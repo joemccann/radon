@@ -237,10 +237,12 @@ class TestReadmeSshRouteClaim:
         assert "ufw blocks public SSH" not in text
         assert "SSH via Tailscale only" not in text
 
-    def test_readme_states_keys_only_public_ssh(self) -> None:
+    def test_readme_states_private_app_ssh_and_recovery_scope(self) -> None:
         text = README.read_text(encoding="utf-8")
         security = text.split("## Security", 1)[1].split("### DNS / TLS", 1)[0]
-        assert "22/tcp" in security
+        assert "no public SSH rule" in security
+        assert "key-based OpenSSH over Tailscale" in security
+        assert "recovery IPv4 `/32`" in security
         assert "keys-only" in security
         assert "sshd drop-in" in security
-        assert "Tailscale SSH" in security
+        assert "Public 22/tcp is open" not in security

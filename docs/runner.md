@@ -333,6 +333,8 @@ The `performance` loop consumes one read-only snapshot from a separate disabled-
 
 The root-owned installer copies `PERF_SSH_TARGET` from the installed `performance.env` into `/private/var/db/radon-perf-probe/config.json`. The checked-in target is `radon@5.78.148.38`. The private directory is helper-owned mode 700; the key and known_hosts are mode 600. The helper-owned public directory is mode 750 and contains only the atomic mode-640 `prod-probe.json`; `_radonprobe_read` grants read access to the helper and `_radonbot` only. The config is root-owned mode 640 with that group. Unrelated local accounts cannot read it. `_radonbot` can read that snapshot and cannot write it or traverse the private directory. No sudo rule, root command, arbitrary path or command argument is provided to the agent.
 
+**Tailnet prerequisite after the firewall cutover:** public app SSH is closed. The checked-in loop target above and the installed loop configuration inspected on 2026-10-18 still use the public address. Before provisioning or restoring collection, an administrator must change `PERF_SSH_TARGET` to `radon@100.112.32.16` in the reviewed loop configuration, reinstall it so the helper config is refreshed, and pin the host key under that exact tailnet address. Verify that the Mac has an operator-authorized tailnet identity; the ephemeral `tag:ci` deployment identity is separate. Preserve the helper account and forced-command restrictions. Do not reopen public SSH or restore a bot-readable credential. [Network trust](operations.md#network-trust-ops-plane-step-2) owns access and recovery.
+
 The pre-run hook invokes the root-installed helper's `read` mode. It validates ownership, modes, regular files, schema 1, timestamp and size before copying the snapshot into `state/performance/prod-probe.json`. Snapshots older than 15 minutes or more than 60 seconds in the future are unavailable. A missing helper, missing credentials, host-key mismatch or stale snapshot records an error and leaves the local performance phase usable. There is no SSH fallback in the bot process. Existing agents can still alter their own copied evidence; this handoff protects credentials and the authoritative snapshot, not the integrity of a same-uid agent's workspace.
 
 Administrator rollout, from a reviewed operator-owned checkout with no active runner/native-update/helper jobs:
@@ -351,6 +353,7 @@ Administrator rollout, from a reviewed operator-owned checkout with no active ru
    ```bash
    sudo -u _radonprobe /bin/sh -c 'key=/private/var/db/radon-perf-probe/private/id_ed25519; test ! -e "$key" && test ! -L "$key" && exec /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-perf-snapshot -f "$key"'
    target=$(sed -n 's/^PERF_SSH_TARGET=//p' /usr/local/radon-runner/loops/performance.env | tail -n 1 | tr -d "\"'")
+   test "$target" = radon@100.112.32.16 || { echo "Migrate the loop target before provisioning" >&2; exit 1; }
    host=${target#*@}
    sudo -u _radonprobe /bin/sh -c 'umask 077; candidate=$(mktemp /private/var/db/radon-perf-probe/private/.known-hosts.XXXXXX); ssh-keyscan -t ed25519 "$1" > "$candidate" && ssh-keygen -lf "$candidate"; printf "candidate=%s\n" "$candidate"' sh "$host"
    ```
@@ -377,10 +380,10 @@ Administrator rollout, from a reviewed operator-owned checkout with no active ru
 5. After successful JSON/freshness/permission verification, revoke only the old bot probe public-key line on the server, then remove only its corresponding bot private/public key and old probe known_hosts files as `_radonbot`. Verify the old key is rejected through the owner channel before deleting its local copy. Do not remove unrelated authorized keys. The isolation change is not complete until the old credential is revoked and retired.
 
 - **Symptom:** the copied probe reports unavailable or stale.
-- **Prerequisites:** an administrator for account creation, the reviewed runner install, a verified pinned host key and the new restricted public key registration. The current operator session requires an interactive sudo password; merging/deploying does not finish Mac credential handover.
+- **Prerequisites:** an operator-authorized tailnet device and installed tailnet target, an administrator for account creation, the reviewed runner install, a verified pinned host key and the new restricted public key registration. The current operator session requires an interactive sudo password; merging/deploying does not finish Mac credential handover.
 - **Blast radius:** one read-only snapshot on the existing schedule; the helper cannot execute an arbitrary command or write to the agent workspace.
 - **Safe diagnosis:** inspect the helper's last exit status and `/var/log/radon-perf-probe.log`; compare fingerprints through the administrator channel. The log contains only an availability class.
-- **Stop conditions:** wrong ownership, writable/symlinked paths, matching uids, administrator-group membership, active helper/runner during install, mismatched fingerprint or unknown key ownership. Do not install a fallback credential in the bot home.
+- **Stop conditions:** a public app target or unavailable tailnet path, wrong ownership, writable/symlinked paths, matching uids, administrator-group membership, active helper/runner during install, mismatched fingerprint or unknown key ownership. Do not install a fallback credential in the bot home.
 - **Verification:** the bot can read fresh JSON but cannot read the private inputs or write the public directory; the original credential is revoked after handover.
 - **Rollback:** unload `com.radon.runner-perf-probe` and revoke the new restricted public key. Keep the bot on the snapshot consumer so it records unavailable; do not restore a bot-readable key. A reviewed prior helper version can be installed while idle without changing its private inputs.
 - **Escalation:** leave the local loop usable and record unavailable evidence until the administrator completes or repairs provisioning.

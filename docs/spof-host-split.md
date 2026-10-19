@@ -1,22 +1,45 @@
 # SPOF host split — operator runbook
 
-![Production network topology](radon-network-topology.png)
+![Production network topology](radon-network-topology.svg)
 
-The picture is illustrative, rendered at 39bf6f5e from a source outside
-the repo. Not shown: the app → broker `10.0.0.4:8340` mTLS Gateway-control
-edge (`radon-ib-gateway-remote.service`). Authoritative edges are
-`cloud/services/*`, `cloud/caddy/Caddyfile`, the Hetzner firewall, and
-Phase 1 below. Do not hand-edit the PNG.
+## Deployed topology and access
 
-Code in this SHA is combined-host safe. `RADON_HOST_ROLE` defaults to
-`combined`. Merging does not create a second VM, move Gateway, or enable
-Hetzner backups. Those steps are below and cannot be done by CI.
+The app/broker split and the private CI cutover are deployed. The graph is
+reproducible from [`tools/render_network_topology.py`](../tools/render_network_topology.py);
+its public-inbound labels come from [`cloud/hetzner/firewalls/`](../cloud/hetzner/firewalls/).
+Run `python3 tools/render_network_topology.py` after a source change, and
+`python3 tools/render_network_topology.py --check` to detect a stale SVG.
+The graph describes reviewed configuration; it cannot prove live attachment.
 
-Do not merge the sudoers-grant commit until you can bootstrap in the same
-window. Preflight refuses `scripts/*` / `config/*` mismatches until
-`refresh-control-plane-privileged` is installed.
+- GitHub's three host jobs join as ephemeral `tag:ci` nodes and reach the app's
+  OpenSSH port over Tailscale. That role cannot reach broker, ops or API ports.
+- Operator devices use OpenSSH over Tailscale to app/broker, and the app's
+  direct FastAPI port for cloud-thin development. This is ordinary key-based
+  SSH over the private network, not Tailscale SSH authentication.
+- The app has no public SSH rule. Broker/demo public SSH accepts only the
+  configured recovery IPv4 `/32`; demo has no Tailscale enrollment.
+- App to broker trading uses the Hetzner private network; Gateway control uses
+  the separate mTLS path documented below. Broker VNC and the paper API bind
+  loopback; VNC requires an SSH tunnel to the broker.
+- The demo frontend is on Vercel and its Caddy/FastAPI backend is on a separate
+  Hetzner VM. HTTPS between them is intentional. Demo has no production
+  private-network connection, tailnet path or IB Gateway.
 
-## What this SHA deploys on the current VPS
+The [network-trust runbook](operations.md#network-trust-ops-plane-step-2)
+owns installed firewall boundaries, recovery-IP rotation, console recovery,
+and before/after access checks. It also distinguishes active provider rules
+from a declared but inactive host UFW ruleset. The
+[external-service owner](external-services.md) owns third-party prerequisites.
+
+## Historical split migration reference
+
+The Phase 0/0B/1 recipes below describe initial provisioning, not routine
+maintenance of the deployed split. Do not replay them to change a firewall or
+repair a private-network connection. Use the current operations runbook first.
+A fresh combined-host installation still defaults `RADON_HOST_ROLE=combined`;
+the deployed hosts explicitly use `app` and `broker`.
+
+### Initial combined-host compatibility
 
 - Tailscale 4001 bind is `${IB_GATEWAY_TAILSCALE_BIND:-100.112.32.16}`.
 - `hhlev` / `hyad` / `vixts` join `auto-sync-units.txt`.
@@ -35,7 +58,7 @@ window. Preflight refuses `scripts/*` / `config/*` mismatches until
 (manifest-pinned, installed) stay off auto-sync. Control-plane timers (`db-backup`, `refresh`, `portfolio-sync`,
 `drift-audit`, …) stay off auto-sync.
 
-## Phase 0 — this week, on the box you have
+### Phase 0: initial backup and recovery preparation
 
 1. Confirm backups. Repo has no record.
 
@@ -73,7 +96,7 @@ window. Preflight refuses `scripts/*` / `config/*` mismatches until
    tailnet IP is no longer `100.112.32.16`. Then `radon-ib-gateway-control
    restart` (2FA).
 
-## Phase 0B — one root bootstrap (this SHA)
+### Phase 0B: initial privileged bootstrap
 
 The commit that adds `refresh-control-plane-privileged` cannot auto-apply
 that sudoers line. After merge, before the next CI deploy:
@@ -87,9 +110,9 @@ Do not restart Gateway. Re-run CI for the same SHA if the in-flight deploy
 refused preflight. After this, helper/sudoers/polkit edits deploy without
 root SSH.
 
-## Phase 1 — second VM (not this deploy)
+### Phase 1: app/broker split provisioning
 
-Create, in the same Ashburn DC, spread placement group, Hetzner Cloud
+Create, in the same Hetzner location and a spread placement group, Hetzner Cloud
 Network `radon-private` `10.0.0.0/16` (app `10.0.0.2`, broker `10.0.0.4`).
 Small CX. Tailscale + private net. FastAPI trusts `10.0.0.0/16` only for
 the broker watchdog's `GET /health` probe (`is_private_net_probe`,

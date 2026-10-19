@@ -286,14 +286,19 @@ def test_transient_staging_artifacts_are_never_published(tmp_path):
     assert not list(dest.iterdir())
 
 
+@pytest.mark.parametrize("entrypoint", ["helper", "setup"])
 @pytest.mark.parametrize("outcomes,expected,attempts", (([75, 75, 0], 0, 3), ([1], 1, 1), ([75] * 20, 75, 20)))
-def test_initial_backfill_drains_before_watchers_are_enabled(tmp_path, outcomes, expected, attempts):
+def test_initial_backfill_retires_path_and_drains_before_timer_is_enabled(tmp_path, entrypoint, outcomes, expected, attempts):
     import re
     import shlex
     import subprocess
     import sys
-    source = (CLOUD / "scripts" / "deploy-root-helper.sh").read_text()
-    function = re.search(r"^prepare_public_media_publication\(\) \{.*?^\}", source, re.M | re.S).group()
+    filename, name = ("deploy-root-helper.sh", "prepare_public_media_publication") if entrypoint == "helper" else ("setup-vps.sh", "install_media_publication")
+    source = (CLOUD / "scripts" / filename).read_text()
+    function = re.search(r"^" + name + r"\(\) \{.*?^\}", source, re.M | re.S).group()
+    if entrypoint == "setup":
+        # Only fixed executable data is remapped; execute the actual setup body.
+        function = function.replace('/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py', '"$SESSION_PYTHON" -I "$RADON_TEST_MEDIA_PUBLISHER"')
     counter = tmp_path / "calls"
     stub = tmp_path / "publisher.py"
     stub.write_text(
@@ -309,13 +314,24 @@ def test_initial_backfill_drains_before_watchers_are_enabled(tmp_path, outcomes,
         "set -uo pipefail\nHELPER_TEST_MODE=1\n"
         f"SESSION_PYTHON={shlex.quote(sys.executable)}\n"
         f"RADON_TEST_MEDIA_PUBLISHER={shlex.quote(str(stub))}\n"
-        f"SYSTEMCTL={shlex.quote(str(ctl))}\n{function}\nprepare_public_media_publication\n"
+        f"SYSTEMCTL={shlex.quote(str(ctl))}\n"
+        f"CLOUD_DIR={shlex.quote(str(CLOUD))}\n"
+        'systemctl() { "$SYSTEMCTL" "$@"; }\n'
+        'stage_from_checkout() { :; }; log_error() { :; }\n'
+        f"{function}\n{name}\n"
     )
     result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
     assert result.returncode == expected, result.stderr
     assert int(counter.read_text()) == attempts
-    assert calls.exists() == (expected == 0)
-    if calls.exists(): assert "enable --now radon-media-publish.path radon-media-publish.timer" in calls.read_text()
+    assert calls.exists()
+    operations = [line for line in calls.read_text().splitlines() if line != "daemon-reload"]
+    assert operations[0] == "disable --now radon-media-publish.path"
+    if expected == 0:
+        assert operations[-1] == "enable --now radon-media-publish.timer"
+        assert any(line.startswith("reset-failed ") and "radon-media-publish.service" in line for line in operations)
+    else:
+        assert operations == ["disable --now radon-media-publish.path"]
+    assert not any(line.startswith("enable ") and "radon-media-publish.path" in line for line in operations)
 
 
 def test_edge_switch_follows_successful_initial_backfill():
@@ -411,3 +427,147 @@ def test_noncanonical_extension_is_not_promoted_even_with_png_bytes(tmp_path):
     (source / "image.webp").write_bytes(PNG)
     assert run(m, source, dest)["rejected"] == 1
     assert not list(dest.iterdir())
+
+
+def test_setup_boot_enable_does_not_reactivate_retired_media_path(tmp_path):
+    import re
+    import shlex
+    import subprocess
+    source = (CLOUD / "scripts/setup-vps.sh").read_text()
+    function = re.search(r"^enable_services\(\) \{.*?^\}", source, re.M | re.S).group()
+    calls = tmp_path / "systemctl-calls"
+    command = (
+        "set -euo pipefail\n"
+        "log_info() { :; }; log_success() { :; }\n"
+        f"systemctl() {{ printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}; }}\n"
+        "SERVICE_FILES=(radon-media-publish.service radon-media-publish.path radon-media-publish.timer)\n"
+        f"CLOUD_DIR={shlex.quote(str(CLOUD))}\n{function}\nenable_services\n"
+    )
+    result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    enabled = [line.split()[1:] for line in calls.read_text().splitlines() if line.startswith("enable ")]
+    assert any("radon-media-publish.timer" in units for units in enabled)
+    assert all("radon-media-publish.path" not in units for units in enabled)
+
+
+def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
+    """Cloud opt-in exercises the actual service limits, sandbox and helper body."""
+    import json
+    import re
+    import shlex
+    import subprocess
+    import time
+    import uuid
+
+    if os.environ.get("RADON_TEST_REAL_MEDIA_SYSTEMD") != "1":
+        pytest.skip("real systemd fixture runs in the mandatory private cloud job")
+    assert Path("/proc/1/comm").read_text().strip() == "systemd", "cloud job requires systemd PID 1"
+    subprocess.run(["sudo", "-n", "true"], check=True, timeout=10)
+    prefix = "radon-media-test-" + uuid.uuid4().hex
+    data = Path("/var/lib") / prefix
+    unit_dir = Path("/run/systemd/system")
+    names = {kind: prefix + "." + kind for kind in ("service", "path", "timer")}
+
+    def ctl(*args, check=True):
+        return subprocess.run(["sudo", "-n", "systemctl", *args], check=check,
+                              capture_output=True, text=True, timeout=20)
+
+    def root_script(script):
+        return subprocess.run(["sudo", "-n", "/usr/bin/python3", "-I", "-"], input=script,
+                              text=True, capture_output=True, check=True, timeout=20)
+
+    def state(kind, prop):
+        return ctl("show", names[kind], "--property=" + prop, "--value").stdout.strip()
+
+    def count():
+        value = data / "public" / "count"
+        return int(value.read_text()) if value.exists() else 0
+
+    def until(predicate, seconds, label):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.1)
+        pytest.fail(label + ": " + json.dumps({k: {p: state(k, p) for p in
+                    ("ActiveState", "SubState", "Result")} for k in names}))
+
+    fixture = ("from pathlib import Path\n"
+               f"base=Path({str(data)!r})\n"
+               "counter=base/'public'/'count'\n"
+               "n=int(counter.read_text()) if counter.exists() else 0\n"
+               "pending=counter.with_suffix('.new')\n"
+               "pending.write_text(str(n+1)); pending.chmod(0o644); pending.replace(counter)\n"
+               "source=base/'staging'/'value'\n"
+               "if source.exists():\n"
+               "    output=base/'public'/'value'; output.write_text(source.read_text()); output.chmod(0o644)\n")
+    units = {}
+    for kind in names:
+        text = (CLOUD / "services" / ("radon-media-publish." + kind)).read_text()
+        text = text.replace("radon-media-publish.service", names["service"])
+        text = text.replace("/var/lib/radon/media", str(data / "staging"))
+        text = text.replace("/var/lib/radon-public", str(data / "public"))
+        text = text.replace("/usr/local/lib/radon/media_publish.py", str(data / "publisher.py"))
+        units[kind] = text
+    try:
+        root_script(f"from pathlib import Path\np=Path({str(data)!r})\np.mkdir(mode=0o755)\n"
+                    "(p/'staging').mkdir(mode=0o755)\n(p/'public').mkdir(mode=0o755)\n"
+                    f"(p/'publisher.py').write_text({fixture!r})\n" + "".join(
+                        f"Path({str(unit_dir / names[kind])!r}).write_text({text!r})\n"
+                        for kind, text in units.items()))
+        ctl("daemon-reload")
+        ctl("enable", "--now", names["path"])
+        # Deliberately reproduce production: ten successful fast path starts,
+        # then another write trips the retained 10-per-60s service limiter.
+        for n in range(10):
+            root_script(f"from pathlib import Path\nPath({str(data / 'staging' / ('trigger-'+str(n)))!r}).write_text({str(n)!r})\n")
+            until(lambda: count() >= n + 1 and state("service", "ActiveState") == "inactive",
+                  5, "legacy path did not complete each successful invocation")
+        root_script(f"from pathlib import Path\nPath({str(data / 'staging' / 'trigger-limit')!r}).write_text('limit')\n")
+        until(lambda: state("service", "Result") == "start-limit-hit" and
+              state("path", "Result") == "unit-start-limit-hit", 5,
+              "legacy schedule did not reproduce the real production latch")
+        print("REAL_SYSTEMD_LEGACY_REPRODUCED: 10 successes; service=start-limit-hit; path=unit-start-limit-hit", flush=True)
+        source = (CLOUD / "scripts/deploy-root-helper.sh").read_text()
+        function = re.search(r"^prepare_public_media_publication\(\) \{.*?^\}", source, re.M | re.S).group()
+        # The actual helper body runs unchanged. Only its documented test
+        # executable and fixed systemctl unit identities are fixture-bound.
+        mapping = "case \"$arg\" in " + " ".join(
+            f"radon-media-publish.{kind}) mapped+=({shlex.quote(name)});;"
+            for kind, name in names.items()) + ' *) mapped+=("$arg");; esac'
+        wrapper = data / "ctl"
+        wrapper_text = '#!/bin/bash\nset -euo pipefail\nmapped=()\nfor arg; do ' + mapping + '\ndone\nexec /usr/bin/systemctl "${mapped[@]}"\n'
+        root_script(f"from pathlib import Path\np=Path({str(wrapper)!r})\np.write_text({wrapper_text!r})\np.chmod(0o755)\n")
+        command = ("set -euo pipefail\nHELPER_TEST_MODE=1\nSESSION_PYTHON=/usr/bin/python3\n"
+                   f"RADON_TEST_MEDIA_PUBLISHER={shlex.quote(str(data / 'publisher.py'))}\n"
+                   f"SYSTEMCTL={shlex.quote(str(wrapper))}\n{function}\nprepare_public_media_publication\n")
+        result = subprocess.run(["sudo", "-n", "bash", "-c", command], capture_output=True, text=True, timeout=25)
+        assert result.returncode == 0, result.stderr
+        assert state("path", "ActiveState") == "inactive", "retired path must be stopped"
+        assert state("path", "UnitFileState") == "disabled", "retired path must stay disabled on boot"
+        assert state("path", "Result") == "success", "retired path failure must be reset"
+        assert state("timer", "ActiveState") == "active"
+        after_backfill = 11  # ten systemd starts plus the helper's direct backfill
+        until(lambda: state("timer", "LastTriggerUSecMonotonic") not in ("", "0", "0us", "n/a")
+              and count() >= after_backfill + 1 and state("service", "ActiveState") == "inactive",
+              6, "first actual timer invocation must complete before burst control")
+        first = count()
+        root_script(f"from pathlib import Path\np=Path({str(data / 'staging' / 'value')!r})\n"
+                    "for n in range(100): p.write_text('burst-'+str(n))\n")
+        time.sleep(2)
+        assert count() == first, "burst writes must not trigger publisher starts"
+        until(lambda: count() >= first + 3 and state("service", "ActiveState") == "inactive",
+              56, "timer must complete three subsequent publications")
+        assert (data / "public" / "value").read_text() == "burst-99"
+        assert state("service", "Result") == "success"
+        assert state("path", "ActiveState") == "inactive"
+        assert state("timer", "ActiveState") == "active"
+        print("REAL_SYSTEMD_RECOVERED: retired path disabled/inactive; timer completed 3 later publications; burst ignored", flush=True)
+    finally:
+        ctl("disable", "--now", names["path"], names["timer"], check=False)
+        ctl("stop", names["service"], check=False)
+        ctl("reset-failed", *names.values(), check=False)
+        root_script("from pathlib import Path\nimport shutil\n" + "".join(
+            f"Path({str(unit_dir / name)!r}).unlink(missing_ok=True)\n" for name in names.values()) +
+            f"shutil.rmtree({str(data)!r}, ignore_errors=True)\n")
+        ctl("daemon-reload")

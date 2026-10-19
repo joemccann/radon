@@ -60,8 +60,8 @@ radon_fw_rules() {
   done
   case "$role" in
     app)
-      # Public SSH stays open: CI deploys over SSH from GitHub-hosted
-      # runners (ci.yml appleboy/ssh-action), whose addresses are not fixed.
+      # Keep the sshd listener reachable over tailscale0 for CI/operators.
+      # Public SSH is blocked separately by fw-radon-app (provider firewall).
       echo "allow 22/tcp comment ssh-ci-deploy-and-recovery"
       echo "allow 80/tcp comment caddy-http"
       echo "allow 443/tcp comment caddy-https"
