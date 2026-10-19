@@ -45,6 +45,25 @@ describe("resolveDemoContext", () => {
     expect(ctx!.expired).toBe(true);
     expect(ctx!.trialExpiresAt).toBeNull();
   });
+
+  it("flags a missing/invalid expiry as pending, not a lapsed trial", () => {
+    expect(resolveDemoContext({ demoRole: "trial" }, NOW)!.pending).toBe(true);
+    expect(resolveDemoContext({ demoRole: "trial", demoTrialExpiresAt: "garbage" }, NOW)!.pending).toBe(true);
+  });
+
+  it("treats demoRole 'pending' as pending and denied even with a future expiry", () => {
+    const ctx = resolveDemoContext(
+      { demoRole: "pending", demoTrialExpiresAt: "2099-01-01T16:00:00-05:00" },
+      NOW,
+    );
+    expect(ctx!.pending).toBe(true);
+    expect(ctx!.expired).toBe(true);
+  });
+
+  it("an active or genuinely lapsed trial is not pending", () => {
+    expect(resolveDemoContext({ demoRole: "trial", demoTrialExpiresAt: "2099-01-01T16:00:00-05:00" }, NOW)!.pending).toBe(false);
+    expect(resolveDemoContext({ demoRole: "trial", demoTrialExpiresAt: "2000-01-01T16:00:00-05:00" }, NOW)!.pending).toBe(false);
+  });
 });
 
 describe("getDemoContext (injected auth)", () => {

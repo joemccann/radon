@@ -39,12 +39,16 @@ export const LATEST_ONE = [
   { table: "vcg_snapshots", orderCol: "scan_time" },
   { table: "gamma_rotation_snapshots", orderCol: "scan_time" },
   { table: "oi_changes", orderCol: "scan_time" },
+  // scripts/api/demo_scan.py serves the vol-skew-mr scan from this table.
+  { table: "vol_skew_mr_snapshots", orderCol: "scan_time" },
 ];
 
 // Latest row per key (multiple services / tickers share one table).
 export const PER_KEY = [
   { table: "scan_snapshots", key: "service", orderCol: "scan_time" },
   { table: "gex_snapshots", key: "ticker", orderCol: "scan_time" },
+  // One row per symbol (PK symbol, 0029); /api/options/rv-ratio reads it.
+  { table: "rv_ratio_snapshots", key: "symbol", orderCol: "taken_at" },
   // Equibles per-ticker decks. orderCol matches the column each API route
   // sorts on so the mirrored row is the one the demo actually serves:
   // equibles-smart-money-13f orders by report_date DESC, filing-forensics

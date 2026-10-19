@@ -2113,6 +2113,35 @@ async def _fetch_risk_reversal_history(
 # Health
 # ---------------------------------------------------------------------------
 
+# The demo VM deploy (cloud/scripts/deploy-demo-vm.sh) writes the shipped commit
+# into <app>/REVISION; /health echoes it so off-box drift checks can see what is
+# live. Absent on hosts deployed any other way, and the key is then omitted.
+DEPLOY_REVISION_PATH = Path(__file__).resolve().parents[2] / "REVISION"
+_REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def read_deploy_revision(path: Path) -> Optional[str]:
+    """Return the full lowercase SHA in ``path``, or None.
+
+    The value reaches an unauthenticated response, so anything that is not a
+    40-hex SHA is dropped rather than echoed.
+    """
+    try:
+        value = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if _REVISION_PATTERN.fullmatch(value) else None
+
+
+DEPLOY_REVISION = read_deploy_revision(DEPLOY_REVISION_PATH)
+
+
+def _with_revision(payload: dict) -> dict:
+    if DEPLOY_REVISION:
+        payload["revision"] = DEPLOY_REVISION
+    return payload
+
+
 @app.get("/health")
 async def health(request: Request):
     # /health is auth-exempt and reachable from the public internet via Caddy's
@@ -2123,7 +2152,7 @@ async def health(request: Request):
     # watchdog on radon-private is a probe-only caller (REL-170): full payload
     # here, no bypass anywhere else.
     if not (is_trusted_local_request(request) or is_private_net_probe(request)):
-        return {"status": "ok"}
+        return _with_revision({"status": "ok"})
 
     pool_status = ib_pool.status() if ib_pool else None
     # Bound the probe: check_ib_gateway can block for tens of seconds when the
@@ -2155,7 +2184,7 @@ async def health(request: Request):
             "upstream_dead": False,
             "probe_timed_out": True,
         }
-    return {
+    return _with_revision({
         "status": "ok",
         "test_mode": test_mode,
         "host_role": admin_services.host_role(),
@@ -2163,7 +2192,7 @@ async def health(request: Request):
         "ib_pool": pool_status or {},
         "uw": uw_available,
         "dependencies": await dependencies,
-    }
+    })
 
 
 async def _measure_event_loop_lag_ms() -> float:

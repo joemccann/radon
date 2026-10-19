@@ -36,7 +36,9 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 **Newsfeed schema rollout:** the Vercel frontend and demo Turso have an independent migration lifecycle from production. `/api/newsfeed/posts` joins `research_post_sources` when migration `0071` exists. If that specific table is absent, it reads the newest 500 legacy posts and excludes every `research-*` ID before the limit. Network/auth failures and other SQL errors retain the existing error or last-good-cache behavior. No request performs schema writes or copies private research into the demo database.
 
-**Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, and BPI therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
+**Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, ticker company profile and seasonality, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, BPI, NYSE breadth, AI infrastructure, and catalysts therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
+
+**Mirrored snapshot window:** regime surfaces that still read mirrored `scan_snapshots` rows (VIX term structure, IV rank, skew, vol cone and the other freshness-gated indicators) resolve their stale window through `web/lib/demo/snapshotWindow.ts`. A demo principal gets at least 96h, the worst weekend gap of the Mon..Fri `radon-demo-mirror.timer`; operator windows are unchanged. `web/tests/demo-snapshot-window.test.ts` fails when a new freshness-gated route skips the helper.
 
 ## Guardrails (enforcement points)
 
@@ -188,16 +190,77 @@ Rollback: `radon-demo-api:rollback` (the pre-redeploy image) and
 The redeploy surfaced one break: `TrustedHostMiddleware` gained a host pin
 after the VM's last deploy, and `demo-api.radon.run` was never on the list, so
 every proxied request returned `400 Invalid host header` while `127.0.0.1`
-health stayed 200. The host is now pinned in `scripts/api/server.py`
-`_ALLOWED_HOSTS` rather than left to `RADON_ALLOWED_HOSTS` on the VM, so a
-fresh VM cannot reproduce it. Pinned by
-`scripts/api/tests/test_loopback_browser_bypass.py`.
+health stayed 200. The host is pinned in `scripts/api/server.py`
+`_ALLOWED_HOSTS` (89eed3df) rather than left to `RADON_ALLOWED_HOSTS` on the
+VM, pinned by `scripts/api/tests/test_loopback_browser_bypass.py`.
+
+**Correction (2026-10-18): that pin is not on the VM yet.** The 09-04 ship was
+02db257b, which predates 89eed3df; `/opt/radon-demo/app/scripts/api/server.py`
+has no `demo-api.radon.run` entry, and the VM serves only because its `.env`
+still sets `RADON_ALLOWED_HOSTS`. "A fresh VM cannot reproduce it" becomes true
+only after the next redeploy below.
 
 Post-redeploy verification: `/health` 200 externally, `/health/lite` 401 without
 the service token and 200 with it, `POST /vcg/scan` and `/breadth/scan` 200 from
 the seeded snapshots, `RADON_API_TEST_MODE=1` confirmed in the running
 container, container `TURSO_DB_URL` on `radon-demo-joemccann`, no tailscale and
 no reachable IB port on any prod host.
+
+### VM backend deploy and drift check (2026-10-18)
+
+The 09-04 ship was a manual ssh+tar from macOS: it carried 2,193 AppleDouble
+`._*` files into the image, wrote no record of which commit it was, and by
+2026-10-18 the VM was 847 commits behind main in `scripts/` with 8 routes the
+demo frontend calls missing (`/ai-cycle` 404 x213). Nothing deploys the VM
+automatically and nothing can from GitHub: `fw-radon-demo` admits SSH only from
+the recovery /32.
+
+**Deploy** from the operator host (the Mac mini, which has `ssh radon-demo`),
+from a checkout that has fetched the target commit:
+
+```
+git fetch origin
+cloud/scripts/deploy-demo-vm.sh --dry-run "$(git rev-parse origin/main)"
+cloud/scripts/deploy-demo-vm.sh "$(git rev-parse origin/main)"
+```
+
+`deploy-demo-vm.sh` takes only a full 40-hex sha. It `git archive`s
+`scripts requirements.txt pyproject.toml` at that sha (object store only: no
+`._*`, no local WIP), ships it, and runs `deploy-demo-vm-remote.sh` on the VM,
+which:
+
+- refuses an archive carrying `._*` entries or a top-level `data/`, and
+  refuses to start unless `.env` sets `RADON_API_TEST_MODE=1` and a
+  `radon-demo` (never `radon-joemccann`) `TURSO_DB_URL`;
+- copies `app/data/` (the `flow_reports` seed) verbatim into the new tree and
+  never writes the live copy; the previous tree, seed included, becomes
+  `app.bak`;
+- writes `app/REVISION` = sha, tags the running image `radon-demo-api:rollback`,
+  then `docker compose build api && docker compose up -d api`;
+- gates on: in-container `/health` reporting the new `revision`;
+  `RADON_API_TEST_MODE=1` and a `radon-demo` `TURSO_DB_URL` inside the running
+  container (values never printed); `/health` through Caddy with the real
+  `demo-api.radon.run` Host header (the host-pin trap above); `/health/lite`
+  401 without and 200 with the service token (read from the container, passed
+  on stdin, never in argv);
+- on any failure restores `app.bak` and `radon-demo-api:rollback` and restarts.
+
+The operator side then requires the off-box `https://demo-api.radon.run/health`
+to report the same `revision`, and tells the VM to roll back if it does not.
+Locks: `flock` on `/opt/radon-demo/.deploy.lock` on the VM, a lock dir on the
+operator host. Re-running the live sha is a no-op. Manual rollback:
+`ssh radon-demo bash -s -- rollback < cloud/scripts/deploy-demo-vm-remote.sh`.
+
+**Revision.** `/health` returns `revision` (validated 40-hex from
+`<app>/REVISION`) to every caller, public included; hosts without the file
+(prod) keep the old payload.
+
+**Drift check.** `.github/workflows/demo-vm-drift.yml` runs
+`scripts/ci/check_demo_vm_drift.py` daily on main. It fails when `/health`
+reports no revision, a revision not on main, or when the oldest main commit
+touching the backend paths that the VM lacks is more than 7 days old. The
+failed-run email is the alert. Until the first `deploy-demo-vm.sh` run it fails
+by design: the 09-04 image has no `revision`.
 
 ### Second root cause: Svix auto-disabled the endpoint (found 2026-09-04)
 

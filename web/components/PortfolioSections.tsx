@@ -23,6 +23,8 @@ const EMPTY_POSITIONS: PortfolioPosition[] = [];
 export type PortfolioSectionsProps = {
   portfolio: PortfolioData | null;
   prices?: Record<string, PriceData>;
+  // Error from the portfolio read. Only rendered while there is no snapshot.
+  loadError?: string | null;
 };
 
 function positionColumnEntries(hasOptions: boolean, hasExpiry: boolean) {
@@ -37,7 +39,7 @@ function positionColumnEntries(hasOptions: boolean, hasExpiry: boolean) {
 }
 
 /** Route-local surface so /portfolio does not download every workspace route. */
-export default function PortfolioSections({ portfolio, prices }: PortfolioSectionsProps) {
+export default function PortfolioSections({ portfolio, prices, loadError }: PortfolioSectionsProps) {
   const grouping = usePositionStrategyGroups(portfolio?.positions ?? EMPTY_POSITIONS);
   const positions = grouping.positions;
   const definedPositions = positions.filter((p) => p.risk_profile === "defined");
@@ -94,11 +96,14 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
             Portfolio
             <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
           </h2>
-          <span className="pill neutral">LOADING</span>
+          <span className="pill neutral">{loadError ? "UNAVAILABLE" : "LOADING"}</span>
         </div>
         <div className="section-body">
-          <div className="alert-item">Waiting for portfolio data...</div>
+          <div className="alert-item">
+            {loadError ? "Portfolio data could not be loaded. Retrying automatically." : "Waiting for portfolio data..."}
+          </div>
         </div>
+        {loadError ? <ErrorToast message={loadError} testId="portfolio-load-error" /> : null}
       </div>
     );
   }
