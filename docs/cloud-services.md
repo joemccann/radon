@@ -1444,3 +1444,17 @@ exclusive maintenance window or recoverable pre-change rows cannot be verified.
    using the [restore runbook](#restore-runbook)'s scratch comparison and
    partial-table recovery. Do not perform a blind full restore over newer
    journal activity; escalate recovery decisions to the database operator.
+
+
+## Optional responder account units
+
+The separate responder account uses the opt-in unit inventory under
+`/etc/radon/grok-responder/installed-units.sha256`. Root preparation validates
+the nested service/timer pairs and owns that inventory before drift audit
+includes them. An absent inventory preserves the existing fleet; malformed,
+unsafe or incomplete opt-in inventory reports drift. The responder and its
+independent upgrade timer remain unstarted until the explicit handover in
+[responder operations](grok-page-responder.md). `GROK_UPGRADE_DOMAIN=responder`
+is pinned by the optional upgrade unit; the existing keeper upgrade path
+keeps its normal runtime when the variable is absent. Rollback restores the
+previous timers through the same recorded handover procedure.

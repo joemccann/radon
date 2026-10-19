@@ -444,6 +444,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (scripts/grok_upgrade.py via radon-grok-upgrade.timer). Pure xAI CLI +
     # Turso heartbeat, no IB. 26h window = daily cadence + timer jitter.
     "grok-upgrade": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    "grok-responder-upgrade": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # portfolio-archive — portfolio_snapshots cold-archive oneshot
     # (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
     # on the VPS, 06:52 UTC daily). 48h window mirrors
@@ -574,6 +575,7 @@ BUCKETS: dict[str, list[str]] = {
         # promote leaves the live symlink on last-known-good; the 26h
         # window pages before a second night is lost.
         "grok-upgrade",
+        "grok-responder-upgrade",
         # Daily 07:00 UTC Chronos-2 backfill + calibration. Nothing observed
         # it: the unit wrote no row on any path, so a throwing backfill left
         # the forecast tables silently not advancing. R-402.

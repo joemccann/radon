@@ -9897,6 +9897,17 @@ Review: Production provisioning and credential operations require operator coord
 
 Subscription environment review: cloud red recorded on private run 39162568477; the dedicated publisher uses pinned directory descriptors and root-private output. Keeper UID, canonical native credential writes, vault socket and paging stay unchanged. Cloud green pending; no production operations performed.
 
+## Responder service account maintenance (2026-10-18)
+
+- [x] RA1 depends_on: [] Map account, native authentication, runtime promotion, state, clone pickup and action grants.
+- [x] RA2 depends_on: [RA1] Obtain cloud red for the isolated account and gated migration contracts.
+- [x] RA3 depends_on: [RA2] Implement independent account/runtime and complete trusted host handover.
+- [ ] RA4 depends_on: [RA3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Existing subscription credential lifecycle remains separate; host migration requires explicit native authentication under the new service account.
+
+Responder account review: private cloud red run 39162568477 proved the missing account/domain contracts. Optional source deploy is inert; trusted preparation, native login and explicit pickup acknowledgement are required before timer handover. Keeper runtime remains separate. Synthetic transport and handover tests cover rollback/race paths; cloud green pending. No production state or credential material changed in this session.
+
 
 ### Private CI integration repair (2026-10-18)
 - [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
@@ -9906,3 +9917,11 @@ Subscription environment review: cloud red recorded on private run 39162568477; 
 Review: Existing gates remain mandatory; no production provisioning or credential operation belongs to this repair.
 
 Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.
+
+
+### Independent responder review repair
+- [x] RR1 depends_on: [] Verify transient systemd states and the native installer output location against existing source.
+- [x] RR2 depends_on: [RR1] Refuse busy/unknown workload state on both sides of timer disable and normalize native CLI layout before reporting readiness.
+- [x] RR3 depends_on: [RR2] Add synthetic transient-state, lookup-failure and provisioned-layout coverage for cloud verification.
+
+Independent review repair: handover reads explicit ActiveState and permits only confirmed inactive/failed workloads; transient states and query failures refuse before timer changes or restore the prior timers after disable. Native CLI installation normalizes only an absent canonical slot as the dedicated account and validates the executable before preparation completes. Synthetic coverage authored for both handover directions, second-check races and native installer layouts. AST and whitespace checks pass; cloud verification remains pending.
