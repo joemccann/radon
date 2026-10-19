@@ -248,3 +248,151 @@ def test_access_matrix_keeps_private_inputs_helper_only_and_snapshot_group_reada
     assert not _can_access(key, bot_uid, {group}, 4)
     assert not _can_access(public, unrelated_uid, set(), 1)
     assert not _can_access(output, unrelated_uid, set(), 4)
+
+
+def test_collector_accepts_the_canonical_producer_host_metrics_object(helper, monkeypatch):
+    # The real producer initially stores a hostname then replaces "host" with
+    # metrics when that section succeeds. Exercise collect(), not a hand-made
+    # helper-shaped report, so both sides of the contract stay represented.
+    spec = importlib.util.spec_from_file_location('handover_perf_producer', ROOT / 'cloud/scripts/perf_probe.py')
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    metrics = {'cpus': 8, 'loadavg': [0.1, 0.2, 0.3], 'uptime_s': 600.0}
+    report = producer.collect(sections=[('host', lambda: metrics)])
+    assert report['host'] == metrics
+    monkeypatch.setattr(helper, 'ssh_output', lambda argv: json.dumps(report).encode())
+    helper.collect()
+    assert helper.read_snapshot()['host'] == metrics
+
+
+_ROOT_LOG_PROVISION_PROBE = r"""
+import contextlib, grp, importlib.util, json, os, pathlib, pwd, stat, subprocess, sys, tempfile
+module_path, case = sys.argv[1:]
+spec = importlib.util.spec_from_file_location('isolated_log_provision', module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+account = pwd.getpwnam('nobody')
+assert account.pw_uid > 0
+# Use a root-owned isolated filesystem root. The real installer correctly
+# refuses a sticky /tmp ancestor; weakening that check would hide the bug.
+@contextlib.contextmanager
+def isolated_root(directory):
+    outside = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    previous = os.getcwd()
+    try:
+        os.chroot(directory)
+        os.chdir('/')
+        yield outside
+    finally:
+        os.fchdir(outside)
+        os.chroot('.')
+        os.chdir(previous)
+        os.close(outside)
+with tempfile.TemporaryDirectory(prefix='radon-log-provision-contract-') as temp:
+    root = pathlib.Path(temp)
+    root.chmod(0o755)
+    base = root / 'base'
+    runner = root / 'runner'
+    (runner / 'loops').mkdir(parents=True, mode=0o755)
+    (runner / 'loops/performance.env').write_text('PERF_SSH_TARGET=probe@example.test\n')
+    logdir = root / 'logs'
+    logdir.mkdir(mode=0o755)
+    log = logdir / 'probe.log'
+    module.BASE = base
+    module.RUNNER = runner
+    module.LOG_PATH = log
+    module.HELPER_USER = account.pw_name
+    module.READ_GROUP = grp.getgrgid(account.pw_gid).gr_name
+    module._helper_uid = lambda: account.pw_uid
+    module._read_gid = lambda: account.pw_gid
+    with isolated_root(root) as outside_root:
+        logdir = pathlib.Path('/logs')
+        log = logdir / 'probe.log'
+        module.BASE = pathlib.Path('/base')
+        module.RUNNER = pathlib.Path('/runner')
+        module.LOG_PATH = log
+        victim = pathlib.Path('/preserved-victim')
+        victim.write_text('preserved')
+        victim.chmod(0o600)
+        if case == 'symlink':
+            log.symlink_to(victim)
+        elif case == 'fifo':
+            os.mkfifo(log, 0o600)
+            os.chown(log, account.pw_uid, account.pw_gid)
+        elif case == 'directory':
+            log.mkdir(mode=0o700)
+            os.chown(log, account.pw_uid, account.pw_gid)
+        elif case in {'valid-existing', 'wrong-mode', 'wrong-owner', 'hardlink'}:
+            log.write_text('existing log bytes\n')
+            log.chmod(0o600)
+            os.chown(log, account.pw_uid, account.pw_gid)
+            if case == 'wrong-mode':
+                log.chmod(0o660)
+            elif case == 'wrong-owner':
+                os.chown(log, 0, 0)
+            elif case == 'hardlink':
+                os.link(log, logdir / 'second-name')
+        before = log.lstat() if os.path.lexists(log) else None
+        expected_error = case in {'symlink', 'fifo', 'directory', 'wrong-mode', 'wrong-owner', 'hardlink'}
+        refused = False
+        try:
+            module.provision()
+        except (OSError, RuntimeError, ValueError):
+            refused = True
+        assert refused == expected_error, (case, 'unsafe log was not refused' if expected_error else 'safe provisioning refused')
+        assert victim.read_text() == 'preserved'
+        if expected_error:
+            after = log.lstat()
+            assert (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid, before.st_nlink) == (
+                after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid, after.st_nlink)
+        else:
+            assert log.exists(), 'provisioning did not create the launchd stdout/stderr path'
+            meta = log.lstat()
+            assert stat.S_ISREG(meta.st_mode) and meta.st_uid == account.pw_uid and meta.st_gid == account.pw_gid
+            assert stat.S_IMODE(meta.st_mode) == 0o600 and meta.st_nlink == 1
+            if case == 'valid-existing':
+                assert log.read_text() == 'existing log bytes\n'
+                assert meta.st_ino == before.st_ino
+            # Real permissions: a daemon uid cannot create this file in the
+            # root-owned 0755 log parent, but can open the provisioned log O_RDWR.
+            child = os.fork()
+            if child == 0:
+                try:
+                    os.close(outside_root)
+                    os.setgroups([])
+                    os.setgid(account.pw_gid)
+                    os.setuid(account.pw_uid)
+                    stream = os.open(log, os.O_RDWR | os.O_NOFOLLOW)
+                    os.write(stream, b'probe')
+                    os.close(stream)
+                except BaseException:
+                    os._exit(1)
+                os._exit(0)
+            _, status = os.waitpid(child, 0)
+            assert os.waitstatus_to_exitcode(status) == 0, (case, 'daemon uid could not open its fixed launchd log')
+            assert os.stat(logdir).st_uid == 0 and stat.S_IMODE(os.stat(logdir).st_mode) == 0o755
+        print(json.dumps({'case': case, 'refused': refused, 'victim_preserved': True}))
+"""
+
+
+@pytest.mark.parametrize('case', [
+    'new', 'valid-existing', 'symlink', 'fifo', 'directory',
+    'wrong-mode', 'wrong-owner', 'hardlink',
+])
+def test_provision_makes_launchd_log_openable_without_unsafe_replacement(case):
+    if sys.platform != 'linux':
+        pytest.skip('real root/unprivileged permission contract runs on Linux CI')
+    result = subprocess.run(
+        ['/usr/bin/sudo', '-n', sys.executable, '-I', '-S', '-c',
+         _ROOT_LOG_PROVISION_PROBE, str(HELPER), case],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['victim_preserved'] is True
+
+
+def test_checked_in_probe_uses_the_app_tailnet_after_public_ssh_cutover():
+    lines = (ROOT / 'scripts/runner/loops/performance.env').read_text().splitlines()
+    assert [line for line in lines if line.startswith('PERF_SSH_TARGET=')] == [
+        'PERF_SSH_TARGET=radon@100.112.32.16'
+    ]
