@@ -9991,7 +9991,10 @@ Deploy serialization private validation `981bbe7c`: scripts-ac 4 failed/3119 pas
 
 - [x] PS1 depends_on: [] Confirm first-upgrade behavior and normal recovery/sync/deploy ordering against the reviewed final stack.
 - [x] PS2 depends_on: [PS1] Author isolated main-path regressions for old grants/helpers, prestage and required normal publication.
-- [ ] PS3 depends_on: [PS2] Record cloud-only RED before applying the minimal runtime guard.
-- [ ] PS4 depends_on: [PS3] Apply the scoped fix, obtain cloud GREEN and independent review, preserving recovery journals and normal deployment ordering.
+- [x] PS3 depends_on: [PS2] Record cloud-only RED before applying the minimal runtime guard.
+- [x] PS4 depends_on: [PS3] Apply the scoped fix while preserving recovery journals and normal deployment ordering.
+- [ ] PS5 depends_on: [PS4] Obtain cloud GREEN and independent review before delivery.
 
-Review: test-only preparation; local suites, source publication and production actions remain excluded. The runtime proposal is retained outside the checkout until cloud RED.
+Review: test-only preparation was committed separately; the runtime guard was applied only after cloud RED. Local suites, source publication and production actions remain excluded.
+
+Prestage ordering review: cloud RED recorded 7 failed/25 passed. All seven failures exercised premature stage publication; all six strict normal-deploy cases passed. Applied the stage-only guard after RED and clarified the environment owner. Recovery, pinned synchronization and rollback journals are unchanged. Static checks only locally; focused cloud GREEN and independent review remain pending.

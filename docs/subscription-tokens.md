@@ -121,9 +121,12 @@ optional `CLAUDE_CONFIG_DIR` / `CODEX_HOME` directory overrides. The vault
 socket and replica policy remain fixed unit settings. Provider credential
 locations and the keeper's `radon` UID remain unchanged.
 
-Control-plane sync installs the publisher before deploy derives the file.
-Deploy republishes it after canonical environment validation and before any
-scheduled unit activation; initial setup publishes before installing units.
+The normal deploy job recovers pending transitions, synchronizes the pinned
+control plane, then invokes deploy to derive the file. Ordinary deploys
+republish after canonical environment validation, including already-green
+releases, and before any scheduled unit activation. Prestage runs before that
+sync and does not invoke the subscription publisher or require its new grant.
+Initial setup publishes before installing units.
 Rotations therefore replace the entire selected set. Missing required inputs
 leave the previous complete file intact and stop that publication/deploy.
 The publisher follows no directory or file links and publishes by descriptor
