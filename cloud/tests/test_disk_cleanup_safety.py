@@ -411,3 +411,51 @@ class TestTimerDoesNotReplayAtBoot:
     def test_the_weekly_slot_is_unchanged(self):
         text = self.TIMER.read_text(encoding="utf-8")
         assert "OnCalendar=Sun *-*-* 03:20:00 UTC" in text
+
+
+# ── an ancestor swapped AFTER the symlink check must not redirect the delete ─
+
+class TestAncestorSwapAfterCheckCannotRedirect:
+    def _swap_after_check(self, monkeypatch, ancestor, elsewhere):
+        real_check = disk_cleanup.has_symlink_component
+
+        def check_then_swap(path):
+            verdict = real_check(path)
+            ancestor.rename(ancestor.with_name(ancestor.name + ".moved"))
+            ancestor.symlink_to(elsewhere, target_is_directory=True)
+            return verdict
+
+        monkeypatch.setattr(disk_cleanup, "has_symlink_component", check_then_swap)
+
+    def test_a_swapped_ancestor_does_not_delete_the_same_named_tree_elsewhere(
+        self, tmp_path, monkeypatch
+    ):
+        elsewhere = tmp_path / "var-lib-radon"
+        (elsewhere / "pip").mkdir(parents=True)
+        (elsewhere / "pip" / "wheel").write_text("keep", encoding="utf-8")
+        cache = tmp_path / "home-radon" / ".cache"
+        (cache / "pip").mkdir(parents=True)
+        (cache / "pip" / "blob").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(disk_cleanup, "PROTECTED_PATHS", ())
+        self._swap_after_check(monkeypatch, cache, elsewhere)
+
+        with pytest.raises(OSError):
+            disk_cleanup.remove_tree(cache / "pip")
+
+        assert (elsewhere / "pip" / "wheel").exists(), "deleted through a swapped ancestor"
+
+    def test_a_platform_without_fd_safe_rmtree_fails_closed(self, tmp_path, monkeypatch):
+        victim = tmp_path / "cache"
+        victim.mkdir()
+        (victim / "blob").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(disk_cleanup, "PROTECTED_PATHS", ())
+        monkeypatch.setattr(disk_cleanup, "_SAFE_RMTREE", False)
+
+        with pytest.raises(OSError, match="symlink-safe"):
+            disk_cleanup.remove_tree(victim)
+
+        assert (victim / "blob").exists()
+
+    def test_a_vanished_leaf_reclaims_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(disk_cleanup, "PROTECTED_PATHS", ())
+        assert disk_cleanup.remove_tree(tmp_path / "absent") == 0
