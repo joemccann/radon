@@ -783,3 +783,18 @@ needs **no** globals.css change.
 The Live market analysis panel includes a PDFs tab alongside Commentary and Headlines. PDFs uses validated research-source provenance, including text-only PDF findings. Commentary remains the mixed feed and continues to include those same articles. PDF filtering applies before the shared 18-item pagination and composes with tag filters and hidden-post feedback. Refresh reloads the shared feed in either article tab. Source PDF links, charts/lightbox, bookmarks and sharing keep the existing article controls. An empty PDF collection reads “No PDF articles available.” Existing server-side research access rules still apply.
 
 Regression coverage: `web/tests/dashboard-newsfeed-pdf-tab.test.tsx` and curated `web/e2e/newsfeed-pdf-tab.spec.ts` at desktop and 393px widths.
+
+### Share panel containment (2026-10-19)
+
+The feed and research lightbox share the same flex action row. Keep the closed
+Share trigger compact, but give its root the full available row when the panel
+is open and cap that root at its parent's width. Otherwise `flex: 0 0 auto`
+uses the panel's intrinsic content width and its export controls extend past
+the article on phones. The panel wraps text and the actions grid can shrink;
+do not hide the overflow and clip controls to mask a sizing failure.
+
+`web/e2e/newsfeed-sharing.spec.ts` measures panel/control bounds at 320, 393,
+640 and 1440px in both the feed and lightbox, while rewriting and after the
+preview loads. It also edits a long caption, downloads a PNG and closes the
+panel. The pre-fix 393px feed placed the right edge at 612px against a 318px
+article bound.
