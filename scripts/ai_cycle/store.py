@@ -28,6 +28,26 @@ _TRANSIENT_HRANA_MARKERS = (
     "HTTP Error 429",
     "HTTP Error 5",
 )
+
+
+def _is_transient_hrana(exc: BaseException) -> bool:
+    """True when an idempotent cloud write may be sent again.
+
+    Pooled Hrana wraps HTTP 502/503/504 as HttpStatusError ("HTTP 503"),
+    not urllib's "HTTP Error 503". The markers above miss that text, so
+    one fast 503 aborted radon-ai-cycle before any source status
+    (2026-10-17 07:18Z). Type classification covers the wrapped status.
+    Timeout strings with no cause stay transient. A statement error has
+    neither, and fails on the first attempt.
+    """
+    from scripts.db.hrana_http import is_transport_error
+
+    if is_transport_error(exc):
+        return True
+    text = str(exc)
+    return any(marker in text for marker in _TRANSIENT_HRANA_MARKERS)
+
+
 _CLOUD_WRITE_RETRY_DELAYS = (0.25, 1.0)
 _SNAPSHOT_PAGE_SIZE = 500
 _SNAPSHOT_PERSIST_DEADLINE_SECONDS = 900
@@ -57,7 +77,7 @@ class ObservationStore:
             try:
                 return hrana_execute(sql, args)
             except HranaHttpError as exc:
-                transient = any(marker in str(exc) for marker in _TRANSIENT_HRANA_MARKERS)
+                transient = _is_transient_hrana(exc)
                 if not transient or attempt == len(_CLOUD_WRITE_RETRY_DELAYS):
                     raise
                 time.sleep(_CLOUD_WRITE_RETRY_DELAYS[attempt])
@@ -121,7 +141,7 @@ class ObservationStore:
                 args,
             )
         except HranaHttpError as exc:
-            transient = any(marker in str(exc) for marker in _TRANSIENT_HRANA_MARKERS)
+            transient = _is_transient_hrana(exc)
             if not transient or len(batch) <= _OBSERVATION_BATCH_FLOOR:
                 raise
             mid = len(batch) // 2
