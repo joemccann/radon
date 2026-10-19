@@ -1,4 +1,5 @@
 import type { BpiIndexSymbol, BpiPayload, BpiResponse, BpiState } from "@/lib/bpi";
+import type { BreadthData, BreadthDivergence, BreadthHistoryEntry, BreadthIntradayPoint } from "@/lib/useBreadth";
 import type { DispersionData, DispersionPoint } from "@/lib/dispersion";
 import { lastCompletedSessionDate, mostRecentSessionDate } from "@/lib/marketSession";
 import type { TrinData, TrinHourlyBar, TrinState } from "@/lib/trin";
@@ -468,6 +469,77 @@ export function buildDemoDispersionFixture(now: Date = new Date()): DispersionDa
       last_below_surface_date: date,
     },
     series,
+  };
+}
+
+function breadthDivergence(spyChangePct: number, cumAdChange: number): BreadthDivergence {
+  if (spyChangePct > 1 && cumAdChange < 0) return "bearish";
+  if (spyChangePct < -1 && cumAdChange > 0) return "bullish";
+  return "none";
+}
+
+export function buildDemoBreadthFixture(now: Date = new Date()): BreadthData {
+  const date = mostRecentSessionDate(now);
+  const scanTime = currentSessionTimestamp(now, date);
+  const marketOpen = isMarketOpenAt(now) && etCalendarDate(now) === date;
+  let cumAd = 41_000;
+  const history: BreadthHistoryEntry[] = sessionDatesEndingAt(252, date).map((session, index) => {
+    const netAd = Math.round(260 * Math.sin(index / 6) + 140 * Math.cos(index / 17) + 35);
+    cumAd += netAd;
+    return {
+      date: session,
+      net_ad: netAd,
+      cum_ad: cumAd,
+      spy_close: round(560 + index * 0.24 + 6 * Math.sin(index / 9)),
+    };
+  });
+  const last = history[history.length - 1];
+  const base = history[history.length - 21];
+
+  // 5-minute bars from the open, through request time while the session is
+  // live and through the close otherwise. The final bar is the latest net A/D.
+  let barCount = 79;
+  if (marketOpen) {
+    const parts = new Intl.DateTimeFormat("en-US-u-hc-h23", {
+      timeZone: ET_TIME_ZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const minutes = Number(values.hour) * 60 + Number(values.minute);
+    barCount = Math.min(79, Math.floor((minutes - (9 * 60 + 30)) / 5) + 1);
+  }
+  const intraday: BreadthIntradayPoint[] = Array.from({ length: barCount }, (_, index) => {
+    const minutes = 9 * 60 + 30 + index * 5;
+    const progress = barCount === 1 ? 1 : index / (barCount - 1);
+    return {
+      time: etWallClockTimestamp(date, Math.floor(minutes / 60), minutes % 60),
+      net_ad: index === barCount - 1
+        ? last.net_ad
+        : Math.round(last.net_ad * progress + 90 * Math.sin(index / 5)),
+    };
+  });
+
+  const spyChange = round(((last.spy_close ?? 0) - (base.spy_close ?? 0)) / (base.spy_close ?? 1) * 100);
+  const cumAdChange = last.cum_ad - base.cum_ad;
+  return {
+    scan_time: scanTime,
+    market_open: marketOpen,
+    source: "sample",
+    latest: {
+      session_date: date,
+      net_ad: last.net_ad,
+      net_ad_prev: history[history.length - 2].net_ad,
+      tick: 312,
+      cum_ad: last.cum_ad,
+      cum_ad_change_20d: cumAdChange,
+      spy_change_20d_pct: spyChange,
+      sessions_positive_20: history.slice(-20).filter((entry) => entry.net_ad > 0).length,
+      divergence: breadthDivergence(spyChange, cumAdChange),
+    },
+    history,
+    intraday,
   };
 }
 

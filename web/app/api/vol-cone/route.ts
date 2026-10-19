@@ -5,6 +5,7 @@ import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -91,7 +92,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readCachedVolConeFromDb,
     fromDisk: readCachedVolConeFromDisk,
-    maxAgeMs: maxAgeMs(),
+    maxAgeMs: await snapshotMaxAgeMs(maxAgeMs()),
     label: "vol-cone",
     // R-193: a writer that ran, produced nothing and still stamped a
     // timestamped row would otherwise outrank an older row with a real

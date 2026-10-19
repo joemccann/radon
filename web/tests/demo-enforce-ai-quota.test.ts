@@ -23,6 +23,35 @@ const authFor = (metadata: unknown, userId: string | null = "u") =>
   vi.fn().mockResolvedValue({ userId, sessionClaims: { metadata } });
 
 describe("enforceDemoAiQuota", () => {
+  // 2026-10-18 demo sweep: getDemoDb() threw "TURSO_DEMO_DB_URL is not set" and
+  // the throw escaped the route as an empty-body 500. The quota is the only AI
+  // spend guard, so an unreadable store must deny, with a JSON 503.
+  it("demo user with an unconstructible quota store → 503 JSON, fail closed", async () => {
+    const res = await enforceDemoAiQuota("assistant", {
+      authFn: authFor({ demoRole: "trial", demoTrialExpiresAt: FUTURE }),
+      dbFactory: () => {
+        throw new Error("getDemoDb: TURSO_DEMO_DB_URL is not set");
+      },
+      now: NOW,
+    });
+    expect(res?.status).toBe(503);
+    expect(await res?.json()).toMatchObject({ code: "DEMO_QUOTA_UNAVAILABLE" });
+  });
+
+  it("demo user whose quota query fails → 503 JSON, fail closed", async () => {
+    const res = await enforceDemoAiQuota("assistant", {
+      authFn: authFor({ demoRole: "trial", demoTrialExpiresAt: FUTURE }),
+      dbFactory: () => ({
+        async execute() {
+          throw new Error("fetch failed");
+        },
+      }),
+      now: NOW,
+    });
+    expect(res?.status).toBe(503);
+    expect(await res?.json()).toMatchObject({ code: "DEMO_QUOTA_UNAVAILABLE" });
+  });
+
   it("non-demo user → null (no quota, demo DB never touched)", async () => {
     const dbFactory = vi.fn();
     const res = await enforceDemoAiQuota("assistant", {
