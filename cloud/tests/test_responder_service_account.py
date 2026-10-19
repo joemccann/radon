@@ -391,8 +391,8 @@ def test_state_lookup_transport_errors_leave_no_candidate_timer_enabled(maintena
     assert not any(args[1:3] == ["enable", "--now"] and args[-1] in maintenance.NEW_TIMERS for args in calls)
 
 
-def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_repositories(maintenance, tmp_path, monkeypatch):
-    """Exercise Git's ownership gate on the server-side upload-pack gitdir."""
+def test_prepare_registers_gitdir_safety_for_pickup_without_trusting_other_repositories(maintenance, tmp_path, monkeypatch):
+    """Exercise real Git ownership discovery for the server-side gitdir."""
     account_home = tmp_path / "responder"
     repo = account_home / "repo"
     unrelated = tmp_path / "unrelated"
@@ -426,9 +426,11 @@ def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_reposito
     assert len(expected_head) == 40
     assert git("config", "--global", "--add", "safe.directory", "/synthetic/prior").returncode == 0
 
+    # New Git upload-pack permits any owner; older servers enforce this same
+    # discovery gate. Check it directly, then retain the real transport below.
     # Fail rather than skip if this Git does not actually enforce ownership.
     for candidate in (repo, unrelated):
-        refused = git("ls-remote", candidate / ".git", "HEAD", different_owner=True)
+        refused = git("-C", candidate / ".git", "rev-parse", "HEAD", different_owner=True)
         assert refused.returncode != 0
         assert "dubious ownership" in refused.stderr
         assert str(candidate / ".git") in refused.stderr
@@ -471,13 +473,16 @@ def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_reposito
     with pytest.raises(DependencyBoundary):
         maintenance.prepare(tmp_path / "trusted-stage")
 
+    resolved = git("-C", repo / ".git", "rev-parse", "HEAD", different_owner=True)
+    assert resolved.returncode == 0, resolved.stderr
+    assert resolved.stdout.strip() == expected_head
     advertised = git("ls-remote", repo / ".git", "HEAD", different_owner=True)
     assert advertised.returncode == 0, advertised.stderr
     assert advertised.stdout.split() == [expected_head, "HEAD"]
     status = git("-C", repo, "status", "--porcelain", different_owner=True)
     assert status.returncode == 0, status.stderr
     assert status.stdout == ""
-    refused = git("ls-remote", unrelated / ".git", "HEAD", different_owner=True)
+    refused = git("-C", unrelated / ".git", "rev-parse", "HEAD", different_owner=True)
     assert refused.returncode != 0 and "dubious ownership" in refused.stderr
     assert str(unrelated / ".git") in refused.stderr
     values = git("config", "--global", "--get-all", "safe.directory").stdout.splitlines()
