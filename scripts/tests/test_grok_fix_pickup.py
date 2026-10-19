@@ -390,6 +390,36 @@ def test_changed_origin_head_is_refused_without_push_or_pr(world):
     assert ensure.calls == []
 
 
+def test_push_carries_the_validated_sha_when_the_ref_moves_before_push(world):
+    """A ref moved between validation and push must not change what is pushed."""
+    _vps_branch(world, "fix/pinned")
+    validated = _git(world["vps"], "rev-parse", "HEAD").stdout.strip()
+    # An unvalidated commit (touches .github/) the shared ref is moved to.
+    _commit(world["vps"], ".github/workflows/x.yml", "on: push\n", "unreviewed")
+    other = _git(world["vps"], "rev-parse", "HEAD").stdout.strip()
+    _git(world["vps"], "reset", "-q", "--hard", validated)
+    mini = world["mini"]
+    assert _git(mini, "fetch", "-q", str(world["vps"]), f"{other}:refs/evil").returncode == 0
+    local_ref = f"{pickup.PICKUP_NAMESPACE}fix/pinned"
+    calls: list[list[str]] = []
+
+    def runner(argv, **kwargs):
+        if argv[:2] == ["git", "push"]:
+            assert _git(mini, "update-ref", local_ref, other).returncode == 0
+        calls.append(list(argv))
+        return pickup._default_runner(argv, **kwargs)
+
+    results = _run(world, runner=runner)
+
+    assert [r["action"] for r in results] == ["picked_up"]
+    pushes = [c for c in calls if c[:2] == ["git", "push"]]
+    assert pushes == [["git", "push", "--quiet", "origin", f"{validated}:refs/heads/fix/pinned"]]
+    assert _git(world["origin"], "rev-parse", "refs/heads/fix/pinned").stdout.strip() == validated
+    # Every validation step read the pinned sha, never the movable name.
+    assert not [c for c in calls if any(local_ref in a for a in c) and "fetch" not in c and "rev-parse" not in c]
+    assert ["git", "merge-base", "origin/main", validated] in calls
+
+
 @pytest.mark.parametrize("result", [None, {}, {"action": "created"}])
 def test_pickup_requires_a_confirmed_pr_url(world, result):
     _vps_branch(world, "fix/no-pr-proof")

@@ -324,6 +324,11 @@ that cap is a refusal naming the limit, not an exhausted process: a single
 oversized blob, patch or commit message used to be buffered whole in memory.
 The same bound covers the PR builder reading a complete commit message.
 
+Pickup resolves each fetched branch to one commit sha right after the fetch.
+Every check above, the PR text and the push (`<sha>:refs/heads/fix/<slug>`)
+use that sha, so moving the shared `refs/remotes/grok-vps/*` ref after
+validation cannot change what is published.
+
 A refused branch stays on the VPS and is listed every cycle, but its Pushover
 page (identifier or IR-body refusal) fires once per branch head. Pickup records
 the paged head in `logs/grok-fix-pickup/refusal-pages.json` in its clone; a new
