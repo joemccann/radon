@@ -2418,7 +2418,7 @@ class TestDocumentation20261018:
 
 
 class TestDocumentation20261019:
-    """DOC-209..210: public health revision and demo AI spend."""
+    """DOC-209..211: health revision, demo AI spend, login-link prefix."""
 
     def test_public_health_may_include_revision(self):
         server = (_ROOT / "scripts/api/server.py").read_text()
@@ -2444,4 +2444,18 @@ class TestDocumentation20261019:
         assert "AI_PATHS" in doc
         assert "DEMO_QUOTA_UNAVAILABLE" in doc
         assert "/api/newsfeed/share" in doc
+
+    def test_login_link_uses_the_raw_origin_prefix(self):
+        src = (_ROOT / "scripts/subscription_tokens.py").read_text()
+        fn = src.split("def _is_login_origin", 1)[1].split("\ndef parse_login_prompt", 1)[0]
+        assert 'if "\\\\" in candidate:' in fn
+        assert 'candidate.startswith(f"{origin}/")' in fn
+        assert "urlsplit(candidate).hostname == host" in fn
+        section = (_ROOT / "docs/subscription-tokens.md").read_text()
+        section = section.split("### codex, grok: tap the link", 1)[1]
+        section = section.split("### anthropic", 1)[0]
+        assert "raw string" in section
+        assert "backslash" in section
+        assert "auth.openai.com" in section
+        assert "accounts.x.ai" in section
 
