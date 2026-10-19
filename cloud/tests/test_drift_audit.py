@@ -199,13 +199,65 @@ def test_gather_degrades_on_expired_allowlist_entry(monkeypatch):
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(
-        da, "_read_repo",
+        da, "_read_repo_blob",
         lambda rel: "unit-mismatch:radon-api.service expires=2026-08-01 pending reinstall\n",
     )
     drifts, allowed, _known = da.gather()
     assert allowed == {}
     assert drifts and drifts[0]["id"] == "unit-mismatch:radon-api.service"
     assert "expired 2026-08-01" in drifts[0]["detail"]
+
+
+def _gather_with_unit_drift(monkeypatch, tmp_path, working_tree_allowlist, blob):
+    def inject_unit_drift(drifts, _known):
+        drifts.append({"id": "unit-mismatch:radon-api.service", "detail": "live-only: X"})
+
+    monkeypatch.setattr(da, "_compare_file_pair", lambda *args: None)
+    monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_units", inject_unit_drift)
+    monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
+    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "drift-allowlist.conf").write_text(working_tree_allowlist)
+    monkeypatch.setattr(da, "REPO", tmp_path)
+    seen = []
+
+    def fake_blob(rel):
+        seen.append(rel)
+        return blob
+
+    monkeypatch.setattr(da, "_read_repo_blob", fake_blob)
+    result = da.gather()
+    assert "config/drift-allowlist.conf" in seen
+    return result
+
+
+SUPPRESS_UNIT = "unit-mismatch:radon-api.service expires=2999-01-01 pending reinstall\n"
+
+
+def test_working_tree_allowlist_edit_does_not_suppress_drift(tmp_path, monkeypatch):
+    """The allowlist is read from the pinned blob, not the writable checkout."""
+    drifts, allowed, _known = _gather_with_unit_drift(
+        monkeypatch, tmp_path, SUPPRESS_UNIT, blob=""
+    )
+    assert allowed == {}
+    assert [d["id"] for d in drifts] == ["unit-mismatch:radon-api.service"]
+
+
+def test_unfetchable_allowlist_blob_suppresses_nothing(tmp_path, monkeypatch):
+    drifts, allowed, _known = _gather_with_unit_drift(
+        monkeypatch, tmp_path, SUPPRESS_UNIT, blob=None
+    )
+    assert allowed == {}
+    assert [d["id"] for d in drifts] == ["unit-mismatch:radon-api.service"]
+
+
+def test_committed_allowlist_entry_still_suppresses(tmp_path, monkeypatch):
+    drifts, allowed, _known = _gather_with_unit_drift(
+        monkeypatch, tmp_path, "", blob=SUPPRESS_UNIT
+    )
+    assert drifts == []
+    assert "unit-mismatch:radon-api.service" in allowed
 
 
 def test_shipped_allowlist_entries_all_carry_expiries():
@@ -334,6 +386,7 @@ def test_gather_does_not_mix_general_git_dirtiness_into_config(monkeypatch):
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(da, "_read", lambda path: "")
+    monkeypatch.setattr(da, "_read_repo_blob", lambda relative: "")
     assert da.gather() == ([], {}, [])
 
 
@@ -416,6 +469,7 @@ class TestRoleSkippedGatewayPlane:
         monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
         monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
         monkeypatch.setattr(da, "_read_repo", lambda relative: "")
+        monkeypatch.setattr(da, "_read_repo_blob", lambda relative: "")
         result = da.gather()
         return result, checked_files, compose_checks
 

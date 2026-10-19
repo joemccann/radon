@@ -784,6 +784,39 @@ finally:
 PY_PRIVATE_DIR
 }
 
+# Container bind sources under radon-owned parents. The engine follows links
+# when it binds, so every component must be a real directory (walked with
+# O_NOFOLLOW from /) and the last must be radon-owned: a planted link would
+# otherwise hand a root-only tree to the container.
+require_bind_source() {
+  local ids="$1" dir="$2"
+  "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_BIND_SOURCE' || exit 78
+import os, sys
+from pathlib import Path
+path, ids, test = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+uid = os.getuid() if test else int(ids.split(':')[0])
+fd = None
+try:
+    parts = Path(path).parts
+    if not parts or parts[0] != '/' or '..' in parts:
+        raise OSError('bind source must be absolute without traversal')
+    flags = os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY
+    fd = os.open('/', flags)
+    for part in parts[1:]:
+        child = os.open(part, flags, dir_fd=fd)
+        os.close(fd)
+        fd = child
+    if os.fstat(fd).st_uid != uid:
+        raise OSError('bind source has an unexpected owner')
+except OSError:
+    print(f'radon-app-runtime: bind source is a symlink, under a symlink, or not radon-owned; refusing: {path}', file=sys.stderr)
+    raise SystemExit(78)
+finally:
+    if fd is not None:
+        os.close(fd)
+PY_BIND_SOURCE
+}
+
 # DS-2026-09-24-01 residual: the engine loads this filter as root, and
 # /etc/radon is radon-writable (root:radon 1770), so the profile's own
 # directory is the untrusted component. A leaf -f/-L test follows a planted
@@ -870,6 +903,11 @@ cmd_run() {
   # which would kill Chromium's namespace sandbox at launch.
   if [[ "$unit" == "radon-newsfeed.service" ]]; then
     require_trusted_seccomp_profile "$CHROMIUM_SECCOMP_PROFILE" || exit 78
+  fi
+
+  if ! is_research_unit "$unit" && ! is_store_job "$unit"; then
+    require_bind_source "$ids" "$DATA_DIR"
+    require_bind_source "$ids" "$MEDIA_DIR"
   fi
 
   local credential_gid=""
@@ -1001,7 +1039,8 @@ cmd_run() {
   case "$unit" in
     radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
       for cred_dir in .grok .codex .claude; do
-        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
+          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
         fi
       done
@@ -1015,13 +1054,16 @@ cmd_run() {
       # units consume; its ladder falls past antigravity.
       for cred_dir in .gemini/antigravity-cli .gemini/config; do
         [[ "$unit" == "radon-newsfeed.service" ]] && continue
-        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
+          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
       # Python API and research images carry pinned, image-owned provider CLIs.
       # Provider grants above retain their established HOME and refresh paths.
-      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" && -d "${subscription_home}/.local/bin" ]]; then
+      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" ]] \
+        && [[ -L "${subscription_home}/.local/bin" || -d "${subscription_home}/.local/bin" ]]; then
+        require_bind_source "$ids" "${subscription_home}/.local/bin"
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
       fi
       ;;
@@ -1095,6 +1137,8 @@ cmd_run() {
       newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-/home/radon/.cache/ms-playwright}"
       newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-/home/radon/radon/scripts/newsfeed}"
     fi
+    require_bind_source "$ids" "$newsfeed_browsers"
+    require_bind_source "$ids" "$newsfeed_scripts"
     # The scraper's default media dir is <repo>/web/public/media, which lives
     # in the image layer and is discarded on every restart, while Caddy serves
     # the bind mount above. Point the downloader straight at the mount and

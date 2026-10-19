@@ -654,7 +654,8 @@ NEW timers only (never a timer-owned `.service`). New indicator pairs such as
 review gate: editing a unit in `services/` and bumping its hash in the same
 commit is the whole procedure -- no root SSH. An edit whose hash is NOT
 bumped is left uninstalled (the drift audit then flags it), so the
-drift-allowlist acknowledgment still covers a deliberate pending window;
+drift-allowlist acknowledgment (read from the main-tip blob, never the host
+checkout) still covers a deliberate pending window;
 `tests/test_unit_install_acknowledgment.py` fails CI otherwise. A unit
 absent from the manifest is never installed. `install-units` journals what
 it promoted under `/var/lib/radon-deploy`; a rollback runs

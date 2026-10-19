@@ -315,7 +315,11 @@ pickup refuses:
 REL-296 / R-715: the gate scans each unpublished commit, including merge
 parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal
-messages replace private filenames with a redacted location.
+messages replace private filenames with a redacted location. The raw commit
+object is read too: a header other than `tree`, `parent`, `author`,
+`committer`, `encoding` or `gpgsig`/`gpgsig-sha256`, or a continuation line
+after anything but a signature, refuses the branch, and
+the free-text values of the allowed signature and encoding headers are scanned.
 
 DS-2026-10-17-22: the gate and the pickup job read a branch an outside
 contributor shapes, so both now run every `git` call through one bounded
@@ -323,6 +327,11 @@ runner that reads incrementally and kills the child past 32MB. Output over
 that cap is a refusal naming the limit, not an exhausted process: a single
 oversized blob, patch or commit message used to be buffered whole in memory.
 The same bound covers the PR builder reading a complete commit message.
+
+Pickup resolves each fetched branch to one commit sha right after the fetch.
+Every check above, the PR text and the push (`<sha>:refs/heads/fix/<slug>`)
+use that sha, so moving the shared `refs/remotes/grok-vps/*` ref after
+validation cannot change what is published.
 
 A refused branch stays on the VPS and is listed every cycle, but its Pushover
 page (identifier or IR-body refusal) fires once per branch head. Pickup records

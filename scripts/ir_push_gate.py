@@ -210,12 +210,47 @@ def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
     return files
 
 
+# Headers a pushed commit object may carry. Anything else (an extension
+# header) is published verbatim but shown by no log format, so it is refused
+# rather than scanned. Free-text values of allowed headers are scanned.
+# author/committer are scanned through the log identities.
+_STRUCTURAL_HEADERS = frozenset({"tree", "parent", "author", "committer"})
+_SCANNED_HEADERS = frozenset({"encoding", "gpgsig", "gpgsig-sha256"})
+# Only signatures span lines; a continuation of any other header is refused.
+_MULTILINE_HEADERS = frozenset({"gpgsig", "gpgsig-sha256"})
+
+
+def _scan_commit_headers(repo: Path, sha: str, run: Runner) -> list[str]:
+    raw = _git(repo, ["cat-file", "commit", sha], run)
+    head = raw.split("\n\n", 1)[0]
+    findings: list[str] = []
+    name = ""
+    for line in head.split("\n"):
+        if line.startswith(" "):  # continuation of the previous header
+            if name not in _MULTILINE_HEADERS:
+                raise IrPushRefused(
+                    f"cannot scan the branch: non-standard commit header in {sha[:12]}"
+                )
+            value = line[1:]
+        else:
+            name, _, value = line.partition(" ")
+            if name not in _STRUCTURAL_HEADERS and name not in _SCANNED_HEADERS:
+                raise IrPushRefused(
+                    f"cannot scan the branch: non-standard commit header in {sha[:12]}"
+                )
+        if name in _SCANNED_HEADERS:
+            for kind in find_private_identifiers(value):
+                findings.append(f"{kind} in commit header {sha[:12]}")
+    return findings
+
+
 def scan_commit_range(
     repo: Path,
     base: str,
     ref: str,
     *,
     runner: Runner | None = None,
+    name: str | None = None,
 ) -> list[str]:
     """Findings for everything ``ref`` would publish on top of ``base``.
 
@@ -231,8 +266,9 @@ def scan_commit_range(
     if not fork:
         raise IrPushRefused(f"cannot scan the branch: no merge base with {base}")
     findings: list[str] = []
-    # The pushed branch name is public too.
-    for kind in find_private_identifiers(ref):
+    # The pushed branch name is public too. ``name`` is that name when ``ref``
+    # is a pinned sha (a sha is not a name and can look like a numeric id).
+    for kind in find_private_identifiers(name or ref):
         findings.append(f"{kind} in branch name")
     # The identities are read with the message because `git push` publishes
     # the commit OBJECT: an identifier parked in an author name or email goes
@@ -259,6 +295,7 @@ def scan_commit_range(
         identity = "\n".join((author_name, author_email, committer_name, committer_email))
         for kind in find_private_identifiers(identity):
             findings.append(f"{kind} in commit identity {sha.strip()[:12]}")
+        findings += _scan_commit_headers(repo, sha.strip(), run)
     # Every commit's own patch, not one aggregate diff: pushing publishes
     # each intermediate blob, so content added then removed still counts.
     # --text and --no-textconv: a branch-authored .gitattributes (-diff,
@@ -322,14 +359,18 @@ def check_publish(
     body: str | None = None,
     runner: Runner | None = None,
     env: Mapping[str, str] | None = None,
+    name: str | None = None,
 ) -> None:
-    """Raise :class:`IrPushRefused` unless this push/PR may go public."""
+    """Raise :class:`IrPushRefused` unless this push/PR may go public.
+
+    ``name`` is the branch name when ``ref`` is a pinned commit sha.
+    """
     require_autopush(env)
     findings: list[str] = [
-        f"{kind} in branch name" for kind in find_private_identifiers((ref or "").replace("/", "\n"))
+        f"{kind} in branch name" for kind in find_private_identifiers((name or ref or "").replace("/", "\n"))
     ]
     if repo is not None and base and ref:
-        findings += scan_commit_range(repo, base, ref, runner=runner)
+        findings += scan_commit_range(repo, base, ref, runner=runner, name=name)
     findings += scan_pr_text(title=title, body=body)
     if findings:
         raise IrPushRefused(refusal_message(findings))

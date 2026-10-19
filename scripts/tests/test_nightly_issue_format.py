@@ -706,6 +706,52 @@ class TestSanitizeClaudeUrls:
     def test_usage_page_is_kept(self, text: str):
         assert "claude.ai/settings/usage" in nif.sanitize(text)
 
+    _SUFFIXED = [
+        "https://claude.ai/settings/usage.evil.example/x?code=0000notreal",
+        "claude.ai/settings/usage.evil.example/0000notreal",
+        "https://claude.ai/settings/usage)0000notreal",
+        "claude.ai/settings/usage,0000notreal",
+        "claude.ai/settings/usage?code=0000notreal",
+        "claude.ai/settings/usage/0000notreal",
+        "https://claude.ai/settings/usage'0000notreal",
+    ]
+
+    @pytest.mark.parametrize("url", _SUFFIXED)
+    def test_suffix_after_the_usage_page_is_redacted(self, url: str):
+        out = nif.sanitize(f"see {url} now")
+        assert "0000notreal" not in out, out
+
+    @pytest.mark.parametrize("text", [
+        "top up at claude.ai/settings/usage, then retry",
+        "(top up at https://claude.ai/settings/usage).",
+        "top up at claude.ai/settings/usage!",
+    ])
+    def test_usage_page_with_sentence_punctuation_is_kept(self, text: str):
+        assert "claude.ai/settings/usage" in nif.sanitize(text)
+
+    def _bash(self, tmp_path: Path, text: str) -> str:
+        src = HOOK.read_text(encoding="utf-8")
+        start = src.index("_sanitize_issue_text() {")
+        body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+        script = tmp_path / "run.sh"
+        script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body
+                          + f"\n_sanitize_issue_text {shlex.quote(text)}\n", encoding="utf-8")
+        proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout
+
+    @pytest.mark.parametrize("url", _SUFFIXED)
+    def test_bash_suffix_after_the_usage_page_is_redacted(self, tmp_path: Path, url: str):
+        out = self._bash(tmp_path, f"see {url} now")
+        assert "0000notreal" not in out, out
+
+    @pytest.mark.parametrize("text", [
+        "top up at claude.ai/settings/usage", "top up at https://claude.ai/settings/usage.",
+        "top up at claude.ai/settings/usage, then retry",
+    ])
+    def test_bash_usage_page_is_kept(self, tmp_path: Path, text: str):
+        assert "claude.ai/settings/usage" in self._bash(tmp_path, text)
+
 
 class TestSanitizeNonHttpUris:
     @pytest.mark.parametrize("uri", [

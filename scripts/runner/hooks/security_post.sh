@@ -298,6 +298,12 @@ resolve_pr_url() {
 _sanitize_issue_text() {
   local text="$1"
   [[ -n "$text" ]] || { printf '%s' "$text"; return 0; }
+  # Keep the usage URL only when sentence punctuation alone follows it; any
+  # other suffix redacts the whole token before the keep substitution runs.
+  local usage_tail="]).,;:!'\">"
+  text="$(printf '%s' "$text" | /usr/bin/sed -E \
+    -e "s#[^[:space:]]*claude\\.ai/settings/usage[${usage_tail}]*[^${usage_tail}[:space:]][^[:space:]]*#[REDACTED]#g" \
+    || true)"
   text="${text//https:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
   text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
