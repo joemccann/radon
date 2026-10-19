@@ -216,6 +216,8 @@ def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
 # author/committer are scanned through the log identities.
 _STRUCTURAL_HEADERS = frozenset({"tree", "parent", "author", "committer"})
 _SCANNED_HEADERS = frozenset({"encoding", "gpgsig", "gpgsig-sha256"})
+# Only signatures span lines; a continuation of any other header is refused.
+_MULTILINE_HEADERS = frozenset({"gpgsig", "gpgsig-sha256"})
 
 
 def _scan_commit_headers(repo: Path, sha: str, run: Runner) -> list[str]:
@@ -225,6 +227,10 @@ def _scan_commit_headers(repo: Path, sha: str, run: Runner) -> list[str]:
     name = ""
     for line in head.split("\n"):
         if line.startswith(" "):  # continuation of the previous header
+            if name not in _MULTILINE_HEADERS:
+                raise IrPushRefused(
+                    f"cannot scan the branch: non-standard commit header in {sha[:12]}"
+                )
             value = line[1:]
         else:
             name, _, value = line.partition(" ")
