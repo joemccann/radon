@@ -8,7 +8,7 @@ Production host boundaries are owned by [the host-split runbook](spof-host-split
 Laptop process ownership depends on the [selected mode](#mode-switch).
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
-- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount; laptop-only media transfer is described under [Tailscale-free media push](#tailscale-free-media-push).
+- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount; laptop-only media transfer is described under [Laptop media push requires the tailnet](#laptop-media-push-requires-the-tailnet).
 - **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
@@ -54,20 +54,22 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
    For a missing or changed unit, use the reviewed root control-plane procedure
    from [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not copy a unit from an
    obsolete containerized-services path.
-5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/var/lib/radon/media/` (no `host:` prefix, no SSH). `/home/radon/radon-cloud/media` is a compatibility symlink. The Tailscale and public-IP variants are laptop-only fallbacks (see below).
+5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/var/lib/radon/media/` (no `host:` prefix, no SSH). `/home/radon/radon-cloud/media` is a compatibility symlink. The Tailscale rsync target is for laptop development only (see below).
 6. **Closing the laptop after the cutover does not break `app.radon.run`** — the newsfeed now runs entirely on Hetzner. No chrome-cdp, no Chrome Debug.app, no Tailscale dependency for new posts.
 
-### Tailscale-free media push
+### Laptop media push requires the tailnet
 
-The default rsync target (`radon@radon-app:/home/radon/radon-cloud/media/`) only resolves when Tailscale is up on the laptop. If the operator has shut Tailscale off (battery, conference WiFi, MagicDNS flake) the newsfeed cycle keeps scraping but logs `[push-media] non-fatal: rsync exit …` until the next cycle.
+The laptop rsync target (`radon@radon-app:/home/radon/radon-cloud/media/`)
+requires Tailscale and operator SSH access. If Tailscale is down, the cycle
+can keep scraping but media delivery logs `[push-media] non-fatal: rsync exit …`.
+Restore Tailscale, verify a fresh key-based SSH connection to the app's tailnet
+address, and retry the push. Changing `RADON_MEDIA_REMOTE` to the public app
+address cannot bypass this: `fw-radon-app` blocks public SSH. Do not reopen
+public SSH as a media-upload workaround. The server-side newsfeed uses the
+local media path and needs no SSH hop.
 
-To bypass Tailscale and push over the Hetzner public IP, export the env override before running the scraper / dev stack:
-
-```bash
-export RADON_MEDIA_REMOTE=radon@<prod-host>:/home/radon/radon-cloud/media/
-```
-
-The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys` on the VPS is shared between the Tailscale and public-IP entry points, so no key swap is needed. Tailscale remains the secure default; only flip the env when you actively want the public path. If the public route ever needs different SSH options (custom port, identity file, `StrictHostKeyChecking`), surface them via `RADON_MEDIA_RSYNC_SSH_OPTS` (not yet wired — add when you actually need it).
+The [network-trust runbook](operations.md#network-trust-ops-plane-step-2)
+owns console recovery and access verification.
 
 ## Realtime relay admission
 
