@@ -7,6 +7,7 @@ import {
   Bell,
   CheckCircle2,
   ChevronDown,
+  Download,
   ChevronRight,
   Circle,
   ClipboardList,
@@ -52,6 +53,8 @@ import { useVolCone } from "@/lib/useVolCone";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import { blotterFillPrice, formatBlotterFillPrice, FILL_PRICE_HELP, AGGREGATE_FILL_PRICE_HELP } from "@/lib/blotter/fillPrice";
+import { blotterCsvFilename, blotterTradesToCsv } from "@/lib/blotter/csv";
+import { saveArtifact } from "@/lib/researchWorkbench/artifacts";
 import { isEarlierLocalDay } from "@/lib/holdTime";
 import { resolveStockEntryTime } from "@/lib/orders/stockEntryTime";
 import CashFlowsSection from "@/components/CashFlowsSection";
@@ -4159,6 +4162,11 @@ export function HistoricalTradesSection({
   // Reset page when data or filter changes
   useEffect(() => { setPage(0); }, [data, query]);
 
+  const downloadCsv = useCallback(() => {
+    const csv = new Blob([blotterTradesToCsv(sorted)], { type: "text/csv;charset=utf-8" });
+    saveArtifact(csv, blotterCsvFilename(data?.as_of));
+  }, [sorted, data?.as_of]);
+
   const totalCount = allTrades.length;
   const hasData = data && (data.as_of || totalCount > 0);
   const stalenessAgeDays = blotterStalenessAgeDays(data?.as_of);
@@ -4220,6 +4228,19 @@ export function HistoricalTradesSection({
             </span>
           ) : null}
           <span className="pill neutral">{totalCount} TRADES</span>
+          {sorted.length > 0 && (
+            <button
+              className="sync-button"
+              aria-label={`Download CSV (${sorted.length} trades)`}
+              title={`Download ${sorted.length} trades as CSV`}
+              onClick={(e) => {
+                e.stopPropagation();
+                downloadCsv();
+              }}
+            >
+              <Download size={12} /> CSV
+            </button>
+          )}
           <button
             className="sync-button"
             disabled={syncing}
