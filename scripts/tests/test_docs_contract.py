@@ -2416,3 +2416,55 @@ class TestDocumentation20261018:
         assert "0097_vix_pc.sql" in row
         assert "version 97" in row
 
+
+class TestDocumentation20261019:
+    """DOC-209..212: contracts that drifted after audited-through 30bbaec2."""
+
+    def test_public_health_may_include_revision(self):
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        assert 'return _with_revision({"status": "ok"})' in server
+        assert r'^[0-9a-f]{40}$' in server
+        for rel in ("scripts/api/CLAUDE.md", "docs/operations.md"):
+            text = (_ROOT / rel).read_text()
+            assert "40-hex" in text
+            assert "REVISION" in text
+            assert '{"status":"ok"}` only' not in text
+
+    def test_demo_ai_spend_is_not_three_routes(self):
+        quota = (_ROOT / "web/lib/demo/aiQuota.ts").read_text()
+        assert '"newsfeed/explain": 5' in quota
+        tier = (_ROOT / "web/lib/demo/rateTier.ts").read_text()
+        assert '"/api/newsfeed/share"' in tier
+        enforce = (_ROOT / "web/lib/demo/enforceAiQuota.ts").read_text()
+        assert "DEMO_QUOTA_UNAVAILABLE" in enforce
+        assert "status: 503" in enforce
+        doc = (_ROOT / "docs/demo-environment.md").read_text()
+        assert "3 Next.js LLM routes" not in doc
+        assert "DEMO_AI_DAILY_LIMITS" in doc
+        assert "AI_PATHS" in doc
+        assert "DEMO_QUOTA_UNAVAILABLE" in doc
+        assert "/api/newsfeed/share" in doc
+
+    def test_login_link_uses_the_raw_origin_prefix(self):
+        src = (_ROOT / "scripts/subscription_tokens.py").read_text()
+        fn = src.split("def _is_login_origin", 1)[1].split("\ndef parse_login_prompt", 1)[0]
+        assert 'if "\\\\" in candidate:' in fn
+        assert 'candidate.startswith(f"{origin}/")' in fn
+        assert "urlsplit(candidate).hostname == host" in fn
+        section = (_ROOT / "docs/subscription-tokens.md").read_text()
+        section = section.split("### codex, grok: tap the link", 1)[1]
+        section = section.split("### anthropic", 1)[0]
+        assert "raw string" in section
+        assert "backslash" in section
+        assert "auth.openai.com" in section
+        assert "accounts.x.ai" in section
+
+    def test_clerk_vercel_proxy_stays_off(self):
+        middleware = (_ROOT / "web/middleware.ts").read_text()
+        assert "frontendApiProxy: { enabled: false }" in middleware
+        auth = (_ROOT / "web/CLAUDE.md").read_text()
+        auth = auth.split("## Auth (Next.js side)", 1)[1].split("\n## ", 1)[0]
+        assert "frontendApiProxy" in auth
+        assert "enabled: false" in auth
+        assert ".vercel.app" in auth
+

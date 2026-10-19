@@ -219,9 +219,11 @@ the Pushover page. Tap the link on any device, sign in, enter the code. The CLI
 on the VPS writes its own credential file, the daemon re-evaluates the provider,
 probes it, and seals it. No SSH, no file copy.
 
-- The link is only ever a URL on the provider's own login host
-  (`auth.openai.com`, `accounts.x.ai`). CLI output is not a trusted source of
-  links for the operator's phone.
+- The link is accepted only when the raw string is exactly
+  `https://auth.openai.com` or `https://accounts.x.ai`, or starts with that
+  origin plus `/`. A parsed hostname is not enough: a backslash, userinfo, or
+  a second scheme is dropped, and `urlsplit` must agree with the raw prefix.
+  CLI output is not a trusted source of links for the operator's phone.
 - One login per timer run, held for at most 10 minutes. The link is sent once
   per 12h page cooldown. Codex and grok codes last about 15 minutes. A second
   dead provider is not paged that run; it gets the login slot on the next one.
