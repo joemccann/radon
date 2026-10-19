@@ -548,7 +548,7 @@ def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
         assert state("path", "Result") == "success", "retired path failure must be reset"
         assert state("timer", "ActiveState") == "active"
         after_backfill = 11  # ten systemd starts plus the helper's direct backfill
-        until(lambda: int(state("timer", "LastTriggerUSecMonotonic") or "0") > 0
+        until(lambda: state("timer", "LastTriggerUSecMonotonic") not in ("", "0", "0us", "n/a")
               and count() >= after_backfill + 1 and state("service", "ActiveState") == "inactive",
               6, "first actual timer invocation must complete before burst control")
         first = count()
