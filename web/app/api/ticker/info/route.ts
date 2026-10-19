@@ -7,9 +7,11 @@ import {
   getRequestId,
   jsonApiError,
   setCacheResponseHeaders,
+  setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { canReuseUwInfo, hasAnyTickerData, isPopulated, pickUwInfo, stockStateRefreshDue } from "@/lib/tickerInfoCache";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { buildDemoTickerInfo } from "@/lib/demo/fixtures/tickerInfo";
 import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 export const runtime = "nodejs";
@@ -267,6 +269,12 @@ export async function GET(request: Request): Promise<Response> {
       code: "BAD_REQUEST",
       requestId,
     });
+  }
+
+  // The demo deployment has no UW_TOKEN and no persistent disk cache, so the
+  // company read is completed at request time instead of failing closed.
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoTickerInfo(symbol, new Date())), requestId);
   }
 
   const token = process.env.UW_TOKEN;

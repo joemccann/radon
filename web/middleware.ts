@@ -440,6 +440,11 @@ const clerkHandler = clerkMiddleware(async (auth, request) => {
   // Authenticated + authorized: render the page with a fresh nonce + enforced
   // CSP. This is the former implicit `return;` (NextResponse.next) fall-through.
   return withNonceCsp(request);
+}, {
+  // @clerk/nextjs 7.x auto-proxies /__clerk/* to the Frontend API whenever the
+  // request host ends with ".vercel.app" and the key is live. The instance does
+  // not allow those hosts, so every proxied call answered 400 host_invalid.
+  frontendApiProxy: { enabled: false },
 });
 
 // Entry point. The probe bearer gate and the local/authless bypass run BEFORE
