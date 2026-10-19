@@ -496,9 +496,11 @@ def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
                f"base=Path({str(data)!r})\n"
                "counter=base/'public'/'count'\n"
                "n=int(counter.read_text()) if counter.exists() else 0\n"
-               "counter.write_text(str(n+1))\n"
+               "pending=counter.with_suffix('.new')\n"
+               "pending.write_text(str(n+1)); pending.chmod(0o644); pending.replace(counter)\n"
                "source=base/'staging'/'value'\n"
-               "if source.exists(): (base/'public'/'value').write_text(source.read_text())\n")
+               "if source.exists():\n"
+               "    output=base/'public'/'value'; output.write_text(source.read_text()); output.chmod(0o644)\n")
     units = {}
     for kind in names:
         text = (CLOUD / "services" / ("radon-media-publish." + kind)).read_text()
