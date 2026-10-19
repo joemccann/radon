@@ -1670,6 +1670,33 @@ class TestDemoMirrorSchemaGate:
         assert "--demo" in pre
         assert "TimeoutStartSec=300" in raw
 
+    def test_demo_mirror_reseeds_synthetic_book_after_migrate(self, services_dir):
+        """2026-10-18: the synthetic book was seeded once (2026-09-04) and its
+        SPY legs expired on 2026-10-16 while demo.radon.run kept serving them.
+        demo_seed.py anchors expiries to the run date, so re-running it on the
+        mirror cadence keeps the book current."""
+        raw = (services_dir / "radon-demo-mirror.service").read_text()
+        pres = [line for line in raw.splitlines() if line.startswith("ExecStartPre=")]
+        assert len(pres) == 2, pres
+        assert "migrate.py" in pres[0] and "--demo" in pres[0]
+        assert "demo_seed.py" in pres[1]
+        # A failed reseed must fail the unit (and page), never be ignored.
+        assert not pres[1].startswith("ExecStartPre=-")
+
+    def test_demo_mirror_timer_runs_daily_with_a_retry_slot(self, services_dir):
+        """2026-10-18: a Mon..Fri timer left demo snapshots ~72h old every
+        weekend, past the 48h stale budget the regime routes enforce, and a
+        run killed by a deploy (Fri 21:45 UTC) was never retried."""
+        raw = (services_dir / "radon-demo-mirror.timer").read_text()
+        calendars = [
+            line.split("=", 1)[1].strip()
+            for line in raw.splitlines()
+            if line.startswith("OnCalendar=")
+        ]
+        assert calendars, raw
+        assert not any(c.startswith("Mon..Fri") for c in calendars), calendars
+        assert len(calendars) >= 2, "needs a second daily slot to retry a killed run"
+
 
 # ---------------------------------------------------------------------------
 # radon-newsfeed.service

@@ -116,6 +116,47 @@ describe("useHeadlines demo transport", () => {
     rendered.unmount();
   });
 
+  it.each([401, 403])("stops polling after a terminal %i auth failure", async (status) => {
+    // 95 x 401 /api/headlines in 24h on demo.radon.run: a signed-out or
+    // expired session kept polling at the 600s backoff cap forever.
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { useHeadlines } = await import("../lib/useHeadlines");
+    const rendered = renderHook(() => useHeadlines());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rendered.result.current.status).toBe("down");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    rendered.unmount();
+  });
+
+  it("keeps polling after a transient 5xx", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { useHeadlines } = await import("../lib/useHeadlines");
+    const rendered = renderHook(() => useHeadlines());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    rendered.unmount();
+  });
+
   it("renders a stale fallback snapshot as degraded instead of live", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,

@@ -68,6 +68,12 @@ export function useJournal(active = true): UseJournalReturn {
   const [lastSyncResult, setLastSyncResult] = useState<{ imported: number; skipped: number } | null>(null);
 
   const syncWithIB = useCallback(async () => {
+    // The demo has no IB account and /api/journal/sync is operatorOnly: re-read
+    // the sample journal instead of importing.
+    if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
+      result.syncNow();
+      return { imported: 0, skipped: 0 };
+    }
     setSyncing(true);
     try {
       const res = await fetch("/api/journal/sync", { method: "POST", cache: "no-store" });

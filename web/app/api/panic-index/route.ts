@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { MISSING_PANIC_INDEX } from "@/lib/panicIndex";
 import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
@@ -49,7 +50,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readPanicIndexFromDb,
     fromDisk: readPanicIndexFromDisk,
-    maxAgeMs: PANIC_INDEX_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(PANIC_INDEX_MAX_AGE_MS),
     label: "panic-index",
     isDegraded: isMissingPayload,
   });

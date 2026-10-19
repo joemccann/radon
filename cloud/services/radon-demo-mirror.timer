@@ -2,7 +2,12 @@
 Description=Daily demo snapshot mirror after US close scans settle
 
 [Timer]
-OnCalendar=Mon..Fri 21:45 UTC
+# Daily, not Mon..Fri: a weekday-only mirror left demo snapshots ~72h old every
+# weekend, past the 48h stale budget the regime routes enforce. The 23:30 slot
+# re-runs a 21:45 pass that a deploy killed mid-copy (2026-10-16). Both passes
+# copy prod's latest rows, so the second is a no-op on a clean day.
+OnCalendar=*-*-* 21:45 UTC
+OnCalendar=*-*-* 23:30 UTC
 Persistent=true
 
 [Install]
