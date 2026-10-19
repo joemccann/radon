@@ -383,9 +383,8 @@ def pickup_once(
     paged = _load_refusal_pages(repo_root)
     listed: set[str] = set()
 
-    def page_once(name: str, local_ref: str, send: Callable[[], None]) -> None:
+    def page_once(name: str, head: str, send: Callable[[], None]) -> None:
         """Page a refusal once per branch head; a new commit pages again."""
-        head = _stdout(_git(repo_root, ["rev-parse", local_ref], runner=run))
         if head and paged.get(name) == head:
             return
         send()
@@ -412,14 +411,23 @@ def pickup_once(
             })
             continue
 
-        if origin_head:
-            fetched_head = _git(repo_root, ["rev-parse", local_ref], runner=run)
-            if getattr(fetched_head, "returncode", 1) != 0 or _stdout(fetched_head) != origin_head:
-                results.append({"branch": name, "action": "refused", "reason": "origin head differs from the source head"})
-                continue
+        # Resolve the shared ref exactly once. Every check below and the push
+        # use this sha, so a ref moved after validation cannot change what is
+        # published.
+        resolved = _git(
+            repo_root, ["rev-parse", "--verify", f"{local_ref}^{{commit}}"], runner=run
+        )
+        head = _stdout(resolved)
+        if getattr(resolved, "returncode", 1) != 0 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+            results.append({"branch": name, "action": "refused", "reason": "cannot resolve the fetched head"})
+            continue
+
+        if origin_head and head != origin_head:
+            results.append({"branch": name, "action": "refused", "reason": "origin head differs from the source head"})
+            continue
 
         reason = refusal_reason(
-            repo_root, local_ref, base=base, max_commits=max_commits, runner=run
+            repo_root, head, base=base, max_commits=max_commits, runner=run
         )
         # A previously pushed branch may now be merged. Preserve its PR's
         # terminal disposition instead of creating another review request.
@@ -430,14 +438,14 @@ def pickup_once(
         try:
             pr_kwargs = build_pickup_pr_kwargs(
                 repo_root,
-                local_ref,
+                head,
                 name,
                 runner=run,
                 lookup_page=lookup_page,
                 list_ci_urls=list_ci_urls,
             )
         except ir_pr_description.IrDescriptionError as exc:
-            page_once(name, local_ref, lambda: alert_invalid_description(name, str(exc), alerter=alerter))
+            page_once(name, head, lambda: alert_invalid_description(name, str(exc), alerter=alerter))
             results.append({
                 "branch": name,
                 "action": "refused",
@@ -449,20 +457,21 @@ def pickup_once(
             ir_push_gate.check_publish(
                 repo=repo_root,
                 base=base,
-                ref=local_ref,
+                ref=head,
+                name=local_ref,
                 title=pr_kwargs.get("title"),
                 body=pr_kwargs.get("body"),
                 runner=run,
             )
         except ir_push_gate.IrPushRefused as exc:
-            page_once(name, local_ref, lambda: alert_refused_publish(name, str(exc), alerter=alerter))
+            page_once(name, head, lambda: alert_refused_publish(name, str(exc), alerter=alerter))
             results.append({"branch": name, "action": "refused", "reason": str(exc)})
             continue
 
         if not origin_head:
             pushed = _git(
                 repo_root,
-                ["push", "--quiet", origin, f"{local_ref}:refs/heads/{name}"],
+                ["push", "--quiet", origin, f"{head}:refs/heads/{name}"],
                 runner=run,
             )
             if getattr(pushed, "returncode", 1) != 0:

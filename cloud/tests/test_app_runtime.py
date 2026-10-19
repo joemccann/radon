@@ -135,6 +135,9 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
     state_dir = tmp_path / "state"
     for d in (data_dir, media_dir, state_dir):
         d.mkdir(exist_ok=True)
+    # Newsfeed overlay bind sources must exist as real, owned directories.
+    (state_dir / "ms-playwright").mkdir(exist_ok=True)
+    (data_dir / "newsfeed-scripts").mkdir(exist_ok=True)
     (state_dir / "deploy.lock").touch()
     (state_dir / "last-green").write_text("b" * 40 + "\n")
     credentials_dir = tmp_path / "credentials"
@@ -876,8 +879,10 @@ def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) 
     # Directory provisioning also uses Python; fail only the notify proxy.
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    data_dir = shlex.quote(str(tmp_path / 'data'))
+    media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     # The injected proxy never binds. Exercise all admission polls without
     # paying their sleep delay on the shared runner; keep the timeout intact.
     _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
@@ -1025,6 +1030,66 @@ def test_run_prepares_lease_dir_symlink_safe(tmp_path: Path) -> None:
     chown_log = tmp_path / "chown.log"
     if chown_log.exists():
         assert str(lease) not in chown_log.read_text(encoding="utf-8")
+
+
+def _engine_ran(result: subprocess.CompletedProcess[str]) -> bool:
+    log = result.docker_log  # type: ignore[attr-defined]
+    return log.exists() and any(
+        line.startswith("run ") for line in log.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def _swap_for_link(path: Path, target: Path) -> None:
+    target.mkdir(exist_ok=True)
+    if path.is_dir() and not path.is_symlink():
+        path.rmdir()
+    path.symlink_to(target)
+
+
+@pytest.mark.parametrize("name", ("data", "media"))
+def test_run_refuses_a_symlinked_data_or_media_bind_source(tmp_path: Path, name: str) -> None:
+    """Bind sources under radon-writable parents are checked without
+    following links; a link is refused before any container is started."""
+    _swap_for_link(tmp_path / name, tmp_path / f"{name}-elsewhere")
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
+
+
+def test_run_refuses_a_bind_source_under_a_symlinked_ancestor(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    (real / "data").mkdir(parents=True)
+    (tmp_path / "linked").symlink_to(real)
+    result = _run(
+        tmp_path,
+        ["run", "radon-monitor.service"],
+        extra_env={"RADON_TEST_DATA_DIR": str(tmp_path / "linked" / "data")},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
+
+
+@pytest.mark.parametrize(
+    "env_name", ("RADON_NEWSFEED_SCRIPTS_PATH", "RADON_NEWSFEED_BROWSERS_PATH")
+)
+def test_run_newsfeed_refuses_symlinked_overlay_bind_sources(
+    tmp_path: Path, env_name: str
+) -> None:
+    link = tmp_path / "overlay-link"
+    _swap_for_link(link, tmp_path / "overlay-elsewhere")
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"], extra_env={env_name: str(link)})
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
+
+
+@pytest.mark.parametrize("unit", ("radon-api.service", "radon-newsfeed.service"))
+def test_run_accepts_real_owned_bind_sources(tmp_path: Path, unit: str) -> None:
+    result = _run(tmp_path, ["run", unit])
+    assert result.returncode == 0, result.stderr
+    assert _engine_ran(result)
 
 
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
@@ -1186,8 +1251,10 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
+    data_dir = shlex.quote(str(tmp_path / 'data'))
+    media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {control_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -1979,6 +2046,21 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     assert f"{home}/.local/bin:" not in log
     assert ".claude:" not in log  # absent on this host: not mounted
     assert "HOME=/home/radon" in log
+
+
+@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".local/bin"))
+def test_run_refuses_a_symlinked_subscription_bind_source(tmp_path: Path, cred_dir: str) -> None:
+    """Subscription dirs sit in radon's home; a link there is refused, not bound."""
+    home = _subscription_home(tmp_path)
+    _swap_for_link(home / cred_dir, tmp_path / "subscription-elsewhere")
+    result = _run(
+        tmp_path,
+        ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
 
 
 def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None:

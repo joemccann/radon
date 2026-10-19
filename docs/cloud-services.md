@@ -971,7 +971,9 @@ outside systemd's unit directories once the canonical base unit supplies the
 same data-directory write grant and journal/portfolio read-only restrictions.
 Do not recreate that drop-in. After reconciling configuration, run
 `systemctl daemon-reload` and `systemctl start radon-drift-audit.service` to
-publish a fresh audit verdict.
+publish a fresh audit verdict. The audit reads `cloud/config/drift-allowlist.conf`
+from the GitHub main-tip blob, not the host checkout, so an acknowledgment
+takes effect only once it is merged; an unreadable blob suppresses nothing.
 
 ### Model catalog (`radon-model-catalog.timer`)
 

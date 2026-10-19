@@ -872,7 +872,10 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     # drift. Managed runtime artifacts above are compared byte-for-byte or by
     # normalized unit directives, which is both narrower and actionable.
 
-    allowlist = parse_allowlist(_read_repo("config/drift-allowlist.conf") or "")
+    # Pinned main-tip blob, not the radon-writable working tree: the audited
+    # account must not be able to acknowledge its own drift. An unfetchable
+    # blob suppresses nothing.
+    allowlist = parse_allowlist(_read_repo_blob("config/drift-allowlist.conf") or "")
     drifts, allowed = partition_allowlisted(
         raw_drifts, allowlist, today=datetime.now(timezone.utc).date()
     )
