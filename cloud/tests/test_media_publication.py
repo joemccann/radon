@@ -518,10 +518,10 @@ def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
         # Deliberately reproduce production: ten successful fast path starts,
         # then another write trips the retained 10-per-60s service limiter.
         for n in range(10):
-            root_script(f"from pathlib import Path\nPath({str(data / 'staging' / 'value')!r}).write_text({str(n)!r})\n")
+            root_script(f"from pathlib import Path\nPath({str(data / 'staging' / ('trigger-'+str(n)))!r}).write_text({str(n)!r})\n")
             until(lambda: count() >= n + 1 and state("service", "ActiveState") == "inactive",
                   5, "legacy path did not complete each successful invocation")
-        root_script(f"from pathlib import Path\nPath({str(data / 'staging' / 'value')!r}).write_text('limit')\n")
+        root_script(f"from pathlib import Path\nPath({str(data / 'staging' / 'trigger-limit')!r}).write_text('limit')\n")
         until(lambda: state("service", "Result") == "start-limit-hit" and
               state("path", "Result") == "unit-start-limit-hit", 5,
               "legacy schedule did not reproduce the real production latch")
@@ -545,7 +545,10 @@ def test_real_systemd_recovery_retires_burst_path_and_keeps_timer_publication():
         assert state("path", "UnitFileState") == "disabled", "retired path must stay disabled on boot"
         assert state("path", "Result") == "success", "retired path failure must be reset"
         assert state("timer", "ActiveState") == "active"
-        until(lambda: state("service", "ActiveState") == "inactive", 5, "first timer invocation")
+        after_backfill = 11  # ten systemd starts plus the helper's direct backfill
+        until(lambda: int(state("timer", "LastTriggerUSecMonotonic") or "0") > 0
+              and count() >= after_backfill + 1 and state("service", "ActiveState") == "inactive",
+              6, "first actual timer invocation must complete before burst control")
         first = count()
         root_script(f"from pathlib import Path\np=Path({str(data / 'staging' / 'value')!r})\n"
                     "for n in range(100): p.write_text('burst-'+str(n))\n")
