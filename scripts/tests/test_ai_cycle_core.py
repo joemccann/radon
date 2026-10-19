@@ -153,6 +153,53 @@ def test_cloud_writes_fail_fast_on_statement_errors(monkeypatch):
     assert len(calls) == 1
 
 
+def test_cloud_observation_insert_retries_a_pooled_http_503(monkeypatch):
+    """2026-10-17 07:18Z radon-ai-cycle: OpenRouter raw was archived, then the
+    first cloud insert failed in the same second. No source status was written
+    and the oneshot exited 1. Pooled Hrana raises HttpStatusError(503), wrapped
+    as HranaHttpError. The retry markers look for urllib's "HTTP Error 5", so
+    "HTTP 503" was not retried. One blip must be retried. The insert is
+    INSERT OR IGNORE. A statement error with no transport cause still fails
+    on the first attempt.
+    """
+    from scripts.db import hrana_http
+
+    calls = []
+
+    def flaky(sql, args=(), timeout=4):
+        calls.append(sql)
+        if len(calls) == 1:
+            raise hrana_http.HranaHttpError("HttpStatusError: HTTP 503") from hrana_http.HttpStatusError(503)
+        return None
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", flaky)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda _delay: None)
+    store = ObservationStore()
+    store._initialized = True
+    assert store.append_observations([observation()]) == 1
+    assert len(calls) == 2
+
+
+def test_cloud_observation_insert_still_fails_when_http_503_persists(monkeypatch):
+    from scripts.db import hrana_http
+
+    calls = []
+
+    def down(sql, args=(), timeout=4):
+        calls.append(1)
+        raise hrana_http.HranaHttpError("HttpStatusError: HTTP 503") from hrana_http.HttpStatusError(503)
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", down)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda _delay: None)
+    store = ObservationStore()
+    store._initialized = True
+    with pytest.raises(hrana_http.HranaHttpError):
+        store.append_observations([observation()])
+    # Initial try plus two delayed retries, then the batch split stops at 25
+    # rows. One row never splits, so the write budget is exactly three calls.
+    assert len(calls) == 3
+
+
 def test_cloud_observation_append_splits_when_the_hrana_batch_times_out(monkeypatch):
     """100-row SEC batches blew the 4s Hrana budget on every retry.
 
