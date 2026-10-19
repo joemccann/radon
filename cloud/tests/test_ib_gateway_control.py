@@ -624,11 +624,16 @@ def test_healthy_start_is_noop_even_when_operator_holds_deploy_lock(control_env)
     assert all("compose-" not in line for line in log.read_text().splitlines())
 
 
-def test_deploy_lock_refusal_releases_unused_watchdog_preheld_lease(control_env):
+@pytest.mark.parametrize("generation", ["primary", "legacy"])
+def test_deploy_lock_refusal_releases_unused_watchdog_preheld_lease(control_env, generation):
     env, state, log, lock = control_env
     state.write_text("running\n")
     _acquire(env, WATCHDOG_HOLDER)
     deploy_lock = Path(env["RADON_DEPLOY_LOCK_FILE"])
+    if generation == "legacy":
+        deploy_lock.touch()
+        deploy_lock = deploy_lock.with_name("compatibility.lock")
+        env["RADON_DEPLOY_LEGACY_LOCK_FILE"] = str(deploy_lock)
     with deploy_lock.open("a+") as held:
         fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = _run_control(env, "restart-preheld", WATCHDOG_HOLDER)
@@ -1568,3 +1573,27 @@ else:
         'radon-monitor.service', 'radon-newsfeed.service', 'radon-portfolio-sync.timer',
     }
     assert stat.S_IMODE(topology.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("kind", ["fifo", "missing", "symlink"])
+def test_compatibility_lock_refuses_without_blocking_or_retaining_lease(control_env, kind):
+    env, state, log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, WATCHDOG_HOLDER)
+    primary = Path(env["RADON_DEPLOY_LOCK_FILE"])
+    primary.touch()
+    legacy = primary.with_name("compatibility.lock")
+    if kind == "fifo":
+        os.mkfifo(legacy)
+    elif kind == "symlink":
+        legacy.symlink_to(primary)
+    env["RADON_DEPLOY_LEGACY_LOCK_FILE"] = str(legacy)
+    result = subprocess.run(
+        [str(MODERN_BASH), str(CONTROL), "restart-preheld", WATCHDOG_HOLDER],
+        env=env, text=True, capture_output=True, check=False, timeout=5,
+    )
+    assert result.returncode == 74, result.stderr
+    assert not lock.exists()
+    assert not log.exists()
+    with primary.open() as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)

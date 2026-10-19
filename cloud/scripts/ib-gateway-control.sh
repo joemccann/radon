@@ -49,7 +49,13 @@ CONTROL_LOCK_WAIT_SECS="${RADON_IB_CONTROL_LOCK_WAIT_SECS:-20}"
 DOCKER_MUTATION_TIMEOUT_SECS="${RADON_IB_DOCKER_MUTATION_TIMEOUT_SECS:-15}"
 DOCKER_INSPECT_TIMEOUT_SECS="${RADON_IB_DOCKER_INSPECT_TIMEOUT_SECS:-3}"
 TRANSITION_SETTLE_TIMEOUT_SECS="${RADON_IB_TRANSITION_SETTLE_TIMEOUT_SECS:-10}"
-DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+DEPLOY_LOCK_PATH="${RADON_DEPLOY_LOCK_FILE:-/var/lib/radon-lock/deploy.lock}"
+if [[ -n "${RADON_DEPLOY_LOCK_FILE:-}" \
+  && "${RADON_DEPLOY_LOCK_FILE:-}" != "/var/lib/radon-lock/deploy.lock" ]]; then
+  LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-}"
+else
+  LEGACY_DEPLOY_LOCK_PATH="${RADON_DEPLOY_LEGACY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
+fi
 LOCK_HOLDER="radon-cloud.ib-gateway-control"
 WATCHDOG_HOLDER="scripts.ib_watchdog.trigger_restart"
 CONTAINER_NAME="ib-gateway"
@@ -92,6 +98,9 @@ acquire_deploy_lock() {
   if [[ "${RADON_DEPLOY_LOCKED:-0}" == "1" ]]; then
     if inherited_lock_is_valid \
       "${RADON_DEPLOY_LOCKED:-0}" "${RADON_DEPLOY_LOCK_FD:-}" "$DEPLOY_LOCK_PATH"; then
+      if [[ -n "$LEGACY_DEPLOY_LOCK_PATH" ]]; then
+        inherited_lock_is_valid "1" "${RADON_DEPLOY_LEGACY_LOCK_FD:-}" "$LEGACY_DEPLOY_LOCK_PATH" || return 74
+      fi
       return 0
     fi
     echo "REFUSING Gateway mutation: inherited deploy-lock proof is invalid" >&2
@@ -102,17 +111,20 @@ acquire_deploy_lock() {
     return 1
   fi
   exec "$LOCK_PYTHON" -I - \
-    "$DEPLOY_LOCK_PATH" "$LOCK_CLI" "$WATCHDOG_HOLDER" "$0" "$@" <<'PY'
+    "$DEPLOY_LOCK_PATH" "$LEGACY_DEPLOY_LOCK_PATH" "$LOCK_CLI" "$WATCHDOG_HOLDER" "$0" "$@" <<'PY'
 import fcntl
 import os
 from pathlib import Path
 import subprocess
 import sys
 
-lock_text, lock_cli, watchdog_holder, script, *args = sys.argv[1:]
+lock_text, legacy_text, lock_cli, watchdog_holder, script, *args = sys.argv[1:]
 lock_path = Path(lock_text)
-lock_path.parent.mkdir(parents=True, exist_ok=True)
-fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+if lock_path == Path("/var/lib/radon-lock/deploy.lock"):
+    fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+else:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
 try:
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError:
@@ -128,10 +140,31 @@ except BlockingIOError:
         )
     print(f"REFUSING Gateway mutation: deploy/control lock held: {lock_path}", file=sys.stderr)
     raise SystemExit(74)
-os.set_inheritable(fd, True)
+fds = [fd]
+if legacy_text and legacy_text != lock_text:
+    try:
+        legacy_fd = os.open(legacy_text, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        import stat
+        held, named = os.fstat(legacy_fd), os.lstat(legacy_text)
+        if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            raise OSError("compatibility lock changed")
+        fcntl.flock(legacy_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        if args[:2] == ["restart-preheld", watchdog_holder] and Path(lock_cli).is_file():
+            subprocess.run(
+                [sys.executable, lock_cli, "release", watchdog_holder],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+        print("REFUSING Gateway mutation: deploy/control lock held or unavailable: compatibility lock", file=sys.stderr)
+        raise SystemExit(74)
+    fds.append(legacy_fd)
+for descriptor in fds:
+    os.set_inheritable(descriptor, True)
 env = os.environ.copy()
 env["RADON_DEPLOY_LOCKED"] = "1"
 env["RADON_DEPLOY_LOCK_FD"] = str(fd)
+if len(fds) > 1:
+    env["RADON_DEPLOY_LEGACY_LOCK_FD"] = str(fds[1])
 os.execve(script, [script, *args], env)
 PY
 }

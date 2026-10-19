@@ -54,6 +54,7 @@ import os
 import re
 import shutil
 import subprocess
+import stat
 import sys
 import time
 import urllib.request
@@ -111,7 +112,8 @@ class ReclaimCeilingExceeded(RuntimeError):
 # phase when this timer fires has those trees deleted underneath bun install /
 # pip, producing a failed or silently corrupt build promoted into the release.
 # The job took no lock of any kind. R-341.
-DEPLOY_LOCK_FILE = Path("/home/radon/.radon-deploy.lock")
+DEPLOY_LOCK_FILE = Path("/var/lib/radon-lock/deploy.lock")
+LEGACY_DEPLOY_LOCK_FILE = Path("/home/radon/.radon-deploy.lock")
 # Well under TimeoutStartSec=900, so a deploy that outlasts this skips the
 # weekly reclaim rather than wedging the unit.
 DEPLOY_LOCK_TIMEOUT_S = 600.0
@@ -120,43 +122,57 @@ EX_TEMPFAIL = 75
 
 
 @contextlib.contextmanager
-def acquire_deploy_lock(path: Path = None, timeout_s: float = None):
+def acquire_deploy_lock(path: Path = None, timeout_s: float = None, legacy_path: Path = None):
     """Hold the production deploy lock, or yield False when a deploy owns it.
 
-    O_NOFOLLOW: the lock file sits under /home/radon, which the radon account
-    owns, so root must refuse to follow it anywhere. A missing lock file means
-    no deploy has ever run on this host, which is not a reason to refuse the
-    sweep.
+    Acquire the provisioned primary first, then the compatibility inode used
+    by older installed runners. Never create either file during cleanup.
     """
     lock_path = DEPLOY_LOCK_FILE if path is None else path
+    if legacy_path is None and lock_path == Path("/var/lib/radon-lock/deploy.lock"):
+        legacy_path = LEGACY_DEPLOY_LOCK_FILE
     budget = DEPLOY_LOCK_TIMEOUT_S if timeout_s is None else timeout_s
-    try:
-        fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
-    except FileNotFoundError:
-        yield True
-        return
-    except OSError as exc:
-        print(f"[disk-cleanup] refusing deploy lock {lock_path}: {exc}", file=sys.stderr)
-        yield False
-        return
-
     deadline = time.monotonic() + budget
+    descriptors = []
     try:
-        while True:
+        for target in dict.fromkeys(p for p in (lock_path, legacy_path) if p is not None):
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
+                fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except FileNotFoundError:
+                # Explicit isolated test paths retain pre-provision behavior.
+                if path is not None and legacy_path is None:
+                    continue
+                yield False
+                return
+            except OSError as exc:
+                print(f"[disk-cleanup] refusing deploy lock {target}: {exc}", file=sys.stderr)
+                yield False
+                return
+            descriptors.append(fd)
+            try:
+                held, named = os.fstat(fd), os.lstat(target)
             except OSError:
-                if time.monotonic() >= deadline:
+                yield False
+                return
+            if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+                yield False
+                return
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        yield False
+                        return
+                    time.sleep(DEPLOY_LOCK_POLL_S)
+                except OSError:
                     yield False
                     return
-                time.sleep(DEPLOY_LOCK_POLL_S)
-        try:
-            yield True
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        yield True
     finally:
-        os.close(fd)
+        for fd in reversed(descriptors):
+            os.close(fd)
 
 
 def image_fallback_tag() -> str:
