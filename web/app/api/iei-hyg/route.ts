@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { MISSING_IEI_HYG } from "@/lib/ieiHyg";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -47,7 +48,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readIeiHygFromDb,
     fromDisk: readIeiHygFromDisk,
-    maxAgeMs: IEI_HYG_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(IEI_HYG_MAX_AGE_MS),
     label: "iei-hyg",
     // R-193: a writer that ran, produced nothing and still stamped a
     // timestamped row would otherwise outrank an older row with a real

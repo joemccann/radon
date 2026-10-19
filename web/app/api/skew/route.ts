@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -56,7 +57,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readSkewFromDb,
     fromDisk: readSkewFromDisk,
-    maxAgeMs: SKEW_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(SKEW_MAX_AGE_MS),
     label: "skew",
     // A fresher row that only carries the missing:true heartbeat (writer
     // ran, found nothing) must not outrank an older row with a real

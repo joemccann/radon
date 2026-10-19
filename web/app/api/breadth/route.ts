@@ -4,9 +4,10 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setCacheResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { buildDemoBreadthFixture } from "@/lib/demo/fixtures/regime";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -67,6 +68,9 @@ export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoBreadthFixture()), requestId);
+  }
   const cached = await readCachedBreadth();
   const response = NextResponse.json(cached ?? MISSING_BREADTH);
   return setCacheResponseHeaders(response, {
@@ -81,6 +85,9 @@ export async function GET(): Promise<Response> {
 export async function POST(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoBreadthFixture()), getRequestId());
+  }
   try {
     const data = await radonFetch<Record<string, unknown>>("/breadth/scan", {
       method: "POST",

@@ -4,6 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
+import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { MISSING_VIXTS } from "@/lib/vixts";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -48,7 +49,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readVixTsFromDb,
     fromDisk: readVixTsFromDisk,
-    maxAgeMs: VIXTS_MAX_AGE_MS,
+    maxAgeMs: await snapshotMaxAgeMs(VIXTS_MAX_AGE_MS),
     label: "vixts",
     // A fresher row that only carries the missing:true heartbeat must not
     // outrank an older row with a real series — source selection was on

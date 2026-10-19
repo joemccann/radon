@@ -7,7 +7,8 @@
 //
 //   1. Trial expiry — an expired demo user is blocked everywhere (403 JSON for
 //      /api/*, redirect to the public /trial-expired page which forwards on
-//      to radon.run).
+//      to radon.run). A pending (half-provisioned) user is blocked the same
+//      way but sent to /demo-pending, which retries until the trial is live.
 //   2. Tiered rate-limit — Upstash sliding-window per Clerk userId, applied to
 //      /api/* only (page navigation isn't the DOS surface, and tier-A budgets
 //      would catch ordinary clicking). No-ops when Upstash is unconfigured.
@@ -47,7 +48,7 @@ export async function handleDemoGate(
 ): Promise<NextResponse | null> {
   const { userId, metadata, request } = params;
   const ctx = resolveDemoContext(metadata, deps.now);
-  if (!ctx && deps.demoDeployment) {
+  if ((!ctx && deps.demoDeployment) || ctx?.pending) {
     const requestId = request.headers.get("x-request-id") ?? "demo-provisioning";
     if (isApiPath(request.nextUrl.pathname)) {
       return noStore(NextResponse.json({
