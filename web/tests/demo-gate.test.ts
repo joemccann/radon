@@ -96,6 +96,34 @@ describe("handleDemoGate", () => {
     expect(res?.headers.get("Retry-After")).toBe("2");
   });
 
+  it("a batch fan-out read consumes its own hourly and daily ceilings", async () => {
+    // Not the ordinary-read pair (A/K): one request reaches up to 30 symbols.
+    // Not the producer pair (B/L) either, whose daily bucket is shared with
+    // every scan, so automatic price backfill cannot lock operator controls
+    // out for the rest of the day.
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/previous-close", "POST") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["M", "N"]);
+  });
+
+  it("a denied daily ceiling carries Retry-After like every other 429", async () => {
+    // Without it the client falls back to its maximum backoff and re-polls
+    // for the rest of the day instead of waiting out the window.
+    const limiter = vi.fn(async (tier: string) =>
+      tier === "K" ? deny : allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/blotter") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res?.status).toBe(429);
+    expect((await res!.json()).tier).toBe("K");
+    expect(res?.headers.get("Retry-After")).toBe("2");
+  });
+
   it("does NOT rate-limit page navigations (only /api/*)", async () => {
     const limiter = vi.fn(async () => deny);
     const res = await handleDemoGate(
