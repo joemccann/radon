@@ -119,17 +119,26 @@ export async function handleDemoGate(
             ? "K"
             : tier === "B"
               ? "L"
-              : null;
+              : tier === "M"
+                ? "N"
+                : null;
     if (dailyTier) {
       const daily = await limiter(dailyTier, userId);
       if (!daily.success) {
-        return noStore(NextResponse.json({
+        const res = NextResponse.json({
           error: "Demo rate limit exceeded. Slow down.",
           code: "DEMO_RATE_LIMITED",
           tier: dailyTier,
           limit: daily.limit,
           resetAt: daily.reset,
-        }, { status: 429 }));
+        }, { status: 429 });
+        // Without this the client falls back to its maximum backoff and
+        // re-polls for the rest of the window instead of waiting it out.
+        if (daily.reset) {
+          const retryAfter = Math.max(0, Math.ceil((daily.reset - (deps.now ?? Date.now())) / 1000));
+          res.headers.set("Retry-After", String(retryAfter));
+        }
+        return noStore(res);
       }
     }
   }
