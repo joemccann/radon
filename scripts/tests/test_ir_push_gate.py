@@ -403,6 +403,24 @@ class TestScanCommitRangeOpaqueContent:
         assert GH_TOKEN not in str(exc.value)
         assert ACCOUNT not in str(exc.value)
 
+    @pytest.mark.parametrize("value", [GH_TOKEN, "clean"])
+    def test_a_continuation_of_a_structural_header_is_refused(self, repo, value):
+        """Only multi-line signature headers continue; a continuation line after
+        a structural header is refused, whatever it carries."""
+        _commit(repo, "x = 2\n", "fix: relay")
+        self._commit_with_header(repo, f" {value}")
+        with pytest.raises(gate.IrPushRefused, match="commit header") as exc:
+            gate.scan_commit_range(repo, "main", "fix/relay")
+        assert GH_TOKEN not in str(exc.value)
+
+    def test_a_multi_line_signature_header_still_passes(self, repo):
+        _commit(repo, "x = 2\n", "fix: relay")
+        self._commit_with_header(
+            repo,
+            "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----",
+        )
+        assert gate.scan_commit_range(repo, "main", "fix/relay") == []
+
     def test_a_standard_hand_built_commit_still_passes(self, repo):
         _commit(repo, "x = 2\n", "fix: relay")
         self._commit_with_header(repo, "encoding UTF-8")
