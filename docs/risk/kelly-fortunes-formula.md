@@ -132,10 +132,11 @@ premium or spread width paid. Under this spec:
    operator resets.
 
 The per-ticket bound is only as honest as the price it reads. `order_max_loss`
-prices through `order_limits.effective_order_price`: a STP order on its
-`stopPrice` (it reaches IB as a `StopOrder` and carries no limit), a STP LMT on
-the worse of its two prices, and everything else on its limit. A price field
-the placement funnel ignores must never be the one a cap is computed on.
+and `kelly_guard._worst_case_loss` both price through
+`order_limits.effective_order_price`: a stop order on the worse of its two
+prices (it reaches IB as a `StopOrder` and carries no limit, so neither
+supplied field may lower the bound), and everything else on its limit. A price
+field the placement funnel ignores must never be the one a cap is computed on.
 
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so
