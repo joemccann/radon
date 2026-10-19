@@ -1398,6 +1398,51 @@ when the first cloud observation insert gets one pooled HTTP 503.** Peak:
   `test_cloud_writes_fail_fast_on_statement_errors`.
 - **Code:** `scripts/ai_cycle/store.py` (`_is_transient_hrana`, `_execute`).
 
+## ai-cycle-observation-insert-lock
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when the first publisher's observation insert hits a Turso writer lock.**
+Peak: 2026-10-17 07:20Z, page `436c91e12b8bc7a7a6f5de7a2168f899`. Timer next ~24h.
+
+- **Mechanism:** Daily `--record` fetched OpenRouter and archived eight new
+  raw files from 07:18:05Z to 07:18:20Z. `append_observations` then failed
+  before any `ai_cycle_observations` row committed and before
+  `record_source_status`. `HranaHttpError` is outside the source handler,
+  so vercel onward never ran and `persist_api_snapshot` never ran. Host
+  metrics show the unit `activating` at 07:18:17Z and `failed` at
+  07:19:17Z. `SQLITE_BUSY` / `database is locked` was not retried. The
+  timeout backoff (0.25s, then 1s) also sits inside Turso's 10s
+  idle-transaction reap. `Type=oneshot` has no `Restart=`. A later 20:13Z
+  run collected the same window. Edge stayed up.
+- **Detection:** `systemctl show` is `exit-code` / `NRestarts=0`. No
+  `ai_cycle_source_status` row and no `ai_cycle_observations` row for
+  that morning, while `~/.radon/ai-cycle/raw` has new OpenRouter bodies
+  from the same minute. Journal is root-only (`User=root` via
+  `radon-app-runtime`).
+- **Discriminating check:** Python Turso `SELECT 1` succeeds (40 ms at
+  diagnosis; `:8321/health/lite` `database=up`). The 05:38Z backfill wrote
+  source statuses. Replaying the archived rankings through
+  `parse_openrouter` and a local SQLite append succeeds (357 rows). A
+  source status of `Publisher transport failed` is the EIA or NOAA case,
+  not this one. Canary failure means Turso platform, stand down.
+  `Result=signal` or exit 143 is deploy stop-clean.
+- **Remediation (code):** cloud writes retry a writer lock at 12s then
+  24s, past the 10s reap, and fail on the third attempt. A statement
+  constraint still fails immediately. A timeout keeps the short backoff
+  and the batch split. If the lock budget is exhausted, that source is
+  recorded as `error` / `Observation persistence failed` and later
+  publishers still collect. The driver text stays out of the status row.
+  The snapshot still runs. The oneshot still exits 1 when any source is
+  `error`. Do not `reset-failed` before this retry is live: the same lock
+  still aborts the run. After deploy, the next 07:15 UTC timer covers
+  the 7-day OpenRouter window.
+- **Regression:**
+  `test_ai_cycle_core.py::test_cloud_writes_retry_a_turso_writer_lock_past_the_idle_reap`,
+  `test_cloud_writes_stop_after_the_lock_retry_budget`,
+  `test_ai_cycle_collectors.py::test_locked_observation_insert_does_not_skip_later_publishers`.
+- **Code:** `scripts/ai_cycle/store.py` (`_execute`),
+  `scripts/ai_cycle/collect.py` (source handler).
+
 ---
 
 ## ai-cycle-backfill-snapshot-vintage-budget
