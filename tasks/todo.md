@@ -10044,3 +10044,18 @@ Review: no local test suites; retain all PNG validation, authority, read-budget 
 Media scheduling regression: corrected cloud RED `39191147518` at test source `df0eb32f` recorded 8 failed/42 passed/0 skipped, including ten real successful systemd starts, service `start-limit-hit`, path `unit-start-limit-hit`, and the old helper leaving the path failed. Initial fixture-only failures are excluded. Runtime changes applied only after this valid RED; all PNG and resource-bound source remains unchanged.
 
 Media scheduling final focused review: after integrating current green main `61b6f7e`, corrected identical test blobs produced cloud RED `39191711427` (8 failed/42 passed/0 skipped) and GREEN `39191809980` (50 passed/0 failed/0 skipped). The real systemd fixture recovered the latched legacy path, kept it disabled/inactive, ignored a 100-write burst and completed three later timer publications. Runtime/test blobs remain exactly `2651738c`; the checkpoint clarifies boot and inactivity timer deadlines and records independent Sol/Luna source review. Publisher/PNG logic and all service/path/timer resource bounds remain unchanged. Public exact-head CI, merge/deploy and live verification remain MP4.
+
+## Performance probe handover dependencies (2026-10-18)
+
+- [x] PH1 depends_on: [] Preserve actual partial grant state and identify launchd stdout EACCES plus schema-1 host metrics-object rejection against the pinned app host.
+- [x] PH2 depends_on: [PH1] Cloud RED using real root/unprivileged log access and canonical producer payload shape before changing runtime.
+- [x] PH3 depends_on: [PH2] Minimal protected log provisioning and schema compatibility repair, adversarial coverage, cloud GREEN and exact-head full CI.
+- [ ] PH4 depends_on: [PH3] PR notification, authorized admin merge/deploy, guarded existing-grant continuation and actual production collection/permission/old-key rejection checks.
+
+Review: no local suites. Preserve all source/failed root and coordinator receipts, both current restricted grants, and all private keys in their existing accounts. The actual probe target is the app host verified by its pinned Ed25519 fingerprint, not the Gateway broker. The third authenticated attempt stopped at launchd spawn EX_CONFIG before Python ran. No old key was revoked.
+
+Handover dependency checkpoint: corrected cloud RED 39201217707 (8 failed, 33 passed) and identical-test GREEN 39201382169 (41 passed). Full private CI found the missing runner owner-document update. Pinned, authentication-free app tailnet SSH reached public-key rejection; public port 22 timed out. Add a default-target regression and migrate only the reviewed legacy public target, preserving the existing private key and host identity.
+
+Default transport RED 39202014836: 1 failed and 41 passed against the old checked-in public target. Apply the documented app tailnet default only after that failure; preserve the test blob for GREEN.
+
+Final performance dependency review: focused cloud GREEN 39202104661 passed 42/42 with the transport RED test blob unchanged; private full canonical CI 39202108512 plus images 39202108499 is complete, 41 checks successful or applicable skips on 86516d4e. Runner owner documentation repaired the initial full-gate failure. The Mac continuation preserves the exact retained grant and failed attention context, installs only the tested collector, provisions its protected log and migrates the fixed target/pin while holding the maintenance gate. It remains unpublished until public CI and deployment succeed; the authenticated native run remains unverified. No local suites ran.
