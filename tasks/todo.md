@@ -9885,3 +9885,24 @@ VIX model delivery review: initial exact-head CI found missing canonical Clear/T
 ### Research executable review
 - Cloud regression RED verified in private CI job 117778809500; GREEN validation pending.
 - Scope review: research executable mount only; auth/HOME/state and Node unit mounts retained.
+
+## Subscription service environment maintenance (2026-10-18)
+
+- [x] SE1 depends_on: [] Verify current service inputs and installation sequence.
+- [x] SE2 depends_on: [SE1] Add synthetic environment publication regression and obtain cloud red evidence.
+- [x] SE3 depends_on: [SE2] Publish the service allowlist before unit activation and on every deploy.
+- [ ] SE4 depends_on: [SE3] Complete cloud gates and prepare the independent maintenance PR.
+
+Review: Production provisioning and credential operations require operator coordination; no live changes are part of this branch.
+
+Subscription environment review: cloud red recorded on private run 39162568477; the dedicated publisher uses pinned directory descriptors and root-private output. Keeper UID, canonical native credential writes, vault socket and paging stay unchanged. Cloud green pending; no production operations performed.
+
+
+### Private CI integration repair (2026-10-18)
+- [x] CI1 depends_on: [] Inspect exact-head private CI failures without local suites or production access.
+- [x] CI2 depends_on: [CI1] Repair implementation defects and align synthetic fixtures and owner documentation with the intended maintenance contract.
+- [x] CI3 depends_on: [CI2] Parse changed sources, check shell syntax and whitespace, and return a committed candidate for private cloud verification.
+
+Review: Existing gates remain mandatory; no production provisioning or credential operation belongs to this repair.
+
+Static repair review: changed Python sources parse, changed shell entrypoints pass syntax validation, and `git diff --check` is clean. No local test suite or live/production test ran. Exact candidate cloud re-verification remains required.

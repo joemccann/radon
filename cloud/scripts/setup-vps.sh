@@ -1926,6 +1926,15 @@ write_mcp_env() {
   log_success "Hosted MCP env written to ${mcp_env_target}"
 }
 
+write_subscription_env() {
+  local publisher=/usr/local/lib/radon/subscription_service_env.py
+  install -d -o root -g root -m 0755 /usr/local/lib/radon
+  stage_from_checkout "${CLOUD_DIR}/scripts/subscription_service_env.py" \
+    "$publisher" 0644 -o root -g root
+  "$PYTHON_BIN" -I "$publisher" "$ENV_FILE" /etc/radon/subscription-tokens/env
+}
+
+
 # -- Main --------------------------------------------------------------------
 
 main() {
@@ -1941,6 +1950,7 @@ main() {
   clone_repos
   validate_env
   write_mcp_env
+  write_subscription_env
   setup_python
   setup_node
   install_caddy
