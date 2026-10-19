@@ -1,6 +1,6 @@
 # Newsfeed Explain
 
-Plain-English explanation of a newsfeed post for a non-expert. Triggered by an Explain button on the card and in the expanded lightbox. Cached per post id and content hash in Turso.
+Plain-English explanation of a newsfeed post. Triggered by an Explain button on the card and in the expanded lightbox. Cached per post id and content hash in Turso.
 
 ## Why
 
@@ -133,8 +133,9 @@ explanation: "This post does not have enough detail to explain. Open the source 
 
 System prompt lives in `web/lib/newsfeedExplain.ts` as `NEWSFEED_EXPLAIN_SYSTEM`. Rules:
 
-- Short plain English for a non-expert
-- Cover what happened, why it matters, and what it could mean for markets or ordinary people
+- Short plain English
+- Cover what happened, why it matters, and what it could mean for markets, households, and businesses
+- Never describe or label the reader, any audience, or anyone's level of expertise
 - Define jargon inline on first use (MW-day, capacity auction, collar)
 - No hype, no invented facts
 - Do not tell anyone to buy, sell, or hold (prompt only; never print a disclaimer)
