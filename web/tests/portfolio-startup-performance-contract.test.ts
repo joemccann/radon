@@ -319,6 +319,35 @@ describe("portfolio startup performance contracts", () => {
     expect((element.props as { initialPortfolio?: unknown }).initialPortfolio).toBeUndefined();
   });
 
+  it("forwards a failed cold portfolio read into the portfolio surface", async () => {
+    // Demo mode suppresses the live-data banner, so this prop is the only
+    // signal that a 503 with no snapshot is not still loading. Passing the
+    // string into PortfolioSections directly does not lock this handoff.
+    const { default: WorkspaceShell } = await import("../components/WorkspaceShell");
+    const portfolioModule = await import("../components/PortfolioSections");
+    const resolved = await Promise.all(chunkLoaders.map((load) => load()));
+    const portfolioChunk = resolved.findIndex((mod) => mod.default === portfolioModule.default);
+    expect(portfolioChunk, "PortfolioSections must sit behind next/dynamic").toBeGreaterThanOrEqual(0);
+
+    process.env.NEXT_PUBLIC_RADON_DEMO = "1";
+    render(React.createElement(WorkspaceShell, { section: "portfolio" } as never));
+    expect(chunkProps.get(portfolioChunk)?.loadError ?? null).toBeNull();
+    cleanup();
+    chunkProps.delete(portfolioChunk);
+
+    usePortfolioSpy.mockReturnValue({
+      data: null,
+      loading: false,
+      syncing: false,
+      error: "Service Unavailable",
+      lastSync: null,
+      syncNow: () => {},
+    });
+    render(React.createElement(WorkspaceShell, { section: "portfolio" } as never));
+    expect(chunkProps.get(portfolioChunk)?.portfolio).toBeNull();
+    expect(chunkProps.get(portfolioChunk)?.loadError).toBe("Service Unavailable");
+  });
+
   it("hands the server seed to usePortfolio and enriches entry dates only for orders", async () => {
     const { default: WorkspaceShell } = await import("../components/WorkspaceShell");
     const seed = { data: { bankroll: 42_000, last_sync: "2026-07-10T20:00:00.000Z" }, warning: null };
