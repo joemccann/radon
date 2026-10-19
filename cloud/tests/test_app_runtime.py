@@ -2048,6 +2048,21 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     assert "HOME=/home/radon" in log
 
 
+@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".local/bin"))
+def test_run_refuses_a_symlinked_subscription_bind_source(tmp_path: Path, cred_dir: str) -> None:
+    """Subscription dirs sit in radon's home; a link there is refused, not bound."""
+    home = _subscription_home(tmp_path)
+    _swap_for_link(home / cred_dir, tmp_path / "subscription-elsewhere")
+    result = _run(
+        tmp_path,
+        ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
+
+
 def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None:
     home = _subscription_home(tmp_path)
     result = _run(
