@@ -314,8 +314,11 @@ each destination atomically. Existing filenames and `https://media.radon.run/`
 URLs are preserved. Private research media continues through its existing
 subscriber API and is independent of this public tree.
 
-The timer starts publication 15 seconds after the service becomes inactive,
-handling incomplete writes and deferred batches without burst-triggered starts.
+The timer's first deadline is 15 seconds after boot, so enabling it after that
+deadline starts publication immediately. Later runs wait 15 seconds after the
+service becomes inactive, handling incomplete writes and deferred batches
+without burst-triggered starts. Visibility also depends on publisher runtime,
+timer accuracy and deferred batches.
 The legacy `.path` artifact remains installed for rollback but is stopped and
 disabled; fresh setup and upgrades do not enable it. A protected index avoids
 rereading unchanged image bytes. Each batch reserves at most 256 MiB for attempted

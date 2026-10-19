@@ -10036,9 +10036,11 @@ Final readiness checkpoint: expanded focused cloud validation passed 101/101 wit
 
 - [x] MP1 depends_on: [] Preserve actual failed-unit metadata and bounded journal evidence; establish the trigger/start failure sequence.
 - [x] MP2 depends_on: [MP1] Reproduce the observed scheduling failure in a real isolated cloud systemd fixture before runtime changes.
-- [ ] MP3 depends_on: [MP2] Apply the smallest bounded scheduling/recovery repair and obtain cloud GREEN plus independent Sol/Luna review.
+- [x] MP3 depends_on: [MP2] Apply the smallest bounded scheduling/recovery repair and obtain cloud GREEN plus independent Sol/Luna review.
 - [ ] MP4 depends_on: [MP3] Complete exact-head public CI, one accepted green notification, authorized merge/deploy and independent live publication checks.
 
 Review: no local test suites; retain all PNG validation, authority, read-budget and timeout controls. No IB Gateway or unrelated service changes. Current deployed1bd6 CI green; path failed with unit-start-limit-hit while retry timer is active. Full final live verification remains incomplete.
 
 Media scheduling regression: corrected cloud RED `39191147518` at test source `df0eb32f` recorded 8 failed/42 passed/0 skipped, including ten real successful systemd starts, service `start-limit-hit`, path `unit-start-limit-hit`, and the old helper leaving the path failed. Initial fixture-only failures are excluded. Runtime changes applied only after this valid RED; all PNG and resource-bound source remains unchanged.
+
+Media scheduling final focused review: after integrating current green main `61b6f7e`, corrected identical test blobs produced cloud RED `39191711427` (8 failed/42 passed/0 skipped) and GREEN `39191809980` (50 passed/0 failed/0 skipped). The real systemd fixture recovered the latched legacy path, kept it disabled/inactive, ignored a 100-write burst and completed three later timer publications. Runtime/test blobs remain exactly `2651738c`; the checkpoint clarifies boot and inactivity timer deadlines and records independent Sol/Luna source review. Publisher/PNG logic and all service/path/timer resource bounds remain unchanged. Public exact-head CI, merge/deploy and live verification remain MP4.
