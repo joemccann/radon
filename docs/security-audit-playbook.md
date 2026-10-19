@@ -103,9 +103,12 @@ line here whenever you ship a security fix.**
   finding even when the route is rate-limited.
   (`web/tests/share-image-bounds.test.ts`, `web/tests/share-pnl-text-bounds.test.ts`)
 - **Ops admin routes fail CLOSED** — `/api/admin/{stack/restart,ib/restart,
-  ib/reset-backoff,services/[unit]/[action]}` call `requireDemoAdmin()` and 403 when
-  the allowlist is empty (middleware `isAuthorizedUser` fails OPEN by design; these
-  must not inherit that). (`web/tests/api-routes-smoke-admin.test.ts`)
+  ib/reset-backoff,services/[unit]/[action]}` call
+  `requireRouteAccess(..., { operatorOnly: true })` and 403 when the allowlist is
+  empty (middleware `isAuthorizedUser` fails OPEN by design; these must not
+  inherit that). `admin/demo-users` is the one exception, gated by
+  `requireDemoAdmin()` on `DEMO_ADMIN_USER_IDS`.
+  (`web/tests/api-routes-smoke-admin.test.ts`)
 - **CI supply chain** — third-party GitHub Actions SHA-pinned; the gitleaks binary
   download is SHA256-verified; `requirements.txt` pinned to the VPS's running
   versions. (`feedback_pin_requirements_to_vps_not_laptop`)
@@ -279,6 +282,30 @@ line here whenever you ship a security fix.**
   differs under `.github/` and leave it to a human merge. Any new automated
   merge or deploy authority must answer "can the candidate change the gate that
   judges it?" before it ships. (`scripts/tests/test_unattended_release.py`)
+
+- **A risk guard prices on the field the executing path reads** — the notional
+  cap, Gate 3 and the Kelly guard all preferred `limitPrice`, but a stop order
+  is built as `StopOrder(stopPrice=...)` and its limit never reaches IB, so a
+  decoy limit alongside a real stop bounded the order on a value with no
+  effect. All three now share `order_limits.effective_order_price`, which takes
+  the worse of the two prices for both stop forms: a stop order has no
+  execution price, so neither supplied field may lower the bound. A schema that
+  accepts a price field the placement funnel ignores is a finding whenever a
+  cap reads it. (`scripts/tests/test_order_limits.py`,
+  `scripts/tests/test_bankroll_pref_and_debit_loss.py`)
+- **A demo quota is priced on what the request costs upstream, not on its
+  method** — `POST /api/previous-close` reads prices, but one request reaches
+  up to 30 symbols and each uncached symbol costs a quote plus a fallback, so
+  it pays a dedicated fan-out tier instead of the ordinary-read ceiling. Not
+  the producer tier either: it fires automatically off the price stream, and
+  the producer daily bucket is shared with every scan, so a backfill burst
+  would lock operator controls out for the day. An unresolvable symbol is
+  remembered briefly, because the day cache stores only resolved closes and a
+  replayed batch otherwise re-issued the whole fan-out; a source that failed
+  rather than answered is never remembered. Every daily ceiling carries
+  `Retry-After` so a refused client waits the window out instead of re-polling
+  at its maximum backoff. (`web/tests/demo-rate-tier.test.ts`,
+  `web/tests/previous-close-miss-cache.test.ts`, `web/tests/demo-gate.test.ts`)
 
 ## Triage & patch policy
 

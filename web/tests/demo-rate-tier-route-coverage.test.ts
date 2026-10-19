@@ -53,8 +53,9 @@ const EXPECTED: Record<string, DemoRateTier> = {
   "POST /api/scanner/theta/scan": "B",
   "POST /api/scanner/vol-skew-mr/scan": "B",
   "POST /api/vcg/share": "B",
-  // A batch price read sent as POST (bounded body); the handler pays tier A.
-  "POST /api/previous-close": "A",
+  // A batch price read sent as POST, fanning out to up to 30 symbols, each
+  // costing a quote plus a fallback, so it pays its own fan-out tier.
+  "POST /api/previous-close": "M",
   // LLM routes share the AI budget.
   "POST /api/assistant": "D",
   "POST /api/newsfeed/explain": "D",

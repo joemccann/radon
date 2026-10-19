@@ -54,6 +54,47 @@ class TestCheckOrderLimits:
         assert violation is not None
         assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
 
+    def test_stp_notional_ignores_a_limit_price_ib_never_sends(self):
+        """A STP order executes at market on trigger; ``ib_place_order`` builds
+        ``StopOrder(stopPrice=...)`` and never sends ``limitPrice``. Pricing the
+        cap on the supplied limit let a decoy value understate the notional."""
+        violation = order_limits.check_order_limits({
+            "type": "stock", "symbol": "AAPL", "action": "SELL",
+            "quantity": 10_000, "orderType": "STP",
+            "limitPrice": 0.01, "stopPrice": 1000.0,
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
+    def test_stp_notional_never_prices_below_a_supplied_limit(self):
+        """A stop order has no execution price, so neither supplied field may
+        lower the bound: a decoy in EITHER field must not shrink the cap. A BUY
+        stop at $0.01 triggers immediately and reaches IB as a market buy."""
+        violation = order_limits.check_order_limits({
+            "type": "stock", "symbol": "AAPL", "action": "BUY",
+            "quantity": 10_000, "orderType": "STP",
+            "limitPrice": 1000.0, "stopPrice": 0.01,
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
+    def test_stp_limit_notional_uses_the_worse_of_the_two_prices(self):
+        """STP LMT sends both prices, so the worse one bounds the order."""
+        violation = order_limits.check_order_limits({
+            "type": "stock", "symbol": "AAPL", "action": "BUY",
+            "quantity": 10_000, "orderType": "STP LMT",
+            "limitPrice": 0.01, "stopPrice": 1000.0,
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
+    def test_limit_order_still_prices_on_its_limit(self):
+        violation = order_limits.check_order_limits({
+            "type": "stock", "symbol": "AAPL", "action": "BUY",
+            "quantity": 100, "orderType": "LMT", "limitPrice": 20.0,
+        })
+        assert violation is None
+
     def test_stock_notional_uses_multiplier_one(self):
         """1000 shares × $200 = $200k — under the default cap; the option
         multiplier must not apply to stock."""
