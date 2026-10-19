@@ -43,7 +43,7 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 ## Guardrails (enforcement points)
 
 - **No real orders** — (backend) VM `RADON_API_TEST_MODE=1`; (UX) `web/app/api/orders/place/route.ts` detects `demoRole` via `auth()` and routes to `/paper/place` → `paper_fills`. Both present; neither load-bearing alone.
-- **AI quotas** — new `demo_ai_usage` table (PK user_id+endpoint+day_et); guard at the top of the 3 Next.js LLM routes (`assistant` 5/day, `ticker/seasonality` 10/day, `ticker/info` 20/day) where Clerk identity exists; 429 on exceed; reset 00:00 ET. Backstop (revised 2026-06-27): demo **reuses the prod AI keys**, so the per-user quota + the Upstash tier-D limiter (5/day) are the only AI-spend guard — no separate provider cap.
+- **AI quotas** — `demo_ai_usage` table (PK user_id+endpoint+day_et). Per-endpoint daily caps are `DEMO_AI_DAILY_LIMITS` in `web/lib/demo/aiQuota.ts`, which includes `newsfeed/explain`. The shared Upstash tier D (5/day) is the backstop for every path in `AI_PATHS` (`web/lib/demo/rateTier.ts`), including `/api/newsfeed/share`, which is not in the per-endpoint table. Clerk identity is required. Exceeding a cap returns 429 and the counter resets at 00:00 ET. An unreadable quota store returns 503 `DEMO_QUOTA_UNAVAILABLE` and does not call the model. Demo reuses the prod AI keys, so this quota plus tier D are the only AI-spend guard. There is no separate provider cap.
 - **Rate-limit / DOS** — Vercel edge controls plus an app-layer Upstash sliding-window limiter keyed by Clerk userId. Cached GETs use Tier A; only producer mutations use Tier B; writes, AI, WebSocket tickets, headlines, and shell polling retain their dedicated tiers. Every handler with a local limiter declares its durable tier explicitly. Demo sync hooks load one GET, suppress automatic producer POSTs/polling/retries, and make manual refresh another GET.
 - **Write spam** — per-trial caps in demo DB (journal ≤1000 + 10KB/note + 1/5s; alerts/watchlist bounded).
 
@@ -76,7 +76,7 @@ The staging notes in this table record the original rollout, not current
 secret or deployment status. Inspect the operator-managed project settings
 and backend environment before making a change.
 
-The demo reads the vars below. They live in **two places**: `web/.env` (local dev) and the **`radon-demo` Vercel project** env (encrypted, all targets). **Prod must NOT carry `TURSO_DEMO_*` / `UPSTASH_*`** — their absence is what guarantees prod can never reach the demo DB (`web/lib/db.ts:getDemoDb()` throws when unset). Read paths: `getDemoDb()` (Turso), `web/lib/demo/demoGate.ts:demoRateLimit` (Upstash), the 3 LLM routes (AI keys).
+The demo reads the vars below. They live in **two places**: `web/.env` (local dev) and the **`radon-demo` Vercel project** env (encrypted, all targets). **Prod must NOT carry `TURSO_DEMO_*` / `UPSTASH_*`** — their absence is what guarantees prod can never reach the demo DB (`web/lib/db.ts:getDemoDb()` throws when unset). Read paths: `getDemoDb()` (Turso), `web/lib/demo/demoGate.ts:demoRateLimit` (Upstash), and the AI routes named by `DEMO_AI_DAILY_LIMITS` and `AI_PATHS`.
 
 | Var(s) | Source | Initial provisioning notes (historical) |
 |---|---|---|
