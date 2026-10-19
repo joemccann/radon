@@ -389,3 +389,95 @@ def test_state_lookup_transport_errors_leave_no_candidate_timer_enabled(maintena
     with pytest.raises(type(lookup_error)):
         maintenance.handover(forward=True, runner=runner, marker=tmp_path / "ready")
     assert not any(args[1:3] == ["enable", "--now"] and args[-1] in maintenance.NEW_TIMERS for args in calls)
+
+
+def test_prepare_allows_exact_upload_pack_gitdir_without_trusting_other_repositories(maintenance, tmp_path, monkeypatch):
+    """Exercise Git's ownership gate on the server-side upload-pack gitdir."""
+    account_home = tmp_path / "responder"
+    repo = account_home / "repo"
+    unrelated = tmp_path / "unrelated"
+    pickup_home = tmp_path / "pickup"
+    pickup_home.mkdir()
+    environment = {
+        "PATH": os.defpath,
+        "HOME": str(pickup_home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": str(pickup_home / ".gitconfig"),
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+    def git(*args, different_owner=False):
+        selected = dict(environment)
+        if different_owner:
+            # Git's own test switch exercises its real ownership check without
+            # requiring root or modifying any real account/repository ownership.
+            selected["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+        return subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *map(str, args)],
+            env=selected, capture_output=True, text=True, timeout=15,
+        )
+
+    for candidate in (repo, unrelated):
+        assert git("init", candidate).returncode == 0
+        result = git("-C", candidate, "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.test",
+                     "commit", "--allow-empty", "-m", "synthetic pickup fixture")
+        assert result.returncode == 0, result.stderr
+    expected_head = git("-C", repo, "rev-parse", "HEAD").stdout.strip()
+    assert len(expected_head) == 40
+    assert git("config", "--global", "--add", "safe.directory", "/synthetic/prior").returncode == 0
+
+    # Fail rather than skip if this Git does not actually enforce ownership.
+    for candidate in (repo, unrelated):
+        refused = git("ls-remote", candidate / ".git", "HEAD", different_owner=True)
+        assert refused.returncode != 0
+        assert "dubious ownership" in refused.stderr
+
+    class DependencyBoundary(Exception):
+        pass
+
+    account = SimpleNamespace(pw_uid=32000, pw_gid=32000, pw_dir=str(account_home), pw_shell="/usr/sbin/nologin")
+    pickup = SimpleNamespace(pw_uid=32001)
+    monkeypatch.setattr(maintenance, "ACCOUNT_HOME", account_home)
+    monkeypatch.setattr(maintenance, "READY", account_home / "ready")
+    monkeypatch.setattr(maintenance, "pwd", SimpleNamespace(getpwnam=lambda name: account if name == USER else pickup))
+    monkeypatch.setattr(maintenance, "grp", SimpleNamespace(
+        getgrnam=lambda _: SimpleNamespace(gr_gid=32002),
+        getgrgid=lambda _: SimpleNamespace(gr_name=USER),
+    ))
+    isolated_os = SimpleNamespace(**vars(os))
+    isolated_os.getgrouplist = lambda *_: [32000, 32002]
+    monkeypatch.setattr(maintenance, "os", isolated_os)
+    # Only irrelevant host provisioning is replaced. Production prepare itself
+    # must issue the Git registrations, which execute against the isolated HOME.
+    monkeypatch.setattr(maintenance, "trusted_tree", lambda _: None)
+    monkeypatch.setattr(maintenance, "root_directory", lambda *_: None)
+    monkeypatch.setattr(maintenance, "owned_directory", lambda *_: None)
+    monkeypatch.setattr(maintenance, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
+    registrations = []
+
+    def as_account(args, *, account=USER, **kwargs):
+        if args[:5] == ["/usr/bin/git", "config", "--global", "--add", "safe.directory"]:
+            assert account == "radon"
+            registrations.append(str(args[5]))
+            result = git(*args[1:])
+            assert result.returncode == 0, result.stderr
+            return result
+        if args[:3] == ["/usr/bin/python3.13", "-m", "venv"]:
+            raise DependencyBoundary
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(maintenance, "as_account", as_account)
+    with pytest.raises(DependencyBoundary):
+        maintenance.prepare(tmp_path / "trusted-stage")
+
+    advertised = git("ls-remote", repo / ".git", "HEAD", different_owner=True)
+    assert advertised.returncode == 0, advertised.stderr
+    assert advertised.stdout.split() == [expected_head, "HEAD"]
+    status = git("-C", repo, "status", "--porcelain", different_owner=True)
+    assert status.returncode == 0, status.stderr
+    assert status.stdout == ""
+    refused = git("ls-remote", unrelated / ".git", "HEAD", different_owner=True)
+    assert refused.returncode != 0 and "dubious ownership" in refused.stderr
+    values = git("config", "--global", "--get-all", "safe.directory").stdout.splitlines()
+    assert values == ["/synthetic/prior", str(repo), str(repo / ".git")]
+    assert registrations == [str(repo), str(repo / ".git")]
