@@ -47,7 +47,7 @@ def atomic_save(path: str, data: dict) -> str:
     )
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(payload, f, indent=2)
+            json.dump(payload, f, separators=(",", ":"))
             # R-031: without fsync, a power loss can persist the rename
             # while the content is still in the page cache — an empty or
             # torn file behind a "successful" atomic save.
