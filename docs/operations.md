@@ -1064,6 +1064,18 @@ than duplicating commands in this runbook.
 
 ## Private Dropbox research runtime
 
+The research worker executes the Python image's pinned `claude`, `codex`,
+`grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
+directories, `HOME=/home/radon`, and Antigravity refresh/state mounts retain
+their existing paths and modes. The image build verifies each installed CLI's
+version and ownership as the runtime user without calling provider APIs.
+
+Rollout uses the normal verified-image deployment: install the runtime wrapper
+from the same release and restart the managed research unit. No account,
+credential migration, or host CLI installation is required. If image CLI
+compatibility fails, roll back the complete release and its runtime wrapper
+together; do not add an unreviewed host executable mount.
+
 `radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
 
 The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and the model provider key remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
