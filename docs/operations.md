@@ -676,7 +676,21 @@ The `/admin` Service controls modal runs on the app host, where `radon-api` is a
 
 ## Network trust (Ops Plane step 2)
 
-Every change here ships inert. Deploy never applies a tailnet policy, a host firewall or a Hetzner Cloud Firewall; each is an operator step below. Keep a public-IP SSH session open on the host you are changing until the new path is verified.
+Changes to the checked-in declarations ship inert. Deploy never applies a
+tailnet policy, a host firewall or a Hetzner Cloud Firewall; each is an operator
+step below. Retain a working tailnet session and provider console access for
+the app; retain recovery-IP SSH or the console for broker/demo until fresh
+allowed and denied connections are verified.
+
+The operator-applied cutover was verified on 2026-10-18: CI uses the app
+private address, the app public SSH rule is absent, and broker/demo public SSH
+is restricted to the configured recovery IPv4 `/32`. The final
+[merged-policy deployment](https://github.com/joemccann/radon/actions/runs/39166228188)
+passed all three Tailscale-before-SSH host jobs. Provider rules were fully
+applied to their intended servers; broker/demo UFW remained inactive.
+The generated [topology overview](radon-network-topology.svg) describes the
+declarations, not a live firewall inventory. Recheck attachments and fresh
+connections after any later change.
 
 ### Tailnet policy (`cloud/tailscale/policy.hujson`)
 
@@ -686,8 +700,8 @@ pin its boundaries; neither proves which policy or tags are installed live.
 
 The policy has no `ssh` rules: Tailscale SSH authenticates the source node,
 not the local user, so a rule for `group:operator` also admits every other
-user on an operator-owned node such as the shared Mac mini. Every Radon host
-runs plain sshd with key auth and Tailscale SSH off
+user on an operator-owned node such as the shared Mac mini. The app and broker
+run plain sshd with key auth and Tailscale SSH off
 (`tailscale set --ssh=false`); the `tcp:22` grant reaches that sshd on the
 tailnet address.
 
@@ -718,7 +732,8 @@ merging the file does not apply them.
 **Symptom:** peer access is broader than the declared policy, or a required
 operator path fails after a policy change.
 **Prerequisites:** operator access to the Tailscale admin console, a saved live
-policy, and verified public-IP recovery SSH to each affected host. Schedule
+policy, provider console access for the app, and verified recovery-IP SSH
+to broker where applicable. Demo is outside this tailnet procedure. Schedule
 changes outside regular trading hours.
 **Blast radius:** saving a policy changes access for the whole tailnet; tagging
 a server changes which grants match it. It does not restart Gateway.
@@ -733,11 +748,11 @@ host back in.
    the operator's tailnet login. Add its `tagOwners` to the live policy first,
    keeping existing grants, then assign the matching tags to the intended
    machines. Enroll a host only if live inspection confirms it needs enrollment.
-3. From a public-IP session on the app host, run `tailscale set --ssh=false`
+3. From the app provider console or a retained working session, run `tailscale set --ssh=false`
    so tailnet port 22 reaches sshd. Validate the rendered policy in the
    console, require its access tests to pass, then save it. Stop on any failed test or uncertain host identity.
 4. **Verification:** open fresh SSH connections from the operator device to
-   the app and broker while keeping public recovery sessions open. Connect to
+   the app and broker while retaining their applicable recovery paths. Connect to
    each host's tailnet address: an SSH config alias can point at the public IP
    and pass without touching the tailnet. Confirm the
    app's direct `/health/lite` response is available from the operator device;
@@ -749,7 +764,7 @@ required paths and denied paths are verified. If validation or access fails,
 stop the rollout.
 **Rollback:** restore `policy.before.hujson` in the console and undo tag changes
 using the saved live inventory; verify fresh SSH access before continuing.
-**Escalation:** use the retained public recovery session and involve the
+**Escalation:** use the retained working session or provider console and involve the
 operator with tailnet administration access if policy restoration fails.
 
 ### Tailnet trust narrowing (`scripts/api/auth.py`)
@@ -833,7 +848,7 @@ As root, set `BACKUP=<printed /etc/radon-ufw-rollback.* path>`, then run `cp -a 
 - **fw-radon-broker:** 22 from the recovery `/32`; 41641/udp any. No web ports.
 - **fw-radon-demo:** 22 from the recovery `/32`; 80/443 any. No Tailscale UDP rule: demo has no Tailscale interface and no IB connection. The FastAPI `8321` and Caddy admin `2019` ports remain container-only.
 - **fw-radon-ops:** 22 from the recovery `/32`; 80, 443 any; 41641/udp any.
-- No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. That path is held by the bind addresses and the broker ufw set above.
+- No 4001/8340 rules: Hetzner Cloud Firewalls filter the public interface only, so the app-to-broker private-net path (`10.0.0.2` -> `10.0.0.4:4001/8340`) never passes them. The deployed path is constrained by private/loopback binds and the broker's app-only 8340 filter; the UFW rules above are a separate declaration, not proof that UFW is active.
 
 **Symptom:** firewall apply fails, reports an unavailable inventory, or times
 out while replacing rules or attaching a firewall.
@@ -869,7 +884,47 @@ that matches the saved prior state and the recovery path is verified.
 session open, and involve the operator with provider access if state or recovery
 access cannot be established. Do not continue to the next server.
 
-Protection (once, both servers): `hcloud server enable-protection ib-gateway delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
+Protection (once, both servers): `hcloud server enable-protection radon-app delete rebuild` and `hcloud server enable-protection radon-broker delete rebuild`. Verify `hcloud server describe <name> -o json | jq .protection` shows `delete` and `rebuild` true. Disable with `disable-protection` before a deliberate rebuild (spof-host-split.md "Never").
+
+### Recovery IP changes and roaming
+
+**Use:** update broker/demo public SSH when the operator changes networks or
+the ISP changes its public IPv4. Devices behind the same home NAT usually
+share that IPv4; a laptop on another network does not. Operator OpenSSH over
+Tailscale to app/broker is independent of this public address. Demo has no
+tailnet path. The app has no public SSH rule to update.
+
+**Prerequisites:** authenticated Hetzner access with console recovery, the
+intended new public IPv4 independently confirmed, and a private copy of the
+existing rules and attachments. Keep an old working session if available.
+The checked-in placeholder is deliberate: do not commit the operator's real
+recovery address or broaden it to a subnet to accommodate roaming.
+
+1. In Hetzner, verify `fw-radon-broker` is attached only to broker and
+   `fw-radon-demo` only to demo. Change the source of the existing inbound
+   TCP22 rule to the new public IPv4 `/32`, one firewall at a time. Preserve
+   the other rules and outbound behavior; do not edit `fw-radon-app`.
+2. A CLI update is also possible using the existing renderer with the new
+   bare IPv4 in `--recovery-ip`. Review the dry run first: `--apply` replaces
+   the complete rule set, not just the SSH source. If live rules have other
+   approved changes, reconcile them before using full replacement.
+3. Verify a **fresh** SSH connection from the new network to that host.
+   Test an independent non-allowlisted IPv4 source and public IPv6: both
+   must fail. An existing session is not evidence that a new login works.
+4. Confirm demo HTTP/HTTPS over both families, or broker tailnet SSH/direct
+   UDP and app-to-broker private health, as applicable. Only then update the
+   other firewall. No repository edit or application deploy is needed for an
+   address-only change.
+
+**Stop:** do not change the second host if the first fails fresh access or
+expected denials. Use the authenticated provider console to inspect/correct
+that one source. Do not open SSH to all IPv4/IPv6 as a diagnostic shortcut.
+**Reversal:** restore the saved previous `/32` on that host and verify from
+that network, or correct the new `/32` using console access. Restoring a source
+rule does not alter SSH keys, tailnet ACLs or service state.
+**Escalation:** if provider console access is unavailable, involve the Hetzner
+account owner; neither a repository revert nor changing an SSH hostname can
+undo an installed provider firewall.
 
 ### CI deploy over the tailnet
 
@@ -894,7 +949,8 @@ Hetzner Cloud Firewalls filter the public NIC only. Tailnet SSH to port 22
 does not traverse `fw-radon-app`. Closing public 22 is safe only after a
 green deploy has used the tailnet path.
 
-Cutover, in this order. Do not skip or reorder:
+The cutover is complete; the sequence below is for a new installation or a
+reviewed recovery, not work that deploy performs. Do not reorder it:
 
 1. **Create the Tailscale OAuth client and ACL.** In the Tailscale admin
    console, add `tag:ci` to tagOwners (`group:operator`), save the grant
@@ -925,20 +981,23 @@ Cutover, in this order. Do not skip or reorder:
    `https://app.radon.run/edge-health/ping`, and a subsequent successful CI deploy.
 4. **Recovery** after public 22 is closed is the Hetzner web console
    (not public SSH). Keep a tailnet SSH session from an operator device
-   while applying the firewall change. Rollback is restoring the saved
-   `fw-radon-app` rules, including public 22, then verifying console and
-   tailnet SSH.
+   while applying the firewall change. Use console access to restore the
+   last working tailnet/sshd configuration and verify fresh tailnet SSH;
+   public app SSH remains closed.
 
 **Stop:** stop if the OAuth client cannot mint a tagged key, if Connect
 Tailscale or SSH fails, or if a deploy after closing public 22 fails.
-Re-open public 22 from the console before further diagnosis.
+Keep the provider firewall in place and diagnose from a retained tailnet
+session or the Hetzner console. A failed tailnet join is not evidence that
+public SSH must be opened.
 **Verification:** one green `ci.yml` deploy whose SSH target was the
 tailnet address, then (only after step 3) a public `nc` to port 22 on the
 app's public IP fails while tailnet SSH still works.
-**Rollback:** restore the previous live tailnet policy and, if step 3 ran,
-the previous `fw-radon-app` rules. The workflow can SSH to
-`secrets.VPS_HOST` again only by reverting the ci.yml change; prefer
-restoring firewall and ACL first.
+**Rollback:** restore the reviewed last-working client/ACL or SSH
+configuration through the admin/provider consoles, preserving the app's
+closed public SSH boundary. Reverting `ci.yml` alone to `secrets.VPS_HOST`
+cannot restore access while the provider blocks public22. Any broader network
+rollback is a separate operator-reviewed change; a deploy never applies it.
 
 ## Health monitoring (isolated daemon + edge surface)
 
