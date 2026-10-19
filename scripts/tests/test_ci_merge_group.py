@@ -1,10 +1,12 @@
 """Every required check must report on GitHub's `merge_group` event.
 
-The main branch is merged through a merge queue (ruleset `main-merge-queue`,
-2026-10-19). The queue builds a temporary `gh-readonly-queue/main/*` branch and
-fires `merge_group`, not `pull_request`; a required check whose workflow never
-runs on that event parks the queue entry until `check_response_timeout_minutes`
-expires. These tests pin the wiring so a future edit cannot silently drop it.
+A merge queue builds a temporary `gh-readonly-queue/main/*` branch and fires
+`merge_group`, not `pull_request`; a required check whose workflow never runs
+on that event parks the queue entry until `check_response_timeout_minutes`
+expires. GitHub offers the queue only to organization-owned repositories, so
+`main` runs with `required_status_checks.strict=false` instead (2026-10-19);
+the wiring is kept so a move to an organization needs no workflow change.
+These tests pin it so a future edit cannot silently drop it.
 """
 
 from __future__ import annotations

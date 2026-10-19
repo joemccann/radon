@@ -12,9 +12,9 @@ name: PR body
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
-  # The merge queue fires merge_group on a branch with no PR body. The check
+  # A merge queue fires merge_group on a branch with no PR body. The check
   # already passed on the PR itself; this run only has to report the required
-  # context green so the queue entry is not parked.
+  # context green so a queue entry is not parked.
   merge_group:
     branches: [main]
 
