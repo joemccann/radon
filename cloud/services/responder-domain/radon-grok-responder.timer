@@ -1,0 +1,10 @@
+[Unit]
+Description=Radon isolated page responder timer
+
+[Timer]
+OnActiveSec=30
+OnUnitInactiveSec=30
+Persistent=false
+
+[Install]
+WantedBy=timers.target

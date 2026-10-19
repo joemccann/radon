@@ -36,13 +36,17 @@ def test_fleet_units_load_etc_radon_env() -> None:
         if path.name == "radon-mcp.service":
             assert value == "/etc/radon/mcp.env", path.name
             continue
+        if path.name == "radon-subscription-tokens.service":
+            assert value == "/etc/radon/subscription-tokens/env", path.name
+            continue
         assert value == CANONICAL_ENV, path.name
     assert found >= 40
 
 
-def test_caddy_media_root_is_var_lib_radon_media() -> None:
+def test_caddy_media_root_is_protected_publication_directory() -> None:
     text = (CLOUD / "caddy" / "Caddyfile").read_text(encoding="utf-8")
-    assert f"root * {CANONICAL_MEDIA}" in text
+    assert "root * /var/lib/radon-public/media" in text
+    assert f"root * {CANONICAL_MEDIA}" not in text
     assert "root * /home/radon/radon-cloud/media" not in text
 
 

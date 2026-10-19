@@ -27,6 +27,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
 | vix-pc | `/regime/vix-pc` | `vix-pc` | [vix-pc.md](vix-pc.md) (migration `0097_vix_pc.sql` is version 97) |
+| vix-model-spread | `/regime/vix-model-spread` | `vix-model-spread` | [Specification](vix-model-spread.md), [source research](vix-model-spread-source-research.md); personal operator use, 20/252-session bands |
 | panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) (22:20 UTC sweep, 23:20 UTC if a deploy killed the first run) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |

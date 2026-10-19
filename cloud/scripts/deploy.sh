@@ -550,6 +550,13 @@ write_mcp_env() {
   MCP_ENV_TMP=""
 }
 
+write_subscription_env() {
+  if ! sudo -n "$DEPLOY_ROOT_HELPER" publish-subscription-env; then
+    log_error "Subscription service environment publication failed"
+    return 1
+  fi
+}
+
 run_with_cloud_env() {
   local env_file="$1"
   shift
@@ -1790,6 +1797,7 @@ main() {
   fi
   # The hosted MCP unit loads a stripped env derived from the file just validated.
   write_mcp_env "$ENV_FILE_DEFAULT"
+  write_subscription_env
 
   local prev_commit
   prev_commit="$(current_commit)"

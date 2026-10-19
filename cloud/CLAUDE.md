@@ -23,6 +23,15 @@ cloud/
   docker-compose.yml         # production IB Gateway container
 ```
 
+## VIX model spread schedule
+
+`radon-vix-model-spread.service` and `.timer` are included in setup's
+`SERVICE_FILES` and `config/installed-units.sha256`; the normal green deploy
+installs them and enables the timer without an operator root install. The
+personal-use collector samples official Cboe closes daily at 02:50 UTC, with
+no randomized delay. Migration 0098, payload/storage and operator-only access
+are defined in [the indicator spec](../docs/indicators/vix-model-spread.md).
+
 ## Runtime Planes
 
 Production is three planes. Do not collapse them.
@@ -252,12 +261,13 @@ only a prefix of a baked key is rejected.
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
-- Canonical media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
+- Staging media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
 - Control-plane rollback state (manifest, ready marker) in radon-owned `/var/lib/radon`: root restores it only through a pinned `O_NOFOLLOW` directory fd, writing a fresh `O_EXCL` temp then renaming it over the target (`restore_target`); never a by-name `rm` then `cp`
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
   its `research` child is radon-owned `0700`. The worker mounts that child
   read-write and API read-only at `/var/lib/radon/research`. Seed through the
   container mount; host user radon cannot traverse the anchor.
+- Protected served media: `/var/lib/radon-public/media` (`root:caddy`, directory `0750`, files `0640`). No app bind mounts. The credential-free root-owned `media_publish.py` plus `radon-media-publish.{service,path,timer}` publish bounded raster snapshots. Initial migration drains before the Caddy root switches; retries use a protected metadata cache. Every supported staging leaf is preserved regardless of age; source cleanup owns retention. More than 5,000 supported leaves fails before mutation. Actual source deletions mirror only after a complete scan; prior valid bytes survive rejected updates. See [public media publication](../docs/operations.md#public-media-publication).
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
 - Durable privileged deploy state: `/var/lib/radon-deploy` (root `0700` under root-owned `/var/lib`; never a child of radon-owned `/var/lib/radon`). The helper moves a transition journaled at the pre-move `/var/lib/radon/deploy` once, through a pinned `O_NOFOLLOW` fd, and bootstrap refuses while either holds one
 - Root provision store (root's clone of the pinned remote):
@@ -524,6 +534,13 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+The subscription keeper loads the root-private derived environment
+`/etc/radon/subscription-tokens/env`. Setup derives it before installing units;
+each deploy refreshes it through the fixed `publish-subscription-env` root
+verb after environment preflight. The keeper's UID, native credential paths
+and vault socket are unchanged. Lifecycle and rollback ownership:
+[`docs/subscription-tokens.md`](../docs/subscription-tokens.md#service-environment-lifecycle).
+
 `radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
 and heals the agent-CLI subscription credentials (claude, codex, grok,
 Antigravity `agy`) from the encrypted secret store, with a daily keepalive
@@ -543,8 +560,9 @@ with no key and reaches the vault through the broker socket
 cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
 key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
 The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
-(`docker/app/vendor-clis/`), so `radon-api` never mounts host
-`~/.local/bin` while it holds the key group. Root `prepare_private_dir` pins
+(`docker/app/vendor-clis/`), so `radon-api` and `radon-research` never mount host
+`~/.local/bin`. Provider credential directories and `HOME=/home/radon` remain
+unchanged; Antigravity retains its existing writable refresh/state directories. Root `prepare_private_dir` pins
 every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
 every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
 
@@ -576,6 +594,13 @@ the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
 `/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
 and pages via Pushover plus the unit watchdog. The job heartbeats
 `service_health` as `grok-upgrade` (26h daily window). Contract:
+The optional isolated responder is prepared through
+`cloud/scripts/setup-grok-responder-account.sh`, from a root-only provision
+stage. Nested `services/responder-domain/` units are outside automatic fleet
+installation. The explicit native-login and pickup checks precede a
+transactional timer handover; root-private installed-unit inventory adds the
+optional units to ongoing drift verification. The canonical keeper upgrader
+remains unchanged. Migration and rollback commands are owned by
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 `cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
 The unit names every link the upgrader may move (`--live-bin`,

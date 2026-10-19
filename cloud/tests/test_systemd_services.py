@@ -47,6 +47,9 @@ EXPECTED_SERVICE_FILES = [
     "radon-portfolio-archive.timer",
     "radon-research-archive.service",
     "radon-research-archive.timer",
+    "radon-media-publish.service",
+    "radon-media-publish.path",
+    "radon-media-publish.timer",
     "radon-media-backup.service",
     "radon-media-backup.timer",
     "radon-db-retention.service",
@@ -175,6 +178,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-flex-pull.timer",
     "radon-vix-pc.service",
     "radon-vix-pc.timer",
+    "radon-vix-model-spread.service",
+    "radon-vix-model-spread.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -196,12 +201,14 @@ IB_GATEWAY_DEPENDENTS = [
 
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
+    "radon-subscription-tokens.service": "/etc/radon/subscription-tokens/env",
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
     "radon-grok-upgrade.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
     "radon-mcp.service": "/etc/radon/mcp.env",
 }
 STATIC_SERVICES = {
+    "radon-media-publish.service",
     "radon-refresh.service",
     "radon-drift-audit.service",
     "radon-ib-gateway-preheld-restart.service",
@@ -214,6 +221,7 @@ STATIC_SERVICES = {
 # stays root, and like the drift audit it executes a root-owned
 # control-plane copy, never the radon-writable checkout.
 ROOT_REQUIRED_SERVICES = {
+    "radon-media-publish.service",
     "radon-drift-audit.service",
     "radon-disk-cleanup.service",
 }
@@ -298,7 +306,7 @@ class TestSubscriptionTokens:
         assert svc["user"] == "radon"
         assert svc["umask"] == "0077"
         assert svc["workingdirectory"] == "/home/radon/radon"
-        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES[self.SERVICE]
 
     def test_reaches_the_vault_through_the_broker_without_the_key(self, unit, services_dir):
         # DS-2026-10-05-05: this unit runs third-party CLIs out of
@@ -448,7 +456,7 @@ class TestStructure:
     def test_all_expected_files_exist(self, services_dir):
         actual = sorted(
             f.name for f in services_dir.iterdir()
-            if f.suffix in {".service", ".timer"}
+            if f.suffix in {".service", ".timer", ".path"}
         )
         assert actual == sorted(EXPECTED_SERVICE_FILES)
 
@@ -1769,3 +1777,25 @@ class TestTradingViewAlertsDrain:
         assert timer["oncalendar"] == "*:02/5:23"
         assert timer["persistent"] == "false"
         assert timer.get("unit", "radon-tv-alerts.service") == "radon-tv-alerts.service"
+
+
+def test_vix_model_spread_timer_install_and_source_contract():
+    """A merged indicator installs automatically with the exact UI countdown slot."""
+    import hashlib
+
+    cloud = Path(__file__).parents[1]
+    timer = (cloud / 'services/radon-vix-model-spread.timer').read_text()
+    service = (cloud / 'services/radon-vix-model-spread.service').read_text()
+    assert 'OnCalendar=*-*-* 02:50:00 UTC' in timer
+    assert 'RandomizedDelaySec=0' in timer
+    assert 'Persistent=true' in timer
+    assert 'User=radon' in service
+    assert 'scripts/fetch_vix_model_spread.py' in service
+    assert 'Environment=RADON_DB_NO_REPLICA=1' in service
+    manifest = (cloud / 'config/installed-units.sha256').read_text()
+    setup = (cloud / 'scripts/setup-vps.sh').read_text()
+    for suffix in ('service', 'timer'):
+        name = f'radon-vix-model-spread.{suffix}'
+        digest = hashlib.sha256((cloud / 'services' / name).read_bytes()).hexdigest()
+        assert f'{digest}  {name}' in manifest
+        assert f'  {name}\n' in setup
