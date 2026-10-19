@@ -149,6 +149,97 @@ ensure_user() {
   createhomedir -c -u "$BOT" >/dev/null
 }
 
+# A fixed disabled-login account owns only its private probe inputs and the
+# snapshot handoff. No sudoers entry or root command is exposed to the bot.
+ensure_perf_probe_user() {
+  local helper=_radonprobe helper_uid next_uid membership read_group=_radonprobe_read read_gid members member helper_uuid bot_uuid
+  if ! dscl . -read "/Groups/$read_group" >/dev/null 2>&1; then
+    read_gid=400
+    while dscl . -search /Groups PrimaryGroupID "$read_gid" | grep -q .; do
+      read_gid=$((read_gid + 1))
+      [[ "$read_gid" -lt 500 ]] || { echo "no reserved snapshot group available" >&2; return 77; }
+    done
+    dscl . -create "/Groups/$read_group"
+    dscl . -create "/Groups/$read_group" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Groups/$read_group" PrimaryGroupID "$read_gid"
+    dscl . -create "/Groups/$read_group" Password '*'
+  fi
+  read_gid="$(dscl . -read "/Groups/$read_group" PrimaryGroupID | awk '{print $2}')"
+  [[ "$read_gid" =~ ^[0-9]+$ && "$read_gid" -gt 0 ]] \
+    || { echo "snapshot read group is invalid" >&2; return 77; }
+  if ! id "$helper" >/dev/null 2>&1; then
+    next_uid=400
+    while dscl . -search /Users UniqueID "$next_uid" | grep -q .; do
+      next_uid=$((next_uid + 1))
+      [[ "$next_uid" -lt 500 ]] || { echo "no reserved helper uid available" >&2; return 77; }
+    done
+    dscl . -create "/Users/$helper"
+    dscl . -create "/Users/$helper" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Users/$helper" UniqueID "$next_uid"
+    dscl . -create "/Users/$helper" PrimaryGroupID "$read_gid"
+    dscl . -create "/Users/$helper" NFSHomeDirectory /var/empty
+    dscl . -create "/Users/$helper" UserShell /usr/bin/false
+    dscl . -create "/Users/$helper" Password '*'
+    dscl . -create "/Users/$helper" IsHidden 1
+  fi
+  [[ "$(id -g "$helper")" == "$read_gid" ]] \
+    || { echo "snapshot helper must use its dedicated read group" >&2; return 77; }
+  # Existing dedicated groups must not silently export data to other users.
+  members="$(dscl . -read "/Groups/$read_group" GroupMembership 2>/dev/null || true)"
+  for member in ${members#GroupMembership:}; do
+    [[ "$member" == "$helper" || "$member" == "$BOT" ]] \
+      || { echo "snapshot read group contains an unexpected member" >&2; return 77; }
+  done
+  helper_uuid="$(dscl . -read "/Users/$helper" GeneratedUID | awk '{print $2}')"
+  bot_uuid="$(dscl . -read "/Users/$BOT" GeneratedUID | awk '{print $2}')"
+  [[ -n "$helper_uuid" && -n "$bot_uuid" ]] || { echo "snapshot member identity is unverifiable" >&2; return 77; }
+  members="$(dscl . -read "/Groups/$read_group" GroupMembers 2>/dev/null || true)"
+  for member in ${members#GroupMembers:}; do
+    [[ "$member" == "$helper_uuid" || "$member" == "$bot_uuid" ]] \
+      || { echo "snapshot read group contains an unexpected identity" >&2; return 77; }
+  done
+  dseditgroup -o edit -a "$helper" -t user "$read_group"
+  dseditgroup -o edit -a "$BOT" -t user "$read_group"
+  helper_uid="$(id -u "$helper")"
+  [[ "$helper_uid" -gt 0 && "$helper_uid" != "$(id -u "$BOT")" ]] \
+    || { echo "snapshot helper uid must be distinct and unprivileged" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$helper" UserShell)" == 'UserShell: /usr/bin/false' ]] \
+    || { echo "snapshot helper must have a disabled login shell" >&2; return 77; }
+  membership="$(dsmemberutil checkmembership -U "$helper" -G admin)" \
+    || { echo "snapshot helper group membership is unverifiable" >&2; return 77; }
+  [[ "$membership" == *'is not a member'* ]] \
+    || { echo "snapshot helper must not be an administrator" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$helper" NFSHomeDirectory)" == 'NFSHomeDirectory: /var/empty' ]] \
+    || { echo "snapshot helper must use its disabled-login home" >&2; return 77; }
+}
+
+print_perf_probe_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.runner-perf-probe</string>
+<key>UserName</key><string>_radonprobe</string>
+<key>ProgramArguments</key><array><string>$GUARD_PYTHON</string><string>-I</string><string>$PREFIX/perf_probe_helper.py</string></array>
+<key>StartCalendarInterval</key><dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>55</integer></dict>
+<key>ProcessType</key><string>Background</string>
+<key>ExitTimeOut</key><integer>10</integer>
+<key>StandardOutPath</key><string>/var/log/radon-perf-probe.log</string>
+<key>StandardErrorPath</key><string>/var/log/radon-perf-probe.log</string>
+</dict></plist>
+EOF
+}
+
+install_perf_probe_service() {
+  local label=com.radon.runner-perf-probe plist=/Library/LaunchDaemons/com.radon.runner-perf-probe.plist
+  # Fixed source/config only. Provisioning never reads or copies credentials.
+  "$GUARD_PYTHON" -I "$PREFIX/perf_probe_helper.py" provision
+  atomic_text "$plist" 644 print_perf_probe_plist
+  plutil -lint "$plist" >/dev/null
+  launchctl bootout "system/$label" 2>/dev/null || true
+  launchctl bootstrap system "$plist"
+}
+
 # Everything under the bot's home is created by the bot itself: root never
 # writes, chmods or chowns a path the bot could have swapped for a symlink.
 as_bot() { sudo -u "$BOT" "$@"; }
@@ -250,6 +341,7 @@ install_runner() {
   atomic_install -o root -g wheel -m 644 "$SRC/phase_status.sh" "$PREFIX/phase_status.sh"
   atomic_install -o root -g wheel -m 755 "$SRC/lifecycle_gate.py" "$PREFIX/lifecycle_gate.py"
   atomic_install -o root -g wheel -m 755 "$SRC/update_installed.py" "$PREFIX/update_installed.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/perf_probe_helper.py" "$PREFIX/perf_probe_helper.py"
   [[ -e "$PREFIX/maintenance.lock" ]] || atomic_install -o root -g wheel -m 644 /dev/null "$PREFIX/maintenance.lock"
   atomic_install -o root -g wheel -m 644 "$SRC/toolchain-policy.json" "$PREFIX/toolchain-policy.json"
   install -d -o root -g wheel -m 755 "$PREFIX/toolchain"
@@ -295,6 +387,12 @@ refuse_active_install() {
       fi
     fi
   done
+  if output="$(launchctl print system/com.radon.runner-perf-probe 2>/dev/null)"; then
+    if ! grep -qE '^[[:space:]]*state = not running[[:space:]]*$' <<< "$output"; then
+      echo "maintenance deferred: snapshot helper is active or unverifiable" >&2
+      return 75
+    fi
+  fi
   if output="$(launchctl print system/com.radon.runner-native-update 2>/dev/null)"; then
     if ! grep -qE '^[[:space:]]*state = not running[[:space:]]*$' <<< "$output"; then
       echo "maintenance deferred: native CLI update is active or unverifiable" >&2
@@ -383,6 +481,10 @@ PY_READY
 
 main() {
   [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  if [[ "$1" == "--print-perf-probe-plist" ]]; then
+    print_perf_probe_plist
+    return 0
+  fi
   if [[ "$1" == "--print-native-update-plist" ]]; then
     print_native_update_plist
     return 0
@@ -415,9 +517,11 @@ main() {
   done
   refuse_active_install
   ensure_user
+  ensure_perf_probe_user
   configure_user
   install_runner
   for loop in "$@"; do install_loop "$loop"; done
+  if [[ -f "$PREFIX/loops/performance.env" ]]; then install_perf_probe_service; fi
   write_maintenance_ready
   install_update_service
   install_native_update_service
