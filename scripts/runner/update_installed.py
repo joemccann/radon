@@ -21,6 +21,7 @@ PREFIX = Path('/usr/local/radon-runner')
 ORIGIN = 'https://github.com/joemccann/radon.git'
 API = 'https://api.github.com/repos/joemccann/radon/'
 LOOPS = ('documentation', 'ci-performance', 'performance', 'testing', 'reliability', 'security', 'security-deepsec')
+SERVICES = tuple('system/com.radon.runner.' + loop for loop in LOOPS) + ('system/com.radon.runner-perf-probe',)
 ENV = {'HOME': '/var/root', 'PATH': '/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'C',
        'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0'}
 
@@ -34,7 +35,7 @@ def protected(path):
 
 def command(args, *, binary=False, allow_missing=False):
     result = subprocess.run(args, env=ENV, stdin=subprocess.DEVNULL, capture_output=True, timeout=900)
-    if allow_missing and result.returncode == 113 and args[:2] == ['/bin/launchctl', 'print'] and args[2:] in [['system/com.radon.runner.' + loop] for loop in LOOPS]:
+    if allow_missing and result.returncode == 113 and args[:2] == ['/bin/launchctl', 'print'] and args[2:] in [[name] for name in SERVICES]:
         return 'state = not running\n'
     if result.returncode: raise RuntimeError(f'{Path(args[0]).name} failed (exit {result.returncode})')
     return result.stdout if binary else result.stdout.decode().strip()
@@ -141,8 +142,8 @@ def refresh():
             raise RuntimeError('maintenance gate changed')
         if ready_path.exists(): ready = ready_generation(ready_path)
         else: ready = install_proof(pending, gate)
-        for loop in LOOPS:
-            state = command(['/bin/launchctl', 'print', 'system/com.radon.runner.' + loop], allow_missing=recovering)
+        for service in SERVICES:
+            state = command(['/bin/launchctl', 'print', service], allow_missing=recovering)
             if not re.search(r'^\s*state = not running\s*$', state, re.M): return {'status': 'deferred-active-runner'}
         store = BASE / 'origin.git'
         if not store.exists(): command(['/usr/bin/git', '-c', 'init.templateDir=', 'init', '--bare', str(store)])

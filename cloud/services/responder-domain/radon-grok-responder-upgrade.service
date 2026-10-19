@@ -1,0 +1,35 @@
+[Unit]
+Description=Radon isolated responder runtime upgrade
+After=network.target
+ConditionPathExists=/var/lib/radon-responder/ready
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=radon-responder
+Group=radon-responder
+UMask=0027
+WorkingDirectory=/var/lib/radon-responder/upgrade
+EnvironmentFile=/etc/radon/grok-responder/env
+Environment=GROK_PAGE_NO_DOTENV=1
+Environment=HOME=/var/lib/radon-responder
+Environment=PATH=/var/lib/radon-responder/.local/bin:/var/lib/radon-responder/.grok/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GROK_UPGRADE_DOMAIN=responder
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder-upgrade/scripts/grok_upgrade.py --grok-bin /var/lib/radon-responder/.local/bin/grok --live-bin /var/lib/radon-responder/.local/bin/grok --alias-bin /var/lib/radon-responder/.grok/bin/grok --lkg /var/lib/radon-responder/runtime/grok_lkg.json --lock /var/lib/radon-responder/runtime/grok-runtime.lock --scratch /var/lib/radon-responder/upgrade
+TimeoutStartSec=1200
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProtectHome=yes
+ProtectSystem=strict
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /var/lib/radon-responder/repo -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+ReadWritePaths=/var/lib/radon-responder/.grok /var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade
+
+[Install]
+WantedBy=multi-user.target

@@ -93,6 +93,11 @@ DEFAULT_CLOUD_ROOT = Path("/home/radon/radon/cloud")
 REPO = DEFAULT_CLOUD_ROOT
 GIT_REPO = REPO.parent
 SYSTEMD_DIR = Path("/etc/systemd/system")
+OPTIONAL_RESPONDER_INVENTORY = Path("/etc/radon/grok-responder/installed-units.sha256")
+OPTIONAL_RESPONDER_UNITS = frozenset({
+    "radon-grok-responder.service", "radon-grok-responder.timer",
+    "radon-grok-responder-upgrade.service", "radon-grok-responder-upgrade.timer",
+})
 SUDOERS_DIR = Path("/etc/sudoers.d")
 SERVICE_NAME = "config-drift"
 SUMMARY_CAP = 1500
@@ -109,6 +114,7 @@ HEALTH_WRITE_ATTEMPTS = 3
 
 # (live absolute path, repo-relative path, drift label)
 FILE_PAIRS = [
+    ("/usr/local/lib/radon/media_publish.py", "scripts/media_publish.py", "media-publisher"),
     ("/etc/caddy/Caddyfile", "caddy/Caddyfile", "caddyfile"),
     ("/usr/local/bin/radon", "scripts/operator-radon.sh", "operator-cli"),
     (
@@ -165,7 +171,7 @@ FILE_PAIRS = [
 
 GIT_BLOB_PREFIX = "git:"
 
-UNIT_GLOBS = ("radon-*.service", "radon-*.timer")
+UNIT_GLOBS = ("radon-*.service", "radon-*.timer", "radon-*.path")
 
 _UPSERT_SQL = (
     "INSERT INTO service_health (service, state, last_attempt_started_at, "
@@ -687,6 +693,40 @@ def resolve_host_role(environ=None) -> str:
     return raw if raw in HOST_ROLES else "combined"
 
 
+def _optional_responder_units(drifts: list[dict]) -> dict[str, Path]:
+    try:
+        parent = os.open(OPTIONAL_RESPONDER_INVENTORY.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            parent_meta = os.fstat(parent)
+            if parent_meta.st_uid != 0 or parent_meta.st_mode & 0o077:
+                raise ValueError("optional inventory directory differs")
+            fd = os.open(OPTIONAL_RESPONDER_INVENTORY.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        finally:
+            os.close(parent)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        drifts.append({"id": "optional-unit-inventory", "detail": "optional responder inventory cannot be opened"})
+        return {}
+    try:
+        with os.fdopen(fd, "r") as stream:
+            meta = os.fstat(stream.fileno())
+            if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o022:
+                raise ValueError("optional inventory metadata differs")
+            text = stream.read(8193)
+        if len(text) > 8192:
+            raise ValueError("optional inventory is oversized")
+        lines = [line.split("  ", 1) for line in text.splitlines()]
+        if any(len(parts) != 2 or not re.fullmatch(r"[a-f0-9]{64}", parts[0]) or parts[1] not in OPTIONAL_RESPONDER_UNITS for parts in lines):
+            raise ValueError("optional inventory entries differ")
+        if {name for _, name in lines} != OPTIONAL_RESPONDER_UNITS or len(lines) != len(OPTIONAL_RESPONDER_UNITS):
+            raise ValueError("optional inventory membership differs")
+    except (OSError, UnicodeError, ValueError):
+        drifts.append({"id": "optional-unit-inventory", "detail": "optional responder inventory is not canonical"})
+        return {}
+    return {name: REPO / "services/responder-domain" / name for _, name in lines}
+
+
 def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
     role_skipped = ROLE_SKIPPED_UNITS.get(resolve_host_role(), frozenset())
     repo_units = {
@@ -695,6 +735,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
         for p in (REPO / "services").glob(pattern)
         if p.is_file()
     }
+    repo_units.update(_optional_responder_units(drifts))
     live_units = {
         p.name: p
         for pattern in UNIT_GLOBS

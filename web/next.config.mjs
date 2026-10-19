@@ -66,6 +66,7 @@ const HOST_DATA_TRACE_ROUTES = [
   "/api/scanner",
   "/api/ticker/seasonality",
   "/api/vcg",
+  "/api/vix-model-spread",
 ];
 
 const config = {

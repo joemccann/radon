@@ -62,6 +62,11 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  scripts/subscription_service_env.py
+  scripts/media_publish.py
+  services/radon-media-publish.service
+  services/radon-media-publish.path
+  services/radon-media-publish.timer
   config/tmpfiles.d/radon-deploy.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
@@ -115,6 +120,11 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /usr/local/lib/radon/subscription_service_env.py
+  /usr/local/lib/radon/media_publish.py
+  /etc/systemd/system/radon-media-publish.service
+  /etc/systemd/system/radon-media-publish.path
+  /etc/systemd/system/radon-media-publish.timer
   /usr/lib/tmpfiles.d/radon-deploy.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
@@ -127,6 +137,8 @@ readonly -a CONTROL_PLANE_MODES=(
   644 644
   644 644 644 644 644
   644
+  644
+  644 644 644 644
   644
 )
 
@@ -354,7 +366,7 @@ PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -1062,6 +1074,27 @@ grant_caddy_media_access() {
   GRANT_CADDY_NEEDS_RESTART="$need_restart"
 }
 
+# Called only from the fixed edge publish action, before its candidate is live.
+# A deferred batch persists its root-owned index and resumes on the next pass.
+prepare_public_media_publication() {
+  local attempt status
+  local -a publisher=(/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py)
+  if (( HELPER_TEST_MODE == 1 )); then
+    publisher=("$SESSION_PYTHON" -I "${RADON_TEST_MEDIA_PUBLISHER:?isolated publisher required}")
+  fi
+  for ((attempt=0; attempt<20; attempt++)); do
+    status=0
+    "${publisher[@]}" || status=$?
+    if (( status == 0 )); then
+      "$SYSTEMCTL" enable --now radon-media-publish.path radon-media-publish.timer
+      return $?
+    fi
+    (( status == 75 )) || return "$status"
+  done
+  echo "Media backfill remains incomplete; retaining the current edge configuration" >&2
+  return 75
+}
+
 # radon publishes Caddy config only through this fixed action. The retired
 # `cp <checkout Caddyfile> /etc/caddy/Caddyfile` sudoers rule followed a
 # symlinked source, so radon could read any root-only file out of the 0644
@@ -1097,6 +1130,14 @@ publish_caddy() {
     "$RM" -f "$candidate"
     echo "caddy candidate validation failed; live configuration is unchanged" >&2
     return 65
+  fi
+
+  if (( HELPER_TEST_MODE == 0 )) || [[ "${RADON_TEST_PUBLISH_MEDIA:-0}" == "1" ]]; then
+    if ! prepare_public_media_publication; then
+      "$RM" -f "$candidate"
+      echo "Media publication is not ready; live edge configuration is unchanged" >&2
+      return 75
+    fi
   fi
 
   if [[ -f "$CADDY_CONFIG" ]]; then
@@ -2052,7 +2093,7 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */systemd/system/radon-*.service|*/systemd/system/radon-*.timer)
+    */systemd/system/radon-*.service|*/systemd/system/radon-*.timer|*/systemd/system/radon-*.path)
       if ! unit_candidate_verifies "$candidate" "$(basename -- "$dest")"; then
         echo "systemd unit validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
@@ -2604,7 +2645,7 @@ root_action_timeout() {
       # py_compile) for the whole bundle; not in the job-cancel class.
       printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
       ;;
-    publish-mcp-env)
+    publish-mcp-env|publish-subscription-env)
       # One grep and one rename over a constant path; nothing to wait on.
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
@@ -2717,6 +2758,9 @@ case "$1" in
     ;;
   publish-mcp-env)
     publish_mcp_env
+    ;;
+  publish-subscription-env)
+    "$SESSION_PYTHON" -I /usr/local/lib/radon/subscription_service_env.py /etc/radon/env /etc/radon/subscription-tokens/env
     ;;
   sync-control-plane)
     sync_control_plane "${2:-}"

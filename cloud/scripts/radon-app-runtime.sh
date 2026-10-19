@@ -1019,8 +1019,9 @@ cmd_run() {
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
         fi
       done
-      # The API holds the secret-store key; it runs the image's pinned agy.
-      if [[ "$unit" != "radon-api.service" && -d "${subscription_home}/.local/bin" ]]; then
+      # Python API and research images carry pinned, image-owned provider CLIs.
+      # Provider grants above retain their established HOME and refresh paths.
+      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" && -d "${subscription_home}/.local/bin" ]]; then
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
       fi
       ;;
