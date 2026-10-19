@@ -48,6 +48,17 @@ def _is_transient_hrana(exc: BaseException) -> bool:
     return any(marker in text for marker in _TRANSIENT_HRANA_MARKERS)
 
 
+# A writer lock is not a statement that is too large, so it is not a reason
+# to split the batch. Turso reaps an abandoned idle transaction after 10s
+# (knowledge ingest, 2026-09-26). The 0.25s/1s timeout backoff stays inside
+# that window and the daily oneshot exits before later publishers run.
+_LOCK_MARKERS = (
+    "sqlite_busy",
+    "database is locked",
+    "stream not found",
+    "upstream forward failed",
+)
+_LOCK_RETRY_DELAYS = (12.0, 24.0)
 _CLOUD_WRITE_RETRY_DELAYS = (0.25, 1.0)
 _SNAPSHOT_PAGE_SIZE = 500
 _SNAPSHOT_PERSIST_DEADLINE_SECONDS = 900
@@ -77,10 +88,12 @@ class ObservationStore:
             try:
                 return hrana_execute(sql, args)
             except HranaHttpError as exc:
-                transient = _is_transient_hrana(exc)
+                locked = any(marker in str(exc).lower() for marker in _LOCK_MARKERS)
+                transient = locked or _is_transient_hrana(exc)
                 if not transient or attempt == len(_CLOUD_WRITE_RETRY_DELAYS):
                     raise
-                time.sleep(_CLOUD_WRITE_RETRY_DELAYS[attempt])
+                delays = _LOCK_RETRY_DELAYS if locked else _CLOUD_WRITE_RETRY_DELAYS
+                time.sleep(delays[attempt])
 
     def _query(self, sql, args=()):
         if self.connection is not None:
