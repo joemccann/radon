@@ -210,6 +210,34 @@ def _added_lines_by_file(patch: str) -> dict[str, list[str]]:
     return files
 
 
+# Headers a pushed commit object may carry. Anything else (an extension
+# header) is published verbatim but shown by no log format, so it is refused
+# rather than scanned. Free-text values of allowed headers are scanned.
+# author/committer are scanned through the log identities.
+_STRUCTURAL_HEADERS = frozenset({"tree", "parent", "author", "committer"})
+_SCANNED_HEADERS = frozenset({"encoding", "gpgsig", "gpgsig-sha256"})
+
+
+def _scan_commit_headers(repo: Path, sha: str, run: Runner) -> list[str]:
+    raw = _git(repo, ["cat-file", "commit", sha], run)
+    head = raw.split("\n\n", 1)[0]
+    findings: list[str] = []
+    name = ""
+    for line in head.split("\n"):
+        if line.startswith(" "):  # continuation of the previous header
+            value = line[1:]
+        else:
+            name, _, value = line.partition(" ")
+            if name not in _STRUCTURAL_HEADERS and name not in _SCANNED_HEADERS:
+                raise IrPushRefused(
+                    f"cannot scan the branch: non-standard commit header in {sha[:12]}"
+                )
+        if name in _SCANNED_HEADERS:
+            for kind in find_private_identifiers(value):
+                findings.append(f"{kind} in commit header {sha[:12]}")
+    return findings
+
+
 def scan_commit_range(
     repo: Path,
     base: str,
@@ -259,6 +287,7 @@ def scan_commit_range(
         identity = "\n".join((author_name, author_email, committer_name, committer_email))
         for kind in find_private_identifiers(identity):
             findings.append(f"{kind} in commit identity {sha.strip()[:12]}")
+        findings += _scan_commit_headers(repo, sha.strip(), run)
     # Every commit's own patch, not one aggregate diff: pushing publishes
     # each intermediate blob, so content added then removed still counts.
     # --text and --no-textconv: a branch-authored .gitattributes (-diff,
