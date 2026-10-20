@@ -300,3 +300,19 @@ def test_block_scalar_matches_a_prefixed_or_suffixed_credential_key():
         out = scrub_credential_text(text)
         assert "NOTREALPREFIXED1" not in out, out
         assert "tail" in out, out
+
+
+def test_secret_assignment_scan_is_linear_on_adjacent_fragments():
+    """The value run used to be unbounded with a lookahead that rejected
+    punctuation, so every candidate rescanned the whole suffix: 0.0040s,
+    0.0156s, 0.0632s and 0.2527s for 250, 500, 1000 and 2000 adjacent
+    assignment-like fragments, a clean 4x per doubling."""
+    import subprocess
+
+    probe = (
+        "import sys;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import find_secret_assignments as f;"
+        "f('api_key=a1' * 64_000 + '.')"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
