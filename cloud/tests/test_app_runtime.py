@@ -1096,14 +1096,33 @@ def test_run_accepts_real_owned_bind_sources(tmp_path: Path, unit: str) -> None:
 # leaf and plant a link once the check has passed. This stub does exactly that
 # on the orphan reap, which is only a convenient mid-start hook: on a real host
 # any part of the start path between validation and the engine's mount serves.
+# The directory swap keeps allocating until it lands on the freed inode when
+# the filesystem will reissue one (ext4 does, immediately). A busy allocator
+# otherwise hands the replacement a new inode and a device:inode check passes
+# for the wrong reason.
 _SWAPPING_DOCKER = """#!/bin/bash
 printf '%s\\n' "$*" >> {log}
 if [ "$1" = "rm" ] && [ -n "${{RADON_TEST_SWAP_PATH:-}}" ]; then
-  /bin/rm -rf -- "${{RADON_TEST_SWAP_PATH}}"
   if [ "${{RADON_TEST_SWAP_KIND}}" = "link" ]; then
+    /bin/rm -rf -- "${{RADON_TEST_SWAP_PATH}}"
     /bin/ln -s "${{RADON_TEST_SWAP_TARGET}}" "${{RADON_TEST_SWAP_PATH}}"
   else
-    /bin/mkdir -p "${{RADON_TEST_SWAP_PATH}}"
+    python3 -c 'import os, shutil
+p = os.environ["RADON_TEST_SWAP_PATH"]
+st = os.stat(p)
+want = (st.st_dev, st.st_ino)
+shutil.rmtree(p)
+n = 0
+while n < 64:
+    os.mkdir(p)
+    now = os.stat(p)
+    if (now.st_dev, now.st_ino) == want:
+        break
+    os.rename(p, p + ".hold." + str(n))
+    n += 1
+if not os.path.isdir(p):
+    os.mkdir(p)
+'
   fi
 fi
 exit 0
@@ -1124,7 +1143,8 @@ def test_run_refuses_a_bind_source_replaced_after_validation(
     again when it mounts. The recorded directory must be re-resolved before the
     engine runs, so a swap during the rest of the start path refuses the start
     instead of binding a tree the check never saw. Both shapes of swap are
-    refused: a planted link, and a different directory of the same owner."""
+    refused: a planted link, and a different directory of the same owner,
+    including one the filesystem recreated at the same device and inode."""
     victim = tmp_path / "root-only"
     victim.mkdir()
     (victim / "key").write_text("secret\n", encoding="utf-8")
