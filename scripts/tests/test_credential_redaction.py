@@ -316,3 +316,14 @@ def test_secret_assignment_scan_is_linear_on_adjacent_fragments():
         "f('api_key=a1' * 64_000 + '.')"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
+
+
+def test_suffixed_credential_keys_are_scrubbed_not_only_detected():
+    """Detection already accepted a suffix; redaction did not, so
+    `SECRET_KEY_PROD=<value>` passed the scrubber the knowledge pipeline runs
+    before sending document text to a model provider."""
+    for key in ("SECRET_KEY_PROD", "DB_PASSWORD_BACKUP", "UW_TOKEN_STAGING", "api_key_v2"):
+        text = f"the excerpt held {key}=NOTREALSUFFIXED1x9 and more"
+        out = scrub_credential_text(text)
+        assert "NOTREALSUFFIXED1x9" not in out, out
+        assert out.endswith("and more"), out

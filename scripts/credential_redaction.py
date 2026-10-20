@@ -13,6 +13,13 @@ _SECRET_KEY = (
     r"|sess(?:ion)?[-_]?id|_session|csrf|xsrf)"
 )
 
+# A bounded suffix run. find_secret_assignments has accepted one all along
+# (`SECRET_KEY_PROD`), but the generic REDACTION patterns required the
+# credential word to be followed immediately by quoting or the delimiter, so
+# an ordinary suffixed name was detected and then published. Bounded, because
+# this module is scanned over text an outside contributor shapes.
+_KEY_SUFFIX = r"[A-Za-z0-9_-]{0,64}"
+
 # Execution identifiers: private, but not credential-shaped. Defined here, the
 # canonical scrubber, so the publication gate (scripts/ir_push_gate.py) and the
 # public issue sanitizer (scripts/nightly_issue_format.py) cannot drift apart
@@ -148,21 +155,21 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     # published the tail.
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:\\.|[^\"\\\n])*\"",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:\\.|[^\"\\\n])*\"",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
     ),
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:\\.|[^'\\\n])*'",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:\\.|[^'\\\n])*'",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
     ),
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
             re.IGNORECASE,
         ),
         r"\1[redacted-secret]",
