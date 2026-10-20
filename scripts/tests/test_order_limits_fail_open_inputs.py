@@ -212,3 +212,38 @@ class TestSellEnvelopeReversesLegExposure:
         for leg in combo["legs"]:
             leg["action"] = "SELL"
         assert order_limits.combo_max_loss(combo) == 0.0
+
+
+class TestFutureModifyKeepsItsMultiplier:
+    """A working future modified through the modify chokepoint must be priced
+    with its own contract multiplier. Classifying it as an option applied the
+    100 option multiplier and under-counted the notional by the ratio of the
+    two, which is the exact defect the place path already fails closed on."""
+
+    @staticmethod
+    def _future_order(**over):
+        base = {
+            "contract": {"secType": "FUT", "symbol": "ES", "multiplier": "1000"},
+            "quantity": 1,
+            "action": "BUY",
+        }
+        base.update(over)
+        return base
+
+    def test_future_modify_over_the_cap_is_refused(self):
+        refusal = order_limits.check_modify_limits(
+            self._future_order(), new_quantity=100, new_price=20
+        )
+        assert refusal is not None, "100 x 20 x 1000 = $2,000,000 must be refused"
+        assert refusal["code"] == "ORDER_NOTIONAL_LIMIT", refusal
+
+    def test_future_modify_without_a_multiplier_fails_closed(self):
+        order = self._future_order(contract={"secType": "FUT", "symbol": "ES"})
+        refusal = order_limits.check_modify_limits(order, new_quantity=100, new_price=20)
+        assert refusal is not None, refusal
+        assert refusal["code"] == "ORDER_FUTURE_MULTIPLIER", refusal
+
+    def test_a_small_future_modify_is_still_accepted(self):
+        assert order_limits.check_modify_limits(
+            self._future_order(), new_quantity=2, new_price=20
+        ) is None

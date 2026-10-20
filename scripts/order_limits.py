@@ -498,6 +498,13 @@ def _working_order_shape(working_order: dict) -> tuple[str, Optional[list]]:
         return ("combo" if _legs_are_priceable(legs) else "option"), legs
     if sec_type == "STK":
         return "stock", None
+    if sec_type == "FUT":
+        # A future priced with the option's 100 multiplier under-counts its
+        # notional by the ratio of the two, which is RC-D1 on the modify path:
+        # check_order_limits already fails a future closed when no valid
+        # contract multiplier is available, and that only happens if the shape
+        # survives to it.
+        return "future", None
     return "option", None
 
 
@@ -599,6 +606,18 @@ def check_modify_limits(
         "limitPrice": price,
         "action": action or working_order.get("action"),
     }
+    if order_type == "future":
+        # Same two shapes as _working_order_shape: the snapshot nests the
+        # contract, a caller-composed replacement carries the field flat. An
+        # absent or unusable multiplier reaches check_order_limits as None and
+        # is refused there, not guessed at here.
+        contract = working_order.get("contract")
+        contract = contract if isinstance(contract, dict) else {}
+        params["multiplier"] = (
+            contract.get("multiplier")
+            if contract.get("multiplier") is not None
+            else working_order.get("multiplier")
+        )
     if order_type == "combo" and legs is not None:
         params["legs"] = legs
     return check_order_limits(params)
