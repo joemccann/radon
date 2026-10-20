@@ -1,0 +1,8 @@
+import WorkspaceShell from "@/components/WorkspaceShell";
+import { routeMetadata } from "@/lib/pageTitle";
+
+export const metadata = routeMetadata("/regime/exports");
+
+export default function RegimeExportsPage() {
+  return <WorkspaceShell section="regime" />;
+}
