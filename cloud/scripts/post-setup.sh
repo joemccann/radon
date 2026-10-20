@@ -81,7 +81,12 @@ log_info ".env configured"
 log_step "Step 2: Write public web env and rebuild Next.js"
 
 ssh "${VPS_ROOT}" 'for unit in radon-nextjs.service radon-relay.service radon-newsfeed.service; do if systemctl is-active --quiet "$unit"; then echo "Refusing live rebuild while $unit is active; use scripts/deploy.sh with the exact tested commit SHA" >&2; exit 78; fi; done'
-ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /etc/radon/env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /etc/radon/env -- bun run build 2>&1 | tail -5'
+# web/ is radon-owned, so radon writes its own copy and root never creates a
+# path there. install without -T treats a destination that radon has replaced
+# with a link to a directory as that directory and creates a file inside it,
+# which is a root-assisted write into a location radon chooses. Same shape as
+# setup_node in setup-vps.sh.
+ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /etc/radon/env > "$tmp" || true; sudo -u radon sh -c '\''umask 077; cat > "$1" && chmod 0600 "$1"'\'' _ /home/radon/radon/web/.env < "$tmp"; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /etc/radon/env -- bun run build 2>&1 | tail -5'
 
 log_info "Next.js rebuilt with production env vars"
 

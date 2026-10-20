@@ -1001,3 +1001,10 @@ class TestSanitizeCommentedBlockScalars:
         out = nif.sanitize(text)
         assert "NOTREALBLOCKVALUE3" not in out, out
         assert "keep_me: ordinary prose" in out, out
+
+
+class TestSanitizeBlockScalarTrailingComment:
+    def test_a_comment_after_the_indicator_still_hides_the_body(self):
+        out = nif.sanitize("password: | # note\n  NOTREALTRAILING1\ntail\n")
+        assert "NOTREALTRAILING1" not in out, out
+        assert out.rstrip("\n").endswith("tail"), out

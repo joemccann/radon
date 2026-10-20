@@ -30,7 +30,40 @@ EXECUTION_ID_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
 )
 
+def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
+    """A YAML block-scalar header whose value lives on the FOLLOWING lines.
+
+    `key: |` then an indented block. Shared with the public-text sanitizer
+    (``scripts/nightly_issue_format.py``), which keeps its own key alphabet:
+    only the STRUCTURE is shared, because that is the part that drifted. A
+    report excerpt usually arrives commented, bulleted or quoted and may carry
+    a trailing comment after the indicator, and either one used to stop the
+    rule from matching while a line-oriented assignment rule rewrote the
+    header and left the whole body in place. Continuation lines must be
+    indented past the header, so a sibling key at the same indentation ends
+    the block and survives.
+
+    Groups: `indent`, `lead` (comment or bullet prefix) and `key`, so a caller
+    can preserve the header and replace only the value.
+    """
+    return re.compile(
+        rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+-]+[ \t]*)*)"
+        rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
+        r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
+        r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
+        re.I | re.M,
+    )
+
+
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY)
+
 _SPECIFIC_SCRUB_PATTERNS = [
+    # Runs before the generic assignment rule, which would otherwise rewrite
+    # the header line and leave the indented body published.
+    (
+        _SECRET_BLOCK_SCALAR_RE,
+        lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}[redacted-secret]\n",
+    ),
     # PEM / OpenSSH / PGP private-key blocks span lines; a block cut off
     # before its END line is redacted to the end of the text.
     (

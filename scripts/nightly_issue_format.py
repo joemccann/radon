@@ -37,7 +37,7 @@ import math
 import re
 import sys
 
-from credential_redaction import EXECUTION_ID_PATTERNS
+from credential_redaction import EXECUTION_ID_PATTERNS, build_block_scalar_re
 
 HEADING_DISCOVERED = "Issue discovered"
 HEADING_DONE = "What was done to fix it"
@@ -78,19 +78,9 @@ _SECRET_ASSIGN_RE = re.compile(
     r"(?:\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|\S+)",
     re.I,
 )
-# A YAML block scalar hides the value on the FOLLOWING lines: `key: |` then an
-# indented block. Continuation lines must be indented past the key, so a
-# sibling key at the same indent ends the block and survives. A report excerpt
-# usually arrives commented, bulleted or quoted, and that prefix used to stop
-# this rule from matching at all while the assignment rule quietly rewrote the
-# header and left the whole body published.
-_SECRET_BLOCK_SCALAR_RE = re.compile(
-    rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+-]+[ \t]*)*)"
-    rf"(?P<key>[\"']?{_SECRET_KEY_NAME}[\"']?[ \t]*:[ \t]*)"
-    r"[|>][0-9+-]*[ \t]*\r?\n"
-    r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
-    re.I | re.M,
-)
+# The block-scalar structure is shared with the canonical scrubber so the two
+# cannot drift again; this module keeps its own key alphabet.
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY_NAME)
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,

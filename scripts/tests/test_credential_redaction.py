@@ -237,3 +237,27 @@ def test_jwt_scan_stays_linear_on_overlapping_prefixes():
     # the fix and a third of the regression's cost, so it can neither flake
     # nor pass a regression.
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
+
+
+# A block scalar hides its value on the FOLLOWING lines, so a line-oriented
+# rule publishes the whole body. Values below are invented.
+def test_block_scalar_values_are_scrubbed():
+    text = "password: |\n  NOTREALBLOCK1\n  NOTREALBLOCK2\nnext: fine\n"
+    out = scrub_credential_text(text)
+    assert "NOTREALBLOCK" not in out, out
+    assert "next: fine" in out, out
+
+
+def test_block_scalar_header_may_be_commented_or_carry_a_trailing_comment():
+    for header in ("# password: |", "- password: |", "password: | # note"):
+        text = header + "\n  NOTREALBLOCK3\ntail\n"
+        out = scrub_credential_text(text)
+        assert "NOTREALBLOCK3" not in out, out
+        assert "tail" in out, out
+
+
+def test_a_sibling_key_at_the_same_indent_is_not_eaten():
+    text = "password: |\n  NOTREALBLOCK4\nkeep_me: ordinary prose\n"
+    out = scrub_credential_text(text)
+    assert "NOTREALBLOCK4" not in out, out
+    assert "keep_me: ordinary prose" in out, out
