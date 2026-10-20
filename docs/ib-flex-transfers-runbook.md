@@ -41,7 +41,7 @@ Why one query is provably sufficient:
 
 - **An Activity Flex Query already carries multiple sections, and `1442520` already proves it.** Two independent consumers read two different sections out of the *same* document from that one query id: `scripts/perf_twr_builder.py:282` reads `EquitySummaryByReportDateInBase` (the "NAV in Base" section) and `scripts/cash_flow_sync.py:254` reads `CashTransaction` (the "Cash Transactions" section). Sections in an Activity Flex Query are independent checkboxes; Transfers is another one of them. The idea that Flex queries are "typed" one-section-per-query is contradicted by the production query in front of us.
 - **The builder is already written for the single-document case.** `_flows_query_id()` (`scripts/perf_twr_builder.py:454-455`) falls back to `IB_FLEX_NAV_QUERY_ID` when `IB_FLEX_FLOWS_QUERY_ID` is unset, and `resolve_flows()` (`:500-504`) reuses the already-fetched XML when the two ids match, so one build makes exactly one Flex request. This is pinned by `tests/test_perf_twr_ingest.py:283` (`test_flows_d7_one_flex_fetch_per_distinct_query_id`).
-- **A second query id doubles the Flex request rate per build.** The Flex Web Service rate limit is a sliding window and this repo has already taken a 24h→168h embargo from over-requesting (`project_cash_flow_sync_incident_2026_08_04`, codes 1001/1018/1019). Adding a second id would put `radon-perf-twr` at two SendRequests every weekday evening for zero benefit.
+- **A second query id doubles the Flex request rate per build.** The Flex Web Service rate limit is a sliding window and this repo has already taken a 24h→168h embargo from over-requesting (`project_cash_flow_sync_incident_2026_08_04`, codes 1001/1018/1019). Adding a second id would put `radon-perf-twr` at two SendRequests per build for zero benefit.
 - **`flex_flows.parse_flows` reads both sections out of one string** (`scripts/lib/flex_flows.py:146` and `:161`) and nets them per date, which is only correct if they come from one statement — which is what one query gives you.
 
 Consequence: **no new environment variable, no code change, no deploy.** This is a Portal-only change (see §4 and §5).
@@ -250,7 +250,7 @@ Sanity check while you have the payload: `1 + total_return` should equal the pro
 
 ### e. Confirm the published payload is `status: "ok"` in Turso
 
-**Do not run the builder manually to make this happen.** Let `radon-perf-twr.timer` fire on its own at 20:45 ET (Mon–Fri) — that run makes the one Flex request it already makes every evening, so it costs nothing extra against the window. Then read the published row:
+**Do not run the builder manually to make this happen.** Let `radon-perf-twr.timer` fire on its own at Tue..Sat 07:30 ET (up to 300s jitter). That run does not pass `--sendrequest`. It publishes from the statement already in hand. Then read the published row:
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon
@@ -300,9 +300,9 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 **Sequencing rules for the manual work:**
 
 1. Amending the query in the Portal costs **zero** Flex requests. Do the Portal edit at any time.
-2. Make **one** manual pull (§6a), and place it outside both windows — best is 18:00–20:00 ET, or any time before 16:00 ET. Never 16:55–17:15 ET and never 20:40–20:55 ET.
+2. Make **one** manual pull (§6a) outside the live windows: `radon-flex-pull.timer` at 07:30 ET and 08:30 ET Tue..Sat, and `radon-perf-twr.timer` at Tue..Sat 07:30 ET plus its 300s jitter.
 3. §6b, §6c and §6d all read `/tmp/flex_1442520.xml`. Do not re-pull for them.
-4. Do **not** run `python scripts/perf_twr_builder.py` manually — it makes a fresh SendRequest. Let the 20:45 timer publish (§6e).
+4. Do **not** run `python scripts/perf_twr_builder.py` manually. A manual run can pass `--sendrequest` and make a fresh Flex request. Let the Tue..Sat 07:30 ET timer publish (§6e). The scheduled run does not pass `--sendrequest`.
 5. If §6a returns `1001`/`1018`/`1019`: stop immediately. Do not retry. Wait a full 24h, and check the daemon's embargo state before trying again:
 
 ```bash

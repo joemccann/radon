@@ -396,6 +396,24 @@ class TestDocumentation20261020:
             "secret file:\n  " + "\n  ".join(offenders)
         )
 
+    def test_perf_twr_runbook_matches_the_morning_timer(self):
+        """DOC-214: the transfers runbook still told the operator to wait
+        for a Mon-Fri 20:45 ET Flex request. The timer is Tue-Sat 07:30 ET
+        and does not pass --sendrequest."""
+        timer = (_ROOT / "cloud/services/radon-perf-twr.timer").read_text(encoding="utf-8")
+        assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in timer
+        assert "RandomizedDelaySec=300" in timer
+        flex = (_ROOT / "cloud/services/radon-flex-pull.timer").read_text(encoding="utf-8")
+        assert "OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York" in flex
+        builder = (_ROOT / "scripts/perf_twr_builder.py").read_text(encoding="utf-8")
+        assert "sendrequest: bool = False" in builder
+        runbook = (_ROOT / "docs/ib-flex-transfers-runbook.md").read_text(encoding="utf-8")
+        for stale in ("20:45", "20:40", "16:55", "weekday evening"):
+            assert stale not in runbook, stale
+        assert "Tue..Sat 07:30 ET" in runbook
+        assert "08:30 ET" in runbook
+        assert "does not pass `--sendrequest`" in runbook
+
 
 class TestThinIndex:
     def test_readme_has_now_true_not_recent_additions(self):
