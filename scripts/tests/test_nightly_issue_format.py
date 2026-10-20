@@ -1019,3 +1019,21 @@ class TestSanitizePwdNamedKeys:
     def test_a_bare_working_directory_variable_is_not_redacted(self):
         text = "the hook ran with PWD=/Users/bot/work and exited"
         assert nif.sanitize(text) == text
+
+
+class TestSanitizeKeyNameScanIsBounded:
+    def test_repeated_credential_words_do_not_stall_sanitization(self):
+        """Unbounded identifier runs on both sides of the credential-word
+        alternation made the engine redistribute prefix and suffix at every
+        offset: 0.0084s, 0.0336s, 0.1371s and 0.5519s for 250, 500, 1000 and
+        2000 repetitions. PR bodies carry attacker-shaped source excerpts."""
+        import subprocess
+        import sys as _sys
+
+        probe = (
+            "import sys;"
+            f"sys.path.insert(0, {str(REPO / 'scripts')!r});"
+            "import nightly_issue_format as n;"
+            "n.sanitize('TOKEN_' * 64_000 + '!')"
+        )
+        subprocess.run([_sys.executable, "-c", probe], check=True, timeout=20)

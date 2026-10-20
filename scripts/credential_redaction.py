@@ -186,7 +186,15 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
     rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*[\"']?"
-    r"(?P<value>[A-Za-z0-9_+/=~-]{16,})(?![A-Za-z0-9_+/=~.(\[$-])",
+    # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
+    # so only one length is ever tried) and BOUNDED. An unbounded run with a
+    # lookahead that rejected punctuation made every candidate rescan the
+    # whole suffix: measured 0.0040s, 0.0156s, 0.0632s and 0.2527s for 250,
+    # 500, 1000 and 2000 adjacent assignment-like fragments. The second
+    # lookahead keeps the original semantic rejections, so a code expression
+    # or a variable reference is still not a literal.
+    r"(?P<value>[A-Za-z0-9_+/=~-]{16,1024})"
+    r"(?![A-Za-z0-9_+/=~-])(?![.(\[$])",
     re.IGNORECASE,
 )
 _PLACEHOLDER = re.compile(

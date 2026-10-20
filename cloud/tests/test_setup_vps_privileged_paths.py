@@ -1562,13 +1562,15 @@ class TestPostSetupEnvSeeding:
         assert "cat >" in body
         assert "install -m 0640 -o root -g radon" in body
         assert REFUSAL in body
-        # Every /etc/radon/env install goes through this one helper.
-        destination = re.compile(r"\binstall\s[^|;&]*\s/etc/radon/env\b")
-        installs = [
-            line for line in _root_ssh_commands(script) if destination.search(line)
-        ]
-        assert len(installs) == 1
-        assert installs[0] in body
+        # Every /etc/radon/env publication goes through this one helper, and
+        # the helper publishes exactly once. The publication is an atomic
+        # rename rather than a direct install, because the destination lives
+        # in a directory the service account can create entries in.
+        publish = re.compile(r"\bmv\s+(?:-T|--no-target-directory)\s+\S+\s+/etc/radon/env\b")
+        assert len(publish.findall(body)) == 1, body
+        assert publish.findall(script) == publish.findall(body), script
+        direct = re.compile(r"\b(install|cp|tee)\s[^|;&\n]*\s/etc/radon/env\b")
+        assert direct.findall(script) == [], script
 
 
     def test_no_root_write_lands_inside_the_service_checkout(self) -> None:
@@ -1582,6 +1584,17 @@ class TestPostSetupEnvSeeding:
         )
         offenders = [line for line in _root_ssh_commands(script) if writes.search(line)]
         assert offenders == []
+
+    def test_env_publication_refuses_a_nonregular_destination(self) -> None:
+        """/etc/radon is root:radon 1770, so the service account can create an
+        `env` entry while the canonical file is absent. install without -T
+        treats a link to a directory as that directory and writes inside it,
+        so the destination needs a check and an atomic rename."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        helper = script[script.index("install_remote_env() {"):]
+        helper = helper[: helper.index("\n}\n")]
+        assert "mv -T" in helper or "mv --no-target-directory" in helper, helper
+        assert "-L /etc/radon/env" in helper, helper
 
     def test_public_web_env_is_written_by_the_owning_account(self) -> None:
         """Same shape setup-vps.sh uses: radon writes its own copy, so root

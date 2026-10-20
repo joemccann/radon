@@ -40,7 +40,23 @@ install_remote_env() {
     log_warn "Refusing ${source}: not a regular file (missing or a symlink)"
     return 1
   fi
-  ssh "${VPS_ROOT}" 'set -euo pipefail; umask 077; d=$(mktemp -d /root/radon-env.XXXXXX); cat > "$d/env"; install -m 0640 -o root -g radon "$d/env" /etc/radon/env; rm -rf "$d"' < "$source"
+  # The destination needs the same care as the source. /etc/radon is
+  # root:radon mode 1770, so while the canonical file is absent the service
+  # account can create an `env` entry; install without -T would treat a link
+  # to a directory as that directory and write inside it. Refuse a
+  # non-regular destination, stage a root-owned sibling in the same
+  # directory, and publish with an atomic rename that never follows a link.
+  ssh "${VPS_ROOT}" 'set -euo pipefail; umask 077
+    if [ -e /etc/radon/env ] && { [ -L /etc/radon/env ] || [ ! -f /etc/radon/env ]; }; then
+      echo "Refusing /etc/radon/env: not a regular file" >&2; exit 1
+    fi
+    d=$(mktemp -d /root/radon-env.XXXXXX)
+    cat > "$d/env"
+    install -d -m 0750 -o root -g radon /etc/radon
+    staged=$(mktemp /etc/radon/.env.XXXXXX)
+    install -m 0640 -o root -g radon "$d/env" "$staged"
+    mv -T "$staged" /etc/radon/env
+    rm -rf "$d"' < "$source"
 }
 
 # ---------------------------------------------------------------------------
