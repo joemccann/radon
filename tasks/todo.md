@@ -11,6 +11,19 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 Focused cloud: 97 passed (`test_grok_responder_code.py`, `test_responder_service_account.py`, `test_install_units.py`). Scripts: 16 passed (`test_grok_responder_work_root.py`, `test_grok_responder_fails_closed.py`). Docs ownership gate passed. The executed path is `/usr/local/lib/radon/grok-responder`; the clone stays writable. Host cutover is the operator refresh after deploy, not this commit. Did not touch `radon-app-runtime.sh` or `test_app_runtime.py`.
 
+# Web bun audit toolchain refresh (2026-10-20)
+
+Dependency graph: A1 -> A2 -> A3 -> A4.
+
+- [x] A1 depends_on: [] Record `web/` bun audit baseline and map each advisory to the lowest patched version.
+- [x] A2 depends_on: [A1] Bump direct dev floors and add overrides for transitive-only fixes. No Next/React/Playwright/TypeScript major.
+- [x] A3 depends_on: [A2] Regenerate `web/bun.lock`, re-audit, lint, typecheck, Vitest coverage ratchet, and the compile build.
+- [ ] A4 depends_on: [A3] Draft PR, exact-head CI, no merge and no host action.
+
+## Review
+
+Baseline `bun audit` on `web/`: critical 2, high 33, moderate 20, low 3 (58). After floors and flat overrides: critical 0, high 1, moderate 0, low 0. The remaining high is braces GHSA-vfj7-8cjw-p6xm (`<=3.0.3`); npm latest is still 3.0.3 and GitHub has no patched release. Dev-only via Tailwind's micromatch and chokidar. Bun 1.3.14 ignores parent and version-selector overrides, so brace-expansion and picomatch were pinned inside the lock at the lowest patched line each parent already allowed. Majors that are not core frameworks: uuid 8.3.2 to 11.1.1 (exceljs, no patched 8.x), image-size 1.2.1 to 2.0.3 (pptxgenjs, no patched 1.x), postcss-selector-parser 6.1.2 to 7.1.6 (GHSA range ignores the 6.1.5 backport). No Next, React, Playwright, or TypeScript bump. Vitest moved 4.0.18 to 4.1.11 (minor). Production transitive pins required by advisories: sharp 0.35.5, baseline-browser-mapping 2.11.0, source-map-js 1.2.2, uuid, image-size.
+
 # Bind-source inode generation (2026-10-20)
 
 Dependency graph: G1 -> G2 -> G3.
