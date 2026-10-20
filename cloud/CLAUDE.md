@@ -544,6 +544,22 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 **Backblaze B2 (portfolio cold-archive, production required):** `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` (+ optional `RADON_ARCHIVE_S3_PREFIX`). S3-compatible API to bucket `radon-archive`. Used by `radon-portfolio-archive.service` / `scripts/archive_portfolio_snapshots.py`. Not Cloudflare R2. Full contract: root `.env.example`, `docs/cloud-services.md` "Portfolio archive".
 
+**Cloudflare Workers AI (Clairic report dates, optional, off by default):** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` live in `/etc/radon/env` (root:radon `0640`, unquoted `KEY=value`), the same file `radon-research.service` loads for its other API keys. They take effect at the next service start. They are not in `cloud/config/required-env.txt` (a missing required key fails deploy preflight). The token is a Workers AI token with Read and Edit only. `CLAIRIC_DATES_ENABLED` and `CLAIRIC_DATE_SANITY_ENABLED` also default off; set `CLAIRIC_DATES_ENABLED=1` (and optionally `CLAIRIC_DATE_SANITY_ENABLED=1`) in that file, then restart `radon-research.service` or deploy. Behavior: [Dropbox research](../docs/dropbox-research.md#clairic-report-dates-off-by-default).
+
+They are intentionally left out of `mcp.env` (`deploy.sh` `MCP_ENV_KEYS` is Clerk and `RADON_MCP_*` only) and out of the newsfeed allowlist in `radon-app-runtime.sh` `render_env_file`.
+
+Provisioning (app host, as root). Append via stdin. Never pass the token as a command argument:
+
+```bash
+cp -p /etc/radon/env /etc/radon/env.pre-clairic
+cat >> /etc/radon/env
+stat -c '%U:%G %a' /etc/radon/env    # root:radon 640
+grep -c '^CLOUDFLARE_' /etc/radon/env  # 2
+```
+
+`cat` reads the two unquoted lines (`CLOUDFLARE_ACCOUNT_ID=...` and `CLOUDFLARE_API_TOKEN=...`) from stdin until EOF. Rotation: create a new token, replace the `CLOUDFLARE_API_TOKEN` line, restart `radon-research.service`, then revoke the old token.
+
+
 ## Systemd And Drift
 
 `setup-vps.sh` includes the `radon-credit-vix`, `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,

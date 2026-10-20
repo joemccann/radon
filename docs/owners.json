@@ -141,7 +141,7 @@
     },
     {
       "id": "research-worker",
-      "globs": ["scripts/research/worker.py"],
+      "globs": ["scripts/research/worker.py", "scripts/research/identify.py", "scripts/research/clairic.py"],
       "owners": ["docs/dropbox-research.md"],
       "note": "Research lifecycle, bounded processing and publication recovery share the existing worker owner (DOC-146)."
     },

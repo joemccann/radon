@@ -438,13 +438,13 @@ def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
         }
 
     page1 = [
-        _trade(i, f"2026-09-04T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+        _trade(i, f"{session_prior}T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
         for i in range(DARKPOOL_PAGE_LIMIT)
     ]
     page2 = [
         _trade(
             DARKPOOL_PAGE_LIMIT + i,
-            f"2026-09-04T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+            f"{session_prior}T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
         )
         for i in range(DARKPOOL_PAGE_LIMIT)
     ]
