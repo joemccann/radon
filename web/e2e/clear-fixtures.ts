@@ -60,6 +60,11 @@ const fixtures: Record<string, unknown> = {
   "/api/vixcor": VixcorFixture(),
   "/api/hyad": HyadFixture(),
   "/api/record-high-breadth": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
+  "/api/asia-export-lead": {
+    missing: true, scan_time: null, source_last_modified: null, data_date: null,
+    count: 0, series: [], current: null, sources: null,
+    comparison: { available: false, label: "MSCI US forward 12-month EPS", reason: "Licensed EPS series not connected" },
+  },
   "/api/hhlev": HhlevFixture(),
   "/api/ma-ratio": MaRatioFixture(),
   "/api/rsi-oversold": RsiOversoldFixture(),

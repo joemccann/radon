@@ -245,3 +245,12 @@ successful scheduled service heartbeat. No operator steps expected after deploy.
 
 Screenshots: [light](exports-tab.png), [dark](exports-tab-dark.png),
 [phone](exports-tab-mobile.png).
+
+CI integration also verifies the canonical Clear/TesterArmy inventory across
+all 71 App Router pages. Its export route uses the exact missing-data contract,
+checks source-specific measurement conditions, and renders neither a chart nor
+a request-error toast. The two focused SDK checks pass against a production
+build. The existing capped dark-pool scoring regression now freezes session,
+write and prune clocks together while exercising first-write pruning; Sol and
+Luna each verified all 26 file cases. Full repair reruns retain the full-suite
+counts above and the same unrelated local baseline failures.
