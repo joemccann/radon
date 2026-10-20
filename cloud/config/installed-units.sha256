@@ -37,7 +37,7 @@ f1bd12c9bb83536e2d3560e0be9aaa439a4c4e4f03582d926d89838cb017c319  radon-cta-sync
 4af7caae0edb363324a47480d0ff405967932f9a017fb6952dd2a221beeff247  radon-straddle.service
 bd0227f4a7549f6c0d4245844e535117e6acf3c7d443e6325e4113a873a92017  radon-garch.service
 0abc0de8e183d3f5c1dd3e664b06f7c321fd198d375d92b277f0aec4f183fc37  radon-cor.service
-31e0c964e1d2a951273f3f54d1bebeb871b55d60019bb13efa529fd602266b25  radon-drift-audit.service
+e0df0307c9877674fe0c7e538df25388a449f4b222d443db8b5e7b653352fd35  radon-drift-audit.service
 39ca331d4e0fa1c669768cefb87e4ae39889add8806b13fdb0e726ef061590a2  radon-monitor.service
 816c006126dc1b9fe8eec387c9efa6ffcaa3ebdc14a0df7310cf687325872dcc  radon-iei-hyg.service
 381e4b7c37369d2bfc2d55e5e53cea1747d915d3bc4d654ae5f77e0c5b00b55d  radon-incident-watchdog.timer
@@ -162,7 +162,7 @@ cb09556b2a06dda7a685727f293494124b1722220cd7a9be45876d7a66eaaaee  radon-dispersi
 # entries is the root `bootstrap-control-plane.sh` run, which the same commit's
 # CONTROL_PLANE_SOURCES growth already requires before the next deploy's
 # verify-control-plane preflight can pass.
-e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cleanup.service
+94ce3a04639184a971e4919242be86d273079f5125c03f70f6f615a80a15c4e3  radon-disk-cleanup.service
 71f51588972f5eaf42e4047f35435df870d7249fd4f18d8f47ed923aac19ec16  radon-disk-cleanup.timer
 
 # T-236: the FLEET-WIDE systemd prefix drop-in. Not a unit -- systemd applies

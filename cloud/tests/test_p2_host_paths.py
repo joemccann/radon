@@ -59,16 +59,13 @@ def test_media_backup_default_dir() -> None:
 
 def test_deploy_default_env_prefers_etc_radon_env() -> None:
     body = (CLOUD / "scripts" / "deploy.sh").read_text(encoding="utf-8")
-    fn = re.search(
-        r"^_default_env_file\(\)\s*\{(.*?)^\}",
-        body,
-        re.MULTILINE | re.DOTALL,
-    )
-    assert fn
-    text = fn.group(1)
-    etc = text.index("/etc/radon/env")
-    legacy = text.index("/home/radon/radon-cloud/.env")
-    assert etc < legacy
+    start = body.index("_default_env_file()")
+    text = body[start:body.index("readonly ENV_FILE_DEFAULT", start)]
+    assert "/etc/radon/env" in text
+    assert "retired" in text
+    assert "exit 1" in text
+    assert "elif [[ -f /home/radon/radon-cloud/.env ]]" not in text
+    assert "${CLOUD_DIR}/.env" not in text
 
 
 def test_ci_deploy_prefers_etc_radon_env() -> None:

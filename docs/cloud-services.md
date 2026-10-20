@@ -381,7 +381,7 @@ Do not install this on any nightly runner clone under `/Users/_radonbot/radon-ru
 No Sentry SDK is installed (no DSN exists; an unconfigured SDK is dead-weight). When ready, the free tier (5k errors/mo) is plenty for a solo operator:
 
 1. Create a Sentry org + two projects: `radon-api` (Python) and `radon-web` (Next.js). Copy each DSN.
-2. Put DSNs in `/home/radon/radon-cloud/.env` (`SENTRY_DSN_API`) and `web/.env` (`NEXT_PUBLIC_SENTRY_DSN`); never in the repo.
+2. Put DSNs in `/etc/radon/env` (`SENTRY_DSN_API`) and `web/.env` (`NEXT_PUBLIC_SENTRY_DSN`); never in the repo. `/home/radon/radon-cloud/.env` is retired.
 3. FastAPI: `pip install sentry-sdk`, then in `scripts/api/server.py` startup gate on the env var — `sentry_sdk.init(dsn, traces_sample_rate=0)` (errors only; tracing would duplicate what host_metrics already covers). The asyncio + FastAPI integrations are automatic.
 4. Next.js: `@sentry/nextjs` via the wizard, but keep `tracesSampleRate: 0` and disable session replay — error capture only. Mind the Edge-runtime middleware constraint (`feedback_middleware_edge_runtime`): do not import Sentry helpers into `web/middleware.ts`.
 5. Set both projects' alert rule to "new issue" → the existing Pushover webhook, so paging stays single-channel.
@@ -1130,7 +1130,7 @@ Off-box store for cold portfolio history. **Not** Cloudflare R2 (account billing
 | Script | `scripts/archive_portfolio_snapshots.py` |
 | Unit | `radon-portfolio-archive.service` — **fails closed** if B2 env is unset |
 | Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
-| VPS secrets | `/etc/radon/env` (`EnvironmentFile=` on the unit; `~/radon-cloud/.env` is a compatibility symlink) |
+| VPS secrets | `/etc/radon/env` only (root:radon, mode 0640). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. |
 
 Required vars (all five keys + region; endpoint must include `https://`):
 

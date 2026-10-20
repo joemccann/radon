@@ -75,7 +75,7 @@ PY
 check_host_role() {
   # The optional prefix is used by isolated regression tests; main never sets it.
   local prefix="${1:-}" marker
-  for marker in /etc/radon/env /etc/radon/ib-gateway-compose.yml /var/lib/radon/control-plane-ready /home/radon/radon-cloud/.env; do
+  for marker in /etc/radon/env /etc/radon/ib-gateway-compose.yml /var/lib/radon/control-plane-ready /home/radon/radon; do # pragma: allowlist secret
     [[ ! -e "$prefix$marker" && ! -L "$prefix$marker" ]] || die "existing app/broker marker: $marker"
   done
   for marker in /etc/systemd/system/radon-api.service /etc/systemd/system/radon-nextjs.service /etc/systemd/system/ib-gateway.service; do

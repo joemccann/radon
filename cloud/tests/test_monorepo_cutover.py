@@ -28,7 +28,7 @@ RUNNER_PRUNER = CLOUD_ROOT / "scripts" / "prune-deploy-runners.py"
 CANONICAL_APP_DIR = "/home/radon/radon"
 CANONICAL_CLOUD_DIR = f"{CANONICAL_APP_DIR}/cloud"
 CANONICAL_ENV_FILE = "/etc/radon/env"
-LEGACY_ENV_FILE = "/home/radon/radon-cloud/.env"
+RETIRED_ENV_FILE = "/home/radon/radon-cloud/.env"
 ROLLBACK_ARTIFACTS = ("node_modules", "web/node_modules", "web/.next", "web/.env", ".venv")
 
 
@@ -562,10 +562,23 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
     gateway = GATEWAY_HELPER.read_text(encoding="utf-8")
     setup = SETUP.read_text(encoding="utf-8")
     post_setup = POST_SETUP.read_text(encoding="utf-8")
+    grok_setup = (CLOUD_ROOT / "scripts" / "setup-grok-page-responder.sh").read_text(
+        encoding="utf-8"
+    )
     assert f'RADON_CLOUD_DIR:-{CANONICAL_CLOUD_DIR}' in gateway
+    assert f"RADON_GATEWAY_ENV_FILE:-{CANONICAL_ENV_FILE}" in gateway
+    assert RETIRED_ENV_FILE not in gateway
     assert CANONICAL_ENV_FILE in setup
     assert f'ENV_FILE="${{RADON_DEPLOY_ENV_FILE:-{CANONICAL_ENV_FILE}}}"' in setup
     assert f"{CANONICAL_CLOUD_DIR}/scripts" in post_setup
+    assert f"--env-file {CANONICAL_ENV_FILE}" in post_setup
+    assert RETIRED_ENV_FILE not in post_setup
+    assert f"RADON_DEPLOY_ENV_FILE:-{CANONICAL_ENV_FILE}" in grok_setup
+    assert RETIRED_ENV_FILE not in grok_setup
+    for name in ("radon-drift-audit.service", "radon-disk-cleanup.service"):
+        unit = (CLOUD_ROOT / "services" / name).read_text(encoding="utf-8")
+        assert f"Environment=RADON_ENV_FILE={CANONICAL_ENV_FILE}" in unit
+        assert f"Environment=RADON_ENV_FILE={RETIRED_ENV_FILE}" not in unit
 
 
 def test_root_transition_snapshot_is_durable_across_reboot() -> None:

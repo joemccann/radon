@@ -83,7 +83,7 @@ echo ""
 ib_logged_in=false
 for i in $(seq 1 18); do
   sleep 5
-  login_status=$(ssh "${VPS_ROOT}" 'RADON_COMPOSE_ENV_FILE=/home/radon/radon-cloud/.env docker compose --env-file /home/radon/radon-cloud/.env -f /home/radon/radon/cloud/docker-compose.yml logs 2>/dev/null | grep -c "Login has completed" || true' 2>/dev/null | tail -1 | tr -d '[:space:]')
+  login_status=$(ssh "${VPS_ROOT}" 'RADON_COMPOSE_ENV_FILE=/etc/radon/env docker compose --env-file /etc/radon/env -f /home/radon/radon/cloud/docker-compose.yml logs 2>/dev/null | grep -c "Login has completed" || true' 2>/dev/null | tail -1 | tr -d '[:space:]')
   if [[ "${login_status:-0}" -gt 0 ]]; then
     ib_logged_in=true
     break

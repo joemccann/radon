@@ -15,16 +15,14 @@ Type=oneshot
 # `docker inspect` to resolve the live compose file.
 User=root
 WorkingDirectory=/home/radon/radon/cloud
-# This unit deliberately declares NO environment-file directive. The stable
-# secret file is 0600 radon:radon by design, and systemd merges every KEY=VALUE
-# line of such a file into the process environment unfiltered: one LD_PRELOAD
-# line appended to it would load
-# radon-authored code into root on the next tick, and PATH= would redirect the
-# bare `docker` / `systemctl` calls below to radon-owned binaries. The audit
-# instead READS the two keys it needs out of that file as data
-# (drift_audit.py:load_env_keys), which grants radon no control over root's
-# execution environment.
-Environment=RADON_ENV_FILE=/home/radon/radon-cloud/.env
+# This unit deliberately declares NO environment-file directive. systemd
+# merges every KEY=VALUE line of an EnvironmentFile into the process
+# environment unfiltered: one LD_PRELOAD line would load code into root on
+# the next tick, and PATH= would redirect the bare `docker` / `systemctl`
+# calls below. The audit instead READS the keys it needs out of
+# /etc/radon/env (0640 root:radon) as data (drift_audit.py:load_env_keys).
+# /home/radon/radon-cloud/.env is retired.
+Environment=RADON_ENV_FILE=/etc/radon/env
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Root runs the control-plane copy of the audit, installed root-owned by
 # cloud/scripts/bootstrap-control-plane.sh. The checkout is the ARGUMENT it
