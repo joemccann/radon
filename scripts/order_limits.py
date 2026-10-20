@@ -152,6 +152,12 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
     combo on a $5-wide short vertical at limitPrice=-5.00 priced at $0 loss
     on an order paying $250,000.
     """
+    # REL-328 / R-739. Combo STP is stop-market: ib_place_order sends
+    # stopPrice and drops limitPrice (STP LMT on a BAG is refused before
+    # transmit). A negative limit must not be booked as credit, and the
+    # trigger price is not a fill, so assignment/width is not reduced.
+    if _ib_order_type(params) == "STP":
+        return 0.0
     try:
         signed_price = float(params.get("limitPrice") or 0)
     except (TypeError, ValueError):
