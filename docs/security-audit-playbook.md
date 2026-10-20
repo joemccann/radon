@@ -342,6 +342,11 @@ line here whenever you ship a security fix.**
   issue/PR sanitizer also redact multi-line private-key blocks, including a
   block cut off before its END line, and both cover cookie headers,
   session/CSRF keys and U, DU and F IB account ids.
+  The scrubber's own patterns are a denial-of-service surface, because the
+  publication gate runs them over branch text an outside contributor shapes:
+  every repeated character class in them is bounded, so a long run of
+  identifier characters cannot drive a quadratic backtracking scan and stall
+  the gate.
 
   Redaction is a backstop for the renderer, not a licence to put secrets in the
   JSON. If a value is genuinely needed to reproduce a finding, reference where

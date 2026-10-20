@@ -242,10 +242,18 @@ _SECRET_SEP_ERE="[\"']?[[:space:]]*[=:][[:space:]]*"
 _SECRET_VALUE_ERE="(\"[^\"]*\"|'[^']*'|([Bb]asic|[Bb]earer|[Dd]igest|[Tt]oken)[[:space:]]+[^[:space:]]+|[^[:space:]]+)"
 _COOKIE_HEADER_ERE='(^|[^[:alnum:]_])(([Ss][Ee][Tt]-)?[Cc][Oo][Oo][Kk][Ii][Ee][[:blank:]]*:[[:blank:]]*).*'
 
+# PEM / OpenSSH / PGP private-key blocks span lines, so a line-oriented rule
+# needs a sed range: the whole block collapses to one marker line and a block
+# cut off before its END line is dropped to the end of the report.
+_KEY_BEGIN_ERE='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
+_KEY_END_ERE='-----END ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
+
 _redact_secret_classes() {
   # Secret literals only. Routes, file:line and findings stay: this text
   # goes to the PRIVATE repository, not the public issue.
   /usr/bin/sed -E \
+    -e "/${_KEY_BEGIN_ERE}/,/${_KEY_END_ERE}/{/${_KEY_BEGIN_ERE}/!d;}" \
+    -e "s,^.*${_KEY_BEGIN_ERE}.*$,[REDACTED]," \
     -e "s,${_COOKIE_HEADER_ERE},\\1\\2[REDACTED],g" \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
     -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|sk_(live|test)_[A-Za-z0-9]{6,}|(xai|nvapi|csk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \

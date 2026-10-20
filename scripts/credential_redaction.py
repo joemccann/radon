@@ -13,6 +13,23 @@ _SECRET_KEY = (
     r"|sess(?:ion)?[-_]?id|_session|csrf|xsrf)"
 )
 
+# Execution identifiers: private, but not credential-shaped. Defined here, the
+# canonical scrubber, so the publication gate (scripts/ir_push_gate.py) and the
+# public issue sanitizer (scripts/nightly_issue_format.py) cannot drift apart
+# again. Shapes only; no real id is recorded anywhere.
+EXECUTION_ID_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    (
+        "ib_exec_id",
+        re.compile(
+            r"(?<![0-9A-Za-z.])[0-9a-f]{8}\.[0-9a-f]{8}\.\d{2}\.\d{2}(?![0-9A-Za-z])",
+            re.IGNORECASE,
+        ),
+    ),
+    # GitHub Actions run/job ids (11 digits) are exempt only inside a full CI
+    # URL; callers strip those before matching.
+    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
+)
+
 _SPECIFIC_SCRUB_PATTERNS = [
     # PEM / OpenSSH / PGP private-key blocks span lines; a block cut off
     # before its END line is redacted to the end of the text.
@@ -85,8 +102,17 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # LITERAL (env line, export, JSON/YAML, quoted code). Opaque means 16+ chars of
 # key alphabet with letters and digits, no dots, parens or `$` (so expressions
 # and references stay clean) and no placeholder word.
+#
+# The key name is matched from the credential word onward: no leading
+# identifier run. An unbounded leading run overlapped the credential word's own
+# alphabet, so every offset of a long identifier run was retried at every
+# prefix length and the scan cost grew quadratically -- and the push gate runs
+# this scanner over text an outside contributor shapes. The search is
+# unanchored, so a prefixed name (`ANTHROPIC_API_KEY`) still matches from its
+# credential word; the trailing run is bounded well above any real suffix
+# (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?[A-Za-z0-9_-]*{_SECRET_KEY}[A-Za-z0-9_-]*[\"']?\s*[:=]\s*[\"']?"
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*[\"']?"
     r"(?P<value>[A-Za-z0-9_+/=~-]{16,})(?![A-Za-z0-9_+/=~.(\[$-])",
     re.IGNORECASE,
 )
