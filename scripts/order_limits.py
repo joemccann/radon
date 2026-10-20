@@ -86,8 +86,21 @@ def _carries_option_fields(leg: dict) -> bool:
     ``resolve_option_contract(symbol, expiry, strike, right)`` and sends the
     envelope as a BAG; no leg's ``sec_type`` is ever read there. So these
     three fields, not the label, say what IB will actually receive.
+
+    A MEANINGFUL value, not a present key: ``ib_orders`` serializes a real
+    resolved share leg with ``strike: 0.0`` and empty expiry and right, and
+    reading mere presence demoted a genuine covered combo to an unpriceable
+    option (pinned by
+    ``scripts/api/tests/test_modify_snapshot_contract_shape.py``). A strike of
+    zero is no strike, and the placer could not build an option from it
+    either.
     """
-    return any(leg.get(field) not in (None, "") for field in ("expiry", "strike", "right"))
+    if str(leg.get("expiry") or "").strip():
+        return True
+    if str(leg.get("right") or "").strip():
+        return True
+    strike = _finite(leg.get("strike"))
+    return strike is not None and strike > 0
 
 
 def _is_stk_leg(leg: dict) -> bool:
