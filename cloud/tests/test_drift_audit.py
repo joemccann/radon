@@ -628,12 +628,41 @@ class TestRoleSkippedUnits:
 
 
 class TestASuppressingRoleNeedsARootOwnedSource:
-    """R-604 (P1): `resolve_host_role` falls back to `RADON_ENV_FILE`, which
-    the drift-audit unit points at `/home/radon/radon-cloud/.env` — a file
-    `load_env_keys`' own docstring calls attacker-influenced from root's point
-    of view. That value selects `app`, which SKIPS `ib-gateway-control`, the
-    compose check and five units. A role that suppresses a check may come only
-    from the process environment or the root-owned canonical file."""
+    """R-604 (P1): a role that suppresses a check may come only from the
+    process environment or the root-owned `/etc/radon/env`. The drift-audit
+    and disk-cleanup units set `RADON_ENV_FILE=/etc/radon/env`. A radon-writable
+    override of that variable still cannot select `app`."""
+
+    def test_root_units_resolve_turso_and_role_from_canonical_env(self, tmp_path, monkeypatch):
+        services = ROOT / "services"
+        for name in ("radon-drift-audit.service", "radon-disk-cleanup.service"):
+            text = (services / name).read_text(encoding="utf-8")
+            assert "User=root" in text
+            assert "Environment=RADON_ENV_FILE=/etc/radon/env\n" in text
+        canonical = tmp_path / "env"
+        canonical.write_text(
+            "TURSO_DB_URL=libsql://db.example\n"
+            "TURSO_AUTH_TOKEN=token-value\n"
+            "RADON_HOST_ROLE='app'\n"
+            "LD_PRELOAD=/tmp/evil.so\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        assert da.resolve_host_role({}) == "app"
+        creds = da.resolve_db_credentials({"RADON_ENV_FILE": str(canonical)})
+        assert creds["TURSO_DB_URL"] == "libsql://db.example"
+        assert creds["TURSO_AUTH_TOKEN"] == "token-value"
+        assert "LD_PRELOAD" not in creds
+        spec = importlib.util.spec_from_file_location(
+            "disk_cleanup_env", ROOT / "scripts" / "disk_cleanup.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.resolve_db_credentials({"RADON_ENV_FILE": str(canonical)}) == {
+            "TURSO_DB_URL": "libsql://db.example",
+            "TURSO_AUTH_TOKEN": "token-value",
+        }
 
     def test_the_compat_file_cannot_select_a_suppressing_role(self, tmp_path, monkeypatch):
         canonical = tmp_path / "etc-radon-env"

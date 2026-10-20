@@ -235,6 +235,7 @@ exec "$@"
                 "DEPLOY_TIMEOUT": "7",
                 "DEPLOY_KILL_AFTER": "2",
                 "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+                "RADON_DEPLOY_ENV_FILE": str(tmp_path / "env"),
                 "RADON_SYSTEM_PYTHON": sys.executable,
             },
             capture_output=True,

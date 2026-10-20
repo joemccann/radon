@@ -19,6 +19,7 @@ Pins three classes of regression that bit production today:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -344,16 +345,34 @@ class TestOperatorCli:
 
 
 class TestDefaultEnvFile:
-    def test_prefers_etc_radon_env_when_present(self, deploy_sh: str) -> None:
-        body = _function_body(deploy_sh, "_default_env_file")
-        assert re.search(
-            r'if \[\[ -n "\$\{RADON_DEPLOY_ENV_FILE:-\}" \]\]; then.*'
-            r'elif \[\[ -f /etc/radon/env \]\]; then.*'
-            r'elif \[\[ -f /home/radon/radon-cloud/\.env \]\]; then.*'
-            r'\$\{CLOUD_DIR\}/\.env',
-            body,
-            re.DOTALL,
-        ), "_default_env_file must prefer /etc/radon/env over ~/radon-cloud/.env"
+    def test_uses_only_etc_radon_env_and_fails_when_missing(self, deploy_sh: str) -> None:
+        start = deploy_sh.index("_default_env_file()")
+        text = deploy_sh[start:deploy_sh.index("readonly ENV_FILE_DEFAULT", start)]
+        assert "RADON_DEPLOY_ENV_FILE:-" in text
+        assert "/etc/radon/env" in text
+        assert "retired" in text
+        assert "exit 1" in text
+        assert "elif [[ -f /home/radon/radon-cloud/.env ]]" not in text
+        assert "${CLOUD_DIR}/.env" not in text
+
+    def test_executed_deploy_fails_when_canonical_env_is_missing(self) -> None:
+        if Path("/etc/radon/env").exists():
+            pytest.skip("/etc/radon/env exists on this host")
+        env = {key: value for key, value in os.environ.items() if key != "RADON_DEPLOY_ENV_FILE"}
+        result = subprocess.run(
+            ["bash", str(DEPLOY_SH)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+            check=False,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert "/etc/radon/env" in result.stderr
+        assert "retired" in result.stderr
+        assert "/home/radon/radon-cloud/.env" in result.stderr
+        assert "deploy lock" not in combined
 
 
 class TestSetupEtcRadon:

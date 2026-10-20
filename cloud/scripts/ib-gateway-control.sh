@@ -20,7 +20,7 @@ fi
 
 APP_DIR="${RADON_APP_DIR:-/home/radon/radon}"
 CLOUD_DIR="${RADON_CLOUD_DIR:-/home/radon/radon/cloud}"
-ENV_FILE="${RADON_DEPLOY_ENV_FILE:-${RADON_GATEWAY_ENV_FILE:-/home/radon/radon-cloud/.env}}"
+ENV_FILE="${RADON_DEPLOY_ENV_FILE:-${RADON_GATEWAY_ENV_FILE:-/etc/radon/env}}"
 
 # Non-root callers can also inherit an unreadable cwd (for example a leftover
 # root shell). Move to a path the radon user owns before any Compose call.
@@ -454,8 +454,8 @@ read_host_role() {
   local role="${RADON_HOST_ROLE:-}"
   local envf
   # REL-169 (R-472): every other role reader (root helper, operator CLI, app
-  # runtime, setup-vps) canonicalizes /etc/radon/env. Read that first; the
-  # legacy deploy env file is a fallback, never the source of the role.
+  # runtime, setup-vps) canonicalizes /etc/radon/env. Read that first. ENV_FILE
+  # defaults to the same path and is only a fallback when a caller overrides it.
   for envf in "${RADON_ENV_FILE:-/etc/radon/env}" "${ENV_FILE:-}"; do
     [[ -z "$role" ]] || break
     [[ -n "$envf" && -f "$envf" ]] || continue
