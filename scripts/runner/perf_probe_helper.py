@@ -4,6 +4,7 @@
 Installed root-owned. The daemon accepts no arguments; ``read`` exposes only
 validated JSON and ``provision`` is an administrator-only installation step.
 Neither mode accepts a path, command, credential, or environment override.
+Published and returned snapshots keep only the canonical metric and status keys.
 """
 from __future__ import annotations
 
@@ -32,6 +33,13 @@ LOG_PATH = Path('/private/var/log/radon-perf-probe.log')
 MAX_BYTES = 1_000_000
 MAX_AGE = 15 * 60
 SSH_SECONDS = 180
+# Top-level keys cloud/scripts/perf_probe.py emits and the performance loop
+# reads. Nested maps stay: unit, device, path and host names are not fixed.
+SNAPSHOT_KEYS = frozenset({
+    'schema', 'taken_at', 'host', 'errors', 'section_ms',
+    'io_net', 'disk_usage', 'units', 'journal', 'http', 'tls',
+})
+_DROPPED_KEY_NAME = re.compile(r'[A-Za-z0-9_.-]{1,64}\Z')
 
 
 def _secure(path, owners, *, directory=False, mode=None, sticky=False, gid=None):
@@ -82,6 +90,24 @@ def _read(path, owners, *, mode=None, gid=None):
     return payload
 
 
+def _note_dropped_keys(names):
+    """Count every dropped key and spell out identifier names. Never values."""
+    safe = sorted(name for name in names if isinstance(name, str) and _DROPPED_KEY_NAME.fullmatch(name))
+    hidden = len(names) - len(safe)
+    shown = ','.join(safe)
+    if hidden:
+        shown = (shown + ',' if shown else '') + f'<redacted>:{hidden}'
+    print(f'snapshot_dropped_keys={len(names)} names={shown}', file=sys.stderr)
+
+
+def _allowlist_snapshot(report):
+    dropped = [key for key in report if key not in SNAPSHOT_KEYS]
+    if not dropped:
+        return report
+    _note_dropped_keys(dropped)
+    return {key: value for key, value in report.items() if key in SNAPSHOT_KEYS}
+
+
 def validate(payload):
     if len(payload) > MAX_BYTES:
         raise ValueError('snapshot exceeds size limit')
@@ -98,7 +124,7 @@ def validate(payload):
     age = (datetime.now(timezone.utc) - taken).total_seconds()
     if not -60 <= age <= MAX_AGE:
         raise ValueError('snapshot is stale or future-dated')
-    return report
+    return _allowlist_snapshot(report)
 
 
 def _read_gid():
