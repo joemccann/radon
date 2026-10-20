@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -809,6 +810,14 @@ class TestRootProvisionStore:
     SOURCE_REL = "config/sudoers.d/radon-ops"
     FORGED = b"radon ALL=(ALL) NOPASSWD: ALL\n"
 
+    def _pack_checkout(self, h: dict[str, Path]) -> None:
+        repo = h["cloud"]
+        _git(repo, "repack", "-a", "-d")
+        victim = subprocess.check_output(
+            ["git", "rev-parse", "HEAD:config/sudoers.d"], cwd=repo, text=True
+        ).strip()
+        assert not (repo / ".git" / "objects" / victim[:2] / victim[2:]).exists()
+
     def _forged_tree(self, h: dict[str, Path]) -> tuple[str, bytes]:
         """(sha of HEAD's config/sudoers.d tree, raw loose file of a tree
         whose radon-ops entry points at a forged blob). Also writes the
@@ -817,6 +826,20 @@ class TestRootProvisionStore:
         run = lambda *a, **k: subprocess.run(  # noqa: E731
             ["git", *a], cwd=repo, check=True, capture_output=True, **k
         )
+        # These attacks specifically replace a loose object or supply it via
+        # alternates. Git may pack even this tiny fixture (for example after
+        # push); unpack its objects after moving ALL pack indexes out of the
+        # lookup path. Leaving the original packed tree would prevent the
+        # planted alternate from taking effect and weaken the regression.
+        pack_dir = repo / ".git" / "objects" / "pack"
+        if list(pack_dir.glob("*.pack")):
+            saved_packs = h["tmp"] / "fixture-packs"
+            saved_packs.mkdir()
+            for path in pack_dir.iterdir():
+                path.rename(saved_packs / path.name)
+            for path in saved_packs.glob("*.pack"):
+                with path.open("rb") as stream:
+                    run("unpack-objects", stdin=stream)
         victim = run("rev-parse", "HEAD:config/sudoers.d", text=True).stdout.strip()
         forged_blob = run("hash-object", "-w", "--stdin", input=self.FORGED).stdout.decode().strip()
         listing = run("ls-tree", victim, text=True).stdout
@@ -828,30 +851,42 @@ class TestRootProvisionStore:
                 sha = forged_blob
             lines.append(f"{mode} {kind} {sha}\t{name}")
         forged_tree = run("mktree", input="\n".join(lines) + "\n", text=True).stdout.strip()
-        raw = (repo / ".git" / "objects" / forged_tree[:2] / forged_tree[2:]).read_bytes()
+        tree_body = run("cat-file", "tree", forged_tree).stdout
+        raw = zlib.compress(f"tree {len(tree_body)}\0".encode() + tree_body)
         (repo / self.SOURCE_REL).write_bytes(self.FORGED)
         return victim, raw
 
     def _refused(self, h: dict[str, Path]) -> None:
         target = h["tmp"] / "installed"
-        result = _run_stage(h, h["cloud"] / self.SOURCE_REL, target)
+        source = h["cloud"] / self.SOURCE_REL
+        result = _run_stage(h, source, target)
         assert result.returncode != 0, result.stdout + result.stderr
+        assert f"Provenance failed: {source} differs from the committed blob" in result.stdout + result.stderr
         assert not target.exists()
         assert _stage_leftovers(h) == []
 
+    @pytest.mark.parametrize("packed", [False, True], ids=["loose", "packed"])
     def test_rewritten_object_file_cannot_change_the_installed_blob(
-        self, harness: dict[str, Path]
+        self, harness: dict[str, Path], packed: bool
     ) -> None:
+        if packed:
+            self._pack_checkout(harness)
         victim, raw = self._forged_tree(harness)
         loose = harness["cloud"] / ".git" / "objects" / victim[:2] / victim[2:]
         assert loose.is_file()
         loose.chmod(0o644)
         loose.write_bytes(raw)
+        assert subprocess.check_output(
+            ["git", "show", f"HEAD:{self.SOURCE_REL}"], cwd=harness["cloud"]
+        ) == self.FORGED
         self._refused(harness)
 
+    @pytest.mark.parametrize("packed", [False, True], ids=["loose", "packed"])
     def test_alternates_entry_cannot_change_the_installed_blob(
-        self, harness: dict[str, Path]
+        self, harness: dict[str, Path], packed: bool
     ) -> None:
+        if packed:
+            self._pack_checkout(harness)
         victim, raw = self._forged_tree(harness)
         loose = harness["cloud"] / ".git" / "objects" / victim[:2] / victim[2:]
         loose.chmod(0o644)
@@ -862,6 +897,9 @@ class TestRootProvisionStore:
         info = harness["cloud"] / ".git" / "objects" / "info"
         info.mkdir(exist_ok=True)
         (info / "alternates").write_text(f"{planted}\n")
+        assert subprocess.check_output(
+            ["git", "show", f"HEAD:{self.SOURCE_REL}"], cwd=harness["cloud"]
+        ) == self.FORGED
         self._refused(harness)
 
     def test_fetch_failure_fails_closed(self, harness: dict[str, Path]) -> None:

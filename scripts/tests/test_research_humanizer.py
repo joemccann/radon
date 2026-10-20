@@ -353,3 +353,101 @@ def test_coalesced_pattern_certificate_validates_merged_exact_copy():
     assert value and audits[0]["score"] == 92
     assert audits[0]["findings"][0]["text"] == "Experts argue demand grew"
     humanizer.validate_certificate(value)
+
+
+def test_duplicate_model_quotes_are_deduplicated_before_occurrence_expansion(monkeypatch):
+    original = humanizer.re.finditer
+    searches = []
+    def counted(*args, **kwargs):
+        searches.append(args[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(humanizer.re, "finditer", counted)
+    f = {"field": "content", "text": "e", "category": "filler"}
+    values = humanizer._normalise_findings(post("e"*2000), [f]*32, qualitative=True)
+    assert len(values) == 2000 and len(searches) == 1
+
+
+def test_carry_deduplicates_casefolded_needles_before_searching_both_fields(monkeypatch):
+    original = humanizer.re.finditer
+    searches = []
+    def counted(*args, **kwargs):
+        searches.append(args[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(humanizer.re, "finditer", counted)
+    previous = [{"field": "content", "start": i*7, "end": i*7+6,
+                 "text": "robust" if i%2 else "ROBUST", "category": "vocabulary", "deduction": 5}
+                for i in range(200)]
+    values = humanizer._carry_unchanged(post(" ".join(["robust"]*200)), previous)
+    assert len(values) == 200 and len(searches) == 2
+
+
+def test_local_finding_overflow_holds_before_model_call_and_keeps_full_draft():
+    original = post(" ".join(["robust"]*4097))
+    value, audits, calls = run(original, clean(), max_rewrites=0)
+    assert value is None and calls == []
+    assert audits[-1]["status"] == "finding_budget_exceeded" and audits[-1]["score"] is None
+    assert audits[-1]["content"] == original["content"] and audits[-1]["findings"] == []
+
+
+def test_model_finding_overflow_holds_without_partial_score():
+    f = {"field": "content", "text": "e", "category": "filler"}
+    value, audits, calls = run(post("e"*4097), {"findings": [], "qualitative": [f]}, max_rewrites=0)
+    assert value is None and len(calls) == 1
+    assert audits[-1]["status"] == "finding_budget_exceeded" and audits[-1]["score"] is None
+    assert audits[-1]["findings"] == audits[-1]["qualitative"] == []
+
+
+def test_finding_budget_is_shared_across_local_and_model_collections():
+    f = {"field": "content", "text": "e", "category": "filler"}
+    value, audits, _ = run(post("robust " + "e"*4096), {"findings": [], "qualitative": [f]}, max_rewrites=0)
+    assert value is None and audits[-1]["status"] == "finding_budget_exceeded"
+    assert audits[-1]["score"] is None
+
+
+def test_occurrence_expansion_stops_while_iterating_at_budget(monkeypatch):
+    original = humanizer.re.finditer
+    visits = []
+    def counted(*args, **kwargs):
+        for match in original(*args, **kwargs):
+            visits.append(1)
+            yield match
+    monkeypatch.setattr(humanizer.re, "finditer", counted)
+    f = {"field": "content", "text": "e", "category": "filler"}
+    value, audits, _ = run(post("e"*20000), {"findings": [], "qualitative": [f]}, max_rewrites=0)
+    assert value is None and audits[-1]["status"] == "finding_budget_exceeded"
+    assert len(visits) == 4097
+
+
+def test_oversized_certificate_is_rejected_before_duplicate_expansion():
+    value, _, _ = run()
+    f = finding(value["content"], "Goldman Sachs", "vague_attribution")
+    value["source"]["humanizer"].update(findings=[f]*4097, score=92)
+    with pytest.raises(ValueError, match="budget"):
+        humanizer.validate_certificate(value)
+
+
+def test_carry_finding_budget_caps_generated_occurrences():
+    f = {"field": "content", "start": 0, "end": 1, "text": "e", "category": "filler", "deduction": 0}
+    with pytest.raises(ValueError, match="budget"):
+        humanizer._carry_unchanged(post(" ".join(["e"]*4097)), [f])
+
+
+def test_dedupe_refuses_oversized_materialized_collection():
+    f = {"field": "content", "start": 0, "end": 1, "text": "e", "category": "filler", "deduction": 0}
+    with pytest.raises(ValueError, match="budget"):
+        humanizer._dedupe([f]*4097)
+
+
+def test_carry_refuses_oversized_previous_inventory_before_search(monkeypatch):
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("oversized carry must fail before searching")
+    monkeypatch.setattr(humanizer.re, "finditer", unexpected)
+    f = {"field": "content", "text": "e", "category": "filler", "deduction": 0}
+    with pytest.raises(ValueError, match="budget"):
+        humanizer._carry_unchanged(post("e"), [f]*4097)
+
+
+def test_duplicate_descriptor_cannot_hide_malformed_weight():
+    f = {"field": "content", "text": "e", "category": "filler"}
+    with pytest.raises(ValueError, match="deduction"):
+        humanizer._normalise_findings(post("e"), [f, {**f, "deduction": 5}], qualitative=True)

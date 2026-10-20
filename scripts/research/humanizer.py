@@ -15,6 +15,7 @@ from collections.abc import Callable
 RUBRIC_VERSION = "pdf-humanizer-2026-10-19-v1"
 MIN_SCORE = 90
 MAX_REWRITES = 2
+MAX_FINDINGS = 4096
 FIELDS = ("title", "content")
 WEIGHTS = {
     "vocabulary": 5,
@@ -148,16 +149,40 @@ _UNCONDITIONAL = _word_pattern(VOCABULARY)
 _ALL_VOCABULARY = _word_pattern(VOCABULARY + CONTEXTUAL_VOCABULARY + CONTEXTUAL_VERB_FORMS)
 
 
-def _local_findings(post: dict) -> list[dict]:
-    return [{"field": field, "start": match.start(), "end": match.end(),
-             "text": match.group(), "category": "vocabulary", "deduction": 5}
-            for field in FIELDS for match in _UNCONDITIONAL.finditer(post[field])]
+class FindingBudgetExceeded(ValueError):
+    """Editorial findings exceeded the bounded per-draft work inventory."""
 
 
-def _normalise_findings(post: dict, findings: object, *, qualitative: bool = False) -> list[dict]:
+class _FindingBudget:
+    def __init__(self):
+        self.used = 0
+
+    def take(self):
+        if self.used >= MAX_FINDINGS:
+            raise FindingBudgetExceeded("Humanizer finding budget exceeded")
+        self.used += 1
+
+
+def _local_findings(post: dict, *, budget: _FindingBudget | None = None) -> list[dict]:
+    budget = budget if budget is not None else _FindingBudget()
+    findings = []
+    for field in FIELDS:
+        for match in _UNCONDITIONAL.finditer(post[field]):
+            budget.take()
+            findings.append({"field": field, "start": match.start(), "end": match.end(),
+                             "text": match.group(), "category": "vocabulary", "deduction": 5})
+    return findings
+
+
+def _normalise_findings(post: dict, findings: object, *, qualitative: bool = False,
+                        budget: _FindingBudget | None = None) -> list[dict]:
     if not isinstance(findings, list):
         raise ValueError("Humanizer findings must be arrays")
+    if len(findings) > MAX_FINDINGS:
+        raise FindingBudgetExceeded("Humanizer descriptor budget exceeded")
+    budget = budget if budget is not None else _FindingBudget()
     normalised = []
+    descriptors = set()
     for item in findings:
         if not isinstance(item, dict):
             raise ValueError("Humanizer finding must be an object")
@@ -165,12 +190,17 @@ def _normalise_findings(post: dict, findings: object, *, qualitative: bool = Fal
         categories = QUALITATIVE if qualitative else WEIGHTS
         if field not in FIELDS or not isinstance(category, str) or category not in categories:
             raise ValueError("Humanizer finding has invalid category or span")
-        if "start" in item or "end" in item:
+        has_offsets = "start" in item or "end" in item
+        if has_offsets:
             start, end = item.get("start"), item.get("end")
             if (type(start) is not int or type(end) is not int
                     or not 0 <= start < end <= len(post[field])):
                 raise ValueError("Humanizer finding has invalid offsets")
-            spans = [(start, end)]
+            spans = iter(((start, end),))
+            quote = item.get("text")
+            if "text" in item and (not isinstance(quote, str) or quote != post[field][start:end]):
+                raise ValueError("Humanizer finding does not quote the actual copy")
+            descriptor = (field, category, start, end)
         else:
             text = item.get("text")
             if not isinstance(text, str) or not text.strip():
@@ -178,13 +208,18 @@ def _normalise_findings(post: dict, findings: object, *, qualitative: bool = Fal
             pattern = re.escape(text)
             if category == "vocabulary":
                 pattern = r"(?<!\w)" + pattern + r"(?!\w)"
-            spans = [match.span() for match in re.finditer(pattern, post[field])]
-            if not spans:
-                raise ValueError("Humanizer finding text does not occur in copy")
+            descriptor = (field, category, text)
         deduction = 0 if qualitative else WEIGHTS[category]
         if "deduction" in item and (type(item["deduction"]) is not int or item["deduction"] != deduction):
             raise ValueError("Humanizer deduction differs from the supplied rubric")
+        if descriptor in descriptors:
+            continue
+        descriptors.add(descriptor)
+        if not has_offsets:
+            spans = (match.span() for match in re.finditer(pattern, post[field]))
+        found = False
         for start, end in spans:
+            found = True
             text = post[field][start:end]
             if not text.strip() or ("text" in item and item["text"] != text):
                 raise ValueError("Humanizer finding does not quote the actual copy")
@@ -192,12 +227,17 @@ def _normalise_findings(post: dict, findings: object, *, qualitative: bool = Fal
                     or (start and re.match(r"\w", post[field][start-1]))
                     or (end < len(post[field]) and re.match(r"\w", post[field][end]))):
                 raise ValueError("Humanizer vocabulary finding is not in the visible rubric")
+            budget.take()
             normalised.append({"field": field, "start": start, "end": end,
                                "text": text, "category": category, "deduction": deduction})
+        if not found:
+            raise ValueError("Humanizer finding text does not occur in copy")
     return _dedupe(normalised)
 
 
 def _dedupe(findings: list[dict]) -> list[dict]:
+    if len(findings) > MAX_FINDINGS:
+        raise FindingBudgetExceeded("Humanizer merge budget exceeded")
     merged = []
     ordered = sorted(findings, key=lambda f: (FIELDS.index(f["field"]), f["category"], f["start"], f["end"]))
     for item in ordered:
@@ -212,15 +252,24 @@ def _dedupe(findings: list[dict]) -> list[dict]:
     return sorted(merged, key=lambda f: (FIELDS.index(f["field"]), f["start"], f["end"], f["category"]))
 
 
-def _carry_unchanged(post: dict, previous: list[dict]) -> list[dict]:
+def _carry_unchanged(post: dict, previous: list[dict], *, budget: _FindingBudget | None = None) -> list[dict]:
     """An unchanged offending passage cannot gain points on another model call."""
+    if len(previous) > MAX_FINDINGS:
+        raise FindingBudgetExceeded("Humanizer carry descriptor budget exceeded")
+    budget = budget if budget is not None else _FindingBudget()
     carried = []
+    needles = set()
     for item in previous:
         text = item["text"]
+        needle = (item["category"], text.casefold())
+        if needle in needles:
+            continue
+        needles.add(needle)
         boundary_start = r"(?<!\w)" if re.match(r"\w", text[0]) else ""
         boundary_end = r"(?!\w)" if re.match(r"\w", text[-1]) else ""
         for field in FIELDS:
             for match in re.finditer(boundary_start + re.escape(text) + boundary_end, post[field], re.I):
+                budget.take()
                 carried.append({**item, "field": field, "start": match.start(), "end": match.end(), "text": match.group()})
     return carried
 
@@ -239,12 +288,13 @@ def validate_certificate(post: dict) -> None:
     if (certificate.get("rubric_version") != RUBRIC_VERSION
             or certificate.get("copy_sha256") != copy_digest(post)):
         raise ValueError("PDF summary Humanizer certificate is stale")
-    findings = _normalise_findings(post, certificate.get("findings"))
-    qualitative = _normalise_findings(post, certificate.get("qualitative"), qualitative=True)
+    budget = _FindingBudget()
+    findings = _normalise_findings(post, certificate.get("findings"), budget=budget)
+    qualitative = _normalise_findings(post, certificate.get("qualitative"), qualitative=True, budget=budget)
     score = _score(findings)
     if (type(certificate.get("score")) is not int or certificate["score"] != score
             or score < MIN_SCORE or qualitative
-            or _dedupe(findings + _local_findings(post)) != findings):
+            or _dedupe(findings + _local_findings(post, budget=budget)) != findings):
         raise ValueError("PDF summary Humanizer certificate does not pass the rubric")
 
 
@@ -269,10 +319,18 @@ def review_post(post: dict, *, ask: Callable[[str], dict], verify: Callable[[dic
     for attempt in range(max_rewrites + 1):
         audit = {"attempt": attempt, "rubric_version": RUBRIC_VERSION,
                  **_summary(current), "copy_sha256": copy_digest(current),
-                 "findings": _dedupe(_local_findings(current) + _carry_unchanged(current, previous_findings)),
-                 "qualitative": _carry_unchanged(current, previous_qualitative),
-                 "status": "reviewing"}
-        audit["score"] = _score(audit["findings"])
+                 "findings": [], "qualitative": [], "score": None, "status": "reviewing"}
+        record(copy.deepcopy(audit))
+        budget = _FindingBudget()
+        try:
+            audit["findings"] = _dedupe(_local_findings(current, budget=budget)
+                                         + _carry_unchanged(current, previous_findings, budget=budget))
+            audit["qualitative"] = _carry_unchanged(current, previous_qualitative, budget=budget)
+            audit["score"] = _score(audit["findings"])
+        except FindingBudgetExceeded:
+            record({**audit, "findings": [], "qualitative": [], "score": None,
+                    "status": "finding_budget_exceeded"})
+            return None
         record(copy.deepcopy(audit))
         try:
             reply = ask(RUBRIC_INSTRUCTION + "\nUNTRUSTED SUMMARY JSON:\n" + json.dumps(_summary(current), ensure_ascii=False))
@@ -282,8 +340,12 @@ def review_post(post: dict, *, ask: Callable[[str], dict], verify: Callable[[dic
         try:
             if not isinstance(reply, dict) or "findings" not in reply or "qualitative" not in reply:
                 raise ValueError("Humanizer review requires findings and qualitative arrays")
-            findings = _dedupe(audit["findings"] + _normalise_findings(current, reply["findings"]))
-            qualitative = _dedupe(audit["qualitative"] + _normalise_findings(current, reply["qualitative"], qualitative=True))
+            findings = _dedupe(audit["findings"] + _normalise_findings(current, reply["findings"], budget=budget))
+            qualitative = _dedupe(audit["qualitative"] + _normalise_findings(current, reply["qualitative"], qualitative=True, budget=budget))
+        except FindingBudgetExceeded:
+            record({**audit, "findings": [], "qualitative": [], "score": None,
+                    "status": "finding_budget_exceeded"})
+            return None
         except ValueError:
             record({**audit, "status": "malformed_review"})
             return None
