@@ -2,7 +2,7 @@
 
 Coverage levels: SDK route checks verify visible measurement/empty state and redirects. SDK journeys verify named interactions and mocked wire payloads. Existing Playwright suites are retained and CI curation is unchanged; the financial smoke job is non-gating and historical held-out specs remain held out. References identify coverage code, not execution evidence.
 
-All current 70 App Router pages appear exactly once in the manifest test. Four guarded leaves require real Clerk/server authorization and are outside the deterministic authless browser fixture. Authentication/MFA, real brokerage execution/fills, entitlement behavior, third-party exports, every chart gesture and all combinatorial trades remain explicit limitations.
+All current 71 App Router pages appear exactly once in the manifest test. Four guarded leaves require real Clerk/server authorization and are outside the deterministic authless browser fixture. Authentication/MFA, real brokerage execution/fills, entitlement behavior, third-party exports, every chart gesture and all combinatorial trades remain explicit limitations.
 
 | Route | Added SDK coverage | Existing focused coverage / limitation |
 |---|---|---|
@@ -42,6 +42,7 @@ All current 70 App Router pages appear exactly once in the manifest test. Four g
 | `/regime/curve` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/dispersion` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/divyield` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
+| `/regime/exports` | explicit official-export missing measurement, no chart or request error | asia-export-lead-tab.spec.ts covers populated charts and controls; deterministic SDK fixture holds no export observations |
 | `/regime/gex` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/grg` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/hhlev` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |

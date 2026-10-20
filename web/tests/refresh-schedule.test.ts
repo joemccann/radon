@@ -11,6 +11,7 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 
 import {
+  ASIA_EXPORT_LEAD_REFRESH,
   ATS_VENUE_SHARE_REFRESH,
   BPI_REFRESH,
   BREADTH_REFRESH,
@@ -123,6 +124,7 @@ const PINNED: Array<[string, RefreshSchedule, string[]]> = [
   ["VCG", VCG_REFRESH, ["radon-vcg-refresh.timer", "radon-refresh.timer"]],
   ["breadth", BREADTH_REFRESH, ["radon-breadth.timer"]],
   ["BPI", BPI_REFRESH, ["radon-bpi.timer"]],
+  ["Asia export lead", ASIA_EXPORT_LEAD_REFRESH, ["radon-asia-export-lead.timer"]],
   ["margin debt", MARGIN_DEBT_REFRESH, ["radon-margin-debt.timer"]],
   ["straddle", STRADDLE_REFRESH, ["radon-straddle.timer"]],
   ["COR", COR_REFRESH, ["radon-cor.timer"]],
@@ -150,6 +152,15 @@ describe("schedule constants are pinned to the systemd timers", () => {
     const expected = units.flatMap((unit) => canonical(timerRules(unit)));
     expect(expected.length).toBeGreaterThan(0);
     expect(canonical(schedule)).toEqual(expected);
+  });
+
+  it("samples export feeds at 09:40 UTC on weekends without jitter", () => {
+    const saturday = new Date("2026-10-24T09:39:59Z");
+    expect(nextRefreshUtc(ASIA_EXPORT_LEAD_REFRESH, saturday).toISOString()).toBe("2026-10-24T09:40:00.000Z");
+    expect(nextRefreshUtc(ASIA_EXPORT_LEAD_REFRESH, new Date("2026-10-24T09:40:00Z")).toISOString()).toBe("2026-10-25T09:40:00.000Z");
+    const unit = readFileSync(join(TEST_DIR, "../../cloud/services/radon-asia-export-lead.timer"), "utf-8");
+    expect(unit).toMatch(/^RandomizedDelaySec=0$/m);
+    expect(unit).toMatch(/^Persistent=true$/m);
   });
 
   it("reads every OnCalendar line of a multi-line timer", () => {

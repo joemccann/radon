@@ -962,6 +962,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["flow-analysis", false],
     ["ib-watchdog", false],
     ["dispersion", false],
+    ["asia-export-lead", false],
   ])("%s requires_ib = %s", (service, expected) => {
     expect(SERVICE_FRESHNESS_WINDOWS[service]?.requires_ib).toBe(expected);
   });
@@ -1105,5 +1106,20 @@ describe("bounce-setup freshness window", () => {
     expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(74 * HOUR);
     expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(74 * HOUR);
     expect(requiresIb("bounce-setup")).toBe(false);
+  });
+});
+
+
+describe("Asia export lead daily sampling health", () => {
+  it.each<MarketState>(["open", "extended", "closed"])("uses 26h in %s", (state) => {
+    expect(getFreshnessWindowMs("asia-export-lead", state)).toBe(26 * 60 * 60_000);
+    const now = Date.now();
+    expect(isStale("asia-export-lead", new Date(now - 26 * 60 * 60_000).toISOString(), state, now)).toBe(false);
+    expect(isStale("asia-export-lead", new Date(now - 26 * 60 * 60_000 - 1).toISOString(), state, now)).toBe(true);
+  });
+  it("is scheduled without a broker dependency", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["asia-export-lead"]).toBeDefined();
+    expect(getServiceCategory("asia-export-lead")).toBe("scheduled");
+    expect(requiresIb("asia-export-lead")).toBe(false);
   });
 });

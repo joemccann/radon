@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon official export sampling - daily heartbeat
+
+[Timer]
+# Sampling follows Taiwan's afternoon releases; upstream series are monthly.
+# Weekend samples maintain writer health without inventing new observations.
+OnCalendar=*-*-* 09:40:00 UTC
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target
