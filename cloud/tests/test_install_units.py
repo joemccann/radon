@@ -717,3 +717,37 @@ def test_new_timers_are_enabled_after_services_are_back(tmp_path):
         "install-units still runs while the app tier is down: `enable --now` on "
         f"a Persistent=true timer fires its oneshot into a dead FastAPI. {order}"
     )
+
+
+def test_install_units_skips_responder_code_when_the_tip_has_none(tmp_path):
+    box = Sandbox(tmp_path)
+    target = tmp_path / "responder-code"
+    box.env["RADON_GROK_RESPONDER_CODE"] = str(target)
+    box.source("radon-credit-spread.service", SERVICE_BODY)
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not target.exists()
+    assert "grok responder code refreshed" not in result.stdout
+
+
+def test_install_units_refreshes_responder_code_from_the_trusted_tip(tmp_path):
+    box = Sandbox(tmp_path)
+    target = tmp_path / "responder-code"
+    box.env["RADON_GROK_RESPONDER_CODE"] = str(target)
+    box.env["RADON_HELPER_SKIP_CHOWN"] = "1"
+    box.source("radon-credit-spread.service", SERVICE_BODY)
+    scripts = box.repo / "scripts"
+    scripts.mkdir()
+    (scripts / "grok_page_responder.py").write_text("print('trusted')\n", encoding="utf-8")
+    installer = box.repo / "cloud" / "scripts" / "install-grok-responder-code.sh"
+    installer.parent.mkdir(parents=True, exist_ok=True)
+    installer.write_bytes((ROOT / "scripts" / "install-grok-responder-code.sh").read_bytes())
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (target / "scripts" / "grok_page_responder.py").read_text(encoding="utf-8") == "print('trusted')\n"
+    assert "grok responder code refreshed" in result.stdout
+    assert not (target / "scripts" / "grok_page_responder.py").stat().st_mode & 0o022

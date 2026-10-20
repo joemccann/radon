@@ -1,3 +1,16 @@
+# Grok responder root-owned code (DS-2026-10-17-16)
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 depends_on: [] Pin unit, installer, work-root, and upgrade contracts with failing tests.
+- [x] T2 depends_on: [T1] Execute the isolated responder from a root-owned scripts tree.
+- [x] T3 depends_on: [T2] Create and refresh that tree from setup-vps, install-units, and account prepare/refresh.
+- [x] T4 depends_on: [T3] Document the finding and the one-time host refresh.
+
+## Review
+
+Focused cloud: 97 passed (`test_grok_responder_code.py`, `test_responder_service_account.py`, `test_install_units.py`). Scripts: 16 passed (`test_grok_responder_work_root.py`, `test_grok_responder_fails_closed.py`). Docs ownership gate passed. The executed path is `/usr/local/lib/radon/grok-responder`; the clone stays writable. Host cutover is the operator refresh after deploy, not this commit. Did not touch `radon-app-runtime.sh` or `test_app_runtime.py`.
+
 # Web bun audit toolchain refresh (2026-10-20)
 
 Dependency graph: A1 -> A2 -> A3 -> A4.

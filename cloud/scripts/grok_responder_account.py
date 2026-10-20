@@ -25,6 +25,8 @@ PRODUCTION_ENV = Path("/etc/radon/env")
 LEGACY_ENV = Path("/home/radon/radon-page-responder.env")
 LEGACY_REPO = Path("/home/radon/radon-page-responder")
 CONTROLLER = Path("/usr/local/lib/radon/grok-responder-upgrade")
+CODE_ROOT = Path("/usr/local/lib/radon/grok-responder")
+CODE_INSTALLER = "cloud/scripts/install-grok-responder-code.sh"
 INSTALLED_HELPER = Path("/usr/local/lib/radon/grok_responder_account.py")
 SYSTEMD = Path("/etc/systemd/system")
 READY = ACCOUNT_HOME / "ready"
@@ -199,6 +201,54 @@ fi
 """, "grok-native-layout", canonical, native])
 
 
+def install_responder_code(stage: Path):
+    """Publish the executed tree. The account clone stays a writable worktree."""
+    installer = stage / CODE_INSTALLER
+    scripts = stage / "scripts"
+    trusted_tree(installer)
+    trusted_tree(scripts / "grok_page_responder.py")
+    run(["/bin/bash", installer, scripts, CODE_ROOT])
+
+
+def publish_optional_units(stage: Path):
+    source = stage / "cloud/services/responder-domain"
+    trusted_tree(source)
+    run(["/usr/bin/systemd-analyze", "verify", *[source / name for name in OPTIONAL_UNITS]])
+    inventory = []
+    for name in OPTIONAL_UNITS:
+        trusted_tree(source / name)
+        content = (source / name).read_bytes()
+        atomic_root_file(SYSTEMD / name, content, 0o644)
+        inventory.append(hashlib.sha256(content).hexdigest() + "  " + name)
+    atomic_root_file(INVENTORY, ("\n".join(inventory) + "\n").encode())
+    policy_source = stage / "cloud/config/polkit/50-radon-services.rules"
+    trusted_tree(policy_source)
+    atomic_root_file(PRIVATE_DIR / "policy.sha256", (hashlib.sha256(policy_source.read_bytes()).hexdigest() + "\n").encode())
+    root_directory(INSTALLED_HELPER.parent, 0o755)
+    atomic_root_file(INSTALLED_HELPER, Path(__file__).read_bytes(), 0o644)
+    run(["/usr/bin/systemctl", "daemon-reload"])
+
+
+def _responder_idle():
+    for workload in ("radon-grok-responder.service", "radon-grok-responder-upgrade.service"):
+        # Pass `run` at call time. The default argument is bound at import.
+        if _unit_active(workload, runner=run):
+            raise MaintenanceError("responder workload is active; retry after it finishes")
+
+
+def refresh(stage: Path):
+    """Upgrade an already-finalized domain without rebuilding its clone."""
+    trusted_tree(stage)
+    trusted_tree(stage / "cloud/scripts")
+    trusted_tree(stage / "scripts")
+    if READY.is_symlink() or not READY.is_file():
+        raise MaintenanceError("refresh requires the prepared responder marker")
+    _responder_idle()
+    install_responder_code(stage)
+    _responder_idle()
+    publish_optional_units(stage)
+
+
 def prepare(stage: Path):
     trusted_tree(stage)
     trusted_tree(stage / "cloud/scripts")
@@ -256,22 +306,8 @@ def prepare(stage: Path):
         ["/bin/cat", LEGACY_ENV], account="radon", check=False).stdout
     atomic_root_file(PRIVATE_DIR / "env", derive_environment(production, existing).encode())
     run(["/bin/bash", stage / "cloud/scripts/install-grok-upgrade-controller.sh", stage / "scripts", CONTROLLER])
-    source = stage / "cloud/services/responder-domain"
-    trusted_tree(source)
-    run(["/usr/bin/systemd-analyze", "verify", *[source / name for name in OPTIONAL_UNITS]])
-    inventory = []
-    for name in OPTIONAL_UNITS:
-        trusted_tree(source / name)
-        content = (source / name).read_bytes()
-        atomic_root_file(SYSTEMD / name, content, 0o644)
-        inventory.append(hashlib.sha256(content).hexdigest() + "  " + name)
-    atomic_root_file(INVENTORY, ("\n".join(inventory) + "\n").encode())
-    policy_source = stage / "cloud/config/polkit/50-radon-services.rules"
-    trusted_tree(policy_source)
-    atomic_root_file(PRIVATE_DIR / "policy.sha256", (hashlib.sha256(policy_source.read_bytes()).hexdigest() + "\n").encode())
-    root_directory(INSTALLED_HELPER.parent, 0o755)
-    atomic_root_file(INSTALLED_HELPER, Path(__file__).read_bytes(), 0o644)
-    run(["/usr/bin/systemctl", "daemon-reload"])
+    install_responder_code(stage)
+    publish_optional_units(stage)
 
 
 def verify_installed_units():
@@ -386,7 +422,7 @@ def retire_optional_health(post=None):
 
 
 def main(argv):
-    if os.geteuid() != 0 or not argv or argv[0] not in {"prepare", "finalize", "rollback"}:
+    if os.geteuid() != 0 or not argv or argv[0] not in {"prepare", "refresh", "finalize", "rollback"}:
         return 64
     os.environ.clear()
     os.environ.update({"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"})
@@ -400,6 +436,8 @@ def main(argv):
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
             if argv[0] == "prepare" and len(argv) == 2:
                 prepare(Path(argv[1]))
+            elif argv[0] == "refresh" and len(argv) == 2:
+                refresh(Path(argv[1]))
             elif argv == ["finalize", "--pickup-configured"]:
                 verify_installed_units()
                 environment = parse_env(read_root_file(PRIVATE_DIR / "env"))
