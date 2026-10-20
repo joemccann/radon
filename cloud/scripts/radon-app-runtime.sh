@@ -787,8 +787,9 @@ PY_PRIVATE_DIR
 # Container bind sources under radon-owned parents. The engine follows links
 # when it binds, so every component must be a real directory (walked with
 # O_NOFOLLOW from /) and the last must be radon-owned: a planted link would
-# otherwise hand a root-only tree to the container.
-require_bind_source() {
+# otherwise hand a root-only tree to the container. Prints the verified
+# directory's device and inode so the caller can detect a later swap.
+resolve_bind_source() {
   local ids="$1" dir="$2"
   "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_BIND_SOURCE' || exit 78
 import os, sys
@@ -806,7 +807,8 @@ try:
         child = os.open(part, flags, dir_fd=fd)
         os.close(fd)
         fd = child
-    if os.fstat(fd).st_uid != uid:
+    info = os.fstat(fd)
+    if info.st_uid != uid:
         raise OSError('bind source has an unexpected owner')
 except OSError:
     print(f'radon-app-runtime: bind source is a symlink, under a symlink, or not radon-owned; refusing: {path}', file=sys.stderr)
@@ -814,7 +816,41 @@ except OSError:
 finally:
     if fd is not None:
         os.close(fd)
+print(f'{info.st_dev}:{info.st_ino}')
 PY_BIND_SOURCE
+}
+
+# Every bind source validated so far, as "<path>|<device>:<inode>".
+BIND_SOURCES=()
+
+# Validating a name does not pin it. All of these leaves sit in a radon-owned
+# parent, so radon may rename one after the check, and the engine resolves the
+# source by NAME when it mounts -- the playbook's standing rule that root never
+# acts by name inside a radon-owned directory. Record what was verified here
+# and re-resolve it in recheck_bind_sources as the last act before the engine
+# runs, so the long tail of the start path (credential staging, env rendering,
+# the orphan reap, argument assembly) stops being usable swap window.
+require_bind_source() {
+  local ids="$1" dir="$2" identity
+  identity="$(resolve_bind_source "$ids" "$dir")" || exit 78
+  BIND_SOURCES+=("${dir}|${identity}")
+}
+
+# Re-resolve every validated bind source and require the SAME directory.
+# This narrows the check-then-use window to the engine's own mount, it does
+# not close it: an inode-pinned staging mount under a root-owned anchor is a
+# host topology change and an operator action.
+recheck_bind_sources() {
+  local ids="$1" entry path want got
+  for entry in ${BIND_SOURCES[@]+"${BIND_SOURCES[@]}"}; do
+    path="${entry%|*}"
+    want="${entry##*|}"
+    got="$(resolve_bind_source "$ids" "$path")" || exit 78
+    if [[ "$got" != "$want" ]]; then
+      echo "radon-app-runtime: bind source was replaced after validation; refusing: ${path}" >&2
+      exit 78
+    fi
+  done
 }
 
 # DS-2026-09-24-01 residual: the engine loads this filter as root, and
@@ -1203,6 +1239,7 @@ cmd_run() {
       ;;
   esac
 
+  recheck_bind_sources "$ids"
   exec "$DOCKER" "$@"
 }
 
