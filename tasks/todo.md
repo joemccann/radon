@@ -1,3 +1,16 @@
+# PDF Humanizer resource bounds (2026-10-19)
+
+Dependency graph: B1 -> B2 -> B3 -> B4.
+
+- [x] B1 depends_on: [] Verify exact-quote expansion and carried-findings amplification with safe allocation measurements.
+- [x] B2 depends_on: [B1] Add failing memory/budget regressions, deduplicate before expansion and enforce an aggregate finding budget with private fail-closed audits.
+- [x] B3 depends_on: [B2] Obtain independent Sol/Luna approval and focused/full verification.
+- [ ] B4 depends_on: [B3] Ship follow-up PR with exact-head green, one notification, admin merge and automatic production verification.
+
+## Review
+
+Red/green budget regressions passed: 85 core cases and 274/274 executable lines via stdlib trace (branches unmeasured). Sol independently approved 114 focused cases; Luna approved 355. Sol measured the same repeated-descriptor input at 1.41 MB versus 27.22 MB and 2,000 versus 64,000 spans; retained-term output fell from 40,000 dictionaries to 200. Budget exhaustion holds a full private draft with no partial score. Source facts and supplied scoring weights remain unchanged. Main CI 39360738644 also exposed a packed-Git-object assumption in two cloud tests. Red reproduced 2 failures; repaired file passes 75 cases and independently passes Luna's 8 root-store cases, requiring the exact committed-blob refusal. Final research/root: 1,623 passed, 23 subtests. Full Python: 16,380 passed, 10 skipped, the same 54 unrelated local TLS fixture failures. Full cloud: 3,258 passed, 10 skipped, the same 12 unrelated local Linux-tooling failures. Exact-head follow-up delivery and production verification are pending.
+
 # PDF summary Humanizer gate (2026-10-19)
 
 Dependency graph: H1 -> H2; H3 depends_on: [H2]; H4 depends_on: [H3].
@@ -9830,7 +9843,7 @@ Crop/date cloud RED: ab2661b4 / CI39075914272 research117522956297 reproduced5 f
 
 - [x] B1 depends_on: [] Preserve exact deployed terminal-reason evidence for the exhausted normal SELECT attempt and independently bound the remedy.
 - [x] B2 depends_on: [B1] Reproduce the old output ceiling in cloud tests before changing the existing text-only request allowance.
-- [ ] B3 depends_on: [B2] Apply the bounded allowance while preserving complete-response, verification, provider, timeout and queue gates; finish full exact-head CI and independent review.
+- [x] B3 depends_on: [B2] Apply the bounded allowance while preserving complete-response, verification, provider, timeout and queue gates; finish full exact-head CI and independent review.
 - [ ] B4 depends_on: [B3] Deliver after the preceding main deployment, verify actual loaded source, observe normal final decisions and review every resulting publication in production.
 
 Review: verified200e Goldman normal attempt4 recorded stop_reason=max_tokens,input_tokens=21433,output_tokens=6000. This proves exhaustion only for that attempt. Proposed10000 allowance remains one existing text-only request, with120s/2MB/end_turn and multimodal/provider/publication behavior preserved. Cloud RED required before runtime edits; no local suites or original work resets/priority changes.
