@@ -265,6 +265,69 @@ def test_collector_accepts_the_canonical_producer_host_metrics_object(helper, mo
     assert helper.read_snapshot()['host'] == metrics
 
 
+def test_allowlist_is_the_canonical_producer_envelope(helper):
+    spec = importlib.util.spec_from_file_location('allowlist_perf_producer', ROOT / 'cloud/scripts/perf_probe.py')
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    sections = [(name, lambda marker=name: {'marker': marker}) for name, _fn in producer.SECTIONS]
+    report = producer.collect(sections=sections)
+    assert helper.SNAPSHOT_KEYS == {
+        'schema', 'taken_at', 'host', 'errors', 'section_ms',
+        'io_net', 'disk_usage', 'units', 'journal', 'http', 'tls',
+    }
+    assert set(report) == helper.SNAPSHOT_KEYS
+
+
+def test_allowed_snapshot_keys_pass_through_unchanged(helper, capsys):
+    report = dict(helper.fixture_report)
+    report['section_ms'] = {'host': 12.5, 'io_net': 5000.0}
+    report['io_net'] = {
+        'window_s': 5.0,
+        'disks': {'sda': {'iops': 1.0, 'await_ms': 0.2, 'util_pct': 1.0}},
+        'nics': {'eth0': {'rx_kbps': 1.0, 'tx_kbps': 1.0, 'errs_drops': 0}},
+        'tcp_retrans_pct': 0.0,
+        'tcp_retrans_total': 0,
+    }
+    report['disk_usage'] = {'/': {'used_pct': 40.0, 'free_gb': 20.0}}
+    report['units'] = {'radon-api.service': {'ActiveState': 'active', 'NRestarts': 0}}
+    report['journal'] = {'since': '-24h', 'per_unit': {'radon-api.service': 1}, 'top': []}
+    report['http'] = {'api_health_lite': {'status': 200, 'p50_ms': 1.0, 'error': None}}
+    report['tls'] = {'radon.run': {'n': 1, 'tls_p50_ms': 1.0, 'error': None}}
+    out = helper.validate(json.dumps(report).encode())
+    assert out == report
+    assert capsys.readouterr().err == ''
+
+
+def test_unknown_keys_are_dropped_and_their_values_never_appear(helper, monkeypatch, capsys):
+    secret = 'super-secret-env-value-do-not-leak'
+    secret_name = 'sk-live-' + ('A1' * 40)
+    report = dict(helper.fixture_report)
+    report['AWS_SECRET_ACCESS_KEY'] = secret
+    report['env'] = {'PATH': secret, 'TOKEN': secret}
+    report[secret_name] = 'nested-' + secret
+    monkeypatch.setattr(helper, 'ssh_output', lambda argv: json.dumps(report).encode())
+    helper.collect()
+    published = (helper.fixture_public / 'prod-probe.json').read_text()
+    assert secret not in published
+    assert secret_name not in published
+    assert 'AWS_SECRET_ACCESS_KEY' not in published
+    assert '"env"' not in published
+    kept = json.loads(published)
+    assert kept == helper.fixture_report
+    err = capsys.readouterr().err
+    assert 'snapshot_dropped_keys=3' in err
+    assert 'AWS_SECRET_ACCESS_KEY' in err and 'env' in err
+    assert secret not in err and secret_name not in err
+    assert '<redacted>:1' in err
+    output = helper.fixture_public / 'prod-probe.json'
+    output.write_text(json.dumps(dict(helper.fixture_report, TOKEN=secret)))
+    output.chmod(0o640)
+    reread = helper.read_snapshot()
+    assert secret not in json.dumps(reread)
+    assert 'TOKEN' not in reread
+    assert reread == helper.fixture_report
+
+
 _ROOT_LOG_PROVISION_PROBE = r"""
 import contextlib, grp, importlib.util, json, os, pathlib, pwd, stat, subprocess, sys, tempfile
 module_path, case = sys.argv[1:]
