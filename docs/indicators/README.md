@@ -2,6 +2,8 @@
 
 Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a spec ships. Do not copy signal math into the root README.
 
+Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired.
+
 | Slug | Route | Service | Spec |
 |---|---|---|---|
 | vol-cone | `/scanner?mode=vol-cone` | `vol-cone`, `vol-cone-intraday` | [vol-cone.md](vol-cone.md) |

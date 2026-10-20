@@ -131,10 +131,10 @@ If either shows up in the real XML, that is a follow-up code change with its own
 
 Recorded here only in case §1 is overridden and a second query id is created:
 
-- **File:** `/etc/radon/env` on Hetzner, mode `0640`, owner `root:radon` (`/home/radon/radon-cloud/.env` is the compatibility symlink). Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
+- **File:** `/etc/radon/env` on Hetzner, mode `0640`, owner `root:radon`. `/home/radon/radon-cloud/.env` is retired. Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
 - **Values containing `$` must be single-quoted** (repo rule; bash `set -a` expands `$VAR` under `set -u` and aborts silently from systemd). A numeric query id has no `$`, so this is a non-issue for this variable specifically.
 - **Who reads it:**
-  - `radon-perf-twr.service` — `EnvironmentFile=/home/radon/radon-cloud/.env` (`cloud/services/radon-perf-twr.service:12`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Mon–Fri 20:45 America/New_York), and systemd re-reads `EnvironmentFile` at every `ExecStart` — **no restart needed**, the next timer firing picks it up.
+  - `radon-perf-twr.service` loads `EnvironmentFile=/etc/radon/env` (`cloud/services/radon-perf-twr.service`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Tue..Sat 07:30 America/New_York, `RandomizedDelaySec=300`). systemd re-reads `EnvironmentFile` at every `ExecStart`, so the next timer firing picks up a new value. No unit restart is required for that file.
   - `radon-api` — `POST /performance/background` shells the builder via `run_script("perf_twr_builder.py", ["--json"])` (`scripts/api/server.py:3951`), and that subprocess inherits radon-api's process environment, which was captured at radon-api start. This one **does** need `radon unit restart radon-api`.
 - **Never `radon restart`** — it cycles the IB Gateway and fires a 2FA push. App-tier-only work uses `radon unit restart <unit>` (`docs/incident-runbook.md:17-18`).
 - Mirror the variable into root `.env`, `.env.example` and `cloud/.env.example` so local runs and the next operator match production.
@@ -337,7 +337,7 @@ for r in get_db().execute(\"SELECT service, state, last_error, updated_at FROM s
 
 **If the failure is `unknown_flow_type` / `no_direction` / `no_amount`**, that is not a rollback case — it is the parser telling you a field is missing from the Portal config. Re-open the field picker (§2 step 6) and tick the named field. The build stays degraded in the meantime, which is the correct state.
 
-**Do not "fix" a rollback by deleting and recreating the query.** A new query id breaks `IB_FLEX_NAV_QUERY_ID=1442520` in three places (root `.env`, `web/.env`, Hetzner `/home/radon/radon-cloud/.env`) and takes down both consumers.
+**Do not "fix" a rollback by deleting and recreating the query.** A new query id breaks `IB_FLEX_NAV_QUERY_ID=1442520` in root `.env`, `web/.env`, and Hetzner `/etc/radon/env`, and takes down both consumers. `/home/radon/radon-cloud/.env` is retired.
 
 ---
 

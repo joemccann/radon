@@ -933,8 +933,8 @@ provision_secret_store_credential() {
 
 create_etc_radon_dir() {
   # Canonical secrets and media dirs. Live units load /etc/radon/env.
-  # Compatibility: ~/radon-cloud/.env and ~/radon-cloud/media are host
-  # symlinks after P2, not a checkout.
+  # /home/radon/radon-cloud/.env is retired and is not a fallback.
+  # /home/radon/radon-cloud/media remains the media compatibility symlink.
   #
   # /etc/radon is root-owned with the sticky bit (root:radon 1770): radon can
   # still create entries (the Robinhood token store rotates rh-mcp.json beside

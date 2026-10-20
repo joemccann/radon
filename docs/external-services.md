@@ -7,11 +7,10 @@ the profile Credentials tab live in the host-local encrypted secret store and
 WIN over these `.env` values at FastAPI startup — rotation and key-loss
 recovery: [`docs/operations.md`](operations.md) "Encrypted credential store".
 
-Production `.env` lives on the VPS at `/etc/radon/env` (`0640` root:radon,
-canonical; `/home/radon/radon-cloud/.env` is the compatibility symlink).
-That symlink is the sole legacy-directory exception during the monorepo
-migration, not a source of deploy code. Laptop dev uses the root `.env`
-for FastAPI and scripts, plus `web/.env` for Next.js.
+Production secrets load only from `/etc/radon/env` (`0640` root:radon).
+`/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files
+in that directory. It is not a source of deploy code. Laptop dev uses the
+root `.env` for FastAPI and scripts, plus `web/.env` for Next.js.
 
 ## Required (production)
 

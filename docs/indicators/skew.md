@@ -201,7 +201,7 @@ Panel:
 ## Scheduling
 
 `cloud/services/radon-skew.{service,timer}`: oneshot venv-python direct,
-`EnvironmentFile=/home/radon/radon-cloud/.env` (UW_TOKEN must resolve there —
+`EnvironmentFile=/etc/radon/env` (UW_TOKEN must resolve there;
 confirm it exists on the VPS env; it does for GEX/leap timers),
 `RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer runs every 5 minutes in the
 broad 13:00-21:59 UTC weekday DST window (the fetcher gates on the shared ET

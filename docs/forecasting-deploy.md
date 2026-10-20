@@ -46,8 +46,8 @@ The canonical unit sources are:
 
 They are owned with the rest of the production infrastructure in the Radon
 monorepo `cloud/` tree. The standalone `radon-cloud` checkout owns no
-forecasting code or unit files. Its `/home/radon/radon-cloud/.env` path remains
-an external secrets-file compatibility exception only; it is not a source tree.
+forecasting code or unit files. `/home/radon/radon-cloud/.env` is retired.
+It is not a secret file and not a source tree.
 
 Install or update these dedicated-host units through that host's approved root
 transaction. Do not copy templates from this document, install units directly,
@@ -60,9 +60,9 @@ runbook](monorepo-cloud-migration.md) for the main VPS control-plane procedure.
 The dedicated-host transaction must preserve these invariants:
 
 - `WorkingDirectory=/home/radon/radon`, from the same monorepo SHA as `cloud/`.
-- `EnvironmentFile=/etc/radon/env`, mode `0640` `root:radon`
-  (`/home/radon/radon-cloud/.env` is the compatibility symlink); never copy its
-  values into the checkout.
+- `EnvironmentFile=/etc/radon/env`, mode `0640` `root:radon`.
+  `/home/radon/radon-cloud/.env` is retired. Never copy env values into the
+  checkout.
 - `RADON_DB_NO_REPLICA=1` to use the direct cloud database path.
 - `ExecStart` uses `/home/radon/forecasting-venv/bin/python` and the canonical
   `scripts/nightly_forecast.py` invocation.

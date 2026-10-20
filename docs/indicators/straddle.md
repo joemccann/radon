@@ -203,7 +203,7 @@ Panel:
 - `scripts/watchdog/services.py` — same window + daily-bucket list.
 - `cloud/services/radon-straddle.{service,timer}` — oneshot venv-python direct
   (`ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_straddle.py`),
-  `EnvironmentFile=/home/radon/radon-cloud/.env`, `RADON_DB_NO_REPLICA=1`;
+  `EnvironmentFile=/etc/radon/env`, `RADON_DB_NO_REPLICA=1`;
   timer `OnCalendar=*-*-* 02:15:00 UTC` (Cboe appends the session row ~20:00 ET
   ≈ 00:00-01:00 UTC; 02:15 UTC clears both DST regimes), `RandomizedDelaySec=300`,
   `Persistent=true`. Runs daily including weekends: weekend runs are 304

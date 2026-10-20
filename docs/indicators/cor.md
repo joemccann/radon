@@ -212,7 +212,7 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (40, dateti
 
 - `radon-cor.service`: `Type=oneshot`, `User=radon`,
   `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/home/radon/radon-cloud/.env`,
+  `EnvironmentFile=/etc/radon/env`,
   `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_cor.py`
   (venv python direct, never run_*.sh), `TimeoutStartSec=300`.

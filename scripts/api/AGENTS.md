@@ -49,7 +49,7 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Each scan subprocess records its own snapshot + `service_health` row via `scripts/db/scan_mirror.py` (the FastAPI-side mirror is gone).
 - Scheduled writers must heartbeat every cycle, including no-change cycles.
 - Failures record `state=error` with `last_error.message`.
-- Hetzner units live in monorepo `cloud/services/` (installed under `/etc/systemd/system` via control-plane bootstrap). Wrappers use literal env parsing to avoid `$VAR` expansion. Production: `IB_GATEWAY_MODE=cloud`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`, secrets at `/home/radon/radon-cloud/.env`.
+- Hetzner units live in monorepo `cloud/services/` (installed under `/etc/systemd/system` via control-plane bootstrap). Wrappers use literal env parsing to avoid `$VAR` expansion. Production: `IB_GATEWAY_MODE=cloud`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`, secrets at `/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired.
 
 ## Subprocess JSON Discipline
 

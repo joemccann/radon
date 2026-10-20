@@ -312,7 +312,7 @@ Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
 `cloud/services/radon-vol-cone.service` + `.timer`.
 
 - Oneshot, User=radon, WorkingDirectory=/home/radon/radon,
-  EnvironmentFile=/home/radon/radon-cloud/.env,
+  EnvironmentFile=/etc/radon/env,
   `RADON_DB_NO_REPLICA=1`,
   ExecStart venv python `scripts/fetch_vol_cone.py`,
   TimeoutStartSec=900 (backfill headroom).
