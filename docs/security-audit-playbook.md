@@ -316,6 +316,19 @@ line here whenever you ship a security fix.**
   `Retry-After` so a refused client waits the window out instead of re-polling
   at its maximum backoff. (`web/tests/demo-rate-tier.test.ts`,
   `web/tests/previous-close-miss-cache.test.ts`, `web/tests/demo-gate.test.ts`)
+- **The isolated Grok responder executes root-owned code (DS-2026-10-17-16).**
+  `radon-grok-responder.service` runs
+  `/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py`.
+  That tree is installed root-owned by `install-grok-responder-code.sh` from
+  the provision store (`setup-vps.sh`, every `install-units`, and responder
+  account prepare/refresh). It is on `ReadOnlyPaths` and absent from
+  `ReadWritePaths`. `/var/lib/radon-responder/repo` stays writable as the
+  worktree (`RADON_GROK_REPO`); the service does not execute it. A host whose
+  installed unit still points at the repo needs one
+  `setup-grok-responder-account.sh` refresh from a trusted stage after this
+  release is in the provision store. A green deploy alone does not swap that
+  unit.
+  (`cloud/tests/test_grok_responder_code.py`)
 
 ## Triage & patch policy
 

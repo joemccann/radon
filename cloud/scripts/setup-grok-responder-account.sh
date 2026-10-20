@@ -25,7 +25,16 @@ is_root_owned_tree "$SCRIPT_DIR/grok_responder_account.py" && is_root_owned_tree
   echo 'refusing: setup requires a root-owned tree' >&2
   exit 77
 }
-python3.13 -I "$SCRIPT_DIR/grok_responder_account.py" prepare "$STAGE"
-echo "Native login: sudo -u $ACCOUNT -H $ACCOUNT_HOME/.local/bin/grok login --device-auth"
-echo 'Finalize: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured'
-echo 'Rollback: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py rollback'
+verb=prepare
+if [[ -f "$ACCOUNT_HOME/ready" && ! -L "$ACCOUNT_HOME/ready" ]]; then
+  verb=refresh
+fi
+python3.13 -I "$SCRIPT_DIR/grok_responder_account.py" "$verb" "$STAGE"
+if [[ "$verb" == refresh ]]; then
+  echo "Refreshed root-owned responder code and units. Timers and the clone were left in place."
+  echo "Verify: systemctl show radon-grok-responder.service -p ExecStart -p ReadWritePaths --no-pager"
+else
+  echo "Native login: sudo -u $ACCOUNT -H $ACCOUNT_HOME/.local/bin/grok login --device-auth"
+  echo 'Finalize: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured'
+  echo 'Rollback: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py rollback'
+fi

@@ -20,8 +20,10 @@ responsible for the subscription keeper's original Grok installation.
 
 These units live under `cloud/services/responder-domain/`. A source deploy
 does not install or enable them and does not interrupt the existing responder.
-The explicit preparation below installs them disabled and records their
-root-owned inventory at `/etc/radon/grok-responder/installed-units.sha256`.
+It does refresh the root-owned code tree below when that tree's installer is
+in the trusted main tip. The explicit preparation below installs the units
+disabled and records their root-owned inventory at
+`/etc/radon/grok-responder/installed-units.sha256`.
 The daily drift auditor then compares them, including drop-ins, against their
 canonical nested sources. Rollback retains that inventory and those disabled
 units, so their configuration remains observable.
@@ -56,6 +58,43 @@ prerequisites. Dependency installation and the native CLI installer execute
 only as the dedicated account. The trusted stdlib upgrade controller is
 installed separately at `/usr/local/lib/radon/grok-responder-upgrade`; it
 does not replace the keeper's original controller or runtime.
+
+### Root-owned responder code (DS-2026-10-17-16)
+
+The isolated unit executes
+`/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py`.
+That tree is root-owned and listed read-only. `/var/lib/radon-responder/repo`
+stays writable because it is the clone the cycle fetches, edits, and pushes.
+`RADON_GROK_REPO` points the cycle at that clone. The import closure is
+stdlib-only, so the unit does not use the clone's `.venv`.
+
+`setup-vps.sh` creates the tree from the provision store. Every
+`radon-deploy-root install-units` refreshes it from the same store. A fresh
+`setup-grok-responder-account.sh` publishes the unit that points at the tree.
+An already-finalized host (the `ready` marker exists) takes the refresh verb
+of that same script: it replaces the code and the installed unit files, and
+it does not rebuild the clone, the venv, the login, or the timers. Retry when
+it reports the workload is active.
+
+Until that refresh has been run on a host whose unit still executes
+`/var/lib/radon-responder/repo`, the live service is unchanged. Do not treat
+a green deploy as the cutover.
+
+```bash
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+STORE=/opt/radon-provision/radon.git
+SHA="$(git ls-remote https://github.com/joemccann/radon.git refs/heads/main | cut -f1)"
+git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"
+STAGE="$(mktemp -d /opt/radon-provision/responder-code.XXXXXX)"
+git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
+bash "$STAGE/cloud/scripts/setup-grok-responder-account.sh"
+rm -rf "$STAGE"
+systemctl show radon-grok-responder.service -p ExecStart -p ReadWritePaths --no-pager
+```
+
+`ExecStart` must be the `/usr/local/lib/radon/grok-responder` interpreter line.
+`ReadWritePaths` must still include the repo and must not include that code
+tree. Contract: `cloud/tests/test_grok_responder_code.py`.
 
 ### Configure read-only branch pickup
 
