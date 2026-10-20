@@ -1092,6 +1092,71 @@ def test_run_accepts_real_owned_bind_sources(tmp_path: Path, unit: str) -> None:
     assert _engine_ran(result)
 
 
+# radon owns the parent of every bind source, so it can rename the validated
+# leaf and plant a link once the check has passed. This stub does exactly that
+# on the orphan reap, which is only a convenient mid-start hook: on a real host
+# any part of the start path between validation and the engine's mount serves.
+_SWAPPING_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+if [ "$1" = "rm" ] && [ -n "${{RADON_TEST_SWAP_PATH:-}}" ]; then
+  /bin/rm -rf -- "${{RADON_TEST_SWAP_PATH}}"
+  if [ "${{RADON_TEST_SWAP_KIND}}" = "link" ]; then
+    /bin/ln -s "${{RADON_TEST_SWAP_TARGET}}" "${{RADON_TEST_SWAP_PATH}}"
+  else
+    /bin/mkdir -p "${{RADON_TEST_SWAP_PATH}}"
+  fi
+fi
+exit 0
+"""
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    (
+        ("link", "is a symlink"),
+        ("dir", "replaced after validation"),
+    ),
+)
+def test_run_refuses_a_bind_source_replaced_after_validation(
+    tmp_path: Path, kind: str, message: str
+) -> None:
+    """A validated bind source is still a mutable name: the engine resolves it
+    again when it mounts. The recorded directory must be re-resolved before the
+    engine runs, so a swap during the rest of the start path refuses the start
+    instead of binding a tree the check never saw. Both shapes of swap are
+    refused: a planted link, and a different directory of the same owner."""
+    victim = tmp_path / "root-only"
+    victim.mkdir()
+    (victim / "key").write_text("secret\n", encoding="utf-8")
+    result = _run(
+        tmp_path,
+        ["run", "radon-monitor.service"],
+        docker_body=_SWAPPING_DOCKER,
+        extra_env={
+            "RADON_TEST_SWAP_PATH": str(tmp_path / "media"),
+            "RADON_TEST_SWAP_TARGET": str(victim),
+            "RADON_TEST_SWAP_KIND": kind,
+        },
+    )
+    assert result.returncode == 78, result.stdout + result.stderr
+    assert message in result.stderr
+    assert not _engine_ran(result)
+    assert victim.joinpath("key").read_text(encoding="utf-8") == "secret\n"
+
+
+def test_bind_source_recheck_is_the_last_step_before_the_engine() -> None:
+    """The re-resolution is only worth its window if nothing follows it, so no
+    later edit may insert work between the recheck and the engine invocation."""
+    lines = [
+        line.strip()
+        for line in RUNTIME.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    engine_calls = [i for i, line in enumerate(lines) if line == 'exec "$DOCKER" "$@"']
+    assert len(engine_calls) == 1, engine_calls
+    assert lines[engine_calls[0] - 1] == 'recheck_bind_sources "$ids"'
+
+
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
     result = _run(
         tmp_path,

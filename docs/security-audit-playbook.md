@@ -201,6 +201,16 @@ line here whenever you ship a security fix.**
   `cloud/tests/test_refresh_control_plane.py::test_marker_publish_never_acts_on_a_radon_swappable_name`
   and `cloud/tests/test_caddy_media_group.py::test_grant_never_follows_a_media_dir_swapped_mid_grant`
   / `::test_grant_does_not_follow_media_swapped_for_a_link_after_the_check`.
+  Corollary for container bind sources, where no fd can be handed to the
+  engine: the engine resolves the source BY NAME when it mounts, so the
+  verified device and inode are recorded at validation and re-resolved as the
+  last statement before the engine runs
+  (`radon-app-runtime` `resolve_bind_source` / `recheck_bind_sources`). That
+  narrows the window to the engine's own mount; closing it needs an
+  inode-pinned staging mount under a root-owned anchor and is an operator
+  action. Pinned by
+  `cloud/tests/test_app_runtime.py::test_run_refuses_a_bind_source_replaced_after_validation`
+  and `::test_bind_source_recheck_is_the_last_step_before_the_engine`.
   Invariant: `radon` is NOT in the docker group (Docker socket access is
   root-equivalent). Gateway container operations go through the root-owned
   `radon-docker-gw` shim; `setup-vps.sh` strips any legacy membership and
