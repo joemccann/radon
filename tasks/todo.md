@@ -10101,3 +10101,17 @@ Handover dependency checkpoint: corrected cloud RED 39201217707 (8 failed, 33 pa
 Default transport RED 39202014836: 1 failed and 41 passed against the old checked-in public target. Apply the documented app tailnet default only after that failure; preserve the test blob for GREEN.
 
 Final performance dependency review: focused cloud GREEN 39202104661 passed 42/42 with the transport RED test blob unchanged; private full canonical CI 39202108512 plus images 39202108499 is complete, 41 checks successful or applicable skips on 86516d4e. Runner owner documentation repaired the initial full-gate failure. The Mac continuation preserves the exact retained grant and failed attention context, installs only the tested collector, provisions its protected log and migrates the fixed target/pin while holding the maintenance gate. It remains unpublished until public CI and deployment succeed; the authenticated native run remains unverified. No local suites ran.
+
+
+# Nightly performance audit (2026-10-19, resumed delivery)
+
+Dependency graph: P1 -> P2 -> P3 -> P4.
+
+- [x] P1 depends_on: [] Resume tonight's branch and draft #1192; install dependencies; read trusted checkpoint and production snapshot.
+- [x] P2 depends_on: [P1] Audit changed surfaces and network rotation locally; recheck PERF-019/020 red/green budgets.
+- [x] P3 depends_on: [P2] Review transport safety and complete focused verification and build evidence.
+- [x] P4 depends_on: [P3] Validate draft body and delivered code-head CI; prepare the single rolling checkpoint for final exact-head verification.
+
+## Review
+
+Resumed existing pushed commits d848fceb and 6c5b4684; no production access and no new IDs allocated. Audited 48 commits / 163 changed paths through origin/main 5bfadbb6. Network rotation: baseline serial reruns fail unchanged socket/concurrency budgets (5 sockets versus 1; in-flight 1 versus 2); current focused Python 339 passed, web 56 passed, cloud 91 passed. Local transport fault checks preserve 429 Retry-After, size refusal/socket retirement, five-second idle retirement, one stale-read retry and no token-refresh replay. Production build and output trace audit pass (230 manifests, no retained data files); Next 16 compile mode omits per-route First Load JS. Largest client chunks: 1,227,120 and 930,905 bytes; ExcelJS/PPTX imports already defer until export. Local profiles: exports parse 309 Taiwan/321 Korea rows into 321 composite rows; writer uses one 3210-parameter INSERT; snapshot query uses service index with no temp sort. Humanizer expands 4000 duplicate descriptors into one span. SQLite applies 96 migrations; two vector-index migrations require the unavailable libsql_vector_idx extension, so vector plans are outside this SQLite audit. Existing code head has complete green CI; final delivery/checkpoint follows this audit-only commit. No new actionable bottleneck verified beyond PERF-019/020. Runner owns notifications.
