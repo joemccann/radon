@@ -288,3 +288,15 @@ def test_block_scalar_header_prefix_scan_is_linear():
         "assert s(t) == t"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
+
+
+def test_block_scalar_matches_a_prefixed_or_suffixed_credential_key():
+    """`db_password` and `UW_TOKEN` are the ordinary spellings. The key
+    alternation has no prefix or suffix run of its own, and the block rule is
+    line-anchored, so without wrapping it matched neither and the generic
+    assignment rule rewrote the header while the body survived."""
+    for key in ("db_password", "UW_TOKEN", "ANTHROPIC_API_KEY", "x_pwd"):
+        text = f"{key}: |\n  NOTREALPREFIXED1\ntail\n"
+        out = scrub_credential_text(text)
+        assert "NOTREALPREFIXED1" not in out, out
+        assert "tail" in out, out

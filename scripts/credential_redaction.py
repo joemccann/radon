@@ -60,7 +60,13 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     )
 
 
-_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY)
+# The key alternation carries no prefix or suffix run of its own, and the
+# block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`
+# would not match it at all. Bounded runs: the anchor already limits this to
+# one start per line, and a bound keeps it that way.
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(
+    rf"[A-Za-z0-9_-]{{0,64}}{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}"
+)
 
 _BLOCK_SCALAR_LABEL = "[redacted-secret]"
 

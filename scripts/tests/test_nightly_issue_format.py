@@ -1008,3 +1008,14 @@ class TestSanitizeBlockScalarTrailingComment:
         out = nif.sanitize("password: | # note\n  NOTREALTRAILING1\ntail\n")
         assert "NOTREALTRAILING1" not in out, out
         assert out.rstrip("\n").endswith("tail"), out
+
+
+class TestSanitizePwdNamedKeys:
+    def test_an_underscore_pwd_assignment_is_redacted(self):
+        out = nif.sanitize("the fixture held DB_PWD=NOTREALPWD1x9 before")
+        assert "NOTREALPWD1x9" not in out, out
+        assert out.endswith("before"), out
+
+    def test_a_bare_working_directory_variable_is_not_redacted(self):
+        text = "the hook ran with PWD=/Users/bot/work and exited"
+        assert nif.sanitize(text) == text
