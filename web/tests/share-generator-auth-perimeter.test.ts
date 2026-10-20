@@ -156,7 +156,10 @@ describe("share generator responses — no absolute reports/ path disclosure", (
       });
 
       const { POST } = await import(modulePath);
-      const res = await POST(new Request("https://app.radon.run", { method: "POST" }));
+      const res = await POST(new Request("https://app.radon.run", {
+        method: "POST",
+        headers: { "sec-fetch-site": "same-origin" },
+      }));
       const body = (await res.json()) as Record<string, unknown>;
 
       expect(JSON.stringify(body)).not.toContain("/home/radon");

@@ -15,6 +15,7 @@ import {
 import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 import { isSetupMode, isSetupPath, isAuthMisconfigured, SETUP_PAGE_PATH } from "@/lib/setup/setupMode";
+import { sameOriginMutationResponse } from "@/lib/sameOrigin";
 
 // ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
 //
@@ -522,6 +523,12 @@ export default async function middleware(
   // so the gate behaves identically in dev, tests, and production.
   const probeGate = await handleProbeBearerGate(request);
   if (probeGate) return probeGate;
+
+  // Mutating /api calls must be same-origin. Webhooks, setup, a valid probe
+  // bearer (already returned above), in-process assistant dispatch, direct
+  // loopback, and the authless test token are the only exemptions.
+  const originBlock = await sameOriginMutationResponse(request);
+  if (originBlock) return originBlock;
 
   if (authlessBypass) {
     return NextResponse.next();
