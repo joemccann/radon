@@ -24,6 +24,19 @@ Dependency graph: A1 -> A2 -> A3 -> A4.
 
 Baseline `bun audit` on `web/`: critical 2, high 33, moderate 20, low 3 (58). After floors and flat overrides: critical 0, high 1, moderate 0, low 0. The remaining high is braces GHSA-vfj7-8cjw-p6xm (`<=3.0.3`); npm latest is still 3.0.3 and GitHub has no patched release. Dev-only via Tailwind's micromatch and chokidar. Bun 1.3.14 ignores parent and version-selector overrides, so brace-expansion and picomatch were pinned inside the lock at the lowest patched line each parent already allowed. Majors that are not core frameworks: uuid 8.3.2 to 11.1.1 (exceljs, no patched 8.x), image-size 1.2.1 to 2.0.3 (pptxgenjs, no patched 1.x), postcss-selector-parser 6.1.2 to 7.1.6 (GHSA range ignores the 6.1.5 backport). No Next, React, Playwright, or TypeScript bump. Vitest moved 4.0.18 to 4.1.11 (minor). Production transitive pins required by advisories: sharp 0.35.5, baseline-browser-mapping 2.11.0, source-map-js 1.2.2, uuid, image-size.
 
+# Same-origin mutation gate (2026-10-20)
+
+Dependency graph: S1 -> S2 -> S3 -> S4.
+
+- [x] S1 depends_on: [] Map requireRouteAccess, middleware, and non-browser mutating callers.
+- [x] S2 depends_on: [S1] Failing same-origin unit tests.
+- [x] S3 depends_on: [S2] Same-origin check, narrow exemptions, focused green.
+- [ ] S4 depends_on: [S3] Draft PR, exact-head CI, one Pushover. Do not merge.
+
+## Review
+
+Security brief decision 8. `none` is rejected: a mutation is not a typed navigation. Focused same-origin, alerts, profile, share, route-access, and authless tests: 74 passed. Full web suite also showed 30 failures; the 403s were `http://x` fixtures now pointed at localhost. The rest (CTA calendar dates, discover cache age, sync-hook counts, demo open orders, fake-timer order idempotency) still fail with the gate disabled.
+
 # Bind-source inode generation (2026-10-20)
 
 Dependency graph: G1 -> G2 -> G3.

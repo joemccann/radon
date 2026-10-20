@@ -670,7 +670,7 @@ jobs:
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
       # the gate; `next start` + curl below is the dynamic half.
-      - run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts
+      - run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts lib/sameOrigin.ts
         working-directory: web
       # Locked build constraint: web/package.json `build` is
       # `next build --experimental-build-mode=compile` (see web/CLAUDE.md).
