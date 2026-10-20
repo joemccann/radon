@@ -981,3 +981,23 @@ class TestSanitizeYamlBlockScalars:
         out = nif.sanitize(text)
         assert "NOTREALBLOCKVALUE" not in out, out
         assert "keep_me: ordinary prose" in out, out
+
+
+class TestSanitizeCommentedBlockScalars:
+    """A block scalar hides its value on the following lines whether or not
+    the header line is commented or bulleted, which a report excerpt often
+    is. Every value below is an invented placeholder."""
+
+    @pytest.mark.parametrize("lead", ["# ", "#", "- ", "  - ", "> "])
+    def test_a_commented_or_bulleted_block_header_still_hides_its_body(self, lead: str):
+        text = f"{lead}password: |\n{' ' * (len(lead) + 2)}NOTREALBLOCKVALUE1\n"
+        text += f"{' ' * (len(lead) + 2)}NOTREALBLOCKVALUE2\ntail line\n"
+        out = nif.sanitize(text)
+        assert "NOTREALBLOCKVALUE" not in out, out
+        assert out.rstrip("\n").endswith("tail line"), out
+
+    def test_a_commented_sibling_key_at_the_same_indent_survives(self):
+        text = "# password: |\n  NOTREALBLOCKVALUE3\n# keep_me: ordinary prose\n"
+        out = nif.sanitize(text)
+        assert "NOTREALBLOCKVALUE3" not in out, out
+        assert "keep_me: ordinary prose" in out, out

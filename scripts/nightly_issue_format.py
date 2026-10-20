@@ -80,9 +80,13 @@ _SECRET_ASSIGN_RE = re.compile(
 )
 # A YAML block scalar hides the value on the FOLLOWING lines: `key: |` then an
 # indented block. Continuation lines must be indented past the key, so a
-# sibling key at the same indent ends the block and survives.
+# sibling key at the same indent ends the block and survives. A report excerpt
+# usually arrives commented, bulleted or quoted, and that prefix used to stop
+# this rule from matching at all while the assignment rule quietly rewrote the
+# header and left the whole body published.
 _SECRET_BLOCK_SCALAR_RE = re.compile(
-    rf"^(?P<indent>[ \t]*)(?P<key>[\"']?{_SECRET_KEY_NAME}[\"']?[ \t]*:[ \t]*)"
+    rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+-]+[ \t]*)*)"
+    rf"(?P<key>[\"']?{_SECRET_KEY_NAME}[\"']?[ \t]*:[ \t]*)"
     r"[|>][0-9+-]*[ \t]*\r?\n"
     r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
     re.I | re.M,
@@ -220,7 +224,8 @@ def sanitize(text: str) -> str:
     text = _PRIVATE_KEY_BLOCK_RE.sub(REDACTED, text)
     text = _COOKIE_HEADER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _SECRET_BLOCK_SCALAR_RE.sub(
-        lambda m: f"{m.group('indent')}{m.group('key')}{REDACTED}\n", text
+        lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}{REDACTED}\n",
+        text,
     )
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)

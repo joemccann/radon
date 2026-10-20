@@ -56,7 +56,14 @@ _SPECIFIC_SCRUB_PATTERNS = [
         ),
         r"\1\2[redacted]",
     ),
-    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    # The prefix must start a token. Without that anchor the rule matched from
+    # any position, so a run of overlapping prefixes gave one start per three
+    # characters and each one scanned the whole run: quadratic on text an
+    # outside contributor shapes, which the publication gate scans.
+    (
+        re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"),
+        "[redacted-jwt]",
+    ),
     (re.compile(r"\b(?:D?U|F)\d{6,}\b"), "[redacted-account]"),
     (re.compile(r"(://[^\s/:@]+:)[^\s/@]+@"), r"\1[redacted]@"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
@@ -79,10 +86,21 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     (re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
     # Generic key-value assignment (env files, config dumps, JSON), last so a
     # value the specific shapes above already tagged keeps its tag. A quoted
-    # value is redacted through its closing quote (multi-word passwords).
+    # value is redacted through its real closing quote (multi-word
+    # passwords). Each quote style is handled separately and a backslash
+    # escape consumes the next character: a shared `[^"']*` body ended the
+    # match at the FIRST opposite or escaped quote inside the value and
+    # published the tail.
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)([\"'])(?!\[redacted)[^\"'\n]*\2",
+            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:\\.|[^\"\\\n])*\"",
+            re.IGNORECASE,
+        ),
+        r"\1\2[redacted-secret]\2",
+    ),
+    (
+        re.compile(
+            rf"([\"']?{_SECRET_KEY}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:\\.|[^'\\\n])*'",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
