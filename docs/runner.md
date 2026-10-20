@@ -507,6 +507,8 @@ Fields, in order: `loop`, `phase`, `exit`, optional `audited-through`, `ts` (`YY
 
 Security and `security-deepsec` now post this public audit comment too. The body is the three lines above and nothing else: no finding text, no PR numbers for held fixes, no paths, no secrets, no refusal class. The class stays in the runner log and the Pushover `status=`. The private report is unchanged.
 
+Before the post-run hook commits a phase report to the private reports repository it runs the report through its own redactor, which keeps findings, routes and `file:line` but removes secret literals: credential assignments, cookie and bearer headers, known provider key prefixes, JWTs, and PEM / OpenSSH / PGP private-key blocks (the whole block collapses to one `[REDACTED]` line, and a block with no END line is dropped to the end of the report). The same key-block rule lives in `scripts/credential_redaction.py` and `scripts/nightly_issue_format.py`; a new secret class belongs in all three.
+
 Loops without `PHASES` (reliability, ci-performance, documentation, testing) run audit, remediate and deliver in one process. They post one comment, `phase=audit`, with that process's exit. They do not emit three codes. `performance` posts its real phase name (`perf`).
 
 `scripts/nightly_phase_status.py` parses the line and falls back to the banner (`Healthy` / `Fixed` / `Needs you` / `Incomplete`) and the old `**PHASE** STAMP **status**` wording. There is no separate nightly-runners report script in this repo. `joemccann/radon-factory` was not found; the runner lives here.

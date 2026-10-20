@@ -870,3 +870,114 @@ def test_public_key_blocks_are_not_redacted():
 def test_advisor_master_account_ids_are_redacted():
     assert nif.sanitize("allocations under F1234567 failed") == "allocations under [REDACTED] failed"
     assert nif.sanitize("commit f1234567 landed") == "commit f1234567 landed"
+
+
+def _hook_redact(tmp_path: Path, text: str) -> str:
+    """Run the private-report redactor from the hook in isolation."""
+    src = HOOK.read_text(encoding="utf-8")
+    start = src.index("_redact_secret_classes() {")
+    body = _secret_ere_block(src) + src[start:src.index("\n}\n", start) + 3]
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/bash\nset -euo pipefail\n" + body
+                      + f"\nprintf '%s' {shlex.quote(text)} | _redact_secret_classes\n",
+                      encoding="utf-8")
+    proc = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def _key_marker(edge: str, label: str) -> str:
+    """Assemble a PEM armour line at runtime.
+
+    The repo contract is that no credential-shaped literal is spelled in
+    source, even a synthetic one, so the secret scanner cannot trip on a
+    fixture. `label` never names a real key and the body below is invented.
+    """
+    dashes = "-" * 5
+    return f"{dashes}{edge} {label}{dashes}"
+
+
+@pytest.mark.parametrize("label", ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"])
+def test_the_private_report_redactor_drops_private_key_blocks(tmp_path: Path, label: str):
+    report = (f"the report showed\n{_key_marker('BEGIN', label)}\nQUJDZGVmNOTREALONE\n"
+              f"QUJDZGVmNOTREALTWO\n{_key_marker('END', label)}\nthen exited")
+    out = _hook_redact(tmp_path, report)
+    assert "NOTREAL" not in out and "PRIVATE KEY" not in out, out
+    assert out == "the report showed\n[REDACTED]\nthen exited"
+
+
+def test_the_private_report_redactor_drops_an_unterminated_key_block(tmp_path: Path):
+    block = _key_marker("BEGIN", "OPENSSH PRIVATE KEY")
+    out = _hook_redact(tmp_path, f"cut off\n{block}\nQUJDNOTREAL")
+    assert "NOTREAL" not in out, out
+
+
+def test_the_private_report_redactor_keeps_ordinary_report_text(tmp_path: Path):
+    report = ("| phase | sha |\n|---|---|\n| audit | 5bfadbb6 |\n\n"
+              "`web/lib/secret.ts:12` leaks; see -----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQ\n"
+              "-----END PUBLIC KEY-----\ndone")
+    assert _hook_redact(tmp_path, report) == report
+# --- DS sanitizer drift: rules the publication gate had and this one lacked ---
+# Every value below is an invented placeholder. None is a credential or a real
+# execution id.
+
+
+class TestSanitizeExecutionIds:
+    """The public sanitizer must drop the same execution ids the push gate
+    refuses (scripts/ir_push_gate.py PRIVATE_ID_PATTERNS)."""
+
+    @pytest.mark.parametrize("exec_id", [
+        "0000abcd.0000ef01.01.02",  # dotted-hex IB exec id shape
+        "1234567890123",            # long numeric Flex exec id shape
+    ])
+    def test_execution_id_is_redacted(self, exec_id: str):
+        out = nif.sanitize(f"the fill trace {exec_id} did not reconcile")
+        assert exec_id not in out, out
+        assert "[REDACTED]" in out
+        assert out.endswith("did not reconcile")
+
+    def test_shas_pids_and_dates_are_not_execution_ids(self):
+        text = (
+            "Nothing went wrong this audit phase. The audited SHA "
+            "db25990d3c1e4b7a9f0e2d6c8b1a5f4e3d2c1b0a did not advance; "
+            "short SHA 1f04011f; another run owns the lock (pid 4242) "
+            "since 20261020."
+        )
+        assert nif.sanitize(text) == text
+
+
+class TestSanitizeEscapedQuoteValues:
+    def test_value_with_an_escaped_quote_is_redacted_whole(self):
+        secret = 'NOTREALaa\\"NOTREALbb'
+        out = nif.sanitize(f'the fixture held API_KEY="{secret}" before the fix')
+        assert "NOTREALbb" not in out, out
+        assert "[REDACTED]" in out
+        assert out.endswith("before the fix")
+
+    def test_two_quoted_assignments_on_one_line_do_not_merge(self):
+        out = nif.sanitize('A_TOKEN="NOTREAL1" and B_TOKEN="NOTREAL2" seen')
+        assert "NOTREAL1" not in out and "NOTREAL2" not in out, out
+        assert "and" in out and out.endswith("seen")
+
+
+class TestSanitizeYamlBlockScalars:
+    @pytest.mark.parametrize("indicator", ["|", ">", "|-", ">-", "|2-"])
+    def test_block_scalar_value_is_redacted(self, indicator: str):
+        text = (
+            f"the config carried\ndb_password: {indicator}\n"
+            "  NOTREALLINEONE\n  NOTREALLINETWO\nnext_step: resume\n"
+        )
+        out = nif.sanitize(text)
+        assert "NOTREALLINEONE" not in out, out
+        assert "NOTREALLINETWO" not in out, out
+        assert "[REDACTED]" in out
+        assert "next_step: resume" in out
+
+    def test_a_sibling_key_at_the_same_indent_is_not_swallowed(self):
+        text = (
+            "outer:\n  api_key: |\n    NOTREALBLOCKVALUE\n"
+            "  keep_me: ordinary prose\n"
+        )
+        out = nif.sanitize(text)
+        assert "NOTREALBLOCKVALUE" not in out, out
+        assert "keep_me: ordinary prose" in out, out

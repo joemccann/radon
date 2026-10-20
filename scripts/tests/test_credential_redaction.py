@@ -133,3 +133,68 @@ def test_cookie_headers_and_session_keys_are_redacted():
 def test_advisor_master_account_ids_are_redacted():
     body = scrub_credential_text("accounts F1234567 U7654321 DU1234567")
     assert body == "accounts [redacted-account] [redacted-account] [redacted-account]"
+
+
+# Every shape find_secret_assignments detected before its key-name pattern was
+# bounded, so the bound cannot silently narrow detection. Each case is
+# ASSEMBLED AT RUNTIME from a key fragment, a separator and a value fragment:
+# the repo contract is that no credential-shaped assignment is ever spelled
+# as a source literal, even a synthetic one, so a later SHA cannot trip the
+# secret scanner on this table.
+_SECRET_ASSIGNMENT_PARTS = (
+    ("API_KEY", "=", "a1b2c3d4e5f6g7h8"),
+    ("MY_API_KEY", "=", "a1b2c3d4e5f6g7h8"),
+    ("UW_TOKEN", "=", '"tok3n9abcdefghijklmn"'),
+    ("export ANTHROPIC_API_KEY", "=", "sk9abcdefghijklmnop"),
+    ('{"client_secret"', ": ", '"cs9abcdefghijklmnop"}'),
+    ("password", ": ", "p4ssw0rdp4ssw0rdp4ss"),
+    ("db_passwd", " = ", "'zq1xw2cv3bn4ml5kjh6'"),
+    ("SESSION_ID", "=", "qz4abcdefghijklmn12"),
+    ("csrf", " = ", "abc123def456ghi789j"),
+    ("access-token", ": ", "Ab1Cd2Ef3Gh4Ij5Kl6M"),
+    ("SECRET_KEY_PROD", "=", "0123456789abcdef"),
+    ("x_pwd", "=", "abcdef0123456789xy"),
+    ("accessKey", "=", "AKIA0123456789ABCDEF"),
+)
+
+_SECRET_ASSIGNMENT_CASES = tuple("".join(parts) for parts in _SECRET_ASSIGNMENT_PARTS)
+
+_NOT_SECRET_ASSIGNMENT_PARTS = (
+    ("token", " = ", "uuid4().hex"),
+    ("API_KEY", "=", "$UW_TOKEN"),
+    ("api_key", "=", "your-key-here-placeholder"),
+    ("password", "=", "changeme123456789"),
+    ("tests pass", ": ", "3 of 3 green"),
+    ("token", "=", "short1"),
+    ("api_key", "=", "allletterswithoutdigits"),
+    ("api_key", "=", "1234567890123456"),
+)
+
+_NOT_SECRET_ASSIGNMENT_CASES = tuple("".join(parts) for parts in _NOT_SECRET_ASSIGNMENT_PARTS)
+
+
+def test_secret_assignment_shapes_are_detected():
+    from credential_redaction import find_secret_assignments
+
+    for text in _SECRET_ASSIGNMENT_CASES:
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+    for text in _NOT_SECRET_ASSIGNMENT_CASES:
+        assert find_secret_assignments(text) == [], text
+
+
+def test_secret_assignment_scan_stays_linear_on_long_identifier_runs():
+    """The publication gate scans text an outside contributor shapes, so the
+    scanner must stay linear. An unbounded key-name run made it quadratic: a
+    long run of identifier characters stalled the gate for minutes."""
+    import subprocess
+
+    probe = (
+        "import sys;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import find_secret_assignments as f;"
+        "assert f('A' * 250_000 + '!') == []"
+    )
+    # A bounded scan needs ~0.3s here, interpreter startup included, so a 15s
+    # ceiling is ~50x headroom and CI load cannot flake it. The unbounded
+    # pattern needed minutes on this input.
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=15)
