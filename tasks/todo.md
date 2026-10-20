@@ -11,6 +11,18 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 Focused cloud: 97 passed (`test_grok_responder_code.py`, `test_responder_service_account.py`, `test_install_units.py`). Scripts: 16 passed (`test_grok_responder_work_root.py`, `test_grok_responder_fails_closed.py`). Docs ownership gate passed. The executed path is `/usr/local/lib/radon/grok-responder`; the clone stays writable. Host cutover is the operator refresh after deploy, not this commit. Did not touch `radon-app-runtime.sh` or `test_app_runtime.py`.
 
+# Bind-source inode generation (2026-10-20)
+
+Dependency graph: G1 -> G2 -> G3.
+
+- [x] G1 depends_on: [] Reproduce `test_run_refuses_a_bind_source_replaced_after_validation` at 5e65fdcd and d65ee584.
+- [x] G2 depends_on: [G1] Record inode generation in `resolve_bind_source` and force the swap test onto a reused inode.
+- [x] G3 depends_on: [G2] Focused green, PR, exact-head CI.
+
+## Review
+
+ext4 reissues the freed inode, so device:inode alone missed a same-owner directory swap. Serial 60/60 directory failures at both commits; d65ee584 under 4-way xdist was 5 pass / 55 fail of 60. After the generation check: serial 60/60 pass, load 60/60 pass, `test_app_runtime.py` 154 passed.
+
 # Taiwan/Korea export lead indicator (2026-10-19)
 
 Dependency graph: E1 -> E2 -> [E3, E4, E5] -> E6 -> E7.
