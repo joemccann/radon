@@ -8,6 +8,7 @@ import sqlite3
 import sys
 
 import pytest
+from research_editor_fixtures import certify
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api import db_http
 from research import assets, publish
@@ -55,16 +56,17 @@ def post(tmp_path, monkeypatch):
     pdf = tmp_path / "report.pdf"; pdf.write_bytes(b"%PDF-1.7 test document")
     png = tmp_path / "chart.png"; png.write_bytes(b"\x89PNG\r\n\x1a\n test chart")
     image_url = publish.store_asset(png)
-    return {"id": publish.stable_post_id("id:abc", "dispersion"), "title": "Dispersion shifted", "content": "New sector evidence.",
+    return certify({"id": publish.stable_post_id("id:abc", "dispersion"), "title": "Dispersion shifted", "content": "New sector evidence.",
             "timestamp": "2026-09-07T12:00:00Z", "images": [image_url], "tags": ["POSITIONING", "VOLATILITY"],
             "source": {"kind": "dropbox", "publisher": "MS", "url": publish.store_asset(pdf), "fileId": "id:abc", "revision": "rev1",
                        "contentHash": "a" * 64, "documentDate": "2026-09-05", "folderDate": "2026-09-06", "pages": [9],
-                       "figures": [{"url": image_url, "page": 9, "caption": "Original capture ratios"}]}}
+                       "figures": [{"url": image_url, "page": 9, "caption": "Original capture ratios"}]}})
 
 
 def test_retry_and_revision_update_one_post_and_source(db, post):
     publish.publish(post); publish.publish(post)
     post["title"] = "Corrected dispersion"; post["source"]["revision"] = "rev2"
+    post = certify(post)
     publish.publish(post)
     assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 1
     assert db.execute("SELECT title FROM posts").fetchone()[0] == "Corrected dispersion"
@@ -83,6 +85,7 @@ def test_revision_failure_preserves_both_prior_rows(db, post):
     publish.publish(post)
     db.execute("CREATE TRIGGER reject_update BEFORE UPDATE ON research_post_sources BEGIN SELECT RAISE(ABORT, 'reject'); END")
     post["title"] = "Must not persist"
+    post = certify(post)
     with pytest.raises(db_http.DbHttpError): publish.publish(post)
     assert db.execute("SELECT title FROM posts").fetchone()[0] == "Dispersion shifted"
 
@@ -225,6 +228,7 @@ def test_required_stable_id_components():
 def test_em_dash_and_bank_publisher_publish(db, post):
     post["content"] = "Rates \u2014 positioning"
     post["source"]["publisher"] = "Goldman Sachs"
+    post = certify(post)
     assert publish.publish(post) == post["id"]
     assert db.execute("SELECT content FROM posts").fetchone()[0] == "Rates \u2014 positioning"
 
@@ -239,6 +243,7 @@ def test_empty_caption_publishes(db, post):
 def test_long_title_and_body_publish(db, post):
     post["title"] = "T" * 600
     post["content"] = "B" * 40000
+    post = certify(post)
     publish.publish(post)
     assert db.execute("SELECT title, content FROM posts").fetchone() == (post["title"], post["content"])
 
@@ -247,6 +252,7 @@ def test_publication_preserves_evidence_quotes_assets_and_financial_punctuation(
     post["content"] = "Demand fell -5.65%. The 2-3% range isn't a forecast."
     post["source"]["source_quote"] = "Source wording\u2014unchanged."
     post["source"]["date_evidence"] = {"source_quote": "Report\u2014September 5, 2026"}
+    post = certify(post)
     before = copy.deepcopy(post)
     names = [post["source"]["url"].rsplit("/", 1)[1], post["images"][0].rsplit("/", 1)[1]]
     original_bytes = [(assets.assets_dir() / name).read_bytes() for name in names]
@@ -254,7 +260,7 @@ def test_publication_preserves_evidence_quotes_assets_and_financial_punctuation(
     assert post == before
     assert db.execute("SELECT content FROM posts").fetchone()[0] == before["content"]
     source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
-    assert source == before["source"]
+    assert source == {k: v for k, v in before["source"].items() if k != "humanizer"}
     assert [(assets.assets_dir() / name).read_bytes() for name in names] == original_bytes
 
 
@@ -301,9 +307,32 @@ def test_publication_manifest_binds_exact_source_pdf(db, tmp_path, monkeypatch):
         'source':{'kind':'dropbox','publisher':'Research','url':url,'evidenceUrl':evidence_url,
             'fileId':'id:test','revision':'r1','contentHash':'a'*64,'documentDate':'2026-09-07',
             'folderDate':'2026-09-07','pages':[1],'figures':[]}}
+    post = certify(post)
     publish.publish(post)
     saved = json.loads(db.execute('SELECT provenance_json FROM research_post_sources').fetchone()[0])
     assert saved['evidenceUrl'] == evidence_url
     other = tmp_path/'other.pdf';other.write_bytes(b'%PDF-1.4 different')
     post['source']['url'] = publish.store_asset(other)
     with pytest.raises(ValueError, match='original source PDF'): publish.publish(post)
+
+
+@pytest.mark.parametrize("tamper", ["missing", "changed_copy", "inflated_score", "qualitative"])
+def test_final_copy_requires_honest_current_certificate(db, post, tamper):
+    if tamper == "missing":
+        post["source"].pop("humanizer")
+    elif tamper == "changed_copy":
+        post["content"] += " Changed after scoring."
+    elif tamper == "inflated_score":
+        post["source"]["humanizer"]["score"] = 101
+    else:
+        post["source"]["humanizer"]["qualitative"] = [{"field": "title", "start": 0, "end": 10, "category": "filler"}]
+    with pytest.raises(publish.HumanizerCertificateError):
+        publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+def test_scoring_audit_is_not_exposed_in_feed_provenance(db, post):
+    publish.publish(post)
+    source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert "humanizer" not in source
+    assert "humanizer" in post["source"], "publication must not mutate durable outbox payload"

@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from credential_redaction import scrub_credential_text
 from utils.atomic_io import atomic_save
+from research.summary_editor import edit_summaries
 
 
 # The PDF parser subprocess needs only interpreter/locale plumbing, never the
@@ -694,6 +695,8 @@ class Pipeline:
             if manifest_path.is_file():
                 post['source']['evidenceUrl'] = self.publisher.store_asset(manifest_path)
             posts.append(post)
+        posts = edit_summaries(posts, ask=lambda instruction: self._ask(instruction, [], 'humanizer'),
+                               text=text, audit=audit, out=out)
         atomic_save(str(out / 'review.json'), {'source_sha256': evidence['source_sha256'], 'model': self.reviewer.model,
                     'policy_sha256': hashlib.sha256(Path(__file__).with_name('policy.md').read_bytes()).hexdigest(),
                     'feed_comparison_count': len(recent), 'audit': audit, 'posts': posts})

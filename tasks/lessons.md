@@ -1297,3 +1297,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
   and Gateway broker have different checkouts.
 
 - Before requesting another authenticated handover, validate every downstream dependency: launchd log open, canonical schema, reachable pinned transport, installed config and retained partial-grant receipts. A successful source admission is insufficient.
+
+## 2026-10-19: Writing rules must reach production generators
+
+- A global drafting instruction does not enforce generated PDF newsfeed summaries. Put the scoring/rewrite rule at the pipeline's final title/body boundary, bind approval to the exact copy, preserve factual verification and keep detailed audits separate from published text.
+- Mandatory text checks precede optional chart work when charts cannot edit the checked text. Preserve trusted code-established report-date grounding during editorial rewrites; never let a stylistic revision introduce a new date or fact.

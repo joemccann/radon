@@ -1,5 +1,6 @@
 """Extraction formatting and range tokenization must not invent numeric conflicts."""
 import pytest
+from research_editor_fixtures import clean_editor_reply
 from research.pipeline import date_evidence_passed, numeric_evidence_passed, required_numeric_quotes
 
 
@@ -90,6 +91,9 @@ def test_selected_date_page_reaches_independent_verifier(tmp_path, date_page_tex
     calls = []
     responses = [{'candidates': [item]}, result]
     def ask(prompt, images):
+        editorial = clean_editor_reply(prompt)
+        if editorial is not None:
+            return editorial
         calls.append((prompt, images))
         return responses.pop(0)
     def extract(pdf, out):
@@ -110,7 +114,7 @@ def test_selected_date_page_reaches_independent_verifier(tmp_path, date_page_tex
     assert len(posts) == expected_posts
     if posts:
         assert posts[0]['source']['pages'] == [2, 1]
-    audit = json.loads((tmp_path / 'evidence/case/review.json').read_text())['audit'][-1]
+    audit = next(row for row in json.loads((tmp_path / 'evidence/case/review.json').read_text())['audit'] if 'date_evidence_passed' in row)
     assert audit['date_evidence_passed'] == bool(expected_posts)
 
 

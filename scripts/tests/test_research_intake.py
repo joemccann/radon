@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from research import intake, model, publish
+from research_editor_fixtures import clean_editor_reply
 
 PAGE1 = ("## Economics Research ## 16 September 2026 | 5:20PM EDT # TIC Data: Continued Purchases of US Equities in July. "
          "Foreign investors bought $45bn of US equities in July, the second consecutive month above $40bn. "
@@ -85,6 +86,9 @@ class Reviewer:
         self.responses, self.calls = list(responses), []
 
     def ask_text(self, instruction):
+        editorial = clean_editor_reply(instruction)
+        if editorial is not None:
+            return editorial
         self.calls.append(("text", instruction, ()))
         return self.responses.pop(0)
 

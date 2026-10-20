@@ -22,6 +22,7 @@ from pathlib import Path
 
 from utils.atomic_io import atomic_save
 from research import book, generated_charts, force_include, ground, identify, learn, novelty, triage
+from research.summary_editor import edit_summaries
 from research.pipeline import DocumentDeadlineExceeded, EvidenceError, DOCUMENT_BUDGET_SECS, REVIEWER_CALL_TIMEOUT_SECS, comparison_posts
 from research.pipeline import creation_date_isolated, figures_isolated
 
@@ -443,10 +444,22 @@ class Pipeline:
                 posts.append(fallback)
                 review['always_publish_fallback'] = True
                 review['audit'].append({'always_publish_fallback': True, 'reason_code': 'ALWAYS_PUBLISH_FALLBACK'})
-        # Complete mandatory claim verification before spending the lease on
-        # optional graphics, so slow chart providers cannot starve later claims.
-        for post, candidate, key in chart_candidates:
-            self._attach_generated_charts(post, candidate, text, out / 'generated' / key, review)
+        def ask_editor(instruction):
+            self._guard_call('humanizer')
+            result = self.reviewer.ask_text(instruction)
+            self._checkpoint('humanizer')
+            return result
+
+        posts = edit_summaries(posts, ask=ask_editor, text=text, audit=review['audit'], out=out,
+                               source_context=identity.as_dict())
+        # All mandatory copy checks precede optional graphics. Chart attachment
+        # changes media/provenance only, leaving the scored title/body intact.
+        accepted = {post['id']: post for post in posts}
+        for original, candidate, key in chart_candidates:
+            if original['id'] in accepted:
+                post = accepted[original['id']]
+                candidate = dict(candidate, title=post['title'], content=post['content'])
+                self._attach_generated_charts(post, candidate, text, out / 'generated' / key, review)
         review['posts'] = posts
         if posts:
             self._remember(work['key'], fp, identity.publisher)
