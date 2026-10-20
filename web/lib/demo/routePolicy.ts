@@ -202,6 +202,7 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/ticker/seasonality": { GET: { mode: "fixture" } },
 
   // ── mirrored market snapshots (scripts/db/mirror_market_snapshots_to_demo.js)
+  "/api/asia-export-lead": { GET: SCAN_SNAPSHOTS },
   "/api/calm-streak": { GET: SCAN_SNAPSHOTS },
   "/api/cor": { GET: SCAN_SNAPSHOTS },
   "/api/credit-spread": { GET: SCAN_SNAPSHOTS },

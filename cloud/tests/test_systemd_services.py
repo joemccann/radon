@@ -180,6 +180,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-vix-pc.timer",
     "radon-vix-model-spread.service",
     "radon-vix-model-spread.timer",
+    "radon-asia-export-lead.service",
+    "radon-asia-export-lead.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -1826,3 +1828,26 @@ def test_vix_model_spread_timer_install_and_source_contract():
         digest = hashlib.sha256((cloud / 'services' / name).read_bytes()).hexdigest()
         assert f'{digest}  {name}' in manifest
         assert f'  {name}\n' in setup
+
+
+def test_asia_export_lead_install_schedule_and_watchdog_contract():
+    import hashlib
+    from scripts.watchdog.services import SCHEDULED_SERVICES, BUCKETS
+
+    cloud = Path(__file__).parents[1]
+    timer = (cloud / 'services/radon-asia-export-lead.timer').read_text()
+    service = (cloud / 'services/radon-asia-export-lead.service').read_text()
+    assert 'OnCalendar=*-*-* 09:40:00 UTC' in timer
+    assert 'RandomizedDelaySec=0' in timer and 'Persistent=true' in timer
+    assert 'TimeoutStartSec=300' in service
+    assert 'User=radon' in service and 'Environment=RADON_DB_NO_REPLICA=1' in service
+    assert 'scripts/fetch_asia_export_lead.py' in service
+    for suffix in ('service', 'timer'):
+        name = f'radon-asia-export-lead.{suffix}'
+        digest = hashlib.sha256((cloud / 'services' / name).read_bytes()).hexdigest()
+        assert f'{digest}  {name}' in (cloud / 'config/installed-units.sha256').read_text()
+        assert f'  {name}\n' in (cloud / 'scripts/setup-vps.sh').read_text()
+    assert SCHEDULED_SERVICES['asia-export-lead'] == {
+        'open': 26 * 3600, 'closed': 26 * 3600, 'requires_ib': False,
+    }
+    assert 'asia-export-lead' in BUCKETS['daily']

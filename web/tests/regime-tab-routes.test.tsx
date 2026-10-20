@@ -63,6 +63,7 @@ describe.each([
   ["breadth", "app/regime/breadth/page.tsx"],
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
+  ["exports", "app/regime/exports/page.tsx"],
   ["straddle", "app/regime/straddle/page.tsx"],
   ["cor", "app/regime/cor/page.tsx"],
   ["skew", "app/regime/skew/page.tsx"],
@@ -132,6 +133,9 @@ vi.mock("../components/BreadthPanel", () => ({
 }));
 vi.mock("../components/BpiPanel", () => ({
   default: () => <div data-testid="bpi-panel-stub" />,
+}));
+vi.mock("../components/AsiaExportLeadPanel", () => ({
+  default: () => <div data-testid="exports-panel-stub" />,
 }));
 vi.mock("../components/MarginDebtPanel", () => ({
   default: () => <div data-testid="margin-panel-stub" />,
@@ -725,5 +729,22 @@ describe("RegimePanel — the URL, not component state, owns the active tab", ()
 
     expect(pushSpy).toHaveBeenCalledWith("/regime/vcg");
     expect(within(container).queryByTestId("vcg-panel-stub")).toBeNull();
+  });
+});
+
+describe("export lead route", () => {
+  it("registers exports under Models with its desktop label", async () => {
+    const { REGIME_RAIL_GROUPS, REGIME_TAB_LABEL, FLAGGABLE_REGIME_TABS } = await import("../lib/regimeRail");
+    expect(REGIME_RAIL_GROUPS.find((group) => group.label === "Models")?.tabs).toContain("exports");
+    expect(REGIME_TAB_LABEL.exports).toBe("EXPORT LEAD");
+    expect(FLAGGABLE_REGIME_TABS).not.toContain("exports");
+  });
+  afterEach(() => cleanup());
+  it("mounts the export panel and navigates through the Models rail", () => {
+    mockedPathname = "/regime/exports";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("exports-panel-stub")).toBeTruthy();
+    within(container).getByRole("button", { name: /^EXPORT LEAD$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/exports");
   });
 });

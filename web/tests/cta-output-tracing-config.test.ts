@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("host-data output tracing", () => {
   it("keeps live host snapshots and backups out of transitive assistant/order bundles", async () => {
     const { default: config } = await import("../next.config.mjs");
-    for (const route of ["/api/assistant", "/api/orders/place", "/api/vix-model-spread"]) {
+    for (const route of ["/api/assistant", "/api/orders/place", "/api/vix-model-spread", "/api/asia-export-lead"]) {
       expect(config.outputFileTracingExcludes[route]).toEqual(["../data/**/*"]);
     }
   });

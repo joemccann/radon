@@ -1,3 +1,19 @@
+# Taiwan/Korea export lead indicator (2026-10-19)
+
+Dependency graph: E1 -> E2 -> [E3, E4, E5] -> E6 -> E7.
+
+- [x] E1 depends_on: [] Verify official total-export sources, history, units, releases and reuse terms; capture fixtures. User authorized exports first, licensed MSCI EPS later.
+- [x] E2 depends_on: [E1] Specify trailing 3-month mean of equal-weight monthly YoY export growth, six-calendar-month display shift and honest availability; record Python/API/UI red tests.
+- [x] E3 depends_on: [E2] Ingestion worktree: robust source clients, Turso migration/writer, scheduled collection, watchdog/manifest pins and green tests.
+- [x] E4 depends_on: [E2] API worktree: types, db-first missing/cache contracts, hook, freshness schedule and green tests.
+- [x] E5 depends_on: [E2] UI worktree: Regime tab, strip, observed-versus-shifted chart, freshness rail, accessible mobile layout and green tests.
+- [x] E6 depends_on: [E3, E4, E5] Integrate full suites/typecheck and real-source/Turso/browser verification; inspect screenshots and release-time semantics.
+- [ ] E7 depends_on: [E6] PR exact-head green, accepted notification, admin merge, automatic production data/API/timer/browser verification and worktree cleanup.
+
+## Review
+
+Proposed route exports; service asia-export-lead; component AsiaExportLead; tab EXPORT LEAD; next free migration 0099 on base42c897c90. The image labels total Taiwan/Korea exports, not semiconductor-only exports. The six-month shift is a visualization of an unvalidated historical hypothesis, not a forward EPS forecast. The October15 article's no-downturn claim is historical context, never hardcoded current state. User chose official exports first with the licensed MSCI overlay unavailable. Both official sources fetched without credentials; reuse terms verified. Red: Python collection fails on missing collector; API six cases fail on missing route; panel collection fails on missing component. Evidence saved outside worktrees under asia-export-lead-20261019. Three implementation lanes merged. Independent Sol review reproduced source truncation and approved the correction before any writes; Luna passed 35 UI/API/hook cases. Final focused checks: 63 ingestion/registration, 121 API integration and 176 UI cases. Collector executable line coverage is 99.2%, client 100% (branches unmeasured). Full Vitest: 11,330 passed, 21 skipped. Full Python: 16,438 passed, 10 skipped, 54 unchanged local Gateway TLS-fixture failures. Full cloud: 3,264 passed, 10 skipped, 12 unchanged Mac Linux-tooling failures. Typecheck retains two unchanged ExplainPost content errors in DashboardNewsFeed/NewsfeedLightbox. Production compile and trace audit pass; six production-build browser cases pass, including resize navigation and readable tick spacing. Actual Turso schema 99 has 321 history rows, September composite 58.43498029405504%, healthy heartbeat; real Chrome screenshots cover both themes and phone/desktop with a timer-derived 09:40 UTC countdown. Preserve unrelated primary checkout WIP; no generated codemap files committed. Exact-head PR delivery and production verification follow.
+
 # PDF Humanizer resource bounds (2026-10-19)
 
 Dependency graph: B1 -> B2 -> B3 -> B4.
