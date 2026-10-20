@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-10-19T09:00:08Z",
-  "node_count": 4056,
-  "edge_count": 8301,
+  "generated_at": "2026-10-20T09:00:11Z",
+  "node_count": 4083,
+  "edge_count": 8360,
   "areas": {
-    "web": 2329,
+    "web": 2341,
     "site": 159,
-    "scripts": 1401,
+    "scripts": 1416,
     "cloud": 119,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 237
+      "count": 239
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 280
+      "count": 281
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 238
+      "count": 239
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 451
+      "count": 454
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1101
+      "count": 1106
     },
     {
       "id": "site/app",
@@ -100,7 +100,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 188
+      "count": 189
     },
     {
       "id": "scripts/ai_cycle",
@@ -130,7 +130,7 @@
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 25
+      "count": 26
     },
     {
       "id": "scripts/control_service",
@@ -205,7 +205,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 31
+      "count": 34
     },
     {
       "id": "scripts/runner",
@@ -225,7 +225,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 732
+      "count": 742
     },
     {
       "id": "scripts/trade_blotter",
@@ -297,7 +297,7 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 303,
+      "in": 305,
       "out": 1,
       "test": false
     },
@@ -311,8 +311,15 @@
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 129,
+      "in": 130,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceSections.tsx",
+      "area": "web",
+      "in": 25,
+      "out": 86,
       "test": false
     },
     {
@@ -323,16 +330,9 @@
       "test": false
     },
     {
-      "id": "web/components/WorkspaceSections.tsx",
-      "area": "web",
-      "in": 24,
-      "out": 84,
-      "test": false
-    },
-    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 59,
+      "in": 60,
       "out": 44,
       "test": false
     },
@@ -344,17 +344,17 @@
       "test": false
     },
     {
+      "id": "scripts/db/__init__.py",
+      "area": "scripts",
+      "in": 100,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "scripts/db/writer.py",
       "area": "scripts",
       "in": 96,
       "out": 5,
-      "test": false
-    },
-    {
-      "id": "scripts/db/__init__.py",
-      "area": "scripts",
-      "in": 98,
-      "out": 1,
       "test": false
     },
     {
@@ -368,7 +368,7 @@
       "id": "web/lib/assistant/nextLoaders.ts",
       "area": "web",
       "in": 2,
-      "out": 83,
+      "out": 84,
       "test": false
     },
     {
@@ -381,7 +381,7 @@
     {
       "id": "web/lib/pageTitle.ts",
       "area": "web",
-      "in": 73,
+      "in": 74,
       "out": 2,
       "test": false
     },
@@ -400,6 +400,13 @@
       "test": false
     },
     {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 62,
+      "out": 3,
+      "test": false
+    },
+    {
       "id": "scripts/api/server.py",
       "area": "scripts",
       "in": 49,
@@ -407,16 +414,9 @@
       "test": false
     },
     {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
-      "in": 61,
-      "out": 3,
-      "test": false
-    },
-    {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 57,
+      "in": 58,
       "out": 6,
       "test": false
     },
@@ -424,34 +424,41 @@
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
       "in": 4,
-      "out": 59,
+      "out": 60,
       "test": false
     },
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 52,
+      "in": 53,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/SectionEmptyState.tsx",
       "area": "web",
-      "in": 54,
+      "in": 55,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 49,
+      "in": 50,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 53,
+      "in": 54,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/SpectralLoader.tsx",
+      "area": "web",
+      "in": 51,
       "out": 0,
       "test": false
     },
@@ -463,10 +470,10 @@
       "test": false
     },
     {
-      "id": "web/components/SpectralLoader.tsx",
+      "id": "web/components/RequestError.tsx",
       "area": "web",
-      "in": 50,
-      "out": 0,
+      "in": 47,
+      "out": 2,
       "test": false
     },
     {
@@ -477,17 +484,24 @@
       "test": false
     },
     {
-      "id": "web/components/RequestError.tsx",
+      "id": "web/lib/useViewport.ts",
       "area": "web",
       "in": 46,
-      "out": 2,
+      "out": 1,
       "test": false
     },
     {
-      "id": "web/lib/useViewport.ts",
+      "id": "web/e2e/clear-fixtures.ts",
       "area": "web",
-      "in": 45,
-      "out": 1,
+      "in": 33,
+      "out": 10,
+      "test": true
+    },
+    {
+      "id": "web/lib/chartSystem.ts",
+      "area": "web",
+      "in": 42,
+      "out": 0,
       "test": false
     },
     {
@@ -498,18 +512,11 @@
       "test": false
     },
     {
-      "id": "web/lib/chartSystem.ts",
+      "id": "web/lib/refreshSchedule.ts",
       "area": "web",
-      "in": 41,
+      "in": 40,
       "out": 0,
       "test": false
-    },
-    {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 31,
-      "out": 10,
-      "test": true
     },
     {
       "id": "scripts/clients/ib_client.py",
@@ -526,9 +533,9 @@
       "test": false
     },
     {
-      "id": "web/lib/refreshSchedule.ts",
+      "id": "web/lib/serviceHealthWindows.ts",
       "area": "web",
-      "in": 39,
+      "in": 38,
       "out": 0,
       "test": false
     },
@@ -540,14 +547,14 @@
       "test": false
     },
     {
-      "id": "web/lib/serviceHealthWindows.ts",
+      "id": "web/components/mobile/MetricCell.tsx",
       "area": "web",
       "in": 37,
       "out": 0,
       "test": false
     },
     {
-      "id": "web/components/mobile/MetricCell.tsx",
+      "id": "web/components/RegimeStrip.tsx",
       "area": "web",
       "in": 37,
       "out": 0,
@@ -558,13 +565,6 @@
       "area": "web",
       "in": 17,
       "out": 20,
-      "test": false
-    },
-    {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 36,
-      "out": 0,
       "test": false
     },
     {
