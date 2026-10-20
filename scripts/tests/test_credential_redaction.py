@@ -261,3 +261,30 @@ def test_a_sibling_key_at_the_same_indent_is_not_eaten():
     out = scrub_credential_text(text)
     assert "NOTREALBLOCK4" not in out, out
     assert "keep_me: ordinary prose" in out, out
+
+
+def test_credential_shape_labels_survive_a_block_scalar():
+    """find_credential_shapes derives its label from the replacement with
+    re.sub, so a callable replacement in the specific-pattern list made it
+    raise TypeError on any text containing a block scalar."""
+    from credential_redaction import find_credential_shapes
+
+    labels = find_credential_shapes("password: |\n  NOTREALLABEL1\ntail\n")
+    assert labels == ["[redacted-secret]"], labels
+    assert find_credential_shapes("nothing here") == []
+
+
+def test_block_scalar_header_prefix_scan_is_linear():
+    """The header prefix is one bounded run of one character class. A nested
+    quantifier over an overlapping class backtracked catastrophically: 0.03s,
+    0.51s and 8.3s at 16, 20 and 24 repetitions of a marker pair."""
+    import subprocess
+
+    probe = (
+        "import sys;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import scrub_credential_text as s;"
+        "t = '#- ' * 20_000 + 'x\\n';"
+        "assert s(t) == t"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)

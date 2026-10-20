@@ -46,8 +46,13 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     Groups: `indent`, `lead` (comment or bullet prefix) and `key`, so a caller
     can preserve the header and replace only the value.
     """
+    # The lead is ONE bounded run of a single character class. A nested
+    # `(?:[#>*+-]+[ \t]*)*` is ambiguous about where each repetition ends, so
+    # a long marker run backtracks catastrophically: measured 0.03s, 0.51s and
+    # 8.3s for 16, 20 and 24 repetitions of `#- `, which is the same
+    # availability failure this module was just hardened against.
     return re.compile(
-        rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+-]+[ \t]*)*)"
+        rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+\-][#>*+\- \t]{{0,23}})?)"
         rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
         r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
         r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
@@ -57,13 +62,24 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
 
 _SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY)
 
+_BLOCK_SCALAR_LABEL = "[redacted-secret]"
+
+
+def _redact_block_scalar(text: str) -> str:
+    """Remove block-scalar bodies BEFORE any line-oriented rule runs.
+
+    Kept out of ``_SPECIFIC_SCRUB_PATTERNS`` deliberately: every entry there
+    must carry a STRING replacement, because ``find_credential_shapes``
+    derives its label from it with ``re.sub``, which raises on a callable.
+    """
+    return _SECRET_BLOCK_SCALAR_RE.sub(
+        lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}"
+        f"{_BLOCK_SCALAR_LABEL}\n",
+        text,
+    )
+
+
 _SPECIFIC_SCRUB_PATTERNS = [
-    # Runs before the generic assignment rule, which would otherwise rewrite
-    # the header line and leave the indented body published.
-    (
-        _SECRET_BLOCK_SCALAR_RE,
-        lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}[redacted-secret]\n",
-    ),
     # PEM / OpenSSH / PGP private-key blocks span lines; a block cut off
     # before its END line is redacted to the end of the text.
     (
@@ -195,6 +211,8 @@ def find_credential_shapes(text: str) -> list[str]:
     matched value, so the result is safe to log.
     """
     found: list[str] = []
+    if _SECRET_BLOCK_SCALAR_RE.search(text or ""):
+        found.append(_BLOCK_SCALAR_LABEL)
     for pattern, repl in _SPECIFIC_SCRUB_PATTERNS:
         if pattern.search(text or ""):
             label = re.sub(r"\\\d", "", repl).strip()
@@ -205,6 +223,7 @@ def find_credential_shapes(text: str) -> list[str]:
 
 def scrub_credential_text(value: Any) -> Any:
     if isinstance(value, str):
+        value = _redact_block_scalar(value)
         for pattern, repl in _SECRET_SCRUB_PATTERNS:
             value = pattern.sub(repl, value)
         return value
