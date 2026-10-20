@@ -67,7 +67,10 @@ _COOKIE_HEADER_RE = re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.I
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
 _SECRET_KEY_NAME = (
     r"[A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
-    r"API[-_]?KEY|[-_]KEY|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)"
+    # `[-_]PWD`, not bare `PWD`: the canonical scrubber spells it `_pwd` for
+    # the same reason, so an ordinary working-directory variable in a log line
+    # is not mistaken for a credential.
+    r"API[-_]?KEY|[-_]KEY|[-_]PWD|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)"
     r"[A-Za-z0-9_-]*"
 )
 # A quoted value runs to its closing quote; an escaped quote inside it is part
