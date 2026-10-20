@@ -32,6 +32,18 @@ personal-use collector samples official Cboe closes daily at 02:50 UTC, with
 no randomized delay. Migration 0098, payload/storage and operator-only access
 are defined in [the indicator spec](../docs/indicators/vix-model-spread.md).
 
+## Taiwan and Korea export sampling
+
+`radon-asia-export-lead.service` and `.timer` are included in setup's
+`SERVICE_FILES` and `config/installed-units.sha256`; a normal green deploy
+installs both and enables the daily 09:40 UTC timer. The collector uses free
+official monthly total USD export histories, with attribution, and needs no
+additional credentials or operator installation. Migration 0099 creates
+`asia_export_lead_history`; the `asia-export-lead` snapshot and heartbeat
+share a 26-hour freshness window. Source failures retain the last good
+snapshot. See [the indicator specification](../docs/indicators/exports.md).
+The MSCI forward-EPS comparison remains unavailable pending licensed access.
+
 ## Runtime Planes
 
 Production is three planes. Do not collapse them.

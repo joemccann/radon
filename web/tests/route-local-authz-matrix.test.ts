@@ -77,6 +77,7 @@ const SETUP_TOKEN_GUARDED_ROUTES = [
 const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // AI infrastructure is a cache-only research read, like llm-token-index.
   "ai-cycle",
+  "asia-export-lead",
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.

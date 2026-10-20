@@ -105,6 +105,9 @@ export const BPI_REFRESH: RefreshSchedule = [
   { weekdays: TUE_SAT, hours: [11], minutes: [0] },
 ];
 
+/** cloud/services/radon-asia-export-lead.timer */
+export const ASIA_EXPORT_LEAD_REFRESH: RefreshSchedule = [daily(9, 40)];
+
 /** cloud/services/radon-margin-debt.timer */
 export const MARGIN_DEBT_REFRESH: RefreshSchedule = [daily(13, 10)];
 

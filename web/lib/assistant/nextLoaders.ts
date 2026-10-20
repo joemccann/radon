@@ -9,6 +9,7 @@ export type NextRouteModule = Record<string, unknown>;
 export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "alerts": () => import("@/app/api/alerts/route") as Promise<NextRouteModule>,
   "alerts/[id]": () => import("@/app/api/alerts/[id]/route") as Promise<NextRouteModule>,
+  "asia-export-lead": () => import("@/app/api/asia-export-lead/route") as Promise<NextRouteModule>,
   "blotter": () => import("@/app/api/blotter/route") as Promise<NextRouteModule>,
   "bookmarks": () => import("@/app/api/bookmarks/route") as Promise<NextRouteModule>,
   "bookmarks/[post_id]": () => import("@/app/api/bookmarks/[post_id]/route") as Promise<NextRouteModule>,

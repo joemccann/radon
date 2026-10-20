@@ -3,7 +3,7 @@ import json
 import sys
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from discover import (
@@ -412,13 +412,19 @@ def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
     from discover import fetch_darkpool_multi
     from fetch_flow import DARKPOOL_PAGE_LIMIT
 
-    # Prune uses wall-clock ET, not the frozen session. 2026-09-04 aged out
-    # of MAX_AGE_DAYS on 2026-10-20 and the first write in a process deleted
-    # the scoring row before the assertion.
-    anchor = datetime.now(dpc._ET).date()
-    session_today = (anchor - timedelta(days=1)).isoformat()
-    session_prior = (anchor - timedelta(days=7)).isoformat()
-    monkeypatch.setattr(dpc, "_today_et", lambda: session_today)
+    session_today = "2026-09-10"
+    session_prior = "2026-09-04"
+    frozen_now = dpc._ET.localize(datetime.fromisoformat(session_today + "T12:00:00"))
+
+    class CacheClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen_now.astimezone(tz) if tz is not None else frozen_now.replace(tzinfo=None)
+
+    # Freeze the cache's session, write timestamp and pruning clock together.
+    # Exercise the first-write prune even when other tests wrote cache entries.
+    monkeypatch.setattr(dpc, "datetime", CacheClock)
+    monkeypatch.setattr(dpc, "_write_count", 0)
 
     def _trade(i: int, executed_at: str) -> dict:
         return {
