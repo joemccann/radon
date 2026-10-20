@@ -1,3 +1,16 @@
+# PDF summary Humanizer gate (2026-10-19)
+
+Dependency graph: H1 -> H2; H3 depends_on: [H2]; H4 depends_on: [H3].
+
+- [x] H1 depends_on: [] Trace both PDF pipelines, fallback summaries, durable publication and the saved rubric.
+- [x] H2 depends_on: [H1] Add failing tests, shared honest scoring, bounded fact-preserving rewrites and final publication admission.
+- [x] H3 depends_on: [H2] Verify with independent Sol and Luna agents; run focused and full suites and document audit/retry behavior.
+- [ ] H4 depends_on: [H3] Publish PR, confirm exact-head CI green, notify once, admin-merge and verify production delivery.
+
+## Review
+
+Sol approved with 99 focused tests; Luna approved with 337. Core: 74 passing cases and 218/218 executable lines via stdlib trace (branches unmeasured). Live configured model smoke: 85 -> rewrite -> factual verification -> 100, four calls, no feed publication. Full Vitest: 11,279 passed, 21 skipped. Full Python: 16,365 passed, 10 skipped; 54 pre-existing local TLS fixture failures in unchanged Gateway modules. Final research/root: 1,609 passed, 23 subtests; cloud: 3,256 passed, 10 skipped with 12 local Linux-tooling failures in unchanged modules. Exact-head delivery pending. Summary title/body are the scored surface; source captions, figures, hashes and provenance remain immutable. The 19 supplemental patterns are unweighted blockers. Provider outages retain durable parking; the primary checkout remains untouched.
+
 # Dedicated responder SSH pickup safety (2026-10-18)
 
 Dependency graph: GP1 -> GP2 -> GP3 -> GP4.

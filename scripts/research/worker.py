@@ -13,6 +13,7 @@ from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.pipeline import DocumentDeadlineExceeded
+from research.summary_editor import HumanizerCertificateError
 from research.state import State, date_scopes, eligible, folder_backlog_gap, should_persist_cursor
 from utils.atomic_io import atomic_save
 
@@ -156,7 +157,12 @@ def flush_outbox(state, publisher):
         # Discovery may cancel a snapshot row; already-dispatched HTTP is the boundary.
         if not state.outbox_current(row['id'], row['work_key']):
             continue
-        publisher.publish(row['payload'])
+        try:
+            publisher.publish(row['payload'])
+        except HumanizerCertificateError:
+            # Only unpublished work is re-reviewed; existing feed decisions stay intact.
+            state.requeue_unscored(row['id'], row['work_key'])
+            continue
         state.published(row['id'])
         published += 1
     return published

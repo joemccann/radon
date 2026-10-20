@@ -358,6 +358,24 @@ class State:
             WHERE o.id=? AND o.work_key=? AND o.status='pending' AND w.status='complete'""",
             (publication_id,key)).fetchone())
 
+    def requeue_unscored(self, publication_id, key):
+        """Cancel an unscored pending batch and review its source again atomically."""
+        with self.db:
+            row = self.db.execute("""SELECT w.result FROM outbox o JOIN work w ON w.key=o.work_key
+                WHERE o.id=? AND o.work_key=? AND o.status='pending' AND w.status='complete'""",
+                (publication_id, key)).fetchone()
+            if row is None:
+                return False
+            try:
+                result = json.loads(row['result'] or 'null')
+            except (TypeError, ValueError):
+                return False
+            if not isinstance(result, dict) or result.get('status') not in ('reviewed', 'operator_approved'):
+                return False
+            self.db.execute("UPDATE outbox SET status='cancelled' WHERE work_key=? AND status='pending'", (key,))
+            return bool(self.db.execute("""UPDATE work SET status='pending',available_at=?,error='humanizer_recheck_required'
+                WHERE key=? AND status='complete'""", (time.time(), key)).rowcount)
+
     def published(self, publication_id):
         with self.db:
             self.db.execute("UPDATE outbox SET status='published' WHERE id=? AND status='pending'", (publication_id,))

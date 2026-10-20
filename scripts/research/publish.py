@@ -11,7 +11,8 @@ import time
 
 from api.db_http import HRANA_TIMEOUT_S, hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
-from research import force_include
+from research import force_include, humanizer
+from research.summary_editor import HumanizerCertificateError
 
 PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24
@@ -199,6 +200,10 @@ def publish(post: dict) -> str:
     tags = post.get("tags", [])
     if not isinstance(tags, list) or not tags or len(tags) > 12 or any(not isinstance(tag, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9&-]{0,63}", tag) for tag in tags):
         raise ValueError("normalized research tags required")
+    try:
+        humanizer.validate_certificate(post)
+    except ValueError as error:
+        raise HumanizerCertificateError(str(error)) from error
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
@@ -209,7 +214,7 @@ def publish(post: dict) -> str:
     hrana_transaction([(sql, args),
                        ("INSERT INTO research_post_sources(post_id,provenance_json) VALUES (?,?) "
                         "ON CONFLICT(post_id) DO UPDATE SET provenance_json=excluded.provenance_json",
-                        (post_id, json.dumps(source, separators=(",", ":"))))])
+                        (post_id, json.dumps({k: v for k, v in source.items() if k != "humanizer"}, separators=(",", ":"))))])
     return post_id
 
 
