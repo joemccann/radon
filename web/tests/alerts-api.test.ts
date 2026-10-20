@@ -62,7 +62,7 @@ describe("auth gate", () => {
   it("POST /api/alerts returns 401 when signed out", async () => {
     currentUserId = null;
     const { POST } = await import("../app/api/alerts/route");
-    const res = await POST(req("http://x/api/alerts", { method: "POST", body: "{}" }));
+    const res = await POST(req("http://localhost/api/alerts", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
   });
 });
@@ -71,7 +71,7 @@ describe("CRUD", () => {
   async function createRule(body: Record<string, unknown>): Promise<Response> {
     const { POST } = await import("../app/api/alerts/route");
     return POST(
-      req("http://x/api/alerts", {
+      req("http://localhost/api/alerts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -170,7 +170,7 @@ describe("CRUD", () => {
     const ruleId = rules[0].id;
 
     const { DELETE } = await import("../app/api/alerts/[id]/route");
-    const res = await DELETE(req(`http://x/api/alerts/${ruleId}`, { method: "DELETE" }), {
+    const res = await DELETE(req(`http://localhost/api/alerts/${ruleId}`, { method: "DELETE" }), {
       params: Promise.resolve({ id: ruleId }),
     });
     expect(res.status).toBe(200);
