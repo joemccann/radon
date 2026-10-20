@@ -1571,6 +1571,30 @@ class TestPostSetupEnvSeeding:
         assert installs[0] in body
 
 
+    def test_no_root_write_lands_inside_the_service_checkout(self) -> None:
+        """install without -T treats a destination that is a symlink to a
+        directory as that directory and creates a file inside it, so a root
+        write anywhere under the service account's own tree is a primitive.
+        setup-vps.sh writes web/.env as radon; post-setup.sh must too."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        writes = re.compile(
+            rf"\b(install|cp|tee)\s[^|;&\n]*{re.escape(SERVICE_CHECKOUT)}"
+        )
+        offenders = [line for line in _root_ssh_commands(script) if writes.search(line)]
+        assert offenders == []
+
+    def test_public_web_env_is_written_by_the_owning_account(self) -> None:
+        """Same shape setup-vps.sh uses: radon writes its own copy, so root
+        never creates, chmods or chowns a path under the checkout."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        web_env_lines = [
+            line for line in _root_ssh_commands(script) if "web/.env" in line
+        ]
+        assert web_env_lines, "the public web env write disappeared"
+        for line in web_env_lines:
+            assert "sudo -u radon" in line, line
+
+
 class TestSetupVpsEnvAdvice:
     """setup-vps.sh runs as root on the host, where ${CLOUD_DIR} is the
     service-account checkout. Operator advice it prints is advice to run a
