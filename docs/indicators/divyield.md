@@ -174,7 +174,7 @@ ordered ascending by date, monthly `approximate:1` rows then daily rows.
 ## Timer — `cloud/services/radon-divyield.{service,timer}`
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/home/radon/radon-cloud/.env`, `Environment=RADON_DB_NO_REPLICA=1`,
+  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_divyield.py`
   (venv python directly, never the wrapper), `TimeoutStartSec=2100`
   (`SWEEP_BUDGET_S=1800` plus one in-flight Yahoo timeout; 900s SIGTERM'd a

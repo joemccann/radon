@@ -48,8 +48,8 @@ Severity routing for the Pushover channel (DUR-14 escalation)
 The Resend email channel was DELETED 2026-06-12: ``enabled_channels()``
 registered it but no emitter ever existed (the startup log claimed a
 channel that did not exist), and no RESEND_API_KEY is present in any
-environment (VPS radon-cloud/.env, unit files, laptop .env / web/.env /
-~/.zshrc — all checked, zero matches).
+environment (production `/etc/radon/env`, the retired `radon-cloud/.env`,
+unit files, laptop .env / web/.env / ~/.zshrc: all checked, zero matches).
 
 If no external channel is configured a one-line warning prints on
 startup so the operator notices alerts will only land in the table.

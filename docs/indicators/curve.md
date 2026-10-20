@@ -169,7 +169,7 @@ Helpers `web/lib/yieldCurve.ts` (pure, unit-tested):
 - `scripts/watchdog/services.py`: `"yield-curve": {"open": 26*_HOUR, "closed": 26*_HOUR,
   "requires_ib": False}` + append to the daily-bucket check list.
 - `cloud/services/radon-yield-curve.service`: Type=oneshot, User=radon,
-  WorkingDirectory=/home/radon/radon, EnvironmentFile=/home/radon/radon-cloud/.env,
+  WorkingDirectory=/home/radon/radon, EnvironmentFile=/etc/radon/env,
   Environment=RADON_DB_NO_REPLICA=1,
   ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_yield_curve.py,
   TimeoutStartSec=300, journal out/err, StartLimitIntervalSec=300, StartLimitBurst=5.

@@ -1,6 +1,6 @@
 # Flex scheduled delivery: architecture decision
 
-Status: proposed, research complete, no code written.
+Status: proposal from 2026-08-17. The shipped pull is `radon-flex-pull` (`cloud/services/radon-flex-pull.service`), not `radon-flex-ingest`. That unit loads `/var/lib/radon/flex-secrets/env` and marks `/etc/radon/env` and the retired `/home/radon/radon-cloud/.env` inaccessible. Do not copy unit text from this proposal.
 Date: 2026-08-17.
 Scope: replace the IBKR Flex Web Service polling path for `IB_FLEX_NAV_QUERY_ID=1442520`.
 
@@ -342,8 +342,9 @@ new test asserting the ingest job produces byte-identical row output to the CLI 
 
 `scripts/flex_delivery_ingest.py`, plus `cloud/services/radon-flex-ingest.{service,timer}`.
 
-Model the unit on `radon-perf-twr.service`: `Type=oneshot`, `User=radon`,
-`WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/home/radon/radon-cloud/.env`,
+Model the unit on the shipped `radon-flex-pull.service`: `Type=oneshot`, `User=radon`,
+`WorkingDirectory=/home/radon/radon`, `EnvironmentFile=-/var/lib/radon/flex-secrets/env`
+(not `/etc/radon/env`, and not the retired `/home/radon/radon-cloud/.env`),
 `Environment=RADON_DB_NO_REPLICA=1`, `StartLimitIntervalSec=300`, `StartLimitBurst=5`. Add the
 hardening in section E, which no existing unit uses and which this job needs more than any other.
 
