@@ -27,7 +27,7 @@ deployment. If nothing remains, Next is "Fixed with green deployment".
 Security agents do not write GitHub issue comments. The harness posts the
 only public security comment: loop, phase, exit code, sha and timestamp.
 
-Stdlib only.
+Stdlib only, plus the canonical scrubber (scripts/credential_redaction.py).
 """
 from __future__ import annotations
 
@@ -36,6 +36,8 @@ import json
 import math
 import re
 import sys
+
+from credential_redaction import EXECUTION_ID_PATTERNS, build_block_scalar_re
 
 HEADING_DISCOVERED = "Issue discovered"
 HEADING_DONE = "What was done to fix it"
@@ -63,12 +65,33 @@ _FENCE_RE = re.compile(r"```.*?```", re.S)
 _COOKIE_HEADER_RE = re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.I)
 # The key may be quoted (JSON) or a hyphenated header name, the value quoted
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
+# Both identifier runs are BOUNDED. Unbounded runs on either side of the
+# alternation share its alphabet, so the engine redistributes prefix and
+# suffix at every offset and the scan is quadratic in the length of an
+# identifier run: measured 0.0084s, 0.0336s, 0.1371s and 0.5519s for 250,
+# 500, 1000 and 2000 repetitions of a credential word. This sanitizer runs
+# over attacker-shaped source excerpts in PR bodies, so that is a delivery
+# stall. 32 is far above any real prefix (`NEXT_PUBLIC_CLERK_PUBLISHABLE` is
+# 29) and bounds the per-offset work.
+_SECRET_KEY_NAME = (
+    r"[A-Za-z0-9_-]{0,32}(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
+    # `[-_]PWD`, not bare `PWD`: the canonical scrubber spells it `_pwd` for
+    # the same reason, so an ordinary working-directory variable in a log line
+    # is not mistaken for a credential.
+    r"API[-_]?KEY|[-_]KEY|[-_]PWD|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)"
+    r"[A-Za-z0-9_-]{0,32}"
+)
+# A quoted value runs to its closing quote; an escaped quote inside it is part
+# of the value, not the end of it, so the alternation must step over `\"`.
 _SECRET_ASSIGN_RE = re.compile(
-    r"\b([A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
-    r"API[-_]?KEY|[-_]KEY|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)[A-Za-z0-9_-]*)([\"']?\s*[=:]\s*)"
-    r"(?:(?:basic|bearer|digest|token)\s+)?(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)",
+    rf"\b({_SECRET_KEY_NAME})([\"']?\s*[=:]\s*)"
+    r"(?:(?:basic|bearer|digest|token)\s+)?"
+    r"(?:\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|\S+)",
     re.I,
 )
+# The block-scalar structure is shared with the canonical scrubber so the two
+# cannot drift again; this module keeps its own key alphabet.
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY_NAME)
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
@@ -201,6 +224,10 @@ def sanitize(text: str) -> str:
     )
     text = _PRIVATE_KEY_BLOCK_RE.sub(REDACTED, text)
     text = _COOKIE_HEADER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
+    text = _SECRET_BLOCK_SCALAR_RE.sub(
+        lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}{REDACTED}\n",
+        text,
+    )
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)
     text = _FILE_LINE_RE.sub(REDACTED, text)
@@ -211,6 +238,10 @@ def sanitize(text: str) -> str:
     )
     text = _EMAIL_RE.sub(REDACTED, text)
     text = _ACCOUNT_RE.sub(REDACTED, text)
+    # Same execution-id shapes the publication gate refuses. URLs (including
+    # CI run links) are already redacted above, so no exemption is needed.
+    for _, pattern in EXECUTION_ID_PATTERNS:
+        text = pattern.sub(REDACTED, text)
     text = text.replace("\x00USAGE\x00", _USAGE_KEEP)
     text = _LOG_POINTER_RE.sub("", text)
     text = re.sub(r"[ \t]{2,}", " ", text)

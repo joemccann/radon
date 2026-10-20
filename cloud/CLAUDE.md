@@ -272,6 +272,12 @@ only a prefix of a baked key is rejected.
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`). Production loads env only from this file. `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory.
+- Seeding `/etc/radon/env` never reads a source the service account can
+  replace. `post-setup.sh` sends the bytes on the ssh connection's stdin and
+  installs them from a root-only `mktemp -d /root/...` staging directory, and
+  the advice `setup-vps.sh` prints when the file is missing stages the
+  template the same way. Never `install` or `scp` straight out of
+  `/home/radon/radon` or `/tmp`: both follow the source.
 - Staging media: `/var/lib/radon/media` (owner `radon:radon-media`; caddy is not in group `radon`). Root changes its mode only through an `O_NOFOLLOW` fd (`chmod_dir_nofollow`); ACL changes inside it, including recursive `-R -P` walks, run as `radon` via `setpriv`
 - Control-plane rollback state (manifest, ready marker) in radon-owned `/var/lib/radon`: root restores it only through a pinned `O_NOFOLLOW` directory fd, writing a fresh `O_EXCL` temp then renaming it over the target (`restore_target`); never a by-name `rm` then `cp`
 - Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;

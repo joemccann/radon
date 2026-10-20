@@ -79,11 +79,42 @@ def _finite(value: Any) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
+def _carries_option_fields(leg: dict) -> bool:
+    """True when a leg supplies the option coordinates the placer needs.
+
+    ``ib_place_order`` builds EVERY combo leg through
+    ``resolve_option_contract(symbol, expiry, strike, right)`` and sends the
+    envelope as a BAG; no leg's ``sec_type`` is ever read there. So these
+    three fields, not the label, say what IB will actually receive.
+
+    A MEANINGFUL value, not a present key: ``ib_orders`` serializes a real
+    resolved share leg with ``strike: 0.0`` and empty expiry and right, and
+    reading mere presence demoted a genuine covered combo to an unpriceable
+    option (pinned by
+    ``scripts/api/tests/test_modify_snapshot_contract_shape.py``). A strike of
+    zero is no strike, and the placer could not build an option from it
+    either.
+    """
+    if str(leg.get("expiry") or "").strip():
+        return True
+    if str(leg.get("right") or "").strip():
+        return True
+    strike = _finite(leg.get("strike"))
+    return strike is not None and strike > 0
+
+
 def _is_stk_leg(leg: dict) -> bool:
-    return str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK"
+    """True only for a GENUINE stock leg: labelled STK and carrying none of
+    the option coordinates. A caller-supplied label alone must not exempt a
+    leg from the option risk pricing that is the only gate on combo worst
+    case — the buy-write's real share leg (no expiry/strike/right) still is
+    exempt, which is the documented RC-D2 case."""
+    if str(leg.get("sec_type") or leg.get("secType") or "").upper() != "STK":
+        return False
+    return not _carries_option_fields(leg)
 
 
-def _combo_risk_per_unit(legs: Any) -> Optional[float]:
+def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]:
     """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
 
     Shorts are paired against longs of the same right — the nearest strike
@@ -96,6 +127,12 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     is unbounded, so the strike stands in as a documented margin proxy — not a
     true bound, but a number in the right order of magnitude, which is the
     whole point of the cap.
+
+    ``reverse`` inverts each leg's side, for a SELL BAG envelope: IB flips
+    every leg of a combo sold short, so a SELL envelope of BUY legs is short
+    at the broker. Reading the leg action alone priced it at $0. A leg with
+    no action at all keeps its existing "long" meaning (the exit-order
+    service passes position legs with none, and never an envelope action).
     """
     if not isinstance(legs, list) or not legs:
         return None
@@ -117,7 +154,11 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
         if strike is None or strike <= 0 or ratio <= 0:
             return None
         right = str(leg.get("right") or "").upper()[:1]
-        side = "short" if str(leg.get("action") or "").upper().startswith("SELL") else "long"
+        action = str(leg.get("action") or "").upper()
+        is_short = action.startswith("SELL")
+        if reverse and action:
+            is_short = not is_short
+        side = "short" if is_short else "long"
         sides = by_right.setdefault(right, {"long": [], "short": []})
         sides[side].extend([strike] * ratio)
 
@@ -264,7 +305,8 @@ def combo_max_loss(params: dict) -> Optional[float]:
     quantity, price = _quantity_and_price(params)
     if quantity is None or price is None:
         return None
-    risk_per_unit = _combo_risk_per_unit(params.get("legs"))
+    is_sell_envelope = str(params.get("action") or "").upper().startswith("SELL")
+    risk_per_unit = _combo_risk_per_unit(params.get("legs"), reverse=is_sell_envelope)
     if risk_per_unit is None:
         return None
     multiplier = _OPTION_MULTIPLIER
@@ -361,6 +403,19 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                 }
             if _is_stk_leg(leg):
                 continue
+            if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+                # The leg claims to be shares but carries option coordinates,
+                # and the placer transmits every combo leg as an option
+                # regardless of the label. Refuse rather than price a
+                # contract shape the funnel will not build.
+                return {
+                    "code": "ORDER_COMBO_LEG_SEC_TYPE",
+                    "message": (
+                        "combo leg is labelled STK but carries option fields "
+                        "(expiry/strike/right), so its risk cannot be "
+                        "attributed — refused"
+                    ),
+                }
             strike = _finite(leg.get("strike") or 0) or 0.0
             if strike <= 0:
                 return {
@@ -456,6 +511,13 @@ def _working_order_shape(working_order: dict) -> tuple[str, Optional[list]]:
         return ("combo" if _legs_are_priceable(legs) else "option"), legs
     if sec_type == "STK":
         return "stock", None
+    if sec_type == "FUT":
+        # A future priced with the option's 100 multiplier under-counts its
+        # notional by the ratio of the two, which is RC-D1 on the modify path:
+        # check_order_limits already fails a future closed when no valid
+        # contract multiplier is available, and that only happens if the shape
+        # survives to it.
+        return "future", None
     return "option", None
 
 
@@ -557,6 +619,18 @@ def check_modify_limits(
         "limitPrice": price,
         "action": action or working_order.get("action"),
     }
+    if order_type == "future":
+        # Same two shapes as _working_order_shape: the snapshot nests the
+        # contract, a caller-composed replacement carries the field flat. An
+        # absent or unusable multiplier reaches check_order_limits as None and
+        # is refused there, not guessed at here.
+        contract = working_order.get("contract")
+        contract = contract if isinstance(contract, dict) else {}
+        params["multiplier"] = (
+            contract.get("multiplier")
+            if contract.get("multiplier") is not None
+            else working_order.get("multiplier")
+        )
     if order_type == "combo" and legs is not None:
         params["legs"] = legs
     return check_order_limits(params)

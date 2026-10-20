@@ -1973,8 +1973,19 @@ validate_env() {
 
   if [[ ! -f "$env_file" ]]; then
     log_error ".env file not found at ${env_file}"
-    echo "  Copy the example and fill in your values:"
-    echo "    install -m 0640 -o root -g radon ${CLOUD_DIR}/.env.example ${env_file}"
+    # cat, cp, scp and install all follow the SOURCE, so staging the
+    # destination is not enough and neither is printing a command for the
+    # operator to run: the read itself has to come from the root-owned
+    # provision store. stage_from_checkout compares the working-tree body
+    # against the committed blob there and installs the blob, so a template
+    # the service account has replaced is a stop, not a silent publish.
+    log_info "Seeding ${env_file} from the provisioned template..."
+    if ! stage_from_checkout "${CLOUD_DIR}/.env.example" "$env_file" 0640 \
+      -o root -g radon; then
+      log_error "Could not seed ${env_file} from the provisioned template"
+      return 1
+    fi
+    log_warn "Fill in your values in ${env_file}, then run this script again"
     return 1
   fi
 

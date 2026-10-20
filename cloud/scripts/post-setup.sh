@@ -14,6 +14,8 @@ readonly VPS_ROOT="root@${VPS_HOST}"
 readonly VPS_RADON="radon@${VPS_HOST}"
 readonly LOCAL_RADON="$HOME/dev/apps/finance/radon"
 readonly ENV_FILE="${RADON_LOCAL_ENV_FILE:-${LOCAL_RADON}/.env.production}"
+readonly CLOUD_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ENV_TEMPLATE="${CLOUD_DIR}/.env.example"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -25,6 +27,38 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_step()  { echo -e "\n${CYAN}━━━ $* ━━━${NC}"; }
 
+# install_remote_env <local source>
+# Seeds the canonical /etc/radon/env from bytes this script sends on stdin.
+# Root never dereferences a path the radon service account can replace:
+# install and scp both follow the source, so a link planted in the
+# radon-owned VPS checkout or at a fixed name in world-writable /tmp turned
+# this copy into an arbitrary-file read or write. The bytes stage in a
+# root-only mktemp directory under /root and are installed from there.
+install_remote_env() {
+  local source="$1"
+  if [[ -L "$source" || ! -f "$source" ]]; then
+    log_warn "Refusing ${source}: not a regular file (missing or a symlink)"
+    return 1
+  fi
+  # The destination needs the same care as the source. /etc/radon is
+  # root:radon mode 1770, so while the canonical file is absent the service
+  # account can create an `env` entry; install without -T would treat a link
+  # to a directory as that directory and write inside it. Refuse a
+  # non-regular destination, stage a root-owned sibling in the same
+  # directory, and publish with an atomic rename that never follows a link.
+  ssh "${VPS_ROOT}" 'set -euo pipefail; umask 077
+    if [ -e /etc/radon/env ] && { [ -L /etc/radon/env ] || [ ! -f /etc/radon/env ]; }; then
+      echo "Refusing /etc/radon/env: not a regular file" >&2; exit 1
+    fi
+    d=$(mktemp -d /root/radon-env.XXXXXX)
+    cat > "$d/env"
+    install -d -m 0750 -o root -g radon /etc/radon
+    staged=$(mktemp /etc/radon/.env.XXXXXX)
+    install -m 0640 -o root -g radon "$d/env" "$staged"
+    mv -T "$staged" /etc/radon/env
+    rm -rf "$d"' < "$source"
+}
+
 # ---------------------------------------------------------------------------
 # Step 1: Write .env
 # ---------------------------------------------------------------------------
@@ -34,8 +68,7 @@ log_step "Step 1: Write .env to VPS"
 # (group) but cannot rewrite secrets.
 if [[ -f "$ENV_FILE" ]]; then
   log_info "Using ${ENV_FILE}"
-  scp "$ENV_FILE" "${VPS_ROOT}:/tmp/radon.env"
-  ssh "${VPS_ROOT}" 'install -m 0640 -o root -g radon /tmp/radon.env /etc/radon/env && rm -f /tmp/radon.env'
+  install_remote_env "$ENV_FILE"
 else
   log_warn "No .env.production found at ${ENV_FILE}"
   echo "  Create it with your production values, or enter them now."
@@ -43,14 +76,15 @@ else
   read -p "  Paste the path to your .env file (or press Enter to write interactively): " env_path
 
   if [[ -n "$env_path" ]] && [[ -f "$env_path" ]]; then
-    scp "$env_path" "${VPS_ROOT}:/tmp/radon.env"
-    ssh "${VPS_ROOT}" 'install -m 0640 -o root -g radon /tmp/radon.env /etc/radon/env && rm -f /tmp/radon.env'
+    install_remote_env "$env_path"
   else
     echo ""
-    echo "  Opening nano on the VPS to edit .env..."
+    echo "  Seeding /etc/radon/env from this checkout's ${ENV_TEMPLATE##*/},"
+    echo "  then opening nano on the VPS to edit it..."
     echo "  Fill in your values, save (Ctrl+O), and exit (Ctrl+X)."
     echo ""
-    ssh -t "${VPS_ROOT}" "install -m 0640 -o root -g radon /home/radon/radon/cloud/.env.example /etc/radon/env && nano /etc/radon/env"
+    install_remote_env "$ENV_TEMPLATE"
+    ssh -t "${VPS_ROOT}" 'nano /etc/radon/env'
   fi
 fi
 
@@ -63,7 +97,12 @@ log_info ".env configured"
 log_step "Step 2: Write public web env and rebuild Next.js"
 
 ssh "${VPS_ROOT}" 'for unit in radon-nextjs.service radon-relay.service radon-newsfeed.service; do if systemctl is-active --quiet "$unit"; then echo "Refusing live rebuild while $unit is active; use scripts/deploy.sh with the exact tested commit SHA" >&2; exit 78; fi; done'
-ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /etc/radon/env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /etc/radon/env -- bun run build 2>&1 | tail -5'
+# web/ is radon-owned, so radon writes its own copy and root never creates a
+# path there. install without -T treats a destination that radon has replaced
+# with a link to a directory as that directory and creates a file inside it,
+# which is a root-assisted write into a location radon chooses. Same shape as
+# setup_node in setup-vps.sh.
+ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /etc/radon/env > "$tmp" || true; sudo -u radon sh -c '\''umask 077; cat > "$1" && chmod 0600 "$1"'\'' _ /home/radon/radon/web/.env < "$tmp"; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /etc/radon/env -- bun run build 2>&1 | tail -5'
 
 log_info "Next.js rebuilt with production env vars"
 

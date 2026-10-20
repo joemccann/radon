@@ -424,7 +424,14 @@ write_mcp_env
     def test_bootstrap_web_env_writers_are_public_only_and_private(self, script: Path) -> None:
         text = script.read_text(encoding="utf-8")
         assert "NEXT_PUBLIC_" in text
-        assert "install -m 0600" in text
+        # The mode matters, not the tool. Both scripts now write web/.env as
+        # the owning account (umask plus an explicit chmod) rather than with a
+        # root install, because the destination sits inside that account's own
+        # tree and install without -T follows a link to a directory there.
+        private_write = "install -m 0600" in text or (
+            "umask 077" in text and "chmod 0600" in text
+        )
+        assert private_write, text
         assert "run_with_env.py" in text
         assert not re.search(r"\bcp\s+[^\n]*radon-cloud/\.env[^\n]*web/\.env", text)
 
