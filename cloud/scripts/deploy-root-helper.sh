@@ -1333,6 +1333,55 @@ revert_installed_units() {
     $(( ${#timers[@]} + ${#services[@]} )) "$restored"
 }
 
+# DS-2026-10-17-16: the isolated responder executes this tree, never the
+# writable clone. Bytes come from the same trusted main tip as the units.
+# A tip that predates the installer (unit-install fixtures included) skips.
+install_grok_responder_code_from_tip() {
+  local tip="$1"
+  local target="${RADON_GROK_RESPONDER_CODE:-/usr/local/lib/radon/grok-responder}"
+  local stage installer have_code=0 have_installer=0 rc=0
+
+  provision_git cat-file -e "${tip}:scripts/grok_page_responder.py" >/dev/null 2>&1 && have_code=1
+  provision_git cat-file -e "${tip}:cloud/scripts/install-grok-responder-code.sh" >/dev/null 2>&1 && have_installer=1
+  if (( have_code == 0 && have_installer == 0 )); then
+    return 0
+  fi
+  if (( have_code == 0 || have_installer == 0 )); then
+    echo "install-units: grok responder code and installer must be installed together" >&2
+    return 66
+  fi
+  stage="$(mktemp -d "${STATE_DIR}/grok-responder-code.XXXXXX")" || return 73
+  installer="${stage}/install-grok-responder-code.sh"
+  if ! provision_git cat-file blob "${tip}:cloud/scripts/install-grok-responder-code.sh" > "$installer"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not read the grok responder installer" >&2
+    return 66
+  fi
+  chmod 0700 "$installer"
+  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" scripts > "${stage}/scripts.tar"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not read the grok responder scripts tree" >&2
+    return 66
+  fi
+  if ! "$TAR" -x -f "${stage}/scripts.tar" -C "$stage"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not unpack the grok responder scripts tree" >&2
+    return 66
+  fi
+  if (( HELPER_TEST_MODE == 1 )); then
+    RADON_HELPER_SKIP_CHOWN=1
+  fi
+  RADON_HELPER_SKIP_CHOWN="${RADON_HELPER_SKIP_CHOWN:-0}" \
+    /bin/bash "$installer" "${stage}/scripts" "$target" || rc=$?
+  "$RM" -rf -- "$stage"
+  if (( rc != 0 )); then
+    echo "install-units: grok responder code install failed" >&2
+    return "$rc"
+  fi
+  printf 'install-units: grok responder code refreshed at %s\n' "$target"
+  return 0
+}
+
 install_manifest_units() {
   local tip manifest line digest unit target candidate actual was_present backup
   local -a new_timers=() skipped=()
@@ -1466,6 +1515,7 @@ install_manifest_units() {
   for entry in ${skipped[@]+"${skipped[@]}"}; do
     printf 'install-units: skipped %s\n' "$entry"
   done
+  install_grok_responder_code_from_tip "$tip" || return $?
   if (( enable_failures )); then
     printf 'install-units: %d timer(s) failed to enable\n' "$enable_failures" >&2
     return 1

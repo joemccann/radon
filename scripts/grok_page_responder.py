@@ -1135,5 +1135,21 @@ def run_cycle(
         lock.unlink(missing_ok=True)
 
 
+def work_root() -> Path:
+    """Clone the cycle edits.
+
+    The executed file can live in a root-owned tree. Unset keeps the
+    historical default: the project directory that contains this file.
+    """
+    configured = os.environ.get("RADON_GROK_REPO", "").strip()
+    if not configured:
+        return _PROJECT_DIR
+    root = Path(configured)
+    if not root.is_absolute():
+        print("RADON_GROK_REPO must be an absolute path", file=sys.stderr)
+        raise SystemExit(2)
+    return root
+
+
 if __name__ == "__main__":
-    sys.exit(run_cycle(_PROJECT_DIR))
+    sys.exit(run_cycle(work_root()))

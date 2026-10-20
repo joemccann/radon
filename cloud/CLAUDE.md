@@ -643,7 +643,14 @@ and pages via Pushover plus the unit watchdog. The job heartbeats
 The optional isolated responder is prepared through
 `cloud/scripts/setup-grok-responder-account.sh`, from a root-only provision
 stage. Nested `services/responder-domain/` units are outside automatic fleet
-installation. The explicit native-login and pickup checks precede a
+installation. The responder's executed code is not: `setup-vps.sh` and every
+`install-units` publish a root-owned tree at
+`/usr/local/lib/radon/grok-responder`, and the optional unit runs that tree
+with `python3.13 -E -S` (DS-2026-10-17-16). The account clone stays the
+writable worktree. An already-finalized host swaps its installed unit only
+when `setup-grok-responder-account.sh` is rerun from a trusted stage; the
+`ready` marker selects that refresh and leaves the clone and timers alone.
+The explicit native-login and pickup checks precede a
 transactional timer handover; root-private installed-unit inventory adds the
 optional units to ongoing drift verification. The canonical keeper upgrader
 remains unchanged. Migration and rollback commands are owned by

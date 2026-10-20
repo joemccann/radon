@@ -20,7 +20,8 @@ Environment=RADON_GROK_LKG_PATH=/var/lib/radon-responder/runtime/grok_lkg.json
 Environment=RADON_GROK_RUNTIME_LOCK=/var/lib/radon-responder/runtime/grok-runtime.lock
 Environment=XDG_CACHE_HOME=/var/lib/radon-responder/cache
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/var/lib/radon-responder/repo/.venv/bin/python /var/lib/radon-responder/repo/scripts/grok_page_responder.py
+Environment=RADON_GROK_REPO=/var/lib/radon-responder/repo
+ExecStart=/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py
 TimeoutStartSec=3900
 StandardOutput=journal
 StandardError=journal
@@ -32,7 +33,7 @@ ProtectSystem=strict
 RestrictSUIDSGID=yes
 CapabilityBoundingSet=
 InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
-ReadOnlyPaths=/var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade /var/lib/radon-responder/.grok/bin /var/lib/radon-responder/.grok/hooks /var/lib/radon-responder/.grok/downloads
+ReadOnlyPaths=/var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade /var/lib/radon-responder/.grok/bin /var/lib/radon-responder/.grok/hooks /var/lib/radon-responder/.grok/downloads /usr/local/lib/radon/grok-responder
 ReadWritePaths=/var/lib/radon-responder/repo /var/lib/radon-responder/.grok /var/lib/radon-responder/cache /var/lib/radon-responder/runtime/grok-runtime.lock
 
 [Install]
