@@ -7,6 +7,7 @@ from research.pipeline import EvidenceError, Pipeline, comparison_posts, review_
 from research.model import ModelError, Reviewer
 from research.state import State
 from research.worker import discover, flush_outbox
+from research_editor_fixtures import clean_editor_reply
 
 
 def candidate():
@@ -172,7 +173,7 @@ def test_persisted_outbox_flushes_during_discovery_outage(tmp_path,monkeypatch):
 
 def test_selector_reviewer_success_keeps_original_crop_and_provenance(tmp_path):
     item=candidate();responses=[{'candidates':[item]},crop_gates(),gates() | {'numeric_checks':[{'proposal_quote':'September4','page':1,'source_quote':'September4','supported':True}], 'date_evidence':{'page':1,'date_text':'4 September 2026','source_quote':'Report date: 4 September 2026','role':'report','role_verified':True}}];calls=[]
-    reviewer=SimpleNamespace(model='test',ask=lambda prompt,images:responses.pop(0))
+    reviewer=SimpleNamespace(model='test',ask=lambda prompt,images:clean_editor_reply(prompt) or responses.pop(0))
     def extract(pdf,out):
         (out/'page.md').write_text('Report date: 4 September 2026. September4 source')
         (out/'manifest.json').write_text('{"schema_version":1}')

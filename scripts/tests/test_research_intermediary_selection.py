@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from research_editor_fixtures import clean_editor_reply
 
 from research.pipeline import (
     DATE_EVIDENCE_ROLES,
@@ -115,7 +116,7 @@ def test_zh_goldman_desk_recap_publishes_instead_of_provenance_hold(tmp_path):
     work = {'key': 'zh-wrap', 'folder_date': '2026-09-11',
             'metadata': {'name': 'zero-hedge-wrap.pdf', 'id': 'id:zh',
                          'rev': 'r1', 'content_hash': 'b' * 64}}
-    pipe = Pipeline(tmp_path, SimpleNamespace(model='test', ask=lambda *a: responses.pop(0)),
+    pipe = Pipeline(tmp_path, SimpleNamespace(model='test', ask=lambda prompt, images: clean_editor_reply(prompt) or responses.pop(0)),
                     SimpleNamespace(store_asset=lambda _: '/source.pdf'), render, extract)
     posts = pipe.process(work, tmp_path / 'wrap.pdf', [])
     assert posts, 'ZH Goldman-desk recap must produce candidates, not an empty provenance hold'
@@ -123,7 +124,7 @@ def test_zh_goldman_desk_recap_publishes_instead_of_provenance_hold(tmp_path):
     audit = json.loads((tmp_path / 'evidence/zh-wrap/review.json').read_text())['audit']
     assert not any(row.get('held') in ('invalid candidate', 'intermediary', 'omnibus', 'provenance')
                    for row in audit)
-    assert audit[-1]['date_evidence_passed'] is True
+    assert next(row for row in audit if 'date_evidence_passed' in row)['date_evidence_passed'] is True
 
 
 def test_zh_name_in_publisher_is_not_a_hold():

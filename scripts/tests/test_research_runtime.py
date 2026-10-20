@@ -14,6 +14,7 @@ import requests
 import httpx
 
 from research import model, pipeline, seed, worker
+from research_editor_fixtures import clean_editor_reply
 from research.publish import stable_post_id
 from research.state import State
 
@@ -148,6 +149,9 @@ def fixture_pipeline(tmp_path,responses,count=1):
         for p in pages:(out/f"{p}.png").write_bytes(b"image")
         return [{"page_number":p,"image_file":f"{p}.png","width":800,"height":1100} for p in pages]
     def ask(prompt, images):
+        editorial = clean_editor_reply(prompt)
+        if editorial is not None:
+            return editorial
         if prompt.startswith(pipeline.CROP_INSPECTION):
             return {"figures":[{"index":i,"complete":True,"chart_titles":["Yen demand"],"axis_labels":["JPY"],
                 "legend_labels":[],"source_labels":["JPMorgan"],"missing_or_clipped":[],"unrelated_prose":False,"reason":"Visible"}
