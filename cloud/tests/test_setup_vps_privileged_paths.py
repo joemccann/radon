@@ -7,7 +7,8 @@ symlinks, so a link planted by the service account turned a root copy or
 chown into an arbitrary-file primitive. These tests run the provisioning
 functions against a radon-writable fake checkout plus stub binaries on PATH
 (bash 3.2 compatible, no root needed) and pin a static contract over every
-privileged line in the script.
+privileged line in the script. The last class holds the same contract for
+post-setup.sh, which seeds the canonical env file over ssh as root.
 """
 
 from __future__ import annotations
@@ -1514,3 +1515,117 @@ class TestRadonSshDirectory:
         calls = _calls_on(log, ssh_dir)
         assert not any(c.startswith("ssh-keygen as=radon -t") for c in calls)
         assert [c for c in calls if " as=root " in c] == []
+
+
+# ── post-setup.sh: seeding /etc/radon/env never dereferences a
+#    radon-replaceable path ─────────────────────────────────────────────
+
+POST_SETUP = ROOT / "scripts" / "post-setup.sh"
+SERVICE_CHECKOUT = "/home/radon/radon"
+
+
+def _root_ssh_commands(script: str) -> list[str]:
+    """Every line that hands a command to the remote root account."""
+    return [
+        line.strip()
+        for line in script.splitlines()
+        if not line.strip().startswith("#") and "${VPS_ROOT}" in line
+    ]
+
+
+class TestPostSetupEnvSeeding:
+    def test_env_seeding_reads_no_source_inside_the_service_checkout(self) -> None:
+        seeding = re.compile(
+            rf"\b(install|cp)\s[^|;&]*{re.escape(SERVICE_CHECKOUT)}[^|;&]*/etc/radon/env"
+        )
+        offenders = [
+            line
+            for line in _root_ssh_commands(POST_SETUP.read_text(encoding="utf-8"))
+            if seeding.search(line)
+        ]
+        assert offenders == []
+
+    def test_env_bytes_never_stage_in_a_world_writable_path(self) -> None:
+        script = POST_SETUP.read_text(encoding="utf-8")
+        assert "/tmp/radon.env" not in script
+        offenders = [
+            line
+            for line in _root_ssh_commands(script)
+            if "/etc/radon/env" in line and re.search(r"\s/tmp/", line)
+        ]
+        assert offenders == []
+
+    def test_env_bytes_arrive_on_stdin_through_a_root_only_staging_dir(self) -> None:
+        script = POST_SETUP.read_text(encoding="utf-8")
+        body = _function_body(script, "install_remote_env")
+        assert "mktemp -d" in body
+        assert "cat >" in body
+        assert "install -m 0640 -o root -g radon" in body
+        assert REFUSAL in body
+        # Every /etc/radon/env publication goes through this one helper, and
+        # the helper publishes exactly once. The publication is an atomic
+        # rename rather than a direct install, because the destination lives
+        # in a directory the service account can create entries in.
+        publish = re.compile(r"\bmv\s+(?:-T|--no-target-directory)\s+\S+\s+/etc/radon/env\b")
+        assert len(publish.findall(body)) == 1, body
+        assert publish.findall(script) == publish.findall(body), script
+        direct = re.compile(r"\b(install|cp|tee)\s[^|;&\n]*\s/etc/radon/env\b")
+        assert direct.findall(script) == [], script
+
+
+    def test_no_root_write_lands_inside_the_service_checkout(self) -> None:
+        """install without -T treats a destination that is a symlink to a
+        directory as that directory and creates a file inside it, so a root
+        write anywhere under the service account's own tree is a primitive.
+        setup-vps.sh writes web/.env as radon; post-setup.sh must too."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        writes = re.compile(
+            rf"\b(install|cp|tee)\s[^|;&\n]*{re.escape(SERVICE_CHECKOUT)}"
+        )
+        offenders = [line for line in _root_ssh_commands(script) if writes.search(line)]
+        assert offenders == []
+
+    def test_env_publication_refuses_a_nonregular_destination(self) -> None:
+        """/etc/radon is root:radon 1770, so the service account can create an
+        `env` entry while the canonical file is absent. install without -T
+        treats a link to a directory as that directory and writes inside it,
+        so the destination needs a check and an atomic rename."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        helper = script[script.index("install_remote_env() {"):]
+        helper = helper[: helper.index("\n}\n")]
+        assert "mv -T" in helper or "mv --no-target-directory" in helper, helper
+        assert "-L /etc/radon/env" in helper, helper
+
+    def test_public_web_env_is_written_by_the_owning_account(self) -> None:
+        """Same shape setup-vps.sh uses: radon writes its own copy, so root
+        never creates, chmods or chowns a path under the checkout."""
+        script = POST_SETUP.read_text(encoding="utf-8")
+        web_env_lines = [
+            line for line in _root_ssh_commands(script) if "web/.env" in line
+        ]
+        assert web_env_lines, "the public web env write disappeared"
+        for line in web_env_lines:
+            assert "sudo -u radon" in line, line
+
+
+class TestSetupVpsEnvAdvice:
+    """setup-vps.sh runs as root on the host, where ${CLOUD_DIR} is the
+    service-account checkout. Operator advice it prints is advice to run a
+    privileged command, so it must not name a source root would dereference
+    out of that checkout."""
+
+    def test_missing_env_path_reads_no_source_from_the_service_checkout(self) -> None:
+        """cat, cp and install all follow the source, so staging the
+        destination is not enough: the READ has to come from the root store."""
+        script = SETUP.read_text(encoding="utf-8")
+        body = script[script.index("validate_env() {"):]
+        body = body[: body.index("\n}\n")]
+        unsafe = re.compile(r"\b(install|cp|cat)\s[^|;&\n]*\$\{CLOUD_DIR\}")
+        offenders = [line.strip() for line in body.splitlines() if unsafe.search(line)]
+        assert offenders == []
+
+    def test_missing_env_is_seeded_through_the_provenance_helper(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        body = script[script.index("validate_env() {"):]
+        body = body[: body.index("\n}\n")]
+        assert "stage_from_checkout" in body

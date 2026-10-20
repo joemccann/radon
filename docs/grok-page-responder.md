@@ -312,6 +312,11 @@ pickup refuses:
 - running at all from a clone that is behind `origin/main` (stale pickup
   code).
 
+The run-identifier shapes the gate refuses live in
+`scripts/credential_redaction.py` and are shared with the public-text
+sanitizer, so the two cannot acquire rules independently. Add a new shape
+there, not in the gate.
+
 REL-296 / R-715: the gate scans each unpublished commit, including merge
 parents, so adding and then deleting an identifier still refuses publication.
 Empty and binary files, filenames and branch names are included; refusal

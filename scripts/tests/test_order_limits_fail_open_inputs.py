@@ -121,3 +121,129 @@ class TestUnparseableInputsRefuse:
         })
         assert violation is not None
         assert violation["code"] == "ORDER_COMBO_STRIKE"
+
+
+class TestStkLabelIsNotTrusted:
+    """The placement funnel builds EVERY combo leg as an option contract and
+    sends the envelope as a BAG; a leg's `sec_type` is never consulted there.
+    So a leg labelled STK that still carries `expiry`/`strike`/`right` is an
+    option at IB, and the STK label must not buy it an exemption from the
+    option risk pricing that is the only gate on combo worst case."""
+
+    def _mislabelled_strangle(self) -> dict:
+        return {
+            "type": "combo", "symbol": "SPY", "action": "BUY",
+            "quantity": 500, "limitPrice": -0.20,
+            "legs": [
+                {"sec_type": "STK", "expiry": "20260918", "strike": 700.0,
+                 "right": "C", "action": "SELL", "ratio": 1},
+                {"sec_type": "STK", "expiry": "20260918", "strike": 600.0,
+                 "right": "P", "action": "SELL", "ratio": 1},
+            ],
+        }
+
+    def test_stk_labelled_option_legs_are_refused(self):
+        """$65M of assignment on a 500-lot short strangle priced at $0."""
+        violation = order_limits.check_order_limits(self._mislabelled_strangle())
+        assert violation is not None, (
+            "an all-STK-labelled combo of option legs cleared the loss cap"
+        )
+
+    def test_stk_labelled_option_legs_are_priced_not_skipped(self):
+        """Even read directly, the mislabelled legs must carry their risk."""
+        loss = order_limits.combo_max_loss(self._mislabelled_strangle())
+        assert loss is not None and loss > order_limits.max_combo_loss_dollars()
+
+    def test_secType_spelling_is_covered_too(self):
+        combo = self._mislabelled_strangle()
+        for leg in combo["legs"]:
+            leg["secType"] = leg.pop("sec_type")
+        assert order_limits.check_order_limits(combo) is not None
+
+    def test_a_genuine_buy_write_is_still_accepted(self):
+        """Must-preserve: a real stock leg (no expiry/strike/right) stays
+        allowed and stays skipped from option risk pricing."""
+        buy_write = {
+            "type": "combo", "symbol": "NVDA", "action": "BUY",
+            "quantity": 1, "limitPrice": 1.0,
+            "legs": [
+                {"sec_type": "STK", "action": "BUY", "ratio": 100},
+                {"expiry": "20261218", "strike": 200.0, "right": "C",
+                 "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits.check_order_limits(buy_write) is None
+        # The short call's $200 strike × 100 stands alone — the stock leg
+        # contributes no strike of its own (RC-D2).
+        assert order_limits.combo_max_loss(buy_write) == pytest.approx(20_000.0)
+
+
+class TestSellEnvelopeReversesLegExposure:
+    """A SELL BAG inverts every leg at IB, so an envelope of BUY legs is
+    SHORT. Pricing each leg off its own action alone made that $0."""
+
+    def _sell_envelope_strangle(self) -> dict:
+        return {
+            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "quantity": 500, "limitPrice": 0.20,
+            "legs": [
+                {"expiry": "20260918", "strike": 700.0, "right": "C",
+                 "action": "BUY", "ratio": 1},
+                {"expiry": "20260918", "strike": 600.0, "right": "P",
+                 "action": "BUY", "ratio": 1},
+            ],
+        }
+
+    def test_sell_envelope_of_buy_legs_is_refused(self):
+        violation = order_limits.check_order_limits(self._sell_envelope_strangle())
+        assert violation is not None, (
+            "a SELL envelope of BUY legs priced at zero risk and transmitted"
+        )
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+    def test_sell_envelope_of_buy_legs_prices_the_short_side(self):
+        loss = order_limits.combo_max_loss(self._sell_envelope_strangle())
+        # (700 + 600) × 100 × 500 minus the $0.20 × 100 × 500 credit.
+        assert loss == pytest.approx(64_990_000.0)
+
+    def test_sell_envelope_of_sell_legs_is_long_and_unpriced(self):
+        """The mirror: SELL envelope over SELL legs is LONG at IB."""
+        combo = self._sell_envelope_strangle()
+        for leg in combo["legs"]:
+            leg["action"] = "SELL"
+        assert order_limits.combo_max_loss(combo) == 0.0
+
+
+class TestFutureModifyKeepsItsMultiplier:
+    """A working future modified through the modify chokepoint must be priced
+    with its own contract multiplier. Classifying it as an option applied the
+    100 option multiplier and under-counted the notional by the ratio of the
+    two, which is the exact defect the place path already fails closed on."""
+
+    @staticmethod
+    def _future_order(**over):
+        base = {
+            "contract": {"secType": "FUT", "symbol": "ES", "multiplier": "1000"},
+            "quantity": 1,
+            "action": "BUY",
+        }
+        base.update(over)
+        return base
+
+    def test_future_modify_over_the_cap_is_refused(self):
+        refusal = order_limits.check_modify_limits(
+            self._future_order(), new_quantity=100, new_price=20
+        )
+        assert refusal is not None, "100 x 20 x 1000 = $2,000,000 must be refused"
+        assert refusal["code"] == "ORDER_NOTIONAL_LIMIT", refusal
+
+    def test_future_modify_without_a_multiplier_fails_closed(self):
+        order = self._future_order(contract={"secType": "FUT", "symbol": "ES"})
+        refusal = order_limits.check_modify_limits(order, new_quantity=100, new_price=20)
+        assert refusal is not None, refusal
+        assert refusal["code"] == "ORDER_FUTURE_MULTIPLIER", refusal
+
+    def test_a_small_future_modify_is_still_accepted(self):
+        assert order_limits.check_modify_limits(
+            self._future_order(), new_quantity=2, new_price=20
+        ) is None

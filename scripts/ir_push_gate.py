@@ -28,7 +28,11 @@ import time
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-from credential_redaction import find_credential_shapes, find_secret_assignments
+from credential_redaction import (
+    EXECUTION_ID_PATTERNS,
+    find_credential_shapes,
+    find_secret_assignments,
+)
 
 AUTOPUSH_ENV = "GROK_PAGE_AUTOPUSH"
 _FALSEY = {"", "0", "false", "no", "off"}
@@ -36,17 +40,7 @@ _FALSEY = {"", "0", "false", "no", "off"}
 # Shapes, not values. Tests use invented ids only.
 PRIVATE_ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ib_account_id", re.compile(r"(?<![A-Za-z0-9])(?:DU|U|F)\d{6,8}(?![A-Za-z0-9])")),
-    (
-        "ib_exec_id",
-        re.compile(
-            r"(?<![0-9A-Za-z.])[0-9a-f]{8}\.[0-9a-f]{8}\.\d{2}\.\d{2}(?![0-9A-Za-z])",
-            re.IGNORECASE,
-        ),
-    ),
-    # GitHub Actions run/job ids (11 digits) are exempt only inside a full
-    # CI URL, which is removed before this pattern runs (_CI_URL).
-    ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
-)
+) + EXECUTION_ID_PATTERNS
 _CI_URL = re.compile(
     r"https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+"
     r"(?:/(?:job|attempts)/\d+)?(?![\w/])"
