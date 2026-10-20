@@ -1,7 +1,8 @@
 """Deterministic document identity: publisher, series, report date, document type.
 
-No model is consulted. Every fact carries its source so the selector receives
-it as given data; a missing text date falls down a ladder (PDF creation date,
+No model is consulted unless CLAIRIC_DATES_ENABLED=1, and then only for the
+report date. Every fact carries its source so the selector receives it as
+given data; a missing text date falls down a ladder (PDF creation date,
 Dropbox client_modified) and never holds a document.
 """
 from __future__ import annotations
@@ -77,7 +78,7 @@ class Identity:
     publisher_folder: str
     series: str
     date: str | None
-    date_source: str             # text | pdf | dropbox | none
+    date_source: str             # text | pdf | dropbox | folder | clairic | none
     date_page: int | None
     date_quote: str | None
     doc_type: str                # calendar | single_stock | conference | fx_pair_note | digest | research
@@ -85,9 +86,13 @@ class Identity:
     tickers: tuple = ()          # single-name candidates; gates single_stock against the operator book (research.triage)
     publisher_page: int | None = None
     publisher_quote: str | None = None
+    date_flag: str | None = None  # set only when a date flag is on; omitted from as_dict when unset
 
     def as_dict(self):
-        return asdict(self)
+        data = asdict(self)
+        if data.get("date_flag") is None:
+            del data["date_flag"]
+        return data
 
 
 def publisher_folder(path_lower):
@@ -429,8 +434,10 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
             found = (min(modified, limit.isoformat()) if limit else modified, 'dropbox', None, None)
     if not found:
         found = (folder_date or None, 'folder' if folder_date else 'none', None, None)
+    from research import clairic
+    found, date_flag = clairic.apply(found, page_text, folder_date)
 
     kind, reason = doc_type(name, page_one)
     names = tickers(name, page_one) if kind == 'single_stock' else ()
     return Identity(publisher, source, folder, series(name), found[0], found[1], found[2], found[3], kind, reason, names,
-                    publisher_page=attribution_page, publisher_quote=attribution_quote)
+                    publisher_page=attribution_page, publisher_quote=attribution_quote, date_flag=date_flag)

@@ -123,6 +123,7 @@ Durable facts. History and mechanism live in the owner file, not here.
 - **CMD+J.** Quotes, priced UW chains, and `evaluate.py` run from the in-app assistant. KB miss is not a dead end.
 - **Orders.** Desktop/mobile tickets support `STP` and `STP LMT`. In the Position tab, select put/call legs and choose **Close Selected Legs** to close a spread or cover a short leg; review retained legs before confirming.
 - **Incidents.** Watchdog artifacts under `data/incidents/`. Triage with `/incident <path>`. Cases: [`docs/incident-runbook.md`](docs/incident-runbook.md).
+- **Research dates.** Dropbox PDF report dates stay on the text ladder unless `CLAIRIC_DATES_ENABLED=1`. Contract: [`docs/dropbox-research.md`](docs/dropbox-research.md).
 
 ## Project layout
 

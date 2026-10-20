@@ -250,6 +250,8 @@ def outcome_row(work: dict, review: dict) -> dict:
                "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
                "selectorReason": _bounded_selector_reason(((review.get("selection") or {}).get("reason"))),
                "sourceUrl": document.get("source_url") or ""}
+    if identity.get("date_flag"):
+        context["date_flag"] = identity["date_flag"]
     if review.get("always_publish"):
         context["alwaysPublish"] = True
     return {"context_json": json.dumps(context), "work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",

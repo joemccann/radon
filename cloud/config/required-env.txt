@@ -54,6 +54,11 @@ ALLOWED_USER_IDS
 # without it.
 RADON_REQUIRE_OPERATOR_ALLOWLIST
 RADON_PROBE_FRESHNESS_TOKEN
+# CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN / CLAIRIC_DATES_ENABLED /
+# CLAIRIC_DATE_SANITY_ENABLED — optional Workers AI report dates for
+# radon-research. Deliberately NOT required: the date ladder is unchanged
+# when they are absent, and listing them here would fail deploy preflight
+# on every host. They live in /etc/radon/env. See cloud/CLAUDE.md.
 # RADON_HEALTH_STATUS_TOKEN — shared bearer that buys full /status detail from
 # the health daemon THROUGH the public edge. Deliberately NOT a required key:
 # every production consumer (watchdogs, deploy health-gate, the Next.js admin
