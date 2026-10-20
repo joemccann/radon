@@ -489,7 +489,7 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 **IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`, with the hold CLI it runs staged root-owned at `/usr/local/lib/radon/ib_operator_hold.py`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
 
-**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are `/etc/radon/env` (`0640` root:radon); `/home/radon/radon-cloud/.env` is a compatibility symlink. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`).
+**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are loaded only from `/etc/radon/env` (`0640` root:radon). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`). <!-- pragma: allowlist secret -->
 
 Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` serves protected snapshots from `/var/lib/radon-public/media` via group `caddy`. Legacy `radon-media` staging read ACLs remain during rollout and rollback; publication never changes source ownership or permissions. For permission errors, inspect the publisher unit and the affected leaf rather than recursively changing staging ownership.
 
@@ -1112,8 +1112,24 @@ SSHes to the app host tailnet address as `radon`, extracts
 `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`, and invokes that runner's
 deploy script. The monorepo [`cloud/`](../cloud/) directory is the canonical
 source for deploy code, systemd units, Caddy, and the IB Gateway Compose
-project; host secrets are `/etc/radon/env` (`0640` root:radon), with
-`/home/radon/radon-cloud/.env` a compatibility symlink.
+project. Host env is loaded only from `/etc/radon/env` (`0640` root:radon).
+`/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files
+in that directory.
+
+After this release's deploy finishes, reinstall the units, run the drift
+audit once, then move the retired file and its backups into a root-only
+directory. Do not print those files.
+
+```bash
+sudo /usr/local/sbin/radon-deploy-root install-units
+sudo systemctl start radon-drift-audit.service
+sudo install -d -m 0700 -o root -g root /root/radon-retired-env
+sudo mv /home/radon/radon-cloud/.env /root/radon-retired-env/
+sudo bash -c 'shopt -s nullglob; mv /home/radon/radon-cloud/.env.bak-* /root/radon-retired-env/'
+```
+
+`install-units` copies the hashed unit bodies and reloads systemd. The audit
+run is the check that `radon-drift-audit.service` is reading `/etc/radon/env`.
 
 The deploy holds its activity lock, validates the external env and target SHA,
 then verifies the installed root control plane against its manifest **before**

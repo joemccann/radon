@@ -185,13 +185,13 @@ def test_no_root_unit_inherits_a_radon_writable_environment_file():
     """Relocating the payload is not enough if the environment still comes from radon.
 
     systemd merges every KEY=VALUE line of an EnvironmentFile into the process
-    environment with no filtering, and /home/radon/radon-cloud/.env is a
-    compatibility path the unprivileged account can replace. One appended
-    LD_PRELOAD line makes the next timer tick load radon-authored code into
-    root, and PATH= makes root's bare `docker` / `systemctl` calls resolve to
-    radon-owned binaries. `-I` does not affect either. A root unit may READ
-    specific keys out of that file as data; it must not inherit the file
-    wholesale.
+    environment with no filtering. /home/radon/radon-cloud/.env is retired.
+    Production env is only /etc/radon/env (root:radon, mode 0640). One appended
+    LD_PRELOAD line in a radon-writable file makes the next timer tick load
+    radon-authored code into root, and PATH= makes root's bare `docker` /
+    `systemctl` calls resolve to radon-owned binaries. `-I` does not affect
+    either. A root unit may READ specific keys out of /etc/radon/env as data;
+    it must not inherit a file under /home/radon wholesale.
     """
     offenders = {
         name: paths
@@ -203,6 +203,14 @@ def test_no_root_unit_inherits_a_radon_writable_environment_file():
         f"rewrite: {offenders}. Read the specific keys the unit needs as data "
         "instead, and set PATH explicitly in the unit."
     )
+    env_files = {
+        name: value
+        for name, text in _root_units().items()
+        for value in _directive_values(text, "Environment")
+        if value.startswith("RADON_ENV_FILE=")
+    }
+    assert env_files
+    assert set(env_files.values()) == {"RADON_ENV_FILE=/etc/radon/env"}, env_files
 
 
 def test_root_unit_pins_its_own_path():

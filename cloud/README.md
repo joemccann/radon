@@ -1,5 +1,5 @@
 > **Monorepo:** `cloud/` in [`joemccann/radon`](https://github.com/joemccann/radon) is the source of truth for production infrastructure.
-> The standalone `radon-cloud` checkout is legacy compatibility only; `/home/radon/radon-cloud/.env` is its sole external-secrets exception.
+> The standalone `radon-cloud` checkout is legacy compatibility only. Production env is loaded only from `/etc/radon/env` (`0640`, `root:radon`). `/home/radon/radon-cloud/.env` and any `.env.bak-*` files in that directory are retired.
 > Lifecycle, rollback, and bootstrap contract: [`cloud/CLAUDE.md`](CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](../docs/monorepo-cloud-migration.md).
 
 # Radon Cloud

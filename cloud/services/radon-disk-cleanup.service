@@ -19,13 +19,13 @@ Type=oneshot
 User=root
 WorkingDirectory=/
 # This unit deliberately declares NO environment-file directive, for the same
-# reason radon-drift-audit.service does not: the stable secret file is 0600
-# radon:radon and systemd merges every KEY=VALUE line of such a file into the
-# process environment unfiltered, so one appended LD_PRELOAD line would load
-# radon-authored code into root and PATH= would redirect the bare binary names
-# below. The two Turso keys the heartbeat needs are READ out of that file as
-# data (disk_cleanup.load_env_keys).
-Environment=RADON_ENV_FILE=/home/radon/radon-cloud/.env
+# reason radon-drift-audit.service does not: systemd merges every KEY=VALUE
+# line of an EnvironmentFile into the process environment unfiltered, so one
+# LD_PRELOAD line would load code into root and PATH= would redirect the bare
+# binary names below. The two Turso keys the heartbeat needs are READ out of
+# /etc/radon/env (0640 root:radon) as data (disk_cleanup.load_env_keys).
+# /home/radon/radon-cloud/.env is retired.
+Environment=RADON_ENV_FILE=/etc/radon/env
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Root runs the control-plane copy installed root-owned by
 # cloud/scripts/bootstrap-control-plane.sh, never the radon-writable checkout

@@ -782,9 +782,8 @@ def http_url_from_libsql(url: str) -> str:
 def load_env_keys(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
     """Read an allowlisted set of keys out of an env file, as DATA.
 
-    Same contract as drift_audit.load_env_keys: this process is root. The
-    canonical file is 0640 root:radon, but the compatibility path lives under
-    /home/radon, which the unprivileged account can replace. Nothing here
+    Same contract as drift_audit.load_env_keys: this process is root and
+    reads /etc/radon/env (0640 root:radon) via RADON_ENV_FILE. Nothing here
     touches os.environ; an appended LD_PRELOAD or PATH line is read past,
     not applied.
     """

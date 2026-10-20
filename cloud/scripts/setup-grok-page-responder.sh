@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLONE="${RADON_PAGE_RESPONDER_DIR:-/home/radon/radon-page-responder}"
 ENV_FILE="${RADON_PAGE_RESPONDER_ENV:-/home/radon/radon-page-responder.env}"
-PROD_ENV="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
+PROD_ENV="${RADON_DEPLOY_ENV_FILE:-/etc/radon/env}"
 ORIGIN_URL="${RADON_PAGE_RESPONDER_ORIGIN:-https://github.com/joemccann/radon.git}"
 MARKER="$CLONE/.radon-page-responder"
 

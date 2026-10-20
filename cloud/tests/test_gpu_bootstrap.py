@@ -83,7 +83,7 @@ def test_symlink_key_file_refused(tmp_path: Path):
         "etc/radon/env",
         "etc/radon/ib-gateway-compose.yml",
         "var/lib/radon/control-plane-ready",
-        "home/radon/radon-cloud/.env",
+        "home/radon/radon",
         "etc/systemd/system/radon-api.service",
         "etc/systemd/system/radon-nextjs.service",
         "etc/systemd/system/ib-gateway.service",
@@ -100,6 +100,20 @@ def test_existing_app_broker_marker_refuses(tmp_path: Path, marker: str, symlink
     result = shell('check_host_role "$1"', str(tmp_path))
     assert result.returncode == 78
     assert "existing app/broker" in result.stderr
+    assert "DO NOT READ SECRETS" not in result.stderr
+
+
+def test_host_role_marker_does_not_depend_on_retired_env(tmp_path: Path):
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    start = text.index("check_host_role()")
+    body = text[start:text.index("\n}\n", start)]
+    assert "/home/radon/radon-cloud/.env" not in body
+    assert "/home/radon/radon" in body
+    retired = tmp_path / "home/radon/radon-cloud/.env"
+    retired.parent.mkdir(parents=True)
+    retired.write_text("DO NOT READ SECRETS")
+    result = shell('check_host_role "$1"', str(tmp_path))
+    assert result.returncode == 0, result.stderr
     assert "DO NOT READ SECRETS" not in result.stderr
 
 

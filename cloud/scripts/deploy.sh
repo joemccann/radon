@@ -35,18 +35,18 @@ _default_cloud_dir() {
 }
 
 _default_env_file() {
-  # Canonical future path is /etc/radon/env. Compatibility fallback is
-  # ~/radon-cloud/.env so live units keep working until one green host
-  # cutover. RADON_DEPLOY_ENV_FILE always wins.
+  # Production secrets are only /etc/radon/env, a regular file mode 0640
+  # owned by root:radon. RADON_DEPLOY_ENV_FILE overrides for tests and
+  # recovery. There is no fallback.
   if [[ -n "${RADON_DEPLOY_ENV_FILE:-}" ]]; then
     printf '%s\n' "${RADON_DEPLOY_ENV_FILE}"
-  elif [[ -f /etc/radon/env ]]; then
-    printf '%s\n' "/etc/radon/env"
-  elif [[ -f /home/radon/radon-cloud/.env ]]; then
-    printf '%s\n' "/home/radon/radon-cloud/.env"
-  else
-    printf '%s\n' "${CLOUD_DIR}/.env"
+    return 0
   fi
+  if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
+    printf '%s\n' "/etc/radon/env"
+    return 0
+  fi
+  return 1
 }
 
 readonly RADON_DIR="${RADON_DIR:-$(_default_radon_dir)}"
@@ -104,9 +104,17 @@ readonly SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfe
 UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
-# Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
+# Only /etc/radon/env. A real deploy stops when that regular file is missing.
+# /home/radon/radon-cloud/.env is retired and is not a fallback.
 # Discord vars are intentionally absent — the notification stack uses Pushover.
-readonly ENV_FILE_DEFAULT="$(_default_env_file)"
+if ! ENV_FILE_DEFAULT="$(_default_env_file)"; then
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    printf '%s\n' "deploy.sh: /etc/radon/env is missing or not a regular file; /home/radon/radon-cloud/.env is retired and is not a fallback" >&2
+    exit 1
+  fi
+  ENV_FILE_DEFAULT="/etc/radon/env"
+fi
+readonly ENV_FILE_DEFAULT
 readonly APP_RUNTIME_HELPER="${RADON_APP_RUNTIME_HELPER:-/usr/local/sbin/radon-app-runtime}"
 readonly DOCKER_GW="${RADON_DOCKER_GW:-/usr/local/sbin/radon-docker-gw}"
 readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"

@@ -214,10 +214,8 @@ def set_cloud_root(root: Path) -> None:
 def load_env_keys(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
     """Read an allowlisted set of keys out of an env file, as DATA.
 
-    This process runs as root. The canonical file is 0640 root:radon, but the
-    compatibility path lives under /home/radon, which the unprivileged account
-    can replace, so the file's contents are attacker-influenced from root's
-    point of view. Only the named keys are returned, and nothing here touches
+    This process runs as root. Production reads /etc/radon/env (0640
+    root:radon). Only the named keys are returned, and nothing here touches
     os.environ -- an appended LD_PRELOAD or PATH line is read past, not
     applied. Literal parsing (no shell) also keeps a `$VAR` in a secret from
     being expanded.
@@ -655,11 +653,10 @@ ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
 }
 
 
-#: Roles that make this root-run auditor SKIP a check. R-604: the compat
-#: `RADON_ENV_FILE` the unit points at lives under /home/radon, which the
-#: unprivileged account can replace — `load_env_keys`' own docstring calls it
-#: attacker-influenced from root's point of view. It may still NAME a role,
-#: but it may not be the source of one that suppresses an audit surface.
+#: Roles that make this root-run auditor SKIP a check. The unit sets
+#: RADON_ENV_FILE=/etc/radon/env. R-604: an override of that variable may
+#: still NAME a role, but it may not be the source of one that suppresses
+#: an audit surface. Only the process environment or /etc/radon/env may.
 SUPPRESSING_ROLES: frozenset[str] = frozenset(ROLE_SKIPPED_UNITS) | frozenset(
     ROLE_SKIPPED_GATEWAY_SURFACES
 )
@@ -668,8 +665,9 @@ SUPPRESSING_ROLES: frozenset[str] = frozenset(ROLE_SKIPPED_UNITS) | frozenset(
 def resolve_host_role(environ=None) -> str:
     """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE.
 
-    The last of those three is radon-writable, so a role it names is honoured
-    only when that role does not suppress anything (R-604).
+    The unit points RADON_ENV_FILE at /etc/radon/env. A different path in
+    that variable is honoured only when the role does not suppress anything
+    (R-604).
     """
     environ = os.environ if environ is None else environ
     raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")

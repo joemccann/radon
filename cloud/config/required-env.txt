@@ -60,7 +60,7 @@ RADON_PROBE_FRESHNESS_TOKEN
 # proxy) reads 127.0.0.1:8330 unproxied and already gets the full body, so a
 # missing token degrades the edge to the redacted aggregate rather than breaking
 # anything. Listing it here would fail the deploy preflight on a value nothing
-# needs. Set it in /home/radon/radon-cloud/.env (loaded by radon-health.service
+# needs. Set it in /etc/radon/env (loaded by radon-health.service
 # and radon-nextjs.service) when an off-box consumer needs detail; documented in
 # the root .env.example.
 IB_GATEWAY_MODE
