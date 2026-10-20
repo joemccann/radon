@@ -38,6 +38,17 @@ def test_isolated_responder_has_own_identity_home_and_readiness_gate():
     assert "HOME=" + HOME in unit["Environment"]
     assert "GROK_BIN=" + HOME + "/.local/bin/grok" in unit["Environment"]
     assert unit["WorkingDirectory"] == [HOME + "/repo"]
+    assert unit["ExecStart"] == [
+        "/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py"
+    ]
+    assert "RADON_GROK_REPO=" + HOME + "/repo" in unit["Environment"]
+    assert "/usr/local/lib/radon/grok-responder" in " ".join(unit["ReadOnlyPaths"])
+    assert HOME + "/repo" in " ".join(unit["ReadWritePaths"]).split()
+    assert not any(
+        path == "/usr/local/lib/radon/grok-responder" or path.startswith("/usr/local/lib/radon/grok-responder/")
+        for path in " ".join(unit["ReadWritePaths"]).split()
+    )
+    assert ".venv" not in unit["ExecStart"][0]
     assert unit["EnvironmentFile"] == ["/etc/radon/grok-responder/env"]
     assert all("/home/radon" not in value for key in ("ExecStart", "ReadWritePaths") for value in unit.get(key, []))
 
@@ -79,6 +90,8 @@ def test_migration_prepares_independent_auth_and_controlled_handover():
     assert 'radon-grok-responder.timer' in setup
     assert 'safe.directory' in setup
     assert 'chmod' in setup
+    assert 'install-grok-responder-code.sh' in setup
+    assert 'verb=refresh' in setup
     assert 'cp /home/radon/.grok' not in setup
 
 

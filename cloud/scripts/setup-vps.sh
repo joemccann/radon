@@ -2052,6 +2052,56 @@ write_subscription_env() {
 }
 
 
+# DS-2026-10-17-16: root-owned copy of the isolated responder's scripts tree.
+# The optional unit is not installed here. The tree is, so a later account
+# prepare and every deploy execute code the service account cannot rewrite.
+install_grok_responder_code() {
+  local target="${RADON_GROK_RESPONDER_CODE:-/usr/local/lib/radon/grok-responder}"
+  local stage installer rc=0
+  resolve_provision_commit "$RADON_DIR" || return 1
+  if [[ -L "$STAGE_DIR" ]]; then
+    log_error "Refusing symlinked staging dir ${STAGE_DIR}"
+    return 1
+  fi
+  install -d -m 0700 "$STAGE_DIR" || return 1
+  stage="$(mktemp -d "${STAGE_DIR}/grok-responder-code.XXXXXX")" || return 1
+  installer="${stage}/install-grok-responder-code.sh"
+  if ! provision_git cat-file blob "${PROVISION_COMMIT}:cloud/scripts/install-grok-responder-code.sh" > "$installer"; then
+    log_error "Grok responder code failed: installer is not committed at the provision commit"
+    rm -rf -- "$stage"
+    return 1
+  fi
+  chmod 0700 "$installer"
+  if ! cmp -s -- "$installer" "${CLOUD_DIR}/scripts/install-grok-responder-code.sh"; then
+    log_error "Grok responder code failed: installer differs from the committed blob"
+    rm -rf -- "$stage"
+    return 1
+  fi
+  if ! provision_git -c tar.umask=022 archive --format=tar "$PROVISION_COMMIT" scripts > "${stage}/scripts.tar"; then
+    log_error "Grok responder code failed: scripts tree is not at the provision commit"
+    rm -rf -- "$stage"
+    return 1
+  fi
+  if ! tar -x -f "${stage}/scripts.tar" -C "$stage"; then
+    log_error "Grok responder code failed: could not unpack the scripts tree"
+    rm -rf -- "$stage"
+    return 1
+  fi
+  if ! cmp -s -- "${stage}/scripts/grok_page_responder.py" "${RADON_DIR}/scripts/grok_page_responder.py"; then
+    log_error "Grok responder code failed: grok_page_responder.py differs from the committed blob"
+    rm -rf -- "$stage"
+    return 1
+  fi
+  /bin/bash "$installer" "${stage}/scripts" "$target" || rc=$?
+  rm -rf -- "$stage"
+  if (( rc != 0 )); then
+    log_error "Grok responder code failed: install exited ${rc}"
+    return "$rc"
+  fi
+  record_provision_floor
+}
+
+
 # -- Main --------------------------------------------------------------------
 
 main() {
@@ -2065,6 +2115,7 @@ main() {
   create_etc_radon_dir
   provision_secret_store_credential
   clone_repos
+  install_grok_responder_code
   validate_env
   write_mcp_env
   write_subscription_env

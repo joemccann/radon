@@ -384,6 +384,15 @@ root helper read installed bytes from root's own clone of the pinned remote,
 Both refuse a privileged install from a commit older than the one recorded in
 `/opt/radon-provision/control-plane-floor`.
 
+**Isolated responder code (DS-2026-10-17-16).** `setup-vps.sh` and every
+`install-units` publish `/usr/local/lib/radon/grok-responder` from that same
+provision store. The optional unit executes that root-owned tree. The account
+clone stays the writable worktree. A host that already finalized the responder
+still runs the old unit until root reruns
+`setup-grok-responder-account.sh` from a trusted stage of the deployed commit.
+The `ready` marker selects that refresh. Procedure:
+[`docs/grok-page-responder.md`](grok-page-responder.md#root-owned-responder-code-ds-2026-10-17-16).
+
 **Newsfeed least privilege.** `radon-newsfeed.service` runs Chromium against
 third-party web content. Chromium keeps its own sandbox: the container runs
 under `--security-opt seccomp=/etc/radon/seccomp/chromium.json` (source
