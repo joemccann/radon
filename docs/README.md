@@ -56,6 +56,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Evaluation pipeline | [`docs/evaluation.md`](evaluation.md) |
 | Kelly / Fortune's Formula | [`docs/risk/kelly-fortunes-formula.md`](risk/kelly-fortunes-formula.md) |
 | Unusual Whales API | [`docs/unusual_whales_api.md`](unusual_whales_api.md) |
+| Cloudflare Workers AI (Clairic report dates, off by default) | [`docs/external-services.md`](external-services.md) · [`docs/dropbox-research.md`](dropbox-research.md#clairic-report-dates-off-by-default) |
 
 ## IB and performance
 
