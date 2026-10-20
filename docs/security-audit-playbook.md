@@ -203,8 +203,10 @@ line here whenever you ship a security fix.**
   / `::test_grant_does_not_follow_media_swapped_for_a_link_after_the_check`.
   Corollary for container bind sources, where no fd can be handed to the
   engine: the engine resolves the source BY NAME when it mounts, so the
-  verified device and inode are recorded at validation and re-resolved as the
-  last statement before the engine runs
+  verified device, inode, and inode generation (`FS_IOC_GETVERSION`, when the
+  filesystem provides it) are recorded at validation and re-resolved as the
+  last statement before the engine runs. A directory recreated at the same
+  inode is still a different directory.
   (`radon-app-runtime` `resolve_bind_source` / `recheck_bind_sources`). That
   narrows the window to the engine's own mount; closing it needs an
   inode-pinned staging mount under a root-owned anchor and is an operator

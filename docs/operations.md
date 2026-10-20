@@ -187,6 +187,15 @@ the unit's `TimeoutStopSec` and the helper wait. A missing container is
 success (ExecStop also runs after a crash); one that survives a failed stop
 exits 75. `ExecStopPost` still reaps.
 
+**Bind-source identity.** Before the engine mounts a host directory,
+`radon-app-runtime` records its device, inode, and inode generation
+(`FS_IOC_GETVERSION` when the filesystem provides it) and re-resolves that
+identity as the last step before the engine starts. ext4 reissues a just-freed
+inode to the next mkdir, so device and inode alone would accept a directory
+replaced after validation. A symlink, an unexpected owner, or a generation
+mismatch exits 78 and does not start the container. A filesystem that does not
+implement the ioctl keeps the device and inode check.
+
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,

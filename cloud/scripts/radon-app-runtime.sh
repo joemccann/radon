@@ -788,12 +788,16 @@ PY_PRIVATE_DIR
 # when it binds, so every component must be a real directory (walked with
 # O_NOFOLLOW from /) and the last must be radon-owned: a planted link would
 # otherwise hand a root-only tree to the container. Prints the verified
-# directory's device and inode so the caller can detect a later swap.
+# directory's device, inode, and inode generation. ext4 reissues a just-freed
+# inode to the next mkdir of the same name, so device and inode alone treat
+# that replacement as the directory that was checked.
 resolve_bind_source() {
   local ids="$1" dir="$2"
   "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_BIND_SOURCE' || exit 78
-import os, sys
+import array, errno, fcntl, os, sys
 from pathlib import Path
+# _IOR('v', 1, long). The kernel stores i_generation as a 32-bit int.
+FS_IOC_GETVERSION = 0x80087601
 path, ids, test = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
 uid = os.getuid() if test else int(ids.split(':')[0])
 fd = None
@@ -810,17 +814,28 @@ try:
     info = os.fstat(fd)
     if info.st_uid != uid:
         raise OSError('bind source has an unexpected owner')
+    generation = array.array('I', [0])
+    try:
+        fcntl.ioctl(fd, FS_IOC_GETVERSION, generation, True)
+    except OSError as exc:
+        if exc.errno not in (errno.ENOTTY, errno.EOPNOTSUPP, errno.ENOSYS):
+            print(f'radon-app-runtime: bind source generation is unreadable; refusing: {path}', file=sys.stderr)
+            raise SystemExit(78) from exc
+        generation = None
 except OSError:
     print(f'radon-app-runtime: bind source is a symlink, under a symlink, or not radon-owned; refusing: {path}', file=sys.stderr)
     raise SystemExit(78)
 finally:
     if fd is not None:
         os.close(fd)
-print(f'{info.st_dev}:{info.st_ino}')
+if generation is None:
+    print(f'{info.st_dev}:{info.st_ino}')
+else:
+    print(f'{info.st_dev}:{info.st_ino}:{generation[0]}')
 PY_BIND_SOURCE
 }
 
-# Every bind source validated so far, as "<path>|<device>:<inode>".
+# Every bind source validated so far, as "<path>|<device>:<inode>[:<generation>]".
 BIND_SOURCES=()
 
 # Validating a name does not pin it. All of these leaves sit in a radon-owned
@@ -837,9 +852,11 @@ require_bind_source() {
 }
 
 # Re-resolve every validated bind source and require the SAME directory.
-# This narrows the check-then-use window to the engine's own mount, it does
-# not close it: an inode-pinned staging mount under a root-owned anchor is a
-# host topology change and an operator action.
+# Generation is part of that identity where the filesystem provides it, so a
+# recreate that reuses the inode still mismatches. This narrows the
+# check-then-use window to the engine's own mount, it does not close it: an
+# inode-pinned staging mount under a root-owned anchor is a host topology
+# change and an operator action.
 recheck_bind_sources() {
   local ids="$1" entry path want got
   for entry in ${BIND_SOURCES[@]+"${BIND_SOURCES[@]}"}; do
