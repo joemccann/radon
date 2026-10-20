@@ -1577,8 +1577,18 @@ class TestSetupVpsEnvAdvice:
     privileged command, so it must not name a source root would dereference
     out of that checkout."""
 
-    def test_missing_env_advice_does_not_copy_out_of_the_service_checkout(self) -> None:
+    def test_missing_env_path_reads_no_source_from_the_service_checkout(self) -> None:
+        """cat, cp and install all follow the source, so staging the
+        destination is not enough: the READ has to come from the root store."""
         script = SETUP.read_text(encoding="utf-8")
-        unsafe = re.compile(r"\b(install|cp)\s[^|;&\n]*\$\{CLOUD_DIR\}[^|;&\n]*\$\{?env_file")
-        offenders = [line.strip() for line in script.splitlines() if unsafe.search(line)]
+        body = script[script.index("validate_env() {"):]
+        body = body[: body.index("\n}\n")]
+        unsafe = re.compile(r"\b(install|cp|cat)\s[^|;&\n]*\$\{CLOUD_DIR\}")
+        offenders = [line.strip() for line in body.splitlines() if unsafe.search(line)]
         assert offenders == []
+
+    def test_missing_env_is_seeded_through_the_provenance_helper(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        body = script[script.index("validate_env() {"):]
+        body = body[: body.index("\n}\n")]
+        assert "stage_from_checkout" in body

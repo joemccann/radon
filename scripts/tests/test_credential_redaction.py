@@ -198,3 +198,42 @@ def test_secret_assignment_scan_stays_linear_on_long_identifier_runs():
     # ceiling is ~50x headroom and CI load cannot flake it. The unbounded
     # pattern needed minutes on this input.
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=15)
+
+
+# A value containing the OPPOSITE quote, or an escaped delimiter, used to end
+# the match early and publish the tail. Every value below is invented.
+_QUOTED_VALUE_PARTS = (
+    ("API_KEY", "=", '"', "ab'cd9efgh12345", '"'),
+    ("API_KEY", "=", "'", 'ab"cd9efgh12345', "'"),
+    ("API_KEY", "=", '"', 'ab\\"cd9efgh12345', '"'),
+    ("UW_TOKEN", ": ", '"', "zz'9ttt'uuu12345", '"'),
+)
+
+
+def test_quoted_values_are_redacted_through_their_real_closing_quote():
+    for key, sep, open_q, value, close_q in _QUOTED_VALUE_PARTS:
+        text = "config had " + key + sep + open_q + value + close_q + " set"
+        out = scrub_credential_text(text)
+        assert "efgh12345" not in out and "uuu12345" not in out, out
+        assert out.startswith("config had ") and out.endswith(" set"), out
+
+
+def test_jwt_scan_stays_linear_on_overlapping_prefixes():
+    """The publication gate scans text an outside contributor shapes. The JWT
+    rule matched from any position, so a run of overlapping prefixes gave one
+    start per three characters, each scanning to the end of the run."""
+    import subprocess
+
+    probe = (
+        "import sys;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import scrub_credential_text as s;"
+        "t = 'eyJ' * 160_000;"
+        "assert s(t) == t"
+    )
+    # Measured: linear needs well under a second here, while the position-free
+    # rule needed 59s on this exact input (and 3.8s / 14.0s at a quarter and a
+    # half of it, a clean 4x per doubling). A 20s ceiling is ~20x headroom for
+    # the fix and a third of the regression's cost, so it can neither flake
+    # nor pass a regression.
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
