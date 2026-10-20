@@ -1973,8 +1973,12 @@ validate_env() {
 
   if [[ ! -f "$env_file" ]]; then
     log_error ".env file not found at ${env_file}"
-    echo "  Copy the example and fill in your values:"
-    echo "    install -m 0640 -o root -g radon ${CLOUD_DIR}/.env.example ${env_file}"
+    echo "  Seed it from the template without root dereferencing a path the"
+    echo "  service account can replace, then fill in your values:"
+    echo "    d=\$(mktemp -d /root/radon-env.XXXXXX) \\"
+    echo "      && cat ${CLOUD_DIR}/.env.example > \"\$d/env\" \\"
+    echo "      && install -m 0640 -o root -g radon \"\$d/env\" ${env_file} \\"
+    echo "      && rm -rf \"\$d\""
     return 1
   fi
 

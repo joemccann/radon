@@ -7,7 +7,8 @@ symlinks, so a link planted by the service account turned a root copy or
 chown into an arbitrary-file primitive. These tests run the provisioning
 functions against a radon-writable fake checkout plus stub binaries on PATH
 (bash 3.2 compatible, no root needed) and pin a static contract over every
-privileged line in the script.
+privileged line in the script. The last class holds the same contract for
+post-setup.sh, which seeds the canonical env file over ssh as root.
 """
 
 from __future__ import annotations
@@ -1514,3 +1515,70 @@ class TestRadonSshDirectory:
         calls = _calls_on(log, ssh_dir)
         assert not any(c.startswith("ssh-keygen as=radon -t") for c in calls)
         assert [c for c in calls if " as=root " in c] == []
+
+
+# ── post-setup.sh: seeding /etc/radon/env never dereferences a
+#    radon-replaceable path ─────────────────────────────────────────────
+
+POST_SETUP = ROOT / "scripts" / "post-setup.sh"
+SERVICE_CHECKOUT = "/home/radon/radon"
+
+
+def _root_ssh_commands(script: str) -> list[str]:
+    """Every line that hands a command to the remote root account."""
+    return [
+        line.strip()
+        for line in script.splitlines()
+        if not line.strip().startswith("#") and "${VPS_ROOT}" in line
+    ]
+
+
+class TestPostSetupEnvSeeding:
+    def test_env_seeding_reads_no_source_inside_the_service_checkout(self) -> None:
+        seeding = re.compile(
+            rf"\b(install|cp)\s[^|;&]*{re.escape(SERVICE_CHECKOUT)}[^|;&]*/etc/radon/env"
+        )
+        offenders = [
+            line
+            for line in _root_ssh_commands(POST_SETUP.read_text(encoding="utf-8"))
+            if seeding.search(line)
+        ]
+        assert offenders == []
+
+    def test_env_bytes_never_stage_in_a_world_writable_path(self) -> None:
+        script = POST_SETUP.read_text(encoding="utf-8")
+        assert "/tmp/radon.env" not in script
+        offenders = [
+            line
+            for line in _root_ssh_commands(script)
+            if "/etc/radon/env" in line and re.search(r"\s/tmp/", line)
+        ]
+        assert offenders == []
+
+    def test_env_bytes_arrive_on_stdin_through_a_root_only_staging_dir(self) -> None:
+        script = POST_SETUP.read_text(encoding="utf-8")
+        body = _function_body(script, "install_remote_env")
+        assert "mktemp -d" in body
+        assert "cat >" in body
+        assert "install -m 0640 -o root -g radon" in body
+        assert REFUSAL in body
+        # Every /etc/radon/env install goes through this one helper.
+        destination = re.compile(r"\binstall\s[^|;&]*\s/etc/radon/env\b")
+        installs = [
+            line for line in _root_ssh_commands(script) if destination.search(line)
+        ]
+        assert len(installs) == 1
+        assert installs[0] in body
+
+
+class TestSetupVpsEnvAdvice:
+    """setup-vps.sh runs as root on the host, where ${CLOUD_DIR} is the
+    service-account checkout. Operator advice it prints is advice to run a
+    privileged command, so it must not name a source root would dereference
+    out of that checkout."""
+
+    def test_missing_env_advice_does_not_copy_out_of_the_service_checkout(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        unsafe = re.compile(r"\b(install|cp)\s[^|;&\n]*\$\{CLOUD_DIR\}[^|;&\n]*\$\{?env_file")
+        offenders = [line.strip() for line in script.splitlines() if unsafe.search(line)]
+        assert offenders == []
