@@ -3,7 +3,7 @@ import json
 import sys
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from discover import (
@@ -412,8 +412,12 @@ def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
     from discover import fetch_darkpool_multi
     from fetch_flow import DARKPOOL_PAGE_LIMIT
 
-    session_today = "2026-09-10"
-    session_prior = "2026-09-04"
+    # Prune uses wall-clock ET, not the frozen session. 2026-09-04 aged out
+    # of MAX_AGE_DAYS on 2026-10-20 and the first write in a process deleted
+    # the scoring row before the assertion.
+    anchor = datetime.now(dpc._ET).date()
+    session_today = (anchor - timedelta(days=1)).isoformat()
+    session_prior = (anchor - timedelta(days=7)).isoformat()
     monkeypatch.setattr(dpc, "_today_et", lambda: session_today)
 
     def _trade(i: int, executed_at: str) -> dict:
@@ -428,13 +432,13 @@ def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
         }
 
     page1 = [
-        _trade(i, f"2026-09-04T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+        _trade(i, f"{session_prior}T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
         for i in range(DARKPOOL_PAGE_LIMIT)
     ]
     page2 = [
         _trade(
             DARKPOOL_PAGE_LIMIT + i,
-            f"2026-09-04T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+            f"{session_prior}T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
         )
         for i in range(DARKPOOL_PAGE_LIMIT)
     ]
