@@ -82,7 +82,7 @@ describe("demoSnapshotMaxAgeMs", () => {
 });
 
 const SCAN_SNAPSHOT_ROUTES = [
-  "vixts", "ivrank", "vixcor", "panic-index", "calm-streak", "credit-vix",
+  "asia-export-lead", "vixts", "ivrank", "vixcor", "panic-index", "calm-streak", "credit-vix",
   "iei-hyg", "rsi-oversold", "iv-spread", "credit-spread", "ma-ratio",
   "vol-cone", "vix-pc", "skew", "skew2d",
 ] as const;
