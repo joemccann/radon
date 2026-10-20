@@ -1953,6 +1953,25 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+def upsert_asia_export_lead_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Reconcile revised official monthly exports with bounded Hrana upserts."""
+    if not rows:
+        return
+    fields = ['date', 'lead_date', 'taiwan_exports_usd_mn', 'korea_exports_usd_mn',
+              'taiwan_yoy_pct', 'korea_yoy_pct', 'mean_yoy_pct', 'ma3_yoy_pct', 'ma3_change_pp']
+    columns = fields + ['recorded_at']
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ', '.join('(' + ', '.join('?' for _ in columns) + ')' for _ in chunk)
+        params = [value for row in chunk for value in [*(row.get(field) for field in fields), stamp]]
+        updates = ', '.join(f'{field} = excluded.{field}' for field in columns if field != 'date')
+        db.execute(f"INSERT INTO asia_export_lead_history ({', '.join(columns)}) VALUES {placeholders} "
+                   f"ON CONFLICT(date) DO UPDATE SET {updates}", tuple(params))
+    db.commit()
+
+
 def upsert_vix_model_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """Idempotent same-session correction upserts, in bounded Hrana chunks."""
     if not rows:

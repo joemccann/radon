@@ -234,6 +234,8 @@ readonly SERVICE_FILES=(
   radon-vix-pc.timer
   radon-vix-model-spread.service
   radon-vix-model-spread.timer
+  radon-asia-export-lead.service
+  radon-asia-export-lead.timer
 )
 
 
