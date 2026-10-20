@@ -1,3 +1,16 @@
+# Same-origin mutation gate (2026-10-20)
+
+Dependency graph: S1 -> S2 -> S3 -> S4.
+
+- [x] S1 depends_on: [] Map requireRouteAccess, middleware, and non-browser mutating callers.
+- [x] S2 depends_on: [S1] Failing same-origin unit tests.
+- [x] S3 depends_on: [S2] Same-origin check, narrow exemptions, focused green.
+- [ ] S4 depends_on: [S3] Draft PR, exact-head CI, one Pushover. Do not merge.
+
+## Review
+
+Security brief decision 8. `none` is rejected: a mutation is not a typed navigation. Focused same-origin, alerts, profile, share, route-access, and authless tests: 74 passed. Full web suite also showed 30 failures; the 403s were `http://x` fixtures now pointed at localhost. The rest (CTA calendar dates, discover cache age, sync-hook counts, demo open orders, fake-timer order idempotency) still fail with the gate disabled.
+
 # Bind-source inode generation (2026-10-20)
 
 Dependency graph: G1 -> G2 -> G3.

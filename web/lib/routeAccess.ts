@@ -2,6 +2,7 @@ import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "./apiCont
 import { resolveDemoContext, type DemoPublicMetadata } from "./demo/demoContext";
 import { rateLimit, type RateLimitResult } from "./rateLimit";
 import { demoRateLimit, type DemoRateLimitResult, type DemoRateTier } from "./demo/rateLimit";
+import { decideSameOriginMutation, type SameOriginEnv } from "./sameOrigin";
 
 type AuthResult = {
   userId?: string | null;
@@ -98,6 +99,8 @@ function reject(status: 401 | 403 | 429 | 503, message: string, retryAfter?: num
  * Handler-local identity, deployment capability, and optional abuse gate.
  * Middleware remains a first perimeter; this guard prevents route exports from
  * becoming trusted-service deputies when mounted, rewritten, or called directly.
+ * Mutating calls also have to be same-origin (lib/sameOrigin.ts) so a signed-in
+ * browser session cannot be driven by another site.
  */
 export async function requireRouteAccess(
   request?: Request,
@@ -105,6 +108,10 @@ export async function requireRouteAccess(
   deps: RouteAccessDeps = {},
 ): Promise<RouteAccessResult> {
   const env: Env = deps.env ?? (process.env as Env);
+  if (request) {
+    const origin = await decideSameOriginMutation(request, env as SameOriginEnv);
+    if (!origin.ok) return reject(origin.status, origin.message);
+  }
   let authResult: AuthResult;
   try {
     authResult = await (deps.authFn ?? defaultAuth)();

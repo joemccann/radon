@@ -61,7 +61,7 @@ describe("profile route ui_preferences", () => {
   it("PUT persists ui_preferences and GET returns it parsed", async () => {
     const route = await import("../app/api/profile/route");
     const put = await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({
           ui_preferences: { theme: "light", columns: { "orders-open": { qty: false } } },
@@ -80,13 +80,13 @@ describe("profile route ui_preferences", () => {
   it("PUT ui_preferences leaves username and avatar untouched (PATCH semantics)", async () => {
     const route = await import("../app/api/profile/route");
     await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({ username: "operator" }),
       }),
     );
     await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({ ui_preferences: { theme: "dark" } }),
       }),
@@ -99,7 +99,7 @@ describe("profile route ui_preferences", () => {
   it("PUT ui_preferences merges per top-level key instead of replacing", async () => {
     const route = await import("../app/api/profile/route");
     await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({
           ui_preferences: {
@@ -110,7 +110,7 @@ describe("profile route ui_preferences", () => {
       }),
     );
     await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({ ui_preferences: { theme: "light" } }),
       }),
@@ -125,14 +125,14 @@ describe("profile route ui_preferences", () => {
   it("rejects unknown preference keys and bad theme values", async () => {
     const route = await import("../app/api/profile/route");
     const unknown = await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({ ui_preferences: { evil: 1 } }),
       }),
     );
     expect(unknown.status).toBe(400);
     const badTheme = await route.PUT(
-      new Request("http://x/api/profile", {
+      new Request("http://localhost/api/profile", {
         method: "PUT",
         body: JSON.stringify({ ui_preferences: { theme: "hotdog" } }),
       }),
