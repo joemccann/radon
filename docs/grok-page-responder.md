@@ -705,6 +705,15 @@ allowlisted environment (`grok_runtime.grok_child_env`: PATH, HOME, locale,
 proxy and CA vars). Turso and Pushover credentials stay with the Python
 parent, which needs them for the ledger, heartbeats and alerts.
 
+That allowlist alone is advisory, because the child runs under the same UID
+as the parent and `ProtectProc=invisible` only hides OTHER users' processes.
+Before each launch the controller calls `prctl(PR_SET_DUMPABLE, 0)` on
+ITSELF (`grok_page_responder._harden_controller_against_child`), which
+reparents its `/proc` entry to root and denies the same-UID read of the
+parent environment. It is Linux-only, applied to the controller rather than
+through a child `preexec_fn`, and a no-op when libc or prctl is unavailable
+so a page response is never blocked by it.
+
 Page text is untrusted third-party/exception content. It reaches the model
 only inside `<untrusted-excerpt>` delimiters, and `build_prompt` re-sanitizes
 a row that does not already carry them rather than trusting the writer.
