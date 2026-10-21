@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 
-RUNNER_NAME = re.compile(r"^[0-9a-f]{40}\.[0-9]+\.[0-9]+$")
+RUNNER_NAME = re.compile(r"^[0-9a-f]{40}\.[0-9]+\.[0-9]+(\.prestage)?$")
 INDEX_LOCK = ".index.lock"
 ACTIVE_LOCK = ".active.lock"
 
