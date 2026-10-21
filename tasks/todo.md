@@ -222,11 +222,11 @@ Dependency graph: T1 -> T2,T3; T2,T3 -> T4 -> T5 -> T6.
 - [x] T2 depends_on: [T1] Implement model-scoped Super VL request controls and opt-in vision pilot, preserving defaults until measured quality gates pass.
 - [x] T3 depends_on: [T1] Add regression/evaluation coverage and runtime setting propagation; no local suites.
 - [x] T4 depends_on: [T2,T3] Independent review, static verification, documented rollout and rollback.
-- [ ] T5 depends_on: [T4] Create PR and repair every applicable exact-head GitHub CI failure until green, including mapped owner documents and stale base polling documentation contract.
-- [ ] T6 depends_on: [T5] Confirm accepted Pushover notification and record final evidence.
+- [x] T5 depends_on: [T4] Create PR and repair every applicable exact-head GitHub CI failure until green.
+- [x] T6 depends_on: [T5] Confirm accepted Pushover notification and record final evidence.
 
 ## Review
-Implemented exact-model reasoning-off/non-SSE controls and explicit runtime model settings. Two swarm reviewers approved design and compatibility; 12 ladder regression cases and one runtime propagation case added. Python syntax (3 files), shell syntax and diff checks passed. Defaults remain unchanged pending measured pilot. PR #1105 d92ff51f: new ladder/runtime regressions passed in GitHub shards. Initial CI identified required owner-document updates and a stale base polling documentation contract; repair delegated and verification re-planned. Final CI and notification pending; no local suites run.
+Completed in isolated worktree /Users/joemccann/.codex/worktrees/nemotron-super-vl/radon. PR https://github.com/joemccann/radon/pull/1105, exact head 4fe1acf504306e63501631840f88501d00497402: 37 successful checks, 8 not-applicable skips, no pending/failing/cancelled checks. CI 38932318126, image builds 38932318133 and TesterArmy 38932317918 succeeded. Swarm design, implementation and independent review completed; 12 ladder regression cases plus runtime propagation coverage added. Initial owner-document and stale base polling contract failures repaired. No local suites or production model promotion. Pushover accepted HTTP 200/status 1, request 13644b36-6d1c-4d82-8868-92a45a2c92ad. PR worktree clean; human review/merge and measured pilot remain operator actions.
 
 # Nemotron upgrade assessment (2026-10-16)
 
