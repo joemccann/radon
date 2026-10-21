@@ -30,6 +30,7 @@ export PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
 PY="${RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 GH="${RADON_RUNNER_GH:-/opt/homebrew/bin/gh}"
 GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
+GH_HOST="${RADON_WEEKEND_GH_HOST:-github.com}"
 TIMEOUT_BIN="$(command -v gtimeout || command -v timeout || true)"
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
 SCRATCH="$LOOP_STATE/scratch"
@@ -123,34 +124,93 @@ phase_marker_present() {
   return 1
 }
 
-# An agent-asserted URL is not a merge cue: each must be a same-repo OPEN PR
-# on this loop's branch prefix, and there must be one per claimed PR ($2).
+# The numeric id of a PR URL that belongs to the CONFIGURED host and
+# owner/repo, else nothing. The record's URL is written by the agent and is
+# printed to the operator verbatim, so it is pinned here before it is trusted
+# or re-queried; the number is what goes to `gh`, so `-R` stays authoritative.
+pr_number_in_repo() {
+  local url="$1" n
+  case "$url" in
+    "https://$GH_HOST/$GH_REPO/pull/"*) n="${url#"https://$GH_HOST/$GH_REPO/pull/"}" ;;
+    *) return 1 ;;
+  esac
+  [[ "$n" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$n"
+}
+
+# The ONE chokepoint for every "ready to merge" claim, from the durable record
+# or from the transcript. An agent-asserted URL is not a merge cue: each
+# claimed PR must be a same-repo OPEN PR on this loop's branch prefix, its
+# live head must still be the SHA the record was verified at ($3), and that
+# head's check rollup must be wholly successful. A rollup with no entries is
+# PENDING, not green. A claim of ZERO PRs is verified too: an open PR on this
+# loop's prefix contradicts it.
+# $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
-  local tok verified count=0
+  local tok n fields state branch cross head rollup conclusion count=0
+  if [[ "${2:-}" == 0 ]]; then
+    [[ -z "$(resolve_pr_url)" ]]
+    return
+  fi
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
-        verified="$(net_bounded "$GH" pr view "$tok" -R "$GH_REPO" \
-          --json state,headRefName,isCrossRepository \
-          -q "select(.state == \"OPEN\" and .isCrossRepository == false and (.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))) | \"ok\"" \
+        n="$(pr_number_in_repo "$tok")" || return 1
+        fields="$(net_bounded "$GH" pr view "$n" -R "$GH_REPO" \
+          --json state,headRefName,isCrossRepository,headRefOid,statusCheckRollup \
+          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | (.conclusion // .state // "PENDING") | ascii_upcase] | join(","))] | join(" ")' \
           2>/dev/null || true)"
-        [[ "$verified" == "ok" ]] || return 1
+        read -r state branch cross head rollup <<< "$fields"
+        [[ "$state" == OPEN && "$cross" == false ]] || return 1
+        [[ "$branch" == "$PR_BRANCH_PREFIX"* ]] || return 1
+        [[ -n "$head" && "$head" == "$3" ]] || return 1
+        [[ -n "$rollup" ]] || return 1
+        for conclusion in ${rollup//,/ }; do
+          case "$conclusion" in
+            SUCCESS|SKIPPED|NEUTRAL) ;;
+            *) return 1 ;;
+          esac
+        done
         count=$((count + 1)) ;;
     esac
   done
   [[ "$count" -gt 0 && "$count" == "$2" ]]
 }
 
+# The head SHA the record's green was verified at, or "" (DS-2026-10-21-10).
+deliver_record_head_sha() {
+  local rec="$LOOP_STATE/.${LOOP}-deliver/record.json" sha
+  [[ -f "$rec" && ! -L "$rec" ]] || return 0
+  sha="$("$PY" -I -c '
+import json, sys
+try:
+    sha = json.load(open(sys.argv[1], encoding="utf-8")).get("head_sha") or ""
+except Exception:
+    sha = ""
+sys.stdout.write(sha if isinstance(sha, str) else "")
+' "$rec" 2>/dev/null || true)"
+  [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || sha=""
+  printf '%s' "$sha"
+}
+
 # R-613: the durable record first, then the verdict line of this slice.
+# Every green claim, from either source, goes through deliver_urls_verified
+# with the recorded head SHA: a claim with nothing recorded to bind it to is
+# not re-checkable, so it is INCOMPLETE.
 deliver_status() {
-  local from_record line rest tok n="" urls="" check=""
+  local from_record line rest tok n="" urls="" check="" sha
   from_record="$(RADON_WEEKEND_ROOT="$LOOP_STATE" "$TIMEOUT_BIN" 30 "$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py" \
     deliver-status --loop "$LOOP" 2>/dev/null || true)"
+  sha="$(deliver_record_head_sha)"
   case "$from_record" in
     ""|*"no deliver record"*) ;;
     *"deliver record has a branch but no PR"*) ;;
+    *"nothing to merge"*)
+      if deliver_urls_verified "" 0 ""; then printf '%s' "$from_record"
+      else printf 'INCOMPLETE: unverified-zero-pr-claim'; fi
+      return 0 ;;
     *"ready to merge:"*)
-      if deliver_urls_verified "${from_record#*ready to merge:}" "${from_record%% PR(s)*}"; then printf '%s' "$from_record"
+      if deliver_urls_verified "${from_record#*ready to merge:}" "${from_record%% PR(s)*}" "$sha"; then printf '%s' "$from_record"
       else printf 'INCOMPLETE: unverified-pr-url'; fi
       return 0 ;;
     *) printf '%s' "$from_record"; return 0 ;;
@@ -165,8 +225,10 @@ deliver_status() {
           http://*|https://*) urls="${urls:+$urls }$tok" ;;
         esac
       done
-      if [[ "${n:-0}" == "0" ]]; then printf '0 PR(s), nothing to merge'
-      elif deliver_urls_verified "$urls" "$n"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
+      if [[ "${n:-0}" == "0" ]]; then
+        if deliver_urls_verified "" 0 ""; then printf '0 PR(s), nothing to merge'
+        else printf 'INCOMPLETE: unverified-zero-pr-claim'; fi
+      elif deliver_urls_verified "$urls" "$n" "$sha"; then printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
       else printf 'INCOMPLETE: unverified-pr-url'; fi ;;
     "$DELIVER_INCOMPLETE_MARKER"*)
       rest="${line#"$DELIVER_INCOMPLETE_MARKER"}"

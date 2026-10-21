@@ -197,6 +197,16 @@ class TestRecord:
         assert record["run_id"] == "20260902T000007"
         assert record["updated_at"]
 
+    def test_a_green_record_persists_the_head_sha_it_verified(self, tmp_path):
+        # DS-2026-10-21-10: the stored verdict is only re-checkable when it
+        # names the commit it was verified at.
+        nd.write_record("security", root=tmp_path, branch="b", pr=5, url=URL1,
+                        status="green", head_sha="a" * 40)
+        assert nd.read_record("security", root=tmp_path)["head_sha"] == "a" * 40
+        nd.write_record("security", root=tmp_path, branch="b", pr=5, url=URL1,
+                        status="pending")
+        assert nd.read_record("security", root=tmp_path)["head_sha"] is None
+
     def test_missing_record_is_none(self, tmp_path):
         assert nd.read_record("security", root=tmp_path) is None
 
@@ -269,6 +279,17 @@ class TestCli:
         assert shown.returncode == 0, shown.stderr
         assert json.loads(shown.stdout)["pr"] == 5
         assert json.loads(shown.stdout)["resumable"] is True
+
+    def test_record_green_takes_the_verified_head_sha(self, tmp_path):
+        env = {"PATH": "/usr/bin:/bin", "RADON_WEEKEND_ROOT": str(tmp_path)}
+        proc = self._run(
+            "record", "--loop", "security", "--branch", "security/2026-09-02",
+            "--pr", "5", "--url", URL1, "--status", "green",
+            "--head-sha", "b" * 40, env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+        shown = self._run("show", "--loop", "security", env=env)
+        assert json.loads(shown.stdout)["head_sha"] == "b" * 40
 
     def test_show_without_a_record_is_empty_json(self, tmp_path):
         env = {"PATH": "/usr/bin:/bin", "RADON_WEEKEND_ROOT": str(tmp_path)}

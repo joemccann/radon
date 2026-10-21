@@ -28,6 +28,7 @@ TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/
 MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "SECURITY-DEEPSEC PHASE COMPLETE:"}
 LABELS = {"security": "security-nightly", "security-deepsec": "security-deepsec"}
 PR = "https://github.com/joemccann/radon/pull/901"
+HEAD_SHA = "a" * 40
 CANARY_TOKEN = "ghp_" + "A" * 36
 CANARY_FINDING = "web/lib/secret.ts:12 lets an anonymous caller read /api/admin/keys"
 UNSET = (REPO / "scripts" / "runner" / "loops" / "security.env").read_text().split('AGENT_UNSET="')[1].split('"')[0]
@@ -114,6 +115,7 @@ def rig(request, tmp_path):
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
                 "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
+                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
     def pre(phase="audit", cwd=None, **extra):
@@ -317,15 +319,6 @@ def _ready(rig, n=1, url=PR):
     return f"NIGHTLY DELIVER READY: loop={rig.loop} prs={n} {url}\n{rig.marker} deliver run_id=r1\n"
 
 
-def test_a_verified_green_pr_is_ready_to_merge(rig):
-    out = rig.post(phase="deliver", output=_ready(rig))
-
-    assert out["status"].startswith(f"OK: 1 PR(s) green, ready to merge: {PR}")
-    view = next(c for c in rig.gh_calls() if c.startswith("pr view"))
-    assert "-R joemccann/radon" in view and "isCrossRepository == false" in view
-    assert f'startswith("{rig.loop}/")' in view
-
-
 def test_a_foreign_or_closed_pr_url_is_never_ready(rig):
     out = rig.post(phase="deliver", output=_ready(rig), STUB_PR_VIEW="no")
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url")
@@ -386,6 +379,113 @@ def test_protocol_output_ignores_newline_injected_status_values(rig):
 
 def test_a_deliver_timeout_is_an_incomplete_deliver(rig):
     assert rig.post(phase="deliver", rc=124)["status"].startswith("INCOMPLETE: deliver cap hit")
+
+
+# --- security_post.sh: live re-verification of a stored green ----------------
+
+
+def _record(rig, **fields):
+    record = rig.state / f".{rig.loop}-deliver" / "record.json"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    body = {"loop": rig.loop, "branch": f"{rig.loop}/2026-09-28", "pr": 901, "url": PR,
+            "status": "green", "check": None, "head_sha": HEAD_SHA,
+            "updated_at": "2099-01-01T00:00:00+00:00"}
+    body.update(fields)
+    record.write_text(json.dumps(body))
+    return record
+
+
+def _stamp(rig):
+    return f"{rig.marker} deliver run_id=r1\n"
+
+
+def test_a_record_green_at_the_still_current_head_is_ready_to_merge(rig):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith(f"OK: 1 PR(s) green, ready to merge: {PR}"), out
+    view = next(c for c in rig.gh_calls() if c.startswith("pr view"))
+    assert "pr view 901 -R joemccann/radon" in view, view
+    assert "headRefOid" in view and "statusCheckRollup" in view, view
+
+
+def test_a_head_pushed_after_the_watch_step_is_never_ready(rig):
+    _record(rig, head_sha="b" * 40)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_a_green_record_without_a_recorded_head_sha_is_never_ready(rig):
+    _record(rig, head_sha=None)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+@pytest.mark.parametrize("rollup", ["", "SUCCESS,FAILURE", "SUCCESS,PENDING",
+                                   "SUCCESS,QUEUED", "SUCCESS,CANCELLED"])
+def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
+    # "No checks reported" is PENDING, not success.
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+@pytest.mark.parametrize("fields", [
+    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS",
+    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS",
+    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS",
+    "OPEN main false {sha} SUCCESS",
+])
+def test_a_closed_cross_repo_or_off_prefix_pr_is_never_ready(rig, fields):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA))
+
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
+
+
+def test_a_ready_transcript_line_with_no_durable_record_is_incomplete(rig):
+    # Nothing recorded to bind the claim to, so nothing to re-verify.
+    out = rig.post(phase="deliver", output=_ready(rig))
+
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
+
+
+def test_an_open_loop_pr_contradicts_a_zero_pr_claim(rig):
+    # DS-2026-09-29-05: the zero-URL claim used to pass with no verification.
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""), STUB_PR_LIST=PR)
+
+    assert out["status"].startswith("INCOMPLETE"), out
+
+
+def test_a_zero_pr_claim_still_passes_when_the_repository_has_no_loop_pr(rig):
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""))
+
+    assert out["status"].startswith("OK: 0 PR(s), nothing to merge"), out
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/attacker/radon/pull/901",
+    "https://evil.example/joemccann/radon/pull/901",
+    "https://github.com.evil.example/joemccann/radon/pull/901",
+    "https://github.com/joemccann/radon/pull/901/files",
+    "https://github.com/joemccann/radon/pull/9x1",
+])
+def test_a_pr_url_outside_the_configured_repository_never_reaches_the_operator(rig, url):
+    _record(rig, url=url)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    for host in ("attacker", "evil.example", "/files", "9x1"):
+        assert host not in out["_proc"].stdout, out["_proc"].stdout
+    assert not any("evil.example" in c or "attacker" in c for c in rig.gh_calls())
 
 
 # --- security_post.sh: private report ---------------------------------------------
