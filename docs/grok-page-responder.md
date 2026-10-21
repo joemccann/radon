@@ -303,6 +303,8 @@ Before a genuine failure can launch a fallback, `grok_runtime_attempt`
 records its page, model, CLI version, exit/timeout/invalid-result reason,
 output length and a credential-redacted stderr tail. Agent stdout stays
 out of the journal. The normal per-launch action budget still applies.
+Generated `node_modules/` directories must stay gitignored: clone sync
+refuses a dirty tree, including untracked dependency caches.
 
 ## Verify
 

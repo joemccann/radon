@@ -132,3 +132,14 @@ def test_missing_live_binary_can_use_installed_fallback(tmp_path, runtimes):
 @pytest.mark.parametrize("output", ["{truncated", '{"text": null}', '{"stopReason": "error"}'])
 def test_broken_json_is_not_a_completed_result(output):
     assert grok_runtime.should_retry_lkg(0, output, "")
+
+
+def test_dependency_directories_do_not_block_responder_clone_sync():
+    """Use the installed ignore file: dirty dependency caches stall clone sync."""
+    root = Path(__file__).resolve().parents[2]
+    ignored = subprocess.run(
+        ["git", "check-ignore", "node_modules/cache", "web/node_modules/cache"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    assert ignored.returncode == 0
+    assert ignored.stdout.splitlines() == ["node_modules/cache", "web/node_modules/cache"]
