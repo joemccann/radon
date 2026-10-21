@@ -4525,4 +4525,8 @@ Observed 2026-10-21 18:18:13Z for page `72cdada6f65595cfd32c1885c614ed75`.
 - **Rollout:** the legacy responder executes its own clone. Preserve any
   incident branches and untracked files; deployment of the app alone does
   not prove that clone advanced. Verify the next poll's source and outcome.
+  The production clone also had untracked root/web dependency directories:
+  a missing newline had commented out `node_modules/` in `.gitignore`.
+  Restore that ignore rule so generated dependencies cannot hold clone sync
+  in `dirty` forever. Preserve actual untracked work and incident branches.
   Rollback reverts this code change; no runtime pin or credential changes.
