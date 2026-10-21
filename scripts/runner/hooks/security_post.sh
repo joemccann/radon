@@ -310,10 +310,25 @@ _COOKIE_HEADER_ERE='(^|[^[:alnum:]_])(([Ss][Ee][Tt]-)?[Cc][Oo][Oo][Kk][Ii][Ee][[
 _KEY_BEGIN_ERE='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
 _KEY_END_ERE='-----END ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
 
+# DS-2026-10-20-06: the CANONICAL scrubber runs first, from the root-owned
+# lib copy with an isolated interpreter. It consumes YAML block-scalar bodies
+# before anything line-oriented sees them (a line-oriented pass rewrote the
+# `key: |` header and published the indented body) and it shares its key
+# alphabet with the rest of the repo, so a compound credential name is not
+# missed here alone. The sed pass below then adds the key classes the module
+# does not carry (`credential`, a bare `-key` / `_key` suffix). It never sees
+# an unconsumed block. A failed scrub returns non-zero and the caller's &&
+# chain abandons the publish: fail closed, never publish unredacted.
 _redact_secret_classes() {
   # Secret literals only. Routes, file:line and findings stay: this text
   # goes to the PRIVATE repository, not the public issue.
-  /usr/bin/sed -E \
+  "$PY" -I -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from credential_redaction import scrub_credential_text
+sys.stdout.write(scrub_credential_text(sys.stdin.read()))
+' "$RUNNER_DIR/lib" \
+  | /usr/bin/sed -E \
     -e "/${_KEY_BEGIN_ERE}/,/${_KEY_END_ERE}/{/${_KEY_BEGIN_ERE}/!d;}" \
     -e "s,^.*${_KEY_BEGIN_ERE}.*$,[REDACTED]," \
     -e "s,${_COOKIE_HEADER_ERE},\\1\\2[REDACTED],g" \

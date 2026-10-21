@@ -24,7 +24,7 @@ GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 # Copied from scripts/ into $PREFIX/lib, root-owned: the hooks, the resolver
 # and the gh guard run these, never the agent-writable clone's copies.
 LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly_green_base.py
-  nightly_audit_context.py nightly_phase_status.py nightly_deliver.py security_claude_ladder.py claude_cli_env_drift.py
+  nightly_audit_context.py nightly_phase_status.py nightly_deliver.py credential_redaction.py security_claude_ladder.py claude_cli_env_drift.py
   claude_cli_env_reviewed.txt nvidia_rate_limit.py ci/check_pr_body.py nightly_toolchain_update.py utils/atomic_io.py"
 
 # Root installs from $SRC, so every path it reads must be one only root or the

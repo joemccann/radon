@@ -22,6 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 HOOKS = REPO / "scripts" / "runner" / "hooks"
 LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
        "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py",
+       "credential_redaction.py",
        "security_claude_ladder.py", "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt")
 BASH = shutil.which("bash") or "/bin/bash"
 TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/usr/bin/timeout").parent)
@@ -550,6 +551,33 @@ def test_no_deploy_key_means_no_publish(rig):
     _write_report(rig, "report\n")
     out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
     assert _published(rig) is None and out["report_url"] == ""
+
+
+def test_a_block_scalar_or_compound_named_credential_body_is_redacted(rig):
+    # DS-2026-10-20-06: a line-oriented pass rewrote the block-scalar HEADER
+    # and published the indented body; the compound key name was not in the
+    # hook's own alphabet at all.
+    (rig.home / ".radon-runner-reports-key").write_text("key\n")
+    time.sleep(1.1)
+    _write_report(rig, "# Report\n\n" + CANARY_FINDING + "\n\n"
+                  "api_key: |\n  qzBlockFirstNOTREAL\n  qzBlockSecondNOTREAL\n\n"
+                  'db_pwd: "qzCompoundNOTREAL"\n')
+
+    out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
+
+    body = _published(rig)
+    assert body is not None, out
+    assert CANARY_FINDING in body, body
+    assert "NOTREAL" not in body, body
+
+
+def test_the_private_report_redactor_runs_the_root_installed_canonical_scrubber():
+    body = (HOOKS / "security_post.sh").read_text()
+    assert "scrub_credential_text" in body
+    assert '"$RUNNER_DIR/lib"' in body
+    assert "scripts/credential_redaction.py" not in body
+    install = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    assert "credential_redaction.py" in install
 
 
 def test_the_key_is_only_in_the_hooks_ssh_command():
