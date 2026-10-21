@@ -45,6 +45,18 @@ for (const theme of ["light", "dark"] as const) for (const width of [1440, 393])
     await expect(page.getByTestId("high-low-line-cumulative-chart").locator("circle.dot-sar").first()).toBeVisible();
     await expect(page.getByTestId("high-low-line-cumulative-chart").locator("path[stroke]").first()).toBeVisible();
     await expect(page.getByTestId("high-low-line-stoch-chart").locator(".reference-level")).toHaveCount(3);
+    const zoneAnnotations = await page.getByTestId("high-low-line-stoch-chart").locator("svg text").evaluateAll(texts => texts
+      .filter(text => ["OVERSOLD", "0.2"].includes(text.textContent?.trim() ?? ""))
+      .map(text => { const box = text.getBoundingClientRect(); return { label: text.textContent?.trim(), x: box.x, y: box.y, width: box.width, height: box.height }; }));
+    const oversold = zoneAnnotations.find(text => text.label === "OVERSOLD");
+    expect(oversold).toBeDefined();
+    await expect(page.getByTestId("high-low-line-stoch-chart").getByText("0.200", { exact: true })).toBeVisible();
+    const threshold = zoneAnnotations.find(text => text.label === "0.2");
+    if (oversold && threshold) {
+      const overlapX = Math.max(0, Math.min(oversold.x + oversold.width, threshold.x + threshold.width) - Math.max(oversold.x, threshold.x));
+      const overlapY = Math.max(0, Math.min(oversold.y + oversold.height, threshold.y + threshold.height) - Math.max(oversold.y, threshold.y));
+      expect(overlapX * overlapY, "Oversold zone and threshold annotations must remain independently readable").toBe(0);
+    }
     await expect(page.getByTestId("high-low-line-range-chips-5y")).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: "Daily", exact: true }).click();
     await expect(page.getByTestId("high-low-line-week-progress")).toHaveCount(0);
