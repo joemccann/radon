@@ -70,6 +70,9 @@ def cycle_env(monkeypatch, tmp_path):
         responder, "_send_pin_warning", lambda message: warnings.append(message)
     )
     monkeypatch.setattr(pages_mod, "actions_since", lambda **_k: 0)
+    monkeypatch.setattr(
+        pages_mod, "record_action_attempt", lambda **_k: "attempt"
+    )
     monkeypatch.setattr(pages_mod, "list_actionable_pages", lambda **_k: [_page()])
     monkeypatch.setattr(
         pages_mod,

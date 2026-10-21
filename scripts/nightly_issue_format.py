@@ -37,7 +37,11 @@ import math
 import re
 import sys
 
-from credential_redaction import EXECUTION_ID_PATTERNS, build_block_scalar_re
+from credential_redaction import (
+    EXECUTION_ID_PATTERNS,
+    build_block_scalar_re,
+    build_triple_quoted_assignment_re,
+)
 
 HEADING_DISCOVERED = "Issue discovered"
 HEADING_DONE = "What was done to fix it"
@@ -65,33 +69,48 @@ _FENCE_RE = re.compile(r"```.*?```", re.S)
 _COOKIE_HEADER_RE = re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.I)
 # The key may be quoted (JSON) or a hyphenated header name, the value quoted
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
-# Both identifier runs are BOUNDED. Unbounded runs on either side of the
-# alternation share its alphabet, so the engine redistributes prefix and
-# suffix at every offset and the scan is quadratic in the length of an
-# identifier run: measured 0.0084s, 0.0336s, 0.1371s and 0.5519s for 250,
-# 500, 1000 and 2000 repetitions of a credential word. This sanitizer runs
-# over attacker-shaped source excerpts in PR bodies, so that is a delivery
-# stall. 32 is far above any real prefix (`NEXT_PUBLIC_CLERK_PUBLISHABLE` is
-# 29) and bounds the per-offset work.
-_SECRET_KEY_NAME = (
-    r"[A-Za-z0-9_-]{0,32}(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
+# Unbounded identifier runs on BOTH sides of the alternation share its
+# alphabet, so the engine redistributes prefix and suffix at every offset and
+# the scan is quadratic in the length of an identifier run: measured 0.0084s,
+# 0.0336s, 0.1371s and 0.5519s for 250, 500, 1000 and 2000 repetitions of a
+# credential word. This sanitizer runs over contributor-shaped source excerpts
+# in PR bodies, so that is a delivery stall.
+#
+# The fix is NOT a bound on the leading run: a bound is an evasion, because a
+# key whose prefix is longer than it stops matching and its value is published
+# to a PUBLIC body. Match from the credential WORD onward with no leading run,
+# exactly as the canonical scrubber's literal-assignment rule does: the search
+# is unanchored, so a prefixed name still matches from its credential word
+# (the prefix simply stays in the output), there is one match start per
+# credential word, and there is no length at which coverage stops. Only the
+# trailing run is bounded, well above any real suffix.
+_SECRET_KEY_WORD = (
+    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
     # `[-_]PWD`, not bare `PWD`: the canonical scrubber spells it `_pwd` for
     # the same reason, so an ordinary working-directory variable in a log line
     # is not mistaken for a credential.
     r"API[-_]?KEY|[-_]KEY|[-_]PWD|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)"
-    r"[A-Za-z0-9_-]{0,32}"
 )
+_SECRET_KEY_NAME = rf"{_SECRET_KEY_WORD}[A-Za-z0-9_-]{{0,64}}"
+# The block-scalar rule is line-anchored (one start per line), so it can carry
+# a bounded leading run and still match an ordinary `DB_PASSWORD: |` header.
+_SECRET_BLOCK_KEY_NAME = rf"[A-Za-z0-9_-]{{0,64}}{_SECRET_KEY_NAME}"
 # A quoted value runs to its closing quote; an escaped quote inside it is part
 # of the value, not the end of it, so the alternation must step over `\"`.
 _SECRET_ASSIGN_RE = re.compile(
-    rf"\b({_SECRET_KEY_NAME})([\"']?\s*[=:]\s*)"
+    rf"({_SECRET_KEY_NAME})([\"']?\s*[=:]\s*)"
     r"(?:(?:basic|bearer|digest|token)\s+)?"
     r"(?:\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|\S+)",
     re.I,
 )
 # The block-scalar structure is shared with the canonical scrubber so the two
 # cannot drift again; this module keeps its own key alphabet.
-_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY_NAME)
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_BLOCK_KEY_NAME)
+# A triple-delimited value spans lines; the single-delimiter rule above read it
+# as an EMPTY two-quote value and left the credential on the following lines in
+# the body. Structure shared with the canonical scrubber, key alphabet and
+# label local, like the block-scalar rule.
+_SECRET_TRIPLE_ASSIGN_RE = build_triple_quoted_assignment_re(_SECRET_KEY_NAME)
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
@@ -114,7 +133,16 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*)",
     re.S,
 )
-_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
+# Each pattern below starts at a TOKEN start, not at every internal word
+# boundary. A word-boundary anchor let a long hyphen- or dot-separated token
+# re-enter the scan after every separator, so the suffix was rescanned at
+# every one: quadratic on contributor-shaped text that reaches sanitize()
+# through github_pr_output with no size bound. One candidate start per token
+# makes the scan linear and cannot narrow coverage: the leading run already
+# spans every character between the token start and any interior start, so a
+# match that used to begin inside a token now begins at its start and redacts
+# the same span or more.
+_EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.\w+\b")
 # App routes (/api/..., /v1/...) with any query or fragment, including
 # dynamic segments ([id], :id, {id}). Not filesystem
 # roots: lock-held comments name $REPO and $RUNNER_LOCK (/Users/..., /tmp/...,
@@ -125,7 +153,11 @@ _ROUTE_RE = re.compile(
 )
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.
-_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+# The scheme run is matched from the token start, so a scheme-shaped token is
+# considered once. The first character is no longer required to be a letter:
+# the token start is where the run begins anyway, and anything ending in
+# `://` is a URL by any reading.
+_URL_RE = re.compile(r"(?<![\w.+-])[\w.+-]*://\S+", re.I)
 # The quota ladder's one operator URL. Its token is kept only when sentence
 # punctuation alone follows the literal; any other suffix (path, query, host
 # tail) redacts the whole token, which carries no scheme once matched.
@@ -134,7 +166,7 @@ _USAGE_TOKEN_RE = re.compile(
 )
 _USAGE_TAIL_OK_RE = re.compile(r"[).,;:!'\"\]>]*")
 _FILE_LINE_RE = re.compile(
-    r"\b[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
+    r"(?<![\w./-])[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
 )
 # Operator / broker / demo account-looking tokens, not pids.
 _ACCOUNT_RE = re.compile(
@@ -227,6 +259,9 @@ def sanitize(text: str) -> str:
     text = _SECRET_BLOCK_SCALAR_RE.sub(
         lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}{REDACTED}\n",
         text,
+    )
+    text = _SECRET_TRIPLE_ASSIGN_RE.sub(
+        lambda m: f"{m.group(1)}{REDACTED}", text
     )
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)

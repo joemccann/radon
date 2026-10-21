@@ -820,7 +820,39 @@ def _complete_page_with_followup(
     return "completed", note
 
 
+PR_SET_DUMPABLE = 4
+
+
+def _harden_controller_against_child() -> None:
+    """Make THIS process non-dumpable before launching the agent child.
+
+    `grok_child_env` strips the controller's Turso and Pushover credentials
+    from the child environment, but the child runs under the same UID, so
+    that allowlist is advisory on its own: a same-UID process can read
+    `/proc/<ppid>/environ`. `prctl(PR_SET_DUMPABLE, 0)` reparents this
+    process's `/proc` entry to root, which denies that read.
+
+    It must apply to the CONTROLLER, not the child: a `preexec_fn` would
+    harden the child's own `/proc` and leave the controller's environ
+    exposed. Linux-only, and a clean no-op elsewhere or when libc / prctl
+    is unavailable — losing the hardening must never stop a page response.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+            raise OSError(
+                ctypes.get_errno(), "prctl(PR_SET_DUMPABLE, 0) refused"
+            )
+    except Exception as exc:  # noqa: BLE001 — hardening is best effort
+        print(f"grok page prctl non-fatal: {exc}", file=sys.stderr)
+
+
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    _harden_controller_against_child()
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -928,6 +960,11 @@ def run_cycle(
         if rerun:
             disposition, summary = rerun
             finished = datetime.now(timezone.utc)
+            # A oneshot re-run is an action too; keep it inside the same
+            # daily cap now that the cap no longer reads `claimed_at`.
+            pages_mod.record_action_attempt(
+                page_id=page["page_id"], now=finished, kind="oneshot_rerun"
+            )
             finish, note = _complete_page_with_followup(
                 page["page_id"],
                 status="done",
@@ -971,6 +1008,12 @@ def run_cycle(
         )
 
         def _run_once(command: list[str]):
+            # Reserve the budget BEFORE the launch, and once per launch so
+            # the last-known-good fallback spends its own unit. The ticket's
+            # claim is cleared again on failure (retryable); this row is not.
+            pages_mod.record_action_attempt(
+                page_id=page["page_id"], now=datetime.now(timezone.utc)
+            )
             try:
                 return runner(command, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root)), None
             except subprocess.TimeoutExpired:

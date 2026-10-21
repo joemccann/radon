@@ -19,6 +19,7 @@ from kelly import KELLY_MAX_PCT
 from order_limits import (
     _finite,
     _ib_order_type,
+    combo_debit_floor,
     combo_max_loss,
     effective_order_price,
     effective_order_price_bounds,
@@ -227,12 +228,13 @@ def order_max_loss(params: dict) -> Optional[float]:
             return None
         # The margin proxy can be zero for all-long legs; premium paid is
         # still exposed even when there is no short-leg assignment risk.
-        # A stop-market always counts that premium as paid.
-        if stop_market or (price > 0) != sell:
-            debit = abs(quantity * price) * 100.0
-        else:
-            debit = 0.0
-        return max(loss, debit)
+        # A stop-market transmits stopPrice only, so the shared floor's
+        # signed limit is the discarded field (REL-328). Count the worse
+        # supplied price as paid. A limit order uses the shared floor so
+        # both Gate-3 guards stay on one implementation.
+        if stop_market:
+            return max(loss, abs(quantity * price) * 100.0)
+        return combo_debit_floor(params, loss)
     sell = str(params.get("action") or "").upper().startswith("SELL")
     quantity = abs(_finite(params.get("quantity")) or 0.0)
     # The price IB actually sends for this order type: a STP order carries no

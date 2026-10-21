@@ -638,8 +638,12 @@ items are NOT listed in Next. Record the PR:
    test first when the fix is in source, fix on the branch, run the focused
    gate, commit, push, watch again. Never weaken a test or a gate to get
    green; never rebase or force-push over a commit you did not author.
-5. Record the outcome (`record ... --status green`, or `--status incomplete
-   --check <name>`) in the private run-record.
+5. Record the outcome (`record ... --status green --head-sha $(git rev-parse
+   HEAD)`, or `--status incomplete --check <name>`) in the private run-record.
+   A green MUST carry the head SHA the watch step verified: the post-run hook
+   re-reads that PR's live head and check rollup before it tells the operator
+   anything is ready to merge, and a green with no recorded SHA, a head that
+   moved, or a rollup that is not wholly successful is reported INCOMPLETE.
 6. Print the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop security-deepsec --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The runner's post-run hook greps it:

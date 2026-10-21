@@ -15,8 +15,8 @@ them:
   (``N PR(s) green, ready to merge: <urls>`` / ``INCOMPLETE: <check>``);
 - ``watch``: a bounded poll of ``gh pr checks <n> --json name,bucket,link``;
 - ``record`` / ``show``: the resume record (branch + PR number + failing
-  check) the next fire reads, kept OUTSIDE the clone so a ``git clean``
-  cannot reach it.
+  check + the head SHA a green was verified at) the next fire reads, kept
+  OUTSIDE the clone so a ``git clean`` cannot reach it.
 
 The wrapper never executes this file (it is agent-writable); the wrapper's
 parse of the verdict line is in-main bash. Stdlib only. Nothing here posts an
@@ -246,6 +246,7 @@ def write_record(
     status: str,
     check: str | None = None,
     run_id: str | None = None,
+    head_sha: str | None = None,
     root: Path | str | None = None,
 ) -> Path:
     path = record_path(loop, root=root)
@@ -258,6 +259,11 @@ def write_record(
         "url": url,
         "status": status,
         "check": check if status != "green" else None,
+        # DS-2026-10-21-10: the head the green was verified AT. A stored
+        # green is only re-checkable against the commit it was earned on; the
+        # post-run hook refuses to report "ready to merge" when the live head
+        # has moved off it. Only a green carries one.
+        "head_sha": head_sha if status == "green" else None,
         "run_id": run_id,
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -347,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
         choices=("launched", "pending", "incomplete", "green"),
     )
     p_record.add_argument("--check", default=None)
+    p_record.add_argument("--head-sha", default=None,
+                          help="the head SHA CI was verified green at (--status green)")
     p_record.add_argument("--run-id", default=None)
 
     p_show = sub.add_parser("show", help="print the resume record as JSON")
@@ -376,7 +384,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "record":
         path = write_record(
             args.loop, branch=args.branch, pr=args.pr, url=args.url,
-            status=args.status, check=args.check, run_id=args.run_id,
+            status=args.status, check=args.check, head_sha=args.head_sha,
+            run_id=args.run_id,
         )
         print(path)
         return 0

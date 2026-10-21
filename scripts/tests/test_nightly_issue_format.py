@@ -17,6 +17,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -659,9 +660,47 @@ def _phase_status_preamble() -> str:
     )
 
 
+def _hook_lib_root() -> Path:
+    """A stand-in for the installed runner directory, built once.
+
+    `_redact_secret_classes` pipes through the canonical scrubber it imports
+    from `$RUNNER_DIR/lib`, which `scripts/runner/install.sh` populates on the
+    real host. Extracting the function alone leaves `PY` and `RUNNER_DIR`
+    unset, so every extraction site has to supply them -- and supplying a real
+    lib means these tests exercise the actual shared scrubber rather than a
+    stub. The hook keeps its hardcoded `$RUNNER_DIR/lib`; nothing about the
+    code-load path is made environment-injectable for the sake of a test.
+    """
+    global _HOOK_LIB_ROOT
+    if _HOOK_LIB_ROOT is None:
+        root = Path(tempfile.mkdtemp(prefix="radon-hook-lib-"))
+        (root / "lib").mkdir()
+        (root / "lib" / "credential_redaction.py").symlink_to(
+            REPO / "scripts" / "credential_redaction.py"
+        )
+        _HOOK_LIB_ROOT = root
+    return _HOOK_LIB_ROOT
+
+
+_HOOK_LIB_ROOT: Path | None = None
+
+
+def _opaque_value() -> str:
+    """An invented opaque credential value, assembled at runtime.
+
+    Spelled in source it is a `generic-api-key` hit for gitleaks next to any
+    recognisable key name, so the fixture is built from fragments instead.
+    """
+    return "abcdefgh" + "12345678" + "ijklmnop"
+
+
 def _secret_ere_block(src: str) -> str:
+    """The hook's ERE definitions, prefixed with the runtime inputs its
+    redactor needs so the extracted function runs under `set -u`."""
     start = src.index("# Credential assignments")
-    return src[start:src.index("_redact_secret_classes() {", start)]
+    prelude = (f"PY={shlex.quote(sys.executable)}\n"
+               f"RUNNER_DIR={shlex.quote(str(_hook_lib_root()))}\n")
+    return prelude + src[start:src.index("_redact_secret_classes() {", start)]
 
 
 class TestSanitizeQuotedSecrets:
@@ -903,7 +942,12 @@ def test_the_private_report_redactor_drops_private_key_blocks(tmp_path: Path, la
               f"QUJDZGVmNOTREALTWO\n{_key_marker('END', label)}\nthen exited")
     out = _hook_redact(tmp_path, report)
     assert "NOTREAL" not in out and "PRIVATE KEY" not in out, out
-    assert out == "the report showed\n[REDACTED]\nthen exited"
+    # The canonical scrubber now runs ahead of the hook's sed pass and claims
+    # the block first, so the label is its `[redacted-private-key]` rather
+    # than the sed rule's `[REDACTED]`. The block is still collapsed to one
+    # line and both the armour and the body are gone, which is what the two
+    # assertions above pin; only the tag moved.
+    assert out == "the report showed\n[redacted-private-key]\nthen exited"
 
 
 def test_the_private_report_redactor_drops_an_unterminated_key_block(tmp_path: Path):
@@ -1037,3 +1081,103 @@ class TestSanitizeKeyNameScanIsBounded:
             "n.sanitize('TOKEN_' * 64_000 + '!')"
         )
         subprocess.run([_sys.executable, "-c", probe], check=True, timeout=20)
+
+
+class TestSanitizeLongKeyPrefixes:
+    """A bound on the identifier run BEFORE the credential word was an
+    evasion: a key whose prefix exceeded it never matched and its value was
+    published verbatim to a PUBLIC PR body (DS-2026-10-21-06). The canonical
+    scrubber matches from the credential WORD onward instead, which keeps the
+    work bounded with no length at which coverage stops. Values are invented."""
+
+    @pytest.mark.parametrize("prefix_len", [8, 31, 32, 40, 80])
+    def test_a_long_key_prefix_does_not_evade_redaction(self, prefix_len: int):
+        key = "N" * prefix_len + "_TOKEN"
+        value = _opaque_value()
+        text = f"the excerpt held {key}={value} and stopped"
+        out = nif.sanitize(text)
+        assert value not in out, out
+        assert out.endswith("and stopped"), out
+
+    def test_an_ordinary_prefixed_key_keeps_its_name_in_the_output(self):
+        # Key and value are assembled at runtime: the repo contract is that no
+        # credential-shaped literal is spelled in source, even a synthetic one,
+        # so the secret scanner cannot trip on a fixture.
+        key, value = "ANTHROPIC" + "_API_KEY", _opaque_value()
+        out = nif.sanitize(f"set {key}={value} here")
+        assert value not in out, out
+        assert "API_KEY" in out, out
+
+
+class TestSanitizeTripleDelimitedValues:
+    """A triple-delimited value (Python or TOML) was matched as an EMPTY
+    two-quote value, so the credential on the FOLLOWING lines was published
+    to a PUBLIC body (DS-2026-10-20-13). Values are invented."""
+
+    @pytest.mark.parametrize(
+        "key,sep,delim",
+        [
+            ("TOKEN", " = ", '"""'),
+            ("DB_PASSWORD", " = ", "'''"),
+            ("api_key", " = ", '"""'),
+            ("UW_TOKEN", ": ", '"""'),
+        ],
+    )
+    def test_triple_delimited_value_is_redacted(self, key, sep, delim):
+        text = f"the excerpt had\n{key}{sep}{delim}\nqzNOTREALopaque1234\n{delim}\nand stopped"
+        out = nif.sanitize(text)
+        assert "NOTREAL" not in out, out
+        assert out.endswith("and stopped"), out
+
+    def test_a_following_key_survives_the_triple_delimited_value(self):
+        text = 'TOKEN = """\nqzNOTREALopaque1234\n"""\nnext_label = keepme\n'
+        out = nif.sanitize(text)
+        assert "NOTREAL" not in out, out
+        assert "keepme" in out, out
+
+    def test_single_line_and_empty_quoted_values_are_unchanged(self):
+        assert nif.sanitize('TOKEN = ""') == "TOKEN = [REDACTED]"
+        assert nif.sanitize('TOKEN = "qzNOTREALopaque1234"') == "TOKEN = [REDACTED]"
+
+
+class TestSanitizeTokenScanIsBounded:
+    """The URL, email and file-location rules had unbounded runs with
+    OVERLAPPING candidate starts: a long hyphen- or dot-separated token with no
+    delimiter was rescanned at every internal word boundary, so the scan was
+    quadratic (measured 0.023s, 0.085s and 0.340s for 2k, 4k and 8k URL-rule
+    repetitions, and 0.081s, 0.315s and 1.280s for the file rule). sanitize()
+    has no input-size bound and contributor-shaped excerpts reach it through
+    github_pr_output (DS-2026-10-20-12). The cure may not shorten coverage, so
+    the coverage tests below are part of this guard."""
+
+    @pytest.mark.parametrize("filler", ["a-", "a.", "a/"])
+    def test_a_pathological_token_does_not_stall_sanitization(self, filler: str):
+        import subprocess
+        import sys as _sys
+
+        probe = (
+            "import sys;"
+            f"sys.path.insert(0, {str(REPO / 'scripts')!r});"
+            "import nightly_issue_format as n;"
+            f"n.sanitize({filler!r} * 64_000 + '!')"
+        )
+        # One candidate start per token needs well under a second here. The
+        # overlapping-start form needed minutes on this input.
+        subprocess.run([_sys.executable, "-c", probe], check=True, timeout=20)
+
+    @pytest.mark.parametrize(
+        "text,leak",
+        [
+            ("fetched https://internal.example/path?q=1 twice", "internal.example"),
+            ("fetched postgres://user@db.internal/radon twice", "db.internal"),
+            ("mail went to someone@example.com twice", "someone@example.com"),
+            ("mail went to first.last+tag@sub.example.co.uk twice", "first.last"),
+            ("it broke at scripts/api/app.py:4120 twice", "app.py:4120"),
+            ("it broke at web/lib/radonApi.ts:88 twice", "radonApi.ts:88"),
+        ],
+    )
+    def test_coverage_is_not_narrowed_by_the_cost_fix(self, text: str, leak: str):
+        out = nif.sanitize(text)
+        assert leak not in out, out
+        assert nif.REDACTED in out, out
+        assert out.endswith("twice"), out

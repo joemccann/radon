@@ -1348,6 +1348,46 @@ install_fleet_dropin() {
   systemctl daemon-reload
   log_success "Fleet drop-in installed (verify: systemctl show radon-api.service -p Environment)"
 }
+# DS-2026-10-21-07: the per-service runtime-container drop-ins are what make
+# these units root-owned container runs. setup-vps.sh installed only the fleet
+# drop-in above and left the per-service ones to the control plane's first
+# refresh, so a fresh host enabled and started the BASE units -- User=radon,
+# ExecStart out of the radon-writable checkout -- while LoadCredentialEncrypted=
+# already handed five of them the decrypted secret-store master key (R-619).
+# Install them here, from the same trusted provision store every other
+# root-installed artifact comes from, before anything is enabled or started.
+install_container_dropins() {
+  local svc dropin target installed
+  log_info "Installing per-service runtime-container drop-ins..."
+  for svc in "${SERVICE_FILES[@]}"; do
+    [[ "$svc" == *.service ]] || continue
+    dropin="${CLOUD_DIR}/services/${svc}.d/runtime-container.conf"
+    # Whether a drop-in is REQUIRED is read from the installed base unit,
+    # which copy_systemd_services above already staged from the committed
+    # blob, never from the radon-writable checkout. Deciding that with a
+    # bare -f against the checkout let radon delete the drop-in and keep the
+    # provenance-checked base unit, which then started as User=radon out of
+    # the checkout while LoadCredentialEncrypted handed it the decrypted
+    # secret-store master key -- the precise window this function closes.
+    installed="/etc/systemd/system/${svc}"
+    if [[ -f "$installed" ]] && grep -q '^LoadCredentialEncrypted=' "$installed"; then
+      if [[ ! -f "$dropin" ]]; then
+        log_error "${svc} loads an encrypted credential but ships no runtime-container.conf; refusing to continue"
+        return 1
+      fi
+    else
+      [[ -f "$dropin" ]] || continue
+    fi
+    target="/etc/systemd/system/${svc}.d/runtime-container.conf"
+    # Never follow a planted link into another privileged file; the drop-in is
+    # a regular canonical artifact, same contract as the units above.
+    rm -f "$target"
+    stage_from_checkout "$dropin" "$target" 0644 -o root -g root
+  done
+  systemctl daemon-reload
+  log_success "Per-service runtime-container drop-ins installed"
+}
+
 enable_services() {
   log_info "Enabling services..."
   local persistent_units=()
@@ -2129,6 +2169,7 @@ main() {
   install_gateway_control
   install_journald_limits
   install_fleet_dropin
+  install_container_dropins
   ensure_swapfile
   enable_services
   open_firewall

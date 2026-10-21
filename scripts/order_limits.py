@@ -114,14 +114,61 @@ def _is_stk_leg(leg: dict) -> bool:
     return not _carries_option_fields(leg)
 
 
+def _expiry_bounds(raw: Any) -> Optional[tuple[str, str]]:
+    """Earliest and latest ``YYYYMMDD`` day a raw expiry can denote.
+
+    IB accepts both ``YYYYMMDD`` and the month-only ``YYYYMM``, and the legs
+    are caller-composed, so the two precisions have to be compared on a common
+    scale instead of as raw strings. ``None`` when no expiry is supplied.
+    """
+    cleaned = str(raw or "").replace("-", "").strip()
+    if not cleaned.isdigit():
+        return None
+    if len(cleaned) == 8:
+        return cleaned, cleaned
+    if len(cleaned) == 6:
+        return cleaned + "01", cleaned + "31"
+    return None
+
+
+def _long_covers_short(long_expiry: Any, short_expiry: Any) -> bool:
+    """True when a long leg can stand as cover for a short leg.
+
+    A long only covers a short that expires no LATER than it does. The long
+    calendar is the covered orientation and keeps its zero width. In the
+    reverse orientation the short outlives the long, so from the long's expiry
+    onward the short stands alone and must keep the strike proxy this module
+    already applies to an unpaired short.
+
+    Cover must be PROVEN, because the caller composes these fields: the long's
+    earliest possible day has to be on or after the short's latest possible
+    one. A month-only long against a later dated short, and a long with no
+    expiry against a dated short, both fail that test -- reading them as cover
+    is how a reverse calendar buys back its zero width.
+
+    The one permissive case is legs carrying no expiry on EITHER side, the
+    legacy shape of a snapshot BAG and of an exit order whose expiry could not
+    be resolved. Those keep the previous expiry-blind pairing so a resize of an
+    order IB already holds is not refused.
+    """
+    long_bounds = _expiry_bounds(long_expiry)
+    short_bounds = _expiry_bounds(short_expiry)
+    if long_bounds is None and short_bounds is None:
+        return True
+    if long_bounds is None or short_bounds is None:
+        return False
+    return long_bounds[0] >= short_bounds[1]
+
+
 def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]:
     """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
 
     Shorts are paired against longs of the same right — the nearest strike
     first, so the residual width is the conservative one — and a paired short
-    risks only the width. Pairing ignores expiry on purpose: a calendar's long
-    leg does cover its short, and grouping by expiry would price every index
-    calendar off the strike and refuse it.
+    risks only the width. Pairing deliberately spans expiries, because a long
+    calendar's long leg does cover its short and grouping by expiry would price
+    every index calendar off the strike and refuse it. It spans them in ONE
+    direction only: see ``_long_covers_short``.
 
     An unpaired short put's max loss IS its strike. An unpaired short call's
     is unbounded, so the strike stands in as a documented margin proxy — not a
@@ -137,7 +184,7 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
     if not isinstance(legs, list) or not legs:
         return None
 
-    by_right: dict[str, dict[str, list[float]]] = {}
+    by_right: dict[str, dict[str, list[tuple[float, Any]]]] = {}
     for leg in legs:
         if not isinstance(leg, dict):
             return None
@@ -159,17 +206,19 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
         if reverse and action:
             is_short = not is_short
         side = "short" if is_short else "long"
+        expiry = leg.get("expiry")
         sides = by_right.setdefault(right, {"long": [], "short": []})
-        sides[side].extend([strike] * ratio)
+        sides[side].extend([(strike, expiry)] * ratio)
 
     risk = 0.0
     for sides in by_right.values():
         longs = sorted(sides["long"])
-        for short_strike in sorted(sides["short"]):
-            if longs:
-                nearest = min(longs, key=lambda strike: abs(strike - short_strike))
+        for short_strike, short_expiry in sorted(sides["short"]):
+            covering = [leg for leg in longs if _long_covers_short(leg[1], short_expiry)]
+            if covering:
+                nearest = min(covering, key=lambda leg: abs(leg[0] - short_strike))
                 longs.remove(nearest)
-                risk += abs(short_strike - nearest) * _OPTION_MULTIPLIER
+                risk += abs(short_strike - nearest[0]) * _OPTION_MULTIPLIER
             else:
                 risk += short_strike * _OPTION_MULTIPLIER
     return risk
@@ -206,6 +255,23 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
     is_sell_envelope = str(params.get("action") or "").upper().startswith("SELL")
     receives_premium = (signed_price < 0) != is_sell_envelope
     return price * multiplier if receives_premium else 0.0
+
+
+def combo_debit_floor(params: dict, loss: float) -> float:
+    """``loss`` floored by the premium a combo actually pays.
+
+    The strike/width margin proxy is zero for an all-long or long-calendar
+    structure, yet a debit order has its whole premium at risk. A net CREDIT
+    is never a floor — nothing was paid. Both Gate-3 guards call this so the
+    two implementations cannot drift apart again.
+    """
+    quantity = _finite(params.get("quantity"))
+    price = _finite(params.get("limitPrice") or params.get("stopPrice"))
+    if quantity is None or price is None or quantity == 0 or price == 0:
+        return loss
+    sell = str(params.get("action") or "").upper().startswith("SELL")
+    debit = abs(quantity * price) * _OPTION_MULTIPLIER if (price > 0) != sell else 0.0
+    return max(loss, debit)
 
 
 def _ib_order_type(params: dict) -> str:
@@ -444,6 +510,13 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
         }
 
     loss = combo_max_loss(params)
+    if loss is not None:
+        # The always-on gate prices a debit the same way both optional
+        # Gate-3 guards do. Without this floor an all-long or long-calendar
+        # structure reports the zero width/assignment proxy to the mandatory
+        # cap while its whole premium is at risk, so a tightened
+        # RADON_MAX_COMBO_LOSS_DOLLARS could never bind to it.
+        loss = combo_debit_floor(params, loss)
     loss_cap = max_combo_loss_dollars()
     if loss is not None and loss > loss_cap:
         return {

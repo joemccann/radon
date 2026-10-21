@@ -144,6 +144,12 @@ be the one a cap is computed on. A combo stop-market sends `stopPrice` only
 `limitPrice` from assignment or width, and `order_max_loss` prices that stop
 as paying the worse supplied price.
 
+For a combo both guards also floor the worst case at the premium paid, through
+the shared `order_limits.combo_debit_floor`. The strike/width margin proxy is
+zero for an all-long or long-calendar structure whose debit is nevertheless
+fully at risk, and a net credit is never a floor because nothing was paid. One
+helper, called from both, so the two Gate-3 implementations cannot drift.
+
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so
 `kelly_ticket()` must refuse it with `reason: "UNDEFINED_RISK"` rather than
