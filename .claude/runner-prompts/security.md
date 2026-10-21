@@ -846,8 +846,9 @@ Security rails for this phase, in addition to every hard rail above:
    head SHA the watch step verified: the post-run hook re-reads that PR's
    live head and check rollup before it tells the operator anything is ready
    to merge, and a green with no recorded SHA, a head that moved, or a rollup
-   that is not wholly successful is reported INCOMPLETE. The runner alone posts sanitized issue health;
-   never post the private findings or checkpoint to the rolling issue.
+   that is not wholly successful is reported INCOMPLETE. The runner alone
+   posts sanitized issue health; never post the private findings or
+   checkpoint to the rolling issue.
 6. Print the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop security --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The runner's post-run hook greps it:

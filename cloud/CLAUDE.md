@@ -56,7 +56,14 @@ Production is three planes. Do not collapse them.
 - **App plane:** Next.js, FastAPI, relay, monitor, newsfeed and timer-owned
   oneshots. The installed per-unit `runtime-container.conf` determines container
   execution; the host environment default alone does not identify the running
-  plane. [The runtime owner](../docs/cloud-services.md#runtime-planes)
+  plane. `setup-vps.sh` installs those per-service drop-ins itself
+  (`install_container_dropins`, staged root-owned through
+  `stage_from_checkout`) BEFORE `enable_services` and `start_services`, so a
+  fresh host never starts a unit carrying `LoadCredentialEncrypted` while it
+  still has the base `User=radon` `ExecStart`; waiting for the first
+  control-plane refresh to supply the drop-in handed `radon` the decrypted
+  secret-store master key for that window. `install_fleet_dropin` still
+  installs only `common.conf`. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
   `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
