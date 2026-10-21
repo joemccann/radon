@@ -2707,6 +2707,59 @@ same fire exited OK.
 
 ---
 
+## flow-refresh-discover-admission-busy
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when market-wide options flow hits a short UW governor
+embargo.** Peak: 2026-10-21 18:00:41Z, page
+`72cdada6f65595cfd32c1885c614ed75`. Scanner and flow-analysis in the
+same fire exited OK. Flow-analysis spent two instant HTTP 502 capacity
+retries, then completed.
+
+- **Mechanism:** the top-of-hour burst leaves a governor embargo (this
+  fire: until 18:01:02.411Z, about 23s after the discover POST).
+  `reserve()` refuses immediately when the embargo is longer than its
+  10s wait cap, so the options-flow fetch makes no reservation.
+  `fetch_flow` retries that 429 once after 2s, which is still inside
+  the embargo. `discover()` mapped the `UWRateLimitError` to a hard
+  `error` with empty candidates. `_run_flow_tab` returned HTTP 400 in
+  about 2s. The wrapper does not retry 400, so the oneshot exited 1.
+  No darkpool cache writes. `discover.json` stayed on the previous
+  clean run. `/health/lite` stayed authenticated.
+- **Detection:** unit journal scanner OK, flow-analysis OK (optional
+  capacity retries), then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)` about 2s
+  after the discover POST. `systemctl show` is `exit-code` /
+  `ExecMainStatus=1` / `NRestarts=0`. `uw_governor` `requests` has no
+  row in that second, and `policy.embargo` is still in the future.
+- **Discriminating check:** HTTP 400 in about 2s, not ~30s and not
+  instant 502. No darkpool cache writes during the POST. Governor
+  embargo remaining is under the 70s options-flow wait budget, and
+  `auth_status` is still 200. A scored scan with one darkpool skip
+  (HTTP 400 after ~30s, cache writes) is
+  `flow-refresh-discover-partial-400`. Options-flow itself raising
+  `UWAPIError` with no short embargo, or an embargo longer than 70s
+  (daily reset), stays a hard 400. Instant `Subprocess capacity
+  exhausted` is `flow-refresh-capacity-502`. A ~120s flow-analysis
+  502 is `flow-refresh-analysis-timeout`. `curl: (7)` then fallback
+  is `flow-refresh-connect-refused`. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
+  in the same minute, stand down.
+- **Remediation (code):** on `UW admission is busy`, sleep once until
+  the governor embargo lifts when that remainder is at most 70s, then
+  fetch options flow once more. Quota exhaustion, a longer embargo,
+  and any other provider error still set the hard `error` and the
+  oneshot still exits 1. Do not `reset-failed`. The next timer after
+  deploy is enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_options_flow_admission_busy_waits_out_the_short_embargo_then_scores`,
+  `test_options_flow_admission_busy_retries_once_then_stays_a_hard_error`,
+  `test_options_flow_admission_busy_past_the_wait_budget_stays_a_hard_error`,
+  `test_options_flow_quota_exhausted_does_not_wait`.
+- **Code:** `scripts/discover.py` (`_fetch_options_flow_after_admission`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
