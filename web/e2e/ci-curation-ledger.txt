@@ -512,6 +512,7 @@ ws-connection-stability.spec.ts
 #   asserts the deck header carries no esc/x hint. Chain and book at 390px and
 #   1440px passed locally in Chromium against next dev (4 passed).
 # REVIEWED 2026-10-06 mobile-risk-reversal-quote-sign.spec.ts - 2/2 mobile
+# REVIEWED 2026-10-21 day-move-breakdown-net-combo.spec.ts - New spec, green 1/1 locally under `next dev` on :3033 (relay-only socket mock, stubbed portfolio); modal screenshot shows SPCX net $1.30 -> $1.90 +97.0% and IWO IB!=QUOTE chip. Not preflighted under `next start`; backlog membership below.
 #   against isolated next dev :3351, retries=0. Real pointer actions assert
 #   signed BID/MID/ASK presets, selected negative limit, no early POST and
 #   exact confirmed mocked credit-combo payload; full-viewport screenshots
