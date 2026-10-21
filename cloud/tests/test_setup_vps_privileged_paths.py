@@ -1309,6 +1309,14 @@ class TestRemoteInstallerPins:
         assert "| bash" not in body
         assert "deb.nodesource.com/node_22.x" in body
         assert "signed-by=" in body
+        assert 'readonly NODE_VERSION="22.23.4"' in script
+        assert '[[ "$(node --version)" == "v${NODE_VERSION}" ]]' in body
+        assert "node_major" not in body
+        assert "-ge 20" not in body
+        assert 'apt install -y nodejs="${NODE_VERSION}-1nodesource1"' in body
+        validate = _function_body(script, "validate_versions")
+        assert '[[ "$(node --version)" != "v${NODE_VERSION}" ]]' in validate
+        assert ">= 20" not in validate
 
     def test_caddy_apt_key_is_fingerprint_pinned_and_sources_list_is_local(self) -> None:
         script = SETUP.read_text(encoding="utf-8")

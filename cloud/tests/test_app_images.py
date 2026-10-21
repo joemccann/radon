@@ -128,7 +128,7 @@ class TestPythonImage:
         assert re.fullmatch(r"python:3\.13\.\d+-slim@sha256:[0-9a-f]{64}", images[-1])
         assert len(images) == 3
         for image in images[:2]:
-            assert re.fullmatch(r"node:22\.22\.0-bookworm-slim@sha256:[0-9a-f]{64}", image)
+            assert re.fullmatch(r"node:22\.23\.4-bookworm-slim@sha256:[0-9a-f]{64}", image)
         assert f"FROM {images[0]} AS vendor-clis" in text
         assert f"FROM {images[1]} AS chart-runtime" in text
         assert "COPY requirements.txt" in text
@@ -229,7 +229,7 @@ class TestNodeImage:
         text = NODE_DF.read_text(encoding="utf-8")
         images = _from_images(text)
         # DS-2026-10-11-03: both stages are digest-pinned like the Python image.
-        assert re.fullmatch(r"node:22\.\d+\.\d+-bookworm-slim@sha256:[0-9a-f]{64}", images[-1])
+        assert re.fullmatch(r"node:22\.23\.4-bookworm-slim@sha256:[0-9a-f]{64}", images[-1])
         assert re.fullmatch(r"oven/bun:1\.3\.14@sha256:[0-9a-f]{64}", images[0])
         assert "1.3.14" in text
         assert "COPY web/" in text or "COPY web" in text
