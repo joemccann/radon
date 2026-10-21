@@ -394,6 +394,53 @@ class TestComboNotionalIsRiskNotPremium:
         ]
         assert order_limits._combo_risk_per_unit(legs) == pytest.approx(500.0)
 
+    def _all_long_debit_combo(self):
+        """No short leg, so the width/assignment proxy is zero while the
+        whole premium paid is at risk. $50.00 x 40 x 100 = $200,000."""
+        return {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 40, "limitPrice": 50.0,
+            "legs": [
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20271217", "strike": 5200, "right": "C", "action": "BUY", "ratio": 1},
+            ],
+        }
+
+    def test_the_mandatory_loss_gate_applies_the_debit_floor(self, monkeypatch):
+        """The always-on gate must not price a debit lower than the optional ones.
+
+        `combo_debit_floor` was shared between `kelly_guard` and
+        `bankroll_guard`, but `check_order_limits` -- the only Gate-3
+        consumer that is always enabled -- still read `combo_max_loss` raw.
+        An all-long debit combo therefore reported $0 to the mandatory cap
+        while both optional guards priced it at the full debit, so a
+        tightened RADON_MAX_COMBO_LOSS_DOLLARS could not bind to it.
+        """
+        params = self._all_long_debit_combo()
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "100000")
+        violation = order_limits.check_order_limits(params)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+        assert "200,000" in violation["message"], violation["message"]
+
+    def test_the_debit_floor_does_not_refuse_a_debit_under_the_cap(self, monkeypatch):
+        """Green path: the same structure places while the cap is above it."""
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "300000")
+        assert order_limits.check_order_limits(self._all_long_debit_combo()) is None
+
+    def test_a_credit_combo_gets_no_spurious_floor_in_the_gate(self, monkeypatch):
+        """A net credit was never paid, so it must not become a floor."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 10, "limitPrice": -2.0,
+            "legs": [
+                {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20260918", "strike": 7005, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "4000")
+        assert order_limits.check_order_limits(params) is None
+
     def test_single_expiry_vertical_width_math_is_unchanged(self):
         """Existing behaviour: same-expiry legs pair on strike as before."""
         params = {
