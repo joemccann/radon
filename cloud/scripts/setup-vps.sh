@@ -1357,12 +1357,27 @@ install_fleet_dropin() {
 # Install them here, from the same trusted provision store every other
 # root-installed artifact comes from, before anything is enabled or started.
 install_container_dropins() {
-  local svc dropin target
+  local svc dropin target installed
   log_info "Installing per-service runtime-container drop-ins..."
   for svc in "${SERVICE_FILES[@]}"; do
     [[ "$svc" == *.service ]] || continue
     dropin="${CLOUD_DIR}/services/${svc}.d/runtime-container.conf"
-    [[ -f "$dropin" ]] || continue
+    # Whether a drop-in is REQUIRED is read from the installed base unit,
+    # which copy_systemd_services above already staged from the committed
+    # blob, never from the radon-writable checkout. Deciding that with a
+    # bare -f against the checkout let radon delete the drop-in and keep the
+    # provenance-checked base unit, which then started as User=radon out of
+    # the checkout while LoadCredentialEncrypted handed it the decrypted
+    # secret-store master key -- the precise window this function closes.
+    installed="/etc/systemd/system/${svc}"
+    if [[ -f "$installed" ]] && grep -q '^LoadCredentialEncrypted=' "$installed"; then
+      if [[ ! -f "$dropin" ]]; then
+        log_error "${svc} loads an encrypted credential but ships no runtime-container.conf; refusing to continue"
+        return 1
+      fi
+    else
+      [[ -f "$dropin" ]] || continue
+    fi
     target="/etc/systemd/system/${svc}.d/runtime-container.conf"
     # Never follow a planted link into another privileged file; the drop-in is
     # a regular canonical artifact, same contract as the units above.
