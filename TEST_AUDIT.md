@@ -11650,3 +11650,41 @@ Closing gates, serial, from the repo root. Root pytest exit 0 each round. Vitest
 | 3 | 16,612 passed / 10 skipped / 23 subtests (110.91s) | 5 failed / 11,259 passed / 21 skipped / 1,145 files (160.37s) | 54 failed / 3,197 passed / 11 skipped (823.56s) | 22 added / 0 removed |
 
 Base cloud at `30bbaec2` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 32 failed / 2,893 passed / 8 skipped (734.88s). The 22 added nodes are identical on rounds 1–3: four `test_deploy_lock_migration.py` cases (`flock: command not found`), eight `test_responder_service_account.py` slot cases (`FileNotFoundError: /usr/bin/test`), nine `test_sync_control_plane.py` cases (`pin[@]: unbound variable` under bash 3.2 `set -u` on an empty array), and `test_setup_boot_enable_does_not_reactivate_retired_media_path` (`persistent_units[@]: unbound variable`). The 32 base failures stayed failed. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The five next.config timeouts are the same load class as 2026-10-18; they pass when the ceiling is 20s and the import itself is about 6.5–7.2s.
+
+## Delta audit 2026-10-21
+
+Range `5bfadbb6afb805b53dc3ea10f884728ed7076e16..e5426fb17d91d2c1224b070c5865a526d358fd7d`: 30 commits / 43 paths. Newest trusted checkpoint is the 2026-10-20 collaborator comment on issue #83 (`audited-through: 5bfadbb6afb805b53dc3ea10f884728ed7076e16`). It carried no open verified finding. Open pull request #1194 (`testing/2026-10-20`) is green and already owns T-560, so numbering continues at T-561. No red or pending check on that pull request.
+
+Same-origin mutation, credential scrubbing, the perf-probe allowlist, bind-source recheck, and the Grok responder work root are executed by tests that call the behavior. `ci.yml` only adds `lib/sameOrigin.ts` to the perimeter eslint step. No coverage threshold change and no new blanket exclude. No new `skip` or `xfail` in the range. The delta touches 15 test files, re-run three times: script files 240 passed / 8 skipped each run; Vitest 48 passed each run; cloud files 9 failed / 351 passed / 1 skipped each run. Those 9 are `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` (also red on the base SHA) and the eight `/usr/bin/test` slot cases.
+
+Not filed: the root pytest SSL failures (`Missing Authority Key Identifier`) are the same 54 nodes on this SHA and on `5bfadbb6`. The five `next.config.mjs` Vitest timeouts are the prior load class.
+
+### T-561 — P1 — a zero-strike share leg is not the shape the covered-combo tests build
+
+`ib_orders._contract_dict` writes `strike` onto every resolved combo leg (`scripts/ib_orders.py:121`). A share contract carries `strike: 0.0` with empty right and expiry. `_carries_option_fields` treats a strike as an option coordinate only when it is greater than zero (`scripts/order_limits.py:102-103`). The comment says that shape is pinned by `scripts/api/tests/test_modify_snapshot_contract_shape.py`, whose `strike: 0.0` row is a stock order (`test_modify_snapshot_contract_shape.py:46`), not a combo leg. `test_a_genuine_buy_write_is_still_accepted` omits the strike key (`scripts/tests/test_order_limits_fail_open_inputs.py:170`).
+
+Changing the predicate to `strike is not None` left that buy-write green (28 passed in the file) and did two different things to the serialized shape: `check_order_limits` refused a one-lot place with `ORDER_COMBO_LEG_SEC_TYPE`, and `check_modify_limits` classified the bag as an option and returned None for a 200-lot resize whose loss is $14,000,000. Quantity 200 and notional $20,000 sit inside the option caps, so the loss cap was skipped.
+
+Acceptance: a combo leg `secType: STK`, `strike: 0.0`, `right: ""`, `expiry: None` is accepted on a one-lot buy-write and prices the short call at $70,000. The same legs on a snapshot BAG, resized to 200 at $1, are refused with `ORDER_MAX_LOSS_LIMIT`. The no-strike buy-write stays green.
+
+Audited through: e5426fb17d91d2c1224b070c5865a526d358fd7d on 2026-10-21 — 1 new finding
+
+## Remediation 2026-10-21
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-561 | DONE | Predicate set to `strike is not None`: 2 failed / 28 passed in `scripts/tests/test_order_limits_fail_open_inputs.py`. The place case got `ORDER_COMBO_LEG_SEC_TYPE`. The snapshot resize returned None (`serialized covered combo skipped the loss cap`). Predicate restored. The file passed 30 tests on each of three serial runs. Product source unchanged. |
+
+Delta files, three times, before the closing rounds: script files 240 passed / 8 skipped each run; Vitest 48 passed / 4 files each run; cloud files 9 failed / 351 passed / 1 skipped each run, same nodes, and the notify-proxy node also fails on `5bfadbb6`.
+
+### Closing gates 2026-10-21
+
+Serial from the repo root. Root pytest exit 1 each round on the same 54 SSL nodes as a full run of `5bfadbb6` (0 added / 0 removed). Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`). Those five files passed 29 tests at a 20s ceiling in 46.06s. The committed ceiling was not raised. Cloud exit 1. Rounds 1 and 3 are the same 54 nodes as each other and as `5bfadbb6` (0 added / 0 removed). Round 2 added only `test_a_hung_upstream_becomes_a_5xx_within_a_bound`, which passed alone in 30.25s.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `5bfadbb6` |
+|---|---|---|---|---|
+| 1 | 16,884 passed / 54 failed / 10 skipped / 23 subtests (178.16s) | 5 failed / 11,341 passed / 21 skipped / 1,151 files (129.52s) | 54 failed / 3,251 passed / 11 skipped (814.77s) | 0 added / 0 removed |
+| 2 | 16,884 passed / 54 failed / 10 skipped / 23 subtests (138.55s) | 5 failed / 11,341 passed / 21 skipped / 1,151 files (150.27s) | 55 failed / 3,250 passed / 11 skipped (752.29s) | 1 added / 0 removed |
+| 3 | 16,884 passed / 54 failed / 10 skipped / 23 subtests (121.58s) | 5 failed / 11,341 passed / 21 skipped / 1,151 files (130.74s) | 54 failed / 3,251 passed / 11 skipped (779.72s) | 0 added / 0 removed |
+
+Base cloud at `5bfadbb6` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 54 failed / 3,224 passed / 11 skipped (764.89s). The failed-node set matches rounds 1 and 3. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The 54 root failures are `Missing Authority Key Identifier` in `test_ib_gateway_remote_operator_hold.py` and `test_ib_gateway_remote_serve.py`, identical on the base SHA. The cloud 54 are the bash 3.2 `pin[@]` / `mapfile` class, missing `flock`, and missing `/usr/bin/test`, plus `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` (`ConnectionRefusedError`), which fails alone on both SHAs.
