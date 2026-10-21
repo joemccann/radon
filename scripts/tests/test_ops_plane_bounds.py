@@ -92,6 +92,7 @@ class TestRerunPerUnitBound:
 
     def test_first_rerun_of_the_day_still_runs(self, responder, monkeypatch):
         monkeypatch.setattr(responder.pages_mod, "reruns_since", lambda service, since: 0)
+        monkeypatch.setattr(responder.pages_mod, "record_action_attempt", lambda **_k: "attempt")
         calls: list[list[str]] = []
         page = {"kind": "unit", "service": "radon-ivrank.service"}
         outcome = responder.attempt_oneshot_rerun(
@@ -108,6 +109,7 @@ class TestRerunPerUnitBound:
             return 0
 
         monkeypatch.setattr(responder.pages_mod, "reruns_since", spy)
+        monkeypatch.setattr(responder.pages_mod, "record_action_attempt", lambda **_k: "attempt")
         responder.attempt_oneshot_rerun(
             {"kind": "unit", "service": "radon-skew.service"},
             now=NOW,

@@ -66,6 +66,50 @@ def clone_with_remote(tmp_path: Path) -> Path:
     return clone
 
 
+def test_controller_git_drops_credentials_and_repo_hooks(tmp_path, monkeypatch):
+    """DS-2026-10-21-17: controller sync inherited the process environment,
+    so a post-checkout hook the agent wrote could read Turso and Pushover."""
+    monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "SENTINELNOTAREALTOKEN")
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["env"] = kwargs.get("env")
+        return SimpleNamespace(returncode=0, stdout=" M dirty\n")
+
+    monkeypatch.setattr(responder.subprocess, "run", fake_run)
+    assert responder.sync_remote_clone(tmp_path) == "dirty"
+    assert "core.hooksPath=/dev/null" in seen["argv"]
+    assert "TURSO_AUTH_TOKEN" not in (seen["env"] or {})
+
+
+def test_controller_checkout_does_not_run_a_repo_hook(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "SENTINELNOTAREALTOKEN")
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "clone"
+    assert _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote)).returncode == 0
+    assert _git(tmp_path, "clone", "-q", str(remote), str(seed)).returncode == 0
+    _git(seed, "config", "user.email", "t@example.invalid")
+    _git(seed, "config", "user.name", "t")
+    (seed / "a.txt").write_text("1\n")
+    assert _git(seed, "add", "a.txt").returncode == 0
+    assert _git(seed, "commit", "-qm", "base").returncode == 0
+    assert _git(seed, "push", "-q", str(remote), "HEAD:main").returncode == 0
+    assert _git(tmp_path, "clone", "-q", str(remote), str(clone)).returncode == 0
+    _git(clone, "config", "user.email", "t@example.invalid")
+    _git(clone, "config", "user.name", "t")
+    _git(clone, "checkout", "-qb", "fix/parked")
+    hook = clone / ".git" / "hooks" / "post-checkout"
+    hook.write_text('#!/bin/sh\nprintf "%s" "$TURSO_AUTH_TOKEN" > "$(dirname "$0")/hook-ran"\n')
+    hook.chmod(0o755)
+    monkeypatch.setattr(responder, "PUBLIC_REPO_URL", str(remote))
+    assert responder.sync_remote_clone(clone) == "synced"
+    assert not (clone / ".git" / "hooks" / "hook-ran").exists()
+
+
 class TestPushGuardHook:
     def test_installs_an_executable_pre_push_hook(self, clone_with_remote):
         hook = responder.install_push_guard(clone_with_remote)

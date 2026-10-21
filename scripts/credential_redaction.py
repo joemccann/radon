@@ -108,12 +108,18 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     )
 
 
+# The hook's line alphabet also names `credential` and a bare `[-_]key`.
+# Those stay off the single-line rules (`author` must survive). Multiline
+# values are the gap: a block or triple-quoted body is not on the header
+# line the hook rewrites. `[_-]key` matches `signing_key` and `webhook-key`.
+_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|credential|[_-]key)"
+
 # The key alternation carries no prefix or suffix run of its own, and the
 # block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`
 # would not match it at all. Bounded runs: the anchor already limits this to
 # one start per line, and a bound keeps it that way.
 _SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(
-    rf"[A-Za-z0-9_-]{{0,64}}{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}"
+    rf"[A-Za-z0-9_-]{{0,64}}{_MULTILINE_KEY}[A-Za-z0-9_-]{{0,64}}"
 )
 
 _BLOCK_SCALAR_LABEL = "[redacted-secret]"
@@ -122,7 +128,7 @@ _BLOCK_SCALAR_LABEL = "[redacted-secret]"
 # scanner below has none: the search is unanchored, so a prefixed name still
 # matches from its credential word.
 _TRIPLE_QUOTED_ASSIGNMENT_RE = build_triple_quoted_assignment_re(
-    rf"{_SECRET_KEY}{_KEY_SUFFIX}"
+    rf"{_MULTILINE_KEY}{_KEY_SUFFIX}"
 )
 
 

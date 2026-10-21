@@ -21,7 +21,12 @@ import pytest
 
 import grok_runtime
 from grok_page_responder import run_cycle
-from watchdog.pages import actions_since, enqueue_delivered_page, record_attempt_failure
+from watchdog.pages import (
+    actions_since,
+    enqueue_delivered_page,
+    record_action_attempt,
+    record_attempt_failure,
+)
 
 
 NOW = datetime(2026, 8, 14, 15, 0, tzinfo=timezone.utc)
@@ -144,6 +149,38 @@ class TestFailedLaunchesConsumeBudget:
             run_cycle(tmp_path, now=NOW, grok_runner=boom, pin_runtime=RUNTIME)
             launches += actions_since(since=DAY_START) - before
         assert launches == 3
+
+    def test_lkg_fallback_cannot_take_a_seventh_launch(self, db_conn, tmp_path, monkeypatch):
+        """DS-2026-10-21-18: the cap was checked, then each launch inserted
+        unconditionally. With 5 reserved and a cap of 6, the failed launch
+        and its last-known-good fallback were both admitted."""
+        monkeypatch.setenv("GROK_PAGE_MAX_ACTIONS_PER_DAY", "6")
+        page_id = _enqueue()
+        for _ in range(5):
+            assert record_action_attempt(page_id=page_id, now=NOW, cap=6, since=DAY_START)
+        lkg_path = tmp_path / "grok_lkg.json"
+        lkg_path.write_text(json.dumps({
+            "cli_version": "1.0.3",
+            "binary_path": str(tmp_path / "lkg-grok"),
+            "model": "grok-4.6",
+            "reasoning_effort": "high",
+            "promoted_at": "2026-09-01T00:00:00Z",
+            "smoke_result": "stand_down: previous",
+        }), encoding="utf-8")
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(lkg_path))
+        monkeypatch.setattr(grok_runtime, "lkg_binary_problem", lambda *_a, **_k: None)
+        calls: list[list[str]] = []
+
+        def runner(cmd, **_kwargs):
+            calls.append(list(cmd))
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr="model grok-4.7 is unavailable"
+            )
+
+        with patch("grok_page_responder._send_pin_warning"):
+            run_cycle(tmp_path, now=NOW, grok_runner=runner, pin_runtime=RUNTIME)
+        assert len(calls) == 1
+        assert actions_since(since=DAY_START) == 6
 
 
 class TestRetrySemanticsUnchanged:
