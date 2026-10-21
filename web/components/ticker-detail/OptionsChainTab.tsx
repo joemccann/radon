@@ -1484,7 +1484,7 @@ export default function OptionsChainTab({
 
   if (loadingExpiries) {
     return (
-      <div style={{ padding: "24px 0", textAlign: "center" }}>
+      <div className="chain-expiry-loading">
         <SpectralLoader label="Loading expirations" />
       </div>
     );
