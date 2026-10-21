@@ -13,7 +13,7 @@ from discover import (
     is_market_open,
     WEIGHTS,
 )
-from clients.uw_client import UWAPIError
+from clients.uw_client import UWAPIError, UWRateLimitError
 
 
 # ── is_market_open ──────────────────────────────────────────────────
@@ -375,6 +375,126 @@ def test_every_darkpool_miss_still_sets_the_hard_error():
     assert result["degraded"] is True
     assert result["error"] == "required provider data unavailable"
     assert "budget" not in json.dumps(result)
+
+
+def _admission_busy():
+    return UWRateLimitError(
+        "UW admission is busy; retry after the current window",
+        status_code=429,
+    )
+
+
+def _embargo_remaining_s() -> float:
+    """18:01:02.411Z governor embargo minus the 18:00:39Z discover POST."""
+    posted = datetime.fromisoformat("2026-10-21T18:00:39+00:00")
+    embargo = datetime.fromisoformat("2026-10-21T18:01:02.411075+00:00")
+    return (embargo - posted).total_seconds()
+
+
+def _discover_after_options_flow(side_effect, *, embargo_remaining: float):
+    """Market-wide discover with a scripted options-flow result and embargo."""
+    from discover import discover
+
+    calls = {"n": 0}
+    sleeps = []
+    frozen = 1_800_000_000.0
+    outcomes = list(side_effect)
+
+    def _flow(*_args, **_kwargs):
+        calls["n"] += 1
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def _sleep(seconds):
+        sleeps.append(seconds)
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", side_effect=_flow), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", return_value=_dp_ok()), \
+         patch("utils.uw_governor.snapshot", return_value={
+             "embargo_until": frozen + embargo_remaining,
+         }), \
+         patch("time.time", return_value=frozen), \
+         patch("time.sleep", side_effect=_sleep):
+        result = discover(min_alerts=3, dp_pages=2)
+    return result, calls["n"], sleeps
+
+
+def test_options_flow_admission_busy_waits_out_the_short_embargo_then_scores():
+    """A minute-rate embargo must not fail the hourly discover oneshot.
+
+    2026-10-21 18:00:39Z, page 72cdada6f65595cfd32c1885c614ed75: scanner and
+    flow-analysis were OK, then POST /discover returned HTTP 400 in about
+    2s. No darkpool cache was written. The governor embargo ran until
+    18:01:02.411Z, and the options-flow fetch made no reservation. The
+    2s rate-limit retry cannot outlast that window, so the oneshot exited 1.
+    """
+    remaining = _embargo_remaining_s()
+    alerts = [_flow_alert("AAPL") for _ in range(3)]
+    result, calls, sleeps = _discover_after_options_flow(
+        [_admission_busy(), alerts],
+        embargo_remaining=remaining,
+    )
+
+    assert calls == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(remaining)
+    assert [row["ticker"] for row in result["candidates"]] == ["AAPL"]
+    assert "error" not in result
+    assert "admission is busy" not in json.dumps(result)
+
+
+def test_options_flow_admission_busy_past_the_wait_budget_stays_a_hard_error():
+    """A multi-hour embargo is a real miss. Do not burn the scan waiting."""
+    from datetime import timedelta
+
+    remaining = timedelta(hours=6).total_seconds()
+    result, calls, sleeps = _discover_after_options_flow(
+        [_admission_busy()],
+        embargo_remaining=remaining,
+    )
+
+    assert calls == 1
+    assert sleeps == []
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert "admission is busy" not in json.dumps(result)
+
+
+def test_options_flow_admission_busy_retries_once_then_stays_a_hard_error():
+    """A second busy reply is a real miss. Do not loop inside the POST."""
+    remaining = _embargo_remaining_s()
+    result, calls, sleeps = _discover_after_options_flow(
+        [_admission_busy(), _admission_busy()],
+        embargo_remaining=remaining,
+    )
+
+    assert calls == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(remaining)
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert result["provider_failures"][0]["error_type"] == "UWRateLimitError"
+    assert "admission is busy" not in json.dumps(result)
+
+
+def test_options_flow_quota_exhausted_does_not_wait():
+    """Daily quota text is not the short admission window."""
+    remaining = _embargo_remaining_s()
+    result, calls, sleeps = _discover_after_options_flow(
+        [UWRateLimitError("UW provider quota is exhausted", status_code=429)],
+        embargo_remaining=remaining,
+    )
+
+    assert calls == 1
+    assert sleeps == []
+    assert result["error"] == "required provider data unavailable"
 
 
 def test_fetch_darkpool_multi_caps_scoring_pages():
