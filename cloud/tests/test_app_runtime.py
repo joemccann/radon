@@ -1164,6 +1164,52 @@ def test_run_refuses_a_bind_source_replaced_after_validation(
     assert victim.joinpath("key").read_text(encoding="utf-8") == "secret\n"
 
 
+@pytest.mark.parametrize(
+    "env_name", ("RADON_IB_REMOTE_CERT_DIR", "RADON_RH_TOKEN_DIR")
+)
+def test_run_api_refuses_symlinked_gateway_or_token_bind_sources(
+    tmp_path: Path, env_name: str
+) -> None:
+    """The Gateway mTLS directory and the Robinhood token store sit under
+    radon-writable parents like every other bind source, so they are validated
+    without following links instead of admitted by a bare -d test."""
+    link = tmp_path / "store-link"
+    _swap_for_link(link, tmp_path / "store-elsewhere")
+    result = _run(tmp_path, ["run", "radon-api.service"], extra_env={env_name: str(link)})
+    assert result.returncode == 78, result.stderr
+    assert "bind source" in result.stderr
+    assert not _engine_ran(result)
+
+
+@pytest.mark.parametrize(
+    "env_name", ("RADON_IB_REMOTE_CERT_DIR", "RADON_RH_TOKEN_DIR")
+)
+def test_run_api_rechecks_gateway_and_token_bind_sources(
+    tmp_path: Path, env_name: str
+) -> None:
+    """Both names must be recorded in BIND_SOURCES, so a swap after validation
+    is caught by the re-resolution before the engine mounts anything."""
+    store = tmp_path / "store"
+    store.mkdir()
+    victim = tmp_path / "root-only"
+    victim.mkdir()
+    (victim / "key").write_text("secret\n", encoding="utf-8")
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        docker_body=_SWAPPING_DOCKER,
+        extra_env={
+            env_name: str(store),
+            "RADON_TEST_SWAP_PATH": str(store),
+            "RADON_TEST_SWAP_TARGET": str(victim),
+            "RADON_TEST_SWAP_KIND": "link",
+        },
+    )
+    assert result.returncode == 78, result.stdout + result.stderr
+    assert "is a symlink" in result.stderr
+    assert not _engine_ran(result)
+
+
 def test_bind_source_recheck_is_the_last_step_before_the_engine() -> None:
     """The re-resolution is only worth its window if nothing follows it, so no
     later edit may insert work between the recheck and the engine invocation."""
