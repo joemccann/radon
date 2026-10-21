@@ -386,6 +386,36 @@ def combo_max_loss(params: dict) -> Optional[float]:
     return quantity * max(risk_per_unit - credit_per_unit, 0.0)
 
 
+def _limit_combo_expiry_loss(params: dict) -> Optional[float]:
+    """Exact single-expiry loss for a limit combo, or None to keep the proxy.
+
+    A SELL envelope is reversed once here. ``combo_max_loss`` reverses again
+    from the envelope, so this must not hand it already-flipped legs.
+    """
+    try:
+        from bankroll_guard import _combo_expiry_loss
+    except ImportError:
+        from scripts.bankroll_guard import _combo_expiry_loss
+    quantity = _finite(params.get("quantity"))
+    price = _finite(params.get("limitPrice") or params.get("stopPrice"))
+    if quantity is None or price is None or quantity == 0 or price == 0:
+        return None
+    sell = str(params.get("action") or "").upper().startswith("SELL")
+    legs = params.get("legs")
+    if sell and isinstance(legs, list):
+        flipped = []
+        for leg in legs:
+            if not isinstance(leg, dict):
+                return None
+            action = str(leg.get("action") or "")
+            flipped.append({
+                **leg,
+                "action": "BUY" if action.upper().startswith("SELL") else "SELL",
+            })
+        legs = flipped
+    return _combo_expiry_loss(legs, quantity, price, sell)
+
+
 def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     """Return {"code", "message"} on violation, None when within limits."""
     # RC-D4: a supplied-but-unusable number must refuse, never coerce to
@@ -511,12 +541,20 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
 
     loss = combo_max_loss(params)
     if loss is not None:
-        # The always-on gate prices a debit the same way both optional
-        # Gate-3 guards do. Without this floor an all-long or long-calendar
-        # structure reports the zero width/assignment proxy to the mandatory
-        # cap while its whole premium is at risk, so a tightened
-        # RADON_MAX_COMBO_LOSS_DOLLARS could never bind to it.
-        loss = combo_debit_floor(params, loss)
+        # Stop-market keeps the width/assignment proxy. A limit order uses
+        # the exact single-expiry payoff when it exists, so a defined-risk
+        # debit is the premium and a short put's debit is added to
+        # assignment. Calendars and net-short calls fall through to the
+        # shared floor. The floor stays max(); adding the debit onto a
+        # width that already stands for the structure double-counts.
+        if _ib_order_type(params) != "STP":
+            exact = _limit_combo_expiry_loss(params)
+            if exact is not None:
+                loss = exact
+            else:
+                loss = combo_debit_floor(params, loss)
+        else:
+            loss = combo_debit_floor(params, loss)
     loss_cap = max_combo_loss_dollars()
     if loss is not None and loss > loss_cap:
         return {
@@ -631,6 +669,30 @@ def _working_order_shape(working_order: dict) -> tuple[str, Optional[list]]:
     return "option", None
 
 
+def order_ids_match(stored: Any, requested: Any) -> bool:
+    """True when two order ids are the same positive integer.
+
+    Snapshot rows store JSON numbers. A modify body often sends the same id
+    as a string. Neither side matches when it is missing, zero, or a bool.
+    """
+    if isinstance(stored, bool) or isinstance(requested, bool):
+        return False
+    if stored in (None, "", 0, "0") or requested in (None, "", 0, "0"):
+        return False
+    if stored == requested:
+        return True
+
+    def _as_int(value: Any) -> Optional[int]:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        return None
+
+    left, right = _as_int(stored), _as_int(requested)
+    return left is not None and left == right and left != 0
+
+
 def check_modify_limits(
     working_order: Optional[dict],
     *,
@@ -648,32 +710,22 @@ def check_modify_limits(
     lots was accepted with its assignment exposure never computed. REL-005's
     contract named modify as a chokepoint for max qty AND max notional.
 
-    An unreadable working order is NOT a bypass: a quantity modify keeps the
-    contract-quantity cap (plus the notional cap when a price is supplied),
-    and a price-only modify is refused outright — with no snapshot there is
-    nothing to bound the new price against.
+    An unreadable working order is NOT a bypass: any quantity or price change
+    is refused. With no snapshot the notional, ratio, and combo-loss checks
+    have nothing to measure, and the contract-count cap does not stand in
+    for them.
 
     R-431: the shape is read through `_working_order_shape`, because the Turso
     `open_orders` payload nests it one level down and reading the top level
     typed every real working order as an option.
     """
     if not isinstance(working_order, dict):
-        if new_quantity is not None:
-            if new_price is not None:
-                # Bound notional with the only shape available: the stricter
-                # option convention, same as check_quantity_limit.
-                return check_order_limits(
-                    {"type": "option", "quantity": new_quantity, "limitPrice": new_price}
-                )
-            return check_quantity_limit(new_quantity)
-        if new_price is not None:
-            # A price-only modify with no readable snapshot used to skip
-            # every limit and forward the price unchecked. Fail closed.
+        if new_quantity is not None or new_price is not None:
             return {
                 "code": "ORDER_MODIFY_UNREADABLE",
                 "message": (
-                    "working order is unreadable, so a price-only modify "
-                    "cannot be bounded — refused"
+                    "working order is unreadable, so the modify cannot be "
+                    "bounded against its shape — refused"
                 ),
             }
         return None

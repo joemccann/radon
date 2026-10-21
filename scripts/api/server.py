@@ -3679,18 +3679,22 @@ async def orders_cancel(request: Request):
 async def _find_working_order(order_id: Any, perm_id: Any) -> Optional[dict]:
     """The working order's payload from the Turso snapshot, or None.
 
-    Best-effort by construction (R-145): a just-placed order or a Turso blip
-    must degrade to the old contract-quantity cap, never block a modify.
+    A missing row fails closed at check_modify_limits: the id comparison
+    accepts the same positive integer as a JSON number or a decimal string.
     """
     try:
         snapshot = await _read_orders_snapshot_from_db()
     except Exception as exc:  # noqa: BLE001
         logger.warning("orders/modify: could not read the working order: %s", exc)
         return None
+    from order_limits import order_ids_match
+
     for payload in snapshot.get("open_orders", []):
-        if perm_id and payload.get("permId") == perm_id:
+        if not isinstance(payload, dict):
+            continue
+        if order_ids_match(payload.get("permId"), perm_id):
             return payload
-        if order_id and payload.get("orderId") == order_id:
+        if order_ids_match(payload.get("orderId"), order_id):
             return payload
     return None
 
@@ -3724,8 +3728,8 @@ async def orders_modify(request: Request):
     # order's real shape. `check_quantity_limit` hardcoded
     # `{"type": "option", "limitPrice": 0}`, so the notional and combo
     # max-loss branches were both skipped and `newPrice` was bounded only by
-    # `> 0`. The snapshot read is best-effort: an unreadable working order
-    # falls back to the contract-quantity cap, never to no cap.
+    # `> 0`. An unreadable working order is refused rather than resized
+    # against the contract-count cap alone.
     if new_quantity is not None or new_price is not None:
         from order_limits import check_modify_limits
 

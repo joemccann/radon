@@ -76,7 +76,7 @@ def test_cycle_does_not_retry_same_binary_alias(monkeypatch, tmp_path, runtimes,
     monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
     monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *_a, **_k: True)
     attempts, warnings, failures, calls = [], [], [], []
-    monkeypatch.setattr(responder.pages_mod, "record_action_attempt", lambda **k: attempts.append(k))
+    monkeypatch.setattr(responder.pages_mod, "record_action_attempt", lambda **k: attempts.append(k) or "attempt")
     monkeypatch.setattr(responder.pages_mod, "record_attempt_failure", lambda *a, **k: failures.append(k) or "pending")
     monkeypatch.setattr(responder, "_send_pin_warning", warnings.append)
     def runner(cmd, **kwargs):
