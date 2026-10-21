@@ -151,6 +151,21 @@ class TestShortPutPricesTheOtherDirection:
             self._short_put(orderType="STP", limitPrice=0.01, stopPrice=95.0))
         assert loss == pytest.approx(9_999)
 
+    def test_combo_stop_decoy_limit_cannot_shrink_assignment_loss(self):
+        """Same hole on a BAG. The placer drops limitPrice; booking -9.10 as
+        credit priced 110 short 100-puts at $999,900 instead of assignment."""
+        params = {
+            "type": "combo", "symbol": "AAPL", "action": "BUY", "quantity": 110,
+            "orderType": "STP", "limitPrice": -9.10, "stopPrice": 0.50,
+            "legs": [
+                {"action": "SELL", "right": "P", "strike": 100, "ratio": 1, "expiry": "20261218"},
+                {"action": "BUY", "right": "C", "strike": 200, "ratio": 1, "expiry": "20261218"},
+            ],
+        }
+        loss = bankroll_guard.order_max_loss(params)
+        assert loss is not None
+        assert loss >= 1_100_000
+
     def test_plain_limit_short_put_unchanged(self):
         loss = bankroll_guard.order_max_loss(self._short_put(limitPrice=2.0))
         assert loss == pytest.approx(9_800)

@@ -139,7 +139,10 @@ be trusted alone) and everything else has only its limit. Each branch takes the
 end that costs more under its own arithmetic: the high end for a debit or a
 notional, the low end for a short put, whose assignment loss falls as the
 premium collected rises. A price field the placement funnel ignores must never
-be the one a cap is computed on.
+be the one a cap is computed on. A combo stop-market sends `stopPrice` only
+(REL-328 / R-739): `combo_max_loss` does not subtract a discarded negative
+`limitPrice` from assignment or width, and `order_max_loss` prices that stop
+as paying the worse supplied price.
 
 For a combo both guards also floor the worst case at the premium paid, through
 the shared `order_limits.combo_debit_floor`. The strike/width margin proxy is

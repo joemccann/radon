@@ -89,16 +89,25 @@ export async function loadExplainImages(
   urls: string[],
   opts?: { token?: string; signal?: AbortSignal },
 ): Promise<ExplainImageBlock[]> {
-  const images: ExplainImageBlock[] = [];
+  const admitted: FetchTarget[] = [];
   for (const url of urls) {
-    if (images.length >= MAX_IMAGES) break;
     const target = admitUrl(url);
-    if (!target) continue;
-    try {
-      const image = await fetchTarget(target, opts);
-      if (image) images.push(image);
-    } catch {
-      // Failed fetch: continue text-only.
+    if (target) admitted.push(target);
+  }
+  const images: ExplainImageBlock[] = [];
+  let index = 0;
+  while (images.length < MAX_IMAGES && index < admitted.length) {
+    const batch = admitted.slice(index, index + (MAX_IMAGES - images.length));
+    index += batch.length;
+    const fetched = await Promise.all(batch.map(async (target) => {
+      try {
+        return await fetchTarget(target, opts);
+      } catch {
+        return null;
+      }
+    }));
+    for (const image of fetched) {
+      if (image && images.length < MAX_IMAGES) images.push(image);
     }
   }
   return images;

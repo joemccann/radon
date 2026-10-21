@@ -88,6 +88,29 @@ class TestCheckOrderLimits:
         assert violation is not None
         assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
 
+    def test_combo_stp_discarded_limit_cannot_shrink_assignment_loss(self, monkeypatch):
+        """Combo STP transmits stopPrice only. A negative limitPrice is not sent,
+        so it must not be booked as credit against the loss cap.
+
+        110 short 100-puts: assignment is $1,100,000. limitPrice -9.10 with
+        stopPrice 0.50 prices notional at $100,100 (under $250k) and, before
+        the fix, loss at $999,900 (under a $1M cap)."""
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "1000000")
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "250000")
+        params = {
+            "type": "combo", "symbol": "AAPL", "action": "BUY",
+            "quantity": 110, "orderType": "STP",
+            "limitPrice": -9.10, "stopPrice": 0.50,
+            "legs": [
+                {"action": "SELL", "right": "P", "strike": 100, "ratio": 1},
+                {"action": "BUY", "right": "C", "strike": 200, "ratio": 1},
+            ],
+        }
+        assert order_limits.combo_max_loss(params) == pytest.approx(1_100_000)
+        violation = order_limits.check_order_limits(params)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+
     def test_limit_order_still_prices_on_its_limit(self):
         violation = order_limits.check_order_limits({
             "type": "stock", "symbol": "AAPL", "action": "BUY",
