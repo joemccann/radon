@@ -291,6 +291,15 @@ def find_credential_shapes(text: str) -> list[str]:
     found: list[str] = []
     if _SECRET_BLOCK_SCALAR_RE.search(text or ""):
         found.append(_BLOCK_SCALAR_LABEL)
+    # Detection has to cover every shape redaction covers, or the two drift
+    # and the publication gate approves what the scrubber would have hidden.
+    # The triple-delimited value was taught to the scrubber without being
+    # taught here: `find_secret_assignments` cannot stand in for it, because
+    # its value pattern permits a single opening quote only. The rule is
+    # keyed on the credential-word alternation, so an ordinary
+    # `HELP = """..."""` docstring does not match it.
+    if _TRIPLE_QUOTED_ASSIGNMENT_RE.search(text or ""):
+        found.append(_BLOCK_SCALAR_LABEL)
     for pattern, repl in _SPECIFIC_SCRUB_PATTERNS:
         if pattern.search(text or ""):
             label = re.sub(r"\\\d", "", repl).strip()

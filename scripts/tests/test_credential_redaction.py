@@ -422,6 +422,41 @@ def test_text_after_a_complete_triple_quoted_value_survives():
     assert out.endswith("then exited"), out
 
 
+def _detectors():
+    from credential_redaction import find_credential_shapes
+    import sys as _sys, pathlib as _pl
+    _sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[1]))
+    from ir_push_gate import find_private_identifiers
+    return find_credential_shapes, find_private_identifiers
+
+
+def test_a_triple_delimited_credential_is_DETECTED_not_only_redacted():
+    """Detection must cover every shape redaction covers.
+
+    `scrub_credential_text` learned the triple-delimited grammar while
+    `find_credential_shapes` did not, so `ir_push_gate` approved publishing
+    a commit whose content the scrubber would have hidden.
+    `find_secret_assignments` cannot stand in: its value pattern permits a
+    single opening quote only.
+    """
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        complete = f"{key}{sep}{delim}\n{value}\n{delim}\n"
+        truncated = f"{key}{sep}{delim}\n{value}"
+        shapes, gate = _detectors()
+        for text in (complete, truncated):
+            assert shapes(text), text
+            assert gate(text), text
+
+
+def test_detection_does_not_fire_on_an_ordinary_triple_quoted_docstring():
+    """The rule is keyed on the credential-word alternation, so a docstring
+    with no credential word in its key is not a publication finding."""
+    shapes, gate = _detectors()
+    text = 'HELP = """\nusage: radon scan\n"""\n'
+    assert shapes(text) == []
+    assert gate(text) == []
+
+
 def test_single_line_and_empty_quoted_values_are_unchanged():
     assert scrub_credential_text('TOKEN = ""') == 'TOKEN = "[redacted-secret]"'
     assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
