@@ -12,6 +12,16 @@
     # with the upstream restarts the retry loop exists to absorb, and a
     # shorter grace hard-cut that loop during the one event it is for. R-258.
     grace_period 20s
+
+    # HTTP/3 stays off. The default is h1 h2 h3, which emits
+    # Alt-Svc: h3=":443"; ma=2592000. fw-radon-app allows tcp/443 and
+    # udp/41641 only, so that header points Chrome at a blackholed UDP
+    # port for 30 days. A Tailscale path change then aborts the in-flight
+    # QUIC attempt as net::ERR_NETWORK_CHANGED, and Chrome does not mark
+    # the cached alternative broken.
+    servers {
+        protocols h1 h2
+    }
 }
 
 {$DOMAIN:app.radon.run} {

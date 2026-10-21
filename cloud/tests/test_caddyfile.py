@@ -3,6 +3,7 @@
 import contextlib
 import errno
 import http.server
+import json
 import os
 import re
 import shutil
@@ -362,6 +363,25 @@ class TestReloadCompletes:
         assert 1 <= int(match.group(1)) <= 30, (
             f"grace_period {match.group(1)}s is outside the bound the publish "
             "action's reload timeout is sized for"
+        )
+
+    def test_http3_stays_off_while_app_firewall_drops_udp_443(self, caddy_dir):
+        # Caddy 2 defaults to h1 h2 h3 and emits Alt-Svc h3 for 30 days.
+        # fw-radon-app has no udp/443, so that advertisement sends Chrome at
+        # a blackholed QUIC port. A path change then aborts the in-flight
+        # attempt as net::ERR_NETWORK_CHANGED, and Chrome keeps the cached
+        # alternative instead of marking it broken.
+        content = read_caddyfile(caddy_dir)
+        match = re.search(r"(?m)^\s*protocols\s+(\S.*?)\s*$", content)
+        assert match, (
+            "servers.protocols must pin h1 h2; the Caddy default advertises h3"
+        )
+        assert match.group(1).split() == ["h1", "h2"]
+        firewall = json.loads(
+            (REPO_ROOT / "cloud" / "hetzner" / "firewalls" / "fw-radon-app.json").read_text()
+        )
+        assert not any(
+            rule["protocol"] == "udp" and rule["port"] == "443" for rule in firewall
         )
 
 
