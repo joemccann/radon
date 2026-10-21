@@ -1348,6 +1348,31 @@ install_fleet_dropin() {
   systemctl daemon-reload
   log_success "Fleet drop-in installed (verify: systemctl show radon-api.service -p Environment)"
 }
+# DS-2026-10-21-07: the per-service runtime-container drop-ins are what make
+# these units root-owned container runs. setup-vps.sh installed only the fleet
+# drop-in above and left the per-service ones to the control plane's first
+# refresh, so a fresh host enabled and started the BASE units -- User=radon,
+# ExecStart out of the radon-writable checkout -- while LoadCredentialEncrypted=
+# already handed five of them the decrypted secret-store master key (R-619).
+# Install them here, from the same trusted provision store every other
+# root-installed artifact comes from, before anything is enabled or started.
+install_container_dropins() {
+  local svc dropin target
+  log_info "Installing per-service runtime-container drop-ins..."
+  for svc in "${SERVICE_FILES[@]}"; do
+    [[ "$svc" == *.service ]] || continue
+    dropin="${CLOUD_DIR}/services/${svc}.d/runtime-container.conf"
+    [[ -f "$dropin" ]] || continue
+    target="/etc/systemd/system/${svc}.d/runtime-container.conf"
+    # Never follow a planted link into another privileged file; the drop-in is
+    # a regular canonical artifact, same contract as the units above.
+    rm -f "$target"
+    stage_from_checkout "$dropin" "$target" 0644 -o root -g root
+  done
+  systemctl daemon-reload
+  log_success "Per-service runtime-container drop-ins installed"
+}
+
 enable_services() {
   log_info "Enabling services..."
   local persistent_units=()
@@ -2129,6 +2154,7 @@ main() {
   install_gateway_control
   install_journald_limits
   install_fleet_dropin
+  install_container_dropins
   ensure_swapfile
   enable_services
   open_firewall
