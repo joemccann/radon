@@ -1135,7 +1135,8 @@ cmd_run() {
   # (TWS secrets, Turso tokens). Read-only. Missing dir is combined/broker.
   if [[ "$unit" == "radon-api.service" ]]; then
     local ib_remote_certs="${RADON_IB_REMOTE_CERT_DIR:-/etc/radon/ib-remote}"
-    if [[ -d "$ib_remote_certs" ]]; then
+    if [[ -L "$ib_remote_certs" || -d "$ib_remote_certs" ]]; then
+      require_bind_source "$ids" "$ib_remote_certs"
       set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
     fi
     # Robinhood read-only MCP token store. Its own dir, never /etc/radon, and
@@ -1143,7 +1144,8 @@ cmd_run() {
     # sidecar, which a single-file bind cannot do. Without it every Robinhood
     # rung inside the API fell through to UW (2026-09-19).
     local rh_token_dir="${RADON_RH_TOKEN_DIR:-/var/lib/radon/rh-mcp}"
-    if [[ -d "$rh_token_dir" ]]; then
+    if [[ -L "$rh_token_dir" || -d "$rh_token_dir" ]]; then
+      require_bind_source "$ids" "$rh_token_dir"
       set -- "$@" -v "${rh_token_dir}:${rh_token_dir}" \
         --env "ROBINHOOD_MCP_TOKEN_FILE=${rh_token_dir}/rh-mcp.json"
     fi
