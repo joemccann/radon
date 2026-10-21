@@ -23,12 +23,13 @@ import argparse
 import json
 import logging
 import sys
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from clients.uw_client import UWClient, UWAPIError
+from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
 from db.readers import read_portfolio_positions, read_watchlist_tickers
 
 logger = logging.getLogger(__name__)
@@ -543,6 +544,86 @@ def discover_targeted(tickers: list, dp_days: int = 3,
     return result
 
 
+# The discover POST budget is 180s. 70s covers a 60s Retry-After, the
+# governor default when the header is missing, and still leaves the
+# dark-pool walk room to finish. A longer embargo is the daily reset.
+OPTIONS_FLOW_ADMISSION_WAIT_S = 70.0
+_OPTIONS_FLOW_ADMISSION_POLL_S = 8.0
+_ADMISSION_BUSY_MARKER = "admission is busy"
+
+
+def _governor_embargo_remaining() -> float | None:
+    """Seconds until the shared UW embargo lifts. None when the ledger is unreadable."""
+    try:
+        from utils import uw_governor
+        snap = uw_governor.snapshot(None)
+    except Exception:
+        return None
+    if not isinstance(snap, dict):
+        return None
+    embargo = snap.get("embargo_until")
+    if isinstance(embargo, bool) or not isinstance(embargo, (int, float)):
+        return None
+    remaining = float(embargo) - time.time()
+    if remaining != remaining:  # NaN
+        return None
+    return max(0.0, remaining)
+
+
+def _admission_retry_delay(exc: BaseException) -> float | None:
+    """How long to wait before one more options-flow fetch, or None to fail now.
+
+    Only the governor's short "admission is busy" window is worth waiting
+    out. Quota exhaustion and any other provider error stay a hard miss.
+    """
+    if not isinstance(exc, UWRateLimitError):
+        return None
+    message = str(exc).lower()
+    if _ADMISSION_BUSY_MARKER not in message:
+        return None
+    if (
+        "daily request limit" in message
+        or "quota is exhausted" in message
+        or "budget is reserved" in message
+    ):
+        return None
+    remaining = _governor_embargo_remaining()
+    if remaining is None:
+        return _OPTIONS_FLOW_ADMISSION_POLL_S
+    if remaining > OPTIONS_FLOW_ADMISSION_WAIT_S:
+        return None
+    return remaining
+
+
+def _fetch_options_flow_after_admission(client, *, min_premium: int) -> list:
+    """Fetch market-wide alerts, waiting once for a short admission embargo.
+
+    fetch_flow already retries a 429 once after 2s. That retry still fails
+    while the governor embargo is longer than the client's 10s wait cap, and
+    the hourly oneshot then records a hard error. One sleep until the
+    embargo lifts fits in the 180s POST budget.
+    """
+    waited = False
+    while True:
+        try:
+            return fetch_options_flow(
+                min_premium=min_premium, limit=200, _client=client
+            )
+        except UWRateLimitError as exc:
+            if waited:
+                raise
+            delay = _admission_retry_delay(exc)
+            if delay is None:
+                raise
+            waited = True
+            if delay > 0:
+                print(
+                    f"Options flow admission busy; retrying in {delay:.0f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+
+
 def discover(min_premium: int = 500000, min_alerts: int = 1,
              dp_days: int = 3, exclude_indices: bool = True,
              tickers: list = None, top: int = 20,
@@ -568,7 +649,9 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
 
     with UWClient() as client:
         try:
-            alerts = fetch_options_flow(min_premium=min_premium, limit=200, _client=client)
+            alerts = _fetch_options_flow_after_admission(
+                client, min_premium=min_premium
+            )
         except UWAPIError as exc:
             return {
                 "discovery_time": datetime.now(timezone.utc).isoformat(),
