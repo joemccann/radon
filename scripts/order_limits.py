@@ -530,6 +530,37 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     return None
 
 
+def check_placement_limits(params: dict) -> Optional[dict[str, Any]]:
+    """Placement fat-finger check, including a fresh reducing close.
+
+    ``check_order_limits`` prices a SELL envelope as new short assignment.
+    That refusal stands unless the latest portfolio snapshot is inside the
+    bankroll freshness window and every leg only reduces a held leg
+    (REL-329 / R-740). The snapshot read is attempted only after that one
+    code fires, and a failed read keeps the refusal. Quantity, notional,
+    and shape refusals are never waived.
+    """
+    violation = check_order_limits(params)
+    if not violation or violation.get("code") != "ORDER_MAX_LOSS_LIMIT":
+        return violation
+    try:
+        from bankroll_guard import fresh_reducing_close, _load_latest_snapshot, _utcnow
+    except ImportError:
+        from scripts.bankroll_guard import (
+            fresh_reducing_close,
+            _load_latest_snapshot,
+            _utcnow,
+        )
+    try:
+        snapshot = _load_latest_snapshot()
+        now = _utcnow()
+    except Exception:  # noqa: BLE001 — unreadable snapshot keeps the refusal
+        return violation
+    if fresh_reducing_close(params, snapshot, now):
+        return None
+    return violation
+
+
 def _is_known_action(action: Any) -> bool:
     """False for a supplied action other than BUY/SELL. The loss math reads
     anything not starting with SELL as long while the placer forwards the raw
