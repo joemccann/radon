@@ -222,6 +222,23 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
     return price * multiplier if receives_premium else 0.0
 
 
+def combo_debit_floor(params: dict, loss: float) -> float:
+    """``loss`` floored by the premium a combo actually pays.
+
+    The strike/width margin proxy is zero for an all-long or long-calendar
+    structure, yet a debit order has its whole premium at risk. A net CREDIT
+    is never a floor — nothing was paid. Both Gate-3 guards call this so the
+    two implementations cannot drift apart again.
+    """
+    quantity = _finite(params.get("quantity"))
+    price = _finite(params.get("limitPrice") or params.get("stopPrice"))
+    if quantity is None or price is None or quantity == 0 or price == 0:
+        return loss
+    sell = str(params.get("action") or "").upper().startswith("SELL")
+    debit = abs(quantity * price) * _OPTION_MULTIPLIER if (price > 0) != sell else 0.0
+    return max(loss, debit)
+
+
 def _ib_order_type(params: dict) -> str:
     """STP / STP LMT / LMT, using ``ib_place_order``'s own normalization.
 

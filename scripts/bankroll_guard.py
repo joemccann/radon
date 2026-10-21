@@ -18,6 +18,7 @@ from typing import Any, Optional
 from kelly import KELLY_MAX_PCT
 from order_limits import (
     _finite,
+    combo_debit_floor,
     combo_max_loss,
     effective_order_price,
     effective_order_price_bounds,
@@ -216,8 +217,7 @@ def order_max_loss(params: dict) -> Optional[float]:
             return None
         # The margin proxy can be zero for all-long legs; premium paid is
         # still exposed even when there is no short-leg assignment risk.
-        debit = abs(quantity * price) * 100.0 if (price > 0) != sell else 0.0
-        return max(loss, debit)
+        return combo_debit_floor(params, loss)
     sell = str(params.get("action") or "").upper().startswith("SELL")
     quantity = abs(_finite(params.get("quantity")) or 0.0)
     # The price IB actually sends for this order type: a STP order carries no

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT, kelly_config
-from order_limits import combo_max_loss, effective_order_price
+from order_limits import combo_debit_floor, combo_max_loss, effective_order_price
 
 _LOG = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +66,11 @@ def resolve_kelly_bankroll(bankroll: Optional[float] = None) -> Optional[float]:
 def _worst_case_loss(params: dict) -> Optional[float]:
     order_type = str(params.get("type") or "stock").lower()
     if order_type == "combo":
-        return combo_max_loss(params)
+        loss = combo_max_loss(params)
+        # Same debit floor bankroll_guard.order_max_loss applies: the margin
+        # proxy is zero for an all-long or calendar structure whose premium is
+        # still fully at risk.
+        return loss if loss is None else combo_debit_floor(params, loss)
     if order_type == "option":
         action = str(params.get("action") or "").upper()
         if action.startswith("SELL"):
