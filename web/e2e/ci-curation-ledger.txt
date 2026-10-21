@@ -80,6 +80,7 @@
 #   Wire-level pins live in Vitest mobile-ticket-session-refresh and
 #   session-refresh-fetch. Held out of e2e-financial-smoke pending next start
 #   preflight, same as mobile-order-ticket.spec.ts.
+day-move-breakdown-net-combo.spec.ts
 mobile-ticket-session-refresh.spec.ts
 # REVIEWED 2026-10-01 admin-service-controls.spec.ts - App-host Service controls
 #   through the radon-control socket. 1/1 Chromium against local next dev :3047
