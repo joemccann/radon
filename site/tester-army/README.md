@@ -1,6 +1,6 @@
 # Public site flow verification
 
-TesterArmy `e2e` 0.16.0 and `@e2e-dev/web` 0.11.2 run real Chromium through Playwright 1.63.0. This isolated package preserves the existing web Playwright version and site hard gates. Node >=22.12 is required. All tests use deterministic locators/assertions; no model provider or account credentials are needed. Telemetry is disabled by the test script.
+TesterArmy `e2e` 0.16.0 and `@e2e-dev/web` 0.11.2 run real Chromium through Playwright 1.63.0. This isolated package preserves the existing web Playwright version and site hard gates. Node >=22.23.4 is required. All tests use deterministic locators/assertions; no model provider or account credentials are needed. Telemetry is disabled by the test script.
 
 From the repository root:
 

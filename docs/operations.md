@@ -45,6 +45,8 @@ the service account's checkout or in `/tmp`; all three follow the source, so a
 link planted at either place turns the seeding into an arbitrary-file read or
 write. `setup-vps.sh` prints the staged form when the file is missing.
 
+**Host Node.js (2026-10-21).** `setup-vps.sh` installs NodeSource `22.23.4` exactly (`nodejs=22.23.4-1nodesource1`) and fails validation on any other `node --version`. A host that already had Node 20 or newer stays on that binary until setup is re-run, or until `apt install nodejs=22.23.4-1nodesource1`. The production app container is the digest-pinned `node:22.23.4-bookworm-slim` image and moves with deploy, separate from the host package.
+
 
 **Robinhood token file.** `ROBINHOOD_MCP_TOKEN_FILE` (production `/var/lib/radon/rh-mcp/rh-mcp.json`, `0600`, radon-owned, in a `0700` radon-owned dir that `radon-app-runtime.sh` binds read-write into the radon-api container and points the container's `ROBINHOOD_MCP_TOKEN_FILE` at; host timers and the API share this one store, so the rotating refresh token is never split) holds `access_token` / `refresh_token` / `client_id` / `expires_at`; the env vars `ROBINHOOD_MCP_TOKEN`, `ROBINHOOD_MCP_REFRESH_TOKEN`, `ROBINHOOD_MCP_CLIENT_ID` only bootstrap it on first run. The file is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
 

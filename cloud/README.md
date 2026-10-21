@@ -74,7 +74,7 @@ The `setup-vps.sh` script automatically installs all dependencies from their off
 
 - **Docker CE** from `download.docker.com` (not the Ubuntu `docker.io` package)
 - **Python 3.13** from the [deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa)
-- **Node.js 22** from [NodeSource](https://deb.nodesource.com/)
+- **Node.js 22.23.4** from [NodeSource](https://deb.nodesource.com/)
 - **Caddy** from the [official Caddy repo](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
 
 The one-time provisioning script must be run as root from the monorepo: `ssh root@<VPS_IP> 'bash -s' < cloud/scripts/setup-vps.sh`
