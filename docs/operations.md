@@ -1140,7 +1140,8 @@ deploy script. The monorepo [`cloud/`](../cloud/) directory is the canonical
 source for deploy code, systemd units, Caddy, and the IB Gateway Compose
 project. Host env is loaded only from `/etc/radon/env` (`0640` root:radon).
 `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files
-in that directory.
+in that directory. `setup-vps.sh` `create_etc_radon_dir` does not create
+that retired file.
 
 After this release's deploy finishes, reinstall the units, run the drift
 audit once, then move the retired file and its backups into a root-only

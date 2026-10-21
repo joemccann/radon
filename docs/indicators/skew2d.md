@@ -217,7 +217,7 @@ Panel:
 ## Scheduling
 
 `cloud/services/radon-skew2d.{service,timer}`: oneshot venv-python direct,
-`EnvironmentFile=/home/radon/radon-cloud/.env`, `RADON_DB_NO_REPLICA=1`,
+`EnvironmentFile=/etc/radon/env`, `RADON_DB_NO_REPLICA=1`,
 `TimeoutStartSec=120`;
 `OnCalendar=*-*-* 21:50:00 UTC` (five minutes after parent SKEW finalize),
 `Persistent=true`, `RandomizedDelaySec=30`. Register in `setup-vps.sh`

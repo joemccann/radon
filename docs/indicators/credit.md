@@ -241,7 +241,7 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
   test in `web/tests/service-health-windows.test.ts` (same shape as yield-curve).
 - `scripts/watchdog/services.py`: same 26h window + append to the daily-bucket list.
 - `cloud/services/radon-credit-spread.service`: Type=oneshot, User=radon,
-  WorkingDirectory=/home/radon/radon, EnvironmentFile=/home/radon/radon-cloud/.env,
+  WorkingDirectory=/home/radon/radon, EnvironmentFile=/etc/radon/env,
   Environment=RADON_DB_NO_REPLICA=1,
   ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_credit_spread.py,
   TimeoutStartSec=300, journal out/err, StartLimitIntervalSec=300, StartLimitBurst=5.
