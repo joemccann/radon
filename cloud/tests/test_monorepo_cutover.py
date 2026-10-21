@@ -507,6 +507,47 @@ def test_runner_retention_keeps_current_newest_and_active_runner(tmp_path: Path)
     assert sum(path.is_dir() for path in runners) == 5
 
 
+def test_runner_retention_prunes_prestage_copies_too(tmp_path: Path) -> None:
+    # The prestage job materializes `<sha>.<run>.<attempt>.prestage` and
+    # nothing ever removed them: 884 copies (2.4G) filled the app host disk
+    # and failed the 6841096b deploy on 2026-10-21 with ENOSPC.
+    root = tmp_path / "runners"
+    root.mkdir()
+    current = root / f"{'a' * 40}.9.1"
+    current.mkdir()
+    os.utime(current, ns=(100, 100))
+    prestage: list[Path] = []
+    for index in range(6):
+        runner = root / f"{'b' * 40}.{index}.1.prestage"
+        runner.mkdir()
+        (runner / ".active.lock").touch()
+        os.utime(runner, ns=(index + 1, index + 1))
+        prestage.append(runner)
+
+    active_handle = (prestage[0] / ".active.lock").open("r+")
+    fcntl.flock(active_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    command = [
+        str(RUNNER_PRUNER),
+        "--root",
+        str(root),
+        "--current",
+        str(current),
+        "--keep-newest",
+        "2",
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    finally:
+        fcntl.flock(active_handle, fcntl.LOCK_UN)
+        active_handle.close()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert current.is_dir()
+    assert prestage[0].is_dir()
+    assert all(runner.is_dir() for runner in prestage[4:])
+    assert not any(runner.exists() for runner in prestage[1:4])
+    assert "active_skipped=1" in result.stdout
+
+
 def test_root_workflow_never_invokes_unversioned_legacy_fallback_after_readiness() -> None:
     workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
     script = next(
