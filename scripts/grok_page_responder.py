@@ -162,37 +162,63 @@ def grok_bin() -> str:
     return os.environ.get("GROK_BIN") or "grok"
 
 
+# Controller git must not run a hook or helper the agent installed in the
+# clone, and must not hand that hook the process environment (Turso,
+# Pushover). The agent's own push still uses the repo hooks, including the
+# pre-push guard installed below; only these controller commands opt out.
+_CONTROLLER_GIT_FLAGS = (
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.fsmonitor=",
+    "-c", "core.sshCommand=true",
+    "-c", "credential.helper=",
+    "-c", "protocol.ext.allow=never",
+)
+_GIT_ENV_KEYS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SYSTEMROOT")
+
+
+def controller_git_env() -> dict[str, str]:
+    """The only environment a controller git subprocess may see."""
+    env = {key: os.environ[key] for key in _GIT_ENV_KEYS if os.environ.get(key)}
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    return env
+
+
+def _git(repo: Path, args: list[str], *, timeout: int, disable_hooks: bool = True):
+    flags = _CONTROLLER_GIT_FLAGS if disable_hooks else _CONTROLLER_GIT_FLAGS[2:]
+    return subprocess.run(
+        ["git", *flags, *args],
+        cwd=repo,
+        env=controller_git_env(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
 def sync_remote_clone(repo_root: Path) -> str:
     """Fast-forward a clean dedicated clone. Never clobber dirty work."""
     if not _flag("GROK_PAGE_SYNC_REMOTE", False):
         return "disabled"
-    porcelain = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root, capture_output=True, text=True, timeout=30,
-    )
+    porcelain = _git(repo_root, ["status", "--porcelain"], timeout=30)
     if porcelain.returncode != 0:
         return "status-failed"
     if (porcelain.stdout or "").strip():
         return "dirty"
     # Public HTTPS, not the clone's origin: the unit hides ~/.ssh.
-    fetch = subprocess.run(
-        ["git", "fetch", PUBLIC_REPO_URL, "+refs/heads/main:refs/remotes/origin/main"],
-        cwd=repo_root, capture_output=True, text=True, timeout=60,
+    fetch = _git(
+        repo_root,
+        ["fetch", PUBLIC_REPO_URL, "+refs/heads/main:refs/remotes/origin/main"],
+        timeout=60,
     )
     if fetch.returncode != 0:
         return "fetch-failed"
     # A run leaves the clone on its fix/* branch (kept for the pickup); sync
     # main, or every later cycle runs stale code behind "ff-failed".
-    checkout = subprocess.run(
-        ["git", "checkout", "-q", "main"],
-        cwd=repo_root, capture_output=True, text=True, timeout=30,
-    )
+    checkout = _git(repo_root, ["checkout", "-q", "main"], timeout=30)
     if checkout.returncode != 0:
         return "checkout-failed"
-    merged = subprocess.run(
-        ["git", "merge", "--ff-only", "origin/main"],
-        cwd=repo_root, capture_output=True, text=True, timeout=30,
-    )
+    merged = _git(repo_root, ["merge", "--ff-only", "origin/main"], timeout=30)
     if merged.returncode != 0:
         return "ff-failed"
     return "synced"
@@ -226,9 +252,11 @@ exit $status
 def install_push_guard(repo_root: Path) -> Optional[Path]:
     """Write the fix/*-only pre-push hook into the clone. None on failure."""
     try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--git-path", "hooks"],
-            cwd=repo_root, capture_output=True, text=True, timeout=30,
+        # hooksPath stays at the repo default so this resolves .git/hooks,
+        # where the agent's later push will look. The env is still scrubbed.
+        proc = _git(
+            repo_root, ["rev-parse", "--git-path", "hooks"],
+            timeout=30, disable_hooks=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -420,6 +448,17 @@ def attempt_oneshot_rerun(
         return None
     wait_secs = (next_run - now).total_seconds()
     if wait_secs <= RERUN_TIMER_HORIZON_SECS:
+        return None
+    # Reserve before systemctl. A failed start still spends the unit; the
+    # later grok path must not see a free slot this launch already took.
+    reserved = pages_mod.record_action_attempt(
+        page_id=str(page.get("page_id") or unit),
+        now=now,
+        kind="oneshot_rerun",
+        cap=max_actions_per_day(),
+        since=_utc_day_start(now),
+    )
+    if not reserved:
         return None
     for args in (["reset-failed", unit], ["start", "--no-block", unit]):
         if getattr(runner(args), "returncode", 1) != 0:
@@ -960,11 +999,6 @@ def run_cycle(
         if rerun:
             disposition, summary = rerun
             finished = datetime.now(timezone.utc)
-            # A oneshot re-run is an action too; keep it inside the same
-            # daily cap now that the cap no longer reads `claimed_at`.
-            pages_mod.record_action_attempt(
-                page_id=page["page_id"], now=finished, kind="oneshot_rerun"
-            )
             finish, note = _complete_page_with_followup(
                 page["page_id"],
                 status="done",
@@ -1009,11 +1043,17 @@ def run_cycle(
 
         def _run_once(command: list[str]):
             # Reserve the budget BEFORE the launch, and once per launch so
-            # the last-known-good fallback spends its own unit. The ticket's
-            # claim is cleared again on failure (retryable); this row is not.
-            pages_mod.record_action_attempt(
-                page_id=page["page_id"], now=datetime.now(timezone.utc)
+            # the last-known-good fallback spends its own unit. The insert
+            # itself enforces the cap. The ticket's claim is cleared again
+            # on failure (retryable); this row is not.
+            reserved = pages_mod.record_action_attempt(
+                page_id=page["page_id"],
+                now=datetime.now(timezone.utc),
+                cap=cap,
+                since=_utc_day_start(now),
             )
+            if not reserved:
+                return None, "budget"
             try:
                 return runner(command, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root)), None
             except subprocess.TimeoutExpired:
@@ -1025,7 +1065,9 @@ def run_cycle(
                 stdout = getattr(proc, "stdout", "") or "" if proc else ""
                 stderr = getattr(proc, "stderr", "") or "" if proc else ""
                 returncode = getattr(proc, "returncode", 1) if proc else 124
-                if timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr):
+                if timeout_err != "budget" and (
+                    timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr)
+                ):
                     lkg = _load_trusted_lkg(repo_root)
                     if lkg is not None and (
                         lkg.model != runtime.model or lkg.binary_path != runtime.binary_path
@@ -1043,7 +1085,9 @@ def run_cycle(
                             reasoning_effort=runtime.reasoning_effort,
                             grok=runtime.binary_path or grok_bin(),
                         )
-                        proc, timeout_err = _run_once(cmd)
+                        fallback_proc, fallback_err = _run_once(cmd)
+                        if fallback_err != "budget":
+                            proc, timeout_err = fallback_proc, fallback_err
         except grok_runtime.GrokRuntimeError as exc:
             print(json.dumps({
                 "at": now.isoformat(),
@@ -1056,6 +1100,14 @@ def run_cycle(
         # idle and the peer may already have closed it. Drop it before any
         # ledger write so the UPDATE is not a send on that dead keep-alive.
         _drop_idle_hrana_socket()
+
+        if timeout_err == "budget":
+            print(json.dumps({
+                "at": now.isoformat(),
+                "skipped": "daily_action_cap",
+                "page_id": page["page_id"],
+            }))
+            return 0
 
         if timeout_err:
             status = pages_mod.record_attempt_failure(

@@ -290,6 +290,27 @@ def test_block_scalar_header_prefix_scan_is_linear():
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=20)
 
 
+def test_multiline_credential_and_key_bodies_are_scrubbed():
+    """DS-2026-10-21-20: the hook alphabet includes `credential` and `[-_]key`,
+    but the multiline rules only used `_SECRET_KEY`, so a block body survived
+    after the header line was rewritten."""
+    for header in (
+        "credential: |",
+        "signing_key: |",
+        "webhook-key: |",
+        'credential = """',
+    ):
+        if header.endswith('"""'):
+            text = f"{header}\nNOTREALOPAQUE9\n\"\"\"\nsibling: keep\n"
+        else:
+            text = f"{header}\n  NOTREALOPAQUE9\nsibling: keep\n"
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+        assert "sibling: keep" in out, out
+    prose = "author: |\n  ordinary prose stays\nnext: fine\n"
+    assert scrub_credential_text(prose) == prose
+
+
 def test_block_scalar_matches_a_prefixed_or_suffixed_credential_key():
     """`db_password` and `UW_TOKEN` are the ordinary spellings. The key
     alternation has no prefix or suffix run of its own, and the block rule is
