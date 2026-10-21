@@ -43,6 +43,35 @@ EXECUTION_ID_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("flex_exec_id", re.compile(r"(?<![0-9A-Za-z.])\d{10,}(?![0-9A-Za-z])")),
 )
 
+def build_triple_quoted_assignment_re(key_pattern: str) -> "re.Pattern[str]":
+    """An assignment whose value is TRIPLE-delimited and spans lines.
+
+    `TOKEN = \"\"\"` then the value on the following lines (Python, TOML). Every
+    other quoted-value rule in this module and in the public sanitizer handles
+    ONE delimiter character, so a triple delimiter was matched as an EMPTY
+    two-quote value: the assignment was rewritten, the real credential on the
+    following lines was published untouched, and an opaque password carries no
+    provider prefix for the literal rules to catch. The block-scalar rule
+    covers YAML `|` and `>` only.
+
+    Shared with the public-text sanitizer (``scripts/nightly_issue_format.py``)
+    the same way the block-scalar structure is: only the STRUCTURE is shared,
+    each caller keeps its own key alphabet and its own redaction label. That
+    module already imports this one and this one imports nothing but the
+    standard library, so there is no cycle and no dependency weight.
+
+    Group 1 is the key and separator, so a caller can keep the header and
+    replace the whole value. The delimiter is captured and back-referenced, so
+    the value runs to its REAL close: a lone `'''` inside a `\"\"\"` value does
+    not end it. The body is lazy, which costs one scan to the close per
+    credential word and adds no new match start.
+    """
+    return re.compile(
+        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')(?s:.*?)\2",
+        re.IGNORECASE,
+    )
+
+
 def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     """A YAML block-scalar header whose value lives on the FOLLOWING lines.
 
@@ -82,6 +111,22 @@ _SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(
 )
 
 _BLOCK_SCALAR_LABEL = "[redacted-secret]"
+
+# No leading identifier run, for the same reason the literal-assignment
+# scanner below has none: the search is unanchored, so a prefixed name still
+# matches from its credential word.
+_TRIPLE_QUOTED_ASSIGNMENT_RE = build_triple_quoted_assignment_re(
+    rf"{_SECRET_KEY}{_KEY_SUFFIX}"
+)
+
+
+def _redact_triple_quoted(text: str) -> str:
+    """Drop triple-delimited values BEFORE any single-line rule runs.
+
+    Ahead of the specific shapes too: `authorization = \"\"\"` would otherwise
+    have its own rule treat the opening delimiter as the whole value.
+    """
+    return _TRIPLE_QUOTED_ASSIGNMENT_RE.sub(r"\1[redacted-secret]", text)
 
 
 def _redact_block_scalar(text: str) -> str:
@@ -251,6 +296,7 @@ def find_credential_shapes(text: str) -> list[str]:
 def scrub_credential_text(value: Any) -> Any:
     if isinstance(value, str):
         value = _redact_block_scalar(value)
+        value = _redact_triple_quoted(value)
         for pattern, repl in _SECRET_SCRUB_PATTERNS:
             value = pattern.sub(repl, value)
         return value

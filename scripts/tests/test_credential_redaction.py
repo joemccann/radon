@@ -360,3 +360,39 @@ def test_cookie_prose_without_an_assignment_survives():
         from credential_redaction import find_secret_assignments
 
         assert find_secret_assignments(prose) == [], prose
+
+
+# A triple-delimited value (Python or TOML) was matched as an EMPTY two-quote
+# value, so the credential on the FOLLOWING lines was published untouched
+# (DS-2026-10-20-13). An opaque password carries no provider prefix for the
+# literal rules to catch, and the block-scalar rule covers YAML `|`/`>` only.
+# Every value below is invented.
+_TRIPLE_QUOTED_PARTS = (
+    ("TOKEN", " = ", '"""', "qzBNOTREALopaque1234"),
+    ("DB_PASSWORD", " = ", "'''", "qzCNOTREALopaque1234"),
+    ("api_key", " = ", '"""', "qzDNOTREALopaque1234"),
+    ("UW_TOKEN", ": ", '"""', "qzENOTREALopaque1234"),
+    ('"password"', ": ", '"""', "qzFNOTREALopaque1234"),
+)
+
+
+def test_triple_delimited_assignment_values_are_redacted():
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        text = f"config had\n{key}{sep}{delim}\n{value}\n{delim}\nand stopped"
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert out.startswith("config had\n") and out.endswith("and stopped"), out
+
+
+def test_triple_delimited_value_stops_at_its_real_close():
+    text = 'TOKEN = """\nqzGNOTREALopaque1234\n"""\nnext_key = "keepme"\n'
+    out = scrub_credential_text(text)
+    assert "NOTREAL" not in out, out
+    assert "keepme" in out, out
+
+
+def test_single_line_and_empty_quoted_values_are_unchanged():
+    assert scrub_credential_text('TOKEN = ""') == 'TOKEN = "[redacted-secret]"'
+    assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
+    single = scrub_credential_text('TOKEN = "qzHNOTREALopaque1234"')
+    assert single == 'TOKEN = "[redacted-secret]"', single
