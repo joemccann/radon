@@ -300,3 +300,6 @@ data/schema_version.*
 /data/tradingview_mcp_token.json
 /data/tradingview_mcp_token.json.lock
 /data/.tradingview-*
+
+# UW budget history sidecar (runtime-owned by scripts/utils/uw_budget.py)
+data/uw_budget_history.jsonl
