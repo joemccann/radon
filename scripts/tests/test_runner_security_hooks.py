@@ -426,6 +426,68 @@ def test_a_green_record_without_a_recorded_head_sha_is_never_ready(rig):
     assert "ready to merge" not in out["status"]
 
 
+# The cases above stub the already-joined rollup string, so they exercise the
+# bash allowlist but never the jq filter that produces it. These run the real
+# filter, lifted out of the hook, over gh's actual statusCheckRollup shapes.
+
+
+def _rollup_filter() -> str:
+    """The rollup half of the hook's `pr view -q` expression."""
+    src = (HOOKS / "security_post.sh").read_text(encoding="utf-8")
+    start = src.index("statusCheckRollup[]?")
+    frag = src[src.rindex("[", 0, start):]
+    return frag[:frag.index("] | join(\",\")") + len("] | join(\",\")")]
+
+
+def _run_filter(rollup: list[dict]) -> str:
+    jq = shutil.which("jq")
+    if not jq:  # pragma: no cover - jq ships with the runner host
+        pytest.skip("jq not installed")
+    out = subprocess.run([jq, "-r", _rollup_filter()], input=json.dumps(
+        {"statusCheckRollup": rollup}), capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_an_in_progress_check_with_an_empty_conclusion_reads_pending():
+    """gh represents an unfinished CheckRun with `conclusion: ""`.
+
+    jq's `//` only falls through on null or false, so an empty conclusion
+    survived as an empty token; bash word splitting then discarded it and a
+    rollup of `SUCCESS,` verified as wholly green while a check was still
+    running. Every entry must yield a non-empty token.
+    """
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "pytest", "status": "COMPLETED",
+         "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "vitest", "status": "IN_PROGRESS",
+         "conclusion": ""},
+    ])
+    assert got == "SUCCESS,PENDING", got
+    assert "" not in got.split(","), got
+
+
+def test_a_queued_check_is_pending_whatever_its_conclusion_field_holds():
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "a", "status": "QUEUED", "conclusion": None},
+    ])
+    assert got == "PENDING", got
+
+
+def test_a_status_context_with_no_state_reads_pending():
+    got = _run_filter([{"__typename": "StatusContext", "context": "x", "state": ""}])
+    assert got == "PENDING", got
+
+
+def test_completed_and_successful_entries_keep_their_conclusions():
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "a", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "b", "status": "COMPLETED", "conclusion": "SKIPPED"},
+        {"__typename": "StatusContext", "context": "c", "state": "SUCCESS"},
+    ])
+    assert got == "SUCCESS,SKIPPED,SUCCESS", got
+
+
 @pytest.mark.parametrize("rollup", ["", "SUCCESS,FAILURE", "SUCCESS,PENDING",
                                    "SUCCESS,QUEUED", "SUCCESS,CANCELLED"])
 def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
