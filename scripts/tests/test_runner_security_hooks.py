@@ -40,11 +40,12 @@ case "$*" in
   "issue list"*) [ -n "${STUB_ISSUE:-}" ] && echo "$STUB_ISSUE" ;;
   "issue comment"*) [ -n "${STUB_COMMENT_URL:-}" ] && echo "$STUB_COMMENT_URL" ;;
   "pr view"*) echo "${STUB_PR_VIEW:-ok}" ;;
+  "pr list -R"*"--limit 100"*) echo "${STUB_PR_COUNTS:-0 0}" ;;
   "pr list -R"*) echo "${STUB_PR_LIST:-}" ;;
   "pr list"*) echo "[]" ;;
   "api"*) echo "" ;;
 esac
-exit 0
+exit "${STUB_GH_RC:-0}"
 """
 
 
@@ -523,9 +524,43 @@ def test_a_ready_transcript_line_with_no_durable_record_is_incomplete(rig):
 
 def test_an_open_loop_pr_contradicts_a_zero_pr_claim(rig):
     # DS-2026-09-29-05: the zero-URL claim used to pass with no verification.
-    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""), STUB_PR_LIST=PR)
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="5 1")
 
     assert out["status"].startswith("INCOMPLETE"), out
+
+
+def test_a_failed_pr_listing_is_not_proof_that_no_loop_pr_exists(rig):
+    """An auth failure or timeout must not read as absence.
+
+    The listing was called with `|| true`, so a query that could not run
+    produced an empty answer indistinguishable from "no PR" and an OK
+    "nothing to merge" went to the operator while a loop PR could be sitting
+    unmerged.
+    """
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""), STUB_GH_RC="1")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "nothing to merge" not in out["status"], out
+
+
+def test_a_truncated_pr_listing_is_not_proof_either(rig):
+    """The listing is repo-wide and filtered client side, so a full page may
+    have hidden an older loop PR. A full page is unknown, not empty."""
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="100 0")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "nothing to merge" not in out["status"], out
+
+
+def test_a_short_listing_with_no_loop_pr_does_prove_absence(rig):
+    """Green path: the query ran, the page was not full, and nothing on this
+    loop's prefix came back."""
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="7 0")
+
+    assert out["status"].startswith("OK: 0 PR(s), nothing to merge"), out
 
 
 def test_a_zero_pr_claim_still_passes_when_the_repository_has_no_loop_pr(rig):
