@@ -1,3 +1,42 @@
+# NYSE common-stock High-Low Line (2026-10-20)
+
+Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7.
+
+- [x] H1 depends_on: [] Verify exact common-stock-only NYSE 52-week high/low source, authorized transport, history, definition, cadence and storage/display rights. Record screenshot timeframe/baseline uncertainty and explicit calculation conventions.
+- [x] H2 depends_on: [H1] Specify cumulative daily net highs, StochRSI(14), SAR parameters, weekly/daily treatment, freshness and data contract; record Python/API/panel red tests.
+- [x] H3 depends_on: [H2] Implement source client, transform, history/snapshot persistence, migration and schedule with failing-first tests.
+- [x] H4 depends_on: [H2] Implement read-only API, hook, contracts and shared health/schedule pins.
+- [x] H5 depends_on: [H2] Implement branded Regime chart with cumulative line, SAR, synchronized StochRSI panel, honest source/baseline labels and browser coverage.
+- [x] H6 depends_on: [H3, H4, H5] Integrate, independently verify formulae and actual source/Turso/API data, run focused/full gates and inspect production-build desktop/mobile screenshots.
+- [ ] H7 depends_on: [H6] PR exact-head CI green, accepted Pushover notification, authorized admin merge, automatic deployment and production verification; archive owned worktrees.
+
+## Review
+
+User confirmed provider automation permission on 2026-10-21; this is their declaration, not independent inspection of the provider agreement. Exact !NEWHINYC/!NEWLONYC metadata and approved honest-HTTP capture provide 5,988 paired completed sessions (2003-01-02 through 2026-10-20), 1,243 weekly rows and 275 published fractional observations. Baseline is zero before the first source observation; screenshot anchor remains unknown. Weekly is the explicit default, with Daily available; forming-week values are provisional. No all-NYSE substitution or demo redistribution.
+
+Recorded Python/API/panel missing-module red evidence. Author commits: ingestion20301ab23 plus287f448d8 synthetic-fixture repair (82 focused,97% combined coverage), API2064626a (421 focused), UI3a1ae54cf (195 focused,8 browser cases). Sol independently compared every daily/weekly cumulative, RSI, StochRSI and SAR/direction: no mismatches, maximum floating error2.30e-12. Sol's large-snapshot retention and forming-week natural-key findings are repaired; 2,368,759-byte prior snapshot reconstructs in20 bounded queries, maximum131,072bytes, zero duplicate periods. Luna independently passed312 focused and5 browser cases; no blocker.
+
+Integration includes main241fea17e and the Node security update. Final full web:11,438 passed,21 skipped,86.26% lines. Full Python:17,312 passed,10 skipped,54 unchanged Mac Gateway TLS failures; the one new E2E inventory omission is fixed, with176 docs/curation and257 indicator/registration cases green. Full cloud:3,339 passed,10 skipped,12 unchanged Mac missing-tool failures; post-merge cloud/installer pins802 passed. Five unchanged TypeScript errors remain in newsfeed/sameOrigin, zero High-Low errors. Production compile and235-manifest trace audit pass;8 production-build browser cases pass across themes, phone/desktop, missing data and strict page inventory. The GitHub repository is public: checked-in fixtures are synthetic; captured provider history and independent real-history golden verification stay private. Local author history containing captures is squashed away before pushing; no captured-data commit has been published.
+
+Actual Turso migration101 applied;5,988 daily plus1,243 weekly rows, zero duplicate weekly periods, healthy high-low-line heartbeat. Actual direct API invocation (existing test authorization seam, no DB/disk mocks) returns200/private cache and complete dataset in550ms. Current source-derived readings stay in private evidence and the operator panel. Evidence and stable screenshots: /Users/joemccann-mac-mini/.codex/state/jobs/high-low-line-20261020/. Remaining: exact-head PR CI, accepted Pushover, authorized admin merge, automatic deploy, authenticated production browser and installed timer/one-run verification, owned-worktree archival. Primary checkout WIP preserved; no generated codemap files committed.
+
+# Taiwan/Korea export lead indicator (2026-10-19)
+
+Dependency graph: E1 -> E2 -> [E3, E4, E5] -> E6 -> E7.
+
+- [x] E1 depends_on: [] Verify official total-export sources, history, units, releases and reuse terms; capture fixtures. User authorized exports first, licensed MSCI EPS later.
+- [x] E2 depends_on: [E1] Specify trailing 3-month mean of equal-weight monthly YoY export growth, six-calendar-month display shift and honest availability; record Python/API/UI red tests.
+- [x] E3 depends_on: [E2] Ingestion worktree: robust source clients, Turso migration/writer, scheduled collection, watchdog/manifest pins and green tests.
+- [x] E4 depends_on: [E2] API worktree: types, db-first missing/cache contracts, hook, freshness schedule and green tests.
+- [x] E5 depends_on: [E2] UI worktree: Regime tab, strip, observed-versus-shifted chart, freshness rail, accessible mobile layout and green tests.
+- [x] E6 depends_on: [E3, E4, E5] Integrate full suites/typecheck and real-source/Turso/browser verification; inspect screenshots and release-time semantics.
+- [ ] E7 depends_on: [E6] PR exact-head green, accepted notification, admin merge, automatic production data/API/timer/browser verification and worktree cleanup.
+
+## Review
+
+Proposed route exports; service asia-export-lead; component AsiaExportLead; tab EXPORT LEAD; next free migration 0099 on base42c897c90. The image labels total Taiwan/Korea exports, not semiconductor-only exports. The six-month shift is a visualization of an unvalidated historical hypothesis, not a forward EPS forecast. The October15 article's no-downturn claim is historical context, never hardcoded current state. User chose official exports first with the licensed MSCI overlay unavailable. Both official sources fetched without credentials; reuse terms verified. Red: Python collection fails on missing collector; API six cases fail on missing route; panel collection fails on missing component. Evidence saved outside worktrees under asia-export-lead-20261019. Three implementation lanes merged. Independent Sol review reproduced source truncation and approved the correction before any writes; Luna passed 35 UI/API/hook cases. Final focused checks: 63 ingestion/registration, 121 API integration and 176 UI cases. Collector executable line coverage is 99.2%, client 100% (branches unmeasured). Full Vitest: 11,330 passed, 21 skipped. Full Python: 16,438 passed, 10 skipped, 54 unchanged local Gateway TLS-fixture failures. Full cloud: 3,264 passed, 10 skipped, 12 unchanged Mac Linux-tooling failures. Typecheck retains two unchanged ExplainPost content errors in DashboardNewsFeed/NewsfeedLightbox. Production compile and trace audit pass; six production-build browser cases pass, including resize navigation and readable tick spacing. Actual Turso schema 99 has 321 history rows, September composite 58.43498029405504%, healthy heartbeat; real Chrome screenshots cover both themes and phone/desktop with a timer-derived 09:40 UTC countdown. Preserve unrelated primary checkout WIP; no generated codemap files committed. Initial PR CI exposed a calendar-dependent legacy cache test and the exhaustive TesterArmy page inventory. The test now freezes session/write/prune clocks together and forces first-write pruning; Sol and Luna each passed all 26 file cases. Canonical Clear inventory, source-shaped missing fixture and SDK assertions now cover exports among 71 pages; strict comparison preserved and two focused SDK cases passed against a production build. Full repair reruns retain 11,330 Vitest passes and 16,438 Python passes with the same unrelated local baseline failures. Exact-head PR delivery and production verification follow.
+
+
 # Grok responder root-owned code (DS-2026-10-17-16)
 
 Dependency graph: T1 -> T2 -> T3 -> T4.

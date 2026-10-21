@@ -61,6 +61,7 @@ describe.each([
   ["gex", "app/regime/gex/page.tsx"],
   ["grg", "app/regime/grg/page.tsx"],
   ["breadth", "app/regime/breadth/page.tsx"],
+  ["high-low", "app/regime/high-low/page.tsx"],
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
   ["exports", "app/regime/exports/page.tsx"],
@@ -131,6 +132,7 @@ vi.mock("../components/GammaRotationPanel", () => ({
 vi.mock("../components/BreadthPanel", () => ({
   default: () => <div data-testid="breadth-panel-stub" />,
 }));
+vi.mock("../components/HighLowLinePanel", () => ({ default: () => <div data-testid="high-low-panel-stub" /> }));
 vi.mock("../components/BpiPanel", () => ({
   default: () => <div data-testid="bpi-panel-stub" />,
 }));
@@ -748,3 +750,14 @@ describe("export lead route", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/exports");
   });
 });
+
+ describe("High-Low route", () => {
+  afterEach(() => cleanup());
+  it("renders and navigates through the breadth rail", () => {
+    mockedPathname = "/regime/high-low";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("high-low-panel-stub")).toBeTruthy();
+    within(container).getByRole("button", { name: /^HIGH LOW$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/high-low");
+  });
+ });

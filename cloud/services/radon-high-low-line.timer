@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon NYSE common-stock High-Low Line daily sampling
+
+[Timer]
+# Radon sampling time; the provider publication SLA is not verified.
+# Calendar-day sampling keeps writer health separate from session data lag.
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

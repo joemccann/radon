@@ -47,6 +47,7 @@ const HOST_DATA_TRACE_ROUTES = [
   // the order function and thousands of caches into the assistant.
   "/api/assistant",
   "/api/asia-export-lead",
+  "/api/high-low-line",
   "/api/orders/place",
   "/api/breadth",
   "/api/catalysts",

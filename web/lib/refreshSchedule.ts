@@ -105,6 +105,9 @@ export const BPI_REFRESH: RefreshSchedule = [
   { weekdays: TUE_SAT, hours: [11], minutes: [0] },
 ];
 
+/** cloud/services/radon-high-low-line.timer: daily, including weekend heartbeats. */
+export const HIGH_LOW_LINE_REFRESH: RefreshSchedule = [daily(0, 30)];
+
 /** cloud/services/radon-asia-export-lead.timer */
 export const ASIA_EXPORT_LEAD_REFRESH: RefreshSchedule = [daily(9, 40)];
 
