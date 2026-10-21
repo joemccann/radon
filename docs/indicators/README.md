@@ -29,6 +29,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
 | vix-pc | `/regime/vix-pc` | `vix-pc` | [vix-pc.md](vix-pc.md) (migration `0097_vix_pc.sql` is version 97) |
+| high-low | `/regime/high-low` | `high-low-line` | [high-low.md](high-low.md); approved operator-only common-stock breadth, Daily/Weekly StochRSI and SAR |
 | exports | `/regime/exports` | `asia-export-lead` | [Specification](exports.md); official total exports, three-month mean, optional six-month display alignment; licensed EPS comparison deferred |
 | vix-model-spread | `/regime/vix-model-spread` | `vix-model-spread` | [Specification](vix-model-spread.md), [source research](vix-model-spread-source-research.md); personal operator use, 20/252-session bands |
 | panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |

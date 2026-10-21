@@ -32,7 +32,9 @@ export interface ChartSeries<T = CriHistoryEntry> {
   /** Y-scale for this series; log domains clamp to the smallest positive value. */
   scaleType?: "log" | "linear";
   /** Sparse periodic measurements can retain a zero-based bar representation. */
-  renderAs?: "line" | "bar";
+  renderAs?: "line" | "bar" | "points";
+  /** Fixed numeric bounds for bounded indicators such as raw StochRSI. */
+  yDomain?: [number, number];
   /** Keep connected lines clear while preserving observations isolated by gaps. */
   pointMarkers?: "all" | "isolated";
 }
@@ -195,6 +197,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         if (isPlottable(s, band.from)) vals.push(band.from);
         if (isPlottable(s, band.to)) vals.push(band.to);
       }
+      if (s.yDomain && s.yDomain.every(Number.isFinite) && s.yDomain[0] < s.yDomain[1]) return d3.scaleLinear().domain(s.yDomain).range([innerH, 0]);
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
       if (s.renderAs === "bar") vals.push(0);
       const ext = d3.extent(vals) as [number, number];
@@ -255,6 +258,14 @@ export default function CriHistoryChart<T extends { date: string }>({
           .attr("width", barWidth)
           .attr("height", d => Math.abs(yScale(d[s.key] as number) - yScale(0)))
           .attr("fill", s.color);
+        return;
+      }
+      if (s.renderAs === "points") {
+        g.selectAll(`.dot-${String(s.key)}`).data(validData).enter().append("circle")
+          .attr("class", `dot-${String(s.key)}`)
+          .attr("cx", d => xScale(new Date(d.date)))
+          .attr("cy", d => yScale(d[s.key] as number))
+          .attr("r", 2).attr("fill", s.color);
         return;
       }
       if (validData.length < 2) return;

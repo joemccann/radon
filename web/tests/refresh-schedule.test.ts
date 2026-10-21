@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 
 import {
   ASIA_EXPORT_LEAD_REFRESH,
+  HIGH_LOW_LINE_REFRESH,
   ATS_VENUE_SHARE_REFRESH,
   BPI_REFRESH,
   BREADTH_REFRESH,
@@ -125,6 +126,7 @@ const PINNED: Array<[string, RefreshSchedule, string[]]> = [
   ["breadth", BREADTH_REFRESH, ["radon-breadth.timer"]],
   ["BPI", BPI_REFRESH, ["radon-bpi.timer"]],
   ["Asia export lead", ASIA_EXPORT_LEAD_REFRESH, ["radon-asia-export-lead.timer"]],
+  ["High-Low Line", HIGH_LOW_LINE_REFRESH, ["radon-high-low-line.timer"]],
   ["margin debt", MARGIN_DEBT_REFRESH, ["radon-margin-debt.timer"]],
   ["straddle", STRADDLE_REFRESH, ["radon-straddle.timer"]],
   ["COR", COR_REFRESH, ["radon-cor.timer"]],
@@ -152,6 +154,11 @@ describe("schedule constants are pinned to the systemd timers", () => {
     const expected = units.flatMap((unit) => canonical(timerRules(unit)));
     expect(expected.length).toBeGreaterThan(0);
     expect(canonical(schedule)).toEqual(expected);
+  });
+
+  it("samples High-Low Line at 00:30 UTC on weekends", () => {
+    expect(nextRefreshUtc(HIGH_LOW_LINE_REFRESH, new Date("2026-10-24T00:29:59Z")).toISOString()).toBe("2026-10-24T00:30:00.000Z");
+    expect(nextRefreshUtc(HIGH_LOW_LINE_REFRESH, new Date("2026-10-24T00:30:00Z")).toISOString()).toBe("2026-10-25T00:30:00.000Z");
   });
 
   it("samples export feeds at 09:40 UTC on weekends without jitter", () => {

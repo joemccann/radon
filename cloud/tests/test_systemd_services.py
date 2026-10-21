@@ -185,6 +185,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-vix-model-spread.timer",
     "radon-asia-export-lead.service",
     "radon-asia-export-lead.timer",
+    "radon-high-low-line.service",
+    "radon-high-low-line.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -1855,3 +1857,27 @@ def test_asia_export_lead_install_schedule_and_watchdog_contract():
         'open': 26 * 3600, 'closed': 26 * 3600, 'requires_ib': False,
     }
     assert 'asia-export-lead' in BUCKETS['daily']
+
+
+def test_high_low_line_install_schedule_and_watchdog_contract():
+    import hashlib
+    from scripts.watchdog.services import SCHEDULED_SERVICES, BUCKETS
+
+    cloud = Path(__file__).parents[1]
+    timer = (cloud / 'services/radon-high-low-line.timer').read_text()
+    service = (cloud / 'services/radon-high-low-line.service').read_text()
+    assert 'OnCalendar=*-*-* 00:30:00 UTC' in timer
+    assert 'RandomizedDelaySec=0' in timer and 'Persistent=true' in timer
+    assert 'TimeoutStartSec=300' in service
+    assert 'User=radon' in service and 'Environment=RADON_DB_NO_REPLICA=1' in service
+    assert 'scripts/fetch_high_low_line.py' in service
+    assert 'ib-gateway' not in service
+    for suffix in ('service', 'timer'):
+        name = f'radon-high-low-line.{suffix}'
+        digest = hashlib.sha256((cloud / 'services' / name).read_bytes()).hexdigest()
+        assert f'{digest}  {name}' in (cloud / 'config/installed-units.sha256').read_text()
+        assert f'  {name}\n' in (cloud / 'scripts/setup-vps.sh').read_text()
+    assert SCHEDULED_SERVICES['high-low-line'] == {
+        'open': 26 * 3600, 'closed': 26 * 3600, 'requires_ib': False,
+    }
+    assert 'high-low-line' in BUCKETS['daily']

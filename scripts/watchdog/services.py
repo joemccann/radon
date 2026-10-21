@@ -160,6 +160,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # Monthly official exports, sampled daily including weekends at 09:40 UTC.
+    # Approved StockCharts daily sampling at 00:30 UTC, including weekends.
+    "high-low-line": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "asia-export-lead": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # hhlev — radon-hhlev.timer, daily 13:20 UTC every calendar day (quarterly
     # Z.1 source with a daily cheap check, heartbeats each run). Uniform 26h
@@ -668,6 +670,7 @@ BUCKETS: dict[str, list[str]] = {
         "vix-pc",
         "vix-model-spread",
         "asia-export-lead",
+        "high-low-line",
         # Daily 02:45 UTC Cboe VIX/VIX3M term-structure pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "vixts",

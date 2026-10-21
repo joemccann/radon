@@ -42,8 +42,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
   // Newsfeed Explain: requireRouteAccess (any admitted principal), paid LLM path.
   "newsfeed/explain",
-  // Cboe model history is restricted to the personal-use operator.
-  "vix-model-spread",
+  // Restricted provider histories require the operator allowlist.
+  "vix-model-spread", "high-low-line",
   // Original-page evidence and account/assistant audit exports are operator-only.
   "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
@@ -195,6 +195,14 @@ describe("security report route-local authorization matrix", () => {
 
   it("keeps research evidence and audit exports operator-only", () => {
     for (const route of ["research/evidence/[asset]", "research/governance"]) {
+      const text = source(`app/api/${route}/route.ts`);
+      expect(text, route).toMatch(/requireRouteAccess\(request, \{ operatorOnly: true \}\)/);
+      expect(text, route).not.toContain("demoBlockadeRoute: true");
+    }
+  });
+
+  it("keeps provider-restricted indicators operator-only", () => {
+    for (const route of ["high-low-line", "vix-model-spread"]) {
       const text = source(`app/api/${route}/route.ts`);
       expect(text, route).toMatch(/requireRouteAccess\(request, \{ operatorOnly: true \}\)/);
       expect(text, route).not.toContain("demoBlockadeRoute: true");

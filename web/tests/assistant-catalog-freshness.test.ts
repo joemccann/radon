@@ -143,6 +143,12 @@ describe("assistant catalog freshness", () => {
     expect(watch.every((item) => item.surface === "next")).toBe(true);
   });
 
+  it("advertises the private High-Low Line read with its operator guard and static loader", () => {
+    const operation = ops.find((item) => item.path === "/api/high-low-line" && item.method === "GET");
+    expect(operation).toMatchObject({ surface: "next", capability: "read", operatorOnly: true });
+    expect(NEXT_MODULES["high-low-line"]).toBeTypeOf("function");
+  });
+
   it("existing operator-only FastAPI mutations stay gated", () => {
     const gated = ops
       .filter((item) => item.operatorOnly)
