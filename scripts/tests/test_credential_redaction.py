@@ -327,3 +327,138 @@ def test_suffixed_credential_keys_are_scrubbed_not_only_detected():
         out = scrub_credential_text(text)
         assert "NOTREALSUFFIXED1x9" not in out, out
         assert out.endswith("and more"), out
+
+
+# A serialized cookie header (JSON / dict dump) has no colon directly after the
+# header name, so the line-oriented header rule never saw it and the generic
+# assignment rules did not carry the header name at all: the value was both
+# published and reported clean (DS-2026-10-21-03). Values are invented.
+_SERIALIZED_COOKIE_CASES = (
+    '{"Cookie": "sid=qz7NOTREALvalue1234567890"}',
+    '{"set-cookie": "__session=qz8NOTREALvalue1234567890; Path=/"}',
+    "cookie = 'sid=qz9NOTREALvalue1234567890'",
+    "COOKIE_HEADER=sidqzANOTREALvalue1234567890",
+)
+
+
+def test_serialized_cookie_headers_are_redacted_and_detected():
+    from credential_redaction import find_secret_assignments
+
+    for text in _SERIALIZED_COOKIE_CASES:
+        body = scrub_credential_text("upstream sent " + text + "\nretry after review")
+        assert "NOTREAL" not in body, body
+        assert body.endswith("\nretry after review"), body
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+
+
+def test_cookie_prose_without_an_assignment_survives():
+    for prose in (
+        "the cookie banner was dismissed and the run continued",
+        "set-cookie handling is covered by the middleware test",
+    ):
+        assert scrub_credential_text(prose) == prose, prose
+        from credential_redaction import find_secret_assignments
+
+        assert find_secret_assignments(prose) == [], prose
+
+
+# A triple-delimited value (Python or TOML) was matched as an EMPTY two-quote
+# value, so the credential on the FOLLOWING lines was published untouched
+# (DS-2026-10-20-13). An opaque password carries no provider prefix for the
+# literal rules to catch, and the block-scalar rule covers YAML `|`/`>` only.
+# Every value below is invented.
+_TRIPLE_QUOTED_PARTS = (
+    ("TOKEN", " = ", '"""', "qzBNOTREALopaque1234"),
+    ("DB_PASSWORD", " = ", "'''", "qzCNOTREALopaque1234"),
+    ("api_key", " = ", '"""', "qzDNOTREALopaque1234"),
+    ("UW_TOKEN", ": ", '"""', "qzENOTREALopaque1234"),
+    ('"password"', ": ", '"""', "qzFNOTREALopaque1234"),
+)
+
+
+def test_triple_delimited_assignment_values_are_redacted():
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        text = f"config had\n{key}{sep}{delim}\n{value}\n{delim}\nand stopped"
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert out.startswith("config had\n") and out.endswith("and stopped"), out
+
+
+def test_triple_delimited_value_stops_at_its_real_close():
+    text = 'TOKEN = """\nqzGNOTREALopaque1234\n"""\nnext_key = "keepme"\n'
+    out = scrub_credential_text(text)
+    assert "NOTREAL" not in out, out
+    assert "keepme" in out, out
+
+
+def test_a_truncated_triple_delimited_value_is_redacted_to_the_end():
+    """A cut-off excerpt must not keep its body.
+
+    The rule required the real closing delimiter, so an excerpt that ended
+    mid-value did not match at all and the single-line rule then rewrote the
+    opening delimiter pair as an empty value, leaving the credential on the
+    following lines. A private-key block cut off before its END line has
+    always been redacted to the end of the text; this now matches it.
+    """
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        text = f"log tail\n{key}{sep}{delim}\n{value}"
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert out.startswith("log tail\n"), out
+
+
+def test_an_ordinary_triple_quoted_docstring_is_left_alone():
+    """The key alternation still gates the rule: no credential word, no match."""
+    text = 'HELP = """\nusage: radon scan\n"""\n'
+    assert scrub_credential_text(text) == text
+
+
+def test_text_after_a_complete_triple_quoted_value_survives():
+    """Running to end-of-input is the FALLBACK, not the default: a value that
+    does close must not swallow the rest of the report."""
+    text = 'TOKEN = """\nqzINOTREALopaque1234\n"""\nthen exited'
+    out = scrub_credential_text(text)
+    assert "NOTREAL" not in out, out
+    assert out.endswith("then exited"), out
+
+
+def _detectors():
+    from credential_redaction import find_credential_shapes
+    import sys as _sys, pathlib as _pl
+    _sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[1]))
+    from ir_push_gate import find_private_identifiers
+    return find_credential_shapes, find_private_identifiers
+
+
+def test_a_triple_delimited_credential_is_DETECTED_not_only_redacted():
+    """Detection must cover every shape redaction covers.
+
+    `scrub_credential_text` learned the triple-delimited grammar while
+    `find_credential_shapes` did not, so `ir_push_gate` approved publishing
+    a commit whose content the scrubber would have hidden.
+    `find_secret_assignments` cannot stand in: its value pattern permits a
+    single opening quote only.
+    """
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        complete = f"{key}{sep}{delim}\n{value}\n{delim}\n"
+        truncated = f"{key}{sep}{delim}\n{value}"
+        shapes, gate = _detectors()
+        for text in (complete, truncated):
+            assert shapes(text), text
+            assert gate(text), text
+
+
+def test_detection_does_not_fire_on_an_ordinary_triple_quoted_docstring():
+    """The rule is keyed on the credential-word alternation, so a docstring
+    with no credential word in its key is not a publication finding."""
+    shapes, gate = _detectors()
+    text = 'HELP = """\nusage: radon scan\n"""\n'
+    assert shapes(text) == []
+    assert gate(text) == []
+
+
+def test_single_line_and_empty_quoted_values_are_unchanged():
+    assert scrub_credential_text('TOKEN = ""') == 'TOKEN = "[redacted-secret]"'
+    assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
+    single = scrub_credential_text('TOKEN = "qzHNOTREALopaque1234"')
+    assert single == 'TOKEN = "[redacted-secret]"', single

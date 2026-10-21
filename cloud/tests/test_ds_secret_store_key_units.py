@@ -262,3 +262,88 @@ def test_store_units_refuse_when_radon_joined_the_secrets_group(tmp_path: Path, 
     assert result.returncode == 78, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert not [l for l in log.splitlines() if l.startswith("run ")]
+
+
+# --- DS-2026-10-21-07: fresh bootstrap ordering ------------------------------
+
+
+def _setup_main_calls(text: str) -> list[str]:
+    body = re.search(r"^main\(\)\s*\{\n(.*?)^\}", text, re.M | re.S)
+    assert body, "main() not found in setup-vps.sh"
+    return [
+        line.strip()
+        for line in body.group(1).splitlines()
+        if re.fullmatch(r"[a-z0-9_]+", line.strip())
+    ]
+
+
+def _setup_function_body(text: str, name: str) -> str:
+    match = re.search(rf"^{re.escape(name)}\(\)\s*\{{\n(.*?)^\}}", text, re.M | re.S)
+    return match.group(1) if match else ""
+
+
+def test_setup_installs_container_dropins_before_enabling_or_starting_units() -> None:
+    """A key-loading unit without its runtime-container drop-in keeps the base
+    `User=radon` ExecStart out of the radon-writable checkout, while
+    `LoadCredentialEncrypted=` still hands it the decrypted master key. A fresh
+    bootstrap must therefore install the per-service drop-ins itself, from the
+    trusted provision store, before any unit is enabled or started -- not wait
+    for the control plane's first refresh.
+    """
+    text = SETUP.read_text(encoding="utf-8")
+    calls = _setup_main_calls(text)
+    installers = [
+        name for name in calls if "runtime-container.conf" in _setup_function_body(text, name)
+    ]
+    assert installers, "main() never installs the per-service container drop-ins"
+    body = _setup_function_body(text, installers[0])
+    assert "stage_from_checkout" in body, "drop-ins must come from the trusted provision store"
+    assert calls.index(installers[0]) < calls.index("enable_services")
+    assert calls.index(installers[0]) < calls.index("start_services")
+
+
+def test_a_missing_dropin_for_a_key_loading_unit_aborts_the_bootstrap() -> None:
+    """The requirement must be read from trusted bytes, not the checkout.
+
+    The installer decided whether a drop-in was needed with a `-f` test
+    against the radon-writable checkout and skipped silently when it was
+    absent. Deleting `radon-api.service.d/runtime-container.conf` from the
+    checkout therefore left the provenance-checked BASE unit installed and
+    started with `User=radon` and the decrypted master key, which is the
+    exact window this installer exists to close.
+
+    The installed base unit under `/etc/systemd/system` is already staged
+    from the committed blob, so whether it carries `LoadCredentialEncrypted`
+    is a trusted fact. A key-loading unit whose drop-in is missing has to be
+    a hard stop.
+    """
+    text = SETUP.read_text(encoding="utf-8")
+    calls = _setup_main_calls(text)
+    installers = [
+        name for name in calls if "runtime-container.conf" in _setup_function_body(text, name)
+    ]
+    body = _setup_function_body(text, installers[0])
+    assert "LoadCredentialEncrypted" in body, (
+        "the installer must derive the requirement from the installed base unit"
+    )
+    assert "/etc/systemd/system/" in body, (
+        "the requirement must be read from the installed unit, not the checkout"
+    )
+    assert "log_error" in body and "return 1" in body, (
+        "a key-loading unit with no drop-in must abort, not continue"
+    )
+    # Scoped to the drop-in decision: the leading `|| continue` in the loop
+    # skips timers, not drop-ins. A unit with no encrypted credential and no
+    # drop-in is still skipped legitimately; what must not happen is reaching
+    # that skip on a key-loading one, so the refusal is decided first.
+    decision = body[body.index('installed="/etc/systemd/system/'):body.index('target=')]
+    assert "return 1" in decision, decision
+    assert decision.index("return 1") < decision.index("|| continue"), decision
+
+
+@pytest.mark.parametrize("unit", _key_loading_units())
+def test_setup_covers_every_key_loading_unit(unit: str) -> None:
+    """The installer walks SERVICE_FILES, so every unit that loads the key must
+    be listed there and must ship a committed drop-in to install."""
+    assert unit in _readonly_array(SETUP, "SERVICE_FILES"), unit
+    assert _drop_in(unit).is_file(), unit

@@ -22,12 +22,14 @@ REPO = Path(__file__).resolve().parents[2]
 HOOKS = REPO / "scripts" / "runner" / "hooks"
 LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
        "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py",
+       "credential_redaction.py",
        "security_claude_ladder.py", "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt")
 BASH = shutil.which("bash") or "/bin/bash"
 TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/usr/bin/timeout").parent)
 MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "SECURITY-DEEPSEC PHASE COMPLETE:"}
 LABELS = {"security": "security-nightly", "security-deepsec": "security-deepsec"}
 PR = "https://github.com/joemccann/radon/pull/901"
+HEAD_SHA = "a" * 40
 CANARY_TOKEN = "ghp_" + "A" * 36
 CANARY_FINDING = "web/lib/secret.ts:12 lets an anonymous caller read /api/admin/keys"
 UNSET = (REPO / "scripts" / "runner" / "loops" / "security.env").read_text().split('AGENT_UNSET="')[1].split('"')[0]
@@ -38,11 +40,12 @@ case "$*" in
   "issue list"*) [ -n "${STUB_ISSUE:-}" ] && echo "$STUB_ISSUE" ;;
   "issue comment"*) [ -n "${STUB_COMMENT_URL:-}" ] && echo "$STUB_COMMENT_URL" ;;
   "pr view"*) echo "${STUB_PR_VIEW:-ok}" ;;
+  "pr list -R"*"--limit 100"*) echo "${STUB_PR_COUNTS:-0 0}" ;;
   "pr list -R"*) echo "${STUB_PR_LIST:-}" ;;
   "pr list"*) echo "[]" ;;
   "api"*) echo "" ;;
 esac
-exit 0
+exit "${STUB_GH_RC:-0}"
 """
 
 
@@ -114,6 +117,7 @@ def rig(request, tmp_path):
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
                 "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
+                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
     def pre(phase="audit", cwd=None, **extra):
@@ -317,15 +321,6 @@ def _ready(rig, n=1, url=PR):
     return f"NIGHTLY DELIVER READY: loop={rig.loop} prs={n} {url}\n{rig.marker} deliver run_id=r1\n"
 
 
-def test_a_verified_green_pr_is_ready_to_merge(rig):
-    out = rig.post(phase="deliver", output=_ready(rig))
-
-    assert out["status"].startswith(f"OK: 1 PR(s) green, ready to merge: {PR}")
-    view = next(c for c in rig.gh_calls() if c.startswith("pr view"))
-    assert "-R joemccann/radon" in view and "isCrossRepository == false" in view
-    assert f'startswith("{rig.loop}/")' in view
-
-
 def test_a_foreign_or_closed_pr_url_is_never_ready(rig):
     out = rig.post(phase="deliver", output=_ready(rig), STUB_PR_VIEW="no")
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url")
@@ -386,6 +381,209 @@ def test_protocol_output_ignores_newline_injected_status_values(rig):
 
 def test_a_deliver_timeout_is_an_incomplete_deliver(rig):
     assert rig.post(phase="deliver", rc=124)["status"].startswith("INCOMPLETE: deliver cap hit")
+
+
+# --- security_post.sh: live re-verification of a stored green ----------------
+
+
+def _record(rig, **fields):
+    record = rig.state / f".{rig.loop}-deliver" / "record.json"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    body = {"loop": rig.loop, "branch": f"{rig.loop}/2026-09-28", "pr": 901, "url": PR,
+            "status": "green", "check": None, "head_sha": HEAD_SHA,
+            "updated_at": "2099-01-01T00:00:00+00:00"}
+    body.update(fields)
+    record.write_text(json.dumps(body))
+    return record
+
+
+def _stamp(rig):
+    return f"{rig.marker} deliver run_id=r1\n"
+
+
+def test_a_record_green_at_the_still_current_head_is_ready_to_merge(rig):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith(f"OK: 1 PR(s) green, ready to merge: {PR}"), out
+    view = next(c for c in rig.gh_calls() if c.startswith("pr view"))
+    assert "pr view 901 -R joemccann/radon" in view, view
+    assert "headRefOid" in view and "statusCheckRollup" in view, view
+
+
+def test_a_head_pushed_after_the_watch_step_is_never_ready(rig):
+    _record(rig, head_sha="b" * 40)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_a_green_record_without_a_recorded_head_sha_is_never_ready(rig):
+    _record(rig, head_sha=None)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+# The cases above stub the already-joined rollup string, so they exercise the
+# bash allowlist but never the jq filter that produces it. These run the real
+# filter, lifted out of the hook, over gh's actual statusCheckRollup shapes.
+
+
+def _rollup_filter() -> str:
+    """The rollup half of the hook's `pr view -q` expression."""
+    src = (HOOKS / "security_post.sh").read_text(encoding="utf-8")
+    start = src.index("statusCheckRollup[]?")
+    frag = src[src.rindex("[", 0, start):]
+    return frag[:frag.index("] | join(\",\")") + len("] | join(\",\")")]
+
+
+def _run_filter(rollup: list[dict]) -> str:
+    jq = shutil.which("jq")
+    if not jq:  # pragma: no cover - jq ships with the runner host
+        pytest.skip("jq not installed")
+    out = subprocess.run([jq, "-r", _rollup_filter()], input=json.dumps(
+        {"statusCheckRollup": rollup}), capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_an_in_progress_check_with_an_empty_conclusion_reads_pending():
+    """gh represents an unfinished CheckRun with `conclusion: ""`.
+
+    jq's `//` only falls through on null or false, so an empty conclusion
+    survived as an empty token; bash word splitting then discarded it and a
+    rollup of `SUCCESS,` verified as wholly green while a check was still
+    running. Every entry must yield a non-empty token.
+    """
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "pytest", "status": "COMPLETED",
+         "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "vitest", "status": "IN_PROGRESS",
+         "conclusion": ""},
+    ])
+    assert got == "SUCCESS,PENDING", got
+    assert "" not in got.split(","), got
+
+
+def test_a_queued_check_is_pending_whatever_its_conclusion_field_holds():
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "a", "status": "QUEUED", "conclusion": None},
+    ])
+    assert got == "PENDING", got
+
+
+def test_a_status_context_with_no_state_reads_pending():
+    got = _run_filter([{"__typename": "StatusContext", "context": "x", "state": ""}])
+    assert got == "PENDING", got
+
+
+def test_completed_and_successful_entries_keep_their_conclusions():
+    got = _run_filter([
+        {"__typename": "CheckRun", "name": "a", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "b", "status": "COMPLETED", "conclusion": "SKIPPED"},
+        {"__typename": "StatusContext", "context": "c", "state": "SUCCESS"},
+    ])
+    assert got == "SUCCESS,SKIPPED,SUCCESS", got
+
+
+@pytest.mark.parametrize("rollup", ["", "SUCCESS,FAILURE", "SUCCESS,PENDING",
+                                   "SUCCESS,QUEUED", "SUCCESS,CANCELLED"])
+def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
+    # "No checks reported" is PENDING, not success.
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+@pytest.mark.parametrize("fields", [
+    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS",
+    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS",
+    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS",
+    "OPEN main false {sha} SUCCESS",
+])
+def test_a_closed_cross_repo_or_off_prefix_pr_is_never_ready(rig, fields):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA))
+
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
+
+
+def test_a_ready_transcript_line_with_no_durable_record_is_incomplete(rig):
+    # Nothing recorded to bind the claim to, so nothing to re-verify.
+    out = rig.post(phase="deliver", output=_ready(rig))
+
+    assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
+
+
+def test_an_open_loop_pr_contradicts_a_zero_pr_claim(rig):
+    # DS-2026-09-29-05: the zero-URL claim used to pass with no verification.
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="5 1")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+
+
+def test_a_failed_pr_listing_is_not_proof_that_no_loop_pr_exists(rig):
+    """An auth failure or timeout must not read as absence.
+
+    The listing was called with `|| true`, so a query that could not run
+    produced an empty answer indistinguishable from "no PR" and an OK
+    "nothing to merge" went to the operator while a loop PR could be sitting
+    unmerged.
+    """
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""), STUB_GH_RC="1")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "nothing to merge" not in out["status"], out
+
+
+def test_a_truncated_pr_listing_is_not_proof_either(rig):
+    """The listing is repo-wide and filtered client side, so a full page may
+    have hidden an older loop PR. A full page is unknown, not empty."""
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="100 0")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "nothing to merge" not in out["status"], out
+
+
+def test_a_short_listing_with_no_loop_pr_does_prove_absence(rig):
+    """Green path: the query ran, the page was not full, and nothing on this
+    loop's prefix came back."""
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""),
+                   STUB_PR_COUNTS="7 0")
+
+    assert out["status"].startswith("OK: 0 PR(s), nothing to merge"), out
+
+
+def test_a_zero_pr_claim_still_passes_when_the_repository_has_no_loop_pr(rig):
+    out = rig.post(phase="deliver", output=_ready(rig, n=0, url=""))
+
+    assert out["status"].startswith("OK: 0 PR(s), nothing to merge"), out
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/attacker/radon/pull/901",
+    "https://evil.example/joemccann/radon/pull/901",
+    "https://github.com.evil.example/joemccann/radon/pull/901",
+    "https://github.com/joemccann/radon/pull/901/files",
+    "https://github.com/joemccann/radon/pull/9x1",
+])
+def test_a_pr_url_outside_the_configured_repository_never_reaches_the_operator(rig, url):
+    _record(rig, url=url)
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    for host in ("attacker", "evil.example", "/files", "9x1"):
+        assert host not in out["_proc"].stdout, out["_proc"].stdout
+    assert not any("evil.example" in c or "attacker" in c for c in rig.gh_calls())
 
 
 # --- security_post.sh: private report ---------------------------------------------
@@ -450,6 +648,33 @@ def test_no_deploy_key_means_no_publish(rig):
     _write_report(rig, "report\n")
     out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
     assert _published(rig) is None and out["report_url"] == ""
+
+
+def test_a_block_scalar_or_compound_named_credential_body_is_redacted(rig):
+    # DS-2026-10-20-06: a line-oriented pass rewrote the block-scalar HEADER
+    # and published the indented body; the compound key name was not in the
+    # hook's own alphabet at all.
+    (rig.home / ".radon-runner-reports-key").write_text("key\n")
+    time.sleep(1.1)
+    _write_report(rig, "# Report\n\n" + CANARY_FINDING + "\n\n"
+                  "api_key: |\n  qzBlockFirstNOTREAL\n  qzBlockSecondNOTREAL\n\n"
+                  'db_pwd: "qzCompoundNOTREAL"\n')
+
+    out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
+
+    body = _published(rig)
+    assert body is not None, out
+    assert CANARY_FINDING in body, body
+    assert "NOTREAL" not in body, body
+
+
+def test_the_private_report_redactor_runs_the_root_installed_canonical_scrubber():
+    body = (HOOKS / "security_post.sh").read_text()
+    assert "scrub_credential_text" in body
+    assert '"$RUNNER_DIR/lib"' in body
+    assert "scripts/credential_redaction.py" not in body
+    install = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    assert "credential_redaction.py" in install
 
 
 def test_the_key_is_only_in_the_hooks_ssh_command():

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -168,12 +169,41 @@ def list_actionable_pages(*, now: datetime) -> list[dict]:
     return pages
 
 
-def actions_since(*, since: datetime) -> int:
-    """Tickets claimed since `since` — i.e. how many times Grok was launched.
+ATTEMPT_INSERT_SQL = """
+INSERT INTO watchdog_page_attempts (attempt_id, page_id, kind, attempted_at)
+VALUES (?, ?, ?, ?)
+"""
 
-    Backs the responder's global daily cap. Best-effort like the rest of this
-    module, but it fails CLOSED: a Turso miss returns a count that stands the
-    responder down rather than one that lets it keep acting unbounded.
+
+def record_action_attempt(*, page_id: str, now: datetime, kind: str = "grok") -> str:
+    """Reserve one durable unit of the daily action budget before acting.
+
+    `record_attempt_failure` clears `claimed_at` on purpose so the ticket
+    can be retried, so the budget cannot be accounted on that column: a
+    failed or fallback launch would drop out of the count. One row per
+    launch, never cleared.
+
+    Deliberately NOT best-effort: an unwritable reservation propagates so
+    the caller stands down instead of launching unbudgeted, the same
+    fail-closed stance as `actions_since`.
+    """
+    _HranaHttpError, _close, hrana_execute, _query, _is_transport = _hrana()
+    attempt_id = uuid.uuid4().hex
+    hrana_execute(
+        ATTEMPT_INSERT_SQL,
+        (attempt_id, page_id, _safe_kind(kind), _iso(now)),
+    )
+    return attempt_id
+
+
+def actions_since(*, since: datetime) -> int:
+    """Launches reserved since `since` — how many times Grok was invoked.
+
+    Backs the responder's global daily cap. Counts `watchdog_page_attempts`
+    rows, which survive the `claimed_at` reset a retryable failure performs.
+    Best-effort like the rest of this module, but it fails CLOSED: a Turso
+    miss returns a count that stands the responder down rather than one that
+    lets it keep acting unbounded.
     """
     try:
         from db.hrana_http import hrana_query
@@ -182,7 +212,7 @@ def actions_since(*, since: datetime) -> int:
 
     try:
         rows = hrana_query(
-            "SELECT COUNT(*) FROM watchdog_pages WHERE claimed_at >= ?",
+            "SELECT COUNT(*) FROM watchdog_page_attempts WHERE attempted_at >= ?",
             (_iso(since),),
         )
     except Exception:  # noqa: BLE001
