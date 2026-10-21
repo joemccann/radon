@@ -391,6 +391,37 @@ def test_triple_delimited_value_stops_at_its_real_close():
     assert "keepme" in out, out
 
 
+def test_a_truncated_triple_delimited_value_is_redacted_to_the_end():
+    """A cut-off excerpt must not keep its body.
+
+    The rule required the real closing delimiter, so an excerpt that ended
+    mid-value did not match at all and the single-line rule then rewrote the
+    opening delimiter pair as an empty value, leaving the credential on the
+    following lines. A private-key block cut off before its END line has
+    always been redacted to the end of the text; this now matches it.
+    """
+    for key, sep, delim, value in _TRIPLE_QUOTED_PARTS:
+        text = f"log tail\n{key}{sep}{delim}\n{value}"
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert out.startswith("log tail\n"), out
+
+
+def test_an_ordinary_triple_quoted_docstring_is_left_alone():
+    """The key alternation still gates the rule: no credential word, no match."""
+    text = 'HELP = """\nusage: radon scan\n"""\n'
+    assert scrub_credential_text(text) == text
+
+
+def test_text_after_a_complete_triple_quoted_value_survives():
+    """Running to end-of-input is the FALLBACK, not the default: a value that
+    does close must not swallow the rest of the report."""
+    text = 'TOKEN = """\nqzINOTREALopaque1234\n"""\nthen exited'
+    out = scrub_credential_text(text)
+    assert "NOTREAL" not in out, out
+    assert out.endswith("then exited"), out
+
+
 def test_single_line_and_empty_quoted_values_are_unchanged():
     assert scrub_credential_text('TOKEN = ""') == 'TOKEN = "[redacted-secret]"'
     assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
