@@ -11,6 +11,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -322,13 +323,43 @@ def should_retry_lkg(
     stdout: str,
     stderr: str,
 ) -> bool:
-    """Retry LKG on non-zero, model-unavailable, or unparseable output."""
+    """Retry a failed process or a reply without an assistant verdict.
+
+    Model availability mentioned in diagnosis, JSON metadata or stderr is
+    not evidence that a completed incident run failed.
+    """
     if returncode != 0:
         return True
-    blob = f"{stdout or ''}\n{stderr or ''}".lower()
-    if "unavailab" in blob and "model" in blob:
+    text = (stdout or "").strip()
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            return True
+        if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+            return True
+        text = payload["text"]
+    for line in reversed(text.splitlines()):
+        if line.strip().startswith("RESULT:"):
+            return re.fullmatch(
+                r"RESULT:\s*(?:code_fix|stand_down|ops_only|failed)\s*\|\s*\S.*",
+                line.strip(),
+                flags=re.IGNORECASE,
+            ) is None
+    return True
+
+
+def is_distinct_fallback(runtime: ResolvedRuntime, lkg: LkgState) -> bool:
+    """Aliases and hard links to the running executable are not a fallback."""
+    if (runtime.model, runtime.reasoning_effort) != (lkg.model, lkg.reasoning_effort):
         return True
-    return "RESULT:" not in (stdout or "")
+    live = Path(shutil.which(runtime.binary_path) or runtime.binary_path)
+    fallback = Path(lkg.binary_path)
+    try:
+        return not live.samefile(fallback)
+    except OSError:
+        # A missing live command may still fall back to an installed LKG.
+        return os.path.realpath(live) != os.path.realpath(fallback)
 
 
 def runtime_from_lkg(lkg: LkgState) -> ResolvedRuntime:

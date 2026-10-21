@@ -4489,3 +4489,40 @@ source change or leave collection unavailable while investigating.
 - **Regression:** `web/e2e/newsfeed-sharing.spec.ts`, eight containment cases:
   feed/lightbox at 320/393/640/1440px, pending/ready, long caption and PNG
   download. The 393px pre-fix failure measured right=612px, allowed<=318px.
+
+## grok-page-responder-identical-fallback
+
+**Symptom:** `radon grok: last-known-good fallback` names the same model and
+CLI on both sides, and repeats work after the first Grok session completed.
+Observed 2026-10-21 18:18:13Z for page `72cdada6f65595cfd32c1885c614ed75`.
+
+- **Evidence:** the first CLI session ended `completed` at 18:18:12Z and its
+  last assistant message contained `RESULT: code_fix`; it had already made
+  commit `5a5bf2b9`. The parent launched a second session at 18:18:13Z.
+  `/home/radon/.local/bin/grok` and the LKG binary both resolved to the
+  same installed CLI 1.0.62 payload. The second run finished at 18:22:35Z.
+- **Mechanism:** `should_retry_lkg` searched the entire stdout/stderr blob
+  for the independent substrings `model` and `unavailab`, even after a
+  successful `RESULT:`. Its fallback guard compared path strings, so a
+  symlink to the LKG executable counted as a different runtime. First-run
+  stdout/stderr were overwritten on retry; the original trigger cannot be
+  reconstructed from the parent journal alone. Regressions reproduce both
+  false-positive classification and duplicate alias execution.
+- **Discriminating checks:** compare the CLI session's final assistant result
+  with the parent journal; resolve the live path and LKG path and compare
+  file identity. Equal version labels alone do not prove equal executables.
+  A nonzero exit, timeout, missing result or a different installed executable
+  remains a real failure/fallback candidate. Do not reauthenticate or restart
+  the Gateway based on this notification.
+- **Remediation:** validate only the assistant result in zero-exit plain/JSON
+  output. Compare resolved executable identity, model and reasoning effort
+  before retry. Record `grok_runtime_attempt` with bounded, redacted diagnostics
+  before overwriting the first outcome; do not log raw agent stdout.
+- **Verification:** `scripts/tests/test_grok_fallback_identity.py` covers
+  successful diagnosis text, JSON metadata, unrelated stderr, malformed
+  results, symlink/hard-link/PATH identity, timeout and nonzero-exit cycles.
+  Existing responder tests retain genuine different-model fallback coverage.
+- **Rollout:** the legacy responder executes its own clone. Preserve any
+  incident branches and untracked files; deployment of the app alone does
+  not prove that clone advanced. Verify the next poll's source and outcome.
+  Rollback reverts this code change; no runtime pin or credential changes.

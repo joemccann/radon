@@ -58,6 +58,7 @@ from watchdog import pages as pages_mod
 from watchdog import units as units_mod
 import grok_runtime
 import ir_ensure_pr
+from credential_redaction import scrub_credential_text
 
 try:
     from db.hrana_http import HranaHttpError
@@ -1026,10 +1027,20 @@ def run_cycle(
                 stderr = getattr(proc, "stderr", "") or "" if proc else ""
                 returncode = getattr(proc, "returncode", 1) if proc else 124
                 if timeout_err or grok_runtime.should_retry_lkg(returncode, stdout, stderr):
+                    # Preserve the first outcome before a fallback overwrites proc.
+                    # Never put raw agent stdout or credentials into the journal.
+                    print(json.dumps({
+                        "event": "grok_runtime_attempt",
+                        "page_id": page["page_id"],
+                        "model": runtime.model,
+                        "cli_version": runtime.cli_version,
+                        "reason": "timeout" if timeout_err else "exit" if returncode else "invalid_result",
+                        "returncode": returncode,
+                        "stdout_chars": len(stdout),
+                        "stderr_tail": scrub_credential_text(stderr)[-400:],
+                    }), file=sys.stderr)
                     lkg = _load_trusted_lkg(repo_root)
-                    if lkg is not None and (
-                        lkg.model != runtime.model or lkg.binary_path != runtime.binary_path
-                    ):
+                    if lkg is not None and grok_runtime.is_distinct_fallback(runtime, lkg):
                         _send_pin_warning(
                             f"grok {runtime.model} / CLI {runtime.cli_version} "
                             f"failed at incident time; retrying last-known-good "
