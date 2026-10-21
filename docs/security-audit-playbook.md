@@ -69,6 +69,12 @@ line here whenever you ship a security fix.**
   operator gate, the `/api` matcher always running, `PUBLIC_SHARE_API_ROUTES` a
   FIXED explicit list (no `/api/**/share` regex).
   (`feedback_middleware_is_the_perimeter`, `project_prod_perimeter_operator_allowlist`)
+- **Mutating Next API calls are same-origin.** `web/middleware.ts` calls
+  `sameOriginMutationResponse` before the session gate, and `requireRouteAccess`
+  calls `decideSameOriginMutation`. The only browser `Sec-Fetch-Site` value that
+  passes is `same-origin`. `none` is rejected. When that header is absent,
+  `Origin` has to match the allowlist in `web/lib/sameOrigin.ts`.
+  (`web/tests/same-origin-mutation.test.ts`)
 - **Trust-scoped surfaces** — `/health` and `/api/service-health` must never emit
   account IDs, IB topology, or secret-shaped error strings to anonymous callers
   (service-health runs `scrubSecrets`).

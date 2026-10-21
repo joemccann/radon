@@ -2468,3 +2468,27 @@ class TestDocumentation20261019:
         assert "enabled: false" in auth
         assert ".vercel.app" in auth
 
+
+class TestDocumentation20261021:
+    """DOC-217: Next mutation origin contract after audited-through 5bfadbb6."""
+
+    def test_next_mutations_require_same_origin(self):
+        middleware = (_ROOT / "web/middleware.ts").read_text()
+        assert "sameOriginMutationResponse(request)" in middleware
+        access = (_ROOT / "web/lib/routeAccess.ts").read_text()
+        assert "decideSameOriginMutation" in access
+        gate = (_ROOT / "web/lib/sameOrigin.ts").read_text()
+        assert 'if fetchSite == "same-origin"' in gate or 'fetchSite === "same-origin"' in gate
+        assert "CROSS_SITE_MUTATION_MESSAGE" in gate
+        auth = (_ROOT / "web/CLAUDE.md").read_text()
+        auth = auth.split("## Auth (Next.js side)", 1)[1].split("\n## ", 1)[0]
+        assert "Sec-Fetch-Site" in auth
+        assert "same-origin" in auth
+        assert "`none` is rejected" in auth
+        assert "web/lib/sameOrigin.ts" in auth
+        assert "same-origin-mutation.test.ts" in auth
+        playbook = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        assert "sameOriginMutationResponse" in playbook
+        assert "same-origin-mutation.test.ts" in playbook
+        assert "`none` is rejected" in playbook
+
