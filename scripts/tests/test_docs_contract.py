@@ -2470,7 +2470,7 @@ class TestDocumentation20261019:
 
 
 class TestDocumentation20261021:
-    """DOC-217: Next mutation origin contract after audited-through 5bfadbb6."""
+    """DOC-217 and DOC-218: contracts that drifted after audited-through 5bfadbb6."""
 
     def test_next_mutations_require_same_origin(self):
         middleware = (_ROOT / "web/middleware.ts").read_text()
@@ -2491,4 +2491,17 @@ class TestDocumentation20261021:
         assert "sameOriginMutationResponse" in playbook
         assert "same-origin-mutation.test.ts" in playbook
         assert "`none` is rejected" in playbook
+
+    def test_order_limit_bullet_names_sell_envelope_and_future_modify(self):
+        src = (_ROOT / "scripts/order_limits.py").read_text()
+        assert '"ORDER_COMBO_LEG_SEC_TYPE"' in src
+        assert '"ORDER_FUTURE_MULTIPLIER"' in src
+        assert "reverse=is_sell_envelope" in src
+        playbook = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        bullet = playbook.split("**Order-limit inputs fail closed**", 1)[1]
+        bullet = bullet.split("\n- **", 1)[0]
+        assert "SELL" in bullet
+        assert "ORDER_COMBO_LEG_SEC_TYPE" in bullet
+        assert "ORDER_FUTURE_MULTIPLIER" in bullet
+        assert "strike above zero" in bullet
 

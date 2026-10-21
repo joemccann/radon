@@ -240,6 +240,11 @@ line here whenever you ship a security fix.**
   not a finite parseable number refuses the order (never coerces to 0/None and
   skips a bound); a future with no valid contract multiplier refuses; a stock
   leg in a BAG never nulls the combo loss computation.
+  A SELL BAG prices each leg with its side inverted, and a leg with no action
+  stays long. A leg labelled STK that also carries an expiry, a right, or a
+  strike above zero is refused (`ORDER_COMBO_LEG_SEC_TYPE`) rather than skipped.
+  A future modify keeps that order's contract multiplier and refuses when the
+  multiplier is missing (`ORDER_FUTURE_MULTIPLIER`).
   (`scripts/tests/test_order_limits_fail_open_inputs.py`)
 - **Unattended agent push authority is enforced by git, not prompt text** — a
   push-capable Grok responder cycle installs the `fix/*`-only `pre-push` guard
