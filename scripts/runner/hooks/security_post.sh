@@ -154,7 +154,7 @@ pr_number_in_repo() {
 deliver_urls_verified() {
   local tok n fields state branch cross head rollup conclusion count=0
   if [[ "${2:-}" == 0 ]]; then
-    [[ -z "$(resolve_pr_url)" ]]
+    no_loop_pr_exists
     return
   fi
   for tok in $1; do
@@ -374,6 +374,31 @@ publish_private_report() {
 }
 
 # Newest open same-repo PR on this loop's prefix; a fork can carry the name.
+# Absence of a loop PR must be PROVEN before a zero-PR verdict is accepted.
+# resolve_pr_url below cannot do it: it swallows query errors with `|| true`,
+# so an auth failure or timeout is indistinguishable from "no PR", and it
+# reads one repo-wide page and filters by branch prefix client side, so a
+# loop PR older than that page is invisible. Either way an OK "nothing to
+# merge" could be printed while a loop PR sat unmerged.
+#
+# Returns 0 ONLY when the listing ran, came back short of the page limit
+# (so nothing was truncated away) and held no PR on this loop's prefix.
+PR_LIST_PROOF_LIMIT=100
+no_loop_pr_exists() {
+  local counts rc total matching
+  counts="$(net_bounded "$GH" pr list -R "$GH_REPO" --state open \
+    --limit "$PR_LIST_PROOF_LIMIT" --json url,headRefName,isCrossRepository \
+    -q "[length, ([.[] | select(.isCrossRepository == false) | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | length)] | join(\" \")" \
+    2>/dev/null)"
+  rc=$?
+  [[ "$rc" -eq 0 && -n "$counts" ]] || return 1
+  read -r total matching <<< "$counts"
+  [[ "$total" =~ ^[0-9]+$ && "$matching" =~ ^[0-9]+$ ]] || return 1
+  [[ "$matching" -eq 0 ]] || return 1
+  [[ "$total" -lt "$PR_LIST_PROOF_LIMIT" ]] || return 1
+  return 0
+}
+
 resolve_pr_url() {
   local url
   url="$(net_bounded "$GH" pr list -R "$GH_REPO" --state open --limit 20 --json url,headRefName,updatedAt,isCrossRepository \
