@@ -366,7 +366,11 @@ line here whenever you ship a security fix.**
   The canonical scrubber `scripts/credential_redaction.py` and the public
   issue/PR sanitizer also redact multi-line private-key blocks, including a
   block cut off before its END line, and both cover cookie headers,
-  session/CSRF keys and U, DU and F IB account ids.
+  session/CSRF keys and U, DU and F IB account ids. Cookie coverage is not just
+  the raw `Set-Cookie: ...` header line: `cookie` is a credential key name in
+  its own right, so a serialized header (`{"Cookie": "..."}`, a dict dump, an
+  env line) is redacted and detected by the same generic assignment rules as
+  any other credential-named key.
   The scrubber's own patterns are a denial-of-service surface, because the
   publication gate runs them over branch text an outside contributor shapes:
   every repeated character class in them is bounded, so a long run of

@@ -327,3 +327,36 @@ def test_suffixed_credential_keys_are_scrubbed_not_only_detected():
         out = scrub_credential_text(text)
         assert "NOTREALSUFFIXED1x9" not in out, out
         assert out.endswith("and more"), out
+
+
+# A serialized cookie header (JSON / dict dump) has no colon directly after the
+# header name, so the line-oriented header rule never saw it and the generic
+# assignment rules did not carry the header name at all: the value was both
+# published and reported clean (DS-2026-10-21-03). Values are invented.
+_SERIALIZED_COOKIE_CASES = (
+    '{"Cookie": "sid=qz7NOTREALvalue1234567890"}',
+    '{"set-cookie": "__session=qz8NOTREALvalue1234567890; Path=/"}',
+    "cookie = 'sid=qz9NOTREALvalue1234567890'",
+    "COOKIE_HEADER=sidqzANOTREALvalue1234567890",
+)
+
+
+def test_serialized_cookie_headers_are_redacted_and_detected():
+    from credential_redaction import find_secret_assignments
+
+    for text in _SERIALIZED_COOKIE_CASES:
+        body = scrub_credential_text("upstream sent " + text + "\nretry after review")
+        assert "NOTREAL" not in body, body
+        assert body.endswith("\nretry after review"), body
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+
+
+def test_cookie_prose_without_an_assignment_survives():
+    for prose in (
+        "the cookie banner was dismissed and the run continued",
+        "set-cookie handling is covered by the middleware test",
+    ):
+        assert scrub_credential_text(prose) == prose, prose
+        from credential_redaction import find_secret_assignments
+
+        assert find_secret_assignments(prose) == [], prose
