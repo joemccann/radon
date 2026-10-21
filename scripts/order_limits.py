@@ -114,7 +114,24 @@ def _is_stk_leg(leg: dict) -> bool:
     return not _carries_option_fields(leg)
 
 
-def _long_covers_short(long_expiry: str, short_expiry: str) -> bool:
+def _expiry_bounds(raw: Any) -> Optional[tuple[str, str]]:
+    """Earliest and latest ``YYYYMMDD`` day a raw expiry can denote.
+
+    IB accepts both ``YYYYMMDD`` and the month-only ``YYYYMM``, and the legs
+    are caller-composed, so the two precisions have to be compared on a common
+    scale instead of as raw strings. ``None`` when no expiry is supplied.
+    """
+    cleaned = str(raw or "").replace("-", "").strip()
+    if not cleaned.isdigit():
+        return None
+    if len(cleaned) == 8:
+        return cleaned, cleaned
+    if len(cleaned) == 6:
+        return cleaned + "01", cleaned + "31"
+    return None
+
+
+def _long_covers_short(long_expiry: Any, short_expiry: Any) -> bool:
     """True when a long leg can stand as cover for a short leg.
 
     A long only covers a short that expires no LATER than it does. The long
@@ -123,12 +140,24 @@ def _long_covers_short(long_expiry: str, short_expiry: str) -> bool:
     onward the short stands alone and must keep the strike proxy this module
     already applies to an unpaired short.
 
-    Expiries that are absent or not directly comparable (different precision)
-    keep the previous expiry-blind pairing rather than fail a legitimate order.
+    Cover must be PROVEN, because the caller composes these fields: the long's
+    earliest possible day has to be on or after the short's latest possible
+    one. A month-only long against a later dated short, and a long with no
+    expiry against a dated short, both fail that test -- reading them as cover
+    is how a reverse calendar buys back its zero width.
+
+    The one permissive case is legs carrying no expiry on EITHER side, the
+    legacy shape of a snapshot BAG and of an exit order whose expiry could not
+    be resolved. Those keep the previous expiry-blind pairing so a resize of an
+    order IB already holds is not refused.
     """
-    if not long_expiry or not short_expiry or len(long_expiry) != len(short_expiry):
+    long_bounds = _expiry_bounds(long_expiry)
+    short_bounds = _expiry_bounds(short_expiry)
+    if long_bounds is None and short_bounds is None:
         return True
-    return long_expiry >= short_expiry
+    if long_bounds is None or short_bounds is None:
+        return False
+    return long_bounds[0] >= short_bounds[1]
 
 
 def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]:
@@ -155,7 +184,7 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
     if not isinstance(legs, list) or not legs:
         return None
 
-    by_right: dict[str, dict[str, list[tuple[float, str]]]] = {}
+    by_right: dict[str, dict[str, list[tuple[float, Any]]]] = {}
     for leg in legs:
         if not isinstance(leg, dict):
             return None
@@ -177,7 +206,7 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
         if reverse and action:
             is_short = not is_short
         side = "short" if is_short else "long"
-        expiry = str(leg.get("expiry") or "").replace("-", "").strip()
+        expiry = leg.get("expiry")
         sides = by_right.setdefault(right, {"long": [], "short": []})
         sides[side].extend([(strike, expiry)] * ratio)
 

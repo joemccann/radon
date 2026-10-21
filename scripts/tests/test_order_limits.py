@@ -346,6 +346,54 @@ class TestComboNotionalIsRiskNotPremium:
         assert order_limits.combo_max_loss(params) == pytest.approx(0.0)
         assert order_limits.check_order_limits(params) is None
 
+    def test_coarse_long_expiry_cannot_claim_cover_of_a_later_short(self):
+        """A YYYYMM long expiry is a real IB shape. Comparing raw strings of
+        unequal length treated it as covering a later YYYYMMDD short and
+        re-opened the zero-width price the strike pairing fix closed."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 500, "limitPrice": -0.50,
+            "legs": [
+                {"expiry": "202612", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits._combo_risk_per_unit(params["legs"]) == pytest.approx(500_000.0)
+        assert order_limits.check_order_limits(params)["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+    def test_a_coarse_long_expiry_past_the_short_still_covers(self):
+        """Green path for the same shape: the long's EARLIEST day is still
+        after the short, so the calendar keeps its zero width."""
+        legs = [
+            {"expiry": "202801", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+            {"expiry": "20271217", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+        ]
+        assert order_limits._combo_risk_per_unit(legs) == pytest.approx(0.0)
+
+    def test_long_leg_without_an_expiry_cannot_claim_cover(self):
+        """Omitting the long's expiry must not buy a zero width: the caller
+        composes these fields and the gate cannot prove cover without one."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 500, "limitPrice": -0.50,
+            "legs": [
+                {"strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits._combo_risk_per_unit(params["legs"]) == pytest.approx(500_000.0)
+        assert order_limits.check_order_limits(params)["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+    def test_legs_with_no_expiry_at_all_keep_expiry_blind_pairing(self):
+        """Legacy shape: a snapshot BAG and an exit order whose expiry could
+        not be resolved carry no expiry on EITHER leg. Those still pair on
+        strike alone, so a resize of an order IB already holds is not refused."""
+        legs = [
+            {"strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
+            {"strike": 7005, "right": "C", "action": "SELL", "ratio": 1},
+        ]
+        assert order_limits._combo_risk_per_unit(legs) == pytest.approx(500.0)
+
     def test_single_expiry_vertical_width_math_is_unchanged(self):
         """Existing behaviour: same-expiry legs pair on strike as before."""
         params = {
