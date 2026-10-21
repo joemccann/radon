@@ -1070,12 +1070,12 @@ cmd_run() {
         ;;
     esac
   elif [[ "$unit" == "radon-uw-stream.service" ]]; then
-    # No media, broker control/lease or subscription grants. Like the API,
-    # this image-trusted process holds the store key for canonical Profile
-    # settings; the master key is not provider-scoped.
+    # Fully trusted app-plane process, like API. Shared data is required for
+    # the SAME governor SQLite WAL/SHM and legacy atomic budget used by every
+    # REST caller; never put reconciliation on a private ephemeral quota.
+    # No media, broker control/lease or subscription grant mounts.
     prepare_private_dir "$ids" "${DATA_DIR}/uw_stream" "UW stream state"
-    set -- "$@" -v "${DATA_DIR}/uw_stream:/home/radon/radon/data/uw_stream" \
-      -v "${DATA_DIR}/secret_store:/home/radon/radon/data/secret_store"
+    set -- "$@" -v "${DATA_DIR}:/home/radon/radon/data"
   elif ! is_research_unit "$unit"; then
     # DS-2026-10-17-20: media.radon.run serves this directory through Caddy
     # file_server, which follows symlinks, so write here lets a container have

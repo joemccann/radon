@@ -27,8 +27,8 @@ def test_stream_has_no_media_or_broker_lease_mount(tmp_path):
     result = _run(tmp_path, ["run", "radon-uw-stream.service"])
     assert result.returncode == 0, result.stderr
     command = _run_line(result)
-    assert f"-v {tmp_path}/data/uw_stream:/home/radon/radon/data/uw_stream" in command
-    assert f"-v {tmp_path}/data:/home/radon/radon/data " not in command
+    assert f"-v {tmp_path}/data:/home/radon/radon/data " in command
+    assert "/home/radon/radon/data/uw_governor" not in command  # no private quota override
     assert "/var/lib/radon/media" not in command and "ib-lease" not in command
 
 

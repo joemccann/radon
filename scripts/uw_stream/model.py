@@ -40,7 +40,9 @@ def _basis(channel: str) -> tuple[str, str]:
     family = channel.partition(":")[0]
     if family == "periscope":
         return "net-market-maker-greek-exposure", "provider-greek-units"
-    if family in {"iv_term_structure", "interpolated_iv", "risk_reversal_skew"}:
+    if family == "risk_reversal_skew":
+        return "put-IV-minus-call-IV-at-delta", "IV-fraction-difference; delta-in-whole-percent"
+    if family in {"iv_term_structure", "interpolated_iv"}:
         return "provider-volatility-observation", "IV-fraction; implied-move-perc-fraction"
     if family == "futures_blocks":
         return "CME-reported-block; displayed-decimal-prices", "contract-price-and-quantity; no-NBBO-direction-inference"
@@ -129,8 +131,19 @@ class Materializer:
             if timestamp is None:
                 self.state["metrics"]["invalid"] += 1
                 return False
-            key = ticker + ":" + str(timestamp) + ":" + str(payload.get("expiry") or "")
-            previous = latest.get(key, {}).get("payload", {})
+            key = ticker + ":" + event_time(timestamp, now) + ":" + str(payload.get("expiry") or "")
+            previous_record = latest.get(key, {})
+            if previous_record.get("basis") in {"REST-confirmed-completed-minute", "REST-baseline-pending-reconciliation"}:
+                # A late partial may already be inside the provider REST sum.
+                # Preserve the confirmed total rather than double-count it.
+                previous_record["complete"] = False
+                previous_record["basis"] = "REST-baseline-pending-reconciliation"
+                previous_record["requires_reconciliation"] = True
+                previous_record["last_late_partial_at"] = iso(now)
+                previous_record["late_partial_count"] = previous_record.get("late_partial_count", 0) + 1
+                meta["complete"] = False
+                return True
+            previous = previous_record.get("payload", {})
             combined = copy.deepcopy(payload)
             for name, value in payload.items():
                 if name in {"ticker", "timestamp", "expiry", "date", "tape_time"} or value is None or isinstance(value, bool):
@@ -172,7 +185,13 @@ class Materializer:
             key = ticker
             if family in {"gex_strike", "gex_strike_expiry"}:
                 key += ":" + str(payload.get("strike") or "unknown") + ":" + str(payload.get("expiry") or "")
-            elif family in {"iv_term_structure", "risk_reversal_skew"}:
+            elif family == "risk_reversal_skew":
+                delta = payload.get("delta")
+                if isinstance(delta, bool) or delta not in {10, 25}:
+                    self.state["metrics"]["invalid"] += 1
+                    return False
+                key += ":" + str(payload.get("expiry") or "unknown") + ":" + str(delta)
+            elif family == "iv_term_structure":
                 key += ":" + str(payload.get("expiry") or "unknown")
             elif family == "interpolated_iv":
                 key += ":" + str(payload.get("days") or "unknown")
@@ -221,6 +240,33 @@ class Materializer:
         self.state["latest"][channel][ticker] = record
         self.state["channels"][channel]["status"] = "observed"
         return True
+
+    def reconcile_greek(self, channel: str, rows: list[dict], now: float, ingest_id: int) -> int:
+        from .reconcile import completed_row
+        if channel not in self.channels or not channel.startswith(("greek_flow:", "greek_flow_expiry:")):
+            return 0
+        reconciled = 0
+        latest = self.state["latest"].setdefault(channel, {})
+        for candidate in rows:
+            row = completed_row(channel, candidate, now, candidate.get("expiry") if isinstance(candidate, dict) else None)
+            if row is None:
+                continue
+            key = row["ticker"] + ":" + row["timestamp"] + ":" + str(row.get("expiry") or "")
+            prior = latest.get(key, {})
+            latest[key] = {"payload": row, "event_time": row["timestamp"], "ingested_at": iso(now), "ingest_id": ingest_id,
+                           "complete": True, "basis": "REST-confirmed-completed-minute", "rest_observed_at": iso(now),
+                           "gap_count_at_reconciliation": self.state["channels"][channel]["gap_count"],
+                           "prior_partial_observation": prior.get("payload") if prior.get("basis") is None else prior.get("prior_partial_observation"),
+                           "requires_reconciliation": False}
+            reconciled += 1
+        self.state["metrics"]["reconciled_minutes"] = self.state["metrics"].get("reconciled_minutes", 0) + reconciled
+        if reconciled:
+            self.state["channels"][channel]["last_rest_reconciled_at"] = iso(now)
+            self.state["channels"][channel]["reconciliation_status"] = "completed-minutes-confirmed"
+        while len(latest) > MAX_STATE_KEYS:
+            del latest[next(iter(latest))]
+            self.state["channels"][channel]["retained_history_limited"] = True
+        return reconciled
 
     def snapshot(self, now: float) -> dict:
         result = copy.deepcopy(self.state)
