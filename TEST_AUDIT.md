@@ -11651,6 +11651,42 @@ Closing gates, serial, from the repo root. Root pytest exit 0 each round. Vitest
 
 Base cloud at `30bbaec2` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 32 failed / 2,893 passed / 8 skipped (734.88s). The 22 added nodes are identical on rounds 1–3: four `test_deploy_lock_migration.py` cases (`flock: command not found`), eight `test_responder_service_account.py` slot cases (`FileNotFoundError: /usr/bin/test`), nine `test_sync_control_plane.py` cases (`pin[@]: unbound variable` under bash 3.2 `set -u` on an empty array), and `test_setup_boot_enable_does_not_reactivate_retired_media_path` (`persistent_units[@]: unbound variable`). The 32 base failures stayed failed. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The five next.config timeouts are the same load class as 2026-10-18; they pass when the ceiling is 20s and the import itself is about 6.5–7.2s.
 
+## Delta audit 2026-10-20
+
+Range `2f08fe78f30b2ea3f086034c64ab1c77f4b937dd..5bfadbb6afb805b53dc3ea10f884728ed7076e16`: 47 commits / 160 paths. Newest trusted checkpoint is the 2026-10-19 collaborator comment on issue #83 (`audited-through: 2f08fe78f30b2ea3f086034c64ab1c77f4b937dd`). No open `testing/` pull request. Numbering continues after T-559. The checkpoint carried no open verified T finding. Operator-only T-130, T-435, T-488, and T-490 stay operator-only from earlier ledgers and were not reopened.
+
+The previous-close route still batches the broker before third-party fallbacks (`web/app/api/previous-close/route.ts:301-302`, `route.ts:355-356`). A remembered miss returns inside `getPreviousClose` before Unusual Whales and Yahoo (`route.ts:303`). The replay test only counted those two hosts (`web/tests/previous-close-miss-cache.test.ts:86-93` before this change) and never counted broker sockets. Asia export lead, stop-price order limits, disk cleanup, deploy env pinning, and the humanizer budget in this range already have tests that call the behavior. No coverage-threshold change and no new blanket exclude. The delta touches 24 root Python test files, 17 Vitest files, and 11 cloud files, not most of the suite.
+
+Not filed: the two cloud nodes that failed inside the delta (`test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs`, `test_precloud_rollback_keeps_immutable_journal_support`) fail the same way on the audited base. The journal script is unchanged and `/usr/bin/python3` is 3.9.6, which rejects `zip(..., strict=True)` at `cloud/scripts/deploy-journal.py:65`. The five `next.config.mjs` imports over 5s are the same local class as 2026-10-19.
+
+### T-560 — P2 — a remembered previous-close miss is proved only for the two fallback hosts
+
+`POST` asks the broker for every symbol that is not already in the positive cache (`web/app/api/previous-close/route.ts:342-356`). `getPreviousClose` may then skip Unusual Whales and Yahoo for a recent miss (`route.ts:303`). `does not re-issue the UW and Yahoo fan-out` stays green if the broker batch drops that symbol. Filtering remembered misses out of `uncached` before `fetchFromIB` left the three existing cases green and the new case saw one broker socket (`expected 2, got 1`).
+
+Acceptance: the second POST of a symbol neither fallback could price opens a second broker socket, and every recorded socket URL starts with `ws://localhost:8765`. The existing fan-out case still sees one Unusual Whales call and one Yahoo call.
+
+Audited through: 5bfadbb6afb805b53dc3ea10f884728ed7076e16 on 2026-10-20 — 1 new finding
+
+## Remediation 2026-10-20
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-560 | DONE | Remembered misses filtered out of the broker batch: `web/tests/previous-close-miss-cache.test.ts` 1 failed / 3 passed (`expected 2, got 1` at the second POST). Restored route. The file passed 4 tests on each of three serial runs. Product source unchanged. |
+
+Delta files, three times, with OpenSSL 3.6.5 ahead of `/usr/bin/openssl`: root Python 1,234 passed each run (24 files). Vitest 537 passed / 16 files each run. `cta-output-tracing-config.test.ts` timed out at 5s even alone and passed 4 tests at a 20s ceiling on each of three serial runs (import about 7.7s). The 11 cloud files were 2 failed / 1,103 passed / 2 skipped each run, and both failed nodes are in the base SHA list.
+
+### Closing gates 2026-10-20
+
+Serial from the repo root. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`): `csp-img-src-allowlist`, `csp-nonce`, `cta-output-tracing-config`, `next-security-headers`, `robots-noindex`. Those five files passed 29 tests in 42.11s with `--testTimeout=20000 --maxWorkers=1` (imports about 7.9–8.6s). The committed ceiling was not raised. Cloud exit 1 each round on the same 54 nodes as the base.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `2f08fe78` |
+|---|---|---|---|---|
+| 1 | 16,880 passed / 10 skipped / 23 subtests (159.40s) | 5 failed / 11,326 passed / 21 skipped / 1,150 files (162.06s) | 54 failed / 3,224 passed / 11 skipped (809.63s) | 0 added / 0 removed |
+| 2 | 16,880 passed / 10 skipped / 23 subtests (129.08s) | 5 failed / 11,326 passed / 21 skipped / 1,150 files (128.54s) | 54 failed / 3,224 passed / 11 skipped (797.04s) | 0 added / 0 removed |
+| 3 | 16,880 passed / 10 skipped / 23 subtests (119.75s) | 5 failed / 11,326 passed / 21 skipped / 1,150 files (130.65s) | 54 failed / 3,224 passed / 11 skipped (795.64s) | 0 added / 0 removed |
+
+Base cloud at `2f08fe78` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 54 failed / 3,197 passed / 11 skipped (846.65s). Head passed 27 more cloud tests and failed the same 54 nodes. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. Vitest file line is 5 failed / 1,144 passed / 1 skipped (1,150).
+
 ## Delta audit 2026-10-21
 
 Range `5bfadbb6afb805b53dc3ea10f884728ed7076e16..e5426fb17d91d2c1224b070c5865a526d358fd7d`: 30 commits / 43 paths. Newest trusted checkpoint is the 2026-10-20 collaborator comment on issue #83 (`audited-through: 5bfadbb6afb805b53dc3ea10f884728ed7076e16`). It carried no open verified finding. Open pull request #1194 (`testing/2026-10-20`) is green and already owns T-560, so numbering continues at T-561. No red or pending check on that pull request.
