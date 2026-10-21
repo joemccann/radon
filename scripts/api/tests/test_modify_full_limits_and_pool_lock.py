@@ -178,22 +178,41 @@ class TestModifyEnforcesTheFullLimitSet:
 
     def test_an_unreadable_working_order_still_applies_the_quantity_cap(self):
         """No snapshot row (a just-placed order, a Turso blip) must not
-        become a bypass — the old contract-quantity cap still runs."""
+        become a bypass — the modify is refused until the shape is readable."""
         from order_limits import check_modify_limits
 
         violation = check_modify_limits(None, new_quantity=100_000, new_price=1.0)
         assert violation is not None
-        assert violation["code"] == "ORDER_QTY_LIMIT"
+        assert violation["code"] == "ORDER_MODIFY_UNREADABLE"
 
     def test_an_unreadable_working_order_bounds_notional_when_both_given(self):
         """qty under the contract cap but a price that blows the notional cap
-        must still be refused: with no snapshot the supplied values are the
-        only bound there is."""
+        must still be refused: with no snapshot the shape is unknown."""
         from order_limits import check_modify_limits
 
         violation = check_modify_limits(None, new_quantity=400, new_price=9_000.0)
         assert violation is not None
-        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+        assert violation["code"] == "ORDER_MODIFY_UNREADABLE"
+
+    def test_a_quantity_only_modify_of_an_unreadable_working_order_is_refused(self):
+        """DS-2026-10-21-23: a quantity change with no snapshot used to fall
+        through to the contract-count cap and skip notional, ratio, and
+        combo loss."""
+        from order_limits import check_modify_limits
+
+        violation = check_modify_limits(None, new_quantity=2)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MODIFY_UNREADABLE"
+
+    def test_string_and_integer_order_ids_match(self):
+        from order_limits import order_ids_match
+
+        assert order_ids_match(41, "41")
+        assert order_ids_match("41", 41)
+        assert not order_ids_match(41, "nope")
+        assert not order_ids_match(0, "0")
+        assert not order_ids_match(None, "41")
+        assert not order_ids_match(False, 0)
 
     def test_a_price_only_modify_of_an_unreadable_working_order_is_refused(self):
         """A price-only modify with no readable snapshot skipped EVERY limit

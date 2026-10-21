@@ -576,8 +576,9 @@ class TestResponder:
             run.return_value = SimpleNamespace(returncode=0, stdout="")
             assert sync_remote_clone(tmp_path) == "synced"
         fetch = run.call_args_list[1].args[0]
-        assert fetch == [
-            "git", "fetch", "https://github.com/joemccann/radon.git",
+        assert "core.hooksPath=/dev/null" in fetch
+        assert fetch[-2:] == [
+            "https://github.com/joemccann/radon.git",
             "+refs/heads/main:refs/remotes/origin/main",
         ]
 
@@ -930,6 +931,9 @@ class TestSignalKilledOneshotRerun:
         )
         past_horizon = _fmt_systemd(
             NOW + timedelta(seconds=RERUN_TIMER_HORIZON_SECS + 60)
+        )
+        monkeypatch.setattr(
+            "grok_page_responder.pages_mod.record_action_attempt", lambda **_k: "attempt",
         )
         assert (
             attempt_oneshot_rerun(

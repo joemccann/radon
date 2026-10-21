@@ -61,6 +61,14 @@ class TestRouteLimitRefusal:
         spawn = AsyncMock(side_effect=AssertionError("must not spawn"))
         monkeypatch.setattr(server, "_run_ib_script_with_recovery", spawn)
 
+        async def snapshot():
+            return {"open_orders": [{
+                "orderId": 7, "secType": "OPT", "action": "BUY",
+                "quantity": 1, "limitPrice": 1.0,
+            }]}
+
+        monkeypatch.setattr(server, "_read_orders_snapshot_from_db", snapshot)
+
         resp = client.post("/orders/modify", json={
             "orderId": 7, "newQuantity": 10000,
         })

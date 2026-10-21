@@ -274,20 +274,54 @@ class TestComboNotionalIsRiskNotPremium:
         })
         assert violation is None
 
+    def test_short_put_plus_debit_is_assignment_plus_premium(self, monkeypatch):
+        """DS-2026-10-21-22: 500 short $200 puts plus a long call at a $0.47
+        debit. max(assignment, debit) is $10,000,000, which is not greater
+        than the default cap, so the order used to pass. The premium is paid
+        on top of assignment."""
+        params = {
+            "type": "combo", "symbol": "XYZ", "action": "BUY",
+            "quantity": 500, "limitPrice": 0.47,
+            "legs": [
+                {"expiry": "20260821", "strike": 200, "right": "P", "action": "SELL", "ratio": 1},
+                {"expiry": "20260821", "strike": 205, "right": "C", "action": "BUY", "ratio": 1},
+            ],
+        }
+        violation = order_limits.check_order_limits(params)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+        assert "10,023,500" in violation["message"], violation["message"]
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "11000000")
+        assert order_limits.check_order_limits(params) is None
+
+    def test_defined_risk_debit_vertical_is_the_premium_not_the_width(self, monkeypatch):
+        """A bull call's expiry loss is the debit. A cap between the premium
+        and the width must admit it. Width math stays on combo_max_loss."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 20, "limitPrice": 2.0,
+            "legs": [
+                {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20260918", "strike": 7010, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits.combo_max_loss(params) == pytest.approx(20_000.0)
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "10000")
+        assert order_limits.check_order_limits(params) is None
+
     def test_defined_risk_width_is_what_trips_the_loss_cap(self):
-        """A vertical whose width is a fat-finger (200 lots × 550-wide =
-        $11M) is refused on max loss. The debit is only $2/lot ($40k
-        notional), under RADON_MAX_ORDER_NOTIONAL."""
-        violation = order_limits.check_order_limits({
+        """Width math is unchanged. The mandatory gate prices a single-expiry
+        debit vertical at the premium, so this 550-wide spread places."""
+        params = {
             "type": "combo", "symbol": "SPX", "action": "BUY",
             "quantity": 200, "limitPrice": 2.0,
             "legs": [
                 {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
                 {"expiry": "20260918", "strike": 7550, "right": "C", "action": "SELL", "ratio": 1},
             ],
-        })
-        assert violation is not None
-        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+        }
+        assert order_limits.combo_max_loss(params) == pytest.approx(11_000_000.0)
+        assert order_limits.check_order_limits(params) is None
 
     def test_calendar_spread_is_priced_off_the_debit_not_the_strike(self):
         """A long calendar's max loss is the debit paid: the long leg covers
