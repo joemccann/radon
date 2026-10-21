@@ -1,6 +1,6 @@
 # NYSE common-stock High-Low Line (2026-10-20)
 
-Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7.
+Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7 -> H8 -> H9.
 
 - [x] H1 depends_on: [] Verify exact common-stock-only NYSE 52-week high/low source, authorized transport, history, definition, cadence and storage/display rights. Record screenshot timeframe/baseline uncertainty and explicit calculation conventions.
 - [x] H2 depends_on: [H1] Specify cumulative daily net highs, StochRSI(14), SAR parameters, weekly/daily treatment, freshness and data contract; record Python/API/panel red tests.
@@ -8,7 +8,9 @@ Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7.
 - [x] H4 depends_on: [H2] Implement read-only API, hook, contracts and shared health/schedule pins.
 - [x] H5 depends_on: [H2] Implement branded Regime chart with cumulative line, SAR, synchronized StochRSI panel, honest source/baseline labels and browser coverage.
 - [x] H6 depends_on: [H3, H4, H5] Integrate, independently verify formulae and actual source/Turso/API data, run focused/full gates and inspect production-build desktop/mobile screenshots.
-- [ ] H7 depends_on: [H6] PR exact-head CI green, accepted Pushover notification, authorized admin merge, automatic deployment and production verification; archive owned worktrees.
+- [x] H7 depends_on: [H6] Feature PR1222 exact-head CI green, accepted Pushover, admin merge191fd468b and automatic production deployment; installed timer, canary, Turso and four authenticated browser cases verified.
+- [ ] H8 depends_on: [H7] Fix the final visual threshold-label overlap with red/green browser geometry coverage, a focused PR, green CI/admin merge and production recheck.
+- [ ] H9 depends_on: [H8] Archive the four owned worktrees and record final verification.
 
 ## Review
 
@@ -18,7 +20,10 @@ Recorded Python/API/panel missing-module red evidence. Author commits: ingestion
 
 Integration includes main241fea17e and the Node security update. Final full web:11,438 passed,21 skipped,86.26% lines. Full Python:17,312 passed,10 skipped,54 unchanged Mac Gateway TLS failures; the one new E2E inventory omission is fixed, with176 docs/curation and257 indicator/registration cases green. Full cloud:3,339 passed,10 skipped,12 unchanged Mac missing-tool failures; post-merge cloud/installer pins802 passed. Five unchanged TypeScript errors remain in newsfeed/sameOrigin, zero High-Low errors. Production compile and235-manifest trace audit pass;8 production-build browser cases pass across themes, phone/desktop, missing data and strict page inventory. The GitHub repository is public: checked-in fixtures are synthetic; captured provider history and independent real-history golden verification stay private. Local author history containing captures is squashed away before pushing; no captured-data commit has been published.
 
-Actual Turso migration101 applied;5,988 daily plus1,243 weekly rows, zero duplicate weekly periods, healthy high-low-line heartbeat. Actual direct API invocation (existing test authorization seam, no DB/disk mocks) returns200/private cache and complete dataset in550ms. Current source-derived readings stay in private evidence and the operator panel. Evidence and stable screenshots: /Users/joemccann-mac-mini/.codex/state/jobs/high-low-line-20261020/. Remaining: exact-head PR CI, accepted Pushover, authorized admin merge, automatic deploy, authenticated production browser and installed timer/one-run verification, owned-worktree archival. Primary checkout WIP preserved; no generated codemap files committed.
+Actual Turso migration101 applied;5,988 daily plus1,243 weekly rows, zero duplicate weekly periods, healthy high-low-line heartbeat. Actual direct API invocation (existing test authorization seam, no DB/disk mocks) returns200/private cache and complete dataset in550ms. Current source-derived readings stay in private evidence and the operator panel. Evidence and stable screenshots: /Users/joemccann-mac-mini/.codex/state/jobs/high-low-line-20261020/. Feature PR1222 merged as191fd468b after37 applicable checks passed; production CI39658254589 passed. Installed timer and collector canary succeeded, source/Turso matched, and four authenticated real-data browser cases passed. Remaining: annotation follow-up delivery and owned-worktree archival. Primary checkout WIP preserved; no generated codemap files committed.
+
+
+Final visual review found 345.625px² overlap between the oversold band label and its redundant numeric guide label. The geometry regression failed before the fix (324.140625px² overlap). Only the redundant right-edge0.2 text is suppressed; its guide line, the0.200 left-axis tick and OVERSOLD annotation remain. Full web11,438 passed/21 skipped; production build/235 trace manifests and8 browser cases passed. Independent Luna inspected both themes at393/1440px with no remaining collision. Follow-up exact-head CI/deploy pending.
 
 # Taiwan/Korea export lead indicator (2026-10-19)
 

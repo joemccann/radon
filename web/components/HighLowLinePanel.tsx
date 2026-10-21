@@ -86,7 +86,7 @@ export default function HighLowLinePanel() {
       <HistoryRangeChips presets={PRESETS} active={preset} onChange={setPreset} ariaLabel="High-Low chart range" dataTestId="high-low-line-range-chips" />
       <div data-testid="high-low-line-cumulative-chart"><CriHistoryChart history={history} series={cumulative} sharedAxis title="CUMULATIVE COMMON-STOCK HIGH-LOW LINE" xTickFormat={tickDate} xTickMinSpacing={90} /></div>
       <div data-testid="high-low-line-stoch-chart"><CriHistoryChart history={history} series={stoch} title="RAW STOCHRSI (14)" xTickFormat={tickDate} xTickMinSpacing={90}
-        referenceLevels={[{ value: 0.2, label: "0.2" }, { value: 0.5, label: "0.5" }, { value: 0.8, label: "0.8" }]}
+        referenceLevels={[{ value: 0.2, label: "" }, { value: 0.5, label: "0.5" }, { value: 0.8, label: "0.8" }]}
         referenceBands={[{ from: 0, to: 0.2, label: "OVERSOLD", axis: "left", color: "var(--warning)" }, { from: 0.8, to: 1, label: "OVERBOUGHT", axis: "left", color: "var(--text-secondary)" }]} /></div>
       <BrushMinimap values={rows.map(row => row.cumulative)} range={range} onRangeChange={setCustomRange} onCustom={() => setPreset("custom")} testIdPrefix="high-low-line-brush" formatIndex={index => rows[index]?.date ?? ""} />
       <div className="chart-footnote" style={{ fontSize: 12 }} data-testid="high-low-line-notes">
