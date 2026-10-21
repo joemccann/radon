@@ -17,6 +17,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -659,6 +660,31 @@ def _phase_status_preamble() -> str:
     )
 
 
+def _hook_lib_root() -> Path:
+    """A stand-in for the installed runner directory, built once.
+
+    `_redact_secret_classes` pipes through the canonical scrubber it imports
+    from `$RUNNER_DIR/lib`, which `scripts/runner/install.sh` populates on the
+    real host. Extracting the function alone leaves `PY` and `RUNNER_DIR`
+    unset, so every extraction site has to supply them -- and supplying a real
+    lib means these tests exercise the actual shared scrubber rather than a
+    stub. The hook keeps its hardcoded `$RUNNER_DIR/lib`; nothing about the
+    code-load path is made environment-injectable for the sake of a test.
+    """
+    global _HOOK_LIB_ROOT
+    if _HOOK_LIB_ROOT is None:
+        root = Path(tempfile.mkdtemp(prefix="radon-hook-lib-"))
+        (root / "lib").mkdir()
+        (root / "lib" / "credential_redaction.py").symlink_to(
+            REPO / "scripts" / "credential_redaction.py"
+        )
+        _HOOK_LIB_ROOT = root
+    return _HOOK_LIB_ROOT
+
+
+_HOOK_LIB_ROOT: Path | None = None
+
+
 def _opaque_value() -> str:
     """An invented opaque credential value, assembled at runtime.
 
@@ -669,8 +695,12 @@ def _opaque_value() -> str:
 
 
 def _secret_ere_block(src: str) -> str:
+    """The hook's ERE definitions, prefixed with the runtime inputs its
+    redactor needs so the extracted function runs under `set -u`."""
     start = src.index("# Credential assignments")
-    return src[start:src.index("_redact_secret_classes() {", start)]
+    prelude = (f"PY={shlex.quote(sys.executable)}\n"
+               f"RUNNER_DIR={shlex.quote(str(_hook_lib_root()))}\n")
+    return prelude + src[start:src.index("_redact_secret_classes() {", start)]
 
 
 class TestSanitizeQuotedSecrets:
@@ -912,7 +942,12 @@ def test_the_private_report_redactor_drops_private_key_blocks(tmp_path: Path, la
               f"QUJDZGVmNOTREALTWO\n{_key_marker('END', label)}\nthen exited")
     out = _hook_redact(tmp_path, report)
     assert "NOTREAL" not in out and "PRIVATE KEY" not in out, out
-    assert out == "the report showed\n[REDACTED]\nthen exited"
+    # The canonical scrubber now runs ahead of the hook's sed pass and claims
+    # the block first, so the label is its `[redacted-private-key]` rather
+    # than the sed rule's `[REDACTED]`. The block is still collapsed to one
+    # line and both the armour and the body are gone, which is what the two
+    # assertions above pin; only the tag moved.
+    assert out == "the report showed\n[redacted-private-key]\nthen exited"
 
 
 def test_the_private_report_redactor_drops_an_unterminated_key_block(tmp_path: Path):
