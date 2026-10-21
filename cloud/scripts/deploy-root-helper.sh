@@ -36,6 +36,9 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
+  services/radon-uw-stream.service
+  services/radon-uw-research.service
+  services/radon-uw-research.timer
   services/radon-relay.service
   services/radon-portfolio-sync.service
   services/radon-portfolio-sync.timer
@@ -53,6 +56,8 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-nextjs.service.d/runtime-container.conf
   services/radon-relay.service.d/runtime-container.conf
   services/radon-monitor.service.d/runtime-container.conf
+  services/radon-uw-stream.service.d/runtime-container.conf
+  services/radon-uw-research.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
   services/radon-research.service
   services/radon-research.service.d/runtime-container.conf
@@ -94,6 +99,9 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
+  /etc/systemd/system/radon-uw-stream.service
+  /etc/systemd/system/radon-uw-research.service
+  /etc/systemd/system/radon-uw-research.timer
   /etc/systemd/system/radon-relay.service
   /etc/systemd/system/radon-portfolio-sync.service
   /etc/systemd/system/radon-portfolio-sync.timer
@@ -111,6 +119,8 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
   /etc/systemd/system/radon-relay.service.d/runtime-container.conf
   /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
   /etc/systemd/system/radon-research.service
   /etc/systemd/system/radon-research.service.d/runtime-container.conf
@@ -128,17 +138,66 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/lib/tmpfiles.d/radon-deploy.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755 644 755 644 644 755 755 644
-  440 440 440 440
+  755
+  755
+  755
+  644
+  755
   644
   644
-  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
-  644 644 644 644 644
-  644 644
-  644 644 644 644 644
+  755
+  755
+  644
+  440
+  440
+  440
+  440
   644
   644
-  644 644 644 644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
   644
 )
 

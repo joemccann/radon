@@ -22,7 +22,10 @@ Full OpenAPI  : docs/unusual_whales_api_spec.yaml
 from __future__ import annotations
 
 import logging
+import math
 import os
+import re
+from contextlib import nullcontext
 import time
 from typing import Any, Dict, Optional
 
@@ -31,7 +34,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError, Timeout a
 
 # Optional in-memory cache for request deduplication
 try:
-    from utils.uw_cache import get_cached, set_cached, make_key, get_disk_cached, set_disk_cached
+    from utils.uw_cache import get_cached, set_cached, make_key, get_disk_cached, set_disk_cached, singleflight
     _USE_CACHE = True
 except ImportError:
     _USE_CACHE = False
@@ -41,6 +44,8 @@ try:
 except ImportError:  # pragma: no cover - budget helper ships with the client
     def record_hit(*_args, **_kwargs):  # type: ignore[misc]
         return 0
+
+from utils import uw_governor
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +129,8 @@ class UWClient:
         timeout: int = _DEFAULT_TIMEOUT,
         max_retries: int = _DEFAULT_MAX_RETRIES,
         backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
+        caller: Optional[str] = None,
+        max_response_bytes: Optional[int] = None,
     ):
         self._token = token or os.environ.get("UW_TOKEN")
         if not self._token:
@@ -133,6 +140,10 @@ class UWClient:
             )
 
         self._base_url = base_url.rstrip("/")
+        self._caller = caller
+        if max_response_bytes is not None and (type(max_response_bytes) is not int or max_response_bytes <= 0):
+            raise ValueError("max_response_bytes must be a positive integer")
+        self._max_response_bytes = max_response_bytes
         self._timeout = timeout
         self._max_retries = max_retries
         self._backoff_factor = backoff_factor
@@ -158,7 +169,44 @@ class UWClient:
 
     # ── internal request layer ─────────────────────────────────────
 
-    def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> dict:
+    def _cache_key(self, endpoint, params):
+        """Separate credential scopes without writing tokens to cache paths."""
+        import hashlib
+        scope = hashlib.sha256((self._base_url + "\0" + self._token).encode()).hexdigest()
+        return make_key(scope + "/" + endpoint, params)
+
+    def get(
+        self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
+        priority: str = "interactive", wait_timeout: float = 5.0,
+        use_cache: bool = True,
+    ) -> dict:
+        """Admitted fixed-base GET for trusted server-side adapters.
+
+        Public HTTP proxies must also apply their own narrow route/query
+        allowlist. This method never accepts a URL, query or traversal path.
+        """
+        return self._get(endpoint, params, priority=priority,
+                         wait_timeout=wait_timeout, use_cache=use_cache)
+
+    def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
+             priority: str = "standard", wait_timeout: float = 5.0,
+             use_cache: bool = True) -> dict:
+        endpoint = endpoint.lstrip("/")
+        if (not re.fullmatch(r"[A-Za-z0-9_.:/-]+", endpoint)
+                or ":" in endpoint or any(p in {".", ".."} for p in endpoint.split("/"))):
+            raise UWValidationError("UW endpoint path is invalid", status_code=422)
+        cache_enabled = use_cache and _USE_CACHE and isinstance(self._session, requests.Session)
+        lock = singleflight(self._cache_key(endpoint, params), timeout=wait_timeout) if cache_enabled else nullcontext()
+        try:
+            with lock:
+                return self._request(endpoint, params, priority=priority,
+                                     wait_timeout=wait_timeout, use_cache=use_cache)
+        except TimeoutError:
+            raise UWRateLimitError("UW request is already in progress", status_code=429) from None
+
+    def _request(self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
+                 priority: str = "standard", wait_timeout: float = 5.0,
+                 use_cache: bool = True) -> dict:
         """Make an authenticated GET with retry and error mapping.
 
         Args:
@@ -177,9 +225,9 @@ class UWClient:
 
         # Memory (60s) then disk (endpoint-class TTL). Skip both when the HTTP
         # session is a mock/test double so retry semantics stay observable.
-        cache_enabled = _USE_CACHE and isinstance(self._session, requests.Session)
+        cache_enabled = use_cache and _USE_CACHE and isinstance(self._session, requests.Session)
         if cache_enabled:
-            cache_key = make_key(endpoint, params)
+            cache_key = self._cache_key(endpoint, params)
             cached = get_cached(cache_key)
             if cached is not None:
                 return cached
@@ -191,22 +239,60 @@ class UWClient:
         last_exc: Optional[Exception] = None
         rate_limited = 0
 
+        # Mock sessions stay observable as in the cache contract. Every real
+        # requests.Session, including one with an injected HTTP method, is
+        # admitted before the wire. There is no runtime feature flag bypass.
+        governed = isinstance(self._session, requests.Session)
         for attempt in range(1 + self._max_retries):
+            reservation = None
+            if governed:
+                try:
+                    reservation = uw_governor.reserve(self._token, priority=priority, timeout=wait_timeout)
+                except uw_governor.AdmissionError as exc:
+                    raise UWRateLimitError(str(exc), status_code=429) from None
             try:
-                resp = self._session.get(url, params=params, timeout=self._timeout)
+                options = {"params": params, "timeout": self._timeout, "allow_redirects": False}
+                if self._max_response_bytes is not None:
+                    options["stream"] = True
+                resp = self._session.get(url, **options)
             except (ReqConnectionError, ReqTimeout) as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
                     self._sleep_backoff(attempt)
                     continue
-                raise UWAPIError(f"Connection failed after {attempt + 1} attempts: {exc}") from exc
+                raise UWAPIError(f"UW connection failed after {attempt + 1} attempts") from None
 
             try:
-                record_hit(endpoint=endpoint)
+                record_hit(caller=self._caller, endpoint=endpoint)
             except Exception:
                 logger.debug("uw budget record_hit failed", exc_info=True)
 
+            if self._max_response_bytes is not None:
+                chunks = []
+                size = 0
+                try:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        size += len(chunk)
+                        if size > self._max_response_bytes:
+                            raise UWAPIError("UW response exceeds the permitted size")
+                        chunks.append(chunk)
+                    resp._content = b"".join(chunks)
+                    resp._content_consumed = True
+                finally:
+                    resp.close()
+
             status = resp.status_code
+            body = self._safe_json(resp) if status != 200 else {}
+            if governed:
+                try:
+                    uw_governor.observe(
+                        self._token, status, resp.headers, reservation=reservation,
+                        daily_exhausted=status == 429 and _UW_DAILY_LIMIT_MARKER in str(body.get("message", "")).lower(),
+                    )
+                except uw_governor.AdmissionError:
+                    # The response may still serve the requested read; the
+                    # next reservation fails closed if state is unavailable.
+                    logger.warning("UW response metadata could not be recorded")
 
             if status == 200:
                 data = resp.json()
@@ -216,8 +302,9 @@ class UWClient:
                 return data
 
             # ── classify error ──
-            body = self._safe_json(resp)
-            msg = body.get("message", "") or resp.reason or f"HTTP {status}"
+            msg = str(body.get("message", "") or resp.reason or f"HTTP {status}")
+            msg = msg.replace(self._token, "[redacted]")[:512]
+            body = {"message": msg}
 
             if status == 429:
                 exc = UWRateLimitError(msg, status_code=status, response_body=body)
@@ -262,7 +349,9 @@ class UWClient:
         retry_after = resp.headers.get("Retry-After")
         if retry_after:
             try:
-                return max(float(retry_after), 1.0)
+                delay = float(retry_after)
+                if math.isfinite(delay):
+                    return min(max(delay, 1.0), 30.0)
             except (ValueError, TypeError):
                 pass
         return 1.0 * (2 ** attempt)
@@ -270,7 +359,8 @@ class UWClient:
     @staticmethod
     def _safe_json(resp: requests.Response) -> dict:
         try:
-            return resp.json()
+            body = resp.json()
+            return body if isinstance(body, dict) else {}
         except Exception:
             return {}
 

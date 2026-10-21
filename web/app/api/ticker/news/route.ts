@@ -80,8 +80,6 @@ async function fetchUW(
   limit: number,
   requestId: string,
 ): Promise<{ data: unknown[]; source: string } | null> {
-  const token = process.env.UW_TOKEN;
-  if (!token) return null;
 
   try {
     const url = new URL("https://api.unusualwhales.com/api/news/headlines");
@@ -90,7 +88,6 @@ async function fetchUW(
 
     const res = await countedUwFetch(url.toString(), {
       cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
 

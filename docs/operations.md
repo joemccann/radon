@@ -1320,3 +1320,25 @@ An explicit `RADON_DEPLOY_LOCK_FILE=/var/lib/radon-lock/deploy.lock` keeps the
 same two-lock transition as the default configuration. A noncanonical isolated
 lock override uses only that path unless `RADON_DEPLOY_LEGACY_LOCK_FILE` is
 supplied as well.
+
+
+### Unusual Whales Advanced collection and admission
+
+All REST collection uses `scripts/clients/uw_client.py` and the shared SQLite
+admission ledger described in [UW REST governance](uw-rest-governance.md).
+The credential store owns `UW_TOKEN` and the optional `RADON_UW_*` account
+settings. Credential validation reserves one request before the provider probe;
+changing a credential does not reset the account allowance. Leave limit
+verification disabled until account-specific limits have been confirmed.
+
+`radon-uw-stream.service` and `radon-uw-research.timer` are optional collectors.
+Collection remains disabled without explicit stream admission and credentials.
+The timer invokes the bounded research service; failed refreshes retain prior
+research data and report collection health. The root-owned control-plane bundle
+installs their units and runtime drop-ins. Environment staging filters UW
+collector settings; treat any secret-store mount as access to the credentials
+it contains, and review grants before activation.
+
+The internal REST proxy invokes `scripts/uw_admitted_request.py` in a child
+process with a hard deadline and a four MiB response ceiling. It shares admission
+with scheduled collectors; it does not expose arbitrary provider URLs.

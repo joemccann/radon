@@ -7,6 +7,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Route tests inject provider transport here; shared admission is covered in
+// uw-counted-fetch.test.ts and must not be bypassed by production fallback.
+vi.mock("@/lib/uwCountedFetch", () => ({
+  countedUwFetch: (input: string | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { readFileMock, writeFileMock, mkdirMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
   writeFileMock: vi.fn(async () => undefined),
@@ -121,7 +127,8 @@ describe("GET /api/ticker/info short_float", () => {
     vi.restoreAllMocks();
   });
 
-  it("cache MISS: fetches interest-float/v2 with Bearer token and returns data[0] as short_float", async () => {
+  it("cache MISS: delegates UW credentials to the backend and returns data[0] as short_float", async () => {
+    delete process.env.UW_TOKEN;
     readFileMock.mockRejectedValue(new Error("ENOENT"));
     const spy = installFetch();
 
@@ -133,9 +140,10 @@ describe("GET /api/ticker/info short_float", () => {
     expect(spy).toHaveBeenCalledWith(
       "https://api.unusualwhales.com/api/shorts/AAPL/interest-float/v2",
       expect.objectContaining({
-        headers: { Authorization: "Bearer test-token" },
+        cache: "no-store",
       }),
     );
+
   });
 
   it("cache MISS + float endpoint 500: still 200 with short_float {}", async () => {

@@ -468,6 +468,22 @@ async def operator_alerts(ctx: Context) -> dict:
     return await _gated_off_loop(lambda p: _operator_read_impl(p, "/api/alerts"), ctx)
 
 
+@mcp.tool()
+async def operator_uw_research(ticker: str, ctx: Context) -> dict:
+    """Retained UW research and feed coverage, never executable broker quotes.
+
+    Operator only. Reads the materialized snapshot; does not open vendor
+    sockets, inherit vendor credentials or activate collection.
+    """
+    import re
+    symbol = ticker.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", symbol):
+        return {"error": "Invalid ticker", "status": 400}
+    return await _gated_off_loop(
+        lambda p: _operator_read_impl(p, f"/api/uw/research?ticker={symbol}"), ctx
+    )
+
+
 # ── ASGI app ─────────────────────────────────────────────────────────
 
 

@@ -227,3 +227,10 @@ fc072067219bf2e8de552dfe9805f5173e810e5d8c2e3c923f36147375575b44  radon-vix-mode
 9f9b211f88da6454d9eb81bdd4d88cfc2952811e8809af80c9222028ea8a49a4  radon-media-publish.timer
 e033343b489169d51c0d40f90f8be5693691d14bcd15bc959c39179a40c3b89a  radon-asia-export-lead.service
 1bbcac006a1480d0e4d57c259df217821d9e7ac012d2b30836305cde8c1ba56e  radon-asia-export-lead.timer
+
+# UW Advanced optional research units; installation does not activate streams.
+f65a20b3f544612f8c7aa686d2190b58539b7243a7795346c3ff03679ed26b40  radon-uw-stream.service
+873644210515823a680044ca546afa340dd7fd4d08c8c73fc40137198017c580  radon-uw-research.service
+e230440364abf51a603d9394caa5bc15ae8ab76a4a8367c88442fb8650721f34  radon-uw-research.timer
+1d2962498bd1f779724a146da77ffc6dc1e4850b68f8682ab0725ada9b779789  radon-uw-stream.service.d/runtime-container.conf
+878275d535f93e02a9a92fb164c3c062600470556119d144949e1b3762c4d36a  radon-uw-research.service.d/runtime-container.conf

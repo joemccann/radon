@@ -31,6 +31,9 @@ vi.mock("@/lib/useTickerFlowReport", () => ({
   useTickerFlowReport: () => hookState,
 }));
 
+// The legacy hero contract is independent of Advanced research feed state.
+vi.mock("@/components/flow-analysis/UwResearchPanel", () => ({ default: () => null }));
+
 import TickerFlowReport from "../components/flow-analysis/TickerFlowReport";
 
 afterEach(cleanup);

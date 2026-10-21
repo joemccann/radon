@@ -31,6 +31,9 @@ CONTRACT = CLOUD / "config" / "required-env.txt"
 # rather than an oversight. Adding a key here is the explicit alternative to
 # adding it to required-env.txt.
 EXEMPT: dict[str, str] = {
+    "NEXT_PUBLIC_RADON_DEMO": "Optional demo guard, unset disables demo mode.",
+    "RADON_DEMO_MODE": "Optional server demo guard, unset disables demo mode.",
+    "RADON_UW_STREAM_ENABLED": "Optional UW collector admission flag, unset keeps collection disabled.",
     "RADON_AI_CYCLE_DB_PATH": "optional isolated SQLite verification override; unset selects the production direct-cloud store",
     # Set by the unit itself, not by the env file: the fleet drop-in
     # radon-.service.d/common.conf and per-unit `Environment=` lines own these.

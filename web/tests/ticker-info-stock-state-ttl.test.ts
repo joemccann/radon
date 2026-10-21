@@ -7,6 +7,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Route tests inject provider transport here; shared admission is covered in
+// uw-counted-fetch.test.ts and must not be bypassed by production fallback.
+vi.mock("@/lib/uwCountedFetch", () => ({
+  countedUwFetch: (input: string | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const { readFileMock, writeFileMock, mkdirMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
   writeFileMock: vi.fn(async () => undefined),

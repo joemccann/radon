@@ -102,11 +102,27 @@ def _validate_anthropic(values: Dict[str, str]) -> ValidationResult:
 
 
 def _validate_unusual_whales(values: Dict[str, str]) -> ValidationResult:
-    return _get(
+    # A key validity check shares account admission but deliberately makes
+    # one uncached read. REST acceptance is not a websocket entitlement.
+    from utils import uw_governor, uw_budget
+
+    token = values["UW_TOKEN"]
+    try:
+        reservation = uw_governor.reserve(token, priority="interactive", timeout=3.0)
+    except uw_governor.AdmissionError:
+        return ValidationResult("error", "Unusual Whales validation is waiting for request capacity")
+    response = requests.get(
         "https://api.unusualwhales.com/api/market/economic-calendar",
-        {"Authorization": f"Bearer {values['UW_TOKEN']}"},
-        "Unusual Whales",
+        headers={"Authorization": f"Bearer {token}", "User-Agent": "radon/2.0"},
+        timeout=HTTP_TIMEOUT_S, allow_redirects=False,
     )
+    try:
+        uw_budget.record_hit(caller="credential-validation", endpoint="market/economic-calendar")
+        uw_governor.observe(token, response.status_code,
+                            getattr(response, "headers", {}), reservation=reservation)
+    except (uw_governor.AdmissionError, OSError, TimeoutError):
+        logger.warning("UW credential-check usage metadata could not be recorded")
+    return _verdict_from_status_code(response.status_code, "Unusual Whales")
 
 
 def _validate_cerebras(values: Dict[str, str]) -> ValidationResult:

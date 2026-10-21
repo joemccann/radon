@@ -90,6 +90,9 @@ ARTIFACTS = (
     Artifact(
         "services/radon-monitor.service", "/etc/systemd/system/radon-monitor.service", 0o644
     ),
+    Artifact("services/radon-uw-stream.service", "/etc/systemd/system/radon-uw-stream.service", 0o644),
+    Artifact("services/radon-uw-research.service", "/etc/systemd/system/radon-uw-research.service", 0o644),
+    Artifact("services/radon-uw-research.timer", "/etc/systemd/system/radon-uw-research.timer", 0o644),
     Artifact("services/radon-relay.service", "/etc/systemd/system/radon-relay.service", 0o644),
     Artifact(
         "services/radon-portfolio-sync.service",
@@ -169,6 +172,8 @@ ARTIFACTS = (
         "/etc/systemd/system/radon-monitor.service.d/runtime-container.conf",
         0o644,
     ),
+    Artifact("services/radon-uw-stream.service.d/runtime-container.conf", "/etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-uw-research.service.d/runtime-container.conf", "/etc/systemd/system/radon-uw-research.service.d/runtime-container.conf", 0o644),
     Artifact(
         "services/radon-newsfeed.service.d/runtime-container.conf",
         "/etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf",

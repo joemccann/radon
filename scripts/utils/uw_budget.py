@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import re
 import sys
@@ -254,14 +255,34 @@ def used(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> i
         return 0
 
 
-def remaining(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int:
-    return max(0, DAILY_LIMIT - used(path=path, now=now))
+def _configured_limit() -> int | None:
+    """Effective local quota policy; verified unlimited is represented as None.
+
+    DAILY_LIMIT/UNIVERSE_BLOCK_AT remain baseline constants for external
+    compatibility, not immutable Advanced entitlements. Actual admission
+    additionally reconciles provider receipts in the shared governor.
+    """
+    from utils.uw_governor import AdmissionError, _policy
+    try:
+        return _policy()["daily_limit"]
+    except AdmissionError:
+        return 0
+
+
+def remaining(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int | float:
+    if _read_unlocked(_path(path)).get("_unreadable"):
+        return 0
+    cap = _configured_limit()
+    return math.inf if cap is None else max(0, cap - used(path=path, now=now))
 
 
 def should_block_universe_scan(
     path: Optional[Path | str] = None, now: Optional[datetime] = None
 ) -> bool:
-    return used(path=path, now=now) >= UNIVERSE_BLOCK_AT
+    if _read_unlocked(_path(path)).get("_unreadable"):
+        return True
+    cap = _configured_limit()
+    return cap is not None and used(path=path, now=now) >= int(cap * 0.5)
 
 
 def usage_snapshot(
@@ -272,14 +293,15 @@ def usage_snapshot(
     unreadable = bool(state.get("_unreadable"))
     current = (not unreadable) and state.get("date") == quota_date(now)
     hits = used(path=path, now=now)
+    cap = _configured_limit()
     return {
         "state_unreadable": unreadable,
         "used": hits,
-        "limit": DAILY_LIMIT,
-        "remaining": max(0, DAILY_LIMIT - hits),
+        "limit": cap,
+        "remaining": None if cap is None and not unreadable else (0 if unreadable else max(0, cap - hits)),
         "reset_et": f"{RESET_HOUR_ET:02d}:00",
         "quota_day": quota_date(now),
-        "universe_scans_blocked": hits >= UNIVERSE_BLOCK_AT,
+        "universe_scans_blocked": should_block_universe_scan(path=path, now=now),
         "top_callers": _ranked(_tally(state, "by_caller")) if current else [],
         "top_endpoints": _ranked(_tally(state, "by_endpoint")) if current else [],
     }

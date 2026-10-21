@@ -19,6 +19,9 @@ type PinnedCapability = Capability | Record<string, Capability>;
  * missing on disk is stale. Values must match `export const radonCapability`.
  */
 const PINNED: Record<string, PinnedCapability> = {
+  "uw/capabilities": "read",
+  "uw/research": { GET: "read", POST: "read.spawn" },
+  "uw/research/events": "internal",
   "admin/demo-users": { GET: "admin", POST: "admin" },
   "admin/edge-health": "admin",
   "admin/health": "admin",
