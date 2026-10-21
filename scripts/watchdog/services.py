@@ -367,6 +367,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # most every 5 min while upstream frames flow and `error` after 3 failed
     # dials or 5 min of silence; 24/7 feed, so one 15-min window (three missed
     # heartbeats) in every state. Mirrors web/lib/serviceHealthWindows.ts.
+    "uw-stream":        {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
+    "uw-research":      {"open": 3 * _HOUR, "closed": 3 * _HOUR, "requires_ib": False},
     "mktnews-hub":      {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # Event-driven writer when a replica file exists. Match the 24h window
     # from web/lib/serviceHealthWindows.ts; applicability is checked at
@@ -558,6 +560,7 @@ BUCKETS: dict[str, list[str]] = {
         "ib-realtime-relay",
         # Headlines hub: 5-min ok heartbeat while upstream frames flow (R-459).
         "mktnews-hub",
+        "uw-stream",
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",
@@ -572,6 +575,7 @@ BUCKETS: dict[str, list[str]] = {
         "grok-page-responder",
     ],
     "daily": [
+        "uw-research",
         "cash-flow-sync",
         # Daily 07:40 UTC Grok CLI/model track-latest upgrade. A missed
         # promote leaves the live symlink on last-known-good; the 26h
@@ -766,6 +770,12 @@ def freshness_window_for(service: str, market_state: str) -> int:
 
 def is_service_monitored(service: str) -> bool:
     """Whether the service is applicable to this host's active architecture."""
+    if service == "uw-stream":
+        # Optional collector is applicable after first activation; a stopped
+        # activated collector retains its snapshot and must still alarm.
+        return (REPLICA_PATH.parent / "uw_stream" / "snapshot.json").is_file()
+    if service == "uw-research":
+        return (REPLICA_PATH.parent / "uw_research").is_dir()
     if service == "replica-watchdog":
         return REPLICA_PATH.is_file()
     return True

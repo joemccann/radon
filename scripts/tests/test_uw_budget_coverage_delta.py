@@ -129,20 +129,15 @@ class TestIvrankUwHitsAreCounted:
         monkeypatch.setattr(uw_budget, "BUDGET_PATH", budget)
         monkeypatch.setenv("UW_TOKEN", "t0ken")
 
-        class _Resp:
-            @staticmethod
-            def read():
-                return json.dumps({"data": []}).encode()
+        import requests
 
-            def __enter__(self):
-                return self
+        def response(*_args, **_kwargs):
+            resp = requests.Response()
+            resp.status_code = 200
+            resp._content = b'{"data": []}'
+            return resp
 
-            def __exit__(self, *_a):
-                return False
-
-        import urllib.request
-
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: _Resp())
+        monkeypatch.setattr(requests.Session, "get", response)
 
         iv._uw_get("/api/stock/SPY/iv-rank")
         iv._uw_get("/api/stock/SPY/iv-rank?date=2026-08-21")

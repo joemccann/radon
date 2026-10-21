@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// Route tests inject provider transport here; shared admission is covered in
+// uw-counted-fetch.test.ts and must not be bypassed by production fallback.
+vi.mock("@/lib/uwCountedFetch", () => ({
+  countedUwFetch: (input: string | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 /**
  * Smoke tests for the remaining miscellaneous routes:
  *   - GET /api/menthorq/cta

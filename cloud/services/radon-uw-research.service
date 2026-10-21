@@ -1,0 +1,26 @@
+[Unit]
+Description=Radon UW Advanced research enrichment snapshot
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+Environment=RADON_DB_NO_REPLICA=1
+Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
+LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
+ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/secret_store.py
+Environment=RADON_UW_CALLER=uw-research
+ExecStart=/home/radon/radon/.venv/bin/python scripts/uw_research.py --scheduled --json
+TimeoutStartSec=900
+TimeoutStopSec=30
+MemoryMax=512M
+TasksMax=64
+StandardOutput=journal
+StandardError=journal

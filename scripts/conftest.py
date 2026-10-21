@@ -90,3 +90,12 @@ def _isolate_robinhood_credentials(tmp_path, monkeypatch):
         reset = getattr(rh, "_reset_process_state", None)
         if reset is not None:
             reset()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_uw_governor(tmp_path, monkeypatch):
+    """Account admission never writes the developer/runner's live state."""
+    monkeypatch.setenv("RADON_UW_GOVERNOR_PATH", str(tmp_path / "uw_governor.sqlite3"))
+    for name in ("RADON_UW_LIMITS_VERIFIED", "RADON_UW_REQUESTS_PER_MINUTE",
+                 "RADON_UW_DAILY_LIMIT", "RADON_UW_QUOTA_PERIOD"):
+        monkeypatch.delenv(name, raising=False)

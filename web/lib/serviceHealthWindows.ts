@@ -500,6 +500,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // of silence. The upstream is a 24/7 feed, so one uniform 15-min window
   // (three missed heartbeats) applies in every market state. No row until
   // the unit is installed: the watchdog reads no-row as dormant.
+  "uw-stream": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
+  "uw-research": { open: 3 * HOUR, extended: 3 * HOUR, closed: 3 * HOUR, category: "scheduled", requires_ib: false },
   "mktnews-hub": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by

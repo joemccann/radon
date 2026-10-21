@@ -100,7 +100,13 @@ readonly DEPLOY_TIMEOUT="${DEPLOY_TIMEOUT:-900}"
 readonly DEPLOY_KILL_AFTER="${DEPLOY_KILL_AFTER:-30}"
 readonly BUN_VERSION="1.3.14"
 
-readonly SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+# Optional research collector joins subsequent release transactions only once
+# activated. A first deploy installs its code/unit before channel admission.
+SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+if systemctl is-active --quiet radon-uw-stream.service; then
+  SERVICES+=(radon-uw-stream)
+fi
+readonly SERVICES
 UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.

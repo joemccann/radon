@@ -1,5 +1,6 @@
 "use client";
 
+import { UwResearchProvider } from "@/lib/UwResearchContext";
 import { IBStatusProvider } from "@/lib/IBStatusContext";
 import { OrderActionsProvider } from "@/lib/OrderActionsContext";
 import { TickerDetailProvider } from "@/lib/TickerDetailContext";
@@ -41,7 +42,7 @@ export default function Providers({
                     Router navigations never tear the connection down. */}
                 <RealtimePricesProvider>
                   <OrderActionsProvider>
-                    <TickerDetailProvider>{children}</TickerDetailProvider>
+                    <UwResearchProvider><TickerDetailProvider>{children}</TickerDetailProvider></UwResearchProvider>
                   </OrderActionsProvider>
                 </RealtimePricesProvider>
               </IBStatusProvider>

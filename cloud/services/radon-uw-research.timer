@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh bounded UW research universe hourly
+
+[Timer]
+OnCalendar=*-*-* *:07:00
+RandomizedDelaySec=120
+Persistent=true
+Unit=radon-uw-research.service
+
+[Install]
+WantedBy=timers.target

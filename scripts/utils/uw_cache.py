@@ -5,10 +5,13 @@ data/uw_http_cache/ and use longer TTLs for slow-moving endpoints.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import time
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -168,6 +171,8 @@ def prune_disk_cache(
         except OSError:
             continue
         mtime = stat.st_mtime
+        if path.suffix == ".lock":
+            continue
         if clock - mtime > _MAX_TTL_SECONDS:
             _unlink_quiet(path)
             removed += 1
@@ -212,15 +217,42 @@ def set_disk_cached(
     except OSError:
         return
     path = _disk_path(key)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = None
     try:
-        with open(tmp, "w") as handle:
+        fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=CACHE_DIR)
+        tmp = Path(temporary)
+        with os.fdopen(fd, "w") as handle:
             json.dump(payload, handle)
         os.replace(tmp, path)
     except (OSError, TypeError, ValueError):
         try:
-            tmp.unlink()
+            if tmp is not None:
+                tmp.unlink()
         except OSError:
             pass
         return
     prune_disk_cache(now=clock)
+
+@contextmanager
+def singleflight(key: str, timeout: float = 10.0):
+    """Cross-process per-key request collapse; the caller rechecks cache inside.
+
+    Locks live beside the cache and retain their inode while requests may
+    reference them. Only 256 hash stripes exist, bounding lock-file count independently of keys. Waiting is bounded and never holds the admission DB.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CACHE_DIR / ("flight-" + _disk_filename(key)[:2] + ".lock")
+    with path.open("a+") as handle:
+        deadline = time.monotonic() + min(max(float(timeout), 0), 10.0)
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("UW cache request is already in progress") from None
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
