@@ -13588,12 +13588,20 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 }
 
 .ticket-risk-payoff-axis {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 2px;
+  position: relative;
+  height: 12px;
+  margin-top: 2px;
   font-family: var(--font-mono);
   font-size: 8px;
+  line-height: 12px;
   color: var(--text-muted);
+}
+
+.ticket-risk-payoff-axis span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .order-builder {
