@@ -302,6 +302,45 @@ def test_setup_installs_container_dropins_before_enabling_or_starting_units() ->
     assert calls.index(installers[0]) < calls.index("start_services")
 
 
+def test_a_missing_dropin_for_a_key_loading_unit_aborts_the_bootstrap() -> None:
+    """The requirement must be read from trusted bytes, not the checkout.
+
+    The installer decided whether a drop-in was needed with a `-f` test
+    against the radon-writable checkout and skipped silently when it was
+    absent. Deleting `radon-api.service.d/runtime-container.conf` from the
+    checkout therefore left the provenance-checked BASE unit installed and
+    started with `User=radon` and the decrypted master key, which is the
+    exact window this installer exists to close.
+
+    The installed base unit under `/etc/systemd/system` is already staged
+    from the committed blob, so whether it carries `LoadCredentialEncrypted`
+    is a trusted fact. A key-loading unit whose drop-in is missing has to be
+    a hard stop.
+    """
+    text = SETUP.read_text(encoding="utf-8")
+    calls = _setup_main_calls(text)
+    installers = [
+        name for name in calls if "runtime-container.conf" in _setup_function_body(text, name)
+    ]
+    body = _setup_function_body(text, installers[0])
+    assert "LoadCredentialEncrypted" in body, (
+        "the installer must derive the requirement from the installed base unit"
+    )
+    assert "/etc/systemd/system/" in body, (
+        "the requirement must be read from the installed unit, not the checkout"
+    )
+    assert "log_error" in body and "return 1" in body, (
+        "a key-loading unit with no drop-in must abort, not continue"
+    )
+    # Scoped to the drop-in decision: the leading `|| continue` in the loop
+    # skips timers, not drop-ins. A unit with no encrypted credential and no
+    # drop-in is still skipped legitimately; what must not happen is reaching
+    # that skip on a key-loading one, so the refusal is decided first.
+    decision = body[body.index('installed="/etc/systemd/system/'):body.index('target=')]
+    assert "return 1" in decision, decision
+    assert decision.index("return 1") < decision.index("|| continue"), decision
+
+
 @pytest.mark.parametrize("unit", _key_loading_units())
 def test_setup_covers_every_key_loading_unit(unit: str) -> None:
     """The installer walks SERVICE_FILES, so every unit that loads the key must
