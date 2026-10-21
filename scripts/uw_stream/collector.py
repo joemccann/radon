@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .config import Config
-from .store import Store
+from .store import Store, read_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ def mirror_compact(snapshot: dict) -> None:
         logger.warning("UW compact mirror unavailable")
 
 
-def run(config: Config, token: str | None = None, *, stop: threading.Event | None = None, connect=None, mirror=mirror_compact) -> None:
+def run(config: Config, token: str | None = None, *, stop: threading.Event | None = None, connect=None, mirror=mirror_compact, recovery_client_factory=None) -> None:
     stop = stop or threading.Event()
     if connect is None and config.enabled:
         from websockets.sync.client import connect
@@ -160,8 +160,33 @@ def run(config: Config, token: str | None = None, *, stop: threading.Event | Non
                 if store is not None:
                     store.close()
 
+        recovery_thread = None
+        def recovery():
+            from .reconcile import reconcile_cycle
+            from clients.uw_client import UWClient
+            factory = recovery_client_factory or (lambda: UWClient(token=token, timeout=5, max_retries=0))
+            def emit(channel, payload, received_at):
+                if stop.is_set():
+                    return
+                try:
+                    events.put_nowait((channel, payload, received_at))
+                except queue.Full:
+                    overflow.set()
+            offset = 0
+            try:
+                with factory() as client:
+                    while not stop.is_set():
+                        snapshot = read_snapshot(config.directory / "snapshot.json")
+                        offset += reconcile_cycle(config.channels, snapshot, time.time(), client, emit, offset=offset, stop=stop)
+                        stop.wait(60)
+            except Exception:
+                logger.warning("UW completed-minute reconciliation unavailable; live gaps remain unconfirmed")
+
         writer_thread = threading.Thread(target=writer, name="uw-stream-writer")
         writer_thread.start()
+        if config.enabled and token and any(c.startswith(("greek_flow:", "greek_flow_expiry:")) for c in config.channels):
+            recovery_thread = threading.Thread(target=recovery, name="uw-greek-recovery")
+            recovery_thread.start()
         attempt = 0
         try:
             if not config.enabled:
@@ -216,6 +241,10 @@ def run(config: Config, token: str | None = None, *, stop: threading.Event | Non
                         stop.wait(min(60, 2 ** attempt) + random.uniform(0, 1))
         finally:
             stop.set()
+            if recovery_thread is not None:
+                recovery_thread.join(timeout=7)
+                if recovery_thread.is_alive():
+                    raise RuntimeError("Research recovery did not finish its bounded request")
             writer_thread.join(timeout=15)
             if writer_thread.is_alive():
                 raise RuntimeError("Research collector did not finish its bounded flush")

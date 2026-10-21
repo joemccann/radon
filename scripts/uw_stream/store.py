@@ -111,6 +111,11 @@ class Store:
                             self.model.disconnect(received_at)
                         elif event == "invalid":
                             self.model.state["metrics"]["invalid"] += 1
+                        elif event == "reconciliation_unavailable":
+                            meta = self.model.state["channels"].get(payload.get("channel"))
+                            if meta is not None:
+                                meta["reconciliation_status"] = "unavailable; retained observations unconfirmed"
+                            self.model.state["metrics"]["reconciliation_failures"] = self.model.state["metrics"].get("reconciliation_failures", 0) + 1
                         continue
                     encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False)
                     source_id = payload.get("id") or payload.get("trade_id") or payload.get("accession_number")
@@ -121,7 +126,10 @@ class Store:
                     cursor = self.db.execute("INSERT OR IGNORE INTO events (received_at,channel,payload,identity) VALUES (?,?,?,?)", (received_at, channel, encoded, identity))
                     if cursor.rowcount == 0:
                         continue
-                    self.model.apply(channel, payload, received_at, cursor.lastrowid)
+                    if channel == "__reconcile__":
+                        self.model.reconcile_greek(payload.get("channel"), payload.get("rows") or [], received_at, cursor.lastrowid)
+                    else:
+                        self.model.apply(channel, payload, received_at, cursor.lastrowid)
                     self.model.state["metrics"]["persisted"] += 1
                     self.model.state["metrics"]["persisted_bytes"] = self.model.state["metrics"].get("persisted_bytes", 0) + len(encoded.encode())
                 self.model.state["metrics"]["queue_depth"] = queue_depth
