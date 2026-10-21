@@ -244,7 +244,13 @@ export default function TicketRiskBlock({
           </svg>
           <div className="ticket-risk-payoff-axis">
             {curve.breakevens.map((b) => (
-              <span key={b}>{b.toFixed(2)}</span>
+              <span
+                key={b}
+                data-testid="payoff-breakeven-label"
+                style={{ left: `${(geometry.toX(b) / CURVE_W) * 100}%` }}
+              >
+                {b.toFixed(2)}
+              </span>
             ))}
           </div>
         </div>
