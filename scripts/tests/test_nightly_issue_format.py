@@ -1072,3 +1072,34 @@ class TestSanitizeLongKeyPrefixes:
         out = nif.sanitize(f"set {key}={value} here")
         assert value not in out, out
         assert "API_KEY" in out, out
+
+
+class TestSanitizeTripleDelimitedValues:
+    """A triple-delimited value (Python or TOML) was matched as an EMPTY
+    two-quote value, so the credential on the FOLLOWING lines was published
+    to a PUBLIC body (DS-2026-10-20-13). Values are invented."""
+
+    @pytest.mark.parametrize(
+        "key,sep,delim",
+        [
+            ("TOKEN", " = ", '"""'),
+            ("DB_PASSWORD", " = ", "'''"),
+            ("api_key", " = ", '"""'),
+            ("UW_TOKEN", ": ", '"""'),
+        ],
+    )
+    def test_triple_delimited_value_is_redacted(self, key, sep, delim):
+        text = f"the excerpt had\n{key}{sep}{delim}\nqzNOTREALopaque1234\n{delim}\nand stopped"
+        out = nif.sanitize(text)
+        assert "NOTREAL" not in out, out
+        assert out.endswith("and stopped"), out
+
+    def test_a_following_key_survives_the_triple_delimited_value(self):
+        text = 'TOKEN = """\nqzNOTREALopaque1234\n"""\nnext_label = keepme\n'
+        out = nif.sanitize(text)
+        assert "NOTREAL" not in out, out
+        assert "keepme" in out, out
+
+    def test_single_line_and_empty_quoted_values_are_unchanged(self):
+        assert nif.sanitize('TOKEN = ""') == "TOKEN = [REDACTED]"
+        assert nif.sanitize('TOKEN = "qzNOTREALopaque1234"') == "TOKEN = [REDACTED]"

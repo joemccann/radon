@@ -37,7 +37,11 @@ import math
 import re
 import sys
 
-from credential_redaction import EXECUTION_ID_PATTERNS, build_block_scalar_re
+from credential_redaction import (
+    EXECUTION_ID_PATTERNS,
+    build_block_scalar_re,
+    build_triple_quoted_assignment_re,
+)
 
 HEADING_DISCOVERED = "Issue discovered"
 HEADING_DONE = "What was done to fix it"
@@ -102,6 +106,11 @@ _SECRET_ASSIGN_RE = re.compile(
 # The block-scalar structure is shared with the canonical scrubber so the two
 # cannot drift again; this module keeps its own key alphabet.
 _SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_BLOCK_KEY_NAME)
+# A triple-delimited value spans lines; the single-delimiter rule above read it
+# as an EMPTY two-quote value and left the credential on the following lines in
+# the body. Structure shared with the canonical scrubber, key alphabet and
+# label local, like the block-scalar rule.
+_SECRET_TRIPLE_ASSIGN_RE = build_triple_quoted_assignment_re(_SECRET_KEY_NAME)
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
@@ -237,6 +246,9 @@ def sanitize(text: str) -> str:
     text = _SECRET_BLOCK_SCALAR_RE.sub(
         lambda m: f"{m.group('indent')}{m.group('lead')}{m.group('key')}{REDACTED}\n",
         text,
+    )
+    text = _SECRET_TRIPLE_ASSIGN_RE.sub(
+        lambda m: f"{m.group(1)}{REDACTED}", text
     )
     text = _URL_RE.sub(REDACTED, text)
     text = _ROUTE_RE.sub(REDACTED, text)
