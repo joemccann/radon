@@ -24,6 +24,10 @@ readonly RADON_REPO="https://github.com/joemccann/radon.git"
 readonly CLOUD_REPO="git@github.com:joemccann/radon-cloud.git"  # legacy only
 readonly PYTHON_BIN="python3.13"
 readonly BUN_VERSION="1.3.14"
+# Oct 21 2026 Node.js security release on the 22.x line (CVE-2026-111497 and
+# the other HIGH fixes in that release). Exact NodeSource package so a rerun
+# cannot stay on an older 22.x or on EOL 20.
+readonly NODE_VERSION="22.23.4"
 readonly VENV_DIR="${RADON_DIR}/.venv"
 readonly CADDY_CONFIG_PATH="${RADON_CADDY_CONFIG_PATH:-/etc/caddy/Caddyfile}"
 readonly CADDY_LOG_DIR="${RADON_CADDY_LOG_DIR:-/var/log/caddy}"
@@ -706,31 +710,23 @@ install_python313() {
 }
 
 install_node22() {
-  local need_install=true
-
-  if command -v node &>/dev/null; then
-    local node_major
-    node_major=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [[ "$node_major" -ge 20 ]]; then
-      need_install=false
-      log_warn "Node.js $(node --version) already installed -- skipping"
-    fi
+  if command -v node &>/dev/null && [[ "$(node --version)" == "v${NODE_VERSION}" ]]; then
+    log_warn "Node.js v${NODE_VERSION} already installed -- skipping"
+    return
   fi
 
-  if $need_install; then
-    log_info "Installing Node.js 22 from nodesource..."
-    pin_apt_keyring \
-      "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-      /etc/apt/keyrings/nodesource.gpg \
-      "$NODESOURCE_GPG_FINGERPRINT" \
-      "NodeSource"
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-      | tee /etc/apt/sources.list.d/nodesource.list > /dev/null
-    apt update
-    apt install -y nodejs
-    log_success "Node.js 22 installed"
-  fi
+  log_info "Installing Node.js ${NODE_VERSION} from nodesource..."
+  pin_apt_keyring \
+    "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+    /etc/apt/keyrings/nodesource.gpg \
+    "$NODESOURCE_GPG_FINGERPRINT" \
+    "NodeSource"
+  echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+    | tee /etc/apt/sources.list.d/nodesource.list > /dev/null
+  apt update
+  apt install -y nodejs="${NODE_VERSION}-1nodesource1"
+  log_success "Node.js ${NODE_VERSION} installed"
 }
 
 install_bun() {
@@ -774,13 +770,9 @@ validate_versions() {
   if ! command -v node &>/dev/null; then
     log_error "node not found"
     failed=true
-  else
-    local node_major
-    node_major=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [[ "$node_major" -lt 20 ]]; then
-      log_error "Node.js version must be >= 20 (found $(node --version))"
-      failed=true
-    fi
+  elif [[ "$(node --version)" != "v${NODE_VERSION}" ]]; then
+    log_error "Node.js version must be v${NODE_VERSION} (found $(node --version))"
+    failed=true
   fi
 
   if ! command -v bun &>/dev/null; then

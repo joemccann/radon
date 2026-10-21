@@ -14,7 +14,7 @@ env -i PATH="$PATH" HOME="$HOME" npm --prefix web/tester-army exec -- playwright
 env -i PATH="$PATH" HOME="$HOME" npm --prefix web/tester-army test
 ```
 
-Requires Node >=22.12 and Bun. `pretest` regenerates ignored `fixtures.json`
+Requires Node >=22.23.4 and Bun. `pretest` regenerates ignored `fixtures.json`
 from the existing Clear Playwright fixture builders. This avoids native ESM
 resolution errors for extensionless application TypeScript imports and avoids
 committing a duplicated 1.3 MB data snapshot. `bun web/tester-army/generate-fixtures.ts`

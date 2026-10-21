@@ -472,6 +472,8 @@ successfully, and the stated schema and core-service checks were green.
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
+Host Node.js is the NodeSource package `22.23.4` (`nodejs=22.23.4-1nodesource1`). `install_node22` keeps the binary only when `node --version` is exactly `v22.23.4`. App and chart images pin `node:22.23.4-bookworm-slim` by digest in `docker/app/Dockerfile.node` and `docker/app/Dockerfile.python`. Re-run `setup-vps.sh` on a host still on an older binary.
+
 Its `open_firewall` RESETS ufw to the declared app ruleset (byte-for-byte
 mirror of `scripts/host-firewall.sh`, pinned by `tests/test_host_firewall.py`):
 no blanket `tailscale0` allow, 8321 only from `10.0.0.4` and

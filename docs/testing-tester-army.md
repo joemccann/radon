@@ -9,7 +9,7 @@ independent browser checks; neither is a dependency of the production deploy job
 
 ## Install and run
 
-Use Node.js 22.12 or newer and the repository's Bun version. From the root:
+Use Node.js 22.23.4 or newer and the repository's Bun version. CI pins 24.22.1. From the root:
 
 ```sh
 env -i PATH="$PATH" HOME="$HOME" bun install --frozen-lockfile
