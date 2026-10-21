@@ -28,48 +28,26 @@ afterEach(() => {
 });
 
 describe("countedUwFetch", () => {
-  it("records one budget hit per resolved UW fetch", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
-
-    await countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/info");
-    await countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/stock-state");
-    await countedUwFetch("https://api.unusualwhales.com/api/news/headlines");
-
-    expect(radonFetchMock).toHaveBeenCalledTimes(3);
-    expect(radonFetchMock).toHaveBeenCalledWith(
-      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Finfo",
-      expect.objectContaining({ method: "POST" }),
-    );
-    // The spent endpoint travels with the hit — a bare total cannot say
-    // which UW path browsing traffic burned.
-    expect(radonFetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Finfo",
-      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Fstock-state",
-      "/uw/usage/record?caller=web&endpoint=news%2Fheadlines",
-    ]);
+  it("admits requests through Python before any provider fetch", async () => {
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    radonFetchMock.mockResolvedValueOnce({status:200,data:{data:[{ticker:"AAPL"}]}} as never);
+    const res = await countedUwFetch("https://api.unusualwhales.com/api/news/headlines?ticker=AAPL&limit=10",{headers:{Authorization:"Bearer never-forward-me"}});
+    expect(fetch).not.toHaveBeenCalled();
+    expect(radonFetchMock).toHaveBeenCalledWith("/uw/request",expect.objectContaining({method:"POST",body:JSON.stringify({endpoint:"news/headlines",params:{ticker:"AAPL",limit:"10"}})}));
+    expect(JSON.stringify(radonFetchMock.mock.calls)).not.toContain("never-forward-me");
+    expect(await res.json()).toEqual({data:[{ticker:"AAPL"}]});
   });
-
-  it("records nothing when the UW request never produced a response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("network down");
-      }),
-    );
-
-    await expect(
-      countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/info"),
-    ).rejects.toThrow("network down");
-    expect(radonFetchMock).not.toHaveBeenCalled();
+  it("preserves provider rejection status without quota bypass", async()=>{
+    radonFetchMock.mockResolvedValueOnce({status:429,data:{error:"unavailable"}} as never);
+    const res=await countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/info");
+    expect(res.status).toBe(429); expect(res.ok).toBe(false);
   });
-
-  it("never lets a failed budget record break the UW data path", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
-    radonFetchMock.mockRejectedValueOnce(new Error("fastapi down"));
-
-    const res = await countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/info");
-
-    expect(res.status).toBe(200);
+  it("fails closed when shared admission is unavailable",async()=>{
+    radonFetchMock.mockRejectedValueOnce(new Error("admission unavailable"));
+    await expect(countedUwFetch("https://api.unusualwhales.com/api/stock/AAPL/info")).rejects.toThrow("admission unavailable");
+  });
+  it.each(["https://other.test/api/stock/AAPL/info","http://api.unusualwhales.com/api/stock/AAPL/info","https://secret@api.unusualwhales.com/api/stock/AAPL/info"])("refuses unsafe URL %s",async url=>{
+    await expect(countedUwFetch(url)).rejects.toThrow(); expect(radonFetchMock).not.toHaveBeenCalled();
   });
 });
 

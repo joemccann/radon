@@ -1,4 +1,5 @@
 "use client";
+import UwResearchPanel from "./UwResearchPanel";
 import ErrorToast from "@/components/ErrorToast";
 
 import { ArrowDownRight, ArrowUpRight, Minus, RefreshCw } from "lucide-react";
@@ -34,7 +35,7 @@ export default function TickerFlowReport({ ticker }: Props) {
 
   if (hasMounted && isMobile) {
     return (
-      <MobileTickerFlowReport
+      <><UwResearchPanel ticker={ticker} /><MobileTickerFlowReport
         ticker={ticker}
         data={data}
         verdict={verdict}
@@ -43,12 +44,13 @@ export default function TickerFlowReport({ ticker }: Props) {
         isAnalyzing={isAnalyzing}
         cachedAge={cachedAge}
         onRefresh={refresh}
-      />
+      /></>
     );
   }
 
   return (
     <div className="ticker-flow-report" data-testid="ticker-flow-report">
+      <UwResearchPanel ticker={ticker} />
       <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} cachedAge={cachedAge} onRefresh={refresh} />
 
       {error && <ErrorToast message={flowReportErrorCopy(error)} onRetry={() => void refresh()} />}

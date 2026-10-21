@@ -300,3 +300,7 @@ data/schema_version.*
 /data/tradingview_mcp_token.json
 /data/tradingview_mcp_token.json.lock
 /data/.tradingview-*
+
+# Private UW research stream journal, materialization and lock.
+/data/uw_stream/
+/data/uw_research/

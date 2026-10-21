@@ -278,39 +278,20 @@ UW_REPAIR_MAX_LOOKUPS = 25
 
 
 def _uw_get(path: str) -> dict[str, Any]:
-    """Bounded UW GET. Never log the response body — 401 bodies echo the token.
-
-    R-152: this was a raw `urlopen` with no `record_hit`, so every ivrank UW
-    hit was invisible to `/uw/usage`, to `top_callers` and to
-    `should_block_universe_scan` — the R-062 hole REL-036 closed for the six
-    Next.js routes, reopened by a job merged in this delta.
-    """
-    from urllib.request import Request, urlopen
+    """One admitted UW read with shared pacing, retries and attribution."""
+    from urllib.parse import parse_qs, urlsplit
+    from clients.uw_client import UWClient
 
     token = _uw_token()
     if not token:
         raise ValueError("ivrank: UW_TOKEN is not set")
-    req = Request(
-        f"{UW_BASE_URL}{path}",
-        headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
-    )
-    try:
-        with urlopen(req, timeout=UW_TIMEOUT_S) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    finally:
-        _count_uw_hit(path)
-
-
-def _count_uw_hit(path: str) -> None:
-    """Attribute one UW request to the shared daily budget. Never raises."""
-    try:
-        from utils import uw_budget
-
-        uw_budget.record_hit(
-            caller="ivrank", endpoint=path.split("?", 1)[0]
-        )
-    except Exception:  # noqa: BLE001 — the gauge must never fail the job
-        pass
+    parsed = urlsplit(path)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/api/"):
+        raise ValueError("ivrank: UW path is invalid")
+    params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+    with UWClient(token=token, timeout=UW_TIMEOUT_S, caller="ivrank") as client:
+        return client.get(parsed.path.removeprefix("/api/"), params=params,
+                          priority="background", use_cache=False)
 
 
 def _real_uw_fetch() -> list[dict[str, Any]]:

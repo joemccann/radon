@@ -1,4 +1,5 @@
 "use client";
+import UwCapabilities from "./UwCapabilities";
 
 import ErrorToast from "@/components/ErrorToast";
 
@@ -251,6 +252,7 @@ export default function CredentialsPanel() {
                   <p className="preferences-row__description">{service.note}</p>
                 ) : null}
 
+                {service.id === "unusual_whales" ? <UwCapabilities /> : null}
                 <div className="credentials-fields">
                   {service.fields.map((field) => (
                     <div className="credentials-field" key={field.name}>
