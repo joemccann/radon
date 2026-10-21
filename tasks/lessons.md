@@ -1302,3 +1302,9 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - A global drafting instruction does not enforce generated PDF newsfeed summaries. Put the scoring/rewrite rule at the pipeline's final title/body boundary, bind approval to the exact copy, preserve factual verification and keep detailed audits separate from published text.
 - Mandatory text checks precede optional chart work when charts cannot edit the checked text. Preserve trusted code-established report-date grounding during editorial rewrites; never let a stylistic revision introduce a new date or fact.
+
+
+## 2026-10-21: Provider permission does not authorize public fixture redistribution
+
+- Check repository visibility before committing provider captures. Approval for private automation, storage and operator display does not imply permission to publish history in Git. Use explicitly synthetic fixtures in public repositories and retain real-source captures and independent reference checks privately.
+- Removing a captured file in a later commit does not remove it from branch history. Before the first push, build the public commit directly on the public base and verify that no captured-data commit or blob is reachable from the pushed branch.

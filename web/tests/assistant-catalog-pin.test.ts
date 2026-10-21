@@ -100,6 +100,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "ai-cycle": "read",
   "llm-token-index": "read",
   "asia-export-lead": "read",
+  "high-low-line": "read",
   "margin-debt": "read",
   "menthorq/[command]/image": "read",
   "menthorq/cta": "read",

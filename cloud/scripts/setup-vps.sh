@@ -243,6 +243,8 @@ readonly SERVICE_FILES=(
   radon-vix-model-spread.timer
   radon-asia-export-lead.service
   radon-asia-export-lead.timer
+  radon-high-low-line.service
+  radon-high-low-line.timer
 )
 
 

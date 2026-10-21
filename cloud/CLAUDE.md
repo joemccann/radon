@@ -44,6 +44,18 @@ share a 26-hour freshness window. Source failures retain the last good
 snapshot. See [the indicator specification](../docs/indicators/exports.md).
 The MSCI forward-EPS comparison remains unavailable pending licensed access.
 
+## NYSE common-stock High-Low sampling
+
+`radon-high-low-line.service` and `.timer` are setup-listed and manifest-pinned;
+normal deploy installs both and enables daily 00:30 UTC sampling, weekends included,
+with a 300-second service deadline. Approved StockCharts `!NEWHINYC`/`!NEWLONYC`
+history is fetched with honest `radon/2.0` HTTP, no new credentials. Migration 0101
+stores daily and weekly rows; snapshot/health key `high-low-line` has a 26-hour
+window. Published fractional readings are preserved, cumulative baseline is zero
+before 2003-01-02, and errors preserve the last good snapshot. Source lag is a
+payload condition separate from writer health. API use is operator-only; no demo
+mirror. Contract: [High-Low Line](../docs/indicators/high-low.md).
+
 ## Runtime Planes
 
 Production is three planes. Do not collapse them.

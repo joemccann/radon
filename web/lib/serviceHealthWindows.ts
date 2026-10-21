@@ -175,6 +175,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // snapshot + heartbeat still write). Uniform 26h window: no weekend gap.
   "margin-debt": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // StockCharts common-stock breadth: daily sampling and weekend writer heartbeats.
+  "high-low-line": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // Daily customs-feed sampling includes weekends; source periods remain monthly.
   "asia-export-lead": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 

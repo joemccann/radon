@@ -819,19 +819,24 @@ def upsert_oi_changes(scan_time: str, payload: dict[str, Any]) -> None:
 SCAN_SNAPSHOT_KEEP = 30
 
 
-def upsert_scan_snapshot(service: str, scan_time: str, payload: dict[str, Any]) -> None:
+def upsert_scan_snapshot(service: str, scan_time: str, payload: dict[str, Any], *, bounded: bool = False) -> None:
     """Generic latest-scan mirror for whole-file scans (scan_snapshots table:
     leap-scan, garch-scan, flow-surprise). Prunes to the newest
-    SCAN_SNAPSHOT_KEEP rows per service so the table stays bounded."""
-    db = get_db()
-    db.execute(
+    SCAN_SNAPSHOT_KEEP rows per service so the table stays bounded.
+
+    bounded=True opts large-history collectors into socket-bounded HTTP;
+    existing callers retain their connection contract.
+    """
+    db = None if bounded else get_db()
+    execute = _hrana_execute if bounded else db.execute
+    execute(
         """
         INSERT OR REPLACE INTO scan_snapshots (service, scan_time, payload)
         VALUES (?, ?, ?)
         """,
         (service, scan_time, json.dumps(payload)),
     )
-    db.execute(
+    execute(
         """
         DELETE FROM scan_snapshots
         WHERE service = ? AND scan_time NOT IN (
@@ -843,7 +848,8 @@ def upsert_scan_snapshot(service: str, scan_time: str, payload: dict[str, Any]) 
         """,
         (service, service, SCAN_SNAPSHOT_KEEP),
     )
-    db.commit()
+    if db is not None:
+        db.commit()
 
 
 def upsert_scanner_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
@@ -1951,6 +1957,31 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
             tuple(params),
         )
     db.commit()
+
+
+def upsert_high_low_line_rows(rows: list[dict[str, Any]], *, interval: str,
+                              recorded_at: Optional[str] = None) -> None:
+    """Idempotent daily/weekly breadth revisions via bounded direct-cloud HTTP.
+
+    Each chunk opens a bounded Hrana pipeline and closes it; no replica or
+    thousands-of-statements stream, including full 2003-onward revisions.
+    """
+    if interval not in {"daily", "weekly"}:
+        raise ValueError("Invalid High-Low calculation interval")
+    if not rows:
+        return
+    fields = ["date", "period_start", "period_end", "period_complete", "highs", "lows",
+              "net", "cumulative", "rsi14", "stoch_rsi14", "sar", "sar_direction",
+              "reset_to_zero", "source_fractional"]
+    columns = ["interval", *fields, "recorded_at"]
+    stamp = recorded_at or _now_iso()
+    updates = ", ".join(f"{key} = excluded.{key}" for key in columns if key not in {"interval", "period_start"})
+    for offset in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[offset:offset + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(" + ", ".join("?" for _ in columns) + ")" for _ in chunk)
+        args = tuple(value for row in chunk for value in [interval, *(row.get(key) for key in fields), stamp])
+        _hrana_execute(f"INSERT INTO high_low_line_history ({', '.join(columns)}) VALUES {placeholders} "
+                       f"ON CONFLICT(interval, period_start) DO UPDATE SET {updates}", args)
 
 
 def upsert_asia_export_lead_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:

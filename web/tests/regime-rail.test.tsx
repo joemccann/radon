@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 37 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(37);
-    expect(new Set(REGIME_TABS).size).toBe(37);
+  it("flattens to all 38 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(38);
+    expect(new Set(REGIME_TABS).size).toBe(38);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "high-low", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports"].sort(),
     );
   });
 
@@ -79,6 +79,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.short).toBe("Positioning");
     expect(groupOf.ats).toBe("Positioning");
     expect(groupOf.breadth).toBe("Breadth & sentiment");
+    expect(groupOf["high-low"]).toBe("Breadth & sentiment");
     expect(groupOf["ma-ratio"]).toBe("Breadth & sentiment");
     expect(groupOf["rsi-oversold"]).toBe("Breadth & sentiment");
     expect(groupOf["record-high-breadth"]).toBe("Breadth & sentiment");
@@ -182,12 +183,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 37 items", () => {
+  it("renders all five group headers and 38 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(37);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(38);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

@@ -1,0 +1,5319 @@
+{
+  "_fixture": {
+    "synthetic": true,
+    "description": "SYNTHETIC TEST DATA. No StockCharts numeric observations or quotes. Public schema, symbols, date labels and documented Sandy closures only.",
+    "generator": "Weekdays 2003-01-02..2026-10-20 except Sandy. h=31+(37*i+17*(i//11))%173; l=11+(53*i+13*(i//7))%167. For i>0, h=0 every97, otherwise0.0001 every89; l=0 every101, otherwise0.0001 every83. Not an exchange-session calendar."
+  },
+  "highs": {
+    "quote": {
+      "source": "SQL_DAILY",
+      "symbol": "!NEWHINYC",
+      "exchange": "INDX",
+      "name": "NYSE Common Stock Only New Highs",
+      "time": {
+        "time": "2026-10-20 16:00:00",
+        "millis": 1792526400000,
+        "zone": "America/New_York"
+      },
+      "open": 155.0,
+      "high": 155.0,
+      "low": 155.0,
+      "close": 155.0,
+      "volume": 7207,
+      "closeYesterday": 118.0,
+      "bid": 154.5,
+      "bidsize": 17,
+      "ask": 155.5,
+      "asksize": 29,
+      "lastsize": 7,
+      "lastticks": null,
+      "sctr": 12.5,
+      "sctrUniverse": null,
+      "vwap": 155.25,
+      "currency": null,
+      "realtime": false,
+      "cached": false,
+      "note": "SYNTHETIC TEST QUOTE"
+    },
+    "history": {
+      "symbol": "!NEWHINYC",
+      "period": "D",
+      "intervals": [
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-02 09:30:00",
+            "millis": 1041517800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-02 16:00:00",
+            "millis": 1041541200000,
+            "zone": "America/New_York"
+          },
+          "open": 31.0,
+          "high": 31.0,
+          "low": 31.0,
+          "close": 31.0,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-03 09:30:00",
+            "millis": 1041604200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-03 16:00:00",
+            "millis": 1041627600000,
+            "zone": "America/New_York"
+          },
+          "open": 68.0,
+          "high": 68.0,
+          "low": 68.0,
+          "close": 68.0,
+          "volume": 1001,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-06 09:30:00",
+            "millis": 1041863400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-06 16:00:00",
+            "millis": 1041886800000,
+            "zone": "America/New_York"
+          },
+          "open": 105.0,
+          "high": 105.0,
+          "low": 105.0,
+          "close": 105.0,
+          "volume": 1002,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-07 09:30:00",
+            "millis": 1041949800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-07 16:00:00",
+            "millis": 1041973200000,
+            "zone": "America/New_York"
+          },
+          "open": 142.0,
+          "high": 142.0,
+          "low": 142.0,
+          "close": 142.0,
+          "volume": 1003,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-08 09:30:00",
+            "millis": 1042036200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-08 16:00:00",
+            "millis": 1042059600000,
+            "zone": "America/New_York"
+          },
+          "open": 179.0,
+          "high": 179.0,
+          "low": 179.0,
+          "close": 179.0,
+          "volume": 1004,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-09 09:30:00",
+            "millis": 1042122600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-09 16:00:00",
+            "millis": 1042146000000,
+            "zone": "America/New_York"
+          },
+          "open": 43.0,
+          "high": 43.0,
+          "low": 43.0,
+          "close": 43.0,
+          "volume": 1005,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-10 09:30:00",
+            "millis": 1042209000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-10 16:00:00",
+            "millis": 1042232400000,
+            "zone": "America/New_York"
+          },
+          "open": 80.0,
+          "high": 80.0,
+          "low": 80.0,
+          "close": 80.0,
+          "volume": 1006,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-13 09:30:00",
+            "millis": 1042468200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-13 16:00:00",
+            "millis": 1042491600000,
+            "zone": "America/New_York"
+          },
+          "open": 117.0,
+          "high": 117.0,
+          "low": 117.0,
+          "close": 117.0,
+          "volume": 1007,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-14 09:30:00",
+            "millis": 1042554600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-14 16:00:00",
+            "millis": 1042578000000,
+            "zone": "America/New_York"
+          },
+          "open": 154.0,
+          "high": 154.0,
+          "low": 154.0,
+          "close": 154.0,
+          "volume": 1008,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-15 09:30:00",
+            "millis": 1042641000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-15 16:00:00",
+            "millis": 1042664400000,
+            "zone": "America/New_York"
+          },
+          "open": 191.0,
+          "high": 191.0,
+          "low": 191.0,
+          "close": 191.0,
+          "volume": 1009,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-16 09:30:00",
+            "millis": 1042727400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-16 16:00:00",
+            "millis": 1042750800000,
+            "zone": "America/New_York"
+          },
+          "open": 55.0,
+          "high": 55.0,
+          "low": 55.0,
+          "close": 55.0,
+          "volume": 1010,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-17 09:30:00",
+            "millis": 1042813800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-17 16:00:00",
+            "millis": 1042837200000,
+            "zone": "America/New_York"
+          },
+          "open": 109.0,
+          "high": 109.0,
+          "low": 109.0,
+          "close": 109.0,
+          "volume": 1011,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-20 09:30:00",
+            "millis": 1043073000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-20 16:00:00",
+            "millis": 1043096400000,
+            "zone": "America/New_York"
+          },
+          "open": 146.0,
+          "high": 146.0,
+          "low": 146.0,
+          "close": 146.0,
+          "volume": 1012,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-21 09:30:00",
+            "millis": 1043159400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-21 16:00:00",
+            "millis": 1043182800000,
+            "zone": "America/New_York"
+          },
+          "open": 183.0,
+          "high": 183.0,
+          "low": 183.0,
+          "close": 183.0,
+          "volume": 1013,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-22 09:30:00",
+            "millis": 1043245800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-22 16:00:00",
+            "millis": 1043269200000,
+            "zone": "America/New_York"
+          },
+          "open": 47.0,
+          "high": 47.0,
+          "low": 47.0,
+          "close": 47.0,
+          "volume": 1014,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-23 09:30:00",
+            "millis": 1043332200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-23 16:00:00",
+            "millis": 1043355600000,
+            "zone": "America/New_York"
+          },
+          "open": 84.0,
+          "high": 84.0,
+          "low": 84.0,
+          "close": 84.0,
+          "volume": 1015,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-24 09:30:00",
+            "millis": 1043418600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-24 16:00:00",
+            "millis": 1043442000000,
+            "zone": "America/New_York"
+          },
+          "open": 121.0,
+          "high": 121.0,
+          "low": 121.0,
+          "close": 121.0,
+          "volume": 1016,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-27 09:30:00",
+            "millis": 1043677800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-27 16:00:00",
+            "millis": 1043701200000,
+            "zone": "America/New_York"
+          },
+          "open": 158.0,
+          "high": 158.0,
+          "low": 158.0,
+          "close": 158.0,
+          "volume": 1017,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-28 09:30:00",
+            "millis": 1043764200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-28 16:00:00",
+            "millis": 1043787600000,
+            "zone": "America/New_York"
+          },
+          "open": 195.0,
+          "high": 195.0,
+          "low": 195.0,
+          "close": 195.0,
+          "volume": 1018,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-29 09:30:00",
+            "millis": 1043850600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-29 16:00:00",
+            "millis": 1043874000000,
+            "zone": "America/New_York"
+          },
+          "open": 59.0,
+          "high": 59.0,
+          "low": 59.0,
+          "close": 59.0,
+          "volume": 1019,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-30 09:30:00",
+            "millis": 1043937000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-30 16:00:00",
+            "millis": 1043960400000,
+            "zone": "America/New_York"
+          },
+          "open": 96.0,
+          "high": 96.0,
+          "low": 96.0,
+          "close": 96.0,
+          "volume": 1020,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-31 09:30:00",
+            "millis": 1044023400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-31 16:00:00",
+            "millis": 1044046800000,
+            "zone": "America/New_York"
+          },
+          "open": 133.0,
+          "high": 133.0,
+          "low": 133.0,
+          "close": 133.0,
+          "volume": 1021,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-03 09:30:00",
+            "millis": 1044282600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-03 16:00:00",
+            "millis": 1044306000000,
+            "zone": "America/New_York"
+          },
+          "open": 187.0,
+          "high": 187.0,
+          "low": 187.0,
+          "close": 187.0,
+          "volume": 1022,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-04 09:30:00",
+            "millis": 1044369000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-04 16:00:00",
+            "millis": 1044392400000,
+            "zone": "America/New_York"
+          },
+          "open": 51.0,
+          "high": 51.0,
+          "low": 51.0,
+          "close": 51.0,
+          "volume": 1023,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-05 09:30:00",
+            "millis": 1044455400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-05 16:00:00",
+            "millis": 1044478800000,
+            "zone": "America/New_York"
+          },
+          "open": 88.0,
+          "high": 88.0,
+          "low": 88.0,
+          "close": 88.0,
+          "volume": 1024,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-06 09:30:00",
+            "millis": 1044541800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-06 16:00:00",
+            "millis": 1044565200000,
+            "zone": "America/New_York"
+          },
+          "open": 125.0,
+          "high": 125.0,
+          "low": 125.0,
+          "close": 125.0,
+          "volume": 1025,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-07 09:30:00",
+            "millis": 1044628200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-07 16:00:00",
+            "millis": 1044651600000,
+            "zone": "America/New_York"
+          },
+          "open": 162.0,
+          "high": 162.0,
+          "low": 162.0,
+          "close": 162.0,
+          "volume": 1026,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-10 09:30:00",
+            "millis": 1044887400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-10 16:00:00",
+            "millis": 1044910800000,
+            "zone": "America/New_York"
+          },
+          "open": 199.0,
+          "high": 199.0,
+          "low": 199.0,
+          "close": 199.0,
+          "volume": 1027,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-11 09:30:00",
+            "millis": 1044973800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-11 16:00:00",
+            "millis": 1044997200000,
+            "zone": "America/New_York"
+          },
+          "open": 63.0,
+          "high": 63.0,
+          "low": 63.0,
+          "close": 63.0,
+          "volume": 1028,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-12 09:30:00",
+            "millis": 1045060200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-12 16:00:00",
+            "millis": 1045083600000,
+            "zone": "America/New_York"
+          },
+          "open": 100.0,
+          "high": 100.0,
+          "low": 100.0,
+          "close": 100.0,
+          "volume": 1029,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-13 09:30:00",
+            "millis": 1045146600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-13 16:00:00",
+            "millis": 1045170000000,
+            "zone": "America/New_York"
+          },
+          "open": 137.0,
+          "high": 137.0,
+          "low": 137.0,
+          "close": 137.0,
+          "volume": 1030,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-14 09:30:00",
+            "millis": 1045233000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-14 16:00:00",
+            "millis": 1045256400000,
+            "zone": "America/New_York"
+          },
+          "open": 174.0,
+          "high": 174.0,
+          "low": 174.0,
+          "close": 174.0,
+          "volume": 1031,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-17 09:30:00",
+            "millis": 1045492200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-17 16:00:00",
+            "millis": 1045515600000,
+            "zone": "America/New_York"
+          },
+          "open": 38.0,
+          "high": 38.0,
+          "low": 38.0,
+          "close": 38.0,
+          "volume": 1032,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-18 09:30:00",
+            "millis": 1045578600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-18 16:00:00",
+            "millis": 1045602000000,
+            "zone": "America/New_York"
+          },
+          "open": 92.0,
+          "high": 92.0,
+          "low": 92.0,
+          "close": 92.0,
+          "volume": 1033,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-19 09:30:00",
+            "millis": 1045665000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-19 16:00:00",
+            "millis": 1045688400000,
+            "zone": "America/New_York"
+          },
+          "open": 129.0,
+          "high": 129.0,
+          "low": 129.0,
+          "close": 129.0,
+          "volume": 1034,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-20 09:30:00",
+            "millis": 1045751400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-20 16:00:00",
+            "millis": 1045774800000,
+            "zone": "America/New_York"
+          },
+          "open": 166.0,
+          "high": 166.0,
+          "low": 166.0,
+          "close": 166.0,
+          "volume": 1035,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-21 09:30:00",
+            "millis": 1045837800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-21 16:00:00",
+            "millis": 1045861200000,
+            "zone": "America/New_York"
+          },
+          "open": 203.0,
+          "high": 203.0,
+          "low": 203.0,
+          "close": 203.0,
+          "volume": 1036,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-24 09:30:00",
+            "millis": 1046097000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-24 16:00:00",
+            "millis": 1046120400000,
+            "zone": "America/New_York"
+          },
+          "open": 67.0,
+          "high": 67.0,
+          "low": 67.0,
+          "close": 67.0,
+          "volume": 1037,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-25 09:30:00",
+            "millis": 1046183400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-25 16:00:00",
+            "millis": 1046206800000,
+            "zone": "America/New_York"
+          },
+          "open": 104.0,
+          "high": 104.0,
+          "low": 104.0,
+          "close": 104.0,
+          "volume": 1038,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-26 09:30:00",
+            "millis": 1046269800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-26 16:00:00",
+            "millis": 1046293200000,
+            "zone": "America/New_York"
+          },
+          "open": 141.0,
+          "high": 141.0,
+          "low": 141.0,
+          "close": 141.0,
+          "volume": 1039,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-27 09:30:00",
+            "millis": 1046356200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-27 16:00:00",
+            "millis": 1046379600000,
+            "zone": "America/New_York"
+          },
+          "open": 178.0,
+          "high": 178.0,
+          "low": 178.0,
+          "close": 178.0,
+          "volume": 1040,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-28 09:30:00",
+            "millis": 1046442600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-28 16:00:00",
+            "millis": 1046466000000,
+            "zone": "America/New_York"
+          },
+          "open": 42.0,
+          "high": 42.0,
+          "low": 42.0,
+          "close": 42.0,
+          "volume": 1041,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-03 09:30:00",
+            "millis": 1046701800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-03 16:00:00",
+            "millis": 1046725200000,
+            "zone": "America/New_York"
+          },
+          "open": 79.0,
+          "high": 79.0,
+          "low": 79.0,
+          "close": 79.0,
+          "volume": 1042,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-04 09:30:00",
+            "millis": 1046788200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-04 16:00:00",
+            "millis": 1046811600000,
+            "zone": "America/New_York"
+          },
+          "open": 116.0,
+          "high": 116.0,
+          "low": 116.0,
+          "close": 116.0,
+          "volume": 1043,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-05 09:30:00",
+            "millis": 1046874600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-05 16:00:00",
+            "millis": 1046898000000,
+            "zone": "America/New_York"
+          },
+          "open": 170.0,
+          "high": 170.0,
+          "low": 170.0,
+          "close": 170.0,
+          "volume": 1044,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-06 09:30:00",
+            "millis": 1046961000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-06 16:00:00",
+            "millis": 1046984400000,
+            "zone": "America/New_York"
+          },
+          "open": 34.0,
+          "high": 34.0,
+          "low": 34.0,
+          "close": 34.0,
+          "volume": 1045,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-07 09:30:00",
+            "millis": 1047047400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-07 16:00:00",
+            "millis": 1047070800000,
+            "zone": "America/New_York"
+          },
+          "open": 71.0,
+          "high": 71.0,
+          "low": 71.0,
+          "close": 71.0,
+          "volume": 1046,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-10 09:30:00",
+            "millis": 1047306600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-10 16:00:00",
+            "millis": 1047330000000,
+            "zone": "America/New_York"
+          },
+          "open": 108.0,
+          "high": 108.0,
+          "low": 108.0,
+          "close": 108.0,
+          "volume": 1047,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-11 09:30:00",
+            "millis": 1047393000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-11 16:00:00",
+            "millis": 1047416400000,
+            "zone": "America/New_York"
+          },
+          "open": 145.0,
+          "high": 145.0,
+          "low": 145.0,
+          "close": 145.0,
+          "volume": 1048,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-12 09:30:00",
+            "millis": 1047479400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-12 16:00:00",
+            "millis": 1047502800000,
+            "zone": "America/New_York"
+          },
+          "open": 182.0,
+          "high": 182.0,
+          "low": 182.0,
+          "close": 182.0,
+          "volume": 1049,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-04-29 09:30:00",
+            "millis": 1051623000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-04-29 16:00:00",
+            "millis": 1051646400000,
+            "zone": "America/New_York"
+          },
+          "open": 107.0,
+          "high": 107.0,
+          "low": 107.0,
+          "close": 107.0,
+          "volume": 1083,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-07 09:30:00",
+            "millis": 1052314200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-07 16:00:00",
+            "millis": 1052337600000,
+            "zone": "America/New_York"
+          },
+          "open": 0.0001,
+          "high": 0.0001,
+          "low": 0.0001,
+          "close": 0.0001,
+          "volume": 1089,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-19 09:30:00",
+            "millis": 1053351000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-19 16:00:00",
+            "millis": 1053374400000,
+            "zone": "America/New_York"
+          },
+          "open": 0.0,
+          "high": 0.0,
+          "low": 0.0,
+          "close": 0.0,
+          "volume": 1097,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-23 09:30:00",
+            "millis": 1053696600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-23 16:00:00",
+            "millis": 1053720000000,
+            "zone": "America/New_York"
+          },
+          "open": 115.0,
+          "high": 115.0,
+          "low": 115.0,
+          "close": 115.0,
+          "volume": 1101,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": null,
+          "cached": false,
+          "start": {
+            "time": "2012-10-29 09:30:00",
+            "millis": 1351517400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2012-10-29 16:00:00",
+            "millis": 1351540800000,
+            "zone": "America/New_York"
+          },
+          "open": null,
+          "high": null,
+          "low": null,
+          "close": null,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": null,
+          "cached": false,
+          "start": {
+            "time": "2012-10-30 09:30:00",
+            "millis": 1351603800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2012-10-30 16:00:00",
+            "millis": 1351627200000,
+            "zone": "America/New_York"
+          },
+          "open": null,
+          "high": null,
+          "low": null,
+          "close": null,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-24 09:30:00",
+            "millis": 1784899800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-24 16:00:00",
+            "millis": 1784923200000,
+            "zone": "America/New_York"
+          },
+          "open": 181.0,
+          "high": 181.0,
+          "low": 181.0,
+          "close": 181.0,
+          "volume": 7144,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-27 09:30:00",
+            "millis": 1785159000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-27 16:00:00",
+            "millis": 1785182400000,
+            "zone": "America/New_York"
+          },
+          "open": 45.0,
+          "high": 45.0,
+          "low": 45.0,
+          "close": 45.0,
+          "volume": 7145,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-28 09:30:00",
+            "millis": 1785245400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-28 16:00:00",
+            "millis": 1785268800000,
+            "zone": "America/New_York"
+          },
+          "open": 82.0,
+          "high": 82.0,
+          "low": 82.0,
+          "close": 82.0,
+          "volume": 7146,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-29 09:30:00",
+            "millis": 1785331800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-29 16:00:00",
+            "millis": 1785355200000,
+            "zone": "America/New_York"
+          },
+          "open": 119.0,
+          "high": 119.0,
+          "low": 119.0,
+          "close": 119.0,
+          "volume": 7147,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-30 09:30:00",
+            "millis": 1785418200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-30 16:00:00",
+            "millis": 1785441600000,
+            "zone": "America/New_York"
+          },
+          "open": 156.0,
+          "high": 156.0,
+          "low": 156.0,
+          "close": 156.0,
+          "volume": 7148,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-31 09:30:00",
+            "millis": 1785504600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-31 16:00:00",
+            "millis": 1785528000000,
+            "zone": "America/New_York"
+          },
+          "open": 37.0,
+          "high": 37.0,
+          "low": 37.0,
+          "close": 37.0,
+          "volume": 7149,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-03 09:30:00",
+            "millis": 1785763800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-03 16:00:00",
+            "millis": 1785787200000,
+            "zone": "America/New_York"
+          },
+          "open": 74.0,
+          "high": 74.0,
+          "low": 74.0,
+          "close": 74.0,
+          "volume": 7150,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-04 09:30:00",
+            "millis": 1785850200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-04 16:00:00",
+            "millis": 1785873600000,
+            "zone": "America/New_York"
+          },
+          "open": 111.0,
+          "high": 111.0,
+          "low": 111.0,
+          "close": 111.0,
+          "volume": 7151,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-05 09:30:00",
+            "millis": 1785936600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-05 16:00:00",
+            "millis": 1785960000000,
+            "zone": "America/New_York"
+          },
+          "open": 148.0,
+          "high": 148.0,
+          "low": 148.0,
+          "close": 148.0,
+          "volume": 7152,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-06 09:30:00",
+            "millis": 1786023000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-06 16:00:00",
+            "millis": 1786046400000,
+            "zone": "America/New_York"
+          },
+          "open": 185.0,
+          "high": 185.0,
+          "low": 185.0,
+          "close": 185.0,
+          "volume": 7153,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-07 09:30:00",
+            "millis": 1786109400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-07 16:00:00",
+            "millis": 1786132800000,
+            "zone": "America/New_York"
+          },
+          "open": 49.0,
+          "high": 49.0,
+          "low": 49.0,
+          "close": 49.0,
+          "volume": 7154,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-10 09:30:00",
+            "millis": 1786368600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-10 16:00:00",
+            "millis": 1786392000000,
+            "zone": "America/New_York"
+          },
+          "open": 86.0,
+          "high": 86.0,
+          "low": 86.0,
+          "close": 86.0,
+          "volume": 7155,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-11 09:30:00",
+            "millis": 1786455000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-11 16:00:00",
+            "millis": 1786478400000,
+            "zone": "America/New_York"
+          },
+          "open": 123.0,
+          "high": 123.0,
+          "low": 123.0,
+          "close": 123.0,
+          "volume": 7156,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-12 09:30:00",
+            "millis": 1786541400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-12 16:00:00",
+            "millis": 1786564800000,
+            "zone": "America/New_York"
+          },
+          "open": 160.0,
+          "high": 160.0,
+          "low": 160.0,
+          "close": 160.0,
+          "volume": 7157,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-13 09:30:00",
+            "millis": 1786627800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-13 16:00:00",
+            "millis": 1786651200000,
+            "zone": "America/New_York"
+          },
+          "open": 197.0,
+          "high": 197.0,
+          "low": 197.0,
+          "close": 197.0,
+          "volume": 7158,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-14 09:30:00",
+            "millis": 1786714200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-14 16:00:00",
+            "millis": 1786737600000,
+            "zone": "America/New_York"
+          },
+          "open": 61.0,
+          "high": 61.0,
+          "low": 61.0,
+          "close": 61.0,
+          "volume": 7159,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-17 09:30:00",
+            "millis": 1786973400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-17 16:00:00",
+            "millis": 1786996800000,
+            "zone": "America/New_York"
+          },
+          "open": 115.0,
+          "high": 115.0,
+          "low": 115.0,
+          "close": 115.0,
+          "volume": 7160,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-18 09:30:00",
+            "millis": 1787059800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-18 16:00:00",
+            "millis": 1787083200000,
+            "zone": "America/New_York"
+          },
+          "open": 152.0,
+          "high": 152.0,
+          "low": 152.0,
+          "close": 152.0,
+          "volume": 7161,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-19 09:30:00",
+            "millis": 1787146200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-19 16:00:00",
+            "millis": 1787169600000,
+            "zone": "America/New_York"
+          },
+          "open": 189.0,
+          "high": 189.0,
+          "low": 189.0,
+          "close": 189.0,
+          "volume": 7162,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-20 09:30:00",
+            "millis": 1787232600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-20 16:00:00",
+            "millis": 1787256000000,
+            "zone": "America/New_York"
+          },
+          "open": 53.0,
+          "high": 53.0,
+          "low": 53.0,
+          "close": 53.0,
+          "volume": 7163,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-21 09:30:00",
+            "millis": 1787319000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-21 16:00:00",
+            "millis": 1787342400000,
+            "zone": "America/New_York"
+          },
+          "open": 90.0,
+          "high": 90.0,
+          "low": 90.0,
+          "close": 90.0,
+          "volume": 7164,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-24 09:30:00",
+            "millis": 1787578200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-24 16:00:00",
+            "millis": 1787601600000,
+            "zone": "America/New_York"
+          },
+          "open": 127.0,
+          "high": 127.0,
+          "low": 127.0,
+          "close": 127.0,
+          "volume": 7165,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-25 09:30:00",
+            "millis": 1787664600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-25 16:00:00",
+            "millis": 1787688000000,
+            "zone": "America/New_York"
+          },
+          "open": 164.0,
+          "high": 164.0,
+          "low": 164.0,
+          "close": 164.0,
+          "volume": 7166,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-26 09:30:00",
+            "millis": 1787751000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-26 16:00:00",
+            "millis": 1787774400000,
+            "zone": "America/New_York"
+          },
+          "open": 201.0,
+          "high": 201.0,
+          "low": 201.0,
+          "close": 201.0,
+          "volume": 7167,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-27 09:30:00",
+            "millis": 1787837400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-27 16:00:00",
+            "millis": 1787860800000,
+            "zone": "America/New_York"
+          },
+          "open": 65.0,
+          "high": 65.0,
+          "low": 65.0,
+          "close": 65.0,
+          "volume": 7168,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-28 09:30:00",
+            "millis": 1787923800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-28 16:00:00",
+            "millis": 1787947200000,
+            "zone": "America/New_York"
+          },
+          "open": 102.0,
+          "high": 102.0,
+          "low": 102.0,
+          "close": 102.0,
+          "volume": 7169,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-31 09:30:00",
+            "millis": 1788183000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-31 16:00:00",
+            "millis": 1788206400000,
+            "zone": "America/New_York"
+          },
+          "open": 139.0,
+          "high": 139.0,
+          "low": 139.0,
+          "close": 139.0,
+          "volume": 7170,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-01 09:30:00",
+            "millis": 1788269400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-01 16:00:00",
+            "millis": 1788292800000,
+            "zone": "America/New_York"
+          },
+          "open": 193.0,
+          "high": 193.0,
+          "low": 193.0,
+          "close": 193.0,
+          "volume": 7171,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-02 09:30:00",
+            "millis": 1788355800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-02 16:00:00",
+            "millis": 1788379200000,
+            "zone": "America/New_York"
+          },
+          "open": 57.0,
+          "high": 57.0,
+          "low": 57.0,
+          "close": 57.0,
+          "volume": 7172,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-03 09:30:00",
+            "millis": 1788442200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-03 16:00:00",
+            "millis": 1788465600000,
+            "zone": "America/New_York"
+          },
+          "open": 94.0,
+          "high": 94.0,
+          "low": 94.0,
+          "close": 94.0,
+          "volume": 7173,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-04 09:30:00",
+            "millis": 1788528600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-04 16:00:00",
+            "millis": 1788552000000,
+            "zone": "America/New_York"
+          },
+          "open": 131.0,
+          "high": 131.0,
+          "low": 131.0,
+          "close": 131.0,
+          "volume": 7174,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-07 09:30:00",
+            "millis": 1788787800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-07 16:00:00",
+            "millis": 1788811200000,
+            "zone": "America/New_York"
+          },
+          "open": 168.0,
+          "high": 168.0,
+          "low": 168.0,
+          "close": 168.0,
+          "volume": 7175,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-08 09:30:00",
+            "millis": 1788874200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-08 16:00:00",
+            "millis": 1788897600000,
+            "zone": "America/New_York"
+          },
+          "open": 32.0,
+          "high": 32.0,
+          "low": 32.0,
+          "close": 32.0,
+          "volume": 7176,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-09 09:30:00",
+            "millis": 1788960600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-09 16:00:00",
+            "millis": 1788984000000,
+            "zone": "America/New_York"
+          },
+          "open": 69.0,
+          "high": 69.0,
+          "low": 69.0,
+          "close": 69.0,
+          "volume": 7177,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-10 09:30:00",
+            "millis": 1789047000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-10 16:00:00",
+            "millis": 1789070400000,
+            "zone": "America/New_York"
+          },
+          "open": 106.0,
+          "high": 106.0,
+          "low": 106.0,
+          "close": 106.0,
+          "volume": 7178,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-11 09:30:00",
+            "millis": 1789133400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-11 16:00:00",
+            "millis": 1789156800000,
+            "zone": "America/New_York"
+          },
+          "open": 143.0,
+          "high": 143.0,
+          "low": 143.0,
+          "close": 143.0,
+          "volume": 7179,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-14 09:30:00",
+            "millis": 1789392600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-14 16:00:00",
+            "millis": 1789416000000,
+            "zone": "America/New_York"
+          },
+          "open": 180.0,
+          "high": 180.0,
+          "low": 180.0,
+          "close": 180.0,
+          "volume": 7180,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-15 09:30:00",
+            "millis": 1789479000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-15 16:00:00",
+            "millis": 1789502400000,
+            "zone": "America/New_York"
+          },
+          "open": 44.0,
+          "high": 44.0,
+          "low": 44.0,
+          "close": 44.0,
+          "volume": 7181,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-16 09:30:00",
+            "millis": 1789565400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-16 16:00:00",
+            "millis": 1789588800000,
+            "zone": "America/New_York"
+          },
+          "open": 98.0,
+          "high": 98.0,
+          "low": 98.0,
+          "close": 98.0,
+          "volume": 7182,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-17 09:30:00",
+            "millis": 1789651800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-17 16:00:00",
+            "millis": 1789675200000,
+            "zone": "America/New_York"
+          },
+          "open": 135.0,
+          "high": 135.0,
+          "low": 135.0,
+          "close": 135.0,
+          "volume": 7183,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-18 09:30:00",
+            "millis": 1789738200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-18 16:00:00",
+            "millis": 1789761600000,
+            "zone": "America/New_York"
+          },
+          "open": 172.0,
+          "high": 172.0,
+          "low": 172.0,
+          "close": 172.0,
+          "volume": 7184,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-21 09:30:00",
+            "millis": 1789997400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-21 16:00:00",
+            "millis": 1790020800000,
+            "zone": "America/New_York"
+          },
+          "open": 36.0,
+          "high": 36.0,
+          "low": 36.0,
+          "close": 36.0,
+          "volume": 7185,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-22 09:30:00",
+            "millis": 1790083800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-22 16:00:00",
+            "millis": 1790107200000,
+            "zone": "America/New_York"
+          },
+          "open": 73.0,
+          "high": 73.0,
+          "low": 73.0,
+          "close": 73.0,
+          "volume": 7186,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-23 09:30:00",
+            "millis": 1790170200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-23 16:00:00",
+            "millis": 1790193600000,
+            "zone": "America/New_York"
+          },
+          "open": 110.0,
+          "high": 110.0,
+          "low": 110.0,
+          "close": 110.0,
+          "volume": 7187,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-24 09:30:00",
+            "millis": 1790256600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-24 16:00:00",
+            "millis": 1790280000000,
+            "zone": "America/New_York"
+          },
+          "open": 147.0,
+          "high": 147.0,
+          "low": 147.0,
+          "close": 147.0,
+          "volume": 7188,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-25 09:30:00",
+            "millis": 1790343000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-25 16:00:00",
+            "millis": 1790366400000,
+            "zone": "America/New_York"
+          },
+          "open": 184.0,
+          "high": 184.0,
+          "low": 184.0,
+          "close": 184.0,
+          "volume": 7189,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-28 09:30:00",
+            "millis": 1790602200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-28 16:00:00",
+            "millis": 1790625600000,
+            "zone": "America/New_York"
+          },
+          "open": 48.0,
+          "high": 48.0,
+          "low": 48.0,
+          "close": 48.0,
+          "volume": 7190,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-29 09:30:00",
+            "millis": 1790688600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-29 16:00:00",
+            "millis": 1790712000000,
+            "zone": "America/New_York"
+          },
+          "open": 85.0,
+          "high": 85.0,
+          "low": 85.0,
+          "close": 85.0,
+          "volume": 7191,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-30 09:30:00",
+            "millis": 1790775000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-30 16:00:00",
+            "millis": 1790798400000,
+            "zone": "America/New_York"
+          },
+          "open": 122.0,
+          "high": 122.0,
+          "low": 122.0,
+          "close": 122.0,
+          "volume": 7192,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-01 09:30:00",
+            "millis": 1790861400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-01 16:00:00",
+            "millis": 1790884800000,
+            "zone": "America/New_York"
+          },
+          "open": 176.0,
+          "high": 176.0,
+          "low": 176.0,
+          "close": 176.0,
+          "volume": 7193,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-02 09:30:00",
+            "millis": 1790947800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-02 16:00:00",
+            "millis": 1790971200000,
+            "zone": "America/New_York"
+          },
+          "open": 40.0,
+          "high": 40.0,
+          "low": 40.0,
+          "close": 40.0,
+          "volume": 7194,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-05 09:30:00",
+            "millis": 1791207000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-05 16:00:00",
+            "millis": 1791230400000,
+            "zone": "America/New_York"
+          },
+          "open": 77.0,
+          "high": 77.0,
+          "low": 77.0,
+          "close": 77.0,
+          "volume": 7195,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-06 09:30:00",
+            "millis": 1791293400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-06 16:00:00",
+            "millis": 1791316800000,
+            "zone": "America/New_York"
+          },
+          "open": 114.0,
+          "high": 114.0,
+          "low": 114.0,
+          "close": 114.0,
+          "volume": 7196,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-07 09:30:00",
+            "millis": 1791379800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-07 16:00:00",
+            "millis": 1791403200000,
+            "zone": "America/New_York"
+          },
+          "open": 151.0,
+          "high": 151.0,
+          "low": 151.0,
+          "close": 151.0,
+          "volume": 7197,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-08 09:30:00",
+            "millis": 1791466200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-08 16:00:00",
+            "millis": 1791489600000,
+            "zone": "America/New_York"
+          },
+          "open": 188.0,
+          "high": 188.0,
+          "low": 188.0,
+          "close": 188.0,
+          "volume": 7198,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-09 09:30:00",
+            "millis": 1791552600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-09 16:00:00",
+            "millis": 1791576000000,
+            "zone": "America/New_York"
+          },
+          "open": 52.0,
+          "high": 52.0,
+          "low": 52.0,
+          "close": 52.0,
+          "volume": 7199,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-12 09:30:00",
+            "millis": 1791811800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-12 16:00:00",
+            "millis": 1791835200000,
+            "zone": "America/New_York"
+          },
+          "open": 89.0,
+          "high": 89.0,
+          "low": 89.0,
+          "close": 89.0,
+          "volume": 7200,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-13 09:30:00",
+            "millis": 1791898200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-13 16:00:00",
+            "millis": 1791921600000,
+            "zone": "America/New_York"
+          },
+          "open": 126.0,
+          "high": 126.0,
+          "low": 126.0,
+          "close": 126.0,
+          "volume": 7201,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-14 09:30:00",
+            "millis": 1791984600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-14 16:00:00",
+            "millis": 1792008000000,
+            "zone": "America/New_York"
+          },
+          "open": 163.0,
+          "high": 163.0,
+          "low": 163.0,
+          "close": 163.0,
+          "volume": 7202,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-15 09:30:00",
+            "millis": 1792071000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-15 16:00:00",
+            "millis": 1792094400000,
+            "zone": "America/New_York"
+          },
+          "open": 200.0,
+          "high": 200.0,
+          "low": 200.0,
+          "close": 200.0,
+          "volume": 7203,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-16 09:30:00",
+            "millis": 1792157400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-16 16:00:00",
+            "millis": 1792180800000,
+            "zone": "America/New_York"
+          },
+          "open": 81.0,
+          "high": 81.0,
+          "low": 81.0,
+          "close": 81.0,
+          "volume": 7204,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-19 09:30:00",
+            "millis": 1792416600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-19 16:00:00",
+            "millis": 1792440000000,
+            "zone": "America/New_York"
+          },
+          "open": 118.0,
+          "high": 118.0,
+          "low": 118.0,
+          "close": 118.0,
+          "volume": 7205,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-20 09:30:00",
+            "millis": 1792503000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-20 16:00:00",
+            "millis": 1792526400000,
+            "zone": "America/New_York"
+          },
+          "open": 155.0,
+          "high": 155.0,
+          "low": 155.0,
+          "close": 155.0,
+          "volume": 7206,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        }
+      ]
+    }
+  },
+  "lows": {
+    "quote": {
+      "source": "SQL_DAILY",
+      "symbol": "!NEWLONYC",
+      "exchange": "INDX",
+      "name": "NYSE Common Stock Only New Lows",
+      "time": {
+        "time": "2026-10-20 16:00:00",
+        "millis": 1792526400000,
+        "zone": "America/New_York"
+      },
+      "open": 101.0,
+      "high": 101.0,
+      "low": 101.0,
+      "close": 101.0,
+      "volume": 7207,
+      "closeYesterday": 48.0,
+      "bid": 100.5,
+      "bidsize": 17,
+      "ask": 101.5,
+      "asksize": 29,
+      "lastsize": 7,
+      "lastticks": null,
+      "sctr": 12.5,
+      "sctrUniverse": null,
+      "vwap": 101.25,
+      "currency": null,
+      "realtime": false,
+      "cached": false,
+      "note": "SYNTHETIC TEST QUOTE"
+    },
+    "history": {
+      "symbol": "!NEWLONYC",
+      "period": "D",
+      "intervals": [
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-02 09:30:00",
+            "millis": 1041517800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-02 16:00:00",
+            "millis": 1041541200000,
+            "zone": "America/New_York"
+          },
+          "open": 11.0,
+          "high": 11.0,
+          "low": 11.0,
+          "close": 11.0,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-03 09:30:00",
+            "millis": 1041604200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-03 16:00:00",
+            "millis": 1041627600000,
+            "zone": "America/New_York"
+          },
+          "open": 64.0,
+          "high": 64.0,
+          "low": 64.0,
+          "close": 64.0,
+          "volume": 1001,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-06 09:30:00",
+            "millis": 1041863400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-06 16:00:00",
+            "millis": 1041886800000,
+            "zone": "America/New_York"
+          },
+          "open": 117.0,
+          "high": 117.0,
+          "low": 117.0,
+          "close": 117.0,
+          "volume": 1002,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-07 09:30:00",
+            "millis": 1041949800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-07 16:00:00",
+            "millis": 1041973200000,
+            "zone": "America/New_York"
+          },
+          "open": 170.0,
+          "high": 170.0,
+          "low": 170.0,
+          "close": 170.0,
+          "volume": 1003,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-08 09:30:00",
+            "millis": 1042036200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-08 16:00:00",
+            "millis": 1042059600000,
+            "zone": "America/New_York"
+          },
+          "open": 56.0,
+          "high": 56.0,
+          "low": 56.0,
+          "close": 56.0,
+          "volume": 1004,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-09 09:30:00",
+            "millis": 1042122600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-09 16:00:00",
+            "millis": 1042146000000,
+            "zone": "America/New_York"
+          },
+          "open": 109.0,
+          "high": 109.0,
+          "low": 109.0,
+          "close": 109.0,
+          "volume": 1005,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-10 09:30:00",
+            "millis": 1042209000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-10 16:00:00",
+            "millis": 1042232400000,
+            "zone": "America/New_York"
+          },
+          "open": 162.0,
+          "high": 162.0,
+          "low": 162.0,
+          "close": 162.0,
+          "volume": 1006,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-13 09:30:00",
+            "millis": 1042468200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-13 16:00:00",
+            "millis": 1042491600000,
+            "zone": "America/New_York"
+          },
+          "open": 61.0,
+          "high": 61.0,
+          "low": 61.0,
+          "close": 61.0,
+          "volume": 1007,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-14 09:30:00",
+            "millis": 1042554600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-14 16:00:00",
+            "millis": 1042578000000,
+            "zone": "America/New_York"
+          },
+          "open": 114.0,
+          "high": 114.0,
+          "low": 114.0,
+          "close": 114.0,
+          "volume": 1008,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-15 09:30:00",
+            "millis": 1042641000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-15 16:00:00",
+            "millis": 1042664400000,
+            "zone": "America/New_York"
+          },
+          "open": 167.0,
+          "high": 167.0,
+          "low": 167.0,
+          "close": 167.0,
+          "volume": 1009,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-16 09:30:00",
+            "millis": 1042727400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-16 16:00:00",
+            "millis": 1042750800000,
+            "zone": "America/New_York"
+          },
+          "open": 53.0,
+          "high": 53.0,
+          "low": 53.0,
+          "close": 53.0,
+          "volume": 1010,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-17 09:30:00",
+            "millis": 1042813800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-17 16:00:00",
+            "millis": 1042837200000,
+            "zone": "America/New_York"
+          },
+          "open": 106.0,
+          "high": 106.0,
+          "low": 106.0,
+          "close": 106.0,
+          "volume": 1011,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-20 09:30:00",
+            "millis": 1043073000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-20 16:00:00",
+            "millis": 1043096400000,
+            "zone": "America/New_York"
+          },
+          "open": 159.0,
+          "high": 159.0,
+          "low": 159.0,
+          "close": 159.0,
+          "volume": 1012,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-21 09:30:00",
+            "millis": 1043159400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-21 16:00:00",
+            "millis": 1043182800000,
+            "zone": "America/New_York"
+          },
+          "open": 45.0,
+          "high": 45.0,
+          "low": 45.0,
+          "close": 45.0,
+          "volume": 1013,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-22 09:30:00",
+            "millis": 1043245800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-22 16:00:00",
+            "millis": 1043269200000,
+            "zone": "America/New_York"
+          },
+          "open": 111.0,
+          "high": 111.0,
+          "low": 111.0,
+          "close": 111.0,
+          "volume": 1014,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-23 09:30:00",
+            "millis": 1043332200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-23 16:00:00",
+            "millis": 1043355600000,
+            "zone": "America/New_York"
+          },
+          "open": 164.0,
+          "high": 164.0,
+          "low": 164.0,
+          "close": 164.0,
+          "volume": 1015,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-24 09:30:00",
+            "millis": 1043418600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-24 16:00:00",
+            "millis": 1043442000000,
+            "zone": "America/New_York"
+          },
+          "open": 50.0,
+          "high": 50.0,
+          "low": 50.0,
+          "close": 50.0,
+          "volume": 1016,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-27 09:30:00",
+            "millis": 1043677800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-27 16:00:00",
+            "millis": 1043701200000,
+            "zone": "America/New_York"
+          },
+          "open": 103.0,
+          "high": 103.0,
+          "low": 103.0,
+          "close": 103.0,
+          "volume": 1017,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-28 09:30:00",
+            "millis": 1043764200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-28 16:00:00",
+            "millis": 1043787600000,
+            "zone": "America/New_York"
+          },
+          "open": 156.0,
+          "high": 156.0,
+          "low": 156.0,
+          "close": 156.0,
+          "volume": 1018,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-29 09:30:00",
+            "millis": 1043850600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-29 16:00:00",
+            "millis": 1043874000000,
+            "zone": "America/New_York"
+          },
+          "open": 42.0,
+          "high": 42.0,
+          "low": 42.0,
+          "close": 42.0,
+          "volume": 1019,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-30 09:30:00",
+            "millis": 1043937000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-30 16:00:00",
+            "millis": 1043960400000,
+            "zone": "America/New_York"
+          },
+          "open": 95.0,
+          "high": 95.0,
+          "low": 95.0,
+          "close": 95.0,
+          "volume": 1020,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-01-31 09:30:00",
+            "millis": 1044023400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-01-31 16:00:00",
+            "millis": 1044046800000,
+            "zone": "America/New_York"
+          },
+          "open": 161.0,
+          "high": 161.0,
+          "low": 161.0,
+          "close": 161.0,
+          "volume": 1021,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-03 09:30:00",
+            "millis": 1044282600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-03 16:00:00",
+            "millis": 1044306000000,
+            "zone": "America/New_York"
+          },
+          "open": 47.0,
+          "high": 47.0,
+          "low": 47.0,
+          "close": 47.0,
+          "volume": 1022,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-04 09:30:00",
+            "millis": 1044369000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-04 16:00:00",
+            "millis": 1044392400000,
+            "zone": "America/New_York"
+          },
+          "open": 100.0,
+          "high": 100.0,
+          "low": 100.0,
+          "close": 100.0,
+          "volume": 1023,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-05 09:30:00",
+            "millis": 1044455400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-05 16:00:00",
+            "millis": 1044478800000,
+            "zone": "America/New_York"
+          },
+          "open": 153.0,
+          "high": 153.0,
+          "low": 153.0,
+          "close": 153.0,
+          "volume": 1024,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-06 09:30:00",
+            "millis": 1044541800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-06 16:00:00",
+            "millis": 1044565200000,
+            "zone": "America/New_York"
+          },
+          "open": 39.0,
+          "high": 39.0,
+          "low": 39.0,
+          "close": 39.0,
+          "volume": 1025,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-07 09:30:00",
+            "millis": 1044628200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-07 16:00:00",
+            "millis": 1044651600000,
+            "zone": "America/New_York"
+          },
+          "open": 92.0,
+          "high": 92.0,
+          "low": 92.0,
+          "close": 92.0,
+          "volume": 1026,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-10 09:30:00",
+            "millis": 1044887400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-10 16:00:00",
+            "millis": 1044910800000,
+            "zone": "America/New_York"
+          },
+          "open": 145.0,
+          "high": 145.0,
+          "low": 145.0,
+          "close": 145.0,
+          "volume": 1027,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-11 09:30:00",
+            "millis": 1044973800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-11 16:00:00",
+            "millis": 1044997200000,
+            "zone": "America/New_York"
+          },
+          "open": 44.0,
+          "high": 44.0,
+          "low": 44.0,
+          "close": 44.0,
+          "volume": 1028,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-12 09:30:00",
+            "millis": 1045060200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-12 16:00:00",
+            "millis": 1045083600000,
+            "zone": "America/New_York"
+          },
+          "open": 97.0,
+          "high": 97.0,
+          "low": 97.0,
+          "close": 97.0,
+          "volume": 1029,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-13 09:30:00",
+            "millis": 1045146600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-13 16:00:00",
+            "millis": 1045170000000,
+            "zone": "America/New_York"
+          },
+          "open": 150.0,
+          "high": 150.0,
+          "low": 150.0,
+          "close": 150.0,
+          "volume": 1030,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-14 09:30:00",
+            "millis": 1045233000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-14 16:00:00",
+            "millis": 1045256400000,
+            "zone": "America/New_York"
+          },
+          "open": 36.0,
+          "high": 36.0,
+          "low": 36.0,
+          "close": 36.0,
+          "volume": 1031,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-17 09:30:00",
+            "millis": 1045492200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-17 16:00:00",
+            "millis": 1045515600000,
+            "zone": "America/New_York"
+          },
+          "open": 89.0,
+          "high": 89.0,
+          "low": 89.0,
+          "close": 89.0,
+          "volume": 1032,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-18 09:30:00",
+            "millis": 1045578600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-18 16:00:00",
+            "millis": 1045602000000,
+            "zone": "America/New_York"
+          },
+          "open": 142.0,
+          "high": 142.0,
+          "low": 142.0,
+          "close": 142.0,
+          "volume": 1033,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-19 09:30:00",
+            "millis": 1045665000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-19 16:00:00",
+            "millis": 1045688400000,
+            "zone": "America/New_York"
+          },
+          "open": 28.0,
+          "high": 28.0,
+          "low": 28.0,
+          "close": 28.0,
+          "volume": 1034,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-20 09:30:00",
+            "millis": 1045751400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-20 16:00:00",
+            "millis": 1045774800000,
+            "zone": "America/New_York"
+          },
+          "open": 94.0,
+          "high": 94.0,
+          "low": 94.0,
+          "close": 94.0,
+          "volume": 1035,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-21 09:30:00",
+            "millis": 1045837800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-21 16:00:00",
+            "millis": 1045861200000,
+            "zone": "America/New_York"
+          },
+          "open": 147.0,
+          "high": 147.0,
+          "low": 147.0,
+          "close": 147.0,
+          "volume": 1036,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-24 09:30:00",
+            "millis": 1046097000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-24 16:00:00",
+            "millis": 1046120400000,
+            "zone": "America/New_York"
+          },
+          "open": 33.0,
+          "high": 33.0,
+          "low": 33.0,
+          "close": 33.0,
+          "volume": 1037,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-25 09:30:00",
+            "millis": 1046183400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-25 16:00:00",
+            "millis": 1046206800000,
+            "zone": "America/New_York"
+          },
+          "open": 86.0,
+          "high": 86.0,
+          "low": 86.0,
+          "close": 86.0,
+          "volume": 1038,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-26 09:30:00",
+            "millis": 1046269800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-26 16:00:00",
+            "millis": 1046293200000,
+            "zone": "America/New_York"
+          },
+          "open": 139.0,
+          "high": 139.0,
+          "low": 139.0,
+          "close": 139.0,
+          "volume": 1039,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-27 09:30:00",
+            "millis": 1046356200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-27 16:00:00",
+            "millis": 1046379600000,
+            "zone": "America/New_York"
+          },
+          "open": 25.0,
+          "high": 25.0,
+          "low": 25.0,
+          "close": 25.0,
+          "volume": 1040,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-02-28 09:30:00",
+            "millis": 1046442600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-02-28 16:00:00",
+            "millis": 1046466000000,
+            "zone": "America/New_York"
+          },
+          "open": 78.0,
+          "high": 78.0,
+          "low": 78.0,
+          "close": 78.0,
+          "volume": 1041,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-03 09:30:00",
+            "millis": 1046701800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-03 16:00:00",
+            "millis": 1046725200000,
+            "zone": "America/New_York"
+          },
+          "open": 144.0,
+          "high": 144.0,
+          "low": 144.0,
+          "close": 144.0,
+          "volume": 1042,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-04 09:30:00",
+            "millis": 1046788200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-04 16:00:00",
+            "millis": 1046811600000,
+            "zone": "America/New_York"
+          },
+          "open": 30.0,
+          "high": 30.0,
+          "low": 30.0,
+          "close": 30.0,
+          "volume": 1043,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-05 09:30:00",
+            "millis": 1046874600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-05 16:00:00",
+            "millis": 1046898000000,
+            "zone": "America/New_York"
+          },
+          "open": 83.0,
+          "high": 83.0,
+          "low": 83.0,
+          "close": 83.0,
+          "volume": 1044,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-06 09:30:00",
+            "millis": 1046961000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-06 16:00:00",
+            "millis": 1046984400000,
+            "zone": "America/New_York"
+          },
+          "open": 136.0,
+          "high": 136.0,
+          "low": 136.0,
+          "close": 136.0,
+          "volume": 1045,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-07 09:30:00",
+            "millis": 1047047400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-07 16:00:00",
+            "millis": 1047070800000,
+            "zone": "America/New_York"
+          },
+          "open": 22.0,
+          "high": 22.0,
+          "low": 22.0,
+          "close": 22.0,
+          "volume": 1046,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-10 09:30:00",
+            "millis": 1047306600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-10 16:00:00",
+            "millis": 1047330000000,
+            "zone": "America/New_York"
+          },
+          "open": 75.0,
+          "high": 75.0,
+          "low": 75.0,
+          "close": 75.0,
+          "volume": 1047,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-11 09:30:00",
+            "millis": 1047393000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-11 16:00:00",
+            "millis": 1047416400000,
+            "zone": "America/New_York"
+          },
+          "open": 128.0,
+          "high": 128.0,
+          "low": 128.0,
+          "close": 128.0,
+          "volume": 1048,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-03-12 09:30:00",
+            "millis": 1047479400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-03-12 16:00:00",
+            "millis": 1047502800000,
+            "zone": "America/New_York"
+          },
+          "open": 27.0,
+          "high": 27.0,
+          "low": 27.0,
+          "close": 27.0,
+          "volume": 1049,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-04-29 09:30:00",
+            "millis": 1051623000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-04-29 16:00:00",
+            "millis": 1051646400000,
+            "zone": "America/New_York"
+          },
+          "open": 0.0001,
+          "high": 0.0001,
+          "low": 0.0001,
+          "close": 0.0001,
+          "volume": 1083,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-07 09:30:00",
+            "millis": 1052314200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-07 16:00:00",
+            "millis": 1052337600000,
+            "zone": "America/New_York"
+          },
+          "open": 41.0,
+          "high": 41.0,
+          "low": 41.0,
+          "close": 41.0,
+          "volume": 1089,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-19 09:30:00",
+            "millis": 1053351000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-19 16:00:00",
+            "millis": 1053374400000,
+            "zone": "America/New_York"
+          },
+          "open": 144.0,
+          "high": 144.0,
+          "low": 144.0,
+          "close": 144.0,
+          "volume": 1097,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2003-05-23 09:30:00",
+            "millis": 1053696600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2003-05-23 16:00:00",
+            "millis": 1053720000000,
+            "zone": "America/New_York"
+          },
+          "open": 0.0,
+          "high": 0.0,
+          "low": 0.0,
+          "close": 0.0,
+          "volume": 1101,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": null,
+          "cached": false,
+          "start": {
+            "time": "2012-10-29 09:30:00",
+            "millis": 1351517400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2012-10-29 16:00:00",
+            "millis": 1351540800000,
+            "zone": "America/New_York"
+          },
+          "open": null,
+          "high": null,
+          "low": null,
+          "close": null,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": null,
+          "cached": false,
+          "start": {
+            "time": "2012-10-30 09:30:00",
+            "millis": 1351603800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2012-10-30 16:00:00",
+            "millis": 1351627200000,
+            "zone": "America/New_York"
+          },
+          "open": null,
+          "high": null,
+          "low": null,
+          "close": null,
+          "volume": 1000,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-24 09:30:00",
+            "millis": 1784899800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-24 16:00:00",
+            "millis": 1784923200000,
+            "zone": "America/New_York"
+          },
+          "open": 38.0,
+          "high": 38.0,
+          "low": 38.0,
+          "close": 38.0,
+          "volume": 7144,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-27 09:30:00",
+            "millis": 1785159000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-27 16:00:00",
+            "millis": 1785182400000,
+            "zone": "America/New_York"
+          },
+          "open": 91.0,
+          "high": 91.0,
+          "low": 91.0,
+          "close": 91.0,
+          "volume": 7145,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-28 09:30:00",
+            "millis": 1785245400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-28 16:00:00",
+            "millis": 1785268800000,
+            "zone": "America/New_York"
+          },
+          "open": 157.0,
+          "high": 157.0,
+          "low": 157.0,
+          "close": 157.0,
+          "volume": 7146,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-29 09:30:00",
+            "millis": 1785331800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-29 16:00:00",
+            "millis": 1785355200000,
+            "zone": "America/New_York"
+          },
+          "open": 43.0,
+          "high": 43.0,
+          "low": 43.0,
+          "close": 43.0,
+          "volume": 7147,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-30 09:30:00",
+            "millis": 1785418200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-30 16:00:00",
+            "millis": 1785441600000,
+            "zone": "America/New_York"
+          },
+          "open": 96.0,
+          "high": 96.0,
+          "low": 96.0,
+          "close": 96.0,
+          "volume": 7148,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-07-31 09:30:00",
+            "millis": 1785504600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-07-31 16:00:00",
+            "millis": 1785528000000,
+            "zone": "America/New_York"
+          },
+          "open": 149.0,
+          "high": 149.0,
+          "low": 149.0,
+          "close": 149.0,
+          "volume": 7149,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-03 09:30:00",
+            "millis": 1785763800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-03 16:00:00",
+            "millis": 1785787200000,
+            "zone": "America/New_York"
+          },
+          "open": 35.0,
+          "high": 35.0,
+          "low": 35.0,
+          "close": 35.0,
+          "volume": 7150,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-04 09:30:00",
+            "millis": 1785850200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-04 16:00:00",
+            "millis": 1785873600000,
+            "zone": "America/New_York"
+          },
+          "open": 88.0,
+          "high": 88.0,
+          "low": 88.0,
+          "close": 88.0,
+          "volume": 7151,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-05 09:30:00",
+            "millis": 1785936600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-05 16:00:00",
+            "millis": 1785960000000,
+            "zone": "America/New_York"
+          },
+          "open": 141.0,
+          "high": 141.0,
+          "low": 141.0,
+          "close": 141.0,
+          "volume": 7152,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-06 09:30:00",
+            "millis": 1786023000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-06 16:00:00",
+            "millis": 1786046400000,
+            "zone": "America/New_York"
+          },
+          "open": 40.0,
+          "high": 40.0,
+          "low": 40.0,
+          "close": 40.0,
+          "volume": 7153,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-07 09:30:00",
+            "millis": 1786109400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-07 16:00:00",
+            "millis": 1786132800000,
+            "zone": "America/New_York"
+          },
+          "open": 93.0,
+          "high": 93.0,
+          "low": 93.0,
+          "close": 93.0,
+          "volume": 7154,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-10 09:30:00",
+            "millis": 1786368600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-10 16:00:00",
+            "millis": 1786392000000,
+            "zone": "America/New_York"
+          },
+          "open": 146.0,
+          "high": 146.0,
+          "low": 146.0,
+          "close": 146.0,
+          "volume": 7155,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-11 09:30:00",
+            "millis": 1786455000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-11 16:00:00",
+            "millis": 1786478400000,
+            "zone": "America/New_York"
+          },
+          "open": 32.0,
+          "high": 32.0,
+          "low": 32.0,
+          "close": 32.0,
+          "volume": 7156,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-12 09:30:00",
+            "millis": 1786541400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-12 16:00:00",
+            "millis": 1786564800000,
+            "zone": "America/New_York"
+          },
+          "open": 85.0,
+          "high": 85.0,
+          "low": 85.0,
+          "close": 85.0,
+          "volume": 7157,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-13 09:30:00",
+            "millis": 1786627800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-13 16:00:00",
+            "millis": 1786651200000,
+            "zone": "America/New_York"
+          },
+          "open": 138.0,
+          "high": 138.0,
+          "low": 138.0,
+          "close": 138.0,
+          "volume": 7158,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-14 09:30:00",
+            "millis": 1786714200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-14 16:00:00",
+            "millis": 1786737600000,
+            "zone": "America/New_York"
+          },
+          "open": 24.0,
+          "high": 24.0,
+          "low": 24.0,
+          "close": 24.0,
+          "volume": 7159,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-17 09:30:00",
+            "millis": 1786973400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-17 16:00:00",
+            "millis": 1786996800000,
+            "zone": "America/New_York"
+          },
+          "open": 90.0,
+          "high": 90.0,
+          "low": 90.0,
+          "close": 90.0,
+          "volume": 7160,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-18 09:30:00",
+            "millis": 1787059800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-18 16:00:00",
+            "millis": 1787083200000,
+            "zone": "America/New_York"
+          },
+          "open": 0.0,
+          "high": 0.0,
+          "low": 0.0,
+          "close": 0.0,
+          "volume": 7161,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-19 09:30:00",
+            "millis": 1787146200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-19 16:00:00",
+            "millis": 1787169600000,
+            "zone": "America/New_York"
+          },
+          "open": 29.0,
+          "high": 29.0,
+          "low": 29.0,
+          "close": 29.0,
+          "volume": 7162,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-20 09:30:00",
+            "millis": 1787232600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-20 16:00:00",
+            "millis": 1787256000000,
+            "zone": "America/New_York"
+          },
+          "open": 82.0,
+          "high": 82.0,
+          "low": 82.0,
+          "close": 82.0,
+          "volume": 7163,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-21 09:30:00",
+            "millis": 1787319000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-21 16:00:00",
+            "millis": 1787342400000,
+            "zone": "America/New_York"
+          },
+          "open": 135.0,
+          "high": 135.0,
+          "low": 135.0,
+          "close": 135.0,
+          "volume": 7164,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-24 09:30:00",
+            "millis": 1787578200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-24 16:00:00",
+            "millis": 1787601600000,
+            "zone": "America/New_York"
+          },
+          "open": 21.0,
+          "high": 21.0,
+          "low": 21.0,
+          "close": 21.0,
+          "volume": 7165,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-25 09:30:00",
+            "millis": 1787664600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-25 16:00:00",
+            "millis": 1787688000000,
+            "zone": "America/New_York"
+          },
+          "open": 74.0,
+          "high": 74.0,
+          "low": 74.0,
+          "close": 74.0,
+          "volume": 7166,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-26 09:30:00",
+            "millis": 1787751000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-26 16:00:00",
+            "millis": 1787774400000,
+            "zone": "America/New_York"
+          },
+          "open": 140.0,
+          "high": 140.0,
+          "low": 140.0,
+          "close": 140.0,
+          "volume": 7167,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-27 09:30:00",
+            "millis": 1787837400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-27 16:00:00",
+            "millis": 1787860800000,
+            "zone": "America/New_York"
+          },
+          "open": 26.0,
+          "high": 26.0,
+          "low": 26.0,
+          "close": 26.0,
+          "volume": 7168,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-28 09:30:00",
+            "millis": 1787923800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-28 16:00:00",
+            "millis": 1787947200000,
+            "zone": "America/New_York"
+          },
+          "open": 79.0,
+          "high": 79.0,
+          "low": 79.0,
+          "close": 79.0,
+          "volume": 7169,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-08-31 09:30:00",
+            "millis": 1788183000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-08-31 16:00:00",
+            "millis": 1788206400000,
+            "zone": "America/New_York"
+          },
+          "open": 132.0,
+          "high": 132.0,
+          "low": 132.0,
+          "close": 132.0,
+          "volume": 7170,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-01 09:30:00",
+            "millis": 1788269400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-01 16:00:00",
+            "millis": 1788292800000,
+            "zone": "America/New_York"
+          },
+          "open": 18.0,
+          "high": 18.0,
+          "low": 18.0,
+          "close": 18.0,
+          "volume": 7171,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-02 09:30:00",
+            "millis": 1788355800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-02 16:00:00",
+            "millis": 1788379200000,
+            "zone": "America/New_York"
+          },
+          "open": 71.0,
+          "high": 71.0,
+          "low": 71.0,
+          "close": 71.0,
+          "volume": 7172,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-03 09:30:00",
+            "millis": 1788442200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-03 16:00:00",
+            "millis": 1788465600000,
+            "zone": "America/New_York"
+          },
+          "open": 124.0,
+          "high": 124.0,
+          "low": 124.0,
+          "close": 124.0,
+          "volume": 7173,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-04 09:30:00",
+            "millis": 1788528600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-04 16:00:00",
+            "millis": 1788552000000,
+            "zone": "America/New_York"
+          },
+          "open": 23.0,
+          "high": 23.0,
+          "low": 23.0,
+          "close": 23.0,
+          "volume": 7174,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-07 09:30:00",
+            "millis": 1788787800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-07 16:00:00",
+            "millis": 1788811200000,
+            "zone": "America/New_York"
+          },
+          "open": 76.0,
+          "high": 76.0,
+          "low": 76.0,
+          "close": 76.0,
+          "volume": 7175,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-08 09:30:00",
+            "millis": 1788874200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-08 16:00:00",
+            "millis": 1788897600000,
+            "zone": "America/New_York"
+          },
+          "open": 129.0,
+          "high": 129.0,
+          "low": 129.0,
+          "close": 129.0,
+          "volume": 7176,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-09 09:30:00",
+            "millis": 1788960600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-09 16:00:00",
+            "millis": 1788984000000,
+            "zone": "America/New_York"
+          },
+          "open": 15.0,
+          "high": 15.0,
+          "low": 15.0,
+          "close": 15.0,
+          "volume": 7177,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-10 09:30:00",
+            "millis": 1789047000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-10 16:00:00",
+            "millis": 1789070400000,
+            "zone": "America/New_York"
+          },
+          "open": 68.0,
+          "high": 68.0,
+          "low": 68.0,
+          "close": 68.0,
+          "volume": 7178,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-11 09:30:00",
+            "millis": 1789133400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-11 16:00:00",
+            "millis": 1789156800000,
+            "zone": "America/New_York"
+          },
+          "open": 121.0,
+          "high": 121.0,
+          "low": 121.0,
+          "close": 121.0,
+          "volume": 7179,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-14 09:30:00",
+            "millis": 1789392600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-14 16:00:00",
+            "millis": 1789416000000,
+            "zone": "America/New_York"
+          },
+          "open": 174.0,
+          "high": 174.0,
+          "low": 174.0,
+          "close": 174.0,
+          "volume": 7180,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-15 09:30:00",
+            "millis": 1789479000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-15 16:00:00",
+            "millis": 1789502400000,
+            "zone": "America/New_York"
+          },
+          "open": 73.0,
+          "high": 73.0,
+          "low": 73.0,
+          "close": 73.0,
+          "volume": 7181,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-16 09:30:00",
+            "millis": 1789565400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-16 16:00:00",
+            "millis": 1789588800000,
+            "zone": "America/New_York"
+          },
+          "open": 126.0,
+          "high": 126.0,
+          "low": 126.0,
+          "close": 126.0,
+          "volume": 7182,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-17 09:30:00",
+            "millis": 1789651800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-17 16:00:00",
+            "millis": 1789675200000,
+            "zone": "America/New_York"
+          },
+          "open": 12.0,
+          "high": 12.0,
+          "low": 12.0,
+          "close": 12.0,
+          "volume": 7183,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-18 09:30:00",
+            "millis": 1789738200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-18 16:00:00",
+            "millis": 1789761600000,
+            "zone": "America/New_York"
+          },
+          "open": 65.0,
+          "high": 65.0,
+          "low": 65.0,
+          "close": 65.0,
+          "volume": 7184,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-21 09:30:00",
+            "millis": 1789997400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-21 16:00:00",
+            "millis": 1790020800000,
+            "zone": "America/New_York"
+          },
+          "open": 118.0,
+          "high": 118.0,
+          "low": 118.0,
+          "close": 118.0,
+          "volume": 7185,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-22 09:30:00",
+            "millis": 1790083800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-22 16:00:00",
+            "millis": 1790107200000,
+            "zone": "America/New_York"
+          },
+          "open": 171.0,
+          "high": 171.0,
+          "low": 171.0,
+          "close": 171.0,
+          "volume": 7186,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-23 09:30:00",
+            "millis": 1790170200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-23 16:00:00",
+            "millis": 1790193600000,
+            "zone": "America/New_York"
+          },
+          "open": 57.0,
+          "high": 57.0,
+          "low": 57.0,
+          "close": 57.0,
+          "volume": 7187,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-24 09:30:00",
+            "millis": 1790256600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-24 16:00:00",
+            "millis": 1790280000000,
+            "zone": "America/New_York"
+          },
+          "open": 123.0,
+          "high": 123.0,
+          "low": 123.0,
+          "close": 123.0,
+          "volume": 7188,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-25 09:30:00",
+            "millis": 1790343000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-25 16:00:00",
+            "millis": 1790366400000,
+            "zone": "America/New_York"
+          },
+          "open": 176.0,
+          "high": 176.0,
+          "low": 176.0,
+          "close": 176.0,
+          "volume": 7189,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-28 09:30:00",
+            "millis": 1790602200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-28 16:00:00",
+            "millis": 1790625600000,
+            "zone": "America/New_York"
+          },
+          "open": 62.0,
+          "high": 62.0,
+          "low": 62.0,
+          "close": 62.0,
+          "volume": 7190,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-29 09:30:00",
+            "millis": 1790688600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-29 16:00:00",
+            "millis": 1790712000000,
+            "zone": "America/New_York"
+          },
+          "open": 115.0,
+          "high": 115.0,
+          "low": 115.0,
+          "close": 115.0,
+          "volume": 7191,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-09-30 09:30:00",
+            "millis": 1790775000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-09-30 16:00:00",
+            "millis": 1790798400000,
+            "zone": "America/New_York"
+          },
+          "open": 168.0,
+          "high": 168.0,
+          "low": 168.0,
+          "close": 168.0,
+          "volume": 7192,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-01 09:30:00",
+            "millis": 1790861400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-01 16:00:00",
+            "millis": 1790884800000,
+            "zone": "America/New_York"
+          },
+          "open": 54.0,
+          "high": 54.0,
+          "low": 54.0,
+          "close": 54.0,
+          "volume": 7193,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-02 09:30:00",
+            "millis": 1790947800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-02 16:00:00",
+            "millis": 1790971200000,
+            "zone": "America/New_York"
+          },
+          "open": 107.0,
+          "high": 107.0,
+          "low": 107.0,
+          "close": 107.0,
+          "volume": 7194,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-05 09:30:00",
+            "millis": 1791207000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-05 16:00:00",
+            "millis": 1791230400000,
+            "zone": "America/New_York"
+          },
+          "open": 173.0,
+          "high": 173.0,
+          "low": 173.0,
+          "close": 173.0,
+          "volume": 7195,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-06 09:30:00",
+            "millis": 1791293400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-06 16:00:00",
+            "millis": 1791316800000,
+            "zone": "America/New_York"
+          },
+          "open": 59.0,
+          "high": 59.0,
+          "low": 59.0,
+          "close": 59.0,
+          "volume": 7196,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-07 09:30:00",
+            "millis": 1791379800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-07 16:00:00",
+            "millis": 1791403200000,
+            "zone": "America/New_York"
+          },
+          "open": 112.0,
+          "high": 112.0,
+          "low": 112.0,
+          "close": 112.0,
+          "volume": 7197,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-08 09:30:00",
+            "millis": 1791466200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-08 16:00:00",
+            "millis": 1791489600000,
+            "zone": "America/New_York"
+          },
+          "open": 165.0,
+          "high": 165.0,
+          "low": 165.0,
+          "close": 165.0,
+          "volume": 7198,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-09 09:30:00",
+            "millis": 1791552600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-09 16:00:00",
+            "millis": 1791576000000,
+            "zone": "America/New_York"
+          },
+          "open": 51.0,
+          "high": 51.0,
+          "low": 51.0,
+          "close": 51.0,
+          "volume": 7199,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-12 09:30:00",
+            "millis": 1791811800000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-12 16:00:00",
+            "millis": 1791835200000,
+            "zone": "America/New_York"
+          },
+          "open": 104.0,
+          "high": 104.0,
+          "low": 104.0,
+          "close": 104.0,
+          "volume": 7200,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-13 09:30:00",
+            "millis": 1791898200000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-13 16:00:00",
+            "millis": 1791921600000,
+            "zone": "America/New_York"
+          },
+          "open": 157.0,
+          "high": 157.0,
+          "low": 157.0,
+          "close": 157.0,
+          "volume": 7201,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-14 09:30:00",
+            "millis": 1791984600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-14 16:00:00",
+            "millis": 1792008000000,
+            "zone": "America/New_York"
+          },
+          "open": 56.0,
+          "high": 56.0,
+          "low": 56.0,
+          "close": 56.0,
+          "volume": 7202,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-15 09:30:00",
+            "millis": 1792071000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-15 16:00:00",
+            "millis": 1792094400000,
+            "zone": "America/New_York"
+          },
+          "open": 109.0,
+          "high": 109.0,
+          "low": 109.0,
+          "close": 109.0,
+          "volume": 7203,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-16 09:30:00",
+            "millis": 1792157400000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-16 16:00:00",
+            "millis": 1792180800000,
+            "zone": "America/New_York"
+          },
+          "open": 162.0,
+          "high": 162.0,
+          "low": 162.0,
+          "close": 162.0,
+          "volume": 7204,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-19 09:30:00",
+            "millis": 1792416600000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-19 16:00:00",
+            "millis": 1792440000000,
+            "zone": "America/New_York"
+          },
+          "open": 48.0,
+          "high": 48.0,
+          "low": 48.0,
+          "close": 48.0,
+          "volume": 7205,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        },
+        {
+          "source": "SQL_DAILY",
+          "cached": false,
+          "start": {
+            "time": "2026-10-20 09:30:00",
+            "millis": 1792503000000,
+            "zone": "America/New_York"
+          },
+          "end": {
+            "time": "2026-10-20 16:00:00",
+            "millis": 1792526400000,
+            "zone": "America/New_York"
+          },
+          "open": 101.0,
+          "high": 101.0,
+          "low": 101.0,
+          "close": 101.0,
+          "volume": 7206,
+          "exchange": "INDX",
+          "currency": "",
+          "sctr": null
+        }
+      ]
+    }
+  }
+}

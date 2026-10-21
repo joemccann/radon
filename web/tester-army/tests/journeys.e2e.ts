@@ -70,6 +70,12 @@ for (const route of samples.routes.filter((route: { guarded?: boolean }) => !rou
     if (route.path === '/journal') await screen.getByTestId('journal-range-all').click();
     if (route.selector) await expect(browser.locator(`${route.selector}:visible`).first()).toBeVisible();
     if (route.text) await expect(screen.getByText(route.text, { exact: false, visible: true }).first()).toBeVisible();
+    if (route.path === '/regime/high-low') {
+      expect(samples.fixtures['/api/high-low-line']).toMatchObject({ missing: true, data_date: null, count: 0, current: null, series: [], weekly_series: [] });
+      await expect(screen.getByText('This panel needs a successful sample of StockCharts DecisionPoint common-stock-only new highs and lows.', { exact: true })).toBeVisible();
+      await expect(screen.getByTestId('high-low-line-chart-section')).toHaveCount(0);
+      await expect(browser.locator('.toast-error')).toHaveCount(0);
+    }
     if (route.path === '/regime/exports') {
       expect(samples.fixtures['/api/asia-export-lead']).toMatchObject({ missing: true, data_date: null, count: 0, current: null, series: [] });
       await expect(screen.getByText('Awaiting a successful sample of Taiwan MOF and South Korea KCS monthly total exports.', { exact: true })).toBeVisible();

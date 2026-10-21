@@ -1123,3 +1123,17 @@ describe("Asia export lead daily sampling health", () => {
     expect(requiresIb("asia-export-lead")).toBe(false);
   });
 });
+
+describe("High-Low Line daily sampling health", () => {
+  it.each<MarketState>(["open", "extended", "closed"])("uses 26h in %s", (state) => {
+    expect(getFreshnessWindowMs("high-low-line", state)).toBe(26 * 60 * 60_000);
+    const now = Date.now();
+    expect(isStale("high-low-line", new Date(now - 26 * 60 * 60_000).toISOString(), state, now)).toBe(false);
+    expect(isStale("high-low-line", new Date(now - 26 * 60 * 60_000 - 1).toISOString(), state, now)).toBe(true);
+  });
+  it("is scheduled without a broker dependency", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["high-low-line"]).toBeDefined();
+    expect(getServiceCategory("high-low-line")).toBe("scheduled");
+    expect(requiresIb("high-low-line")).toBe(false);
+  });
+});
