@@ -178,6 +178,74 @@ class TestStkLabelIsNotTrusted:
         assert order_limits.combo_max_loss(buy_write) == pytest.approx(20_000.0)
 
 
+class TestSerializedShareLegKeepsZeroStrike:
+    """`ib_orders` writes a resolved share leg with strike 0.0 and empty
+    right and expiry. A strike of zero is not an option coordinate. The
+    buy-write above omits the strike key, so treating any present strike as
+    an option field still accepts that case."""
+
+    @staticmethod
+    def _legs() -> list:
+        return [
+            {
+                "secType": "STK",
+                "symbol": "NVDA",
+                "action": "BUY",
+                "ratio": 1,
+                "strike": 0.0,
+                "right": "",
+                "expiry": None,
+            },
+            {
+                "secType": "OPT",
+                "symbol": "NVDA",
+                "expiry": "20261218",
+                "strike": 700.0,
+                "right": "C",
+                "action": "SELL",
+                "ratio": 1,
+            },
+        ]
+
+    def test_a_serialized_share_leg_stays_a_share(self):
+        params = {
+            "type": "combo", "symbol": "NVDA", "action": "BUY",
+            "quantity": 1, "limitPrice": 1.0,
+            "legs": self._legs(),
+        }
+        verdict = order_limits.check_order_limits(params)
+        assert verdict is None, verdict
+        # Unpaired short 700 call, one unit, debit: 700 × 100.
+        assert order_limits.combo_max_loss(params) == pytest.approx(70_000.0)
+
+    def test_a_snapshot_resize_of_that_shape_still_hits_the_loss_cap(self):
+        stock, call = self._legs()
+        working = {
+            "orderId": 77,
+            "symbol": "NVDA",
+            "contract": {
+                "symbol": "NVDA",
+                "secType": "BAG",
+                "comboLegs": [
+                    {**stock, "conId": 1},
+                    {**call, "conId": 2},
+                ],
+            },
+            "action": "BUY",
+            "orderType": "LMT",
+            "totalQuantity": 1.0,
+            "limitPrice": 1.0,
+        }
+        # 200 × 700 × 100 = $14,000,000, past the $10,000,000 loss cap.
+        # Quantity 200 and notional $20,000 stay inside the option caps, so
+        # classifying the bag as an option would transmit it.
+        verdict = order_limits.check_modify_limits(
+            working, new_quantity=200, new_price=1.0
+        )
+        assert verdict is not None, "serialized covered combo skipped the loss cap"
+        assert verdict["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+
 class TestSellEnvelopeReversesLegExposure:
     """A SELL BAG inverts every leg at IB, so an envelope of BUY legs is
     SHORT. Pricing each leg off its own action alone made that $0."""

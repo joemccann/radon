@@ -1304,3 +1304,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-560 | DONE | Filtering remembered misses out of the broker batch left the three older previous-close cases green and the new replay saw one broker socket (`expected 2, got 1`, 1 failed / 3 passed). Restored `web/app/api/previous-close/route.ts`. `web/tests/previous-close-miss-cache.test.ts` passed 4 tests on each of three serial runs. Product source unchanged. Closing rounds: root Python 16,880 passed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,326 passed / 21 skipped / 1,150 files each round (five `next.config.mjs` imports over 5s; the same five passed 29 tests at a 20s ceiling in 42.11s). Cloud 54 failed / 3,224 passed / 11 skipped each round, same nodes. Against base `2f08fe78` (54 failed / 3,197 passed / 11 skipped) each round added 0 and removed 0. |
+
+## 2026-10-21
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-561 | DONE | A share leg serialized with `strike: 0.0` was not the omitted-strike buy-write. Setting `_carries_option_fields` to `strike is not None` left the old case green and failed the new file 2 / 28: place returned `ORDER_COMBO_LEG_SEC_TYPE`, and a 200-lot snapshot resize returned None. Predicate restored. `scripts/tests/test_order_limits_fail_open_inputs.py` passed 30 tests on each of three serial runs. Product source unchanged. Closing rounds: root pytest 16,884 passed / 54 failed / 10 skipped / 23 subtests each round, the same 54 SSL nodes as `5bfadbb6`. Vitest 5 failed / 11,341 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 20s ceiling in 46.06s). Cloud rounds 1 and 3 were 54 failed / 3,251 passed / 11 skipped, 0 added / 0 removed against base `5bfadbb6` (54 failed / 3,224 passed / 11 skipped). Round 2 added `test_a_hung_upstream_becomes_a_5xx_within_a_bound`, which passed alone in 30.25s. |
