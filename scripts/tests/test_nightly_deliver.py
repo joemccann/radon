@@ -118,6 +118,25 @@ class TestClassifyChecks:
     def test_no_checks_reported_yet_is_pending(self):
         assert nd.classify_checks([]) == ("pending", [])
 
+    def test_only_the_pr_body_check_is_not_a_green_suite(self):
+        """DS-2026-10-21-19: a nonempty all-pass set used to be green, including
+        the PR-body workflow finishing before the CI jobs register."""
+        expected = nd.expected_pull_request_check_names()
+        assert expected
+        assert "PR body template" in expected
+        assert "Secret scan (gitleaks)" in expected
+        assert "Vitest (shard 1/8)" in expected
+        assert "Vitest (shard 8/8)" in expected
+        assert "pytest (scripts-ac)" in expected
+        assert "pytest (cloud al)" in expected
+        assert "pytest (cloud edge)" in expected
+        assert "Perimeter smoke (next start + curl)" in expected
+        assert "Exact app images" not in expected
+        rows = [{"name": "PR body template", "bucket": "pass", "link": ""}]
+        state, pending = nd.classify_checks(rows, expected=expected)
+        assert state == "pending"
+        assert pending[0]["name"] == "Secret scan (gitleaks)"
+
 
 class TestWatch:
     """Bounded poll. The clock and gh are injected so nothing sleeps for real."""
@@ -142,6 +161,7 @@ class TestWatch:
         verdict = nd.watch(
             301, cap_secs=600, interval=60, run_checks=run,
             clock=lambda: next(clock), sleep=slept.append,
+            expected_names=["pytest"],
         )
         assert verdict["state"] == "green"
         assert calls == [301, 301]
@@ -168,9 +188,21 @@ class TestWatch:
         verdict = nd.watch(
             301, cap_secs=900, interval=500, run_checks=run,
             clock=lambda: next(clock), sleep=lambda _s: None,
+            expected_names=None,
         )
         assert verdict["state"] == "timeout"
         assert verdict["check"] == "deploy"
+
+    def test_a_partial_green_set_times_out_instead_of_shipping(self):
+        run, _calls = self._runner([
+            [{"name": "PR body template", "bucket": "pass", "link": ""}],
+        ])
+        verdict = nd.watch(
+            301, cap_secs=30, interval=60, run_checks=run,
+            clock=lambda: 0, sleep=lambda _s: None,
+        )
+        assert verdict["state"] == "timeout"
+        assert verdict["state"] != "green"
 
     def test_exit_codes_follow_the_state(self):
         assert nd.exit_code_for("green") == 0
@@ -302,10 +334,14 @@ class TestCli:
         bin_dir.mkdir()
         gh_log = tmp_path / "gh.log"
         gh = bin_dir / "gh"
+        payload = json.dumps([
+            {"name": name, "bucket": "pass", "link": "https://x/1"}
+            for name in nd.expected_pull_request_check_names()
+        ])
         gh.write_text(
             "#!/bin/sh\n"
             f'printf "%s\\n" "$*" >> "{gh_log}"\n'
-            'echo \'[{"name":"pytest","bucket":"pass","link":"https://x/1"}]\'\n'
+            f"printf '%s\\n' {json.dumps(payload)}\n"
             "exit 0\n",
             encoding="utf-8",
         )
@@ -365,7 +401,8 @@ class TestWatchAbortsOnABrokenGh:
             return seq.pop(0)
 
         verdict = nd.watch(
-            7, cap_secs=10800, interval=60, run_checks=flaky, clock=clock, sleep=sleep
+            7, cap_secs=10800, interval=60, run_checks=flaky, clock=clock, sleep=sleep,
+            expected_names=["ci"],
         )
         assert verdict["state"] == "green", verdict
 

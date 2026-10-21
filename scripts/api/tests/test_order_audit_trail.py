@@ -374,6 +374,14 @@ class TestCancelModify:
             server, "_run_ib_script_with_recovery", _fake_recovery(result)
         )
 
+        async def snapshot():
+            return {"open_orders": [{
+                "orderId": 9, "permId": 900, "secType": "OPT", "action": "BUY",
+                "quantity": 2, "limitPrice": 1.25,
+            }]}
+
+        monkeypatch.setattr(server, "_read_orders_snapshot_from_db", snapshot)
+
         response = client.post(
             "/orders/modify",
             json={"orderId": 9, "permId": 900, "newPrice": 1.25, "newQuantity": 2},
