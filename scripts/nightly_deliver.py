@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -115,13 +116,154 @@ def notify_status(line: str) -> str:
 # --- CI watch ----------------------------------------------------------------
 
 
-def classify_checks(rows: list[dict]) -> tuple[str, list[dict]]:
-    """('green'|'red'|'pending', the rows that decided it)."""
+_JOB_HEADER = re.compile(r"^  ([a-z0-9-]+):\s*$")
+_NAME_LINE = re.compile(r"^    name:\s*(.+?)\s*$", re.M)
+_IF_LINE = re.compile(r"^    if:\s*(.*?)\s*$")
+_SHARD_LINE = re.compile(r"shard:\s*\[([^\]]+)\]")
+_LOAD_EXPECTED = object()
+
+
+def _job_blocks(text: str) -> list[tuple[str, str]]:
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line == "jobs:" or line.startswith("jobs:"):
+            start = index + 1
+            break
+    if start is None:
+        return []
+    blocks: list[tuple[str, str]] = []
+    current_id = None
+    buf: list[str] = []
+    for line in lines[start:]:
+        if line and not line.startswith(" ") and not line.startswith("#"):
+            break
+        header = _JOB_HEADER.match(line)
+        if header:
+            if current_id is not None:
+                blocks.append((current_id, "\n".join(buf)))
+            current_id = header.group(1)
+            buf = [line]
+        elif current_id is not None:
+            buf.append(line)
+    if current_id is not None:
+        blocks.append((current_id, "\n".join(buf)))
+    return blocks
+
+
+def _job_if(block: str) -> str | None:
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        matched = _IF_LINE.match(line)
+        if not matched:
+            continue
+        parts = [matched.group(1)]
+        for nxt in lines[index + 1:]:
+            if not nxt.strip():
+                continue
+            if nxt.startswith("     "):
+                parts.append(nxt.strip())
+                continue
+            break
+        return " ".join(part for part in parts if part)
+    return None
+
+
+def _required_on_pull_request(condition: str | None) -> bool:
+    """Jobs with no `if`, or an `if` that runs on pull_request."""
+    if condition is None:
+        return True
+    text = " ".join(condition.split())
+    if text in {"", ">-", ">", "|", "|-"}:
+        return True
+    if "github.event_name == 'pull_request'" not in text:
+        return False
+    first = text.split("||", 1)[0]
+    if "github.event_name == 'push'" in first and "pull_request" not in first:
+        return False
+    return True
+
+
+def _expand_name(name: str, block: str) -> list[str]:
+    name = name.strip().strip('"').strip("'")
+    if "${{ matrix.shard }}" not in name:
+        return [name]
+    matched = _SHARD_LINE.search(block)
+    if not matched:
+        return []
+    shards = [
+        part.strip().strip('"').strip("'")
+        for part in matched.group(1).split(",")
+        if part.strip()
+    ]
+    return [name.replace("${{ matrix.shard }}", shard) for shard in shards]
+
+
+def _checks_from_workflow(text: str) -> list[str] | None:
+    blocks = _job_blocks(text)
+    if not blocks:
+        return None
+    names: list[str] = []
+    for _job_id, block in blocks:
+        name_match = _NAME_LINE.search(block)
+        if not name_match:
+            continue
+        if not _required_on_pull_request(_job_if(block)):
+            continue
+        expanded = _expand_name(name_match.group(1), block)
+        if "${{ matrix.shard }}" in name_match.group(1) and not expanded:
+            return None
+        names.extend(expanded)
+    return names or None
+
+
+def expected_pull_request_check_names(root: Path | None = None) -> list[str] | None:
+    """Check names CI must report before a PR is green.
+
+    Derived from the workflow files the same way the merge-group tests pin
+    the unconditional jobs. Push-only and path-gated jobs are not required
+    on every pull request. None when the workflows cannot be read.
+    """
+    root = Path(__file__).resolve().parents[1] if root is None else Path(root)
+    try:
+        ci_names = _checks_from_workflow(
+            (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
+        pr_names = _checks_from_workflow(
+            (root / ".github" / "workflows" / "pr-body.yml").read_text(encoding="utf-8")
+        )
+    except OSError:
+        return None
+    if not ci_names or not pr_names:
+        return None
+    return ci_names + pr_names
+
+
+def classify_checks(
+    rows: list[dict], *, expected: list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, list[dict]]:
+    """('green'|'red'|'pending', the rows that decided it).
+
+    ``expected`` names must be present. A partial all-pass set, such as the
+    PR-body check arriving before the rest of CI, stays pending.
+    """
     red = [r for r in rows if r.get("bucket") in _RED_BUCKETS]
     if red:
         return "red", red
+    if not rows:
+        return "pending", []
+    if expected:
+        present = {row.get("name") for row in rows}
+        missing = [
+            {"name": name, "bucket": "pending", "link": ""}
+            for name in expected
+            if name not in present
+        ]
+        if missing:
+            reported = [row for row in rows if row.get("bucket") not in _GREEN_BUCKETS]
+            return "pending", missing + reported
     pending = [r for r in rows if r.get("bucket") not in _GREEN_BUCKETS]
-    if pending or not rows:
+    if pending:
         return "pending", pending
     return "green", []
 
@@ -170,8 +312,12 @@ def watch(
     run_checks=gh_pr_checks,
     clock=time.monotonic,
     sleep=time.sleep,
+    expected_names=_LOAD_EXPECTED,
 ) -> dict:
     """Poll until green, red, or the cap. Never longer than ``cap_secs``."""
+    if expected_names is _LOAD_EXPECTED:
+        loaded = expected_pull_request_check_names()
+        expected_names = loaded if loaded else ("__workflow_expectations_unreadable__",)
     start = clock()
     consecutive_failures = 0
     while True:
@@ -198,7 +344,7 @@ def watch(
             sleep(interval)
             continue
         consecutive_failures = 0
-        state, decided = classify_checks(rows)
+        state, decided = classify_checks(rows, expected=expected_names)
         elapsed = int(clock() - start)
         if state == "green":
             return {"state": "green", "elapsed_secs": elapsed, "checks": rows}

@@ -169,14 +169,22 @@ def list_actionable_pages(*, now: datetime) -> list[dict]:
     return pages
 
 
-ATTEMPT_INSERT_SQL = """
+ATTEMPT_RESERVE_SQL = """
 INSERT INTO watchdog_page_attempts (attempt_id, page_id, kind, attempted_at)
-VALUES (?, ?, ?, ?)
+SELECT ?, ?, ?, ?
+WHERE (SELECT COUNT(*) FROM watchdog_page_attempts WHERE attempted_at >= ?) < ?
+RETURNING attempt_id
 """
 
 
-def record_action_attempt(*, page_id: str, now: datetime, kind: str = "grok") -> str:
+def record_action_attempt(
+    *, page_id: str, now: datetime, kind: str = "grok", cap: int, since: datetime,
+) -> Optional[str]:
     """Reserve one durable unit of the daily action budget before acting.
+
+    The insert and the cap check are one statement. Two launches that both
+    observed `count == cap - 1` cannot both commit. `None` means the cap is
+    already spent; the caller must not launch.
 
     `record_attempt_failure` clears `claimed_at` on purpose so the ticket
     can be retried, so the budget cannot be accounted on that column: a
@@ -187,13 +195,15 @@ def record_action_attempt(*, page_id: str, now: datetime, kind: str = "grok") ->
     the caller stands down instead of launching unbudgeted, the same
     fail-closed stance as `actions_since`.
     """
-    _HranaHttpError, _close, hrana_execute, _query, _is_transport = _hrana()
+    _HranaHttpError, _close, _execute, hrana_query, _is_transport = _hrana()
     attempt_id = uuid.uuid4().hex
-    hrana_execute(
-        ATTEMPT_INSERT_SQL,
-        (attempt_id, page_id, _safe_kind(kind), _iso(now)),
+    rows = hrana_query(
+        ATTEMPT_RESERVE_SQL,
+        (attempt_id, page_id, _safe_kind(kind), _iso(now), _iso(since), int(cap)),
     )
-    return attempt_id
+    if not rows:
+        return None
+    return str(rows[0][0])
 
 
 def actions_since(*, since: datetime) -> int:
