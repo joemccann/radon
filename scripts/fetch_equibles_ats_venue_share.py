@@ -680,7 +680,7 @@ def _record_health(state: str, scan_time: str, error: Optional[dict[str, Any]] =
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     ATS_VENUE_SHARE_JSON.parent.mkdir(parents=True, exist_ok=True)
-    ATS_VENUE_SHARE_JSON.write_text(json.dumps(payload, indent=2))
+    ATS_VENUE_SHARE_JSON.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def _read_prior_payload() -> Optional[dict[str, Any]]:
