@@ -1299,6 +1299,12 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-559 | DONE | Removing `loadError={portfolioError}` left `portfolio-sections-load-error.test.tsx` and `portfolio-startup-performance-contract.test.ts` at 11 passed. The new shell handoff then failed: `expected undefined to be 'Service Unavailable'`. Restored prop. Those two files passed 12 tests on each of three serial runs. Product source unchanged. Closing rounds: root Python 16,612 passed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,259 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; the same five passed 29 tests at a 20s ceiling in 35.21s). Cloud 54 failed / 3,197 passed / 11 skipped each round, same nodes. Against base `30bbaec2` (32 failed / 2,893 passed / 8 skipped) each round added 22 and removed 0: bash 3.2 empty-array expansion, missing `flock`, and missing `/usr/bin/test`. |
 
+## 2026-10-20
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-560 | DONE | Filtering remembered misses out of the broker batch left the three older previous-close cases green and the new replay saw one broker socket (`expected 2, got 1`, 1 failed / 3 passed). Restored `web/app/api/previous-close/route.ts`. `web/tests/previous-close-miss-cache.test.ts` passed 4 tests on each of three serial runs. Product source unchanged. Closing rounds: root Python 16,880 passed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,326 passed / 21 skipped / 1,150 files each round (five `next.config.mjs` imports over 5s; the same five passed 29 tests at a 20s ceiling in 42.11s). Cloud 54 failed / 3,224 passed / 11 skipped each round, same nodes. Against base `2f08fe78` (54 failed / 3,197 passed / 11 skipped) each round added 0 and removed 0. |
+
 ## 2026-10-21
 
 | ID | Status | Evidence |
