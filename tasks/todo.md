@@ -10166,3 +10166,23 @@ Dependency graph: P1 -> P2 -> P3 -> P4.
 ## Review
 
 Resumed existing pushed commits d848fceb and 6c5b4684; no production access and no new IDs allocated. Audited 48 commits / 163 changed paths through origin/main 5bfadbb6. Network rotation: baseline serial reruns fail unchanged socket/concurrency budgets (5 sockets versus 1; in-flight 1 versus 2); current focused Python 339 passed, web 56 passed, cloud 91 passed. Local transport fault checks preserve 429 Retry-After, size refusal/socket retirement, five-second idle retirement, one stale-read retry and no token-refresh replay. Production build and output trace audit pass (230 manifests, no retained data files); Next 16 compile mode omits per-route First Load JS. Largest client chunks: 1,227,120 and 930,905 bytes; ExcelJS/PPTX imports already defer until export. Local profiles: exports parse 309 Taiwan/321 Korea rows into 321 composite rows; writer uses one 3210-parameter INSERT; snapshot query uses service index with no temp sort. Humanizer expands 4000 duplicate descriptors into one span. SQLite applies 96 migrations; two vector-index migrations require the unavailable libsql_vector_idx extension, so vector plans are outside this SQLite audit. Existing code head has complete green CI; final delivery/checkpoint follows this audit-only commit. No new actionable bottleneck verified beyond PERF-019/020. Runner owns notifications.
+
+
+## 2026-10-21 Execute UW Advanced roadmap
+Authoritative roadmap: /Users/joemccann/.codex/visualizations/2026/10/14/uw-advanced/roadmap.md.
+- [ ] T1 (U1): Rebase scope against current main, verify account headers/channel access, write execution contracts. depends_on: []
+- [x] T2 (U2): Shared REST governor, provider header reconciliation, direct-fetch integration, capability metadata. depends_on: [T1]
+- [x] T3 (U3/U4): Single-owner managed collector, bounded durable buffering, channel semantics, compact materialization and health. depends_on: [T1]
+- [x] T4 (U7/U8/U9): Advanced research adapters and persistent snapshots for multi-leg/Pulse/issuer/macro/futures; capability gated. depends_on: [T1]
+- [x] T5 (U5/U6): Authenticated research API/MCP/UI, live overlays, source/gap/cadence provenance and selective candidate integration. depends_on: [T2,T3,T4]
+- [ ] T6 (U10/U11): Independent reviews, GitHub exact-head CI, measured staged activation and tape capacity decision. depends_on: [T5]
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+Validation: no local test suites; tests and E2E on GitHub runners. Do not modify IB execution/quote authority or public/demo redistribution. Full tape remains measurement-gated, Kafka not authorized by Advanced. Preserve honest gaps and daily OI.
+
+
+### UW execution review checkpoint
+
+Implemented T2–T5 on `codex/uw-advanced-execution`, PR #1214. REST probes returned 200 across six dataset families; missing quota headers and unreachable VPS SSH leave T1 entitlement verification and T6 production promotion incomplete. Streams remain disabled by default. Independent Sol/Luna findings are repaired: daily rollover probes, credential-scoped caches, killable bounded web reads, frontend credential ownership, observation provenance and retained-event replay. GitHub RED exposed outdated route policy/manifests/fixtures; repair CI and desktop/mobile screenshot verification remain pending. No local suites executed. Full-tape capture, live ranking/cache invalidation and source-parity promotion are deferred until pilot measurements, not claimed delivered.
+
+
+UW follow-up: Sol/Luna re-reviewed `e92c723d2` and closed their final quota/replay findings. VPS read access was restored via existing Tailscale transport; new units remain absent/inactive and account receipts remain unverified. Repair CI reduced failures to one new panel-test isolation failure (1 failed / 1703 passed in that shard); add explicit cleanup because Vitest globals do not register the testing-library auto-cleanup hook. Final exact-head CI and browser artifacts remain required.

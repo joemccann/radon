@@ -7,6 +7,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Route tests inject provider transport here; shared admission is covered in
+// uw-counted-fetch.test.ts and must not be bypassed by production fallback.
+vi.mock("@/lib/uwCountedFetch", () => ({
+  countedUwFetch: (input: string | URL, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 const wsConstructors: Array<{ url: string }> = [];
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -70,6 +76,8 @@ describe("POST /api/previous-close warm in-memory cache", () => {
   });
 
   it("second POST for the same symbol does not call unusualwhales when the cache is warm", async () => {
+    delete process.env.UW_TOKEN; // Backend owns vendor credentials; IB remains first.
+
     const uwUrls: string[] = [];
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);

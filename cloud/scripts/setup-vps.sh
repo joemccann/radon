@@ -80,6 +80,9 @@ readonly SERVICE_FILES=(
   radon-api.service
   radon-relay.service
   radon-monitor.service
+  radon-uw-stream.service
+  radon-uw-research.service
+  radon-uw-research.timer
   radon-health.service
   radon-control.service
   radon-mcp.service
@@ -1397,6 +1400,8 @@ enable_services() {
   for svc in "${SERVICE_FILES[@]}"; do
     # Research requires private runtime credentials and explicit activation.
     [[ "$svc" == "radon-research.service" ]] && continue
+    # UW requires explicit entitlement/channel admission before activation.
+    [[ "$svc" == radon-uw-stream.service || "$svc" == radon-uw-research.service || "$svc" == radon-uw-research.timer ]] && continue
     # Installed for rollback only; media publication is timer-owned.
     [[ "$svc" == "radon-media-publish.path" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue

@@ -222,6 +222,9 @@ readonly -a SOURCES=(
   services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
+  services/radon-uw-stream.service
+  services/radon-uw-research.service
+  services/radon-uw-research.timer
   services/radon-relay.service
   services/radon-portfolio-sync.service
   services/radon-portfolio-sync.timer
@@ -239,6 +242,8 @@ readonly -a SOURCES=(
   services/radon-nextjs.service.d/runtime-container.conf
   services/radon-relay.service.d/runtime-container.conf
   services/radon-monitor.service.d/runtime-container.conf
+  services/radon-uw-stream.service.d/runtime-container.conf
+  services/radon-uw-research.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
   services/radon-research.service
   services/radon-research.service.d/runtime-container.conf
@@ -280,6 +285,9 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
+  /etc/systemd/system/radon-uw-stream.service
+  /etc/systemd/system/radon-uw-research.service
+  /etc/systemd/system/radon-uw-research.timer
   /etc/systemd/system/radon-relay.service
   /etc/systemd/system/radon-portfolio-sync.service
   /etc/systemd/system/radon-portfolio-sync.timer
@@ -297,6 +305,8 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
   /etc/systemd/system/radon-relay.service.d/runtime-container.conf
   /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
   /etc/systemd/system/radon-research.service
   /etc/systemd/system/radon-research.service.d/runtime-container.conf
@@ -314,34 +324,129 @@ readonly -a LOGICAL_TARGETS=(
   /usr/lib/tmpfiles.d/radon-deploy.conf
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0755 0644 0644 0755 0755 0644
-  0440 0440 0440 0440
+  0755
+  0755
+  0755
+  0644
+  0755
   0644
   0644
-  0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
-  0644 0644 0644 0644 0644 0644
-  0644 0644 0644 0644 0644
-  0644 0644
-  0644 0644 0644 0644 0644
+  0755
+  0755
+  0644
+  0440
+  0440
+  0440
+  0440
   0644
   0644
-  0644 0644 0644 0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
+  0644
   0644
 )
 readonly -a KINDS=(
-  shell shell shell python shell python python shell shell compose
-  sudoers sudoers sudoers sudoers
+  shell
+  shell
+  shell
+  python
+  shell
+  python
+  python
+  shell
+  shell
+  compose
+  sudoers
+  sudoers
+  sudoers
+  sudoers
   polkit
   seccomp
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd
-  dropin dropin dropin dropin dropin
-  systemd dropin
-  systemd dropin dropin dropin dropin
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  systemd
+  dropin
+  dropin
+  dropin
+  dropin
+  dropin
+  dropin
+  dropin
+  systemd
+  dropin
+  systemd
+  dropin
+  dropin
+  dropin
+  dropin
   dropin
   python
-  python systemd systemd systemd
+  python
+  systemd
+  systemd
+  systemd
   tmpfiles
 )
 

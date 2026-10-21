@@ -17,8 +17,10 @@ const mocks = vi.hoisted(() => ({
   writeFile: vi.fn(),
   mkdir: vi.fn(),
   fetch: vi.fn(),
+  uwFetch: vi.fn(),
 }));
 
+vi.mock("@/lib/uwCountedFetch", () => ({ countedUwFetch: mocks.uwFetch }));
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
 vi.mock("@/lib/demo/enforceAiQuota", () => ({ enforceDemoAiQuota: mocks.enforceDemoAiQuota }));
 vi.mock("fs", () => {
@@ -36,6 +38,7 @@ beforeEach(() => {
   mocks.enforceDemoAiQuota.mockResolvedValue(null);
   mocks.readFile.mockRejectedValue(new Error("disk must not be reached"));
   mocks.fetch.mockRejectedValue(new Error("network must not be reached"));
+  mocks.uwFetch.mockRejectedValue(new Error("UW transport must be explicitly stubbed"));
   vi.stubGlobal("fetch", mocks.fetch);
   delete process.env.UW_TOKEN;
 });
@@ -48,6 +51,7 @@ afterEach(() => {
 
 function expectNoUpstreamWork(): void {
   expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(mocks.uwFetch).not.toHaveBeenCalled();
   expect(mocks.readFile).not.toHaveBeenCalled();
   expect(mocks.writeFile).not.toHaveBeenCalled();
   expect(mocks.mkdir).not.toHaveBeenCalled();
@@ -110,12 +114,15 @@ describe("GET /api/ticker/info", () => {
     expectNoUpstreamWork();
   });
 
-  it("keeps the operator config error when UW_TOKEN is absent", async () => {
+  it("uses backend-owned UW credentials for operators without a Next token", async () => {
     mocks.requireRouteAccess.mockResolvedValue({ ok: true, principal: { userId: "op", kind: "operator" } });
     mocks.readFile.mockRejectedValue(new Error("ENOENT"));
+    mocks.uwFetch.mockImplementation(async () => new Response(JSON.stringify({ data: { issue_type: "Common Stock", marketcap: "1000" } })));
     const { GET } = await import("../app/api/ticker/info/route");
     const response = await GET(new Request("http://localhost/api/ticker/info?ticker=AAPL"));
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
+    expect((await response.json()).uw_info.marketcap).toBe("1000");
+    expect(mocks.uwFetch).toHaveBeenCalledTimes(3);
     expect(mocks.readFile).toHaveBeenCalled();
   });
 });
@@ -132,13 +139,15 @@ describe("GET /api/ticker/seasonality", () => {
     expectNoUpstreamWork();
   });
 
-  it("does not charge the quota before the UW_TOKEN precondition fails", async () => {
+  it("honors the quota before backend work even when Next has no UW token", async () => {
     mocks.requireRouteAccess.mockResolvedValue({ ok: true, principal: { userId: "op", kind: "operator" } });
     mocks.readFile.mockRejectedValue(new Error("ENOENT"));
+    mocks.enforceDemoAiQuota.mockResolvedValue(new Response(null, { status: 429 }));
     const { GET } = await import("../app/api/ticker/seasonality/route");
     const response = await GET(new Request("http://localhost/api/ticker/seasonality?ticker=MSFT"));
-    expect(response.status).toBe(500);
-    expect(mocks.enforceDemoAiQuota).not.toHaveBeenCalled();
+    expect(response.status).toBe(429);
+    expect(mocks.enforceDemoAiQuota).toHaveBeenCalledWith("ticker/seasonality");
+    expect(mocks.uwFetch).not.toHaveBeenCalled();
   });
 
   it("charges the quota once the token precondition passes", async () => {

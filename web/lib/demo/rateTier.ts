@@ -39,6 +39,7 @@ const EXPENSIVE_PATTERNS: RegExp[] = [
   /^\/api\/flow-analysis\/[^/]+$/,
   /^\/api\/options\/rv-ratio$/,
   /^\/api\/knowledge\/search$/,
+  /^\/api\/uw\/research$/,
 ];
 
 // Reads sent as POST because the request carries a bounded symbol batch. One
@@ -105,7 +106,7 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "prices", "probe", "profile", "record-high-breadth", "regime", "research", "risk-free-rate", "scanner",
   "service-health", "setup", "share", "short-availability", "skew", "skew2d",
   "straddle", "streaks", "ticker", "trin", "vcg", "version", "vix-model-spread", "vix-pc", "vixcor", "vixts", "panic-index",
-  "vol-cone", "watchlist", "webhooks", "yield-curve",
+  "uw", "vol-cone", "watchlist", "webhooks", "yield-curve",
 ]);
 
 /**

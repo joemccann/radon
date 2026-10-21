@@ -47,7 +47,7 @@ def setup_sh() -> str:
 class TestDeployServicesArray:
     def test_radon_newsfeed_present(self, deploy_sh: str) -> None:
         # Pulls the SERVICES=(...) line and asserts the unit name.
-        match = re.search(r"^readonly SERVICES=\(([^)]+)\)", deploy_sh, re.MULTILINE)
+        match = re.search(r"^(?:readonly )?SERVICES=\(([^)]+)\)", deploy_sh, re.MULTILINE)
         assert match, "SERVICES array not found in deploy.sh"
         assert "radon-newsfeed" in match.group(1), (
             "radon-newsfeed missing from deploy.sh SERVICES array — "
@@ -55,7 +55,7 @@ class TestDeployServicesArray:
         )
 
     def test_all_long_running_units_in_services(self, deploy_sh: str) -> None:
-        match = re.search(r"^readonly SERVICES=\(([^)]+)\)", deploy_sh, re.MULTILINE)
+        match = re.search(r"^(?:readonly )?SERVICES=\(([^)]+)\)", deploy_sh, re.MULTILINE)
         assert match
         services = set(match.group(1).split())
         for required in (

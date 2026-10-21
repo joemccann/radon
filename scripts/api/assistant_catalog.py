@@ -24,6 +24,11 @@ REFUSED_CAPABILITIES: frozenset[str] = frozenset(
 CatalogKey = tuple[str, str]
 
 CATALOG: dict[CatalogKey, Capability] = {
+    ("GET", "/uw/capabilities"): "read",
+    ("GET", "/uw/research"): "read",
+    ("POST", "/uw/research/refresh"): "read.spawn",
+    ("GET", "/uw/research/events"): "internal",
+    ("POST", "/uw/request"): "internal",
     ("GET", "/admin/logs"): "admin",
     ("GET", "/admin/services"): "admin",
     ("POST", "/admin/services/{unit}/{action}"): "admin",

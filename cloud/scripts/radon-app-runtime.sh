@@ -6,11 +6,11 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
-readonly SECRET_STORE_UNITS="radon-api.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly SECRET_STORE_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # Store-only jobs: no media, no 2FA lease, no subscription grants, no control
 # socket. Only the secret_store directory and their own state.
 readonly STORE_JOB_UNITS="radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
@@ -690,6 +690,13 @@ render_env_file() {
       [[ "$status" -le 1 ]] || exit 71
       mv "${temporary}.filtered" "$temporary" || exit 71
     fi
+    if [[ "$unit" == "radon-uw-stream.service" || "$unit" == "radon-uw-research.service" ]]; then
+      grep -E '^(#|$|(UW_TOKEN|RADON_UW_[A-Z0-9_]+|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA)=)' \
+        "$temporary" > "${temporary}.filtered"
+      status=$?
+      [[ "$status" -le 1 ]] || exit 71
+      mv "${temporary}.filtered" "$temporary" || exit 71
+    fi
   ) || { rm -f "$temporary" "${temporary}.filtered"; return 71; }
   mv "$temporary" "$out" || { rm -f "$temporary"; return 71; }
   printf '%s\n' "$out"
@@ -940,7 +947,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service) image="$(python_image)" ;;
+    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -1013,7 +1020,7 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  if ! is_research_unit "$unit" && ! is_store_job "$unit"; then
+  if ! is_research_unit "$unit" && ! is_store_job "$unit" && [[ "$unit" != "radon-uw-stream.service" ]]; then
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
@@ -1062,6 +1069,13 @@ cmd_run() {
         set -- "$@" -v "${AI_CYCLE_DIR}:${AI_CYCLE_DIR_IN_CONTAINER}"
         ;;
     esac
+  elif [[ "$unit" == "radon-uw-stream.service" ]]; then
+    # Fully trusted app-plane process, like API. Shared data is required for
+    # the SAME governor SQLite WAL/SHM and legacy atomic budget used by every
+    # REST caller; never put reconciliation on a private ephemeral quota.
+    # No media, broker control/lease or subscription grant mounts.
+    prepare_private_dir "$ids" "${DATA_DIR}/uw_stream" "UW stream state"
+    set -- "$@" -v "${DATA_DIR}:/home/radon/radon/data"
   elif ! is_research_unit "$unit"; then
     # DS-2026-10-17-20: media.radon.run serves this directory through Caddy
     # file_server, which follows symlinks, so write here lets a container have
@@ -1243,6 +1257,12 @@ cmd_run() {
       ;;
     radon-aa-frontier-refresh.service)
       set -- "$@" sh -c 'python scripts/secret_store.py && exec python -m scripts.aa_frontier_refresh'
+      ;;
+    radon-uw-stream.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python scripts/uw_stream_collect.py'
+      ;;
+    radon-uw-research.service)
+      set -- "$@" sh -c 'python scripts/secret_store.py && exec python scripts/uw_research.py --scheduled --json'
       ;;
     radon-monitor.service)
       set -- "$@" python -m scripts.monitor_daemon.run --daemon

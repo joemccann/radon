@@ -72,7 +72,7 @@ def _key_loading_units() -> list[str]:
 
 
 def test_the_key_loading_set_is_exactly_the_runtime_wrapped_units() -> None:
-    assert _key_loading_units() == sorted(("radon-api.service", VAULT, *STORE_JOBS))
+    assert _key_loading_units() == sorted(("radon-api.service", "radon-uw-stream.service", "radon-uw-research.service", VAULT, *STORE_JOBS))
     assert sorted(_runtime_list("SECRET_STORE_UNITS")) == _key_loading_units()
 
 

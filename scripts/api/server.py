@@ -985,6 +985,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
+from api.routes.uw_research import router as uw_research_router
+app.include_router(uw_research_router)
 app.include_router(historical_router)
 app.include_router(preferences_router)
 app.include_router(credentials_router)

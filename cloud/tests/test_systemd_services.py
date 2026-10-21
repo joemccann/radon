@@ -8,6 +8,9 @@ import pathlib
 import pytest
 
 EXPECTED_SERVICE_FILES = [
+    "radon-uw-stream.service",
+    "radon-uw-research.service",
+    "radon-uw-research.timer",
     "radon-aa-frontier-refresh.service",
     "radon-aa-frontier-refresh.timer",
     "radon-ai-cycle-backfill.service",
@@ -210,6 +213,7 @@ STRIPPED_ENV_SERVICES = {
     "radon-mcp.service": "/etc/radon/mcp.env",
 }
 STATIC_SERVICES = {
+    "radon-uw-research.service",
     "radon-media-publish.service",
     "radon-refresh.service",
     "radon-drift-audit.service",

@@ -11,6 +11,9 @@ uvicorn==0.42.0
 PyJWT==2.15.0
 cryptography==50.0.1
 
+# Bounded UW Advanced research streaming (Python sync transport).
+websockets==15.0.1
+
 # HTTP requests
 requests==2.33.0
 
