@@ -129,6 +129,29 @@ def _order_legs(params: dict) -> Optional[list[tuple[tuple, float]]]:
     return [(key, (-1.0 if envelope_sell else 1.0) * quantity)]
 
 
+def fresh_reducing_close(
+    params: dict,
+    snapshot: Optional[dict],
+    now: datetime,
+) -> bool:
+    """True when the order only reduces holdings on a snapshot still in the 15-minute window.
+
+    A SELL-envelope combo is priced as new short assignment by the fat-finger
+    loss cap. That price is right for an opening order. It is the wrong price
+    for a close of longs the book still holds: ten SPX puts sold to close
+    clear the $10M cap on strike proxy alone. The snapshot has to be fresh.
+    A stale book must not waive the cap, because the position may already be
+    gone and the same bytes would open the short. A client flag is not proof.
+    """
+    if not is_close_out(params, snapshot) or not isinstance(snapshot, dict):
+        return False
+    synced = _parse_ts(snapshot.get("last_sync"))
+    age = (now - synced).total_seconds() if synced else None
+    if age is None or age > MAX_SNAPSHOT_AGE_SECS or age < -_CLOCK_SKEW_SECS:
+        return False
+    return True
+
+
 def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
     """True when the combined delta per contract reduces holdings without a flip."""
     if not isinstance(snapshot, dict):

@@ -1040,3 +1040,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-328 / R-739 | DONE | RED 2 failed (`combo_max_loss` and Gate 3 both returned 999900.0); GREEN 173 passed (order limits, combo quadrants, fail-open inputs, funnel, bankroll admission and enforcement). Permanent drills 100 passed. | A combo stop-market no longer books a discarded `limitPrice` as credit. Assignment and width stay intact, and Gate 3 prices the stop as paying the worse supplied price. Limit-order credit math is unchanged. No halt, notional, or broker path was weakened. Full pytest, cloud/tests, Vitest and the order-idempotency drill stay on PR CI. |
+
+## Nightly remediation 2026-10-21
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-329 / R-740 | DONE | RED 6 failed (route 422 ORDER_MAX_LOSS_LIMIT on the fresh 10-lot SPX close, loss $10,999,000); GREEN 6 passed; focused neighborhood 229 passed | A SELL-envelope close of held longs is no longer priced as new short assignment. The loss cap still refuses an empty, stale, or unreadable book, an oversell, and a quantity over the contract cap. The snapshot is read only after ORDER_MAX_LOSS_LIMIT, and a failed read keeps the refusal. No halt change. |

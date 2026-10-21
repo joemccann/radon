@@ -19,7 +19,9 @@ inversion `ib_place_order.py` was restructured to avoid.
 
 The tripwire at the bottom is the point: it enumerates every module that calls
 `client.place_order(` / `.placeOrder(` outside tests and requires each to
-reference `check_order_limits`, so the next site cannot be added silently.
+reference `check_order_limits` or `check_placement_limits` (the placement
+wrapper that calls it, and waives only a fresh reducing close), so the next
+site cannot be added silently.
 """
 
 from __future__ import annotations
@@ -370,7 +372,7 @@ class TestNoPlacementSiteEscapesTheLimits:
             body = _uncommented(path)
             if not self.PLACEMENT.search(body):
                 continue
-            if "check_order_limits" not in body:
+            if "check_order_limits" not in body and "check_placement_limits" not in body:
                 offenders.append(path.relative_to(REPO).as_posix())
         assert not offenders, (
             "these modules place a live order without referencing the "

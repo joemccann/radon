@@ -35,6 +35,15 @@ Order admission has two independent controls:
   snapshot must prove the combined contract deltas reduce held positions
   without increasing or flipping them. This exception is checked before
   snapshot freshness; a client closing flag alone does not establish it.
+- The fat-finger combo loss cap is separate. `check_placement_limits` in
+  `order_limits.py` is what `ib_place_order.py` and the `/orders/place` and
+  `/orders/replace` route refusal call. A SELL envelope is priced as new
+  short assignment. That refusal is waived only by `fresh_reducing_close`:
+  the same reducing-delta test, plus a `last_sync` inside the 15-minute
+  window (a timestamp more than 60 seconds in the future does not qualify).
+  An empty, stale, or unreadable snapshot keeps the refusal. Quantity,
+  notional, and shape caps are never waived. The snapshot is read only
+  after `ORDER_MAX_LOSS_LIMIT`. This does not change the bankroll gate.
 
 The all-placer gate is independent of Kelly warning/block mode. Turning it
 off does not disable the separate Kelly guard, evaluation checks, trading

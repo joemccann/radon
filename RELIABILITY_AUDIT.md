@@ -3207,3 +3207,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` and `:864-906`, wire `placeOrder` at `:752` and `:910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6146` (used at `:6255` and `:6333`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:218-235` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2821-2834`. Whole-repo `.placeOrder(` is only those two call sites. `asia-export-lead` is in `scripts/watchdog/services.py` (`:163`, bucket `:666`) and `web/lib/serviceHealthWindows.ts:179`.
 
 Audited through: 5bfadbb6afb805b53dc3ea10f884728ed7076e16 on 2026-10-20 — 1 new finding
+
+## Delta audit 2026-10-21
+
+Trusted cursor `5bfadbb6afb805b53dc3ea10f884728ed7076e16` (rolling issue #81, 2026-10-20) through `e5426fb17d91d2c1224b070c5865a526d358fd7d`: 30 commits, 43 paths. Open draft #1193 reserves R-739 / REL-328 and was not repeated. Highest IDs before tonight: R-739 / REL-328. Codemap `generated_at` 2026-10-19T09:00:08Z. Importers of `scripts/order_limits.py` were confirmed with `rg` (`check_order_limits` / `check_placement_limits` call sites). The order-limit, same-origin, bind-source, credential-redaction, responder-install, and perf-probe diffs were read.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-740 / REL-329 | P1 | `scripts/order_limits.py` `combo_max_loss`; admission at `scripts/ib_place_order.py` `place_order` and `scripts/api/server.py` `_refuse_if_order_limits_violated` | DONE. A SELL envelope reverses leg sides, so a close of a long combo (structure legs left BUY, envelope SELL) is priced as new short assignment. Ten SPX 6000/5000 puts, limit 1.00, price at $10,999,000 against the $10,000,000 cap and `/orders/place` returns 422 before the bankroll close-out exemption. Acceptance: a fresh snapshot holding those ten puts admits the close and the placer reaches the broker socket; an empty book, a 16-minute-old book, a raising snapshot read, an 11-lot oversell, and a 501-lot quantity all still refuse; the socket is not opened on a refusal. RED 6 failed (route: 422 ORDER_MAX_LOSS_LIMIT on the fresh close). GREEN 6 passed; focused neighborhood 229 passed. |
+
+Reviewed and not filed: the futures-multiplier, stock-leg, and SELL-envelope fixes in this range fail closed and keep their tests. Same-origin mutation rejects a missing `Sec-Fetch-Site` unless Origin is first-party or the request is an enumerated exemption. Bind-source recheck compares device, inode, and generation before the engine starts. No new `service_health` writer.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` and `:864-906`, wire `placeOrder` at `:752` and `:910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6146`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224-241` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2821-2834`.
+
+Audited through: e5426fb17d91d2c1224b070c5865a526d358fd7d on 2026-10-21 — 1 new finding
