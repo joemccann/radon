@@ -132,11 +132,11 @@ function parseExaText(text: string): { profile: Record<string, unknown>; stats: 
 
 /* ─── UW API helpers ─── */
 
-async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<string, unknown>> {
+async function fetchUWStockInfo(ticker: string): Promise<Record<string, unknown>> {
   try {
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/info`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
+      { cache: "no-store", signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -151,11 +151,11 @@ async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<s
  * rows, newest first; the float lives in `total_float` (live-probed
  * 2026-07-21). Failure returns {} — missing float renders "---" downstream.
  */
-async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<string, unknown>> {
+async function fetchUWShortFloat(ticker: string): Promise<Record<string, unknown>> {
   try {
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/shorts/${encodeURIComponent(ticker)}/interest-float/v2`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
+      { cache: "no-store", signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -166,11 +166,11 @@ async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<
   }
 }
 
-async function fetchUWStockState(ticker: string, token: string): Promise<Record<string, unknown>> {
+async function fetchUWStockState(ticker: string): Promise<Record<string, unknown>> {
   try {
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/stock-state`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
+      { cache: "no-store", signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -277,7 +277,6 @@ export async function GET(request: Request): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(buildDemoTickerInfo(symbol, new Date())), requestId);
   }
 
-  const token = process.env.UW_TOKEN;
 
   // 1. Check cache
   const cached = await readCache(symbol);
@@ -292,36 +291,34 @@ export async function GET(request: Request): Promise<Response> {
   if (profileCached && statsCached && isPopulated(cached?.uw_info)) {
     let stockState = cached.stock_state;
     let shortFloat = cached.short_float ?? {};
-    if (token) {
-      // Legacy entries (and past float failures) lack short_float — self-heal
-      // at most once per recheck window. Stock-state is gated by its own
-      // 15-minute TTL so a HIT does not call UW on every request.
-      const refreshState = stockStateRefreshDue(cached);
-      const refreshFloat = floatRecheckDue(cached);
-      if (refreshState || refreshFloat) {
-        const [freshState, freshFloat] = await Promise.all([
-          refreshState ? fetchUWStockState(symbol, token) : Promise.resolve(null),
-          refreshFloat ? fetchUWShortFloat(symbol, token) : Promise.resolve(null),
-        ]);
-        let cacheDirty = false;
-        if (refreshState) {
-          cached.stock_state_checked_at = new Date().toISOString();
-          cacheDirty = true;
-          if (freshState && Object.keys(freshState).length > 0) {
-            stockState = freshState;
-            cached.stock_state = freshState;
-          }
+    // Legacy entries (and past float failures) lack short_float — self-heal
+    // at most once per recheck window. Stock-state is gated by its own
+    // 15-minute TTL so a HIT does not call UW on every request.
+    const refreshState = stockStateRefreshDue(cached);
+    const refreshFloat = floatRecheckDue(cached);
+    if (refreshState || refreshFloat) {
+      const [freshState, freshFloat] = await Promise.all([
+        refreshState ? fetchUWStockState(symbol) : Promise.resolve(null),
+        refreshFloat ? fetchUWShortFloat(symbol) : Promise.resolve(null),
+      ]);
+      let cacheDirty = false;
+      if (refreshState) {
+        cached.stock_state_checked_at = new Date().toISOString();
+        cacheDirty = true;
+        if (freshState && Object.keys(freshState).length > 0) {
+          stockState = freshState;
+          cached.stock_state = freshState;
         }
-        if (freshFloat != null) {
-          cached.short_float_checked_at = new Date().toISOString();
-          cacheDirty = true;
-          if (isPopulated(freshFloat)) {
-            shortFloat = freshFloat;
-            cached.short_float = freshFloat;
-          }
-        }
-        if (cacheDirty) await writeCache(cached);
       }
+      if (freshFloat != null) {
+        cached.short_float_checked_at = new Date().toISOString();
+        cacheDirty = true;
+        if (isPopulated(freshFloat)) {
+          shortFloat = freshFloat;
+          cached.short_float = freshFloat;
+        }
+      }
+      if (cacheDirty) await writeCache(cached);
     }
 
     const response = NextResponse.json({
@@ -340,15 +337,6 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
-  if (!token) {
-    return jsonApiError({
-      message: "UW_TOKEN not configured",
-      status: 500,
-      code: "CONFIG_ERROR",
-      requestId,
-    });
-  }
-
   // Demo AI quota (Phase 4) — charged only on a cache MISS (the expensive
   // UW/Exa/Yahoo fan-out below); no-op for non-demo users.
   const quota = await enforceDemoAiQuota("ticker/info");
@@ -361,9 +349,9 @@ export async function GET(request: Request): Promise<Response> {
     // stats TTL.
     const reuseUwInfo = canReuseUwInfo(cached?.uw_info, !!statsCached);
     const [fetchedUwInfo, stockState, fetchedShortFloat] = await Promise.all([
-      reuseUwInfo && cached ? Promise.resolve(cached.uw_info) : fetchUWStockInfo(symbol, token),
-      fetchUWStockState(symbol, token),
-      fetchUWShortFloat(symbol, token),
+      reuseUwInfo && cached ? Promise.resolve(cached.uw_info) : fetchUWStockInfo(symbol),
+      fetchUWStockState(symbol),
+      fetchUWShortFloat(symbol),
     ]);
     // Float changes slowly (biweekly settlement data) — a transient failure
     // falls back to the last-good cached value rather than blanking it.

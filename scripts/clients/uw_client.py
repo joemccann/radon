@@ -130,6 +130,7 @@ class UWClient:
         max_retries: int = _DEFAULT_MAX_RETRIES,
         backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
         caller: Optional[str] = None,
+        max_response_bytes: Optional[int] = None,
     ):
         self._token = token or os.environ.get("UW_TOKEN")
         if not self._token:
@@ -140,6 +141,9 @@ class UWClient:
 
         self._base_url = base_url.rstrip("/")
         self._caller = caller
+        if max_response_bytes is not None and (type(max_response_bytes) is not int or max_response_bytes <= 0):
+            raise ValueError("max_response_bytes must be a positive integer")
+        self._max_response_bytes = max_response_bytes
         self._timeout = timeout
         self._max_retries = max_retries
         self._backoff_factor = backoff_factor
@@ -165,6 +169,12 @@ class UWClient:
 
     # ── internal request layer ─────────────────────────────────────
 
+    def _cache_key(self, endpoint, params):
+        """Separate credential scopes without writing tokens to cache paths."""
+        import hashlib
+        scope = hashlib.sha256((self._base_url + "\0" + self._token).encode()).hexdigest()
+        return make_key(scope + "/" + endpoint, params)
+
     def get(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
         priority: str = "interactive", wait_timeout: float = 5.0,
@@ -186,7 +196,7 @@ class UWClient:
                 or ":" in endpoint or any(p in {".", ".."} for p in endpoint.split("/"))):
             raise UWValidationError("UW endpoint path is invalid", status_code=422)
         cache_enabled = use_cache and _USE_CACHE and isinstance(self._session, requests.Session)
-        lock = singleflight(make_key(endpoint, params), timeout=wait_timeout) if cache_enabled else nullcontext()
+        lock = singleflight(self._cache_key(endpoint, params), timeout=wait_timeout) if cache_enabled else nullcontext()
         try:
             with lock:
                 return self._request(endpoint, params, priority=priority,
@@ -217,7 +227,7 @@ class UWClient:
         # session is a mock/test double so retry semantics stay observable.
         cache_enabled = use_cache and _USE_CACHE and isinstance(self._session, requests.Session)
         if cache_enabled:
-            cache_key = make_key(endpoint, params)
+            cache_key = self._cache_key(endpoint, params)
             cached = get_cached(cache_key)
             if cached is not None:
                 return cached
@@ -241,7 +251,10 @@ class UWClient:
                 except uw_governor.AdmissionError as exc:
                     raise UWRateLimitError(str(exc), status_code=429) from None
             try:
-                resp = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False)
+                options = {"params": params, "timeout": self._timeout, "allow_redirects": False}
+                if self._max_response_bytes is not None:
+                    options["stream"] = True
+                resp = self._session.get(url, **options)
             except (ReqConnectionError, ReqTimeout) as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
@@ -253,6 +266,20 @@ class UWClient:
                 record_hit(caller=self._caller, endpoint=endpoint)
             except Exception:
                 logger.debug("uw budget record_hit failed", exc_info=True)
+
+            if self._max_response_bytes is not None:
+                chunks = []
+                size = 0
+                try:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        size += len(chunk)
+                        if size > self._max_response_bytes:
+                            raise UWAPIError("UW response exceeds the permitted size")
+                        chunks.append(chunk)
+                    resp._content = b"".join(chunks)
+                    resp._content_consumed = True
+                finally:
+                    resp.close()
 
             status = resp.status_code
             body = self._safe_json(resp) if status != 200 else {}

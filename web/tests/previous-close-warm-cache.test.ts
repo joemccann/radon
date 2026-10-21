@@ -76,6 +76,8 @@ describe("POST /api/previous-close warm in-memory cache", () => {
   });
 
   it("second POST for the same symbol does not call unusualwhales when the cache is warm", async () => {
+    delete process.env.UW_TOKEN; // Backend owns vendor credentials; IB remains first.
+
     const uwUrls: string[] = [];
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);

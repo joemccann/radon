@@ -767,3 +767,20 @@ Image pre-pull compares each cached release tag with its registry manifest diges
 ### SPX breadth scheduled comparison
 
 `setup-vps.sh` inventories `radon-record-high-breadth.{service,timer}` and enables the timer on full-host setup. The bounded auto-sync manifest installs both files on existing app-plane hosts. The daily 18:15 America/New_York run reconciles TradingView MCP source history, writes `record-high-breadth` service health, and retains prior data on authentication failure. Its 26h freshness budget also covers weekend heartbeat runs. Provision the production OAuth store through explicit consent and configure `TRADINGVIEW_MCP_TOKEN_FILE`; setup does not install or copy account credentials. This provider-coherent comparison does not change generic commodity-price failover. Source-universe and history limits are documented in `docs/indicators/record-high-breadth-source-parity.md`.
+
+
+### Unusual Whales Advanced collectors
+
+The root-owned bootstrap manifest includes `radon-uw-stream.service`,
+`radon-uw-research.service`, `radon-uw-research.timer`, and their runtime
+container drop-ins. `setup-vps.sh` installs these through the existing
+control-plane path. Collection requires explicit `RADON_UW_STREAM_ENABLED=1`
+admission and a configured UW token; installation alone must not enable an
+unverified feed. Runtime credential grants and filtered environment staging
+must remain consistent with the collector commands.
+
+Deployment discovers an already active UW stream only after lock, control-plane,
+and environment admission. The optional process then participates in restart
+and rollback with the core services. Sourcing deploy.sh or refusing a prestage
+lock must not invoke systemctl. Account settings and request admission are
+documented in `docs/operations.md` and `docs/uw-rest-governance.md`.

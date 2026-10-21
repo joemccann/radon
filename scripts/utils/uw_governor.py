@@ -127,10 +127,15 @@ def _db():
             conn.close()
 
 
-def _usage(conn, state, day: str, policy: dict) -> int:
+def _local_usage(conn, state, day: str) -> int:
     local = conn.execute("SELECT count(*) FROM requests WHERE quota_day=?", (day,)).fetchone()[0]
     if state["bootstrap_day"] == day:
         local += state["bootstrap_count"]
+    return local
+
+
+def _usage(conn, state, day: str, policy: dict) -> int:
+    local = _local_usage(conn, state, day)
     if state["provider_count"] is not None and (state["observed_day"] == day or policy["quota_period"] != "daily"):
         pending = max(0, state["reserved_total"] - state["cutoff"])
         return max(local, state["provider_count"] + pending)
@@ -165,15 +170,23 @@ def reserve(token: str, *, priority: str = "standard", timeout: float = 5.0) -> 
         day = _day(now)
         with _db() as conn:
             state = conn.execute("SELECT * FROM policy WHERE id=1").fetchone()
-            cap = _effective_cap(policy, state)
             used = _usage(conn, state, day, policy)
             # Cap observations can be monthly; a spent provider cap stays
             # closed across ET midnight until a newer provider receipt.
-            if state["provider_cap"] is not None and used >= state["provider_cap"]:
+            local_used = _local_usage(conn, state, day)
+            # One bounded rollover probe can reconcile a daily count paired
+            # with an unspecified-period token cap. A missing receipt cannot
+            # unlock repeated requests after an exhausted provider allowance.
+            rollover_probe = (policy["quota_period"] == "unknown"
+                              and state["observed_day"] != day and local_used == 0)
+            if state["provider_cap"] is not None and used >= state["provider_cap"] and not rollover_probe:
                 raise AdmissionError("UW provider quota is exhausted")
             factor = 1.0 if priority == "interactive" else 1.0 - RESERVE_FRACTION
-            if cap is not None and used >= max(1, int(cap * factor)):
+            daily_used = max(local_used, used) if policy["quota_period"] == "daily" else local_used
+            if policy["daily_limit"] is not None and daily_used >= max(1, int(policy["daily_limit"] * factor)):
                 raise AdmissionError("UW request budget is reserved or exhausted")
+            if state["provider_cap"] is not None and used >= max(1, int(state["provider_cap"] * factor)) and not rollover_probe:
+                raise AdmissionError("UW provider budget is reserved or exhausted")
             minute_limit = max(1, int(policy["requests_per_minute"] * factor))
             minute = conn.execute("SELECT count(*), min(at) FROM requests WHERE at>?", (now - 60,)).fetchone()
             if state["embargo"] <= now and minute[0] < minute_limit:
@@ -225,7 +238,7 @@ def observe(token: str, status: int, headers: Mapping, *, reservation: int | Non
         if count is not None and (cap is not None or unlimited):
             # Out-of-order responses must not decrease the observed counter
             # within one quota day. A newer low count after rollover can.
-            if (_policy()["quota_period"] == "daily" and state["observed_day"] != _day(now)) or state["provider_count"] is None or count >= state["provider_count"]:
+            if (state["observed_day"] != _day(now)) or state["provider_count"] is None or count >= state["provider_count"]:
                 cutoff = reservation if isinstance(reservation, int) and reservation > 0 else 0
                 conn.execute("UPDATE policy SET provider_count=?,provider_cap=?,provider_unlimited=?,observed_day=?,observed_at=?,cutoff=? WHERE id=1", (count, cap, int(unlimited), _day(now), now, cutoff))
     return snapshot(token)

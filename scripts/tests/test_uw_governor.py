@@ -236,3 +236,65 @@ def test_client_does_not_follow_provider_redirects(monkeypatch):
         with pytest.raises(UWAPIError):
             client.get("market/economic-calendar", use_cache=False)
     assert calls[0]["allow_redirects"] is False
+
+
+def test_unknown_period_local_daily_policy_resets_without_provider_headers(monkeypatch):
+    now = datetime(2026, 10, 21, 16, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gov.time, "time", lambda: now)
+    monkeypatch.setenv("RADON_UW_DAILY_LIMIT", "2")
+    gov.reserve(TOKEN, priority="interactive", timeout=0)
+    gov.reserve(TOKEN, priority="interactive", timeout=0)
+    monkeypatch.setattr(gov.time, "time", lambda: now + 86400)
+    gov.reserve(TOKEN, priority="interactive", timeout=0)
+
+
+def test_unknown_period_rollover_probe_reconciles_daily_provider_counter(monkeypatch):
+    now = datetime(2026, 10, 21, 16, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gov.time, "time", lambda: now)
+    first = gov.reserve(TOKEN, priority="interactive", timeout=0)
+    gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "10", "x-uw-daily-req-count": "10"}, reservation=first)
+    monkeypatch.setattr(gov.time, "time", lambda: now + 86400)
+    probe = gov.reserve(TOKEN, priority="interactive", timeout=0)
+    with pytest.raises(gov.AdmissionError):
+        gov.reserve(TOKEN, priority="interactive", timeout=0)
+    gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "10", "x-uw-daily-req-count": "1"}, reservation=probe)
+    gov.reserve(TOKEN, priority="interactive", timeout=0)
+    assert gov.snapshot()["reserved_or_observed"] == 2
+
+
+def test_cache_and_singleflight_keys_are_credential_scoped():
+    with UWClient(token=TOKEN) as first, UWClient(token="other-token") as second:
+        key = first._cache_key("stock/AAPL/info", None)
+        assert key != second._cache_key("stock/AAPL/info", None)
+        assert TOKEN not in key
+
+
+def test_proxy_response_size_is_bounded(monkeypatch):
+    from clients.uw_client import UWAPIError
+    result = response(payload={"data": "x" * 100})
+    monkeypatch.setattr(requests.Session, "get", lambda *_a, **_k: result)
+    with UWClient(token=TOKEN, max_response_bytes=16) as client:
+        with pytest.raises(UWAPIError, match="permitted size"):
+            client.get("market/economic-calendar", use_cache=False)
+    assert gov.snapshot()["reserved_or_observed"] == 1
+
+
+@pytest.mark.parametrize("period", ["unknown", "monthly"])
+def test_cumulative_provider_count_does_not_consume_local_daily_policy(monkeypatch, period):
+    monkeypatch.setenv("RADON_UW_LIMITS_VERIFIED", "1")
+    monkeypatch.setenv("RADON_UW_QUOTA_PERIOD", period)
+    gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "100000", "x-uw-daily-req-count": "50000"})
+    gov.reserve(TOKEN, priority="interactive", timeout=0)
+
+
+def test_verified_monthly_exhaustion_cannot_probe_each_day(monkeypatch):
+    monkeypatch.setenv("RADON_UW_LIMITS_VERIFIED", "1")
+    monkeypatch.setenv("RADON_UW_QUOTA_PERIOD", "monthly")
+    now = datetime(2026, 10, 21, 16, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gov.time, "time", lambda: now)
+    gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "100", "x-uw-daily-req-count": "100"})
+    monkeypatch.setattr(gov.time, "time", lambda: now + 86400)
+    with pytest.raises(gov.AdmissionError, match="provider quota"):
+        gov.reserve(TOKEN, priority="interactive", timeout=0)
+    gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "100", "x-uw-daily-req-count": "1"})
+    gov.reserve(TOKEN, priority="interactive", timeout=0)

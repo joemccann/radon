@@ -511,16 +511,18 @@ describe("GET /api/ticker/info", () => {
     }
   });
 
-  it("returns 500 when no UW_TOKEN env var and cache missing", async () => {
+  it("delegates an uncached company read when Next has no UW token", async () => {
     mockReadFile.mockRejectedValueOnce(new Error("ENOENT"));
     const oldToken = process.env.UW_TOKEN;
     delete process.env.UW_TOKEN;
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { issue_type: "Common Stock", marketcap: "1000" } }) });
     try {
       const { GET } = await import("../app/api/ticker/info/route");
       const res = await GET(req("http://localhost/api/ticker/info?ticker=AMD"));
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
       const body = (await jsonOf(res)) as Record<string, unknown>;
-      expect(body.error).toContain("UW_TOKEN");
+      expect(body.uw_info).toEqual({ issue_type: "Common Stock", marketcap: "1000" });
+      expect(mockFetch).toHaveBeenCalled();
     } finally {
       if (oldToken != null) process.env.UW_TOKEN = oldToken;
     }

@@ -178,14 +178,12 @@ async def admitted_web_request(body: WebRequest):
             raise HTTPException(400, "Research pagination is out of bounds")
     if len(_web_tasks) >= 4:
         raise HTTPException(429, "Research provider capacity is busy", headers={"Retry-After": "3"})
-    from clients.uw_client import UWClient, UWAPIError
-    def fetch():
-        try:
-            with UWClient(timeout=15, max_retries=0) as client:
-                return {"status": 200, "data": client.get(body.endpoint, body.params, priority="interactive", wait_timeout=3)}
-        except UWAPIError as exc:
-            return {"status": exc.status_code or 503, "data": {"error": "Research provider request unavailable"}}
-    task = asyncio.create_task(asyncio.to_thread(fetch))
+    from api.subprocess import run_script
+    # requests' socket timeout is an inactivity timeout. A slow-drip response
+    # can defeat it, so a killable child owns provider I/O and JSON parsing.
+    task = asyncio.create_task(run_script(
+        "uw_admitted_request.py", [body.endpoint, json.dumps(body.params)], timeout=18,
+    ))
     _web_tasks.add(task)
     def finish(done):
         _web_tasks.discard(done)
@@ -193,11 +191,17 @@ async def admitted_web_request(body: WebRequest):
             done.exception()
     task.add_done_callback(finish)
     try:
-        # Cancellation does not release capacity while a provider socket is
-        # still draining; hung sockets cannot exhaust the API executor.
-        return await asyncio.wait_for(asyncio.shield(task), timeout=18)
+        # Include shared subprocess admission in the caller's wall budget.
+        result = await asyncio.wait_for(task, timeout=18)
+        if not result.ok or not isinstance(result.data, dict):
+            raise HTTPException(503, "Research provider request unavailable")
+        return result.data
     except asyncio.TimeoutError:
         raise HTTPException(503, "Research provider request timed out") from None
+    except asyncio.CancelledError:
+        # run_script kills/reaps its process group before releasing capacity.
+        task.cancel()
+        raise
 
 
 @router.get("/uw/research/events")

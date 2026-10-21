@@ -182,13 +182,11 @@ const UNAVAILABLE: SourceOutcome = { status: "unavailable" };
 /* ── UW source ──────────────────────────────────────────── */
 
 async function fetchFromUW(symbol: string): Promise<SourceOutcome> {
-  const token = process.env.UW_TOKEN;
-  if (!token) return { status: "skipped" };
   try {
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(symbol)}/quote`,
       {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(5000),
       },
     );

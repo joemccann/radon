@@ -20,7 +20,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(request, {operatorOnly:true, rate:{key:"uw-research-refresh",limit:4,windowMs:60_000},durableRateTier:"B"});
+  const access = await requireRouteAccess(request, {operatorOnly: true, rate:{key:"uw-research-refresh",limit:4,windowMs:60_000},durableRateTier: "B"});
   if (!access.ok) return access.response;
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({error:"Invalid refresh request"},{status:400}); }

@@ -289,9 +289,20 @@ def _uw_get(path: str) -> dict[str, Any]:
     if parsed.scheme or parsed.netloc or not parsed.path.startswith("/api/"):
         raise ValueError("ivrank: UW path is invalid")
     params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
-    with UWClient(token=token, timeout=UW_TIMEOUT_S, caller="ivrank") as client:
-        return client.get(parsed.path.removeprefix("/api/"), params=params,
-                          priority="background", use_cache=False)
+    try:
+        with UWClient(token=token, timeout=UW_TIMEOUT_S, caller="ivrank") as client:
+            return client.get(parsed.path.removeprefix("/api/"), params=params,
+                              priority="background", use_cache=False)
+    except Exception:
+        if writer is not None:
+            try:
+                writer.record_service_health(
+                    SERVICE, "error", finished_at=datetime.now(timezone.utc).isoformat(),
+                    error={"message": "ivrank UW request failed"},
+                )
+            except Exception:
+                pass
+        raise
 
 
 def _real_uw_fetch() -> list[dict[str, Any]]:

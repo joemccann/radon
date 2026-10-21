@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const radonCapability = "internal";
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(request, {operatorOnly:true});
+  const access = await requireRouteAccess(request, {operatorOnly: true});
   if (!access.ok) return access.response;
   const ticker = (new URL(request.url).searchParams.get("ticker") || "SPY").toUpperCase();
   if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) return Response.json({error:"Invalid ticker"},{status:400});

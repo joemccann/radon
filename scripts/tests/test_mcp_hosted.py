@@ -312,6 +312,7 @@ EXPECTED_TOOLS = {
     "operator_journal",
     "operator_blotter",
     "operator_alerts",
+    "operator_uw_research",
 }
 
 FORBIDDEN_TOOL_PREFIXES = ("place_", "cancel_", "exercise_", "kb_")

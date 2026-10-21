@@ -279,5 +279,7 @@ class Materializer:
                     result["status"] = "degraded"
         result["updated_at"] = iso(now)
         result["research_only"] = True
-        result["replay_available"] = False
+        result["replay_available"] = False  # legacy field refers to upstream replay
+        result["upstream_replay_available"] = False
+        result["local_replay_available"] = True
         return result
