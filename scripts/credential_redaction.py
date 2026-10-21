@@ -65,9 +65,15 @@ def build_triple_quoted_assignment_re(key_pattern: str) -> "re.Pattern[str]":
     the value runs to its REAL close: a lone `'''` inside a `\"\"\"` value does
     not end it. The body is lazy, which costs one scan to the close per
     credential word and adds no new match start.
+
+    An UNTERMINATED assignment runs to the end of the input, the same way
+    a private-key block cut off before its END line does. A log or report
+    excerpt is routinely truncated mid-value, and requiring the real close
+    left the body in place while the single-line rule rewrote the opening
+    delimiter pair as an empty value, so the credential survived both.
     """
     return re.compile(
-        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')(?s:.*?)\2",
+        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')(?s:.*?)(?:\2|\Z)",
         re.IGNORECASE,
     )
 
