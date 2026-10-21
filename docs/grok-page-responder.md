@@ -295,6 +295,15 @@ ok heartbeat and print `{"event":"grok_page_ledger_transport",...}` plus
 `grok page ledger non-fatal` so `journalctl -u radon-grok-page-responder`
 can see them.
 
+A zero-exit Grok run with a valid assistant `RESULT:` is complete even when
+its diagnosis, JSON metadata or stderr mentions an unavailable model. A
+runtime fallback must change the model, reasoning effort or executable;
+symlinks, hard links and PATH aliases of the same binary do not qualify.
+Before a genuine failure can launch a fallback, `grok_runtime_attempt`
+records its page, model, CLI version, exit/timeout/invalid-result reason,
+output length and a credential-redacted stderr tail. Agent stdout stays
+out of the journal. The normal per-launch action budget still applies.
+
 ## Verify
 
 ```bash

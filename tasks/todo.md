@@ -10186,3 +10186,13 @@ Implemented T2–T5 on `codex/uw-advanced-execution`, PR #1214. REST probes retu
 
 
 UW follow-up: Sol/Luna re-reviewed `e92c723d2` and closed their final quota/replay findings. VPS read access was restored via existing Tailscale transport; new units remain absent/inactive and account receipts remain unverified. Repair CI reduced failures to one new panel-test isolation failure (1 failed / 1703 passed in that shard); add explicit cleanup because Vitest globals do not register the testing-library auto-cleanup hook. Final exact-head CI and browser artifacts remain required.
+
+## Grok duplicate fallback incident (2026-10-21)
+
+- [x] GF1 depends_on: [] Verify first-session completion, live aliases and LKG from production records.
+- [x] GF2 depends_on: [GF1] Reproduce seven behavioral failures plus five new identity cases in cloud tests.
+- [x] GF3 depends_on: [GF2] Reject alias retries, recognize successful assistant results, retain redacted failure diagnostics.
+- [ ] GF4 depends_on: [GF3] Complete broader cloud checks and exact-head PR CI.
+- [ ] GF5 depends_on: [GF4] Verify live responder and record rollout requirements.
+
+Review pending. First CLI completed18:18:12Z and committed5a5bf2b9 before parent repeated the same CLI via its resolved LKG path at18:18:13Z. Parent did not retain the original triggering stdout/stderr. Cloud RED12failures (7 behavioral,5 missing-helper assertions); GREEN87focusedchecks; final broader cloud run322Pythonchecks and84cloudcontracts passed. No local tests or credential changes. Original responder finished18:22:35Z; incident commit separately surfaced as PR1220. Preserve that work.
