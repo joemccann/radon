@@ -1103,3 +1103,46 @@ class TestSanitizeTripleDelimitedValues:
     def test_single_line_and_empty_quoted_values_are_unchanged(self):
         assert nif.sanitize('TOKEN = ""') == "TOKEN = [REDACTED]"
         assert nif.sanitize('TOKEN = "qzNOTREALopaque1234"') == "TOKEN = [REDACTED]"
+
+
+class TestSanitizeTokenScanIsBounded:
+    """The URL, email and file-location rules had unbounded runs with
+    OVERLAPPING candidate starts: a long hyphen- or dot-separated token with no
+    delimiter was rescanned at every internal word boundary, so the scan was
+    quadratic (measured 0.023s, 0.085s and 0.340s for 2k, 4k and 8k URL-rule
+    repetitions, and 0.081s, 0.315s and 1.280s for the file rule). sanitize()
+    has no input-size bound and contributor-shaped excerpts reach it through
+    github_pr_output (DS-2026-10-20-12). The cure may not shorten coverage, so
+    the coverage tests below are part of this guard."""
+
+    @pytest.mark.parametrize("filler", ["a-", "a.", "a/"])
+    def test_a_pathological_token_does_not_stall_sanitization(self, filler: str):
+        import subprocess
+        import sys as _sys
+
+        probe = (
+            "import sys;"
+            f"sys.path.insert(0, {str(REPO / 'scripts')!r});"
+            "import nightly_issue_format as n;"
+            f"n.sanitize({filler!r} * 64_000 + '!')"
+        )
+        # One candidate start per token needs well under a second here. The
+        # overlapping-start form needed minutes on this input.
+        subprocess.run([_sys.executable, "-c", probe], check=True, timeout=20)
+
+    @pytest.mark.parametrize(
+        "text,leak",
+        [
+            ("fetched https://internal.example/path?q=1 twice", "internal.example"),
+            ("fetched postgres://user@db.internal/radon twice", "db.internal"),
+            ("mail went to someone@example.com twice", "someone@example.com"),
+            ("mail went to first.last+tag@sub.example.co.uk twice", "first.last"),
+            ("it broke at scripts/api/app.py:4120 twice", "app.py:4120"),
+            ("it broke at web/lib/radonApi.ts:88 twice", "radonApi.ts:88"),
+        ],
+    )
+    def test_coverage_is_not_narrowed_by_the_cost_fix(self, text: str, leak: str):
+        out = nif.sanitize(text)
+        assert leak not in out, out
+        assert nif.REDACTED in out, out
+        assert out.endswith("twice"), out

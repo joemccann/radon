@@ -133,7 +133,16 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*)",
     re.S,
 )
-_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
+# Each pattern below starts at a TOKEN start, not at every internal word
+# boundary. A word-boundary anchor let a long hyphen- or dot-separated token
+# re-enter the scan after every separator, so the suffix was rescanned at
+# every one: quadratic on contributor-shaped text that reaches sanitize()
+# through github_pr_output with no size bound. One candidate start per token
+# makes the scan linear and cannot narrow coverage: the leading run already
+# spans every character between the token start and any interior start, so a
+# match that used to begin inside a token now begins at its start and redacts
+# the same span or more.
+_EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.\w+\b")
 # App routes (/api/..., /v1/...) with any query or fragment, including
 # dynamic segments ([id], :id, {id}). Not filesystem
 # roots: lock-held comments name $REPO and $RUNNER_LOCK (/Users/..., /tmp/...,
@@ -144,7 +153,11 @@ _ROUTE_RE = re.compile(
 )
 # Any scheme, not just http(s): database, cache and socket URIs carry
 # credentials in their userinfo or query.
-_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+# The scheme run is matched from the token start, so a scheme-shaped token is
+# considered once. The first character is no longer required to be a letter:
+# the token start is where the run begins anyway, and anything ending in
+# `://` is a URL by any reading.
+_URL_RE = re.compile(r"(?<![\w.+-])[\w.+-]*://\S+", re.I)
 # The quota ladder's one operator URL. Its token is kept only when sentence
 # punctuation alone follows the literal; any other suffix (path, query, host
 # tail) redacts the whole token, which carries no scheme once matched.
@@ -153,7 +166,7 @@ _USAGE_TOKEN_RE = re.compile(
 )
 _USAGE_TAIL_OK_RE = re.compile(r"[).,;:!'\"\]>]*")
 _FILE_LINE_RE = re.compile(
-    r"\b[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
+    r"(?<![\w./-])[\w./-]+\.(?:py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):\d+\b"
 )
 # Operator / broker / demo account-looking tokens, not pids.
 _ACCOUNT_RE = re.compile(
