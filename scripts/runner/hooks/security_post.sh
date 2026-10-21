@@ -143,7 +143,12 @@ pr_number_in_repo() {
 # claimed PR must be a same-repo OPEN PR on this loop's branch prefix, its
 # live head must still be the SHA the record was verified at ($3), and that
 # head's check rollup must be wholly successful. A rollup with no entries is
-# PENDING, not green. A claim of ZERO PRs is verified too: an open PR on this
+# PENDING, not green, and so is any entry that is not a COMPLETED CheckRun
+# with a conclusion: gh spells an unfinished run `conclusion: ""`, and jq's
+# `//` only falls through on null, so reading the conclusion directly left an
+# EMPTY token that bash word splitting then dropped -- `SUCCESS,` verified as
+# wholly green while a check was still running. Every entry yields a
+# non-empty token now. A claim of ZERO PRs is verified too: an open PR on this
 # loop's prefix contradicts it.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
@@ -158,7 +163,7 @@ deliver_urls_verified() {
         n="$(pr_number_in_repo "$tok")" || return 1
         fields="$(net_bounded "$GH" pr view "$n" -R "$GH_REPO" \
           --json state,headRefName,isCrossRepository,headRefOid,statusCheckRollup \
-          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | (.conclusion // .state // "PENDING") | ascii_upcase] | join(","))] | join(" ")' \
+          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | ((.status // "") | ascii_upcase) as $st | ((.conclusion // "") | ascii_upcase) as $cc | ((.state // "") | ascii_upcase) as $se | if $st != "" and $st != "COMPLETED" then "PENDING" elif $cc != "" then $cc elif $se != "" then $se else "PENDING" end] | join(","))] | join(" ")' \
           2>/dev/null || true)"
         read -r state branch cross head rollup <<< "$fields"
         [[ "$state" == OPEN && "$cross" == false ]] || return 1
