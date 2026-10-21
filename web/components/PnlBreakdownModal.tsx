@@ -6,6 +6,9 @@ import MetricBreakdownModal, {
 } from "./MetricBreakdownModal";
 import { fmtSigned, fmtPct } from "@/lib/format/money";
 
+/** A visible marker on the P&L cell; `title` explains it on hover. */
+export type PnlBreakdownFlag = { label: string; title: string };
+
 export type PnlBreakdownRow = {
   id: string | number;
   ticker: string;
@@ -15,6 +18,7 @@ export type PnlBreakdownRow = {
   pnl: number;
   pnlPct?: number | null;
   pnlPctTitle?: string;
+  pnlFlag?: PnlBreakdownFlag;
 };
 
 type Props = {
@@ -30,6 +34,17 @@ type Props = {
   onClose: () => void;
   className?: string;
 };
+
+function pnlCell(row: PnlBreakdownRow) {
+  const amount = fmtSigned(row.pnl, 2);
+  if (!row.pnlFlag) return amount;
+  return (
+    <>
+      {amount}
+      <span className="pb-quote-flag" title={row.pnlFlag.title}>{row.pnlFlag.label}</span>
+    </>
+  );
+}
 
 export default function PnlBreakdownModal({
   open, title, formula, col1Header, col2Header, pctHeader = "%", rows, total, totalLabel = "TOTAL", onClose, className = "",
@@ -52,7 +67,7 @@ export default function PnlBreakdownModal({
       { content: row.structure, className: "eb-structure" },
       { content: row.col1, className: "eb-mono" },
       { content: row.col2, className: "eb-mono" },
-      { content: fmtSigned(row.pnl, 2), className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
+      { content: pnlCell(row), className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
       { content: row.pnlPctTitle ? <span title={row.pnlPctTitle}>{row.pnlPct != null ? fmtPct(row.pnlPct) : "N/A"}</span> : row.pnlPct != null ? fmtPct(row.pnlPct) : "N/A", className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
     ],
   }));

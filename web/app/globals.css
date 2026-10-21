@@ -12779,6 +12779,17 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-weight: 600;
   padding: 8px 12px;
 }
+.pb-quote-flag {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: 3px;
+  padding: 0 4px;
+  vertical-align: middle;
+}
 
 /* ─── Share PnL Button ─────────────────────────────────── */
 
