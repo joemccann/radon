@@ -631,9 +631,12 @@ class TestResearchArchive:
         assert "--no-prune" not in svc["execstart"] and "--dry-run" not in svc["execstart"]
         assert 3600 <= int(svc["timeoutstartsec"]) <= 6 * 3600
 
-    def test_timer_fires_on_the_first_of_every_month(self, unit):
+    def test_timer_fires_weekly_after_disk_cleanup(self, unit):
+        # Weekly with a rolling cutoff: monthly let a month of evidence pile
+        # up on the app host disk. 04:20 UTC Sunday sits after the 03:20
+        # disk-cleanup pass and ahead of the 05:40 portfolio archive.
         timer = unit("radon-research-archive.timer")["Timer"]
-        assert timer["oncalendar"] == "*-*-01 04:20:00 UTC"
+        assert timer["oncalendar"] == "Sun *-*-* 04:20:00 UTC"
         assert timer["persistent"] == "true"
         assert int(timer["randomizeddelaysec"]) > 0
 
