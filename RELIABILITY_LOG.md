@@ -1034,3 +1034,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-327 / R-738 | DONE | RED 1 failed (second reader AbortError); GREEN 6 passed in `web/tests/newsfeed-explain-cache.test.ts`, neighborhood 28 passed across the four explain suites | The flight owns `AbortSignal.timeout(EXPLAIN_BUDGET_MS)`. A reader who leaves rejects only their wait. One model call remains. No placement, halt, or broker path changed. Permanent drills 95 passed. Full pytest, cloud/tests, remaining Vitest and the order-idempotency drill stay on PR CI. |
+
+## Nightly remediation 2026-10-21
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-329 / R-740 | DONE | RED 6 failed (route 422 ORDER_MAX_LOSS_LIMIT on the fresh 10-lot SPX close, loss $10,999,000); GREEN 6 passed; focused neighborhood 229 passed | A SELL-envelope close of held longs is no longer priced as new short assignment. The loss cap still refuses an empty, stale, or unreadable book, an oversell, and a quantity over the contract cap. The snapshot is read only after ORDER_MAX_LOSS_LIMIT, and a failed read keeps the refusal. No halt change. |

@@ -3226,9 +3226,9 @@ def _consume_order_rate_reservation(order_ref: Optional[str] = None) -> None:
 
 
 def _refuse_if_order_limits_violated(params: dict) -> None:
-    from order_limits import check_order_limits
+    from order_limits import check_placement_limits
 
-    violation = check_order_limits(params)
+    violation = check_placement_limits(params)
     if violation:
         raise HTTPException(status_code=422, detail=violation)
 

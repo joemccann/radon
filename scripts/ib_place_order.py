@@ -250,9 +250,9 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         # Server-side fat-finger bounds (REL-005) — authoritative for every
         # placement path. what-if previews are
         # exempt so the risk UI can still price an over-limit order.
-        from order_limits import check_order_limits
+        from order_limits import check_placement_limits
 
-        violation = check_order_limits(params)
+        violation = check_placement_limits(params)
         if violation:
             return {"status": "error", "message": violation["message"]}
 
