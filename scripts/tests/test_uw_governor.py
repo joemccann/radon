@@ -270,8 +270,11 @@ def test_cache_and_singleflight_keys_are_credential_scoped():
 
 
 def test_proxy_response_size_is_bounded(monkeypatch):
+    from io import BytesIO
     from clients.uw_client import UWAPIError
     result = response(payload={"data": "x" * 100})
+    result.raw = BytesIO(result.content)
+    result._content = False
     monkeypatch.setattr(requests.Session, "get", lambda *_a, **_k: result)
     with UWClient(token=TOKEN, max_response_bytes=16) as client:
         with pytest.raises(UWAPIError, match="permitted size"):

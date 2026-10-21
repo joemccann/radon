@@ -10,7 +10,7 @@ This is an implementation checkpoint, not completed production promotion. Live c
 
 Bounded REST probes returned HTTP 200 for economic-calendar, AAPL company profile, futures contracts, multi-leg trades, Options Pulse and volatility context. Responses omitted quota/count headers; neither unlimited allowance nor higher RPM is verified. Conservative 120 RPM / 40,000 local daily allowance remains. An initial SPY company-profile 404 was followed by AAPL 200; an ETF response cannot establish issuer-profile denial.
 
-No websocket was opened locally because a second host could conflict with the token's single-owner feed. Public and tailnet VPS SSH timed out. Same-VPS channel ACKs, service activation, lag measurements and staged promotion remain unverified.
+No websocket was opened locally because a second host could conflict with the token's single-owner feed. Initial public and tailnet SSH attempts timed out; read access was restored through the existing Tailscale transport. The new units are not installed or active, and the credential resides in the protected app-plane store rather than the readable host environment. Same-VPS channel ACKs, service activation, lag measurements and staged promotion remain unverified.
 
 ## Dependency graph
 
