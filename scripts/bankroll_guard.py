@@ -18,6 +18,7 @@ from typing import Any, Optional
 from kelly import KELLY_MAX_PCT
 from order_limits import (
     _finite,
+    _ib_order_type,
     combo_max_loss,
     effective_order_price,
     effective_order_price_bounds,
@@ -227,11 +228,21 @@ def order_max_loss(params: dict) -> Optional[float]:
                 for leg in legs
             ]}
         quantity = _finite(params.get("quantity"))
-        price = _finite(params.get("limitPrice") or params.get("stopPrice"))
-        if quantity is None or price is None or quantity == 0 or price == 0:
-            return None
+        # Stop-market transmits stopPrice only. Price the envelope as paying
+        # the worse supplied price so a discarded credit limit cannot shrink
+        # assignment. Limit orders keep the signed net price.
+        stop_market = _ib_order_type(params) == "STP"
+        if stop_market:
+            price = effective_order_price(params)
+            if quantity is None or quantity == 0 or price <= 0:
+                return None
+        else:
+            price = _finite(params.get("limitPrice") or params.get("stopPrice"))
+            if quantity is None or price is None or quantity == 0 or price == 0:
+                return None
         sell = str(params.get("action") or "").upper().startswith("SELL")
-        expiry_loss = _combo_expiry_loss(params.get("legs"), quantity, price, sell)
+        expiry_sell = False if stop_market else sell
+        expiry_loss = _combo_expiry_loss(params.get("legs"), quantity, price, expiry_sell)
         if expiry_loss is not None:
             return expiry_loss
         loss = _finite(combo_max_loss(params))
@@ -239,7 +250,11 @@ def order_max_loss(params: dict) -> Optional[float]:
             return None
         # The margin proxy can be zero for all-long legs; premium paid is
         # still exposed even when there is no short-leg assignment risk.
-        debit = abs(quantity * price) * 100.0 if (price > 0) != sell else 0.0
+        # A stop-market always counts that premium as paid.
+        if stop_market or (price > 0) != sell:
+            debit = abs(quantity * price) * 100.0
+        else:
+            debit = 0.0
         return max(loss, debit)
     sell = str(params.get("action") or "").upper().startswith("SELL")
     quantity = abs(_finite(params.get("quantity")) or 0.0)

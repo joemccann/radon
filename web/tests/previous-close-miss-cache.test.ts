@@ -93,6 +93,21 @@ describe("POST /api/previous-close unresolvable-symbol replay", () => {
     expect(upstream.filter((u) => u.includes("finance.yahoo.com"))).toHaveLength(1);
   });
 
+  it("still asks the broker after third-party sources have already missed", async () => {
+    // A remembered miss may skip Unusual Whales and Yahoo. It must not skip
+    // the broker: that socket is the first source on every request, including
+    // a replay of a symbol the other two could not price.
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => ({}) }));
+    const { POST } = await import("@/app/api/previous-close/route");
+
+    await POST(postRequest(["MISSU7"]));
+    expect(wsConstructors).toHaveLength(1);
+
+    await POST(postRequest(["MISSU7"]));
+    expect(wsConstructors).toHaveLength(2);
+    expect(wsConstructors.every((socket) => socket.url.startsWith("ws://localhost:8765"))).toBe(true);
+  });
+
   it("does not remember a miss when a source failed rather than answered", async () => {
     // A UW 429 or a Yahoo timeout is not "no source has this symbol". Caching
     // it would cost the previous close for the rest of the browser session on
