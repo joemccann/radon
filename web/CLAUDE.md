@@ -114,6 +114,8 @@ Day Chg % = Daily P&L / |Yesterday's Close Value| × 100   (NEVER entry cost)
 ```
 Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg()`.
 
+**Day Move breakdown modal (2026-10-21).** `computeDayMoveBreakdown` (`lib/dayMoveBreakdown.ts`) describes every option row by its NET per-unit quote (Σ sign × leg price × leg ratio, credits negative), never by its first leg; a leg without a live mark and prior close drops the quote labels to `IB daily` / `reqPnLSingle`. The % column is the row's P&L over the absolute net close value for stocks and options alike. When IB's reqPnLSingle daily and the quoted move disagree in sign the row carries `pnlFlag` (`IB≠QUOTE`, title explains both figures), rendered by `PnlBreakdownModal` as `.pb-quote-flag`. Tests: `day-move-breakdown-net-combo.test.tsx`, `e2e/day-move-breakdown-net-combo.spec.ts`.
+
 **Same-day exception:** `entry_date == today (ET)` → yesterday's close meaningless. Day Chg + Today P&L use entry-cost baseline → Today P&L = Total P&L = `MV − EC`. `ib_daily_pnl` ignored same-day.
 
 **Mixed-age combos are not same-day** (2026-09-17). Overnight long + same-session short (SPY 740P held since May, 760P sold today → bull put spread) stamps `basis_source: mixed` and often `entry_date=today`. The same-day identity then prints the overnight leg's entire accumulated P&L as Today P&L (−$162k). `isSameDay` is false for mixed; Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Prefer `ib_daily_pnl` when IB already mixed-lot summed. Without that total, require a usable mark and baseline for every leg; any missing contribution makes Today P&L unavailable, never a partial sum. Tests: `mixed-age-combo-today-pnl.test.ts`.

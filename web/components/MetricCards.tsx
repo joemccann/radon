@@ -837,6 +837,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         formula={
           "Day Move = stocks: (last − close) × shares; options: IB reqPnLSingle daily P&L when available, else sign × (last − close) × contracts × multiplier\n" +
           "sign = +1 LONG, −1 SHORT  |  multiplier = 100 for options, 1 for stocks\n" +
+          "CLOSE / CURRENT = net per-unit price (credits negative)  |  % = P&L / |close value|  |  IB≠QUOTE = IB daily and the quoted move disagree in sign\n" +
           "Source: IB reqPnLSingle + live IB realtime prices"
         }
         col1Header="CLOSE"
