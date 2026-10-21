@@ -115,6 +115,48 @@ async function scrollToBottom(region: Locator) {
   await region.evaluate((element) => { element.scrollTop = element.scrollHeight; });
 }
 
+test("loading expirations is centered in the chain view", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  let releaseExpirations: () => void = () => {};
+  const expirationsHeld = new Promise<void>((resolve) => {
+    releaseExpirations = resolve;
+  });
+  await installFixtures(page, "light");
+  await page.route("**/api/options/expirations*", async (route) => {
+    await expirationsHeld;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ symbol: TICKER, expirations: EXPIRIES }),
+    });
+  });
+  try {
+    await page.goto(`/${TICKER}?deck=c`);
+    const loader = page.getByRole("status", { name: "Loading expirations" });
+    await expect(loader).toBeVisible();
+    const placed = await loader.evaluate((node) => {
+      const shell = node.parentElement?.getBoundingClientRect();
+      const deck = node.closest(".asset-deck-body")?.getBoundingClientRect();
+      const readout = node.getBoundingClientRect();
+      if (!shell || !deck) return null;
+      return {
+        shellWidthGap: Math.abs(shell.width - deck.width),
+        shellHeightGap: Math.abs(shell.height - deck.height),
+        centerX: Math.abs((readout.left + readout.right) / 2 - (deck.left + deck.right) / 2),
+        centerY: Math.abs((readout.top + readout.bottom) / 2 - (deck.top + deck.bottom) / 2),
+      };
+    });
+    expect(placed).not.toBeNull();
+    expect(placed!.shellWidthGap).toBeLessThan(2);
+    expect(placed!.shellHeightGap).toBeLessThan(2);
+    expect(placed!.centerX).toBeLessThan(8);
+    expect(placed!.centerY).toBeLessThan(8);
+    await screenshot(page, testInfo, "loading-expirations-centered");
+  } finally {
+    releaseExpirations();
+  }
+});
+
 test("chain-first strike column CSS fits four- and five-digit grouped labels", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 800 });
   const globals = readFileSync(join(WEB_ROOT, "app/globals.css"), "utf8");

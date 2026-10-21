@@ -13339,6 +13339,18 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   flex-direction: column;
 }
 
+/* The chain-first deck body is a row flex container. A shrink-wrapped loader
+   sits at the start edge, so this shell fills the view and centers the readout. */
+.chain-expiry-loading {
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .chain-tab {
   flex: 1;
   min-height: 0;
