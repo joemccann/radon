@@ -500,6 +500,9 @@ class TestGrokCycleEnsuresPr:
             lambda **_: [_page()],
         )
         monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(
+            responder.pages_mod, "record_action_attempt", lambda **_k: "attempt"
+        )
         monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
         completed = []
         monkeypatch.setattr(
@@ -552,6 +555,9 @@ class TestGrokCycleEnsuresPr:
             lambda **_: [_page()],
         )
         monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(
+            responder.pages_mod, "record_action_attempt", lambda **_k: "attempt"
+        )
         monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
         monkeypatch.setattr(responder.pages_mod, "complete_page", lambda *a, **k: None)
         monkeypatch.setattr(
@@ -586,6 +592,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
         monkeypatch.setattr(responder.pages_mod, "list_actionable_pages", lambda **_: [_page()])
         monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(
+            responder.pages_mod, "record_action_attempt", lambda **_k: "attempt"
+        )
         monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
         completed = []
         failures = []
@@ -639,6 +648,9 @@ class TestGrokCycleEnsuresPr:
             lambda **_: [_page()],
         )
         monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(
+            responder.pages_mod, "record_action_attempt", lambda **_k: "attempt"
+        )
         monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
         monkeypatch.setattr(responder.pages_mod, "complete_page", lambda *a, **k: None)
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)

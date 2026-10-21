@@ -255,6 +255,7 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     # paged_at is a full ISO datetime; against date('now', ...) the boundary
     # day resolves one day late, which a 90-day forensic horizon absorbs.
     KeepDaysPolicy("watchdog_pages", "paged_at", WATCHDOG_PAGES_KEEP_DAYS),
+    KeepDaysPolicy("watchdog_page_attempts", "attempted_at", WATCHDOG_PAGES_KEEP_DAYS),
     KeepDaysPolicy("slm_tagger_shadow", "observed_at", SLM_TAGGER_SHADOW_KEEP_DAYS),
     # R-120: migrations 0051-0054.
     KeepLatestPolicy("credit_spread_history", "date", CREDIT_SPREAD_KEEP_SESSIONS),
