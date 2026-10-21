@@ -194,3 +194,52 @@ def test_single_option_order_wire(monkeypatch, mode):
         assert result["kelly_warning"]["code"] == "KELLY_CAP_EXCEEDED"
         assert result["kelly_warning"]["loss"] == pytest.approx(5000)
         client.place_order.assert_called_once()
+
+
+_CALENDAR_DEBIT = {
+    "type": "combo",
+    "symbol": "SPX",
+    "action": "BUY",
+    "quantity": 400,
+    "limitPrice": 5.00,
+    "legs": [
+        {"expiry": "20271217", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+        {"expiry": "20261120", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+    ],
+}
+
+_CALENDAR_CREDIT = {
+    "type": "combo",
+    "symbol": "SPX",
+    "action": "BUY",
+    "quantity": 400,
+    "limitPrice": -20.00,
+    "legs": [
+        {"expiry": "20271217", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+        {"expiry": "20261120", "strike": 4999, "right": "C", "action": "SELL", "ratio": 1},
+    ],
+}
+
+
+def test_both_gate3_guards_floor_a_debit_combo_at_the_premium_paid():
+    """The width/strike margin proxy is zero for a long calendar, but the
+    debit paid is fully at risk. Both Gate-3 implementations must price it."""
+    import bankroll_guard
+    import kelly_guard
+    import order_limits
+
+    assert order_limits.combo_max_loss(_CALENDAR_DEBIT) == pytest.approx(0.0)
+    assert bankroll_guard.order_max_loss(_CALENDAR_DEBIT) == pytest.approx(200_000.0)
+    assert kelly_guard._worst_case_loss(_CALENDAR_DEBIT) == pytest.approx(200_000.0)
+
+
+def test_a_net_credit_combo_gets_no_spurious_floor_in_either_guard():
+    """Nothing was paid, so the premium is not a floor. A mis-signed floor
+    would price this $20-credit order at $800,000."""
+    import bankroll_guard
+    import kelly_guard
+    import order_limits
+
+    assert order_limits.combo_max_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
+    assert bankroll_guard.order_max_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
+    assert kelly_guard._worst_case_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
