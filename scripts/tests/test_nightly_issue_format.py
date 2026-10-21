@@ -659,6 +659,15 @@ def _phase_status_preamble() -> str:
     )
 
 
+def _opaque_value() -> str:
+    """An invented opaque credential value, assembled at runtime.
+
+    Spelled in source it is a `generic-api-key` hit for gitleaks next to any
+    recognisable key name, so the fixture is built from fragments instead.
+    """
+    return "abcdefgh" + "12345678" + "ijklmnop"
+
+
 def _secret_ere_block(src: str) -> str:
     start = src.index("# Credential assignments")
     return src[start:src.index("_redact_secret_classes() {", start)]
@@ -1037,3 +1046,29 @@ class TestSanitizeKeyNameScanIsBounded:
             "n.sanitize('TOKEN_' * 64_000 + '!')"
         )
         subprocess.run([_sys.executable, "-c", probe], check=True, timeout=20)
+
+
+class TestSanitizeLongKeyPrefixes:
+    """A bound on the identifier run BEFORE the credential word was an
+    evasion: a key whose prefix exceeded it never matched and its value was
+    published verbatim to a PUBLIC PR body (DS-2026-10-21-06). The canonical
+    scrubber matches from the credential WORD onward instead, which keeps the
+    work bounded with no length at which coverage stops. Values are invented."""
+
+    @pytest.mark.parametrize("prefix_len", [8, 31, 32, 40, 80])
+    def test_a_long_key_prefix_does_not_evade_redaction(self, prefix_len: int):
+        key = "N" * prefix_len + "_TOKEN"
+        value = _opaque_value()
+        text = f"the excerpt held {key}={value} and stopped"
+        out = nif.sanitize(text)
+        assert value not in out, out
+        assert out.endswith("and stopped"), out
+
+    def test_an_ordinary_prefixed_key_keeps_its_name_in_the_output(self):
+        # Key and value are assembled at runtime: the repo contract is that no
+        # credential-shaped literal is spelled in source, even a synthetic one,
+        # so the secret scanner cannot trip on a fixture.
+        key, value = "ANTHROPIC" + "_API_KEY", _opaque_value()
+        out = nif.sanitize(f"set {key}={value} here")
+        assert value not in out, out
+        assert "API_KEY" in out, out

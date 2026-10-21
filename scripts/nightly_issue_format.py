@@ -65,33 +65,43 @@ _FENCE_RE = re.compile(r"```.*?```", re.S)
 _COOKIE_HEADER_RE = re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.I)
 # The key may be quoted (JSON) or a hyphenated header name, the value quoted
 # (spaces inside) or led by an auth scheme word ("Authorization: Basic <value>").
-# Both identifier runs are BOUNDED. Unbounded runs on either side of the
-# alternation share its alphabet, so the engine redistributes prefix and
-# suffix at every offset and the scan is quadratic in the length of an
-# identifier run: measured 0.0084s, 0.0336s, 0.1371s and 0.5519s for 250,
-# 500, 1000 and 2000 repetitions of a credential word. This sanitizer runs
-# over attacker-shaped source excerpts in PR bodies, so that is a delivery
-# stall. 32 is far above any real prefix (`NEXT_PUBLIC_CLERK_PUBLISHABLE` is
-# 29) and bounds the per-offset work.
-_SECRET_KEY_NAME = (
-    r"[A-Za-z0-9_-]{0,32}(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
+# Unbounded identifier runs on BOTH sides of the alternation share its
+# alphabet, so the engine redistributes prefix and suffix at every offset and
+# the scan is quadratic in the length of an identifier run: measured 0.0084s,
+# 0.0336s, 0.1371s and 0.5519s for 250, 500, 1000 and 2000 repetitions of a
+# credential word. This sanitizer runs over contributor-shaped source excerpts
+# in PR bodies, so that is a delivery stall.
+#
+# The fix is NOT a bound on the leading run: a bound is an evasion, because a
+# key whose prefix is longer than it stops matching and its value is published
+# to a PUBLIC body. Match from the credential WORD onward with no leading run,
+# exactly as the canonical scrubber's literal-assignment rule does: the search
+# is unanchored, so a prefixed name still matches from its credential word
+# (the prefix simply stays in the output), there is one match start per
+# credential word, and there is no length at which coverage stops. Only the
+# trailing run is bounded, well above any real suffix.
+_SECRET_KEY_WORD = (
+    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|"
     # `[-_]PWD`, not bare `PWD`: the canonical scrubber spells it `_pwd` for
     # the same reason, so an ordinary working-directory variable in a log line
     # is not mistaken for a credential.
     r"API[-_]?KEY|[-_]KEY|[-_]PWD|COOKIE|SESS(?:ION)?[-_]?ID|_SESSION|CSRF|XSRF)"
-    r"[A-Za-z0-9_-]{0,32}"
 )
+_SECRET_KEY_NAME = rf"{_SECRET_KEY_WORD}[A-Za-z0-9_-]{{0,64}}"
+# The block-scalar rule is line-anchored (one start per line), so it can carry
+# a bounded leading run and still match an ordinary `DB_PASSWORD: |` header.
+_SECRET_BLOCK_KEY_NAME = rf"[A-Za-z0-9_-]{{0,64}}{_SECRET_KEY_NAME}"
 # A quoted value runs to its closing quote; an escaped quote inside it is part
 # of the value, not the end of it, so the alternation must step over `\"`.
 _SECRET_ASSIGN_RE = re.compile(
-    rf"\b({_SECRET_KEY_NAME})([\"']?\s*[=:]\s*)"
+    rf"({_SECRET_KEY_NAME})([\"']?\s*[=:]\s*)"
     r"(?:(?:basic|bearer|digest|token)\s+)?"
     r"(?:\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|\S+)",
     re.I,
 )
 # The block-scalar structure is shared with the canonical scrubber so the two
 # cannot drift again; this module keeps its own key alphabet.
-_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_KEY_NAME)
+_SECRET_BLOCK_SCALAR_RE = build_block_scalar_re(_SECRET_BLOCK_KEY_NAME)
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
 # Bare credential literals by well-known prefix or shape (the classes the
 # gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
