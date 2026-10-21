@@ -114,14 +114,32 @@ def _is_stk_leg(leg: dict) -> bool:
     return not _carries_option_fields(leg)
 
 
+def _long_covers_short(long_expiry: str, short_expiry: str) -> bool:
+    """True when a long leg can stand as cover for a short leg.
+
+    A long only covers a short that expires no LATER than it does. The long
+    calendar is the covered orientation and keeps its zero width. In the
+    reverse orientation the short outlives the long, so from the long's expiry
+    onward the short stands alone and must keep the strike proxy this module
+    already applies to an unpaired short.
+
+    Expiries that are absent or not directly comparable (different precision)
+    keep the previous expiry-blind pairing rather than fail a legitimate order.
+    """
+    if not long_expiry or not short_expiry or len(long_expiry) != len(short_expiry):
+        return True
+    return long_expiry >= short_expiry
+
+
 def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]:
     """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
 
     Shorts are paired against longs of the same right — the nearest strike
     first, so the residual width is the conservative one — and a paired short
-    risks only the width. Pairing ignores expiry on purpose: a calendar's long
-    leg does cover its short, and grouping by expiry would price every index
-    calendar off the strike and refuse it.
+    risks only the width. Pairing deliberately spans expiries, because a long
+    calendar's long leg does cover its short and grouping by expiry would price
+    every index calendar off the strike and refuse it. It spans them in ONE
+    direction only: see ``_long_covers_short``.
 
     An unpaired short put's max loss IS its strike. An unpaired short call's
     is unbounded, so the strike stands in as a documented margin proxy — not a
@@ -137,7 +155,7 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
     if not isinstance(legs, list) or not legs:
         return None
 
-    by_right: dict[str, dict[str, list[float]]] = {}
+    by_right: dict[str, dict[str, list[tuple[float, str]]]] = {}
     for leg in legs:
         if not isinstance(leg, dict):
             return None
@@ -159,17 +177,19 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
         if reverse and action:
             is_short = not is_short
         side = "short" if is_short else "long"
+        expiry = str(leg.get("expiry") or "").replace("-", "").strip()
         sides = by_right.setdefault(right, {"long": [], "short": []})
-        sides[side].extend([strike] * ratio)
+        sides[side].extend([(strike, expiry)] * ratio)
 
     risk = 0.0
     for sides in by_right.values():
         longs = sorted(sides["long"])
-        for short_strike in sorted(sides["short"]):
-            if longs:
-                nearest = min(longs, key=lambda strike: abs(strike - short_strike))
+        for short_strike, short_expiry in sorted(sides["short"]):
+            covering = [leg for leg in longs if _long_covers_short(leg[1], short_expiry)]
+            if covering:
+                nearest = min(covering, key=lambda leg: abs(leg[0] - short_strike))
                 longs.remove(nearest)
-                risk += abs(short_strike - nearest) * _OPTION_MULTIPLIER
+                risk += abs(short_strike - nearest[0]) * _OPTION_MULTIPLIER
             else:
                 risk += short_strike * _OPTION_MULTIPLIER
     return risk

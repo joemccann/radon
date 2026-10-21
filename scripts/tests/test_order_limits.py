@@ -311,6 +311,54 @@ class TestComboNotionalIsRiskNotPremium:
         assert order_limits.order_notional(params) == pytest.approx(100.0)
         assert order_limits.combo_max_loss(params) == pytest.approx(709_900.0)
 
+    def test_short_outliving_its_long_is_not_treated_as_covered(self):
+        """Reverse calendar: the short expires AFTER the long, so once the long
+        expires the short stands alone. Pairing on strike alone priced the pair
+        at a zero width and accepted 500 uncovered index calls."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 500, "limitPrice": -0.50,
+            "legs": [
+                {"expiry": "20261120", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        # The outliving short keeps the strike proxy a naked short already gets.
+        assert order_limits._combo_risk_per_unit(params["legs"]) == pytest.approx(500_000.0)
+        loss = order_limits.combo_max_loss(params)
+        assert loss == pytest.approx(249_975_000.0)
+        violation = order_limits.check_order_limits(params)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+    def test_long_calendar_still_prices_off_the_debit(self):
+        """Green-path guard: the long outlives the short, so the width stays
+        zero and the index calendar the chain builder emits still places."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 500, "limitPrice": 0.50,
+            "legs": [
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20261120", "strike": 5000, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits._combo_risk_per_unit(params["legs"]) == pytest.approx(0.0)
+        assert order_limits.combo_max_loss(params) == pytest.approx(0.0)
+        assert order_limits.check_order_limits(params) is None
+
+    def test_single_expiry_vertical_width_math_is_unchanged(self):
+        """Existing behaviour: same-expiry legs pair on strike as before."""
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 10, "limitPrice": 2.0,
+            "legs": [
+                {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20260918", "strike": 7005, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits._combo_risk_per_unit(params["legs"]) == pytest.approx(500.0)
+        assert order_limits.combo_max_loss(params) == pytest.approx(5_000.0)
+
     def test_gld_spread_close_nets_the_credit_against_the_width(self):
         """Production repro 2026-08-19: SELL 100x GLD 420/450 bull call spread
         @ $15 credit (a close of a held position). Gross width is $300k, but
