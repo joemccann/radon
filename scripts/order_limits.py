@@ -504,6 +504,13 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
         }
 
     loss = combo_max_loss(params)
+    if loss is not None:
+        # The always-on gate prices a debit the same way both optional
+        # Gate-3 guards do. Without this floor an all-long or long-calendar
+        # structure reports the zero width/assignment proxy to the mandatory
+        # cap while its whole premium is at risk, so a tightened
+        # RADON_MAX_COMBO_LOSS_DOLLARS could never bind to it.
+        loss = combo_debit_floor(params, loss)
     loss_cap = max_combo_loss_dollars()
     if loss is not None and loss > loss_cap:
         return {
