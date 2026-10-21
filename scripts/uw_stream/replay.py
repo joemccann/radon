@@ -95,7 +95,7 @@ def replay_retained(directory: Path | str | None = None, *, from_ingest_id: int 
                         # Reject giant/corrupt values inside SQLite before the driver
                         # allocates Python strings. UTF-8 encoding below is then
                         # bounded by at most four bytes per accepted character.
-                        "SELECT ingest_id,received_at,channel,CASE WHEN typeof(payload)='text' AND length(payload)<=? THEN payload ELSE NULL END FROM events WHERE ingest_id>=? AND ingest_id<=? ORDER BY ingest_id LIMIT ?",
+                        "SELECT ingest_id,received_at,channel,CASE WHEN typeof(payload)='text' AND length(CAST(payload AS BLOB))<=? THEN payload ELSE NULL END FROM events WHERE ingest_id>=? AND ingest_id<=? ORDER BY ingest_id LIMIT ?",
                         (MAX_PAYLOAD_BYTES, from_ingest_id, limit, max_events + 1),
                     )
                     for record in cursor:
