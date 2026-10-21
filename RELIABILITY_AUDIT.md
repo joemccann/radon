@@ -3192,6 +3192,22 @@ Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` 
 
 Audited through: 30bbaec2bd208d41fe04a9d115c393f9aa5bfb0e on 2026-10-18 — 1 new finding
 
+## Delta audit 2026-10-20
+
+Trusted cursor `2f08fe78f30b2ea3f086034c64ab1c77f4b937dd` (rolling issue #81, 2026-10-19) through `5bfadbb6afb805b53dc3ea10f884728ed7076e16`: 47 commits, 160 paths. No open `reliability/` PR. Highest IDs before tonight: R-738 / REL-327. Codemap importers of `scripts/order_limits.py` are the placement funnel (`scripts/ib_place_order.py`) and `scripts/bankroll_guard.py` / `scripts/kelly_guard.py`, confirmed with `rg`. The codemap refresh in this range is the 2026-10-19 nightly artifact and was not treated as a product change.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-739 / REL-328 | P1 | `scripts/order_limits.py` `_combo_credit_per_unit`; `scripts/bankroll_guard.py` `order_max_loss` | DONE. A combo STP transmits `StopOrder(stopPrice=...)` and drops `limitPrice` (`scripts/ib_place_order.py:294-295`, `:488-495`). The loss cap still treated a negative `limitPrice` as collected credit and priced that credit at the higher of the two absolutes. 110 short 100-puts with `limitPrice=-9.10` and `stopPrice=0.50` computed loss `$999,900` and notional `$100,100`, so a `$1,000,000` loss cap and the `$250,000` notional cap both admitted an order whose assignment is `$1,100,000`. Acceptance: `combo_max_loss` for that order is `$1,100,000` and `check_order_limits` returns `ORDER_MAX_LOSS_LIMIT`; Gate 3 `order_max_loss` is at least `$1,100,000`. RED 2 failed (`999900.0`). GREEN 173 passed across the order-limit and bankroll suites. |
+
+Reviewed and not filed: production env resolution fails closed when `/etc/radon/env` is missing or a symlink. Disk cleanup deletes through `O_NOFOLLOW` directory fds. AI-cycle writer-lock retries stay on the idempotent insert path. Previous-close misses are a bounded 10-minute negative cache and do not store a close. `asia-export-lead` is in both watchdog catalogs. Single-leg stop pricing still uses the worse supplied price. No new `placeOrder` site.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` and `:864-906`, wire `placeOrder` at `:752` and `:910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6146` (used at `:6255` and `:6333`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:218-235` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2821-2834`. Whole-repo `.placeOrder(` is only those two call sites. `asia-export-lead` is in `scripts/watchdog/services.py` (`:163`, bucket `:666`) and `web/lib/serviceHealthWindows.ts:179`.
+
+Audited through: 5bfadbb6afb805b53dc3ea10f884728ed7076e16 on 2026-10-20 — 1 new finding
+
 ## Delta audit 2026-10-21
 
 Trusted cursor `5bfadbb6afb805b53dc3ea10f884728ed7076e16` (rolling issue #81, 2026-10-20) through `e5426fb17d91d2c1224b070c5865a526d358fd7d`: 30 commits, 43 paths. Open draft #1193 reserves R-739 / REL-328 and was not repeated. Highest IDs before tonight: R-739 / REL-328. Codemap `generated_at` 2026-10-19T09:00:08Z. Importers of `scripts/order_limits.py` were confirmed with `rg` (`check_order_limits` / `check_placement_limits` call sites). The order-limit, same-origin, bind-source, credential-redaction, responder-install, and perf-probe diffs were read.

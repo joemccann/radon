@@ -1035,6 +1035,12 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 |---|---|---|---|
 | REL-327 / R-738 | DONE | RED 1 failed (second reader AbortError); GREEN 6 passed in `web/tests/newsfeed-explain-cache.test.ts`, neighborhood 28 passed across the four explain suites | The flight owns `AbortSignal.timeout(EXPLAIN_BUDGET_MS)`. A reader who leaves rejects only their wait. One model call remains. No placement, halt, or broker path changed. Permanent drills 95 passed. Full pytest, cloud/tests, remaining Vitest and the order-idempotency drill stay on PR CI. |
 
+## Nightly remediation 2026-10-20
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-328 / R-739 | DONE | RED 2 failed (`combo_max_loss` and Gate 3 both returned 999900.0); GREEN 173 passed (order limits, combo quadrants, fail-open inputs, funnel, bankroll admission and enforcement). Permanent drills 100 passed. | A combo stop-market no longer books a discarded `limitPrice` as credit. Assignment and width stay intact, and Gate 3 prices the stop as paying the worse supplied price. Limit-order credit math is unchanged. No halt, notional, or broker path was weakened. Full pytest, cloud/tests, Vitest and the order-idempotency drill stay on PR CI. |
+
 ## Nightly remediation 2026-10-21
 
 | ID | Status | Red / green evidence | Change |
