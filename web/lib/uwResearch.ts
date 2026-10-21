@@ -12,6 +12,14 @@ export function isResearchSnapshot(value: unknown, ticker: string): value is Res
   const v = value as Partial<ResearchSnapshot>;
   return v.ticker === ticker && v.schema_version === 1 && !!v.stream && !!v.research && typeof v.research.sections === "object" && v.research.sections !== null;
 }
+const DATASET_LABELS: Record<string,string> = {monthly:"Monthly history",year_month:"Year and month history",stats:"Contract statistics",blocks:"Block trades",fixed:"Fixed window",sliding:"Sliding window",dividends:"Dividends",splits:"Splits"};
+export function researchGroups(data:unknown):{label:string;rows:Record<string,unknown>[]}[] {
+  if(!data || typeof data!=="object" || Array.isArray(data)) return [{label:"",rows:researchRows(data)}];
+  const obj=data as Record<string,unknown>;
+  const groups=Object.entries(DATASET_LABELS).filter(([key])=>obj[key]!==null && typeof obj[key]==="object")
+    .map(([key,label])=>({label,rows:researchRows(obj[key])}));
+  return groups.length?groups:[{label:"",rows:researchRows(data)}];
+}
 export function researchRows(data:unknown):Record<string,unknown>[] {
   if(Array.isArray(data)) return data.filter(x=>x&&typeof x==="object"&&!Array.isArray(x)) as Record<string,unknown>[];
   if(!data || typeof data!=="object") return [];
@@ -20,9 +28,8 @@ export function researchRows(data:unknown):Record<string,unknown>[] {
   if(Array.isArray(obj.trades)) return researchRows(obj.trades);
   if(obj.snapshot && typeof obj.snapshot==="object") return researchRows(obj.snapshot);
   if(obj.latest && typeof obj.latest==="object") return researchRows(obj.latest);
-  for(const key of ["monthly","year_month","stats","blocks","fixed","sliding"]){
-    if(obj[key]&&typeof obj[key]==="object")return researchRows(obj[key]);
-  }
+  const children=Object.keys(DATASET_LABELS).filter(key=>obj[key]!==null && typeof obj[key]==="object");
+  if(children.length)return children.flatMap(key=>researchRows(obj[key]));
   if(Array.isArray(obj.rows)) return researchRows(obj.rows);
   if(Array.isArray(obj.data)) return researchRows(obj.data);
   if(obj.data && typeof obj.data==="object") return researchRows(obj.data);

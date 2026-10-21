@@ -103,10 +103,6 @@ readonly BUN_VERSION="1.3.14"
 # Optional research collector joins subsequent release transactions only once
 # activated. A first deploy installs its code/unit before channel admission.
 SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
-if systemctl is-active --quiet radon-uw-stream.service; then
-  SERVICES+=(radon-uw-stream)
-fi
-readonly SERVICES
 UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
@@ -1815,6 +1811,11 @@ main() {
     log_error "Fix ${ENV_FILE_DEFAULT}; the escape hatch skips required-key shape only."
     return 1
   fi
+  # Optional service discovery must follow lock and environment admission.
+  if systemctl is-active --quiet radon-uw-stream.service; then
+    SERVICES+=(radon-uw-stream)
+  fi
+  readonly SERVICES
   # The hosted MCP unit loads a stripped env derived from the file just validated.
   write_mcp_env "$ENV_FILE_DEFAULT"
   # Prestage precedes the deploy job's pinned control-plane sync. A first

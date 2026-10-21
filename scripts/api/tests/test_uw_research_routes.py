@@ -48,3 +48,21 @@ def test_observations_read_without_provider_call(client, monkeypatch):
 @pytest.mark.parametrize("params", [{"limit":"1000000"},{"page":"999"},{"limit":"-1"},{"page":"x"}])
 def test_proxy_limits_paging_before_spending(client, params):
     assert client.post("/uw/request",json={"endpoint":"news/headlines","params":params}).status_code == 400
+
+def test_proxy_delegates_provider_io_to_killable_admitted_worker(client, monkeypatch):
+    from api import subprocess
+    worker = AsyncMock(return_value=SimpleNamespace(ok=True, data={"status":200,"data":{"data":[]}}))
+    monkeypatch.setattr(subprocess,"run_script",worker)
+    response=client.post("/uw/request",json={"endpoint":"news/headlines","params":{"limit":"10"}})
+    assert response.status_code == 200
+    assert response.json() == {"status":200,"data":{"data":[]}}
+    assert worker.await_args.args[0] == "uw_admitted_request.py"
+    assert worker.await_args.kwargs["timeout"] == 18
+    assert __import__("json").loads(worker.await_args.args[1][1]) == {"limit":"10"}
+
+def test_proxy_sanitizes_killable_worker_failure(client, monkeypatch):
+    from api import subprocess
+    monkeypatch.setattr(subprocess,"run_script",AsyncMock(return_value=SimpleNamespace(ok=False,error="private provider detail")))
+    response=client.post("/uw/request",json={"endpoint":"stock/AAPL/info"})
+    assert response.status_code == 503
+    assert "private provider detail" not in response.text

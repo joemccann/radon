@@ -117,7 +117,7 @@ class TestList:
             for service in response.json()["services"]
             if service["id"] == "unusual_whales"
         )
-        (field,) = uw["fields"]
+        field = next(field for field in uw["fields"] if field["name"] == "UW_TOKEN")
         assert field["configured"] is True
         assert field["hint"].endswith("alue")
         assert "value" not in field
@@ -130,7 +130,7 @@ class TestList:
             for service in response.json()["services"]
             if service["id"] == "unusual_whales"
         )
-        (field,) = uw["fields"]
+        field = next(field for field in uw["fields"] if field["name"] == "UW_TOKEN")
         assert field["configured"] is False
         assert field["env_fallback"] is True
         assert field["exported_only"] is False
@@ -151,7 +151,7 @@ class TestList:
             for service in response.json()["services"]
             if service["id"] == "unusual_whales"
         )
-        (field,) = uw["fields"]
+        field = next(field for field in uw["fields"] if field["name"] == "UW_TOKEN")
         assert field["configured"] is False
         assert field["exported_only"] is True
         assert field["env_fallback"] is False

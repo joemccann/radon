@@ -26,6 +26,14 @@ Raw frames batch at most once per second or500 records/2MB, with an8MB/1024-fram
 - Periscope publishes only a complete, row-identity-unique multipart board with final has_more=false and matching total_rows. An incomplete rollover retains old observations and records a gap.
 - Futures blocks use exchange+trade_date+trade_id identity and reported_at order; update/delete supersede old states. Current documented block messages already contain displayed decimal prices. Preserve raw factor-based conversion for raw CME integer feeds only; do not double-convert block or REST prices. Do not infer direction from stale/null block NBBO.
 
+## Offline retained-event replay
+
+Stop the managed collector before running `python3.13 scripts/uw_stream_collect.py --replay --from-ingest-id 100 --to-ingest-id 200 --max-events 1000`. `--replay-directory` optionally selects an exported journal directory containing `events.sqlite3` and its existing `collector.lock`. The shared owner lock refuses a running collector. Replay copies SQLite and its WAL/SHM into a temporary directory before opening a read-only transaction; it never hydrates credentials, opens a provider connection, publishes a snapshot or changes source state.
+
+Rows are selected once in ascending local ingest-ID order. The inclusive end ID is optional. Bounds are 100,000 events, 32MiB selected payload and a 1GiB+32MiB journal-copy ceiling. The receipt includes retained/requested/replayed boundaries, invalid records, pruned starts, missing ends and truncation. `local_replay_available` describes this local capability; legacy `replay_available=false` and `upstream_replay_available=false` continue to describe provider replay.
+
+This reconstructs a projection of the selected retained range, not complete historical state. It starts without a previous baseline and cannot recover pruned events or historical control transitions that older journals did not retain. Greek partials remain incomplete until a retained completed-minute REST confirmation replaces that bucket; later partials preserve that confirmed baseline and require reconciliation. Output is explicitly `offline-replay`, disconnected, with no live ACK claim. Do not promote replay output to trading or live-health state.
+
 ## Health and rollback
 
 Watchdog tracks uw-stream after first snapshot and uw-research after its state directory exists. Unit failures are also covered by the existing radon-* unit watchdog. DB mirror outages do not discard the local journal. Input/disk overflow records a gap; storage transaction failure stops the collector rather than continuing unpersisted.

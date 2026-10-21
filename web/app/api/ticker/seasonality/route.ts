@@ -193,19 +193,9 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
-  const token = process.env.UW_TOKEN;
-  if (!token) {
-    return jsonApiError({
-      message: "UW_TOKEN not configured",
-      status: 500,
-      code: "CONFIG_ERROR",
-      requestId,
-    });
-  }
-
   // Demo AI quota (Phase 4) — charged only on a cache MISS (real LLM work)
-  // and only after every precondition passed, so a config error never burns
-  // a call; no-op for non-demo users.
+  // after cache lookup; provider credentials are resolved by the backend.
+  // This is a no-op for non-demo users.
   const quota = await enforceDemoAiQuota("ticker/seasonality");
   if (quota) return quota;
 
@@ -213,7 +203,7 @@ export async function GET(request: Request): Promise<Response> {
     // 2. Fetch UW API
     const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/seasonality/${encodeURIComponent(symbol)}/monthly`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
+      { cache: "no-store", signal: AbortSignal.timeout(30_000) },
     );
 
     let uwData: MonthData[] = [];

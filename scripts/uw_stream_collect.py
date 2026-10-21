@@ -16,8 +16,24 @@ from uw_stream.store import read_snapshot
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot", action="store_true", help="Read current research snapshot without opening a socket")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--snapshot", action="store_true", help="Read current research snapshot without opening a socket")
+    mode.add_argument("--replay", action="store_true", help="Offline reconstruction from retained local ingest IDs; collector must be stopped")
+    parser.add_argument("--replay-directory", help="Explicit retained-journal directory for offline replay")
+    parser.add_argument("--from-ingest-id", type=int, default=1)
+    parser.add_argument("--to-ingest-id", type=int)
+    parser.add_argument("--max-events", type=int, default=10000)
     args = parser.parse_args()
+    if args.replay:
+        from uw_stream.replay import replay_retained
+        try:
+            result = replay_retained(args.replay_directory, from_ingest_id=args.from_ingest_id,
+                                     to_ingest_id=args.to_ingest_id, max_events=args.max_events)
+        except ValueError:
+            print(json.dumps({"status": "unavailable", "error_code": "offline_replay_unavailable", "guidance": "Stop the collector and choose a retained bounded ingest-ID range"}))
+            return 1
+        print(json.dumps(result, allow_nan=False))
+        return 0
     if args.snapshot:
         print(json.dumps(read_snapshot(), allow_nan=False))
         return 0

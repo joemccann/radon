@@ -366,7 +366,7 @@ class TestRetryLogic:
         hits: list[int] = []
         monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
         clear_cache()
-        set_cached(make_key("stock/AAPL/info", None), {"data": "from-cache"})
+        set_cached(client._cache_key("stock/AAPL/info", None), {"data": "from-cache"})
         client._session.get = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("HTTP must not run on cache hit")
         )
@@ -384,8 +384,8 @@ class TestRetryLogic:
         monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
         clear_cache()
         payload = {"data": "from-disk"}
-        set_disk_cached(make_key("stock/AAPL/info", None), "stock/AAPL/info", payload)
-        assert get_disk_cached(make_key("stock/AAPL/info", None)) == payload
+        set_disk_cached(client._cache_key("stock/AAPL/info", None), "stock/AAPL/info", payload)
+        assert get_disk_cached(client._cache_key("stock/AAPL/info", None)) == payload
         client._session.get = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("HTTP must not run on disk cache hit")
         )
@@ -407,7 +407,7 @@ class TestRetryLogic:
         assert client._get("stock/AAPL/info") == payload
         assert client._session.get.call_count == 1
         assert hits == [1]
-        assert get_disk_cached(make_key("stock/AAPL/info", None)) == payload
+        assert get_disk_cached(client._cache_key("stock/AAPL/info", None)) == payload
 
         clear_cache()
         assert client._get("stock/AAPL/info") == payload
@@ -425,7 +425,7 @@ class TestRetryLogic:
         )
         with pytest.raises(UWNotFoundError):
             client._get("stock/AAPL/info")
-        assert get_disk_cached(make_key("stock/AAPL/info", None)) is None
+        assert get_disk_cached(client._cache_key("stock/AAPL/info", None)) is None
         assert list((tmp_path / "uw_http_cache").glob("*.json")) == []
 
     def test_http_5xx_is_not_written_to_disk(self, client, monkeypatch, tmp_path):
@@ -440,7 +440,7 @@ class TestRetryLogic:
         with patch("time.sleep"):
             with pytest.raises(UWServerError):
                 client._get("stock/AAPL/info")
-        assert get_disk_cached(make_key("stock/AAPL/info", None)) is None
+        assert get_disk_cached(client._cache_key("stock/AAPL/info", None)) is None
         assert list((tmp_path / "uw_http_cache").glob("*.json")) == []
 
 

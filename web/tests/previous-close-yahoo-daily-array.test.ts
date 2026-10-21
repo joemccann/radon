@@ -122,7 +122,7 @@ describe("/api/previous-close — Yahoo path reads daily close array, not stale 
   beforeEach(() => {
     vi.resetModules();
     mockFetch.mockReset();
-    delete process.env.UW_TOKEN; // skip UW, exercise Yahoo
+    delete process.env.UW_TOKEN; // Backend UW is unavailable in these fixtures; exercise Yahoo.
   });
 
   afterEach(() => {

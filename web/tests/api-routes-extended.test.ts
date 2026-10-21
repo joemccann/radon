@@ -278,16 +278,17 @@ describe("GET /api/ticker/seasonality — extended", () => {
     expect(body.error).toContain("ticker");
   });
 
-  it("returns 500 when UW_TOKEN is not set", async () => {
+  it("reaches governed seasonality when only the backend owns UW credentials", async () => {
     delete process.env.UW_TOKEN;
-    // Make cache miss
     mockReadFile.mockRejectedValue(new Error("ENOENT"));
-
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: makeMonths(20) }) });
     const { GET } = await import("../app/api/ticker/seasonality/route");
     const res = await GET(new Request("http://localhost/api/ticker/seasonality?ticker=AAPL"));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("UW_TOKEN");
+    expect(body.source).toBe("uw");
+    expect(body.data).toHaveLength(12);
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("seasonality/AAPL/monthly"), expect.objectContaining({ cache: "no-store" }));
   });
 
   it("returns UW data when all 12 months are populated", async () => {
@@ -418,7 +419,8 @@ describe("GET /api/ticker/news — extended", () => {
     expect(body.error).toContain("ticker");
   });
 
-  it("returns UW news when UW_TOKEN is set and fetch succeeds", async () => {
+  it("returns UW news with backend-owned credentials and no Next token", async () => {
+    delete process.env.UW_TOKEN;
     const uwNews = [
       { headline: "AAPL beats earnings", source: "Reuters", created_at: "2026-03-05T10:00:00Z" },
       { headline: "AAPL expands AI division", source: "Bloomberg", created_at: "2026-03-05T09:00:00Z" },
@@ -472,6 +474,8 @@ describe("GET /api/ticker/news — extended", () => {
   it("returns { data: [], source: 'none' } when all sources fail", async () => {
     // UW fails
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    // Backend-owned UW attempt fails before Yahoo fallbacks.
+    mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     // Yahoo chart fails
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     // Yahoo search fails
@@ -486,8 +490,10 @@ describe("GET /api/ticker/news — extended", () => {
     expect(body.source).toBe("none");
   });
 
-  it("returns { data: [], source: 'none' } when UW_TOKEN not set and Yahoo fails", async () => {
+  it("returns { data: [], source: 'none' } when governed UW and Yahoo fail", async () => {
     delete process.env.UW_TOKEN;
+    // Backend-owned UW attempt fails before Yahoo fallbacks.
+    mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     // Yahoo chart fails
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     // Yahoo search fails

@@ -31,6 +31,7 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on
   // every verb, reads included — masked hints are nobody's business on demo.
   "credentials", "credentials/[service]",
+  "uw/capabilities", "uw/research", "uw/research/events",
   // R-179: minting a relay ticket is not read-only — with an OPTIONAL bearer
   // this route was a loopback-trusted deputy (the Next.js server IS loopback
   // to FastAPI's /ws-ticket).

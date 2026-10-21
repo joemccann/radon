@@ -10171,10 +10171,15 @@ Resumed existing pushed commits d848fceb and 6c5b4684; no production access and 
 ## 2026-10-21 Execute UW Advanced roadmap
 Authoritative roadmap: /Users/joemccann/.codex/visualizations/2026/10/14/uw-advanced/roadmap.md.
 - [ ] T1 (U1): Rebase scope against current main, verify account headers/channel access, write execution contracts. depends_on: []
-- [ ] T2 (U2): Shared REST governor, provider header reconciliation, direct-fetch integration, capability metadata. depends_on: [T1]
-- [ ] T3 (U3/U4): Single-owner managed collector, bounded durable buffering, channel semantics, compact materialization and health. depends_on: [T1]
-- [ ] T4 (U7/U8/U9): Advanced research adapters and persistent snapshots for multi-leg/Pulse/issuer/macro/futures; capability gated. depends_on: [T1]
-- [ ] T5 (U5/U6): Authenticated research API/MCP/UI, live overlays, source/gap/cadence provenance and selective candidate integration. depends_on: [T2,T3,T4]
+- [x] T2 (U2): Shared REST governor, provider header reconciliation, direct-fetch integration, capability metadata. depends_on: [T1]
+- [x] T3 (U3/U4): Single-owner managed collector, bounded durable buffering, channel semantics, compact materialization and health. depends_on: [T1]
+- [x] T4 (U7/U8/U9): Advanced research adapters and persistent snapshots for multi-leg/Pulse/issuer/macro/futures; capability gated. depends_on: [T1]
+- [x] T5 (U5/U6): Authenticated research API/MCP/UI, live overlays, source/gap/cadence provenance and selective candidate integration. depends_on: [T2,T3,T4]
 - [ ] T6 (U10/U11): Independent reviews, GitHub exact-head CI, measured staged activation and tape capacity decision. depends_on: [T5]
 Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 Validation: no local test suites; tests and E2E on GitHub runners. Do not modify IB execution/quote authority or public/demo redistribution. Full tape remains measurement-gated, Kafka not authorized by Advanced. Preserve honest gaps and daily OI.
+
+
+### UW execution review checkpoint
+
+Implemented T2–T5 on `codex/uw-advanced-execution`, PR #1214. REST probes returned 200 across six dataset families; missing quota headers and unreachable VPS SSH leave T1 entitlement verification and T6 production promotion incomplete. Streams remain disabled by default. Independent Sol/Luna findings are repaired: daily rollover probes, credential-scoped caches, killable bounded web reads, frontend credential ownership, observation provenance and retained-event replay. GitHub RED exposed outdated route policy/manifests/fixtures; repair CI and desktop/mobile screenshot verification remain pending. No local suites executed. Full-tape capture, live ranking/cache invalidation and source-parity promotion are deferred until pilot measurements, not claimed delivered.

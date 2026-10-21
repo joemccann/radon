@@ -5,7 +5,7 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 export const dynamic = "force-dynamic";
 export const radonCapability = "read";
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(request, {operatorOnly:true});
+  const access = await requireRouteAccess(request, {operatorOnly: true});
   if (!access.ok) return access.response;
   try {
     return setNoStoreResponseHeaders(NextResponse.json(await radonFetch("/uw/capabilities",{token:access.principal.token,timeout:10_000})),getRequestId());
