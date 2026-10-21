@@ -1175,10 +1175,27 @@ def test_rel291_only_one_contender_can_reclaim_a_stale_lock(rig):
 # --- install.sh: source-tree trust -----------------------------------------------
 
 _LIB = ("nightly_pr_guard.py", "nightly_publish.py", "nightly_issue_prune.py", "nightly_green_base.py",
-        "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py", "security_claude_ladder.py",
+        "nightly_audit_context.py", "nightly_phase_status.py", "nightly_deliver.py",
+        "credential_redaction.py", "security_claude_ladder.py",
         "claude_cli_env_drift.py", "claude_cli_env_reviewed.txt", "nvidia_rate_limit.py",
         "ci/check_pr_body.py", "nightly_toolchain_update.py", "utils/atomic_io.py",
         "codex_capability_probe.py")
+
+
+def test_the_fixture_supplies_every_file_install_copies():
+    """`_LIB` must cover `install.sh`'s `LIB_FILES`.
+
+    `_source_tree` builds the tree install.sh reads from. When install.sh
+    learns a new lib file and this tuple does not, install.sh aborts early on
+    the missing path and ~30 unrelated trust-check cases fail with an empty
+    stderr, which points nowhere near the cause. Asserted one way only: the
+    fixture may stage more than install.sh copies.
+    """
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text(encoding="utf-8")
+    body = src[src.index('LIB_FILES="') + len('LIB_FILES="'):]
+    declared = set(body[:body.index('"')].split())
+    assert declared, "could not parse LIB_FILES out of install.sh"
+    assert not declared - set(_LIB), sorted(declared - set(_LIB))
 
 
 def _source_tree(tmp_path):
