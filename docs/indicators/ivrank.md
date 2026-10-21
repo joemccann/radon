@@ -307,7 +307,7 @@ the window.
 
 `cloud/services/radon-ivrank.service` — copy `radon-vixcor.service` verbatim
 (oneshot, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-`EnvironmentFile=/home/radon/radon-cloud/.env`,
+`EnvironmentFile=/etc/radon/env`,
 `Environment=RADON_DB_NO_REPLICA=1`, venv python **directly** — never a
 `run_*.sh` wrapper — journald, `TimeoutStartSec=300`).
 `cloud/services/radon-ivrank.timer` — `Persistent=true`,

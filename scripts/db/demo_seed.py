@@ -46,8 +46,9 @@ _PROD_URL_MARKER = "radon-joemccann"
 
 # ...and the demo DB is provisioned under this name. Requiring the POSITIVE
 # marker as well means a mistyped / unrelated target is refused rather than
-# silently written: the same ~/radon-cloud/.env on the prod app host holds both
-# credential pairs, so "not prod-marked" alone is too weak a guard.
+# silently written: prod and demo credential pairs can sit in one host env
+# file (/etc/radon/env; ~/radon-cloud/.env is retired), so "not prod-marked"
+# alone is too weak a guard.
 _DEMO_URL_MARKER = "radon-demo"
 
 # Seed dates are ANCHORED to the run date, never hardcoded. The first seed

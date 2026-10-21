@@ -39,7 +39,7 @@ radon/                          # sole product repo
 | `/home/radon/radon` | Monorepo checkout (app + `cloud/`) |
 | `/home/radon/radon/cloud` | Infra + deploy scripts (same SHA as app) |
 | `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` | Immutable support bundle; current plus four newest inactive bundles retained |
-| `/etc/radon/env` | Canonical host secrets (`0640`, `root:radon`); `/home/radon/radon-cloud/.env` is the compatibility symlink |
+| `/etc/radon/env` | Canonical host secrets (`0640`, `root:radon`). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory |
 | `/var/lib/radon-deploy` | Reboot-durable root topology transition state |
 | `/var/lib/radon/control-plane-ready` | Root-published compatibility marker for monorepo deploys |
 
@@ -59,9 +59,10 @@ The app/broker/demo boundaries are shown in the [network overview](spof-host-spl
 
 1. Copy `radon-cloud` tree into `radon/cloud/` (exclude `.git`, `.venv`, caches, `media/`, `state/`, secrets, and `security-archive/` which remains only in the legacy cloud history).
 2. Detect monorepo layout in `cloud/scripts/deploy.sh` defaults.
-3. CI contains a readiness-gated monorepo deploy path and keeps the secret file
-   at `~/radon-cloud/.env`; the legacy runner remains active until root
-   bootstrap publishes compatibility.
+3. CI contains a readiness-gated monorepo deploy path. The legacy runner
+   remains active until root bootstrap publishes compatibility. The secret
+   file this phase kept at `~/radon-cloud/.env` is retired; production loads
+   `/etc/radon/env`.
 4. CI runs `cloud/` pytest alongside app tests.
 5. Document; do **not** delete the `radon-cloud` GitHub repo yet.
 
@@ -123,16 +124,13 @@ copy of `cloud/` so canonical installed unit paths remain valid.
 
 ### B. VPS rollback (if monorepo deploy path misbehaves)
 
-1. Ensure legacy checkout is intact:
-   ```bash
-   ls ~/radon-cloud/scripts/deploy.sh
-   test -f ~/radon-cloud/.env
-   ```
-2. Force next deploy through legacy (temporary CI pin or manual):
-   ```bash
-   cd ~/radon-cloud
-   bash scripts/deploy.sh <known-good-radon-sha>
-   ```
+1. Do not deploy from `~/radon-cloud` once
+   `/var/lib/radon/control-plane-ready` exists, and do not treat
+   `~/radon-cloud/.env` as a secret file. That path is retired.
+2. Recover an exact older SHA from the root provision store. The procedure
+   is in [cloud/CLAUDE.md](../cloud/CLAUDE.md#canonical-host-paths). It keeps
+   the exact-SHA and control-plane checks. It does not read the retired home
+   env file.
 3. If the app tree was hard-reset badly, restore from the green marker and
    release artifacts per `docs/operations.md`. Deploy journal operations run
    from the retained immutable runner, so recovery remains available even when
@@ -145,7 +143,7 @@ evidence; the next successful deploy performs bounded cleanup.
 
 ### C. Do not
 
-- Do not delete `~/radon-cloud/.env` during migration.
+- Do not keep editing `~/radon-cloud/.env`. It is retired. Move it with the procedure in [Deployment](operations.md#deployment). Production loads `/etc/radon/env` only.
 - Do not symlink the whole `~/radon-cloud` path to the monorepo while `.env`
   lives inside the legacy directory.
 - Do not `rm -rf ~/radon-cloud` until at least one readiness-gated monorepo

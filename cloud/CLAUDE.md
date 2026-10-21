@@ -541,7 +541,9 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Canonical secrets path: `/etc/radon/env`; service units load it through
   `EnvironmentFile=`. `/home/radon/radon-cloud/.env` is retired, including
   any `.env.bak-*` files in that directory. `deploy.sh` uses `/etc/radon/env`
-  and fails when that regular file is missing.
+  and fails when that regular file is missing. `setup-vps.sh`
+  `create_etc_radon_dir` creates `/etc/radon` and the media directory. It
+  does not create `/home/radon/radon-cloud/.env`.
 - Compose interpolation and service `env_file` both receive `/etc/radon/env`
   through `RADON_COMPOSE_ENV_FILE`.
 - [Runtime planes](#runtime-planes) owns execution mode and required release

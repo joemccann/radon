@@ -320,6 +320,101 @@ class TestRobinhoodRankRule:
             assert "https://api.robinhood.com/oauth2/token/" in text, rel
 
 
+def _doc_paragraphs(text: str) -> list[str]:
+    blocks: list[str] = []
+    buf: list[str] = []
+    for line in text.splitlines():
+        if line.strip():
+            buf.append(line)
+            continue
+        if buf:
+            blocks.append("\n".join(buf))
+            buf = []
+    if buf:
+        blocks.append("\n".join(buf))
+    return blocks
+
+
+def _retired_home_env_sources() -> list[Path]:
+    """Current instructions an operator or agent can follow. Audit logs,
+    tasks, unit bodies and tests are out of scope: a unit comment change
+    would ship a new hashed unit."""
+    found: list[Path] = []
+    for path in sorted(_ROOT.glob("docs/**/*.md")):
+        rel = path.relative_to(_ROOT).as_posix()
+        if rel.startswith("docs/archive/"):
+            continue
+        found.append(path)
+    found.extend(sorted(_ROOT.glob("cloud/**/*.md")))
+    found.append(_ROOT / "cloud/scripts/setup-vps.sh")
+    found.extend(sorted(_ROOT.glob("**/CLAUDE.md")))
+    found.extend(sorted(_ROOT.glob("**/AGENTS.md")))
+    for path in sorted(_ROOT.glob("scripts/**/*.py")):
+        rel = path.relative_to(_ROOT).as_posix()
+        if rel.startswith("scripts/tests/"):
+            continue
+        found.append(path)
+    # unique, stable
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in found:
+        rel = path.relative_to(_ROOT).as_posix()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        unique.append(path)
+    return unique
+
+
+class TestDocumentation20261020:
+    """DOC-213: #1191 loads production env only from /etc/radon/env.
+    /home/radon/radon-cloud/.env is a retired regular file, not a symlink
+    units still read."""
+
+    # Whole words. "staleness" must not excuse a live EnvironmentFile.
+    _LIVE_EXCUSE = re.compile(
+        r"\bretired\b|must not|not a fallback|radon-retired-env|\binaccessible\b|\bstale\b",
+        re.IGNORECASE,
+    )
+
+    def test_retired_home_env_is_not_documented_as_live(self):
+        deploy = (_ROOT / "cloud/scripts/deploy.sh").read_text(encoding="utf-8")
+        assert "/home/radon/radon-cloud/.env is retired and is not a fallback" in deploy
+        offenders: list[str] = []
+        for path in _retired_home_env_sources():
+            rel = path.relative_to(_ROOT).as_posix()
+            text = path.read_text(encoding="utf-8")
+            for paragraph in _doc_paragraphs(text):
+                if "radon-cloud/.env" not in paragraph:
+                    continue
+                if self._LIVE_EXCUSE.search(paragraph):
+                    continue
+                first = paragraph.splitlines()[0].strip()
+                offenders.append(f"{rel}: {first[:180]}")
+        assert not offenders, (
+            "these instructions still treat ~/radon-cloud/.env as a live "
+            "secret file:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_perf_twr_runbook_matches_the_morning_timer(self):
+        """DOC-214: the transfers runbook still told the operator to wait
+        for a Mon-Fri 20:45 ET Flex request. The timer is Tue-Sat 07:30 ET
+        and does not pass --sendrequest."""
+        timer = (_ROOT / "cloud/services/radon-perf-twr.timer").read_text(encoding="utf-8")
+        assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in timer
+        assert "RandomizedDelaySec=300" in timer
+        flex = (_ROOT / "cloud/services/radon-flex-pull.timer").read_text(encoding="utf-8")
+        assert "OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York" in flex
+        builder = (_ROOT / "scripts/perf_twr_builder.py").read_text(encoding="utf-8")
+        assert "sendrequest: bool = False" in builder
+        runbook = (_ROOT / "docs/ib-flex-transfers-runbook.md").read_text(encoding="utf-8")
+        for stale in ("20:45", "20:40", "16:55", "weekday evening"):
+            assert stale not in runbook, stale
+        assert "Tue..Sat 07:30 ET" in runbook
+        assert "08:30 ET" in runbook
+        assert "does not pass `--sendrequest`" in runbook
+
+
 class TestThinIndex:
     def test_readme_has_now_true_not_recent_additions(self):
         text = (_ROOT / "README.md").read_text(encoding="utf-8")

@@ -16,8 +16,8 @@ Usage:
     python -m scripts.cash_flow_sync --from-file statement.xml --dry-run
     python -m scripts.cash_flow_sync --from-file statement.xml --since 2026-06-01
 
-Required env for a LIVE pull (already set on Hetzner per
-/home/radon/radon-cloud/.env). `--from-file` needs neither:
+Required env for a LIVE pull (already set on Hetzner in
+/etc/radon/env; /home/radon/radon-cloud/.env is retired). `--from-file` needs neither:
     IB_FLEX_TOKEN          - Flex Web Service token
     IB_FLEX_NAV_QUERY_ID   - Flex Query ID with CashTransaction section enabled
 
