@@ -9,6 +9,9 @@
 // plausible-looking guess an operator might size a position against.
 
 import React from "react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 
@@ -112,7 +115,47 @@ describe("TicketRiskBlock", () => {
     const svg = container.querySelector(".ticket-risk-payoff");
     expect(svg).toBeTruthy();
     expect(svg!.querySelector("polyline")).toBeTruthy();
-    expect(svg!.querySelectorAll("[data-testid='payoff-breakeven']")).toHaveLength(2);
+    const lines = [...svg!.querySelectorAll("[data-testid='payoff-breakeven']")];
+    const labels = [...container.querySelectorAll<HTMLElement>("[data-testid='payoff-breakeven-label']")];
+    expect(lines).toHaveLength(2);
+    expect(labels.map((label) => label.textContent)).toEqual(["242.02", "282.98"]);
+    const width = Number(svg!.getAttribute("viewBox")!.split(" ")[2]);
+    lines.forEach((line, index) => {
+      const x = Number(line.getAttribute("x1"));
+      expect(labels[index].style.left).toBe(`${(x / width) * 100}%`);
+    });
+  });
+
+  it("places each breakeven price under its dotted line", () => {
+    const { container } = render(
+      <TicketRiskBlock
+        legs={[
+          { action: "BUY", right: "C", strike: 350, quantity: 1 },
+          { action: "SELL", right: "C", strike: 400, quantity: 1 },
+        ]}
+        netPremium={6.96}
+        spot={370}
+        maxGain={4304}
+        maxLoss={696}
+        maxLossUnbounded={false}
+        marginRequirement={34800}
+        fundsAfter={231515}
+        total={34800}
+        isCredit={false}
+      />,
+    );
+    const svg = container.querySelector(".ticket-risk-payoff");
+    expect(svg).toBeTruthy();
+    const width = Number(svg!.getAttribute("viewBox")!.split(" ")[2]);
+    const lines = [...svg!.querySelectorAll("[data-testid='payoff-breakeven']")];
+    const labels = [...container.querySelectorAll<HTMLElement>("[data-testid='payoff-breakeven-label']")];
+    expect(lines).toHaveLength(1);
+    expect(labels).toHaveLength(1);
+    expect(labels[0].textContent).toBe("356.96");
+    const x = Number(lines[0].getAttribute("x1"));
+    expect(x / width).toBeGreaterThan(0.2);
+    expect(x / width).toBeLessThan(0.8);
+    expect(labels[0].style.left).toBe(`${(x / width) * 100}%`);
   });
 
   it("omits the curve when there are no legs to price", () => {
@@ -148,4 +191,18 @@ it('withholds nonfinite break-even labels when a finite spot overflows the payof
   expect(container.querySelector('svg')).toBeNull();
   expect(getByText('Expiry payoff cannot be measured from the current price and legs.')).toBeTruthy();
   expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
+});
+
+it("centers each breakeven price on the marker x", () => {
+  const css = readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../app/globals.css"),
+    "utf8",
+  );
+  const axis = css.match(/\.ticket-risk-payoff-axis\s*\{([^}]*)\}/)?.[1] ?? "";
+  const label = css.match(/\.ticket-risk-payoff-axis span\s*\{([^}]*)\}/)?.[1] ?? "";
+  expect(axis).toContain("position: relative");
+  expect(axis).not.toContain("space-between");
+  expect(label).toContain("position: absolute");
+  expect(label).toContain("transform: translateX(-50%)");
+  expect(label).toContain("white-space: nowrap");
 });
