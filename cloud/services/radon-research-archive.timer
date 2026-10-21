@@ -1,9 +1,11 @@
 [Unit]
-Description=Radon monthly research evidence archive (1st of the month)
+Description=Radon weekly research evidence archive (Sunday)
 
 [Timer]
-# 1st of every month, ahead of the 05:40 UTC database maintenance window.
-OnCalendar=*-*-01 04:20:00 UTC
+# Weekly: after the 03:20 UTC disk-cleanup pass, ahead of the 05:40 UTC
+# database maintenance window. Monthly let a month of evidence (~0.5G/day)
+# pile up on the 75G app host disk (ENOSPC on 2026-10-21).
+OnCalendar=Sun *-*-* 04:20:00 UTC
 Persistent=true
 RandomizedDelaySec=900
 
