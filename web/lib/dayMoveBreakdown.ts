@@ -13,7 +13,8 @@ import {
   positionDirectionSign,
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
-import type { PnlBreakdownRow } from "@/components/PnlBreakdownModal";
+import { fmtSigned } from "@/lib/format/money";
+import type { PnlBreakdownFlag, PnlBreakdownRow } from "@/components/PnlBreakdownModal";
 
 /**
  * Resolve the "current price" for a position's price data.
@@ -48,48 +49,105 @@ function isMid(p: PriceData): boolean {
   return true;
 }
 
-/** Optional close/last labels for the breakdown modal when quotes exist. */
-function quoteLabelsForPosition(
+/** Signed price for the modal: credits (net short premium) print negative. */
+function fmtPrice(value: number): string {
+  return `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`;
+}
+
+function fmtCurrent(value: number, mid: boolean): string {
+  return mid ? `${fmtPrice(value)} (MID)` : fmtPrice(value);
+}
+
+/**
+ * What live quotes say about a position's day: the CLOSE / CURRENT labels,
+ * the absolute baseline the % column divides by, and the dollar move the
+ * quotes alone imply (sign-aware). Null when any leg lacks a live mark or a
+ * prior close, so a combo is never described by one of its legs.
+ */
+type QuoteContext = {
+  col1: string;
+  col2: string;
+  closeValue: number;
+  quotedMove: number;
+};
+
+function stockQuoteContext(
   pos: PortfolioPosition,
   prices: Record<string, PriceData>,
-): { col1: string; col2: string; pnlPct: number | null } {
-  if (pos.structure_type === "Stock") {
-    const p = prices[pos.ticker];
-    const current = p ? resolveLastOrMid(p) : null;
-    if (p?.close != null && p.close > 0 && current != null) {
-      const closeValue = p.close * Math.abs(pos.contracts);
-      const pnlPct =
-        pos.ib_daily_pnl != null && closeValue !== 0
-          ? (pos.ib_daily_pnl / Math.abs(closeValue)) * 100
-          : null;
-      return {
-        col1: `$${p.close.toFixed(2)}`,
-        col2: isMid(p) ? `$${current.toFixed(2)} (MID)` : `$${current.toFixed(2)}`,
-        pnlPct,
-      };
-    }
-    return { col1: "IB daily", col2: "reqPnLSingle", pnlPct: null };
-  }
+): QuoteContext | null {
+  const p = prices[pos.ticker];
+  const current = p ? resolveLastOrMid(p) : null;
+  if (!p || current == null || p.close == null || p.close <= 0) return null;
+  const shares = Math.abs(pos.contracts);
+  return {
+    col1: fmtPrice(p.close),
+    col2: fmtCurrent(current, isMid(p)),
+    closeValue: p.close * shares,
+    quotedMove: positionDirectionSign(pos) * (current - p.close) * shares,
+  };
+}
 
-  let closeStr = "";
-  let lastStr = "";
+/**
+ * Net per-unit combo quote: Σ sign × leg price × (leg contracts / units),
+ * +1 LONG / −1 SHORT, so a credit structure prints negative, matching the
+ * table's Last Price convention.
+ */
+function optionQuoteContext(
+  pos: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): QuoteContext | null {
+  const units = Math.abs(pos.contracts);
+  if (pos.legs.length === 0 || units === 0) return null;
+  let netClose = 0;
+  let netCurrent = 0;
+  let mid = false;
   for (const leg of pos.legs) {
     const key = legPriceKey(pos.ticker, pos.expiry, leg);
     const lp = key ? prices[key] : null;
     const current = lp ? resolveLastOrMid(lp) : null;
-    if (!lp || current == null || lp.close == null || lp.close <= 0) continue;
-    if (!closeStr) closeStr = `$${lp.close.toFixed(2)}`;
-    if (!lastStr) {
-      lastStr = isMid(lp)
-        ? `$${current.toFixed(2)} (MID)`
-        : `$${current.toFixed(2)}`;
-    }
+    if (!lp || current == null || lp.close == null || lp.close <= 0) return null;
+    const sign = leg.direction === "LONG" ? 1 : -1;
+    const ratio = Math.abs(leg.contracts) / units;
+    netClose += sign * lp.close * ratio;
+    netCurrent += sign * current * ratio;
+    if (isMid(lp)) mid = true;
   }
-  if (closeStr && lastStr) {
-    return { col1: closeStr, col2: lastStr, pnlPct: null };
-  }
-  return { col1: "IB daily", col2: "reqPnLSingle", pnlPct: null };
+  return {
+    col1: fmtPrice(netClose),
+    col2: fmtCurrent(netCurrent, mid),
+    closeValue: netClose * units * 100,
+    quotedMove: (netCurrent - netClose) * units * 100,
+  };
 }
+
+function quoteContextForPosition(
+  pos: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): QuoteContext | null {
+  return pos.structure_type === "Stock" || pos.structure_type === "Crypto"
+    ? stockQuoteContext(pos, prices)
+    : optionQuoteContext(pos, prices);
+}
+
+function pctOfCloseValue(pnl: number, closeValue: number): number | null {
+  return closeValue !== 0 ? (pnl / Math.abs(closeValue)) * 100 : null;
+}
+
+/**
+ * IB's reqPnLSingle daily and the relay quotes carry independent prior
+ * closes. When they disagree on the direction of the day the row must say
+ * so, instead of printing a P&L that contradicts the prices beside it.
+ */
+function ibQuoteDisagreement(ibDailyPnl: number, quotedMove: number): PnlBreakdownFlag | undefined {
+  if (ibDailyPnl === 0 || quotedMove === 0) return undefined;
+  if (Math.sign(ibDailyPnl) === Math.sign(quotedMove)) return undefined;
+  return {
+    label: "IB≠QUOTE",
+    title: `IB daily ${fmtSigned(ibDailyPnl, 2)} disagrees with the quoted move ${fmtSigned(quotedMove, 2)}`,
+  };
+}
+
+const NO_QUOTE_LABELS = { col1: "IB daily", col2: "reqPnLSingle" } as const;
 
 /**
  * Per-position day move for the Account Day P&L fallback and the Day Move
@@ -102,7 +160,7 @@ function quoteLabelsForPosition(
  *      getTodayPnlDollars (prior close is meaningless when the position did
  *      not exist yesterday).
  *   3. Overnight stock — close-based with SHORT sign awareness + last/mid.
- *   4. Overnight options — last/mid vs prior close.
+ *   4. Overnight options — net per-unit last/mid vs prior close.
  */
 export function computeDayMoveBreakdown(
   portfolio: PortfolioData,
@@ -117,15 +175,16 @@ export function computeDayMoveBreakdown(
     //    close math and blow up ESTIMATED (LIVE) Day P&L during RTH.
     if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) {
       total += pos.ib_daily_pnl;
-      const labels = quoteLabelsForPosition(pos, prices);
+      const quote = quoteContextForPosition(pos, prices);
       rows.push({
         id: pos.id,
         ticker: pos.ticker,
         structure: pos.structure,
-        col1: labels.col1,
-        col2: labels.col2,
+        col1: quote?.col1 ?? NO_QUOTE_LABELS.col1,
+        col2: quote?.col2 ?? NO_QUOTE_LABELS.col2,
         pnl: pos.ib_daily_pnl,
-        pnlPct: labels.pnlPct,
+        pnlPct: quote ? pctOfCloseValue(pos.ib_daily_pnl, quote.closeValue) : null,
+        pnlFlag: quote ? ibQuoteDisagreement(pos.ib_daily_pnl, quote.quotedMove) : undefined,
       });
       continue;
     }
@@ -150,68 +209,20 @@ export function computeDayMoveBreakdown(
       continue;
     }
 
-    if (pos.structure_type === "Stock" || pos.structure_type === "Crypto") {
-      const p = prices[pos.ticker];
-      const current = p ? resolveLastOrMid(p) : null;
-      if (current == null || p?.close == null || p.close <= 0) continue;
-
-      // Sign-aware: contracts is a magnitude; SHORT loses when price rises.
-      const effectivePnl =
-        positionDirectionSign(pos) * (current - p.close) * Math.abs(pos.contracts);
-      total += effectivePnl;
-      const closeValue = p.close * Math.abs(pos.contracts);
-      const pnlPct = closeValue !== 0 ? (effectivePnl / Math.abs(closeValue)) * 100 : null;
-      const currentLabel = isMid(p)
-        ? `$${current.toFixed(2)} (MID)`
-        : `$${current.toFixed(2)}`;
-      rows.push({
-        id: pos.id,
-        ticker: pos.ticker,
-        structure: pos.structure,
-        col1: `$${p.close.toFixed(2)}`,
-        col2: currentLabel,
-        pnl: effectivePnl,
-        pnlPct,
-      });
-      continue;
-    }
-
-    // 3. Overnight options: last-or-mid vs prior close.
-    let legPnl = 0;
-    let allLegsValid = true;
-    let closeStr = "";
-    let lastStr = "";
-
-    for (const leg of pos.legs) {
-      const key = legPriceKey(pos.ticker, pos.expiry, leg);
-      const lp = key ? prices[key] : null;
-      const current = lp ? resolveLastOrMid(lp) : null;
-      if (!lp || current == null || lp.close == null || lp.close <= 0) {
-        allLegsValid = false;
-        break;
-      }
-      const sign = leg.direction === "LONG" ? 1 : -1;
-      legPnl += sign * (current - lp.close) * leg.contracts * 100;
-      if (!closeStr) closeStr = `$${lp.close.toFixed(2)}`;
-      if (!lastStr) {
-        lastStr = isMid(lp)
-          ? `$${current.toFixed(2)} (MID)`
-          : `$${current.toFixed(2)}`;
-      }
-    }
-
-    if (allLegsValid) {
-      total += legPnl;
-      rows.push({
-        id: pos.id,
-        ticker: pos.ticker,
-        structure: pos.structure,
-        col1: closeStr || "---",
-        col2: lastStr || "---",
-        pnl: legPnl,
-        pnlPct: null,
-      });
-    }
+    // 3. Overnight stock and options: sign-aware last-or-mid vs prior close,
+    //    netted per unit for combos. A missing leg quote drops the row.
+    const quote = quoteContextForPosition(pos, prices);
+    if (quote == null) continue;
+    total += quote.quotedMove;
+    rows.push({
+      id: pos.id,
+      ticker: pos.ticker,
+      structure: pos.structure,
+      col1: quote.col1,
+      col2: quote.col2,
+      pnl: quote.quotedMove,
+      pnlPct: pctOfCloseValue(quote.quotedMove, quote.closeValue),
+    });
   }
 
   return { rows, total };
