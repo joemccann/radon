@@ -231,7 +231,7 @@ systemctl enable --now radon-grok-page-responder.timer
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
-Least-privilege Turso: the responder touches only `watchdog_pages` and its
+Least-privilege Turso: the responder touches only `watchdog_pages`, `watchdog_page_attempts` and its
 `service_health` heartbeat (whose triggers append to `service_health_events`;
 without that grant the heartbeat logs `not authorized`). Mint a scoped token
 and put it in the production env as `GROK_RESPONDER_TURSO_AUTH_TOKEN`; setup
@@ -243,6 +243,7 @@ token is never used. Turso's insert action is `data_add`; the CLI accepts
 ```bash
 turso db tokens create radon \
   -p watchdog_pages:data_read,data_update \
+  -p watchdog_page_attempts:data_read,data_add \
   -p service_health:data_read,data_add,data_update \
   -p service_health_events:data_add
 ```
@@ -619,9 +620,16 @@ The per-ticket bounds (3 attempts; one ticket per service/severity/kind/hour)
 do not bound a weekend of hourly P1s — that is ~24 independent
 autoship-and-push runs, each of which can deploy.
 `GROK_PAGE_MAX_ACTIONS_PER_DAY` (default 6) caps grok invocations per UTC day,
-counted as tickets claimed since 00:00Z (`watchdog.pages.actions_since`). At
+counted from `watchdog_page_attempts` since 00:00Z
+(`watchdog.pages.actions_since`). One row is reserved BEFORE every launch
+(`record_action_attempt`), including the last-known-good fallback launch and
+an `attempt_oneshot_rerun`, and is never cleared. The count deliberately does
+NOT key on `watchdog_pages.claimed_at`: a failed attempt clears that column so
+the ticket stays retryable, which silently returned the attempt's budget. At
 the cap the cycle heartbeats `paused` and exits 0. An unreadable ledger counts
 as over-cap, so a Turso miss stands the responder down rather than freeing it.
+A reservation that cannot be written propagates and fails the cycle instead of
+launching unbudgeted.
 
 ## Oneshot re-run (signal-killed, or exit-code with a fix deployed since)
 

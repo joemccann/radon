@@ -134,6 +134,9 @@ class TestGlobalDailyActionCap:
             pages_mod, "list_actionable_pages", lambda **_: [_page()]
         )
         monkeypatch.setattr(pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(
+            pages_mod, "record_action_attempt", lambda **_k: "attempt"
+        )
         monkeypatch.setattr(pages_mod, "claim_page", lambda *a, **k: True)
         monkeypatch.setattr(pages_mod, "complete_page", lambda *a, **k: None)
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)

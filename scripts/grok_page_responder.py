@@ -960,6 +960,11 @@ def run_cycle(
         if rerun:
             disposition, summary = rerun
             finished = datetime.now(timezone.utc)
+            # A oneshot re-run is an action too; keep it inside the same
+            # daily cap now that the cap no longer reads `claimed_at`.
+            pages_mod.record_action_attempt(
+                page_id=page["page_id"], now=finished, kind="oneshot_rerun"
+            )
             finish, note = _complete_page_with_followup(
                 page["page_id"],
                 status="done",
@@ -1003,6 +1008,12 @@ def run_cycle(
         )
 
         def _run_once(command: list[str]):
+            # Reserve the budget BEFORE the launch, and once per launch so
+            # the last-known-good fallback spends its own unit. The ticket's
+            # claim is cleared again on failure (retryable); this row is not.
+            pages_mod.record_action_attempt(
+                page_id=page["page_id"], now=datetime.now(timezone.utc)
+            )
             try:
                 return runner(command, timeout=GROK_TIMEOUT_SECS, cwd=str(repo_root)), None
             except subprocess.TimeoutExpired:
