@@ -85,12 +85,20 @@ def _run(root, client, **kwargs):
 
 
 class TestCutoff:
+    # Rolling window: the cutoff no longer snaps to the start of the month.
+    # A month-start cutoff left October's 10.6G of evidence on the 75G app
+    # host disk until Nov 1 and the 2026-10-21 deploy hit ENOSPC.
     def test_first_of_month_keeps_the_last_week(self):
         assert archive.compute_cutoff(NOW, 7) == datetime(2026, 9, 24, 5, 30, tzinfo=timezone.utc)
 
-    def test_mid_month_cuts_at_the_month_start(self):
+    def test_mid_month_cuts_a_rolling_week_back(self):
         mid = datetime(2026, 10, 15, tzinfo=timezone.utc)
-        assert archive.compute_cutoff(mid, 7) == datetime(2026, 10, 1, tzinfo=timezone.utc)
+        assert archive.compute_cutoff(mid, 7) == datetime(2026, 10, 8, tzinfo=timezone.utc)
+
+    def test_min_age_is_honoured_not_the_calendar(self):
+        mid = datetime(2026, 10, 15, tzinfo=timezone.utc)
+        assert archive.compute_cutoff(mid, 14) == datetime(2026, 10, 1, tzinfo=timezone.utc)
+        assert archive.compute_cutoff(mid, 1) == datetime(2026, 10, 14, tzinfo=timezone.utc)
 
 
 class TestArchiveAndPrune:

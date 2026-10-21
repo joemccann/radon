@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monthly archive of private research evidence to Backblaze B2, then prune.
+"""Weekly archive of private research evidence to Backblaze B2, then prune.
 
 ``<root>/evidence/<work key>/`` holds per-document extraction artifacts
 (evidence.json, page markdown, review.json). The pipeline reads them only
@@ -13,8 +13,9 @@ that queued reviews hash-check, so neither is touched.
 
 A directory is a candidate only when:
   * every entry is a regular file or directory (no symlinks or specials),
-  * its newest mtime is older than ``compute_cutoff`` (the start of the
-    current UTC month, and never inside the last ``--min-age-days``), and
+  * its newest mtime is older than ``compute_cutoff`` (a rolling
+    ``--min-age-days`` back from now; the cutoff no longer snaps to the
+    month start, which left a month of evidence on the app host disk), and
   * its work row in ``state.sqlite`` is settled (complete, published,
     deleted, superseded) or absent. Pending or processing work is skipped.
 
@@ -93,11 +94,12 @@ def _utcnow() -> datetime:
 
 
 def compute_cutoff(now: datetime, min_age_days: int) -> datetime:
-    """Start of the current UTC month, pulled back so nothing younger than
-    ``min_age_days`` qualifies (the 1st-of-month run would otherwise take
-    yesterday's documents)."""
-    month_start = now.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    return min(month_start, now - timedelta(days=min_age_days))
+    """Rolling cutoff: nothing newer than ``min_age_days`` ago qualifies.
+
+    The archive key still groups objects by the month of the directory's
+    newest mtime, so a weekly run and the old monthly run lay out the bucket
+    identically."""
+    return now.astimezone(timezone.utc) - timedelta(days=min_age_days)
 
 
 def s3_config_from_env(env: dict | None = None) -> dict | None:
