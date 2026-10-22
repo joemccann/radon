@@ -554,3 +554,30 @@ def test_every_cookie_in_a_header_is_detected_not_only_the_first():
         "the cookie banner was dismissed: theme=light",
     ):
         assert find_secret_assignments(text) == [], text
+
+
+def test_long_cookie_headers_and_values_are_still_inspected():
+    from credential_redaction import find_secret_assignments
+
+    filler = "; ".join(f"pref{n}=on" for n in range(800))
+    assert len(filler) > 4096
+    assert find_secret_assignments(f"Cookie: {filler}; sid={_cookie_value()}") == ["[redacted-secret]"]
+    long_value = _cookie_value() * 120
+    assert len(long_value) > 1024
+    assert find_secret_assignments(f"Cookie: theme=light; sid={long_value}") == ["[redacted-secret]"]
+
+
+def test_yaml_quoted_values_split_across_lines_or_doubling_quotes():
+    from credential_redaction import find_secret_assignments
+
+    value = _cookie_value()
+    for text in (
+        f'password: "\n  {value}"\nnext: 1',
+        f"password: '\n  {value}'\nnext: 1",
+        f"password: 'ab''{value}'\nnext: 1",
+    ):
+        body = scrub_credential_text(text)
+        assert "NOTREAL" not in body, body
+        assert body.endswith("\nnext: 1"), body
+    for text in (f'password: "\n  {value}"', f"password: '\n  {value}'"):
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text

@@ -228,14 +228,14 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     # published the tail.
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:\\.|[^\"\\\n])*\"",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:[ \t]*\r?\n)?(?:\\.|[^\"\\\n])*\"",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
     ),
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:\\.|[^'\\\n])*'",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:[ \t]*\r?\n)?(?:''|\\.|[^'\\\n])*'",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
@@ -265,7 +265,9 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*[\"']?"
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*"
+    # A quoted value may open on the key line and start on the next one.
+    r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
     # so only one length is ever tried) and BOUNDED. An unbounded run with a
     # lookahead that rejected punctuation made every candidate rescan the
@@ -287,10 +289,10 @@ _PLACEHOLDER = re.compile(
 # above reads only the first pair as the value, so a short first cookie hid an
 # opaque session cookie after it; check every pair on the header line.
 _COOKIE_HEADER = re.compile(
-    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n\"']{0,4096})",
+    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n\"']*)",
     re.IGNORECASE,
 )
-_COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,1024}")
+_COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
 
 
 def _is_opaque(value: str) -> bool:

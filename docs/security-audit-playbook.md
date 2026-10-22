@@ -382,7 +382,9 @@ line here whenever you ship a security fix.**
   its own right, so a serialized header (`{"Cookie": "..."}`, a dict dump, an
   env line) is redacted and detected by the same generic assignment rules as
   any other credential-named key. Detection reads every `name=value` pair on a
-  cookie header, not only the first. Both also share one triple-delimited
+  cookie header, not only the first, with no length cap. A quoted value may
+  open on the key line and start on the next one, and a single-quoted value
+  may double its quote. Both also share one triple-delimited
   assignment rule (`TOKEN = """` on one line, the value on the next), so a
   Python or TOML multi-line value is not mistaken for an empty two-quote value
   with its real credential left in the body. They also share the YAML
