@@ -2600,3 +2600,77 @@ class TestDocumentation20261021:
         assert "ORDER_FUTURE_MULTIPLIER" in bullet
         assert "strike above zero" in bullet
 
+
+class TestDocumentation20261022:
+    """DOC-219..222: contracts that drifted after audited-through e5426fb1."""
+
+    def test_research_archive_heartbeat_is_nine_days_on_sunday(self):
+        timer = (_ROOT / "cloud/services/radon-research-archive.timer").read_text()
+        assert "OnCalendar=Sun *-*-* 04:20:00 UTC" in timer
+        assert "*-*-01" not in timer
+        windows = (_ROOT / "web/lib/serviceHealthWindows.ts").read_text()
+        assert '"research-archive": { open: 9 * DAY' in windows
+        watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
+        assert '"research-archive": {"open": 9 * _DAY' in watchdog
+        assert "Monthly research evidence archive" not in watchdog
+        section = _markdown_heading("docs/operations.md", "Research evidence archive")
+        assert "33-day" not in section
+        assert "9-day" in section
+        assert "Sunday" in section
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        start = cloud.index("`setup-vps.sh` inventories `radon-research-archive.{service,timer}`")
+        paragraph = cloud[start:cloud.index("`setup-vps.sh` inventories `radon-rsi-oversold", start)]
+        assert "1st of the month" not in paragraph
+        assert "33d" not in paragraph
+        assert "Sunday 04:20 UTC" in paragraph
+        assert "(9d)" in paragraph
+
+    def test_combo_loss_owners_name_the_exact_expiry_split(self):
+        limits = (_ROOT / "scripts/order_limits.py").read_text()
+        assert 'if _ib_order_type(params) != "STP"' in limits
+        assert "_limit_combo_expiry_loss" in limits
+        bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
+        exact_at = bankroll.index("expiry_loss = _combo_expiry_loss")
+        floor_at = bankroll.index("return combo_debit_floor(params, loss)", exact_at)
+        assert exact_at < floor_at
+        kelly = (_ROOT / "scripts/kelly_guard.py").read_text()
+        worst = kelly.split("def _worst_case_loss", 1)[1].split("\ndef ", 1)[0]
+        assert "combo_debit_floor" in worst
+        assert "_combo_expiry_loss" not in worst
+        text = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        fat = text.split("The fat-finger combo loss cap", 1)[1].split(
+            "The all-placer gate is independent", 1
+        )[0]
+        assert "single-expiry" in fat
+        assert "stop-market" in fat
+        assert "premium" in fat
+        assert "short put" in fat
+        gate3 = text.split("For a single-expiry limit combo", 1)[1].split("What this does NOT cover", 1)[0]
+        assert "_combo_expiry_loss" in gate3
+        assert "kelly_guard._worst_case_loss" in gate3
+        assert "cannot drift" not in gate3
+        assert "combo_debit_floor" in gate3
+
+    def test_zero_pr_claim_requires_a_complete_listing(self):
+        hook = (_ROOT / "scripts/runner/hooks/security_post.sh").read_text()
+        limit = next(
+            line.split("=", 1)[1].strip()
+            for line in hook.splitlines()
+            if line.startswith("PR_LIST_PROOF_LIMIT=")
+        )
+        assert limit.isdigit()
+        assert "no_loop_pr_exists" in hook
+        assert "full page is not" in hook or "full page is not absence" in hook
+        section = (_ROOT / "docs/runner.md").read_text()
+        start = section.index('The deliver phase\'s "ready to merge" line')
+        paragraph = section[start:section.index("Loops without `PHASES`", start)]
+        assert f"fewer than {limit} rows" in paragraph
+        assert "failed query" in paragraph
+        assert "full page is not absence" in paragraph
+        assert "an open PR on the loop's prefix contradicts it" not in paragraph
+
+    def test_high_low_spec_does_not_point_at_a_private_machine(self):
+        text = (_ROOT / "docs/indicators/high-low.md").read_text()
+        assert "/Users/" not in text
+        assert "joemccann-mac-mini" not in text
+
