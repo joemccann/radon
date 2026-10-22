@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-21T09:00:08Z",
-  "node_count": 4087,
-  "edge_count": 8370,
+  "generated_at": "2026-10-22T09:00:08Z",
+  "node_count": 4143,
+  "edge_count": 8480,
   "areas": {
-    "web": 2343,
+    "web": 2367,
     "site": 159,
-    "scripts": 1417,
-    "cloud": 120,
+    "scripts": 1448,
+    "cloud": 121,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 239
+      "count": 244
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 281
+      "count": 284
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 239
+      "count": 242
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 455
+      "count": 459
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1107
+      "count": 1116
     },
     {
       "id": "site/app",
@@ -100,7 +100,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 189
+      "count": 193
     },
     {
       "id": "scripts/ai_cycle",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 139
+      "count": 141
     },
     {
       "id": "scripts/backtest",
@@ -130,7 +130,7 @@
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 26
+      "count": 28
     },
     {
       "id": "scripts/control_service",
@@ -225,7 +225,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 743
+      "count": 758
     },
     {
       "id": "scripts/trade_blotter",
@@ -235,7 +235,12 @@
     {
       "id": "scripts/utils",
       "area": "scripts",
-      "count": 45
+      "count": 46
+    },
+    {
+      "id": "scripts/uw_stream",
+      "area": "scripts",
+      "count": 7
     },
     {
       "id": "scripts/watchdog",
@@ -265,7 +270,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 103
+      "count": 104
     },
     {
       "id": "lib/tools",
@@ -297,22 +302,29 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 305,
+      "in": 306,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 206,
+      "in": 208,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 131,
+      "in": 134,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/lib/routeAccess.ts",
+      "area": "web",
+      "in": 110,
+      "out": 5,
       "test": false
     },
     {
@@ -323,24 +335,24 @@
       "test": false
     },
     {
-      "id": "web/lib/routeAccess.ts",
-      "area": "web",
-      "in": 105,
-      "out": 5,
-      "test": false
-    },
-    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 60,
+      "in": 61,
       "out": 44,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 100,
+      "in": 103,
       "out": 1,
+      "test": false
+    },
+    {
+      "id": "scripts/db/writer.py",
+      "area": "scripts",
+      "in": 98,
+      "out": 5,
       "test": false
     },
     {
@@ -351,16 +363,9 @@
       "test": false
     },
     {
-      "id": "scripts/db/writer.py",
-      "area": "scripts",
-      "in": 96,
-      "out": 5,
-      "test": false
-    },
-    {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 98,
+      "in": 100,
       "out": 0,
       "test": false
     },
@@ -368,7 +373,7 @@
       "id": "web/lib/assistant/nextLoaders.ts",
       "area": "web",
       "in": 2,
-      "out": 84,
+      "out": 86,
       "test": false
     },
     {
@@ -381,8 +386,15 @@
     {
       "id": "web/lib/pageTitle.ts",
       "area": "web",
-      "in": 74,
+      "in": 75,
       "out": 2,
+      "test": false
+    },
+    {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 65,
+      "out": 3,
       "test": false
     },
     {
@@ -400,23 +412,16 @@
       "test": false
     },
     {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
-      "in": 62,
-      "out": 3,
-      "test": false
-    },
-    {
       "id": "scripts/api/server.py",
       "area": "scripts",
       "in": 49,
-      "out": 16,
+      "out": 17,
       "test": false
     },
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 58,
+      "in": 59,
       "out": 6,
       "test": false
     },
@@ -424,27 +429,27 @@
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
       "in": 4,
-      "out": 60,
+      "out": 61,
       "test": false
     },
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 53,
+      "in": 54,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/SectionEmptyState.tsx",
       "area": "web",
-      "in": 55,
+      "in": 56,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 50,
+      "in": 51,
       "out": 5,
       "test": false
     },
@@ -456,23 +461,23 @@
       "test": false
     },
     {
-      "id": "web/components/SpectralLoader.tsx",
+      "id": "web/components/ErrorToast.tsx",
       "area": "web",
-      "in": 51,
-      "out": 0,
+      "in": 52,
+      "out": 1,
       "test": false
     },
     {
-      "id": "web/components/ErrorToast.tsx",
+      "id": "web/components/SpectralLoader.tsx",
       "area": "web",
-      "in": 50,
-      "out": 1,
+      "in": 52,
+      "out": 0,
       "test": false
     },
     {
       "id": "web/components/RequestError.tsx",
       "area": "web",
-      "in": 47,
+      "in": 48,
       "out": 2,
       "test": false
     },
@@ -493,14 +498,14 @@
     {
       "id": "web/e2e/clear-fixtures.ts",
       "area": "web",
-      "in": 33,
+      "in": 34,
       "out": 10,
       "test": true
     },
     {
       "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 42,
+      "in": 43,
       "out": 0,
       "test": false
     },
@@ -514,7 +519,7 @@
     {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
-      "in": 40,
+      "in": 41,
       "out": 0,
       "test": false
     },
@@ -535,6 +540,20 @@
     {
       "id": "web/lib/serviceHealthWindows.ts",
       "area": "web",
+      "in": 39,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/RegimeStrip.tsx",
+      "area": "web",
+      "in": 38,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/utils/__init__.py",
+      "area": "scripts",
       "in": 38,
       "out": 0,
       "test": false
@@ -554,23 +573,9 @@
       "test": false
     },
     {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 37,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/DashboardNewsFeed.tsx",
-      "area": "web",
-      "in": 17,
-      "out": 20,
-      "test": false
-    },
-    {
       "id": "web/lib/TickerDetailContext.tsx",
       "area": "web",
-      "in": 34,
+      "in": 35,
       "out": 2,
       "test": false
     }
