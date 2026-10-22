@@ -21,12 +21,24 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PORTFOLIO = _REPO_ROOT / "data" / "portfolio.json"
 
 
-def _is_closing(params: dict) -> bool:
-    if params.get("isClosing") or params.get("is_closing"):
-        return True
-    if params.get("closeOut") or params.get("reducing"):
-        return True
-    return False
+def _is_verified_close(params: dict) -> bool:
+    """True only for a reducing close proven against a fresh portfolio snapshot.
+
+    A client flag (isClosing, closeOut, reducing) is not proof. Same check as
+    order_limits.check_placement_limits (R-740). A failed read is not a close.
+    """
+    try:
+        from bankroll_guard import fresh_reducing_close, _load_latest_snapshot, _utcnow
+    except ImportError:
+        from scripts.bankroll_guard import (
+            fresh_reducing_close,
+            _load_latest_snapshot,
+            _utcnow,
+        )
+    try:
+        return fresh_reducing_close(params, _load_latest_snapshot(), _utcnow())
+    except Exception:  # noqa: BLE001 - unreadable snapshot keeps the violation
+        return False
 
 
 def _portfolio_bankroll() -> Optional[float]:
@@ -93,6 +105,11 @@ def _violation(code: str, message: str, **fields: Any) -> dict[str, Any]:
     for key, value in fields.items():
         if value is not None:
             payload[key] = value
+    return payload
+
+
+def _log_violation(payload: dict[str, Any]) -> None:
+    code, message = payload["code"], payload["message"]
     extras = []
     if "loss" in payload:
         extras.append(f"loss={payload['loss']:.2f}")
@@ -102,7 +119,6 @@ def _violation(code: str, message: str, **fields: Any) -> dict[str, Any]:
         extras.append(f"pct={payload['pct']:.2f}")
     suffix = f" {' '.join(extras)}" if extras else ""
     _LOG.warning("kelly_guard: %s %s%s", code, message, suffix)
-    return payload
 
 
 def check_kelly_ticket(params: dict, bankroll: Optional[float] = None) -> Optional[dict[str, Any]]:
@@ -118,9 +134,18 @@ def check_kelly_ticket(params: dict, bankroll: Optional[float] = None) -> Option
     if order_type == "stock":
         _LOG.info("kelly_guard: skip stock order")
         return None
-    if _is_closing(params):
-        return None
 
+    violation = _ticket_violation(params, order_type, bankroll)
+    # The snapshot is read only when a violation would fire.
+    if violation is None or _is_verified_close(params):
+        return None
+    _log_violation(violation)
+    return violation
+
+
+def _ticket_violation(
+    params: dict, order_type: str, bankroll: Optional[float]
+) -> Optional[dict[str, Any]]:
     resolved = resolve_kelly_bankroll(bankroll)
     if resolved is None:
         return _violation(

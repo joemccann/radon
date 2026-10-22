@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import eventkit
@@ -24,6 +25,23 @@ def _combo(*, quantity: int, width: float, debit: bool = True) -> dict:
             {"expiry": "20260918", "strike": low, "right": "PUT", "action": "BUY", "ratio": 1},
             {"expiry": "20260918", "strike": high, "right": "PUT", "action": "SELL", "ratio": 1},
         ],
+    }
+
+
+_NOW = datetime(2026, 10, 22, 15, 0, tzinfo=timezone.utc)
+
+
+def _held_spread_snapshot(*, last_sync: str | None = None) -> dict:
+    """Book the _combo(width=30) BUY ticket closes: short 100P, long 130P."""
+    return {
+        "last_sync": last_sync or _NOW.isoformat(),
+        "positions": [{
+            "ticker": "AAPL", "structure_type": "Put Spread",
+            "legs": [
+                {"type": "Put", "direction": "SHORT", "contracts": 1, "strike": 100.0, "expiry": "2026-09-18"},
+                {"type": "Put", "direction": "LONG", "contracts": 1, "strike": 130.0, "expiry": "2026-09-18"},
+            ],
+        }],
     }
 
 
@@ -62,13 +80,36 @@ class TestD11KellyGuard:
         assert "3.00" in caplog.text or "3.0" in caplog.text
         assert "100000" in caplog.text or "100000.00" in caplog.text
 
-    def test_d11_closing_same_ticket_passes(self, monkeypatch, caplog):
+    def test_d11_verified_reducing_close_passes(self, monkeypatch, caplog):
+        monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+        params = _combo(quantity=1, width=30)
+        with patch("bankroll_guard._load_latest_snapshot", return_value=_held_spread_snapshot()), \
+             patch("bankroll_guard._utcnow", return_value=_NOW), \
+             caplog.at_level(logging.WARNING, logger="kelly_guard"):
+            assert check_kelly_ticket(params, bankroll=100_000) is None
+        assert caplog.records == []
+
+    @pytest.mark.parametrize("flag", ["isClosing", "is_closing", "closeOut", "reducing"])
+    def test_d11_client_close_flag_alone_is_not_exempt(self, monkeypatch, flag):
+        monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+        params = _combo(quantity=1, width=30)
+        params[flag] = True
+        with patch("bankroll_guard._load_latest_snapshot", return_value={"positions": [], "last_sync": _NOW.isoformat()}), \
+             patch("bankroll_guard._utcnow", return_value=_NOW):
+            warning = check_kelly_ticket(params, bankroll=100_000)
+        assert warning is not None
+        assert warning["code"] == "KELLY_CAP_EXCEEDED"
+
+    def test_d11_reducing_close_on_stale_snapshot_is_not_exempt(self, monkeypatch):
         monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
         params = _combo(quantity=1, width=30)
         params["isClosing"] = True
-        with caplog.at_level(logging.WARNING, logger="kelly_guard"):
-            assert check_kelly_ticket(params, bankroll=100_000) is None
-        assert caplog.records == []
+        stale = _held_spread_snapshot(last_sync=(_NOW - timedelta(hours=1)).isoformat())
+        with patch("bankroll_guard._load_latest_snapshot", return_value=stale), \
+             patch("bankroll_guard._utcnow", return_value=_NOW):
+            warning = check_kelly_ticket(params, bankroll=100_000)
+        assert warning is not None
+        assert warning["code"] == "KELLY_CAP_EXCEEDED"
 
     def test_d11_unknown_bankroll_warns(self, monkeypatch, caplog):
         monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
@@ -129,6 +170,20 @@ class TestD11PlaceOrderWire:
         ib_cls.assert_called()
         client.place_order.assert_called()
 
+    def test_d11_place_order_blocks_flagged_opening_order(self, monkeypatch):
+        monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+        monkeypatch.setenv("RADON_KELLY_ENFORCE_MODE", "block")
+        params = _combo(quantity=1, width=30)
+        params["isClosing"] = True
+        with patch("ib_place_order.IBClient") as ib_cls, \
+             patch("kelly_guard._portfolio_bankroll", return_value=100_000), \
+             patch("bankroll_guard._load_latest_snapshot", return_value=None):
+            import ib_place_order
+            result = ib_place_order.place_order(params)
+        assert result.get("status") == "error"
+        assert result.get("code") == "KELLY_CAP_EXCEEDED"
+        ib_cls.assert_not_called()
+
     def test_d11_place_order_blocks_only_when_mode_block(self, monkeypatch):
         monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
         monkeypatch.setenv("RADON_KELLY_ENFORCE_MODE", "block")
@@ -164,12 +219,37 @@ def test_single_option_cap_boundary(monkeypatch, price, oversized):
         assert warning is None
 
 
-@pytest.mark.parametrize("closing,armed", [(True, True), (False, False)])
-def test_single_option_exempt_controls(monkeypatch, closing, armed, caplog):
-    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1" if armed else "0")
+def test_single_option_unarmed_is_exempt(monkeypatch, caplog):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "0")
+    assert check_kelly_ticket(_option(), bankroll=100_000) is None
+    assert not caplog.records
+
+
+def test_single_option_flagged_open_is_not_exempt(monkeypatch):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
     ticket = _option()
-    ticket["isClosing"] = closing
-    assert check_kelly_ticket(ticket, bankroll=100_000) is None
+    ticket["isClosing"] = True
+    with patch("bankroll_guard._load_latest_snapshot", return_value=None):
+        warning = check_kelly_ticket(ticket, bankroll=100_000)
+    assert warning["code"] == "KELLY_CAP_EXCEEDED"
+
+
+def test_single_option_verified_sell_to_close_is_exempt(monkeypatch, caplog):
+    monkeypatch.setenv("RADON_KELLY_ENFORCE_ORDERS", "1")
+    ticket = _option()
+    ticket["action"] = "SELL"
+    snapshot = {
+        "last_sync": _NOW.isoformat(),
+        "positions": [{
+            "ticker": "AAPL", "structure_type": "Long Call",
+            "legs": [{"type": "Call", "direction": "LONG", "contracts": 1,
+                      "strike": 100, "expiry": "2026-12-18"}],
+        }],
+    }
+    with patch("bankroll_guard._load_latest_snapshot", return_value=snapshot), \
+         patch("bankroll_guard._utcnow", return_value=_NOW), \
+         caplog.at_level(logging.WARNING, logger="kelly_guard"):
+        assert check_kelly_ticket(ticket, bankroll=100_000) is None
     assert not caplog.records
 
 

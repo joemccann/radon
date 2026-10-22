@@ -289,9 +289,12 @@ IB. Fat-finger `order_limits` still refuse. `RADON_KELLY_ENFORCE_MODE=block`
 restores hard refuse (`status: "error"` before IB). Evaluate M6 fail-closed
 for sizing/eval is unchanged.
 
-- Applies to opening orders only. Closing, rolling and reducing orders lower
-  risk and are exempt; the classifier reuses the coverage logic behind
-  `RADON_MAX_COMBO_LOSS_DOLLARS` (worst-case loss already computed for combos).
+- Applies to opening orders only. A close is exempt only when
+  `bankroll_guard.fresh_reducing_close` proves every leg reduces a held leg on
+  a portfolio snapshot inside the 15-minute window, the same proof
+  `order_limits.check_placement_limits` uses. A client flag (`isClosing`,
+  `closeOut`, `reducing`) is not proof (R-740); a stale or unreadable snapshot
+  keeps the warning.
 - Bankroll source in a fresh interpreter: `NetLiquidation` from the connected
   `IBClient` account summary, falling back to `data/portfolio.json`
   `net_liquidation`. If neither is available the guard **warns** with
