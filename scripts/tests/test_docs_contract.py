@@ -2602,7 +2602,7 @@ class TestDocumentation20261021:
 
 
 class TestDocumentation20261022:
-    """DOC-219..221: contracts that drifted after audited-through e5426fb1."""
+    """DOC-219..222: contracts that drifted after audited-through e5426fb1."""
 
     def test_research_archive_heartbeat_is_nine_days_on_sunday(self):
         timer = (_ROOT / "cloud/services/radon-research-archive.timer").read_text()
@@ -2668,4 +2668,9 @@ class TestDocumentation20261022:
         assert "failed query" in paragraph
         assert "full page is not absence" in paragraph
         assert "an open PR on the loop's prefix contradicts it" not in paragraph
+
+    def test_high_low_spec_does_not_point_at_a_private_machine(self):
+        text = (_ROOT / "docs/indicators/high-low.md").read_text()
+        assert "/Users/" not in text
+        assert "joemccann-mac-mini" not in text
 
