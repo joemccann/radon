@@ -38,7 +38,13 @@ Order admission has two independent controls:
 - The fat-finger combo loss cap is separate. `check_placement_limits` in
   `order_limits.py` is what `ib_place_order.py` and the `/orders/place` and
   `/orders/replace` route refusal call. A SELL envelope is priced as new
-  short assignment. That refusal is waived only by `fresh_reducing_close`:
+  short assignment. A limit order replaces that proxy with the exact
+  single-expiry payoff when `_limit_combo_expiry_loss` returns one: a
+  defined-risk debit is the premium paid, not the strike width, and a short put's
+  debit is added to assignment. A stop-market keeps the width and
+  assignment proxy, then `combo_debit_floor`. Calendars and net-short calls
+  have no single-expiry payoff and use that floor. That refusal is waived
+  only by `fresh_reducing_close`:
   the same reducing-delta test, plus a `last_sync` inside the 15-minute
   window (a timestamp more than 60 seconds in the future does not qualify).
   An empty, stale, or unreadable snapshot keeps the refusal. Quantity,
@@ -153,11 +159,17 @@ be the one a cap is computed on. A combo stop-market sends `stopPrice` only
 `limitPrice` from assignment or width, and `order_max_loss` prices that stop
 as paying the worse supplied price.
 
-For a combo both guards also floor the worst case at the premium paid, through
-the shared `order_limits.combo_debit_floor`. The strike/width margin proxy is
-zero for an all-long or long-calendar structure whose debit is nevertheless
-fully at risk, and a net credit is never a floor because nothing was paid. One
-helper, called from both, so the two Gate-3 implementations cannot drift.
+For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
+`_combo_expiry_loss` before any floor: a defined-risk debit is the premium,
+and a short put's debit is added to assignment. Stock legs, calendars, and a
+net-short call return no exact payoff, so those use
+`order_limits.combo_debit_floor` on the width or assignment proxy. A net
+credit is never a floor. A stop-market skips the exact payoff and counts the
+worse supplied price as paid.
+
+`kelly_guard._worst_case_loss` does not call `_combo_expiry_loss`. It takes
+`combo_max_loss` and then `combo_debit_floor` only, so a single-expiry limit
+combo is a different number in the two Gate-3 guards.
 
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so
