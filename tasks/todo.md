@@ -8,7 +8,7 @@ Dependency graph: D1 -> D2 -> D3.
 
 ## Review
 
-Pillow 13 call sites are Image.open/new/paste/convert/split/point, ImageChops.lighter, getbbox, size, tobytes. No source change. Research pytest 70 passed. Vitest 4.1.12: 11394 passed. The 55 local failures also fail on main vitest 4.1.2 here (ALLOWED_USER_IDS, real CTA cache, fake-timer hang).
+Pillow 13 call sites are Image.open/new/paste/convert/split/point, ImageChops.lighter, getbbox, size, tobytes. No source change. Research pytest 72 passed with the wheel test. fastembed 0.8.0/0.9.0 cap pillow<13; the materializer rewrites only that cap on the official wheel. uv resolved pillow 13.0.0 with fastembed 0.8.0. Vitest 4.1.12: 11394 passed. The 55 local failures also fail on main vitest 4.1.2 here.
 
 # NYSE common-stock High-Low Line (2026-10-20)
 
