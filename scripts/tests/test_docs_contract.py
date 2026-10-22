@@ -2602,7 +2602,7 @@ class TestDocumentation20261021:
 
 
 class TestDocumentation20261022:
-    """DOC-219: research-archive window drifted after audited-through e5426fb1."""
+    """DOC-219 and DOC-220: contracts that drifted after audited-through e5426fb1."""
 
     def test_research_archive_heartbeat_is_nine_days_on_sunday(self):
         timer = (_ROOT / "cloud/services/radon-research-archive.timer").read_text()
@@ -2624,4 +2624,30 @@ class TestDocumentation20261022:
         assert "33d" not in paragraph
         assert "Sunday 04:20 UTC" in paragraph
         assert "(9d)" in paragraph
+
+    def test_combo_loss_owners_name_the_exact_expiry_split(self):
+        limits = (_ROOT / "scripts/order_limits.py").read_text()
+        assert 'if _ib_order_type(params) != "STP"' in limits
+        assert "_limit_combo_expiry_loss" in limits
+        bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
+        exact_at = bankroll.index("expiry_loss = _combo_expiry_loss")
+        floor_at = bankroll.index("return combo_debit_floor(params, loss)", exact_at)
+        assert exact_at < floor_at
+        kelly = (_ROOT / "scripts/kelly_guard.py").read_text()
+        worst = kelly.split("def _worst_case_loss", 1)[1].split("\ndef ", 1)[0]
+        assert "combo_debit_floor" in worst
+        assert "_combo_expiry_loss" not in worst
+        text = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        fat = text.split("The fat-finger combo loss cap", 1)[1].split(
+            "The all-placer gate is independent", 1
+        )[0]
+        assert "single-expiry" in fat
+        assert "stop-market" in fat
+        assert "premium" in fat
+        assert "short put" in fat
+        gate3 = text.split("For a single-expiry limit combo", 1)[1].split("What this does NOT cover", 1)[0]
+        assert "_combo_expiry_loss" in gate3
+        assert "kelly_guard._worst_case_loss" in gate3
+        assert "cannot drift" not in gate3
+        assert "combo_debit_floor" in gate3
 
