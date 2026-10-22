@@ -125,15 +125,28 @@ class TestAssistantCatalog:
         sources = [api_dir / "server.py", *sorted((api_dir / "routes").glob("*.py"))]
         spawning = []
         for source in sources:
-            for node in ast.walk(ast.parse(source.read_text())):
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                called = {
+            funcs = [
+                node
+                for node in ast.walk(ast.parse(source.read_text()))
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+            calls = {
+                node: {
                     call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", None)
                     for call in ast.walk(node)
                     if isinstance(call, ast.Call)
                 }
-                if not called & {"run_script", "run_script_raw"}:
+                for node in funcs
+            }
+            # A handler that spawns through a module helper spawns too.
+            spawners = {"run_script", "run_script_raw"}
+            while True:
+                grown = spawners | {node.name for node in funcs if calls[node] & spawners}
+                if grown == spawners:
+                    break
+                spawners = grown
+            for node in funcs:
+                if not calls[node] & spawners:
                     continue
                 for dec in node.decorator_list:
                     if (
@@ -146,6 +159,7 @@ class TestAssistantCatalog:
                         spawning.append((dec.func.attr.upper(), dec.args[0].value))
 
         assert ("GET", "/ticker/ratings") in spawning
+        assert ("GET", "/backtest/{strategy}") in spawning
         plain = [key for key in spawning if capability_for(*key) == "read"]
         assert plain == [], f"subprocess-backed routes pinned plain read: {plain}"
 
@@ -155,7 +169,7 @@ class TestAssistantCatalog:
         from scripts.api import auth, server
         from scripts.api.assistant_catalog import capability_for
 
-        assert capability_for("GET", "/backtest/{strategy}") == "read"
+        assert capability_for("GET", "/backtest/{strategy}") == "read.spawn"
         assert (
             capability_for("POST", "/backtest/{strategy}/refresh")
             == "mutate.workspace"

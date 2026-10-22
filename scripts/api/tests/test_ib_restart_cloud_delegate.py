@@ -99,7 +99,7 @@ def app_host(monkeypatch, tmp_path):
     monkeypatch.setattr(
         auth_mod,
         "_get_jwks_client",
-        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key),
+        lambda: SimpleNamespace(get_signing_key=lambda kid: signing_key),
     )
     auth_mod._jwks_negative.clear()
 

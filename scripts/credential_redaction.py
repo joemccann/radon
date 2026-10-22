@@ -99,11 +99,19 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     # a long marker run backtracks catastrophically: measured 0.03s, 0.51s and
     # 8.3s for 16, 20 and 24 repetitions of `#- `, which is the same
     # availability failure this module was just hardened against.
+    #
+    # A quoted (`> `) or commented (`# `) excerpt repeats its lead on EVERY
+    # line, so a continuation line may repeat the header's lead before its
+    # indentation, and a blank line may carry the bare marker run (`>`).
+    # The marker run ends on a marker character and the padding is spaces
+    # only, so the split between them is unambiguous and both stay bounded.
     return re.compile(
-        rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+\-][#>*+\- \t]{{0,23}})?)"
+        rf"^(?P<indent>[ \t]*)"
+        rf"(?P<lead>(?:(?P<mark>[#>*+\-](?:[#>*+\- \t]{{0,22}}[#>*+\-])?)[ \t]{{0,23}})?)"
         rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
         r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
-        r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
+        r"(?:[ \t]*\r?\n|(?P=indent)(?P=mark)[ \t]*\r?\n"
+        r"|(?P=indent)(?:(?P=lead))?[ \t]+[^\r\n]*\r?\n?)+",
         re.I | re.M,
     )
 
@@ -112,7 +120,9 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
 # Those stay off the single-line rules (`author` must survive). Multiline
 # values are the gap: a block or triple-quoted body is not on the header
 # line the hook rewrites. `[_-]key` matches `signing_key` and `webhook-key`.
-_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|credential|[_-]key)"
+# `authorization` is here for the same reason: its single-line rule below read
+# a triple delimiter as the whole value and left the body in place.
+_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|authorization|credential|[_-]key)"
 
 # The key alternation carries no prefix or suffix run of its own, and the
 # block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`
@@ -208,7 +218,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # specific shapes above.
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
-    (re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
     # Generic key-value assignment (env files, config dumps, JSON), last so a
     # value the specific shapes above already tagged keeps its tag. A quoted
     # value is redacted through its real closing quote (multi-word
@@ -218,14 +229,14 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     # published the tail.
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:\\.|[^\"\\\n])*\"",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:[ \t]*\r?\n)?(?:\\.|[^\"\\\n])*\"",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
     ),
     (
         re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:\\.|[^'\\\n])*'",
+            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:[ \t]*\r?\n)?(?:''|\\.|[^'\\\n])*'",
             re.IGNORECASE,
         ),
         r"\1\2[redacted-secret]\2",
@@ -255,7 +266,9 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*[\"']?"
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*"
+    # A quoted value may open on the key line and start on the next one.
+    r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
     # so only one length is ever tried) and BOUNDED. An unbounded run with a
     # lookahead that rejected punctuation made every candidate rescan the
@@ -273,18 +286,36 @@ _PLACEHOLDER = re.compile(
 )
 
 
+# A cookie header carries several `name=value` pairs. The assignment rule
+# above reads only the first pair as the value, so a short first cookie hid an
+# opaque session cookie after it; check every pair on the header line.
+_COOKIE_HEADER = re.compile(
+    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n\"']*)",
+    re.IGNORECASE,
+)
+_COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
+
+
+def _is_opaque(value: str) -> bool:
+    return bool(
+        re.search(r"[A-Za-z]", value)
+        and re.search(r"\d", value)
+        and not _PLACEHOLDER.search(value)
+    )
+
+
 def find_secret_assignments(text: str) -> list[str]:
     """``["[redacted-secret]"]`` when ``text`` assigns a literal opaque value
     to a credential-named key, else ``[]``. Never returns the value.
     """
     for match in _SECRET_LITERAL_ASSIGNMENT.finditer(text or ""):
-        value = match.group("value")
-        if (
-            re.search(r"[A-Za-z]", value)
-            and re.search(r"\d", value)
-            and not _PLACEHOLDER.search(value)
-        ):
+        if _is_opaque(match.group("value")):
             return ["[redacted-secret]"]
+    for match in _COOKIE_HEADER.finditer(text or ""):
+        for pair in match.group("pairs").split(";"):
+            value = pair.partition("=")[2].strip()
+            if _COOKIE_VALUE.fullmatch(value) and _is_opaque(value):
+                return ["[redacted-secret]"]
     return []
 
 

@@ -2635,7 +2635,8 @@ class TestDocumentation20261022:
         assert exact_at < floor_at
         kelly = (_ROOT / "scripts/kelly_guard.py").read_text()
         worst = kelly.split("def _worst_case_loss", 1)[1].split("\ndef ", 1)[0]
-        assert "combo_debit_floor" in worst
+        assert "order_max_loss" in worst
+        assert "combo_debit_floor" not in worst
         assert "_combo_expiry_loss" not in worst
         text = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
         fat = text.split("The fat-finger combo loss cap", 1)[1].split(
@@ -2645,11 +2646,18 @@ class TestDocumentation20261022:
         assert "stop-market" in fat
         assert "premium" in fat
         assert "short put" in fat
-        gate3 = text.split("For a single-expiry limit combo", 1)[1].split("What this does NOT cover", 1)[0]
+        gate3 = text.split("For a combo the Kelly guard", 1)[1].split("What this does NOT cover", 1)[0]
+        flat = " ".join(gate3.split())
+        assert "bankroll_guard.order_max_loss" in gate3
+        assert "implementations cannot drift" in flat
         assert "_combo_expiry_loss" in gate3
-        assert "kelly_guard._worst_case_loss" in gate3
-        assert "cannot drift" not in gate3
         assert "combo_debit_floor" in gate3
+        assert "Stock legs" in gate3
+        assert "calendars" in gate3
+        assert "net-short call" in gate3
+        assert "stop-market" in gate3
+        assert "does not call `_combo_expiry_loss`" not in gate3
+        assert "different number" not in gate3
 
     def test_zero_pr_claim_requires_a_complete_listing(self):
         hook = (_ROOT / "scripts/runner/hooks/security_post.sh").read_text()
