@@ -16,6 +16,8 @@ websockets==15.0.1
 
 # HTTP requests
 requests==2.33.0
+# Trust store: 2026.10.19 drops the eMudhra/emSign intermediates (keys recovered 2026-10).
+certifi==2026.10.19
 
 # Data analysis
 pandas==3.0.1
