@@ -277,22 +277,46 @@ def _uw_token() -> str:
 UW_REPAIR_MAX_LOOKUPS = 25
 
 
-def _uw_get(path: str) -> dict[str, Any]:
-    """One admitted UW read with shared pacing, retries and attribution."""
-    from urllib.parse import parse_qs, urlsplit
+_uw_session: Any = None
+
+
+def close_uw_session() -> None:
+    """Drop the job-scoped UW session. Safe to call when none is open."""
+    global _uw_session
+    client = _uw_session
+    _uw_session = None
+    if client is not None:
+        client.close()
+
+
+def _uw_client() -> Any:
+    """One UWClient for the whole job: fetch, outlier lookups, and check."""
+    global _uw_session
     from clients.uw_client import UWClient
 
     token = _uw_token()
     if not token:
         raise ValueError("ivrank: UW_TOKEN is not set")
+    if _uw_session is None:
+        _uw_session = UWClient(token=token, timeout=UW_TIMEOUT_S, caller="ivrank")
+    return _uw_session
+
+
+def _uw_get(path: str) -> dict[str, Any]:
+    """One admitted UW read with shared pacing, retries and attribution."""
+    from urllib.parse import parse_qs, urlsplit
+
     parsed = urlsplit(path)
     if parsed.scheme or parsed.netloc or not parsed.path.startswith("/api/"):
         raise ValueError("ivrank: UW path is invalid")
     params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     try:
-        with UWClient(token=token, timeout=UW_TIMEOUT_S, caller="ivrank") as client:
-            return client.get(parsed.path.removeprefix("/api/"), params=params,
-                              priority="background", use_cache=False)
+        return _uw_client().get(
+            parsed.path.removeprefix("/api/"),
+            params=params,
+            priority="background",
+            use_cache=False,
+        )
     except Exception:
         if writer is not None:
             try:
@@ -666,42 +690,45 @@ def run(
     now = now or datetime.now(timezone.utc)
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    fetched, source, status, errors = _fetch_rows(ib_fetch, uw_fetch, backfill=backfill)
-    if fetched is None:
-        return _serve_cached(scan_time, errors)
+    try:
+        fetched, source, status, errors = _fetch_rows(ib_fetch, uw_fetch, backfill=backfill)
+        if fetched is None:
+            return _serve_cached(scan_time, errors)
 
-    stored = load_history()
-    merged = merge_history(stored, fetched)
-    merged, repairs = repair_outliers(merged, uw_iv_lookup or _real_uw_iv_for_date)
-    for repair in repairs:
+        stored = load_history()
+        merged = merge_history(stored, fetched)
+        merged, repairs = repair_outliers(merged, uw_iv_lookup or _real_uw_iv_for_date)
+        for repair in repairs:
+            print(
+                f"[ivrank] repaired bad print {repair['date']}: ib {repair['ib_iv']:.4f} "
+                f"-> uw {repair['uw_iv']:.4f}",
+                file=sys.stderr,
+            )
+        series = compute_series(merged)
+        rows_changed = _rows_changed(stored, merged)
+        if not rows_changed:
+            print("[ivrank] source unchanged; refreshing snapshot only", file=sys.stderr)
+
+        check = _run_uw_check(uw_check) if source == "ib" else None
+        payload = build_payload(
+            series,
+            scan_time=scan_time,
+            status=status,
+            source=source,
+            uw_check=check,
+            now=now,
+        )
+        payload["outliers_repaired"] = repairs
         print(
-            f"[ivrank] repaired bad print {repair['date']}: ib {repair['ib_iv']:.4f} "
-            f"-> uw {repair['uw_iv']:.4f}",
+            f"[ivrank] {payload['count']} sessions through {payload['as_of']} "
+            f"({payload['rank_count']} with a rank) via {source}",
             file=sys.stderr,
         )
-    series = compute_series(merged)
-    rows_changed = _rows_changed(stored, merged)
-    if not rows_changed:
-        print("[ivrank] source unchanged; refreshing snapshot only", file=sys.stderr)
-
-    check = _run_uw_check(uw_check) if source == "ib" else None
-    payload = build_payload(
-        series,
-        scan_time=scan_time,
-        status=status,
-        source=source,
-        uw_check=check,
-        now=now,
-    )
-    payload["outliers_repaired"] = repairs
-    print(
-        f"[ivrank] {payload['count']} sessions through {payload['as_of']} "
-        f"({payload['rank_count']} with a rank) via {source}",
-        file=sys.stderr,
-    )
-    _write_db(payload, scan_time, rows_changed=rows_changed, rows=series)
-    persist_json(payload)
-    return payload
+        _write_db(payload, scan_time, rows_changed=rows_changed, rows=series)
+        persist_json(payload)
+        return payload
+    finally:
+        close_uw_session()
 
 
 # ── CLI ───────────────────────────────────────────────────────────
