@@ -485,6 +485,50 @@ class TestComboNotionalIsRiskNotPremium:
         monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "300000")
         assert order_limits.check_order_limits(self._all_long_debit_combo()) is None
 
+    def _all_long_stop_combo(self, *, limit_price: float, stop_price: float) -> dict:
+        """All-long debit whose width is zero. Combo STP transmits stopPrice
+        and drops limitPrice, so a decoy limit is not the premium at risk."""
+        return {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 40, "orderType": "STP",
+            "limitPrice": limit_price, "stopPrice": stop_price,
+            "legs": [
+                {"expiry": "20271217", "strike": 5000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20271217", "strike": 5200, "right": "C", "action": "BUY", "ratio": 1},
+            ],
+        }
+
+    def test_stop_market_debit_floor_uses_the_price_the_broker_sends(self, monkeypatch):
+        """The mandatory loss cap must price a stop-market debit at the stop.
+
+        `bankroll_guard.order_max_loss` already counts the worse supplied
+        price for a combo STP. `combo_debit_floor`, which the always-on gate
+        and `kelly_guard` share, still prefers `limitPrice`. A $0.01 decoy
+        therefore reports $40 of risk on 40 contracts stopped at $50
+        (40 × 50 × 100 = $200,000). Notional at the $250,000 default does
+        not catch it, and a tightened loss cap must.
+        """
+        import bankroll_guard
+        import kelly_guard
+
+        params = self._all_long_stop_combo(limit_price=0.01, stop_price=50.0)
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "100000")
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "250000")
+        assert order_limits.order_notional(params) == pytest.approx(200_000.0)
+        assert bankroll_guard.order_max_loss(params) == pytest.approx(200_000.0)
+        assert kelly_guard._worst_case_loss(params) == pytest.approx(200_000.0)
+        violation = order_limits.check_order_limits(params)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+        assert "200,000" in violation["message"], violation
+
+    def test_stop_market_debit_under_the_cap_still_places(self, monkeypatch):
+        """Green path: the same stop, priced at the stop, stays under the cap."""
+        params = self._all_long_stop_combo(limit_price=0.01, stop_price=5.0)
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "100000")
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "250000")
+        assert order_limits.check_order_limits(params) is None
+
     def test_a_credit_combo_gets_no_spurious_floor_in_the_gate(self, monkeypatch):
         """A net credit was never paid, so it must not become a floor."""
         params = {
