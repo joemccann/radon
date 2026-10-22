@@ -1253,7 +1253,7 @@ A dry run (no B2 calls, no deletes) needs the private bind, so run it inside the
 - **Stop conditions:** missing credentials exit 2 and delete nothing. A directory that fails verification stays on disk and the heartbeat is error.
 - **Verification:** `pruned_dirs` counts only directories removed after HEAD verification. `skipped.deadline` and `skipped.budget` are still local.
 - **Rollback:** copy the `research/evidence/<YYYY-MM>/<key>/` objects back into `evidence/<key>/` through the container bind.
-- **Escalation:** a stale 33-day heartbeat or a repeating error is a backup gap. Do not delete evidence by hand to clear it.
+- **Escalation:** a stale 9-day heartbeat or a repeating error is a backup gap. Do not delete evidence by hand to clear it.
 
 ## Host swap
 

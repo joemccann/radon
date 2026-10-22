@@ -730,7 +730,7 @@ BUCKETS: dict[str, list[str]] = {
         "journal-expiry-sweep",
         # Nightly portfolio_snapshots cold-archive on the VPS — 48h window.
         "portfolio-archive",
-        # Monthly research evidence archive to B2 — 33d window.
+        # Weekly research evidence archive to B2, 9-day window.
         "research-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
         "db-retention",
