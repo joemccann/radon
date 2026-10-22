@@ -99,11 +99,19 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
     # a long marker run backtracks catastrophically: measured 0.03s, 0.51s and
     # 8.3s for 16, 20 and 24 repetitions of `#- `, which is the same
     # availability failure this module was just hardened against.
+    #
+    # A quoted (`> `) or commented (`# `) excerpt repeats its lead on EVERY
+    # line, so a continuation line may repeat the header's lead before its
+    # indentation, and a blank line may carry the bare marker run (`>`).
+    # The marker run ends on a marker character and the padding is spaces
+    # only, so the split between them is unambiguous and both stay bounded.
     return re.compile(
-        rf"^(?P<indent>[ \t]*)(?P<lead>(?:[#>*+\-][#>*+\- \t]{{0,23}})?)"
+        rf"^(?P<indent>[ \t]*)"
+        rf"(?P<lead>(?:(?P<mark>[#>*+\-](?:[#>*+\- \t]{{0,22}}[#>*+\-])?)[ \t]{{0,23}})?)"
         rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
         r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
-        r"(?:[ \t]*\r?\n|(?P=indent)[ \t]+[^\r\n]*\r?\n?)+",
+        r"(?:[ \t]*\r?\n|(?P=indent)(?P=mark)[ \t]*\r?\n"
+        r"|(?P=indent)(?:(?P=lead))?[ \t]+[^\r\n]*\r?\n?)+",
         re.I | re.M,
     )
 
@@ -112,7 +120,9 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
 # Those stay off the single-line rules (`author` must survive). Multiline
 # values are the gap: a block or triple-quoted body is not on the header
 # line the hook rewrites. `[_-]key` matches `signing_key` and `webhook-key`.
-_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|credential|[_-]key)"
+# `authorization` is here for the same reason: its single-line rule below read
+# a triple delimiter as the whole value and left the body in place.
+_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|authorization|credential|[_-]key)"
 
 # The key alternation carries no prefix or suffix run of its own, and the
 # block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`

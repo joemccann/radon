@@ -483,3 +483,51 @@ def test_single_line_and_empty_quoted_values_are_unchanged():
     assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
     single = scrub_credential_text('TOKEN = "qzHNOTREALopaque1234"')
     assert single == 'TOKEN = "[redacted-secret]"', single
+
+
+# DS-2026-10-22-03: a quoted (`> `) or commented (`# `) excerpt repeats its
+# lead on EVERY line, but continuation lines had to start with whitespace, so
+# only the header matched the lead and the body survived. Values are invented.
+def _block_lines(lead: str, *body: str) -> str:
+    return "".join(f"{lead}{line}\n" for line in body)
+
+
+def test_a_quoted_or_commented_block_scalar_body_is_redacted():
+    from credential_redaction import find_credential_shapes
+
+    for lead in ("> ", "# ", ">", "#"):
+        text = _block_lines(
+            lead,
+            "password: |",
+            "  qzQNOTREALquoted1",
+            "",
+            "  qzQNOTREALquoted2",
+            "sibling: keep",
+        ).replace(f"{lead}\n", f"{lead.rstrip()}\n")
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert f"{lead}sibling: keep" in out, out
+        assert find_credential_shapes(text) == ["[redacted-secret]"], text
+
+
+def test_an_unquoted_block_scalar_baseline_is_unchanged():
+    text = "password: |\n  qzRNOTREALplain1\nsibling: keep\n"
+    assert scrub_credential_text(text) == "password: [redacted-secret]\nsibling: keep\n"
+
+
+def test_a_quoted_non_secret_block_scalar_is_left_alone():
+    from credential_redaction import find_credential_shapes
+
+    for lead in ("> ", "# "):
+        text = _block_lines(lead, "description: |", "  ordinary prose stays", "next: fine")
+        assert scrub_credential_text(text) == text
+        assert find_credential_shapes(text) == []
+
+
+def test_a_triple_quoted_authorization_value_is_redacted():
+    scheme = "Basic"
+    for delim in ('"""', "'''"):
+        text = f'authorization = {delim}{scheme} qzSNOTREALauth1234{delim}\nnext = "keep"\n'
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert 'next = "keep"' in out, out

@@ -1181,3 +1181,18 @@ class TestSanitizeTokenScanIsBounded:
         assert leak not in out, out
         assert nif.REDACTED in out, out
         assert out.endswith("twice"), out
+
+
+class TestSanitizeQuotedBlockScalars:
+    """DS-2026-10-22-03: a quoted or commented excerpt repeats its lead on
+    every continuation line. Values are invented placeholders."""
+
+    @pytest.mark.parametrize("lead", ["> ", "# "])
+    def test_a_lead_repeated_on_every_line_still_hides_the_body(self, lead: str):
+        text = "".join(
+            f"{lead}{line}\n"
+            for line in ("password: |", "  NOTREALQUOTED1", "  NOTREALQUOTED2", "keep_me: prose")
+        )
+        out = nif.sanitize(text)
+        assert "NOTREALQUOTED" not in out, out
+        assert "keep_me: prose" in out, out
