@@ -66,7 +66,11 @@ boto3==1.43.36
 # instead of failing. Pins verified to have manylinux x86_64 cp313 wheels
 # (VPS, onnxruntime needs glibc>=2.28 — fine on Hetzner Ubuntu) and to
 # install on the cp311 laptop venv.
-fastembed==0.8.0
+# 0.8.0 and 0.9.0 both cap pillow<13. qdrant/fastembed#830 (image tests pass
+# on Pillow 13) is not released. scripts/deps/materialize_fastembed_pillow13.py
+# writes the official 0.8.0 wheel with only those caps raised to <14.
+# Run it before pip/uv install. vendor/ is gitignored.
+fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl
 onnxruntime==1.27.0
 # fastembed transitive pins with compiled wheels, held explicitly so a fresh
 # VPS provision resolves the exact versions the laptop verified.

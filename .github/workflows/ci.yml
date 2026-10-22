@@ -202,7 +202,9 @@ jobs:
             requirements.txt
             scripts/requirements-api.txt
             requirements-dev.txt
-      - run: uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
+      - run: |
+          python scripts/deps/materialize_fastembed_pillow13.py
+          uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
       - run: >-
           python -m pytest ${{ needs.changes.outputs.contract_script_tests }}
           -q --durations=25
@@ -400,6 +402,7 @@ jobs:
             cloud/requirements-test.txt
       - name: Install dependencies
         run: |
+          python scripts/deps/materialize_fastembed_pillow13.py
           uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
       # Run from the repo ROOT — pyproject.toml pins pythonpath so `import
       # ib_sync` / `from api.*` / trade_blotter all resolve. addopts already

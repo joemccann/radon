@@ -37,6 +37,8 @@ WORKDIR /home/radon/radon
 
 COPY requirements.txt ./requirements.txt
 COPY scripts/requirements-api.txt ./scripts/requirements-api.txt
+COPY scripts/deps/materialize_fastembed_pillow13.py ./scripts/deps/materialize_fastembed_pillow13.py
+RUN python scripts/deps/materialize_fastembed_pillow13.py
 RUN python -m pip install --no-cache-dir \
     -r requirements.txt \
     -r scripts/requirements-api.txt

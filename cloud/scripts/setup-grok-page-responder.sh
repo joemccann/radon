@@ -79,6 +79,7 @@ sudo -u radon bash -lc "
   if [[ ! -x .venv/bin/python ]]; then
     /usr/bin/python3.13 -m venv .venv
   fi
+  .venv/bin/python scripts/deps/materialize_fastembed_pillow13.py
   .venv/bin/pip install -q -r requirements.txt
   bun install --frozen-lockfile
   cd web && bun install --frozen-lockfile
