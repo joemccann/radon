@@ -283,18 +283,36 @@ _PLACEHOLDER = re.compile(
 )
 
 
+# A cookie header carries several `name=value` pairs. The assignment rule
+# above reads only the first pair as the value, so a short first cookie hid an
+# opaque session cookie after it; check every pair on the header line.
+_COOKIE_HEADER = re.compile(
+    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n\"']{0,4096})",
+    re.IGNORECASE,
+)
+_COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,1024}")
+
+
+def _is_opaque(value: str) -> bool:
+    return bool(
+        re.search(r"[A-Za-z]", value)
+        and re.search(r"\d", value)
+        and not _PLACEHOLDER.search(value)
+    )
+
+
 def find_secret_assignments(text: str) -> list[str]:
     """``["[redacted-secret]"]`` when ``text`` assigns a literal opaque value
     to a credential-named key, else ``[]``. Never returns the value.
     """
     for match in _SECRET_LITERAL_ASSIGNMENT.finditer(text or ""):
-        value = match.group("value")
-        if (
-            re.search(r"[A-Za-z]", value)
-            and re.search(r"\d", value)
-            and not _PLACEHOLDER.search(value)
-        ):
+        if _is_opaque(match.group("value")):
             return ["[redacted-secret]"]
+    for match in _COOKIE_HEADER.finditer(text or ""):
+        for pair in match.group("pairs").split(";"):
+            value = pair.partition("=")[2].strip()
+            if _COOKIE_VALUE.fullmatch(value) and _is_opaque(value):
+                return ["[redacted-secret]"]
     return []
 
 

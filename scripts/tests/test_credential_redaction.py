@@ -531,3 +531,26 @@ def test_a_triple_quoted_authorization_value_is_redacted():
         out = scrub_credential_text(text)
         assert "NOTREAL" not in out, out
         assert 'next = "keep"' in out, out
+
+
+def _cookie_value() -> str:
+    return "qz" + "NOTREAL" + "value" + "".join(str(n) for n in range(10))
+
+
+def test_every_cookie_in_a_header_is_detected_not_only_the_first():
+    from credential_redaction import find_secret_assignments
+
+    value = _cookie_value()
+    for text in (
+        f"Cookie: theme=light; sid={value}",
+        f'{{"Cookie": "theme=light; sid={value}"}}',
+        f"Set-Cookie: a=b; __session={value}; Path=/",
+        f"cookie = 'lang=en; sid={value}'",
+    ):
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+    for text in (
+        "Cookie: theme=light; lang=en",
+        "Set-Cookie: theme=dark; Path=/; HttpOnly",
+        "the cookie banner was dismissed: theme=light",
+    ):
+        assert find_secret_assignments(text) == [], text
