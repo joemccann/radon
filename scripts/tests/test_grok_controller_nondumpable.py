@@ -113,3 +113,48 @@ def test_launch_passes_no_preexec_fn(monkeypatch):
     responder._default_grok_runner(["grok"])
 
     assert "preexec_fn" not in seen
+
+
+def _record_cycle_order(monkeypatch, tmp_path) -> list[str]:
+    """Run one cycle with every subprocess and the prctl call recorded."""
+    order: list[str] = []
+    monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+    monkeypatch.setattr(
+        responder,
+        "_harden_controller_against_child",
+        lambda: order.append("prctl"),
+    )
+
+    def fake_run(cmd, *_a, **_k):
+        order.append(f"subprocess:{cmd[0]}")
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(responder.subprocess, "run", fake_run)
+    monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(
+        responder.pages_mod, "list_actionable_pages", lambda **_k: []
+    )
+    responder.run_cycle(tmp_path, grok_runner=lambda *a, **k: None)
+    return order
+
+
+def test_cycle_hardens_before_the_push_guard_git(monkeypatch, tmp_path):
+    """Controller git in the agent-writable clone can run repo-configured
+    filter drivers as children; the controller must already be hidden."""
+    monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+    monkeypatch.delenv("GROK_PAGE_SYNC_REMOTE", raising=False)
+
+    order = _record_cycle_order(monkeypatch, tmp_path)
+
+    assert "subprocess:git" in order
+    assert order[0] == "prctl"
+
+
+def test_cycle_hardens_before_the_remote_sync_git(monkeypatch, tmp_path):
+    monkeypatch.delenv("GROK_PAGE_AUTOPUSH", raising=False)
+    monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+
+    order = _record_cycle_order(monkeypatch, tmp_path)
+
+    assert "subprocess:git" in order
+    assert order[0] == "prctl"

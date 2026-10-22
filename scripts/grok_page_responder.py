@@ -864,7 +864,7 @@ PR_SET_DUMPABLE = 4
 
 
 def _harden_controller_against_child() -> None:
-    """Make THIS process non-dumpable before launching the agent child.
+    """Make THIS process non-dumpable before any child (git, agent) runs.
 
     `grok_child_env` strips the controller's Turso and Pushover credentials
     from the child environment, but the child runs under the same UID, so
@@ -912,6 +912,9 @@ def run_cycle(
     ensure_ir_pr: Optional[Callable] = None,
     pin_runtime: grok_runtime.ResolvedRuntime | None = None,
 ) -> int:
+    # Before ANY subprocess: controller git in the agent-writable clone can
+    # still run repo-configured filter drivers as same-UID children.
+    _harden_controller_against_child()
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
         print(json.dumps({"at": now.isoformat(), "skipped": "disabled"}))
