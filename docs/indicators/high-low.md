@@ -170,9 +170,6 @@ Coordinate all local suites through the exclusive test gate; never run pytest an
 Vitest concurrently. No fabricated production history, mislabelled synthetic
 samples or weakened pins.
 
-Source/formula research and raw capture audit are retained outside the checkout:
-`/Users/joemccann-mac-mini/.codex/state/jobs/high-low-line-20261020/`.
-
 Primary references:
 
 - https://articles.stockcharts.com/article/articles-chartwatchers-2007-01-new-nyse-common-stock-only-indicators/
