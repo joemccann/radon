@@ -4,6 +4,14 @@ TWS_PASSWORD
 TRADING_MODE
 TURSO_DB_URL
 TURSO_AUTH_TOKEN
+# Table-scoped token for radon-subscription-tokens. The publisher writes this
+# value as TURSO_AUTH_TOKEN in /etc/radon/subscription-tokens/env
+# (service_health data_read,data_add,data_update and service_health_events
+# data_add). Missing, or equal to TURSO_AUTH_TOKEN, fails publish and the
+# deploy keeps the previous derived file. Mint it into /etc/radon/env before
+# the publisher change merges or the next deploy stops:
+# turso db tokens create <DB> -p service_health:data_read,data_add,data_update -p service_health_events:data_add
+TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN
 # Isolated demo Turso. radon-demo-mirror.service carries an ExecStartPre that
 # runs `migrate.py --demo`, and resolve_target() sys.exit(2)s when either is
 # unset — so without them the unit fails on EVERY fire and the demo schema

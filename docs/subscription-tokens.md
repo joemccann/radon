@@ -115,11 +115,25 @@ in its own process group, with stdin closed, and is killed as a group on timeout
 ### Service environment lifecycle
 
 The host unit reads `/etc/radon/subscription-tokens/env`, a root-owned `0600`
-file in a root-owned `0700` directory. The trusted publisher selects only
-`TURSO_DB_URL`, `TURSO_AUTH_TOKEN`, `PUSHOVER_USER`, `PUSHOVER_TOKEN` and the
-optional `CLAUDE_CONFIG_DIR` / `CODEX_HOME` directory overrides. The vault
-socket and replica policy remain fixed unit settings. Provider credential
-locations and the keeper's `radon` UID remain unchanged.
+file in a root-owned `0700` directory. The trusted publisher selects
+`TURSO_DB_URL`, `PUSHOVER_USER`, `PUSHOVER_TOKEN` and the optional
+`CLAUDE_CONFIG_DIR` / `CODEX_HOME` directory overrides. The derived file's
+`TURSO_AUTH_TOKEN` is `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` from
+`/etc/radon/env`: a table-scoped Turso token for `service_health`
+(`data_read`, `data_add`, `data_update`) and `service_health_events`
+(`data_add`). The operator `TURSO_AUTH_TOKEN` is never copied. The keeper
+and database clients stay unchanged and still read `TURSO_AUTH_TOKEN` from
+this derived file. The vault socket and replica policy remain fixed unit
+settings. Provider credential locations and the keeper's `radon` UID remain
+unchanged.
+
+Write `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` in `/etc/radon/env` before this
+change merges. The next deploy stops if that variable is missing or its
+value equals `TURSO_AUTH_TOKEN`. Mint the scoped token with:
+
+```bash
+turso db tokens create <DB> -p service_health:data_read,data_add,data_update -p service_health_events:data_add
+```
 
 The normal deploy job recovers pending transitions, synchronizes the pinned
 control plane, then invokes deploy to derive the file. Ordinary deploys
@@ -127,10 +141,11 @@ republish after canonical environment validation, including already-green
 releases, and before any scheduled unit activation. Prestage runs before that
 sync and does not invoke the subscription publisher or require its new grant.
 Initial setup publishes before installing units.
-Rotations therefore replace the entire selected set. Missing required inputs
-leave the previous complete file intact and stop that publication/deploy.
+Rotations therefore replace the entire selected set. Missing required inputs,
+or a keeper token equal to the operator token, leave the previous complete
+file intact and stop that publication/deploy.
 The publisher follows no directory or file links and publishes by descriptor
-into its private directory. It never prints values.
+into its private directory. It never logs or prints token values.
 
 For an explicit refresh after editing the canonical root environment, run
 `sudo -n /usr/local/sbin/radon-deploy-root publish-subscription-env`. Do not
