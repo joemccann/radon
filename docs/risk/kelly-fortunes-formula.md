@@ -159,17 +159,15 @@ be the one a cap is computed on. A combo stop-market sends `stopPrice` only
 `limitPrice` from assignment or width, and `order_max_loss` prices that stop
 as paying the worse supplied price.
 
-For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
+For a combo the Kelly guard prices the worst case with the bankroll guard's
+own `bankroll_guard.order_max_loss`, so the two Gate-3 implementations cannot
+drift. For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
 `_combo_expiry_loss` before any floor: a defined-risk debit is the premium,
 and a short put's debit is added to assignment. Stock legs, calendars, and a
 net-short call return no exact payoff, so those use
 `order_limits.combo_debit_floor` on the width or assignment proxy. A net
 credit is never a floor. A stop-market skips the exact payoff and counts the
 worse supplied price as paid.
-
-`kelly_guard._worst_case_loss` does not call `_combo_expiry_loss`. It takes
-`combo_max_loss` and then `combo_debit_floor` only, so a single-expiry limit
-combo is a different number in the two Gate-3 guards.
 
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so

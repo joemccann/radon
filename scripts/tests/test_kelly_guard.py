@@ -63,7 +63,7 @@ class TestD11KellyGuard:
     def test_d11_flag_off_allows_oversized(self, monkeypatch, caplog):
         monkeypatch.delenv("RADON_KELLY_ENFORCE_ORDERS", raising=False)
         with caplog.at_level(logging.WARNING, logger="kelly_guard"):
-            # width 30 * 100 * 1 = 3000 = 3% of 100k
+            # width 30 * 100 + $500 debit = 3500 = 3.5% of 100k
             assert check_kelly_ticket(_combo(quantity=1, width=30), bankroll=100_000) is None
         assert caplog.records == []
 
@@ -73,11 +73,11 @@ class TestD11KellyGuard:
             warning = check_kelly_ticket(_combo(quantity=1, width=30), bankroll=100_000)
         assert warning is not None
         assert warning["code"] == "KELLY_CAP_EXCEEDED"
-        assert warning["loss"] == pytest.approx(3000.0)
+        assert warning["loss"] == pytest.approx(3500.0)
         assert warning["bankroll"] == pytest.approx(100_000.0)
-        assert warning["pct"] == pytest.approx(3.0)
+        assert warning["pct"] == pytest.approx(3.5)
         assert "KELLY_CAP_EXCEEDED" in caplog.text
-        assert "3.00" in caplog.text or "3.0" in caplog.text
+        assert "3.50" in caplog.text
         assert "100000" in caplog.text or "100000.00" in caplog.text
 
     def test_d11_verified_reducing_close_passes(self, monkeypatch, caplog):
@@ -163,9 +163,9 @@ class TestD11PlaceOrderWire:
         assert result.get("status") != "error" or "Kelly" not in str(result.get("message", ""))
         assert result.get("status") == "ok"
         assert result.get("kelly_warning", {}).get("code") == "KELLY_CAP_EXCEEDED"
-        assert result["kelly_warning"]["loss"] == pytest.approx(3000.0)
+        assert result["kelly_warning"]["loss"] == pytest.approx(3500.0)
         assert result["kelly_warning"]["bankroll"] == pytest.approx(100_000.0)
-        assert result["kelly_warning"]["pct"] == pytest.approx(3.0)
+        assert result["kelly_warning"]["pct"] == pytest.approx(3.5)
         assert "KELLY_CAP_EXCEEDED" in caplog.text
         ib_cls.assert_called()
         client.place_order.assert_called()
@@ -323,3 +323,30 @@ def test_a_net_credit_combo_gets_no_spurious_floor_in_either_guard():
     assert order_limits.combo_max_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
     assert bankroll_guard.order_max_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
     assert kelly_guard._worst_case_loss(_CALENDAR_CREDIT) == pytest.approx(0.0)
+
+
+_SHORT_PUT_LONG_CALL_DEBIT = {
+    "type": "combo",
+    "symbol": "AAPL",
+    "action": "BUY",
+    "quantity": 1,
+    "limitPrice": 6.00,
+    "legs": [
+        {"expiry": "20261120", "strike": 20, "right": "P", "action": "SELL", "ratio": 1},
+        {"expiry": "20261120", "strike": 25, "right": "C", "action": "BUY", "ratio": 1},
+    ],
+}
+
+
+def test_kelly_prices_a_combo_at_the_shared_payoff_loss():
+    """Assignment and premium paid both land at zero: $2,000 + $600. The
+    Kelly guard must use the same payoff-aware loss as the bankroll guard,
+    not max(margin proxy, debit), or this order passes a $2,500 cap."""
+    import bankroll_guard
+    import kelly_guard
+
+    assert bankroll_guard.order_max_loss(_SHORT_PUT_LONG_CALL_DEBIT) == pytest.approx(2_600.0)
+    assert kelly_guard._worst_case_loss(_SHORT_PUT_LONG_CALL_DEBIT) == pytest.approx(2_600.0)
+    with patch.dict("os.environ", {"RADON_KELLY_ENFORCE_ORDERS": "1"}):
+        violation = check_kelly_ticket(_SHORT_PUT_LONG_CALL_DEBIT, bankroll=100_000)
+    assert violation is not None and violation["code"] == "KELLY_CAP_EXCEEDED"
