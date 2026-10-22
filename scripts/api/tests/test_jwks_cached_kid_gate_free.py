@@ -63,16 +63,16 @@ async def test_unknown_kid_still_takes_the_bounded_lookup(monkeypatch):
     client = _client_with_cached_kid("kid-cached")
     calls = []
 
-    def lookup(token):
-        calls.append(token)
+    def lookup(kid):
+        calls.append(kid)
         raise pyjwt.exceptions.PyJWKClientError("unknown kid")
 
-    client.get_signing_key_from_jwt = lookup
+    client.get_signing_key = lookup
     monkeypatch.setattr(auth, "_get_jwks_client", lambda: client)
     with pytest.raises(auth.HTTPException) as exc:
         await auth._bounded_signing_key_lookup("token", "kid-other")
     assert exc.value.status_code == 401
-    assert calls == ["token"]
+    assert calls == ["kid-other"]
 
 
 @pytest.mark.asyncio

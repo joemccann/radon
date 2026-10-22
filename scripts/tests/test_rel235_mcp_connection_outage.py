@@ -53,7 +53,7 @@ def test_connection_error_is_503_and_the_kid_stays_reprobeable(monkeypatch):
         def get_signing_keys(self):
             return [type("K", (), {"key_id": "kid-conn"})()]
 
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             if state["fail"]:
                 raise pyjwt.PyJWKClientConnectionError("failed to fetch JWKS")
             return type("S", (), {"key": "the-key"})()

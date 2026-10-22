@@ -338,10 +338,15 @@ async def _bounded_signing_key_lookup(token: str, kid: str):
         if len(_jwks_inflight) >= MAX_JWKS_INFLIGHT:
             raise HTTPException(status_code=503, detail="Authentication unavailable")
 
+        # Resolve by kid, not by token: the task is shared per kid and its
+        # failure negative-caches the kid, so it must not depend on any one
+        # token's contents.
+        lookup_kid = None if kid == "__default__" else kid
+
         async def lookup():
             return await asyncio.to_thread(
-                _get_jwks_client().get_signing_key_from_jwt,
-                token,
+                _get_jwks_client().get_signing_key,
+                lookup_kid,
             )
 
         task = asyncio.create_task(lookup())
