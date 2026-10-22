@@ -23,7 +23,7 @@ readonly ENV_FILE="${RADON_DEPLOY_ENV_FILE:-/etc/radon/env}"
 readonly RADON_REPO="https://github.com/joemccann/radon.git"
 readonly CLOUD_REPO="git@github.com:joemccann/radon-cloud.git"  # legacy only
 readonly PYTHON_BIN="python3.13"
-readonly BUN_VERSION="1.3.14"
+readonly BUN_VERSION="1.4.4"
 # Oct 21 2026 Node.js security release on the 22.x line (CVE-2026-111497 and
 # the other HIGH fixes in that release). Exact NodeSource package so a rerun
 # cannot stay on an older 22.x or on EOL 20.
