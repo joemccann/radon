@@ -11724,3 +11724,39 @@ Serial from the repo root. Root pytest exit 1 each round on the same 54 SSL node
 | 3 | 16,884 passed / 54 failed / 10 skipped / 23 subtests (121.58s) | 5 failed / 11,341 passed / 21 skipped / 1,151 files (130.74s) | 54 failed / 3,251 passed / 11 skipped (779.72s) | 0 added / 0 removed |
 
 Base cloud at `5bfadbb6` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy 2.11.7): 54 failed / 3,224 passed / 11 skipped (764.89s). The failed-node set matches rounds 1 and 3. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The 54 root failures are `Missing Authority Key Identifier` in `test_ib_gateway_remote_operator_hold.py` and `test_ib_gateway_remote_serve.py`, identical on the base SHA. The cloud 54 are the bash 3.2 `pin[@]` / `mapfile` class, missing `flock`, and missing `/usr/bin/test`, plus `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` (`ConnectionRefusedError`), which fails alone on both SHAs.
+
+## Delta audit 2026-10-22
+
+Range `e5426fb17d91d2c1224b070c5865a526d358fd7d..b7e0f6f0842f43269d04c3c1a5b9c0efff9af951`: 98 commits / 274 paths. Newest trusted checkpoint is the 2026-10-21 collaborator comment on issue #83 (`audited-through: e5426fb17d91d2c1224b070c5865a526d358fd7d`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-562.
+
+Day-move netting, the discover admission wait, the high-low line, UW research and stream reconciliation, the reverse-calendar cover rule, and the fresh-close exemption each ship with tests that call the behavior. `ci.yml` adds `e2e/high-low-line-tab.spec.ts` and `e2e/uw-advanced-research.spec.ts` to the curated Playwright list and uploads the research screenshots. No coverage-threshold change and no new blanket exclude. The new `pytest.skip` in `scripts/tests/test_runner_security_hooks.py` runs only when `jq` is absent; `/usr/bin/jq` is present and those cases ran. The delta touches 44 Python test files, 31 Vitest files, and 11 cloud files, not most of the suite.
+
+Not filed: the root pytest SSL failures (`Missing Authority Key Identifier`) are the same 54 nodes on this SHA and on `b7e0f6f0`. The five `next.config.mjs` Vitest timeouts are the prior load class. The cloud failures are the same 54 nodes as `b7e0f6f0`.
+
+### T-562 — P1 — a stop-market combo debit is floored on the limit the broker drops
+
+`combo_debit_floor` priced the premium from `limitPrice` or, only when that was empty, `stopPrice` (`scripts/order_limits.py` before this change). `check_order_limits` applies that floor on a combo STP (`scripts/order_limits.py` stop branch), and `kelly_guard._worst_case_loss` calls the same floor. `bankroll_guard.order_max_loss` already uses `effective_order_price` for a combo STP and counts that price as paid (`scripts/bankroll_guard.py:235-259`). An all-long 40-lot stop at $50 with `limitPrice` 0.01 has no strike width, so `combo_max_loss` is 0. The floor was $40. Notional, which already uses the stop, is $200,000, under the $250,000 notional cap. With `RADON_MAX_COMBO_LOSS_DOLLARS=100000`, `check_order_limits` returned None and `kelly_guard._worst_case_loss` returned 40.0. `bankroll_guard.order_max_loss` returned 200000.0. A negative decoy limit floored at 0.
+
+Acceptance: that stop is refused with `ORDER_MAX_LOSS_LIMIT` and the message names $200,000. `kelly_guard._worst_case_loss` is $200,000. The same structure stopped at $5, under the cap, is still accepted. The notional of the $50 stop stays $200,000.
+
+Audited through: b7e0f6f0842f43269d04c3c1a5b9c0efff9af951 on 2026-10-22 — 1 new finding
+
+## Remediation 2026-10-22
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-562 | DONE | Before the floor change: `kelly_guard._worst_case_loss` was 40.0 against 200000, and `check_order_limits` returned None under a $100,000 cap (`scripts/tests/test_order_limits.py`, 1 failed / 1 passed). `combo_debit_floor` now uses `effective_order_price` for STP (`scripts/order_limits.py:275-279`). The two new cases passed. Focused cluster: 176 passed in 6.59s. |
+
+Delta files, three times, after the fix: Python 1,647 passed each run (44 files; 77.78s, 79.11s, 81.17s). Vitest 1 failed / 768 passed / 31 files each run. The failure is `cta-output-tracing-config.test.ts` importing `next.config.mjs` over 5s; that file passed 4 tests at a 20s ceiling in 10.52s. Cloud files 2 failed / 1,144 passed / 1 skipped each run (310.09s, 310.37s, 312.53s). Both nodes, `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` and `test_precloud_rollback_keeps_immutable_journal_support`, are in the `b7e0f6f0` failed set.
+
+### Closing gates 2026-10-22
+
+Serial from the repo root. Root pytest exit 1 each round on the same 54 SSL nodes as a full run of `b7e0f6f0` (0 added / 0 removed). Head passed 17,319 and the base passed 17,317; the two new cases are the difference. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`). Those five files passed 29 tests at a 20s ceiling in 49.40s. The committed ceiling was not raised. Cloud exit 1 each round on the same 54 nodes as each other and as `b7e0f6f0` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `b7e0f6f0` |
+|---|---|---|---|---|
+| 1 | 17,319 passed / 54 failed / 10 skipped / 23 subtests (174.86s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (165.79s) | 54 failed / 3,297 passed / 11 skipped (926.48s) | 0 added / 0 removed |
+| 2 | 17,319 passed / 54 failed / 10 skipped / 23 subtests (173.92s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (165.62s) | 54 failed / 3,297 passed / 11 skipped (812.18s) | 0 added / 0 removed |
+| 3 | 17,319 passed / 54 failed / 10 skipped / 23 subtests (147.22s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (164.58s) | 54 failed / 3,297 passed / 11 skipped (811.16s) | 0 added / 0 removed |
+
+Base cloud at `b7e0f6f0` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 54 failed / 3,297 passed / 11 skipped (814.95s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The 54 root failures are `Missing Authority Key Identifier`, identical on the base SHA. The cloud 54 are bash 3.2 `mapfile` / `pin[@]`, missing `/usr/bin/test`, `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` (`ConnectionRefusedError`), and `test_precloud_rollback_keeps_immutable_journal_support` (`/usr/bin/python3` 3.9 rejects `zip(..., strict=True)`).
