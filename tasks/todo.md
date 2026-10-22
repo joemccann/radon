@@ -1,3 +1,15 @@
+# Bun 1.4.4 security pin (2026-10-22)
+
+Dependency graph: B1 -> B2 -> B3.
+
+- [x] B1 depends_on: [] Red tests for the 1.4.4 image digest, workflow `bun-version` pins, and host `BUN_VERSION`.
+- [x] B2 depends_on: [B1] Pin `oven/bun:1.4.4` by registry index digest, CI `bun-version`, and `deploy.sh` / `setup-vps.sh`. Frozen lockfiles unchanged.
+- [ ] B3 depends_on: [B2] Draft PR, local web and Python suites, GitHub CI green. No host changes. No merge.
+
+## Review
+
+Pending CI.
+
 # NYSE common-stock High-Low Line (2026-10-20)
 
 Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7 -> H8 -> H9.
