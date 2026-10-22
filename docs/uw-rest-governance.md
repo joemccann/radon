@@ -13,7 +13,7 @@ The client records only allowlisted numeric cap/count headers, a receipt timesta
 ## Guarantees and limits
 
 - SQLite `BEGIN IMMEDIATE` atomically reserves each attempt across processes. Initial activation preserves the current legacy spend. Connection failures conservatively retain their reservation.
-- Standard/background requests stop at 80% of minute/daily policy; interactive calls can use the remaining headroom. Waiting is bounded to ten seconds and releases the DB lock.
+- Standard/background requests stop at 80% of minute/daily policy; interactive calls can use the remaining headroom. Admission defaults to five seconds and releases the DB lock while waiting. Explicit scanner waits are capped at 120 seconds. LEAP uses `UWClient(admission_timeout=120)` so a shared minute window or short Retry-After does not discard the rest of its universe; ordinary clients and explicit per-request deadlines keep their fast refusal. Daily/provider exhaustion and embargoes longer than the deadline still refuse before HTTP.
 - HTTP429 receipts create a shared embargo from Retry-After (seconds or HTTP date); a daily-exhausted response waits for the ET reset. Missing Retry-After uses a conservative minute delay. Requests that cannot wait fail with `UWRateLimitError` before provider HTTP.
 - Existing attributed `uw_budget` telemetry remains post-response and separate from admission. It is not presented as exact provider-billed usage; provider allowance counting semantics vary.
 - Per-key caching uses 256 stable cross-process lock stripes, rechecks cache after lock admission and unique temp files. Cache hits do not reserve an HTTP request. Locks never have their inode unlinked while an owner may exist.

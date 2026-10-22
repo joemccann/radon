@@ -1010,6 +1010,42 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
 
 ---
 
+## leap-admission-window-exhaustion
+
+**`radon-leap.service` fails with provider exhaustion after a shared UW embargo.**
+Observed 2026-10-22 14:04:27Z: HTTP 502, `502 provider failures vs 7 results`,
+`data/leap.json` status `degraded`; API health remained `ok` and authenticated.
+The account admission ledger retained a short 429 embargo ending 14:05:07Z;
+AAPL IV/contracts and a bounded AAPL scan subsequently succeeded. Exact original
+per-ticker errors were not retained by the API's stderr-only failure log;
+transient admission is the reproduced failure mechanism, not proof that every
+one of the 502 failures had that cause.
+
+- **Mechanism:** each typed UW request used the interactive-sized five-second
+  admission deadline, and the governor capped even explicit waits at ten
+  seconds. A sixty-second embargo or exhausted rolling minute refused all
+  queued ticker requests before HTTP, rapidly converting a healthy provider
+  into an exhausted scan. Do not bypass the governor, raise unverified rate
+  limits, or change the exhaustion success threshold.
+- **Discriminating checks:** read `leap.json` status/result/provider-failure
+  counts, the API journal and `utils.uw_governor.snapshot()` metadata. Low daily
+  usage with a short embargo/minute pressure differs from daily/provider quota
+  exhaustion. One ticker canary after the window is sufficient; do not loop
+  reruns or overlap a pending `/leap/scan` child.
+- **Remediation:** LEAP explicitly waits up to 120 seconds for typed client
+  admission; the governor releases its DB lock while waiting. Normal clients
+  retain five seconds, explicit request deadlines override the client default,
+  and hard budgets/long embargoes still fail closed. After deploy, confirm no
+  active scan or production deploy and perform one guarded unit start through
+  the existing operator control. Verify `Result=success`, fresh `leap.json`
+  status `ok`, restored coverage, healthy `leap-scan`, and watchdog resolution.
+- **Regressions:** `scripts/tests/test_leap_admission_window.py` exercises real
+  SQLite admission and synthetic HTTP with a virtual clock, the scanner client
+  policy, full ticker retention, fast defaults, explicit overrides, hard caps
+  and long embargo refusal.
+
+---
+
 ## leap-reports-permission-502
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)

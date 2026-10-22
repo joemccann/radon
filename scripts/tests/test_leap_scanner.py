@@ -377,7 +377,7 @@ def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypa
     previous = {"scan_time": "old", "results": [{"ticker": "SPY"}]}
     cache.write_text(json.dumps(previous))
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         sys,
@@ -411,7 +411,7 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
     """
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
 
     # REL-049 / R-095: the universe proportions matter now. A name with no
@@ -459,7 +459,7 @@ def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monk
     banner."""
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     health: list = []
     monkeypatch.setattr(
         leap_scanner_uw,
@@ -505,7 +505,7 @@ def test_unwritable_html_report_still_writes_cache_and_exits_zero(tmp_path, monk
     reports.mkdir()
     reports.chmod(0o555)
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
     monkeypatch.setattr(
         leap_scanner_uw,

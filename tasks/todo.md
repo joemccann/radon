@@ -10242,3 +10242,14 @@ UW follow-up: Sol/Luna re-reviewed `e92c723d2` and closed their final quota/repl
 Review pending. First CLI completed18:18:12Z and committed5a5bf2b9 before parent repeated the same CLI via its resolved LKG path at18:18:13Z. Parent did not retain the original triggering stdout/stderr. Cloud RED12failures (7 behavioral,5 missing-helper assertions); GREEN87focusedchecks; final broader cloud run323Pythonchecks and84cloudcontracts passed. No local tests or credential changes. Original responder finished18:22:35Z; incident commit separately surfaced as PR1220. Preserve that work. The clone was also held dirty by root/web node_modules because a missing newline commented out its ignore rule; added one more cloud RED/GREEN regression and restored that rule.
 
 Integration review: merged current main0ba43e597, preserving atomic daily-budget reservation and no-fallback-on-budget-refusal. Isolated cloud tests333passed plus84cloudcontracts. Four initial remote harness failures were its real host deploy-transition journal leaking into rerun tests; a per-test temporary transition/lock/LKG plugin isolated those external files without altering production behavior or test assertions. Original PR-head full test CI passed; integrated head must rerun after the current main deploy finishes.
+
+## LEAP admission-window incident 2026-10-22
+- [x] L1 depends_on: [] Confirm journal, cache, provider canary and shared governor state.
+- [x] L2 depends_on: [L1] Cloud failing regressions for transient embargo/minute windows and scanner client policy.
+- [x] L3 depends_on: [L2] Allow explicitly bounded scanner admission waits; preserve fast interactive defaults and hard quota refusals.
+- [ ] L4 depends_on: [L3] Cloud focused tests, PR full CI, deploy and successful production LEAP refresh.
+- [ ] L5 depends_on: [L4] Verify cache coverage, service health, watchdog and review.
+
+L2 evidence: isolated VPS red run: 7 failed, 2 passed (real SQLite governor, virtual clock and synthetic HTTP).
+
+L3 verification: isolated cloud focused suite 250 passed; final admission regressions 10 passed, including full scan retention across embargo and rolling windows. Local checks are static only.

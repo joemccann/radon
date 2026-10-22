@@ -1308,3 +1308,6 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - Check repository visibility before committing provider captures. Approval for private automation, storage and operator display does not imply permission to publish history in Git. Use explicitly synthetic fixtures in public repositories and retain real-source captures and independent reference checks privately.
 - Removing a captured file in a later commit does not remove it from branch history. Before the first push, build the public commit directly on the public base and verify that no captured-data commit or blob is reachable from the pushed branch.
+
+### 2026-10-22 LEAP scanner admission
+- A scanner must explicitly wait through the provider's rolling minute or short Retry-After; a five-second UI deadline is not a batch scheduling policy. Preserve shared reservations, interactive headroom, hard quota refusal and bounded waits. Prove the behavior with a real isolated ledger and synthetic HTTP before rerunning a production universe.

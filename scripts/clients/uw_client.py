@@ -131,6 +131,7 @@ class UWClient:
         backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
         caller: Optional[str] = None,
         max_response_bytes: Optional[int] = None,
+        admission_timeout: float = 5.0,
     ):
         self._token = token or os.environ.get("UW_TOKEN")
         if not self._token:
@@ -145,6 +146,7 @@ class UWClient:
             raise ValueError("max_response_bytes must be a positive integer")
         self._max_response_bytes = max_response_bytes
         self._timeout = timeout
+        self._admission_timeout = admission_timeout
         self._max_retries = max_retries
         self._backoff_factor = backoff_factor
 
@@ -189,8 +191,12 @@ class UWClient:
                          wait_timeout=wait_timeout, use_cache=use_cache)
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
-             priority: str = "standard", wait_timeout: float = 5.0,
+             priority: str = "standard", wait_timeout: Optional[float] = None,
              use_cache: bool = True) -> dict:
+        # Typed scanner calls may wait through a minute window. Explicit
+        # request deadlines (including zero) retain their existing semantics.
+        if wait_timeout is None:
+            wait_timeout = self._admission_timeout
         endpoint = endpoint.lstrip("/")
         if (not re.fullmatch(r"[A-Za-z0-9_.:/-]+", endpoint)
                 or ":" in endpoint or any(p in {".", ".."} for p in endpoint.split("/"))):
