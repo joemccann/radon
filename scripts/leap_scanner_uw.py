@@ -614,7 +614,10 @@ def scan_universe(
     quiet = workers > 1
     results: List[ScanResult] = []
     with scan_ib_session() as ib:
-        with UWClient() as uw:
+        # A preset spans many account minute windows. The interactive 5s
+        # deadline otherwise turns a transient shared 429 embargo into hundreds
+        # of skipped tickers. Daily/provider caps still refuse before HTTP.
+        with UWClient(admission_timeout=120) as uw:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
                     pool.submit(scan_ticker, ticker, min_gap, uw, quiet=quiet, ib=ib): ticker
