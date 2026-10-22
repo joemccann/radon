@@ -148,8 +148,10 @@ pr_number_in_repo() {
 # `//` only falls through on null, so reading the conclusion directly left an
 # EMPTY token that bash word splitting then dropped -- `SUCCESS,` verified as
 # wholly green while a check was still running. Every entry yields a
-# non-empty token now. A claim of ZERO PRs is verified too: an open PR on this
-# loop's prefix contradicts it.
+# non-empty token now. A claim of ZERO PRs is accepted only by
+# no_loop_pr_exists: the listing ran, came back short of the page limit, and
+# held no same-repo PR on this prefix. A failed query or a full page is not
+# absence.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
   local tok n fields state branch cross head rollup conclusion count=0

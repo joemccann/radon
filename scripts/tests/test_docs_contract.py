@@ -2602,7 +2602,7 @@ class TestDocumentation20261021:
 
 
 class TestDocumentation20261022:
-    """DOC-219 and DOC-220: contracts that drifted after audited-through e5426fb1."""
+    """DOC-219..221: contracts that drifted after audited-through e5426fb1."""
 
     def test_research_archive_heartbeat_is_nine_days_on_sunday(self):
         timer = (_ROOT / "cloud/services/radon-research-archive.timer").read_text()
@@ -2650,4 +2650,22 @@ class TestDocumentation20261022:
         assert "kelly_guard._worst_case_loss" in gate3
         assert "cannot drift" not in gate3
         assert "combo_debit_floor" in gate3
+
+    def test_zero_pr_claim_requires_a_complete_listing(self):
+        hook = (_ROOT / "scripts/runner/hooks/security_post.sh").read_text()
+        limit = next(
+            line.split("=", 1)[1].strip()
+            for line in hook.splitlines()
+            if line.startswith("PR_LIST_PROOF_LIMIT=")
+        )
+        assert limit.isdigit()
+        assert "no_loop_pr_exists" in hook
+        assert "full page is not" in hook or "full page is not absence" in hook
+        section = (_ROOT / "docs/runner.md").read_text()
+        start = section.index('The deliver phase\'s "ready to merge" line')
+        paragraph = section[start:section.index("Loops without `PHASES`", start)]
+        assert f"fewer than {limit} rows" in paragraph
+        assert "failed query" in paragraph
+        assert "full page is not absence" in paragraph
+        assert "an open PR on the loop's prefix contradicts it" not in paragraph
 
