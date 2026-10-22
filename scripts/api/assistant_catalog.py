@@ -37,7 +37,8 @@ CATALOG: dict[CatalogKey, Capability] = {
     # assistant fan-out (same rationale as /streaks/{ticker}).
     ("GET", "/attribution"): "read.spawn",
     ("GET", "/backtest"): "read",
-    ("GET", "/backtest/{strategy}"): "read",
+    # read.spawn: a cache miss runs the backtest subprocess.
+    ("GET", "/backtest/{strategy}"): "read.spawn",
     # refresh spawns a 180s subprocess that persists to Turso: a mutation.
     ("POST", "/backtest/{strategy}/refresh"): "mutate.workspace",
     ("POST", "/blotter"): "mutate.workspace",
