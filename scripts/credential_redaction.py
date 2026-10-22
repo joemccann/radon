@@ -218,7 +218,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # specific shapes above.
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
-    (re.compile(r"(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
     # Generic key-value assignment (env files, config dumps, JSON), last so a
     # value the specific shapes above already tagged keeps its tag. A quoted
     # value is redacted through its real closing quote (multi-word

@@ -581,3 +581,10 @@ def test_yaml_quoted_values_split_across_lines_or_doubling_quotes():
         assert body.endswith("\nnext: 1"), body
     for text in (f'password: "\n  {value}"', f"password: '\n  {value}'"):
         assert find_secret_assignments(text) == ["[redacted-secret]"], text
+
+
+def test_unquoted_cookie_assignment_redacts_every_pair():
+    value = _cookie_value()
+    body = scrub_credential_text(f"COOKIE=theme=light; sid={value}\nnext: 1")
+    assert "NOTREAL" not in body, body
+    assert body.endswith("\nnext: 1"), body
