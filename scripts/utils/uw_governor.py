@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 DEFAULT_RPM = 120
 DEFAULT_DAILY_LIMIT = 40_000
 RESERVE_FRACTION = 0.20
-MAX_WAIT_SECONDS = 10.0
+MAX_WAIT_SECONDS = 120.0  # Explicit scanner waits can cross a 60s window; default stays 5s.
 ET = ZoneInfo("America/New_York")
 
 

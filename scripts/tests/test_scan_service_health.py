@@ -383,7 +383,7 @@ class TestLeapWiring:
             is_mispriced=True,
             best_leap=None,
         )
-        monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+        monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
         monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *a, **kw: result)
         @contextmanager
         def _no_ib():
