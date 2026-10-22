@@ -264,10 +264,21 @@ def combo_debit_floor(params: dict, loss: float) -> float:
     structure, yet a debit order has its whole premium at risk. A net CREDIT
     is never a floor — nothing was paid. Both Gate-3 guards call this so the
     two implementations cannot drift apart again.
+
+    A stop-market transmits ``stopPrice`` and drops ``limitPrice``. The
+    signed limit is that discarded field, so it must not set the floor
+    (REL-328). The worse supplied price is what can be paid.
     """
     quantity = _finite(params.get("quantity"))
+    if quantity is None or quantity == 0:
+        return loss
+    if _ib_order_type(params) == "STP":
+        price = effective_order_price(params)
+        if price <= 0:
+            return loss
+        return max(loss, abs(quantity) * price * _OPTION_MULTIPLIER)
     price = _finite(params.get("limitPrice") or params.get("stopPrice"))
-    if quantity is None or price is None or quantity == 0 or price == 0:
+    if price is None or price == 0:
         return loss
     sell = str(params.get("action") or "").upper().startswith("SELL")
     debit = abs(quantity * price) * _OPTION_MULTIPLIER if (price > 0) != sell else 0.0
