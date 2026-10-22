@@ -688,12 +688,12 @@ The unit runs the root-owned copy `/usr/local/lib/radon/grok-upgrade` on
 on the host only at a setup rerun (`cloud/tests/test_grok_upgrade_controller.py`).
 
 `setup-vps.sh` inventories `radon-research-archive.{service,timer}` and
-`enable_services` enables the timer: 1st of the month 04:20 UTC, moves
+`enable_services` enables the timer: Sunday 04:20 UTC, moves
 settled private research `evidence/` to B2 (`research/` prefix), verifies,
 then prunes. Its Type=oneshot `runtime-container.conf` drop-in (control
 plane) runs it in the Python image with only the private research bind,
 since host radon cannot traverse `/var/lib/radon-private`. Heartbeat
-`research-archive` (33d). Runbook: `docs/operations.md` "Research evidence
+`research-archive` (9d). Runbook: `docs/operations.md` "Research evidence
 archive".
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and

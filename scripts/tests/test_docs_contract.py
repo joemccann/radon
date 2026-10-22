@@ -2600,3 +2600,28 @@ class TestDocumentation20261021:
         assert "ORDER_FUTURE_MULTIPLIER" in bullet
         assert "strike above zero" in bullet
 
+
+class TestDocumentation20261022:
+    """DOC-219: research-archive window drifted after audited-through e5426fb1."""
+
+    def test_research_archive_heartbeat_is_nine_days_on_sunday(self):
+        timer = (_ROOT / "cloud/services/radon-research-archive.timer").read_text()
+        assert "OnCalendar=Sun *-*-* 04:20:00 UTC" in timer
+        assert "*-*-01" not in timer
+        windows = (_ROOT / "web/lib/serviceHealthWindows.ts").read_text()
+        assert '"research-archive": { open: 9 * DAY' in windows
+        watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
+        assert '"research-archive": {"open": 9 * _DAY' in watchdog
+        assert "Monthly research evidence archive" not in watchdog
+        section = _markdown_heading("docs/operations.md", "Research evidence archive")
+        assert "33-day" not in section
+        assert "9-day" in section
+        assert "Sunday" in section
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        start = cloud.index("`setup-vps.sh` inventories `radon-research-archive.{service,timer}`")
+        paragraph = cloud[start:cloud.index("`setup-vps.sh` inventories `radon-rsi-oversold", start)]
+        assert "1st of the month" not in paragraph
+        assert "33d" not in paragraph
+        assert "Sunday 04:20 UTC" in paragraph
+        assert "(9d)" in paragraph
+
