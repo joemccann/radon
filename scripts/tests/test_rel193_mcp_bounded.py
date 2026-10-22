@@ -161,7 +161,7 @@ class TestJwksBounding:
             def get_signing_keys(self):
                 return []
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 import jwt as pyjwt
 
                 calls.append(1)
@@ -183,7 +183,7 @@ class TestJwksBounding:
             def get_signing_keys(self):
                 return []
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 raise AssertionError("must not be reached when saturated")
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: SlowClient())
@@ -200,7 +200,7 @@ class TestJwksBounding:
             def get_signing_keys(self):
                 return []
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 import jwt as pyjwt
 
                 calls.append(1)
@@ -270,7 +270,7 @@ class TestOutageIsNotASignatureVerdict:
                     raise TimeoutError("clerk timed out")
                 return [type("K", (), {"key_id": "kid-a"})()]
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 return type("S", (), {"key": "the-key"})()
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Flaky())
@@ -293,7 +293,7 @@ class TestOutageIsNotASignatureVerdict:
                 calls.append(1)
                 return [type("K", (), {"key_id": "kid-real"})()]
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 import jwt as pyjwt
 
                 raise pyjwt.exceptions.InvalidTokenError("no such kid")
@@ -315,10 +315,9 @@ class TestOutageIsNotASignatureVerdict:
             def get_signing_keys(self):
                 return [type("K", (), {"key_id": k})() for k in keys["set"]]
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 import jwt as pyjwt
 
-                kid = pyjwt.get_unverified_header(token).get("kid")
                 if kid in keys["set"]:
                     return type("S", (), {"key": f"key-{kid}"})()
                 raise pyjwt.exceptions.InvalidTokenError("no such kid")

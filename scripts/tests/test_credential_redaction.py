@@ -483,3 +483,108 @@ def test_single_line_and_empty_quoted_values_are_unchanged():
     assert scrub_credential_text("TOKEN = ''") == "TOKEN = '[redacted-secret]'"
     single = scrub_credential_text('TOKEN = "qzHNOTREALopaque1234"')
     assert single == 'TOKEN = "[redacted-secret]"', single
+
+
+# DS-2026-10-22-03: a quoted (`> `) or commented (`# `) excerpt repeats its
+# lead on EVERY line, but continuation lines had to start with whitespace, so
+# only the header matched the lead and the body survived. Values are invented.
+def _block_lines(lead: str, *body: str) -> str:
+    return "".join(f"{lead}{line}\n" for line in body)
+
+
+def test_a_quoted_or_commented_block_scalar_body_is_redacted():
+    from credential_redaction import find_credential_shapes
+
+    for lead in ("> ", "# ", ">", "#"):
+        text = _block_lines(
+            lead,
+            "password: |",
+            "  qzQNOTREALquoted1",
+            "",
+            "  qzQNOTREALquoted2",
+            "sibling: keep",
+        ).replace(f"{lead}\n", f"{lead.rstrip()}\n")
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert f"{lead}sibling: keep" in out, out
+        assert find_credential_shapes(text) == ["[redacted-secret]"], text
+
+
+def test_an_unquoted_block_scalar_baseline_is_unchanged():
+    text = "password: |\n  qzRNOTREALplain1\nsibling: keep\n"
+    assert scrub_credential_text(text) == "password: [redacted-secret]\nsibling: keep\n"
+
+
+def test_a_quoted_non_secret_block_scalar_is_left_alone():
+    from credential_redaction import find_credential_shapes
+
+    for lead in ("> ", "# "):
+        text = _block_lines(lead, "description: |", "  ordinary prose stays", "next: fine")
+        assert scrub_credential_text(text) == text
+        assert find_credential_shapes(text) == []
+
+
+def test_a_triple_quoted_authorization_value_is_redacted():
+    scheme = "Basic"
+    for delim in ('"""', "'''"):
+        text = f'authorization = {delim}{scheme} qzSNOTREALauth1234{delim}\nnext = "keep"\n'
+        out = scrub_credential_text(text)
+        assert "NOTREAL" not in out, out
+        assert 'next = "keep"' in out, out
+
+
+def _cookie_value() -> str:
+    return "qz" + "NOTREAL" + "value" + "".join(str(n) for n in range(10))
+
+
+def test_every_cookie_in_a_header_is_detected_not_only_the_first():
+    from credential_redaction import find_secret_assignments
+
+    value = _cookie_value()
+    for text in (
+        f"Cookie: theme=light; sid={value}",
+        f'{{"Cookie": "theme=light; sid={value}"}}',
+        f"Set-Cookie: a=b; __session={value}; Path=/",
+        f"cookie = 'lang=en; sid={value}'",
+    ):
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+    for text in (
+        "Cookie: theme=light; lang=en",
+        "Set-Cookie: theme=dark; Path=/; HttpOnly",
+        "the cookie banner was dismissed: theme=light",
+    ):
+        assert find_secret_assignments(text) == [], text
+
+
+def test_long_cookie_headers_and_values_are_still_inspected():
+    from credential_redaction import find_secret_assignments
+
+    filler = "; ".join(f"pref{n}=on" for n in range(800))
+    assert len(filler) > 4096
+    assert find_secret_assignments(f"Cookie: {filler}; sid={_cookie_value()}") == ["[redacted-secret]"]
+    long_value = _cookie_value() * 120
+    assert len(long_value) > 1024
+    assert find_secret_assignments(f"Cookie: theme=light; sid={long_value}") == ["[redacted-secret]"]
+
+
+def test_yaml_quoted_values_split_across_lines_or_doubling_quotes():
+    from credential_redaction import find_secret_assignments
+
+    value = _cookie_value()
+    for text in (
+        f'password: "\n  {value}"\nnext: 1',
+        f"password: '\n  {value}'\nnext: 1",
+        f"password: 'ab''{value}'\nnext: 1",
+    ):
+        body = scrub_credential_text(text)
+        assert "NOTREAL" not in body, body
+        assert body.endswith("\nnext: 1"), body
+    for text in (f'password: "\n  {value}"', f"password: '\n  {value}'"):
+        assert find_secret_assignments(text) == ["[redacted-secret]"], text
+
+
+def test_unquoted_cookie_assignment_redacts_every_pair():
+    value = _cookie_value()
+    body = scrub_credential_text(f"COOKIE=theme=light; sid={value}\nnext: 1")
+    assert "NOTREAL" not in body, body
+    assert body.endswith("\nnext: 1"), body

@@ -159,17 +159,15 @@ be the one a cap is computed on. A combo stop-market sends `stopPrice` only
 `limitPrice` from assignment or width, and `order_max_loss` prices that stop
 as paying the worse supplied price.
 
-For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
+For a combo the Kelly guard prices the worst case with the bankroll guard's
+own `bankroll_guard.order_max_loss`, so the two Gate-3 implementations cannot
+drift. For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
 `_combo_expiry_loss` before any floor: a defined-risk debit is the premium,
 and a short put's debit is added to assignment. Stock legs, calendars, and a
 net-short call return no exact payoff, so those use
 `order_limits.combo_debit_floor` on the width or assignment proxy. A net
 credit is never a floor. A stop-market skips the exact payoff and counts the
 worse supplied price as paid.
-
-`kelly_guard._worst_case_loss` does not call `_combo_expiry_loss`. It takes
-`combo_max_loss` and then `combo_debit_floor` only, so a single-expiry limit
-combo is a different number in the two Gate-3 guards.
 
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so
@@ -289,9 +287,12 @@ IB. Fat-finger `order_limits` still refuse. `RADON_KELLY_ENFORCE_MODE=block`
 restores hard refuse (`status: "error"` before IB). Evaluate M6 fail-closed
 for sizing/eval is unchanged.
 
-- Applies to opening orders only. Closing, rolling and reducing orders lower
-  risk and are exempt; the classifier reuses the coverage logic behind
-  `RADON_MAX_COMBO_LOSS_DOLLARS` (worst-case loss already computed for combos).
+- Applies to opening orders only. A close is exempt only when
+  `bankroll_guard.fresh_reducing_close` proves every leg reduces a held leg on
+  a portfolio snapshot inside the 15-minute window, the same proof
+  `order_limits.check_placement_limits` uses. A client flag (`isClosing`,
+  `closeOut`, `reducing`) is not proof (R-740); a stale or unreadable snapshot
+  keeps the warning.
 - Bankroll source in a fresh interpreter: `NetLiquidation` from the connected
   `IBClient` account summary, falling back to `data/portfolio.json`
   `net_liquidation`. If neither is available the guard **warns** with

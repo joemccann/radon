@@ -24,7 +24,7 @@ const STRATEGIES = new Set([
   "vcg",
 ]);
 
-export const radonCapability = "read";
+export const radonCapability = "read.spawn";
 
 export async function GET(
   request: Request,
