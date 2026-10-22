@@ -99,4 +99,4 @@ sse-starlette==3.4.5
 # Firecrawl local research PDF extraction and original chart rendering
 pdf-inspector==1.17.0
 pypdfium2==5.13.0
-Pillow==12.3.0
+Pillow==13.0.0
