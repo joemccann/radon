@@ -1310,3 +1310,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-561 | DONE | A share leg serialized with `strike: 0.0` was not the omitted-strike buy-write. Setting `_carries_option_fields` to `strike is not None` left the old case green and failed the new file 2 / 28: place returned `ORDER_COMBO_LEG_SEC_TYPE`, and a 200-lot snapshot resize returned None. Predicate restored. `scripts/tests/test_order_limits_fail_open_inputs.py` passed 30 tests on each of three serial runs. Product source unchanged. Closing rounds: root pytest 16,884 passed / 54 failed / 10 skipped / 23 subtests each round, the same 54 SSL nodes as `5bfadbb6`. Vitest 5 failed / 11,341 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 20s ceiling in 46.06s). Cloud rounds 1 and 3 were 54 failed / 3,251 passed / 11 skipped, 0 added / 0 removed against base `5bfadbb6` (54 failed / 3,224 passed / 11 skipped). Round 2 added `test_a_hung_upstream_becomes_a_5xx_within_a_bound`, which passed alone in 30.25s. |
+
+## 2026-10-22
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-562 | DONE | An all-long 40-lot combo STP at stop $50 with limit $0.01 floored the always-on loss cap and `kelly_guard` at $40 while `bankroll_guard.order_max_loss` was $200,000. `check_order_limits` returned None under a $100,000 cap (1 failed / 1 passed). `combo_debit_floor` now uses `effective_order_price` for STP. Focused cluster 176 passed. Delta Python 1,647 passed three times. Closing rounds: root pytest 17,319 passed / 54 failed / 10 skipped / 23 subtests each round, 0 added / 0 removed against `b7e0f6f0` (17,317 passed / 54 failed). Vitest 5 failed / 11,444 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 20s ceiling in 49.40s). Cloud 54 failed / 3,297 passed / 11 skipped each round, 0 added / 0 removed against `b7e0f6f0`. |
