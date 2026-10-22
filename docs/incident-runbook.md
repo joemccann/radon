@@ -1033,7 +1033,7 @@ one of the 502 failures had that cause.
   exhaustion. One ticker canary after the window is sufficient; do not loop
   reruns or overlap a pending `/leap/scan` child.
 - **Remediation:** LEAP explicitly waits up to 120 seconds for typed client
-  admission; the governor releases its DB lock while waiting. Normal clients
+  admission; the governor releases its DB lock while waiting. The cache singleflight wait also respects that explicit ceiling. Normal clients
   retain five seconds, explicit request deadlines override the client default,
   and hard budgets/long embargoes still fail closed. After deploy, confirm no
   active scan or production deploy and perform one guarded unit start through

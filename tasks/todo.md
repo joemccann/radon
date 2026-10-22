@@ -10253,3 +10253,5 @@ Integration review: merged current main0ba43e597, preserving atomic daily-budget
 L2 evidence: isolated VPS red run: 7 failed, 2 passed (real SQLite governor, virtual clock and synthetic HTTP).
 
 L3 verification: isolated cloud focused suite 250 passed; final admission regressions 10 passed, including full scan retention across embargo and rolling windows. Local checks are static only.
+
+L3 cache-path review: a separate cloud red test proved singleflight still truncated the opt-in wait to ten seconds. Its explicit ceiling now matches admission; normal five-second and absolute 120-second bounds are regression-tested. Expanded cloud compatibility: 277 passed; final admission/cache regressions: 13 passed.

@@ -158,3 +158,37 @@ def test_full_scan_keeps_tickers_across_admission_windows(monkeypatch, clock):
     assert failures == []
     assert len(calls) == 4
     assert sum(clock[1]) == pytest.approx(240)
+
+
+@pytest.mark.parametrize("admission_timeout,release_after,succeeds", [
+    (120, 60, True), (5, 60, False), (3600, 121, False),
+])
+def test_cached_scanner_waits_for_inflight_request(
+    monkeypatch, clock, admission_timeout, release_after, succeeds,
+):
+    """The real cache path must not truncate the scanner wait to ten seconds."""
+    from utils import uw_cache
+    monkeypatch.setattr(uw_client, "_USE_CACHE", True)
+    monkeypatch.setattr(uw_cache, "time", gov.time)
+    release_at = clock[0][0] + release_after
+    actual_fcntl = uw_cache.fcntl
+
+    def flock(fd, flags):
+        if flags != actual_fcntl.LOCK_UN and clock[0][0] < release_at:
+            raise BlockingIOError()
+        return actual_fcntl.flock(fd, flags)
+
+    monkeypatch.setattr(uw_cache, "fcntl", SimpleNamespace(
+        flock=flock, LOCK_EX=actual_fcntl.LOCK_EX,
+        LOCK_NB=actual_fcntl.LOCK_NB, LOCK_UN=actual_fcntl.LOCK_UN,
+    ))
+    calls = wire(monkeypatch)
+    with uw_client.UWClient(token=TOKEN, admission_timeout=admission_timeout) as client:
+        if succeeds:
+            assert client.get_iv_rank("INFLIGHT") == {"data": []}
+        else:
+            with pytest.raises(uw_client.UWRateLimitError, match="already in progress"):
+                client.get_iv_rank("INFLIGHT")
+    assert len(calls) == int(succeeds)
+    expected_wait = release_after if succeeds else min(admission_timeout, 120)
+    assert sum(clock[1]) == pytest.approx(expected_wait, abs=0.03)
