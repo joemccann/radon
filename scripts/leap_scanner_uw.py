@@ -44,6 +44,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from datetime import datetime, timedelta
@@ -596,6 +597,94 @@ def scan_is_exhausted(results: int, provider_failures: int) -> bool:
     return (provider_failures / attempted) > MAX_PROVIDER_FAILURE_RATIO
 
 
+# The leap POST budget is 3610s (TimeoutStartSec=3900). 70s covers a 60s
+# Retry-After, the governor default when the header is missing. One wait
+# per ticker overlaps across the worker pool, so a minute-scale embargo on
+# a 518-name largecaps scan stays inside that budget. A longer embargo is
+# the daily reset and must still fail the oneshot.
+LEAP_ADMISSION_WAIT_S = 70.0
+_LEAP_ADMISSION_POLL_S = 8.0
+_ADMISSION_BUSY_MARKER = "admission is busy"
+
+
+def _governor_embargo_remaining() -> Optional[float]:
+    """Seconds until the shared UW embargo lifts. None when the ledger is unreadable."""
+    try:
+        from utils import uw_governor
+        snap = uw_governor.snapshot(None)
+    except Exception:
+        return None
+    if not isinstance(snap, dict):
+        return None
+    embargo = snap.get("embargo_until")
+    if isinstance(embargo, bool) or not isinstance(embargo, (int, float)):
+        return None
+    remaining = float(embargo) - time.time()
+    if remaining != remaining:  # NaN
+        return None
+    return max(0.0, remaining)
+
+
+def _admission_retry_delay(exc: BaseException) -> Optional[float]:
+    """How long to wait before one more ticker scan, or None to fail now.
+
+    Only the governor's short "admission is busy" window is worth waiting
+    out. Quota exhaustion and any other provider error stay a hard miss.
+    """
+    if not isinstance(exc, UWRateLimitError):
+        return None
+    message = str(exc).lower()
+    if _ADMISSION_BUSY_MARKER not in message:
+        return None
+    if (
+        "daily request limit" in message
+        or "quota is exhausted" in message
+        or "budget is reserved" in message
+    ):
+        return None
+    remaining = _governor_embargo_remaining()
+    if remaining is None:
+        return _LEAP_ADMISSION_POLL_S
+    if remaining > LEAP_ADMISSION_WAIT_S:
+        return None
+    return remaining
+
+
+def _scan_ticker_after_admission(
+    ticker: str,
+    min_gap: float,
+    client: Optional[UWClient],
+    *,
+    quiet: bool,
+    ib: Any,
+) -> Optional[ScanResult]:
+    """Scan one ticker, waiting once for a short admission embargo.
+
+    The client's own wait is 5s. A 60s Retry-After still raises
+    UWRateLimitError before a row is reserved, and scan_universe counted
+    that as a provider failure. One sleep until the embargo lifts, then
+    one retry, fits under the 3610s curl budget when the waits overlap.
+    A second busy reply still raises.
+    """
+    waited = False
+    while True:
+        try:
+            return scan_ticker(ticker, min_gap, client, quiet=quiet, ib=ib)
+        except UWRateLimitError as exc:
+            if waited:
+                raise
+            delay = _admission_retry_delay(exc)
+            if delay is None:
+                raise
+            waited = True
+            if delay > 0:
+                print(
+                    f"  {ticker}: UW admission busy; retrying in {delay:.0f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+
+
 def scan_universe(
     tickers: List[str],
     min_gap: float,
@@ -620,7 +709,14 @@ def scan_universe(
         with UWClient(admission_timeout=120) as uw:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
-                    pool.submit(scan_ticker, ticker, min_gap, uw, quiet=quiet, ib=ib): ticker
+                    pool.submit(
+                        _scan_ticker_after_admission,
+                        ticker,
+                        min_gap,
+                        uw,
+                        quiet=quiet,
+                        ib=ib,
+                    ): ticker
                     for ticker in tickers
                 }
                 for future in as_completed(futures):
