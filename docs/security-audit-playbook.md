@@ -343,6 +343,18 @@ line here whenever you ship a security fix.**
   unit.
   (`cloud/tests/test_grok_responder_code.py`)
 
+- **One value tokenizer for credential assignments.** `scripts/credential_redaction.py`
+  tokenizes the value of a credential-named assignment ONCE and both the
+  scrubber and the detector read that span. A family of single-purpose regexes,
+  each modelling part of a quoted literal, is how six shapes published a
+  credential or its tail at the same time: a value spanning more than one
+  newline, an escaped quote before a triple-quote closer, a Python `r`/`b`/`u`/`f`
+  prefix, punctuation inside an unquoted value, password-only URL userinfo, and
+  a quoted cookie-pair value. A new shape is taught to the tokenizer, never to
+  a seventh pattern, and the scanner must stay linear and backtrack-free
+  because the publication gate runs it over text an outside contributor shapes.
+  (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not

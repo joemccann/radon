@@ -96,6 +96,110 @@ def _held_quantities(snapshot: dict) -> dict[tuple, float]:
     return held
 
 
+_RESTING_STATUSES = {
+    "PENDINGSUBMIT",
+    "PRESUBMITTED",
+    "SUBMITTED",
+    "APIPENDING",
+    "PENDINGCANCEL",
+}
+
+
+def _load_working_orders() -> Optional[list[dict]]:
+    """Today's working orders, or None when the book cannot be read."""
+    try:
+        from db.readers import read_open_orders
+
+        orders = read_open_orders()
+    except Exception:  # noqa: BLE001 - unreadable book keeps the refusal
+        return None
+    return orders if isinstance(orders, list) else None
+
+
+def _resting_changes(orders: Any) -> Optional[dict[tuple, tuple[float, float]]]:
+    """key -> ``(gross selling, gross buying)`` still resting per contract.
+
+    DS-2026-10-23-03: the close exemption read held quantities alone, so each
+    of several closes of one holding was individually only reducing. The
+    unfilled remainder of a working order has already laid claim to that size.
+    None when the book is unusable, which keeps the cap in force.
+
+    The two directions are kept GROSS and separate. Summing them into one
+    signed change let a working OPEN cancel a working close's reservation: a
+    resting sell of ten and a resting buy of ten netted to zero against ten
+    held contracts, the buy need never fill, and a second sell of ten was
+    exempted again.
+    """
+    if not isinstance(orders, list):
+        return None
+    try:
+        from order_limits import _working_order_shape
+    except ImportError:  # pragma: no cover - flat vs package import
+        from scripts.order_limits import _working_order_shape  # type: ignore[no-redef]
+
+    resting: dict[tuple, tuple[float, float]] = {}
+    for order in orders:
+        if not isinstance(order, dict):
+            return None
+        status = str(order.get("status") or "").upper().replace(" ", "")
+        if status and status not in _RESTING_STATUSES:
+            continue
+        remaining = _finite(order.get("remaining"))
+        if remaining is None:
+            total = _finite(order.get("totalQuantity")) or _finite(order.get("quantity"))
+            filled = _finite(order.get("filled")) or 0.0
+            remaining = None if total is None else total - filled
+        if remaining is None:
+            return None
+        if remaining <= 0:
+            continue
+
+        contract = order.get("contract")
+        contract = contract if isinstance(contract, dict) else {}
+        order_type, legs = _working_order_shape(order)
+        params = {
+            "type": order_type,
+            "symbol": contract.get("symbol") or order.get("underlying") or "",
+            "action": order.get("action"),
+            "quantity": remaining,
+            "strike": contract.get("strike"),
+            "right": contract.get("right"),
+            "expiry": contract.get("expiry"),
+        }
+        if legs is not None:
+            params["legs"] = legs
+        order_changes = _order_legs(params)
+        if order_changes is None:
+            # A working order whose effect cannot be measured must not be
+            # treated as reserving nothing.
+            return None
+        for key, change in order_changes:
+            if _finite(change) is None:
+                return None
+            selling, buying = resting.get(key, (0.0, 0.0))
+            if change < 0:
+                selling += change
+            else:
+                buying += change
+            resting[key] = (selling, buying)
+    return resting
+
+
+def _available_position(position: float, resting: tuple[float, float]) -> float:
+    """``position`` less the part a resting order has already claimed.
+
+    Only the opposing side counts, at its GROSS size: a resting open may never
+    fill, so it neither creates closeable size nor releases what a resting
+    close already reserved.
+    """
+    selling, buying = resting
+    if position > 0:
+        return max(position + selling, 0.0)
+    if position < 0:
+        return min(position + buying, 0.0)
+    return position
+
+
 def _order_legs(params: dict) -> Optional[list[tuple[tuple, float]]]:
     """[(key, signed quantity change)] for the order; None when unmatchable."""
     symbol = str(params.get("symbol") or "").upper()
@@ -133,6 +237,7 @@ def fresh_reducing_close(
     params: dict,
     snapshot: Optional[dict],
     now: datetime,
+    working_orders: Any = ...,
 ) -> bool:
     """True when the order only reduces holdings on a snapshot still in the 15-minute window.
 
@@ -143,7 +248,9 @@ def fresh_reducing_close(
     A stale book must not waive the cap, because the position may already be
     gone and the same bytes would open the short. A client flag is not proof.
     """
-    if not is_close_out(params, snapshot) or not isinstance(snapshot, dict):
+    if not is_close_out(params, snapshot, working_orders=working_orders) or not isinstance(
+        snapshot, dict
+    ):
         return False
     synced = _parse_ts(snapshot.get("last_sync"))
     age = (now - synced).total_seconds() if synced else None
@@ -152,12 +259,24 @@ def fresh_reducing_close(
     return True
 
 
-def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
-    """True when the combined delta per contract reduces holdings without a flip."""
+def is_close_out(
+    params: dict, snapshot: Optional[dict], working_orders: Any = ...
+) -> bool:
+    """True when the combined delta per contract reduces holdings without a flip.
+
+    The holding is measured net of what working orders have already claimed
+    (DS-2026-10-23-03). ``working_orders`` defaults to a read of today's book;
+    pass a list to supply it, and a book that cannot be read is not a waiver.
+    """
     if not isinstance(snapshot, dict):
         return False
     legs = _order_legs(params)
     if not legs:
+        return False
+    if working_orders is ...:
+        working_orders = _load_working_orders()
+    resting = _resting_changes(working_orders)
+    if resting is None:
         return False
     held = _held_quantities(snapshot)
     changes: dict[tuple, float] = {}
@@ -168,7 +287,7 @@ def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
     for key, change in changes.items():
         if _finite(change) is None:
             return False
-        position = held.get(key, 0.0)
+        position = _available_position(held.get(key, 0.0), resting.get(key, (0.0, 0.0)))
         if position == 0 or change == 0 or (position > 0) == (change > 0):
             return False
         if abs(change) > abs(position) + 1e-9:
@@ -224,10 +343,17 @@ def order_max_loss(params: dict) -> Optional[float]:
                 return None
             # A SELL BAG reverses each leg's execution direction. Keep the
             # envelope and price intact so the premium sign is still correct.
-            params = {**params, "legs": [
+            # `combo_max_loss` performs this reversal ITSELF from the envelope,
+            # so it keeps the ORIGINAL params: handing it the already-reversed
+            # legs reversed them twice, and a SELL BAG of BUY call legs (short
+            # calls at IB) reached the margin proxy as all-long calls and
+            # priced at zero, which both Gate-3 guards then consumed.
+            as_executed = {**params, "legs": [
                 {**leg, "action": "BUY" if str(leg.get("action") or "").upper().startswith("SELL") else "SELL"}
                 for leg in legs
             ]}
+        else:
+            as_executed = params
         quantity = _finite(params.get("quantity"))
         # Stop-market transmits stopPrice only. Price the envelope as paying
         # the worse supplied price so a discarded credit limit cannot shrink
@@ -243,7 +369,9 @@ def order_max_loss(params: dict) -> Optional[float]:
                 return None
         sell = str(params.get("action") or "").upper().startswith("SELL")
         expiry_sell = False if stop_market else sell
-        expiry_loss = _combo_expiry_loss(params.get("legs"), quantity, price, expiry_sell)
+        expiry_loss = _combo_expiry_loss(
+            as_executed.get("legs"), quantity, price, expiry_sell
+        )
         if expiry_loss is not None:
             return expiry_loss
         loss = _finite(combo_max_loss(params))
@@ -309,13 +437,14 @@ def check_bankroll_admission(
     *,
     snapshot: Any = ...,
     now: Optional[datetime] = None,
+    working_orders: Any = ...,
 ) -> Optional[dict[str, Any]]:
     """Return {"code", "message"} on refusal, None when admitted."""
     if snapshot is ...:
         snapshot = _load_latest_snapshot()
     now = now or _utcnow()
 
-    if is_close_out(params, snapshot):
+    if is_close_out(params, snapshot, working_orders=working_orders):
         return None
 
     if not isinstance(snapshot, dict):
