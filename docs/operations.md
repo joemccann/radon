@@ -341,7 +341,9 @@ service becomes inactive, handling incomplete writes and deferred batches
 without burst-triggered starts. Visibility also depends on publisher runtime,
 timer accuracy and deferred batches.
 The legacy `.path` artifact remains installed for rollback but is stopped and
-disabled; fresh setup and upgrades do not enable it. A protected index avoids
+disabled; fresh setup and upgrades do not enable it. If systemd has already
+garbage-collected it, the backfill tolerates `reset-failed` failing on the
+absent `.path` and gates only on the `.service`. A protected index avoids
 rereading unchanged image bytes. Each batch reserves at most 256 MiB for attempted
 source and destination reads, including failed reads and one-byte growth sentinels; each image
 at most 80 MiB, and source enumeration stops at 20,000 entries. Initially oversized files are rejected before opening. The producer in
