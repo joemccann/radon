@@ -63,6 +63,17 @@ Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.
 
 ## Subprocess Pattern (`run_script`)
 
+`GET /informed-flow/{ticker}` serves `data/informed_flow/{TICKER}.json` when
+`scan_time` is younger than 30 minutes (the open-hours window in
+`web/lib/serviceHealthWindows.ts`) and only then spawns
+`fetch_informed_flow.py`. Congress / insider / 13F do not justify a new
+interpreter on every 10-minute panel poll (PERF-023). Stale or unstamped
+cache still goes live; a failed live fetch still falls back to disk.
+
+`GET /short-availability/{ticker}` overlaps the IB tick-46/89 probe and the
+UW `get_short_data` fee overlay (PERF-024). Merge after both complete;
+source priority stays IB then UW.
+
 `scripts/api/subprocess.py` exposes `run_script(name, args, timeout)` and `run_script_raw(...)`:
 
 - `run_script`: spawns `<script>`, expects JSON on stdout, returns parsed dict. `_find_json_start()` accepts both `{` and `[` as JSON starts (fixed for the leap-scanner array case).

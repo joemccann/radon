@@ -126,7 +126,9 @@ def test_short_availability_priority_freshness_and_errors_http(bounded, monkeypa
         "source": source, "missing": source == "none",
         "as_of": "2026-10-03T11:59:00Z" if source == "uw" else "2026-10-03T12:00:00+00:00",
     }
-    assert calls == [("ib", "bounded-client", "AAPL"), ("uw", "AAPL")]
+    assert ("ib", "bounded-client", "AAPL") in calls
+    assert ("uw", "AAPL") in calls
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("ticker", ["AAPL", "invalid!"])
