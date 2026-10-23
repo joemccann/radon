@@ -1,7 +1,7 @@
 """Persistent (ticker, date) dark-pool print cache.
 
 Closed-session dark-pool prints are IMMUTABLE — once a trading day closes its
-prints never change. But the scheduled data-refresh (``run_data_refresh.sh``,
+prints never change. But the scheduled data-refresh (radon-refresh.timer,
 ~28 runs/day) re-fetched ``lookback_days`` of dark-pool data per ticker on every
 cycle, paying Unusual Whales ~28x/day for history that was identical each time.
 The only existing cache was a 60s in-memory dedup (``utils.uw_cache``) that dies

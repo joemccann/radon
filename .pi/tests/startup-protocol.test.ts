@@ -86,12 +86,12 @@ test("should show startup banner with process count", () => {
   const ui = new MockUI();
   
   // Simulate startup banner
-  const processes = ["IB Reconciliation", "Monitor Daemon", "Free Trade Analysis"];
+  const processes = ["IB Reconciliation", "Free Trade Analysis"];
   const banner = `🚀 Startup: Running ${processes.length} checks...`;
   ui.notify(banner, "info");
   
   assert.ok(ui.hasMessage("🚀 Startup:"), "Should show startup banner");
-  assert.ok(ui.hasMessage("3 checks"), "Should show process count");
+  assert.ok(ui.hasMessage("2 checks"), "Should show process count");
 });
 
 test("should show completion status for each process", () => {
@@ -101,7 +101,6 @@ test("should show completion status for each process", () => {
   const expectedProcesses = [
     { name: "Docs loaded", status: "✓" },
     { name: "IB reconciliation", status: "✓" },
-    { name: "Monitor daemon", status: "✓" },
     { name: "Free trade analysis", status: "✓" },
   ];
   
@@ -110,8 +109,8 @@ test("should show completion status for each process", () => {
     ui.notify(`[${i + 1}/${expectedProcesses.length}] ${proc.status} ${proc.name}`, "info");
   });
   
-  assert.ok(ui.hasMessage("[1/4]"), "Should show numbered progress");
-  assert.ok(ui.hasMessage("[4/4]"), "Should show final step");
+  assert.ok(ui.hasMessage("[1/3]"), "Should show numbered progress");
+  assert.ok(ui.hasMessage("[3/3]"), "Should show final step");
 });
 
 test("should show final summary when all processes complete", () => {
@@ -179,17 +178,16 @@ test("should track async process completion", async () => {
   }
   
   // Test usage
-  const tracker = new StartupTracker(ui, ["docs", "ib", "daemon", "free_trade"]);
+  const tracker = new StartupTracker(ui, ["docs", "ib", "free_trade"]);
   
   assert.ok(ui.hasMessage("🚀 Startup:"), "Should show startup banner");
   
   // Simulate async completions
   tracker.complete("docs", "success", "Docs loaded");
   tracker.complete("ib", "success", "IB trades in sync");
-  tracker.complete("daemon", "success", "Monitor daemon running");
   tracker.complete("free_trade", "success", "No free trade opportunities");
   
-  assert.ok(ui.hasMessage("[4/4]"), "Should show all processes complete");
+  assert.ok(ui.hasMessage("[3/3]"), "Should show all processes complete");
   assert.ok(ui.hasMessage("✅ Startup complete"), "Should show final summary");
 });
 
@@ -227,11 +225,11 @@ test("StartupTracker should immediately notify with check count", async () => {
   const { StartupTracker } = await import("../extensions/startup-protocol.ts");
   const ui = new MockUI();
   
-  new StartupTracker(ui, ["docs", "ib", "daemon"]);
+  new StartupTracker(ui, ["docs", "ib"]);
   
   // Immediate notification with check count
   assert.strictEqual(ui.notifications.length, 1, "Should notify immediately with check count");
-  assert.ok(ui.hasMessage("🚀 Startup: Running 3 checks..."), "Should show check count");
+  assert.ok(ui.hasMessage("🚀 Startup: Running 2 checks..."), "Should show check count");
 });
 
 test("StartupTracker.complete should batch progress into final notification", async () => {

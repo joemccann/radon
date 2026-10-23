@@ -1,103 +1,27 @@
 #!/usr/bin/env bash
-# scripts/dev — Radon dev-stack launcher with optional --only <service> filter.
-#
-# Default: starts all four services (next, ib, api, scraper). With --only NAME,
-# concurrently hides the output of every service except NAME — the hidden
-# services keep running, only their log lines are suppressed.
-#
-# Profile RADON_DEV_PROFILE=cloud-thin (set by scripts/cloud.sh): laptop runs
-# only Next.js. FastAPI / IB relay / newsfeed scraper run on Hetzner; the
-# laptop reaches them at $RADON_API_URL / $IB_REALTIME_WS_URL over Tailscale.
-#
-# Usage:
-#   npm run dev                       # all four streams (default)
-#   npm run dev -- --only api         # show only [api] lines
-#   npm run dev -- --only ib          # show only [ib] lines
-#   npm run dev -- --only next        # show only [next] lines
-#   npm run dev -- --only scraper     # show only [scraper] lines
+# scripts/dev - laptop runs only Next.js attached to the VPS; launched by
+# scripts/cloud.sh, which sets RADON_DEV_PROFILE=cloud-thin and the API /
+# relay URLs. FastAPI, the IB relay and the collectors run on Hetzner.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ALL_NAMES=(next ib api scraper headlines)
-ONLY=""
-PROFILE="${RADON_DEV_PROFILE:-full}"
-
-usage() {
-  cat <<EOF
-Usage: npm run dev [-- --only <next|ib|api|scraper|headlines>]
-
-  npm run dev                       Run all four services with full logs.
-  npm run dev -- --only <name>      Show only that service's logs.
-                                    Other three keep running silently.
-
-  RADON_DEV_PROFILE=cloud-thin      Run only Next.js; reach FastAPI / IB relay
-                                    / scraper on Hetzner via Tailscale. Set by
-                                    scripts/cloud.sh.
-EOF
-}
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --only)
-      ONLY="${2:-}"
-      shift 2 || true
-      ;;
-    --only=*)
-      ONLY="${1#--only=}"
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "[dev] unknown arg: $1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-done
-
-HIDE_ARGS=()
-if [[ -n "$ONLY" ]]; then
-  valid=0
-  for n in "${ALL_NAMES[@]}"; do
-    [[ "$n" == "$ONLY" ]] && valid=1
-  done
-  if [[ $valid -eq 0 ]]; then
-    echo "[dev] --only must be one of: ${ALL_NAMES[*]} (got: '$ONLY')" >&2
-    exit 2
-  fi
-  hidden=()
-  for n in "${ALL_NAMES[@]}"; do
-    [[ "$n" == "$ONLY" ]] || hidden+=("$n")
-  done
-  IFS=, HIDE_ARGS=(--hide "${hidden[*]}")
-  unset IFS
-  echo "[dev] showing only [$ONLY] — other services still running"
-fi
+PROFILE="${RADON_DEV_PROFILE:-cloud-thin}"
 
 cd "$PROJECT_ROOT/web"
 
 if [[ "$PROFILE" == "cloud-thin" ]]; then
-  if [[ -n "$ONLY" && "$ONLY" != "next" ]]; then
-    echo "[dev] cloud-thin profile only runs next; ignoring --only=$ONLY" >&2
-  fi
-  echo "[dev] profile=cloud-thin — laptop = Next.js only"
+  echo "[dev] profile=cloud-thin - laptop = Next.js only"
   echo "[dev]   RADON_API_URL=${RADON_API_URL:-(unset, defaulting to localhost)}"
   echo "[dev]   IB_REALTIME_WS_URL=${IB_REALTIME_WS_URL:-(unset, defaulting to localhost)}"
   echo "[dev]   NEXT_PUBLIC_IB_REALTIME_WS_URL=${NEXT_PUBLIC_IB_REALTIME_WS_URL:-(unset)}"
+  echo "[dev]   HEADLINES_WS_URL=${HEADLINES_WS_URL:-(unset, defaulting to localhost)}"
+  echo "[dev]   NEXT_PUBLIC_HEADLINES_WS_URL=${NEXT_PUBLIC_HEADLINES_WS_URL:-(unset)}"
+  echo "[dev]   ALLOWED_USER_IDS must be set in web/.env or the operator routes 403"
   exec next dev
 fi
 
-exec npx concurrently "${HIDE_ARGS[@]}" \
-  -n next,ib,api,scraper,headlines \
-  -c cyan,yellow,green,magenta,white \
-  "next dev" \
-  "node ../scripts/ib_realtime_server.js" \
-  "python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts" \
-  "node ../scripts/newsfeed/index.js" \
-  "node ../scripts/mktnews/index.js --serve"
+echo "[dev] laptop runs only Next.js; unknown profile '$PROFILE' - use scripts/cloud.sh" >&2
+exit 2

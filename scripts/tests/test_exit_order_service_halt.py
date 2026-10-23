@@ -4,8 +4,8 @@
 `is_trading_halted()` nor `check_order_limits()` — the only order-placing
 module in the repo with neither guard. `ib_order_manage.py` states the
 contract as "every order-placing process on the host", and the halt is the
-operator's kill switch. The module is launchd-installable
-(`setup_exit_order_service.sh install`) and holds a reserved client id.
+operator's kill switch. The module runs under the FastAPI autonomous timers
+on the VPS and holds a reserved client id.
 
 The halt file is NEVER touched here: `trading_halt.HALT_FILE` is redirected to
 a tmp path, so the production kill switch is neither set nor cleared.

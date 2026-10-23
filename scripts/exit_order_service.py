@@ -337,7 +337,7 @@ def place_target_order(
     # R-351: this was the ONLY order-placing module in the repo carrying
     # neither guard, while `ib_order_manage.py` states the contract as "every
     # order-placing process on the host". The halt is the operator's kill
-    # switch and this module is launchd-installable with a reserved client id.
+    # switch and this module holds a reserved client id.
     # Both checks run BEFORE any contract qualification or client call, so a
     # halted host does not even open the socket.
     from trading_halt import get_halt_state, is_trading_halted

@@ -22,8 +22,6 @@ def _load_ib_client_module(module_name: str):
 def test_ib_client_default_host_reads_env():
     """After reloading ib_client with IB_GATEWAY_HOST set, DEFAULT_HOST must reflect it."""
     with patch.dict(os.environ, {"IB_GATEWAY_HOST": "test-cloud-host", "IB_GATEWAY_PORT": "9999"}):
-        # No-op load_dotenv so an on-disk .env.ib-mode (override=True) can't
-        # clobber the patched env — the sibling tests already do this.
         import dotenv
 
         with patch.object(dotenv, "load_dotenv", return_value=False):
@@ -60,50 +58,24 @@ def test_ib_client_loads_env_before_defaults_are_snapshotted():
             assert ib_client.DEFAULT_GATEWAY_PORT == 7777
 
 
-def test_ib_mode_overlay_wins_over_dotenv():
-    """When .env sets IB_GATEWAY_HOST one way and .env.ib-mode sets it another,
-    the .env.ib-mode overlay (loaded with override=True) must win."""
+def test_ib_client_loads_only_dotenv():
+    """ib_client reads the project .env once; no .env.ib-mode overlay exists."""
     with patch.dict(os.environ, {}, clear=True):
         import dotenv
 
         calls = []
 
         def fake_load_dotenv(path, *args, override=False, **kwargs):
-            path_str = str(path)
-            calls.append((path_str, override))
-            if path_str.endswith(".env"):
-                os.environ["IB_GATEWAY_HOST"] = "dotenv-host"
-                os.environ["IB_GATEWAY_PORT"] = "4001"
-            elif path_str.endswith(".env.ib-mode"):
-                if override or "IB_GATEWAY_HOST" not in os.environ:
-                    os.environ["IB_GATEWAY_HOST"] = "ibmode-host"
-            return True
-
-        with patch.object(dotenv, "load_dotenv", side_effect=fake_load_dotenv):
-            ib_client = _load_ib_client_module("tests._isolated_ib_client_overlay")
-            assert ib_client.DEFAULT_HOST == "ibmode-host"
-            # Loader must call .env first (no override), then .env.ib-mode (override=True)
-            env_calls = [c for c in calls if c[0].endswith(".env")]
-            mode_calls = [c for c in calls if c[0].endswith(".env.ib-mode")]
-            assert env_calls and not env_calls[0][1], "expected .env load with override=False"
-            assert mode_calls and mode_calls[0][1] is True, "expected .env.ib-mode load with override=True"
-
-
-def test_ib_mode_overlay_absent_falls_back_to_dotenv():
-    """When .env.ib-mode does not exist, ib_client must still see the .env values."""
-    with patch.dict(os.environ, {}, clear=True):
-        import dotenv
-
-        def fake_load_dotenv(path, *args, override=False, **kwargs):
-            path_str = str(path)
-            if path_str.endswith(".env.ib-mode"):
-                # Simulate dotenv's actual behavior when target file is missing
-                return False
+            calls.append((str(path), override))
             os.environ["IB_GATEWAY_HOST"] = "dotenv-only-host"
             os.environ["IB_GATEWAY_PORT"] = "4321"
             return True
 
         with patch.object(dotenv, "load_dotenv", side_effect=fake_load_dotenv):
-            ib_client = _load_ib_client_module("tests._isolated_ib_client_no_overlay")
+            ib_client = _load_ib_client_module("tests._isolated_ib_client_only_dotenv")
+            assert len(calls) == 1, calls
+            path, override = calls[0]
+            assert path.endswith(".env") and not path.endswith(".env.ib-mode")
+            assert not override
             assert ib_client.DEFAULT_HOST == "dotenv-only-host"
             assert ib_client.DEFAULT_GATEWAY_PORT == 4321

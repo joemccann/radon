@@ -102,7 +102,7 @@ echo "--- also dumping repo docker/caddy/Caddyfile for diff ---"
 cat /home/radon/radon-cloud/docker/caddy/Caddyfile 2>/dev/null
 
 sec "ENV FILES — surface (values redacted for secrets)"
-for f in /home/radon/radon-cloud/.env /home/radon/radon-cloud/.env.ib-mode /home/radon/radon-cloud/web/.env; do
+for f in /home/radon/radon-cloud/.env /home/radon/radon-cloud/web/.env; do
   echo "----- $f -----"
   [ -f "$f" ] && redact < "$f" || echo "(absent)"
 done
@@ -119,7 +119,7 @@ echo "media.radon.run -> $(getent hosts media.radon.run 2>/dev/null | awk '{prin
 echo "beta.radon.run -> $(getent hosts beta.radon.run 2>/dev/null | awk '{print $1}' || echo 'NXDOMAIN (expected)')"
 
 sec "CLIENT-ID usage hints (grep configs)"
-grep -rhniE 'client_id|clientId|CLIENT_ID' /home/radon/radon-cloud/.env /home/radon/radon-cloud/.env.ib-mode 2>/dev/null | redact | head
+grep -rhniE 'client_id|clientId|CLIENT_ID' /home/radon/radon-cloud/.env 2>/dev/null | redact | head
 
 sec "CAPTURE COMPLETE"
 date -u +"%Y-%m-%dT%H:%M:%SZ"

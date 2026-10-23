@@ -71,7 +71,7 @@ Every decision must satisfy ALL THREE. Any fails → do not trade.
 ## Infrastructure
 
 - **Clients:** `IBClient`, `UWClient`, `MenthorQClient` (in `scripts/clients/`)
-- **Execution:** `ib_execute.py` (unified order + fill monitor + logging), exit order service, IB Gateway (Docker/cloud/launchd)
+- **Execution:** `ib_execute.py` (unified order + fill monitor + logging), exit order service, IB Gateway (broker VPS, IB_GATEWAY_MODE=cloud)
 - **Monitoring:** Radon Terminal (Next.js), monitor daemon, CRI scan service (30min), portfolio/stress-test reports
 - **Data integrity:** Atomic SHA-256 JSON writes (`atomic_io.py`), incremental sync, IB = source of truth
 - **Position classification:** `ib_sync.py` auto-detects covered calls, verticals, synthetics, risk reversals, straddles, all-long combos. Unrecognized → "complex" → undefined risk bucket

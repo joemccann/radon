@@ -19,19 +19,15 @@ bun install
 cp .env.example .env
 # Edit .env with your API keys
 
-# 3. Start everything (from repo root, preferred: ../scripts/cloud.sh)
+# 3. Start Next.js attached to the VPS (from repo root): ../scripts/cloud.sh
 bun run dev
 
 # 4. Open http://localhost:3000
 ```
 
-The `bun run dev` command starts four services:
-- Next.js dev server (port 3000)
-- IB real-time price server (port 8765)
-- FastAPI server (port 8321) — Python script execution, IB Gateway auto-restart
-- Market Ear newsfeed scraper (no port; polls `themarketear.com/newsfeed` every 120s via chrome-cdp)
+`bun run dev` starts only the Next.js dev server (port 3000). FastAPI (`radon-app:8321`), the IB relay (`wss://app.radon.run/ws`), the headlines hub (`wss://app.radon.run/ws-headlines`) and the newsfeed scraper run on the VPS; `scripts/cloud.sh` exports `RADON_API_URL`, `IB_REALTIME_WS_URL`, `NEXT_PUBLIC_IB_REALTIME_WS_URL`, `HEADLINES_WS_URL`, `NEXT_PUBLIC_HEADLINES_WS_URL`.
 
-**Authentication on localhost.** Clerk auth auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`, so `bun run dev` never hits the sign-in wall. `next build && next start` (production builds) still enforce Clerk. See [Authentication](#authentication) for details.
+**Authentication on localhost.** Clerk is enforced on every host; sign in with the operator account and put its id in `ALLOWED_USER_IDS` in `web/.env`. `RADON_AUTHLESS_TEST=1` is for Playwright only. See [Authentication](#authentication) for details.
 
 **Note:** Frontend data polling automatically respects market hours. During CLOSED market (weekends, holidays, overnight), all polls stop. During regular hours (9:30 AM - 4:00 PM ET) polling is most frequent. See [Market-Hours Polling](#market-hours-polling) for details.
 
@@ -321,17 +317,14 @@ python3.13 ../scripts/test_ib_realtime.py --ws-only   # WebSocket only
 ## Development
 
 ```bash
-# Start everything (Next.js + IB WS relay + FastAPI)
+# Next.js dev server; use ../scripts/cloud.sh for the VPS env
 bun run dev
 
 # Start Next.js only (no real-time prices, no FastAPI)
 bun run dev:next
 
-# Start IB price server only
-bun run dev:prices
-
 # Health check (FastAPI + IB Gateway status)
-curl http://localhost:8321/health
+curl http://radon-app:8321/health/lite
 
 # Build for production
 bun run build

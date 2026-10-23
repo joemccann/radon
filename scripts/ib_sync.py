@@ -38,7 +38,6 @@ try:
     # Project-level .env first, then the IB-mode overlay, then web/.env which
     # is where TURSO_DB_URL / TURSO_AUTH_TOKEN actually live on Hetzner.
     load_dotenv(_PROJECT_DIR / ".env")
-    load_dotenv(_PROJECT_DIR / ".env.ib-mode")
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass

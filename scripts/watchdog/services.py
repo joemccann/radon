@@ -478,8 +478,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "equibles-13f": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-ats-venue-share": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-cot-positioning": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
-    # event-odds — laptop launchd 3x weekday, holiday-aware. Windows
-    # match catalysts (7h open / 4d closed). Polymarket only — no IB.
+    # event-odds — fetch_event_odds.py via run_event_odds.sh (no in-repo VPS
+    # timer as of 2026-10-23; see open question on its scheduler), holiday-aware.
+    # Windows match catalysts (7h open / 4d closed). Polymarket only — no IB.
     "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # subscription-tokens — agent-CLI subscription credential vault + refresh
     # (scripts/subscription_tokens via radon-subscription-tokens.timer, every
