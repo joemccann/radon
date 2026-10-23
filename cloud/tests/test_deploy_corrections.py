@@ -3036,12 +3036,74 @@ with Path({str(call_log)!r}).open("a", encoding="utf-8") as log:
         materialize_calls = [c for c in calls if any(a.endswith("materialize_fastembed_pillow13.py") for a in c["argv"])]
         assert len(materialize_calls) == 1, calls
 
-    def test_install_target_python_env_installs_from_the_release_dir(self) -> None:
-        """The offline install re-reads the same file: requirement, so it runs
-        from the release dir too."""
-        body = function_body(DEPLOY.read_text(encoding="utf-8"), "install_target_python_env")
-        install_at = body.index("pip install --no-index")
-        assert 'cd "$release_dir"' in body[:install_at]
+    def test_install_target_python_env_installs_from_the_release_dir(self, tmp_path: Path) -> None:
+        """The offline install re-reads the same file: requirement, so pip's
+        working directory must be the release dir. A comment that contains
+        cd "$release_dir" does not count."""
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        call_log = tmp_path / "python-calls.jsonl"
+        venv_python = (
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            f"with Path({str(call_log)!r}).open('a', encoding='utf-8') as log:\n"
+            "    log.write(json.dumps({'cwd': os.getcwd(), 'argv': sys.argv[1:]}) + '\\n')\n"
+            "raise SystemExit(0)\n"
+        )
+        _write_executable(
+            fake_bin / "python3.13",
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1:3] == ['-m', 'venv']:\n"
+            "    dest = Path(sys.argv[3]) / 'bin'\n"
+            "    dest.mkdir(parents=True)\n"
+            "    python = dest / 'python'\n"
+            f"    python.write_text({venv_python!r}, encoding='utf-8')\n"
+            "    python.chmod(0o755)\n"
+            "    raise SystemExit(0)\n"
+            "raise SystemExit('unexpected system python args: ' + ' '.join(sys.argv[1:]))\n",
+        )
+        _write_executable(
+            fake_bin / "sha256sum",
+            f"#!{sys.executable}\nprint('deadbeef' + '0' * 56)\n",
+        )
+        live = tmp_path / "live"
+        release = tmp_path / "release"
+        backup = tmp_path / "backup"
+        (backup / ".venv").mkdir(parents=True)
+        (release / "scripts").mkdir(parents=True)
+        (release / "requirements.txt").write_text(
+            "fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl\n",
+            encoding="utf-8",
+        )
+        (release / "scripts" / "requirements-api.txt").write_text(
+            "uvicorn==0.1\n", encoding="utf-8"
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["RADON_DIR"] = str(live)
+        env["VENV_DIR"] = str(live / ".venv")
+        env["RADON_SHA256SUM"] = str(fake_bin / "sha256sum")
+        env["RADON_SYSTEM_PYTHON"] = str(fake_bin / "python3.13")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"source {DEPLOY!s}; RELEASE_BACKUP_DIR={backup!s}; "
+                f"install_target_python_env {release!s}",
+            ],
+            env=env,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+        pip_calls = [c for c in calls if c["argv"][:3] == ["-m", "pip", "install"]]
+        assert len(pip_calls) == 1, calls
+        assert Path(pip_calls[0]["cwd"]).resolve() == release.resolve()
 
     def test_validate_release_artifacts_accepts_live_reuse_marker(
         self, tmp_path: Path
