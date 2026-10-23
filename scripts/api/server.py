@@ -4864,6 +4864,26 @@ async def earnings_get(
 # ── Informed flow (F4 — congress / insider / institutional) ─────────
 
 _INFORMED_FLOW_DIR = DATA_DIR / "informed_flow"
+# Congress / insider / 13F do not move intra-minute. Match the open-hours
+# freshness window in web/lib/serviceHealthWindows.ts so a 10-minute panel
+# poll does not spawn fetch_informed_flow.py (PERF-023).
+_INFORMED_FLOW_CACHE_TTL_S = 30 * 60
+
+
+def _cache_age_seconds(payload: dict) -> Optional[float]:
+    stamp = payload.get("scan_time")
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    if age < 0:
+        return None
+    return age
 
 
 @app.get("/informed-flow/{ticker}")
@@ -4874,11 +4894,19 @@ async def informed_flow_get(ticker: str):
     fetch with per-source failure tolerance), persists the per-ticker cache,
     and returns the normalised payload. 200 + ``missing`` flag for a
     structurally empty surface (never 4xx for a legitimate empty state); the
-    on-disk cache stays the fallback when the live fetch fails.
+    on-disk cache stays the fallback when the live fetch fails. A cache whose
+    ``scan_time`` is inside ``_INFORMED_FLOW_CACHE_TTL_S`` is served without a
+    spawn (PERF-023).
     """
     upper = ticker.upper()
     if not _TICKER_RE.match(upper):
         raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    cached = _read_cache(_INFORMED_FLOW_DIR / f"{upper}.json")
+    if isinstance(cached, dict):
+        age = _cache_age_seconds(cached)
+        if age is not None and age < _INFORMED_FLOW_CACHE_TTL_S:
+            return cached
 
     result = await run_script("fetch_informed_flow.py", [upper, "--json"], timeout=60)
     if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
