@@ -12,6 +12,7 @@ import pytest
 import requests
 
 from clients.menthorq_dashboard_client import (
+    _BROWSER_USER_AGENT,
     MenthorQDashboardAuthError,
     MenthorQDashboardClient,
     MenthorQDashboardPayloadError,
@@ -125,6 +126,22 @@ def test_fetch_uses_frequency_specific_url_and_bearer_header_without_caching():
     )
     assert session.calls[1]["url"].endswith("/gamma-levels/MU/eod")
     assert all(call["headers"]["Authorization"] == f"Bearer {token}" for call in session.calls)
+
+
+def test_data_requests_carry_browser_user_agent():
+    # 2026-10-14: cf.menthorq.io's WAF answers 403 "Automated clients are not
+    # allowed on this API." to python-requests' default UA; the 401/403 ->
+    # AuthError mapping then forced a re-login + embargo on every valid token.
+    session = _Session([_Response(_exposure_payload()), _Response(_levels_payload())])
+    client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)
+
+    client.fetch_exposure("MU", "eod")
+
+    assert len(session.calls) == 2
+    assert all(
+        call["headers"]["User-Agent"] == _BROWSER_USER_AGENT
+        for call in session.calls
+    )
 
 
 def test_fetch_targets_the_cf_api_host_the_dashboard_uses():
