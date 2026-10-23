@@ -166,6 +166,38 @@ describe("WriterFreshnessTable", () => {
     expect(row.textContent).not.toContain("{");
   });
 
+  it("surfaces a failing writer's own summary instead of the generic fallback", () => {
+    const message =
+      "menthorq dashboard session unavailable: dashboard session expired 2026-09-19T20:57:06+00:00";
+    render(
+      <WriterFreshnessTable
+        reachable
+        rows={[
+          {
+            service: "menthorq-session",
+            state: "error",
+            updated_at: new Date().toISOString(),
+            last_error: JSON.stringify({ message, days_remaining: -33 }),
+          },
+          {
+            service: "config-drift",
+            state: "error",
+            updated_at: new Date().toISOString(),
+            last_error: JSON.stringify({ message: "config drift: file-mismatch:caddyfile" }),
+            error_summary: "config drift: file-mismatch:caddyfile",
+          },
+        ]}
+      />,
+    );
+    const session = screen.getByTestId("writer-row-menthorq-session");
+    expect(session.textContent).toContain("menthorq dashboard session unavailable");
+    expect(session.textContent).not.toContain("Writer update failed");
+    expect(session.textContent).not.toContain("{");
+    const drift = screen.getByTestId("writer-row-config-drift");
+    expect(drift.textContent).toContain("config drift: file-mismatch:caddyfile");
+    expect(drift.textContent).not.toContain("Writer update failed");
+  });
+
   it("shows skeletons while loading", () => {
     render(<WriterFreshnessTable reachable={false} rows={[]} loading />);
     expect(screen.getByTestId("writer-freshness").querySelector(".admin-skeleton")).toBeTruthy();
