@@ -1316,3 +1316,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-562 | DONE | An all-long 40-lot combo STP at stop $50 with limit $0.01 floored the always-on loss cap and `kelly_guard` at $40 while `bankroll_guard.order_max_loss` was $200,000. `check_order_limits` returned None under a $100,000 cap (1 failed / 1 passed). `combo_debit_floor` now uses `effective_order_price` for STP. Focused cluster 176 passed. Delta Python 1,647 passed three times. Closing rounds: root pytest 17,319 passed / 54 failed / 10 skipped / 23 subtests each round, 0 added / 0 removed against `b7e0f6f0` (17,317 passed / 54 failed). Vitest 5 failed / 11,444 passed / 21 skipped each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 20s ceiling in 49.40s). Cloud 54 failed / 3,297 passed / 11 skipped each round, 0 added / 0 removed against `b7e0f6f0`. |
+
+## 2026-10-23
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-564 | DONE | A comment containing `cd "$release_dir"` left the old text search green while pip's cwd was the caller directory (1 failed on the new run). Restored subshell: the install and wheel cwd cases passed, and `cloud/tests/test_deploy_corrections.py` passed 158 with 3 skipped. Product source unchanged. |
+| T-563 | DONE | `test_a_split_banner_is_not_an_ignore_rule` failed on `59: '='`. The Node separator is a comment again. Gitignore rules and contract tests passed 13. Closing rounds: root pytest 17,391 passed / 54 failed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,444 passed / 21 skipped each round (five `next.config.mjs` imports over 5s). Cloud 54 failed / 3,310 passed / 11 skipped each round, 0 added / 0 removed against `19e25a1d` (54 failed / 3,310 passed / 11 skipped). |
