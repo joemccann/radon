@@ -469,7 +469,7 @@ def test_short_admission_embargo_is_retried_and_does_not_fail_the_oneshot(
 
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
 
     started = datetime.fromisoformat("2026-10-22T14:01:35+00:00")
@@ -537,7 +537,7 @@ def _admission_oneshot(
 
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
 
     frozen = 1_800_000_000.0
