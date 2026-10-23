@@ -2556,7 +2556,7 @@ class TestFrozenArtifacts:
             assert "npm install" not in body and "npm ci" not in body
             assert body.count("node_modules/.bin/playwright install chromium chromium-headless-shell") >= 2
         assert "ms-playwright" in build or "PLAYWRIGHT_BROWSERS_PATH" in build
-        assert 'BUN_VERSION="1.3.14"' in deploy_text
+        assert 'BUN_VERSION="1.4.4"' in deploy_text
         assert "bun --version" in build
         seed = function_body(deploy_text, "seed_staged_node_modules")
         assert "cmp -s" in seed
