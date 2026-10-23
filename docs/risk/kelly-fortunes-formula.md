@@ -309,6 +309,15 @@ for sizing/eval is unchanged.
   the number the server will check. Display, never enforcement (chokepoint
   rule in `web/CLAUDE.md`).
 
+- Close-out exemption: a close of a held position is exempt from this cap and
+  from the placement loss cap, and the holding is measured NET of the unfilled
+  remainder of today's working orders (`scripts/bankroll_guard.py`
+  `is_close_out`). Held quantity alone made every one of several closes of the
+  same holding individually reducing, and the surplus opened a short once more
+  than one filled. Only a resting change that opposes the holding reduces it,
+  and a working-order book that cannot be read is not a waiver
+  (`scripts/tests/test_close_exemption_reservation.py`).
+
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.
 
