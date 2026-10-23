@@ -9,7 +9,7 @@ TURSO_AUTH_TOKEN
 # (service_health data_read,data_add,data_update and service_health_events
 # data_add). Missing, or equal to TURSO_AUTH_TOKEN, fails publish and the
 # deploy keeps the previous derived file. Mint it into /etc/radon/env before
-# the publisher change merges or the next deploy stops:
+# the next deploy. A missing token stops that deploy:
 # turso db tokens create <DB> -p service_health:data_read,data_add,data_update -p service_health_events:data_add
 TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN
 # Isolated demo Turso. radon-demo-mirror.service carries an ExecStartPre that

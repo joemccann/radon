@@ -2666,3 +2666,53 @@ class TestDocumentation20261022:
         assert "/Users/" not in text
         assert "joemccann-mac-mini" not in text
 
+
+class TestDocumentation20261023:
+    """DOC-223..225 after audited-through b7e0f6f0."""
+
+    def test_stop_market_combo_uses_the_exact_expiry_payoff(self):
+        bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
+        fn = bankroll.split("def order_max_loss", 1)[1].split("\ndef ", 1)[0]
+        assert "expiry_sell = False if stop_market else sell" in fn
+        expiry_at = fn.index("_combo_expiry_loss")
+        floor_at = fn.index("return max(loss, abs(quantity * price) * 100.0)")
+        assert expiry_at < floor_at
+        text = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        gate3 = " ".join(
+            text.split("For a combo the Kelly guard", 1)[1]
+            .split("What this does NOT cover", 1)[0]
+            .split()
+        )
+        assert "skips the exact payoff" not in gate3
+        assert "forces the sell flag off" in gate3
+        assert "effective_order_price" in gate3
+        assert "discarded credit limit" in gate3
+
+    def test_subscription_keeper_rollout_is_not_waiting_on_a_merge(self):
+        blobs = [
+            (_ROOT / "docs/subscription-tokens.md").read_text(),
+            (_ROOT / "cloud/.env.example").read_text(),
+            (_ROOT / "cloud/config/required-env.txt").read_text(),
+        ]
+        for blob in blobs:
+            flat = " ".join(blob.split())
+            assert "before this change merges" not in flat
+            assert "before the publisher change merges" not in flat
+        doc = " ".join(blobs[0].split())
+        assert "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN" in doc
+        assert "next deploy stops" in doc
+
+    def test_responder_sandbox_names_the_live_secrets_file(self):
+        text = (_ROOT / "docs/grok-page-responder.md").read_text()
+        start = text.index("## Filesystem sandbox")
+        section = text[start:text.index("## Ticket states", start)]
+        assert "holds the 0600" not in section
+        assert "/etc/radon/env" in section
+        assert "retired" in section
+        unit = (_ROOT / "cloud/services/radon-grok-page-responder.service").read_text()
+        inaccessible = next(
+            line for line in unit.splitlines() if line.startswith("InaccessiblePaths=")
+        )
+        assert "/home/radon/radon-cloud" in inaccessible
+        assert "-/etc/radon/env" in inaccessible
+
