@@ -12,7 +12,8 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 
 
-def _run(tmp_path, *, start_rc=0, stop_rc=0, health='authenticated', busy=False, docker_rc=0):
+def _run(tmp_path, *, start_rc=0, stop_rc=0, health='authenticated', busy=False, docker_rc=0,
+         loaded_agents=()):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (tmp_path / 'web').mkdir()
@@ -44,7 +45,8 @@ exec(compile(sys.stdin.read(), 'cloud-preflight', 'exec'), {{'__name__': '__main
         bin_dir / 'ssh': ('ssh', f'echo "already running"; exit {start_rc}'),
         bin_dir / 'python3': ('probe', 'exit 0'),
         bin_dir / 'docker': ('docker', f'echo ib-gateway-ib-gateway-1; exit {docker_rc}'),
-        bin_dir / 'launchctl': ('launchctl', 'exit 0'),
+        bin_dir / 'launchctl': ('launchctl', 'case "$1" in list) printf "%s\\n" '
+                                + ' '.join(loaded_agents) + ';; esac; exit 0'),
         bin_dir / 'ifconfig': ('ifconfig', 'exit 0'),
         bin_dir / 'netstat': ('netstat', 'exit 0'),
         bin_dir / 'lsof': ('lsof', f'exit {0 if busy else 1}'),
@@ -180,3 +182,22 @@ def test_local_logout_children_are_bounded_and_failure_refuses(monkeypatch, phas
         exec(compile(code, 'cloud-local-logout', 'exec'), {})
     assert result.value.code == 1
     assert [kwargs['timeout'] for _, kwargs in calls] == ([10] if phase == 'inventory' else [10, 60])
+
+
+HETZNER_MODE_AGENTS = ['com.radon.cri-scan', 'com.radon.cta-sync', 'com.radon.data-refresh',
+                       'com.radon.exit-order-service', 'com.radon.monitor-daemon',
+                       'com.radon.vcg-refresh']
+
+
+def test_cloud_mode_boots_out_and_disables_laptop_agents(tmp_path):
+    """A bare ``launchctl unload`` is not durable: RunAtLoad / the next login
+    reloads the agent and the laptop monitor daemon races the VPS writer
+    (menthorq-session flip-flopped ok/error daily from the laptop's expired
+    cookie jar). Cloud mode must bootout AND disable every laptop agent."""
+    result, calls = _run(tmp_path, loaded_agents=['com.radon.monitor-daemon'])
+    assert result.returncode == 0, result.stderr
+    domain = f'gui/{os.getuid()}'
+    assert f'launchctl bootout {domain}/com.radon.monitor-daemon' in calls
+    for label in HETZNER_MODE_AGENTS:
+        assert f'launchctl disable {domain}/{label}' in calls
+    assert not any(c.startswith('launchctl unload') for c in calls)

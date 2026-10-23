@@ -12,7 +12,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 
 
-def _run(tmp_path, release_rc):
+def _run(tmp_path, release_rc, *, home=None):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (tmp_path / 'web').mkdir()
@@ -34,7 +34,8 @@ def _run(tmp_path, release_rc):
         path.write_text(f'#!/bin/sh\nprintf "%s\\n" "{name} $*" >> "{log}"\n{action}\n')
         path.chmod(0o755)
     result = subprocess.run(['bash', str(scripts / 'local.sh')],
-                            env={**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}'},
+                            env={**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+                                 **({'HOME': str(home)} if home else {})},
                             capture_output=True, text=True, timeout=10)
     return result, log.read_text().splitlines()
 
@@ -82,3 +83,21 @@ def test_broker_release_child_is_bounded_and_unknown_is_failure(monkeypatch, fau
     assert calls[0][0][-2:] == [
         'root@radon-broker', '/usr/local/bin/radon ib release --reason local-development',
     ]
+
+
+def test_local_mode_re_enables_agents_before_loading(tmp_path):
+    """cloud.sh disables the laptop agents durably; a disabled agent refuses a
+    plain ``launchctl load``, so local mode must enable each label first."""
+    home = tmp_path / 'home'
+    agents = home / 'Library' / 'LaunchAgents'
+    agents.mkdir(parents=True)
+    labels = ['com.radon.monitor-daemon', 'com.radon.cri-scan']
+    for label in labels:
+        (agents / f'{label}.plist').write_text('<plist/>')
+    result, calls = _run(tmp_path, 0, home=home)
+    assert result.returncode == 0, result.stderr
+    domain = f'gui/{os.getuid()}'
+    for label in labels:
+        enable = calls.index(f'launchctl enable {domain}/{label}')
+        load = calls.index(f'launchctl load {agents / f"{label}.plist"}')
+        assert enable < load

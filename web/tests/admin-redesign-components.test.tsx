@@ -113,6 +113,24 @@ describe("WriterFreshnessTable", () => {
     expect(screen.getByTestId("writer-row-knowledge-ingest").textContent).toContain("Writer update failed");
   });
 
+  it("surfaces the config-drift audit summary instead of the generic failure copy", () => {
+    const payload = JSON.stringify({
+      summary: "config drift: file-mismatch:caddyfile",
+      drift_count: 1,
+      drifts: [{ id: "file-mismatch:caddyfile", detail: "live vs repo: +0/-10 lines" }],
+      allowed_count: 4,
+      allowlisted_pending: ["not-installed:radon-knowledge-eval.*"],
+      known_untracked: [],
+      note: "",
+    });
+    render(<WriterFreshnessTable reachable rows={[
+      { service: "config-drift", state: "error", updated_at: new Date().toISOString(), last_error: payload },
+    ]} />);
+    const row = screen.getByTestId("writer-row-config-drift");
+    expect(row.textContent).toContain("config drift: file-mismatch:caddyfile");
+    expect(row.textContent).not.toContain("Writer update failed");
+  });
+
   it("labels on-demand writers neutrally without hiding errors or scheduled staleness", () => {
     render(<WriterFreshnessTable reachable rows={[
       { service: "analyst-ratings", state: "ok", updated_at: "2020-01-01T00:00:00Z" },
@@ -146,6 +164,38 @@ describe("WriterFreshnessTable", () => {
     const row = screen.getByTestId("writer-row-replica-watchdog");
     expect(row.textContent).toContain("wal conflicts 5m: 0");
     expect(row.textContent).not.toContain("{");
+  });
+
+  it("surfaces a failing writer's own summary instead of the generic fallback", () => {
+    const message =
+      "menthorq dashboard session unavailable: dashboard session expired 2026-09-19T20:57:06+00:00";
+    render(
+      <WriterFreshnessTable
+        reachable
+        rows={[
+          {
+            service: "menthorq-session",
+            state: "error",
+            updated_at: new Date().toISOString(),
+            last_error: JSON.stringify({ message, days_remaining: -33 }),
+          },
+          {
+            service: "config-drift",
+            state: "error",
+            updated_at: new Date().toISOString(),
+            last_error: JSON.stringify({ message: "config drift: file-mismatch:caddyfile" }),
+            error_summary: "config drift: file-mismatch:caddyfile",
+          },
+        ]}
+      />,
+    );
+    const session = screen.getByTestId("writer-row-menthorq-session");
+    expect(session.textContent).toContain("menthorq dashboard session unavailable");
+    expect(session.textContent).not.toContain("Writer update failed");
+    expect(session.textContent).not.toContain("{");
+    const drift = screen.getByTestId("writer-row-config-drift");
+    expect(drift.textContent).toContain("config drift: file-mismatch:caddyfile");
+    expect(drift.textContent).not.toContain("Writer update failed");
   });
 
   it("shows skeletons while loading", () => {

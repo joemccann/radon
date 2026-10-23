@@ -1217,7 +1217,9 @@ install_media_publication() {
     status=0
     /usr/bin/python3 -I /usr/local/lib/radon/media_publish.py || status=$?
     if (( status == 0 )); then
-      systemctl reset-failed radon-media-publish.service radon-media-publish.path || return 1
+      systemctl reset-failed radon-media-publish.service || return 1
+      # systemd unloads the disabled path unit, so its reset-failed is hygiene only.
+      systemctl reset-failed radon-media-publish.path 2>/dev/null || true
       systemctl enable --now radon-media-publish.timer
       return $?
     fi
