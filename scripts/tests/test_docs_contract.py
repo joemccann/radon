@@ -2684,7 +2684,7 @@ class TestDocumentation20261022:
 
 
 class TestDocumentation20261023:
-    """DOC-223 and DOC-224 after audited-through b7e0f6f0."""
+    """DOC-223..225 after audited-through b7e0f6f0."""
 
     def test_stop_market_combo_uses_the_exact_expiry_payoff(self):
         bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
@@ -2717,4 +2717,18 @@ class TestDocumentation20261023:
         doc = " ".join(blobs[0].split())
         assert "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN" in doc
         assert "next deploy stops" in doc
+
+    def test_responder_sandbox_names_the_live_secrets_file(self):
+        text = (_ROOT / "docs/grok-page-responder.md").read_text()
+        start = text.index("## Filesystem sandbox")
+        section = text[start:text.index("## Ticket states", start)]
+        assert "holds the 0600" not in section
+        assert "/etc/radon/env" in section
+        assert "retired" in section
+        unit = (_ROOT / "cloud/services/radon-grok-page-responder.service").read_text()
+        inaccessible = next(
+            line for line in unit.splitlines() if line.startswith("InaccessiblePaths=")
+        )
+        assert "/home/radon/radon-cloud" in inaccessible
+        assert "-/etc/radon/env" in inaccessible
 
