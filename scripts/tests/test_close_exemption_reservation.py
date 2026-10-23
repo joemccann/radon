@@ -241,3 +241,104 @@ class TestExemptionSites:
         )
         assert refusal is not None
         assert refusal["code"] == "BANKROLL_UNAVAILABLE"
+
+
+class TestReservationIsGross:
+    """A working OPEN must not cancel out a working close's reservation.
+
+    Rescan residual of DS-2026-10-23-03: the first fix summed every working
+    order into one signed change per contract, so a resting SELL ten and a
+    resting BUY ten netted to zero and a second SELL ten was exempted again.
+    The buy need never fill and can be cancelled, leaving twenty sells against
+    ten held contracts. Reserve the gross outstanding size on the reducing
+    side only.
+    """
+
+    def _order(self, action, quantity, perm_id):
+        order = _resting_close(quantity=quantity)
+        order["action"] = action
+        order["permId"] = perm_id
+        return order
+
+    def test_a_working_open_does_not_release_a_working_close(self):
+        book = [self._order("SELL", 10, 1), self._order("BUY", 10, 2)]
+        assert not bankroll_guard.is_close_out(
+            _close(), _snapshot(), working_orders=book
+        )
+
+    def test_gross_sells_are_reserved_for_a_long_holding(self):
+        book = [self._order("SELL", 4, 1), self._order("SELL", 3, 2)]
+        assert bankroll_guard.is_close_out(
+            _close(quantity=3), _snapshot(), working_orders=book
+        )
+        assert not bankroll_guard.is_close_out(
+            _close(quantity=4), _snapshot(), working_orders=book
+        )
+
+    def test_gross_buys_are_reserved_for_a_short_holding(self):
+        short = {
+            "ticker": "SPX",
+            "expiry": "2026-11-20",
+            "legs": [{"type": "Put", "strike": 5000.0, "direction": "SHORT",
+                      "contracts": 10}],
+        }
+        buy_to_close = {**_close(), "action": "BUY"}
+        book = [self._order("BUY", 10, 1), self._order("SELL", 10, 2)]
+        assert not bankroll_guard.is_close_out(
+            buy_to_close, _snapshot(positions=[short]), working_orders=book
+        )
+
+
+class TestSellEnvelopeFallbackRisk:
+    """Rescan finding: the margin-proxy fallback reversed the legs twice.
+
+    ``order_max_loss`` reverses a SELL envelope's legs, then handed those
+    reversed legs with the SELL envelope intact to ``combo_max_loss``, which
+    reverses a SELL envelope itself. A SELL BAG of BUY call legs executes as
+    short calls but reached the proxy as all-long calls, so Gate 3 and the
+    Kelly guard both saw zero risk.
+    """
+
+    def _short_call_envelope(self):
+        return {
+            "type": "combo",
+            "symbol": "SPX",
+            "action": "SELL",
+            "quantity": 10,
+            "limitPrice": 5.0,
+            "legs": [{"expiry": "20261218", "strike": 6000.0, "right": "C",
+                      "action": "BUY", "ratio": 1}],
+        }
+
+    def test_short_call_envelope_is_not_priced_at_zero(self):
+        params = self._short_call_envelope()
+        loss = bankroll_guard.order_max_loss(params)
+        assert loss is not None
+        assert loss == pytest.approx(order_limits.combo_max_loss(params))
+        assert loss > 1_000_000.0
+
+    def test_the_bankroll_cap_refuses_it(self):
+        refusal = _real_bankroll_admission(
+            self._short_call_envelope(),
+            snapshot={
+                "last_sync": (NOW - timedelta(minutes=1)).isoformat(),
+                "account_summary": {"net_liquidation": 100_000.0},
+                "positions": [],
+            },
+            now=NOW,
+        )
+        assert refusal is not None
+        assert refusal["code"] == "BANKROLL_CAP_EXCEEDED"
+
+    def test_a_long_debit_envelope_still_prices_its_premium(self):
+        params = {
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 1, "limitPrice": 2.0,
+            "legs": [
+                {"expiry": "20261218", "strike": 6000.0, "right": "C",
+                 "action": "BUY", "ratio": 1},
+                {"expiry": "20261218", "strike": 6100.0, "right": "C",
+                 "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert bankroll_guard.order_max_loss(params) == pytest.approx(200.0)
