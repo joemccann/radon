@@ -600,7 +600,7 @@ Source-green is not production-green. After source hardening, live recovery stil
 - After any live hot-patch of an installed control-plane target, re-run bootstrap so the readiness manifest hashes match the next release, or deploy preflight will refuse "incompatible with scripts/…".
 - Immutable runners are extracted with `chmod a-w`. Prune must restore write bits before `rmtree`, or a green deploy fails after success on runner retention.
 - Post-gate backup cleanup of managed release trees is best-effort. Root-owned venv files (e.g. py-spy) must not turn a gated green release into a hard failure.
-- Production VPS needs the exact Bun pin in PATH for radon (currently 1.3.14). Missing Bun fails staged builds after control-plane and env preflight already passed.
+- Production VPS needs the exact Bun pin in PATH for radon (currently 1.4.4). Missing Bun fails staged builds after control-plane and env preflight already passed.
 
 ### Production env invariants (Hetzner monorepo)
 

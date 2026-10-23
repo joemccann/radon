@@ -799,6 +799,29 @@ def test_bun_jobs_cache_the_install_store() -> None:
         assert "web/bun.lock" in key
 
 
+def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:
+    root = Path(__file__).resolve().parents[2]
+    expected = {
+        root / ".github/workflows/ci.yml": 4,
+        root / ".github/workflows/tester-army.yml": 1,
+    }
+    action = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
+    for path, count in expected.items():
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        pins = [
+            step["with"]["bun-version"]
+            for job in workflow["jobs"].values()
+            for step in (job.get("steps") or [])
+            if "oven-sh/setup-bun" in step.get("uses", "")
+        ]
+        assert len(pins) == count, path.name
+        assert set(pins) == {"1.4.4"}
+        for job in workflow["jobs"].values():
+            for step in job.get("steps") or []:
+                if "oven-sh/setup-bun" in step.get("uses", ""):
+                    assert step["uses"].startswith(action)
+
+
 def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
     workflow = _workflow()
     for job_name in ("web-tests", "perimeter-smoke"):
@@ -806,7 +829,7 @@ def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
             step for step in workflow["jobs"][job_name]["steps"]
             if "oven-sh/setup-bun" in step.get("uses", "")
         )
-        assert setup_bun["with"]["bun-version"] == "1.3.14"
+        assert setup_bun["with"]["bun-version"] == "1.4.4"
         steps = workflow["jobs"][job_name]["steps"]
         commands = "\n".join(str(step.get("run", "")) for step in steps)
         assert commands.count("bun install --frozen-lockfile") == 2
