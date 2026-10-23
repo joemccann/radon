@@ -583,17 +583,29 @@ class TestIBGatewayRemote:
 
     def test_network_exposed_daemon_is_sandboxed(self, unit):
         """REL-168 (R-497): the daemon execs a Docker-mutating helper on a
-        private-net port; it gets the same sandbox as the other radon units."""
+        private-net port; it keeps the filesystem sandbox of the other radon
+        units."""
         svc = unit(self.FILENAME)["Service"]
-        assert svc.get("nonewprivileges") == "yes"
         assert svc.get("protectsystem") == "strict"
         assert svc.get("privatetmp") == "yes"
-        assert "capabilityboundingset" in svc
         # The helper writes the 2FA lease, control guard and transition file
         # under /var/lib/radon and the deploy lock under /home/radon.
         rw = svc.get("readwritepaths", "")
         assert "/var/lib/radon" in rw
         assert "/home/radon" in rw
+
+    def test_daemon_can_take_the_helper_sudo_hop(self, unit, services_dir):
+        """`radon` left group docker (2026-09-04), so ib-gateway-control.sh
+        reaches the container only through `sudo -n radon-docker-gw`. Under
+        NoNewPrivileges=yes or an empty CapabilityBoundingSet= that setuid hop
+        is refused, the helper answers `unknown` rc=2 for every verb, the API
+        row reads `active_state=unknown`, and the operator UI disables every
+        Gateway control (2026-10-22, reproduced with systemd-run)."""
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("nonewprivileges") != "yes"
+        assert "capabilityboundingset" not in svc
+        helper = (services_dir.parent / "scripts" / "ib-gateway-control.sh").read_text()
+        assert "sudo" in helper and "radon-docker-gw" in helper
 
 
 # ---------------------------------------------------------------------------
