@@ -60,6 +60,18 @@ TRADING_DAYS = 252
 DEFAULT_MAX_WORKERS = 24
 RATE_LIMIT_ABORT = 8
 
+# The :05 signals refresh runs theta then strength back to back. The first
+# scan fills the UW governor's per-minute window; the client default (5s)
+# then refuses every ticker of the second scan (0/101 in 9s, 2026-10-23).
+UW_ADMISSION_WAIT_S = 120.0
+
+
+def _uw_client_kwargs(retry_transient: bool) -> dict:
+    kwargs: dict = {"admission_timeout": UW_ADMISSION_WAIT_S}
+    if not retry_transient:
+        kwargs.update(max_retries=0, backoff_factor=0)
+    return kwargs
+
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
     try:
@@ -783,7 +795,7 @@ def scan_ticker(
 ) -> Optional[StrengthCandidate]:
     own_client = None
     if client is None:
-        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        client_kwargs = _uw_client_kwargs(retry_transient)
         own_client = UWClient(**client_kwargs)
         client = own_client
     errors: List[str] = []
@@ -913,7 +925,7 @@ def scan_universe(
         return blocked
     print(f"Scanning {len(resolved)} tickers for 7-step strength confirmation ({source})...", file=sys.stderr)
 
-    client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+    client_kwargs = _uw_client_kwargs(retry_transient)
     context_client = UWClient(**client_kwargs)
     try:
         market_context = build_market_context(context_client)
