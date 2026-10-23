@@ -2981,6 +2981,66 @@ raise SystemExit(1)
         assert staged.read_bytes() == b"wheel"
         assert (release / ".deploy-wheels" / "target").is_symlink()
 
+    def test_python_env_pip_runs_from_the_release_dir(self, tmp_path: Path) -> None:
+        """A `file:./vendor/...` requirement resolves against pip's cwd, not the
+        requirements file, so both pip calls must run inside the release."""
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        cwd_log = tmp_path / "pip-cwd.log"
+        _write_executable(
+            fake_bin / "sha256sum",
+            f"""#!{sys.executable}
+print("feedface" + "0" * 56)
+""",
+        )
+        stub_python = f"""#!{sys.executable}
+import os, sys
+from pathlib import Path
+if "pip" in sys.argv:
+    with Path({str(cwd_log)!r}).open("a", encoding="utf-8") as fh:
+        fh.write(os.getcwd() + "\\n")
+raise SystemExit(0)
+"""
+        _write_executable(fake_bin / "python", stub_python)
+        release = tmp_path / "release"
+        (release / "scripts" / "deps").mkdir(parents=True)
+        (release / "requirements.txt").write_text(
+            "fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl\n",
+            encoding="utf-8",
+        )
+        (release / "scripts" / "requirements-api.txt").write_text(
+            "uvicorn==0.1\n", encoding="utf-8"
+        )
+        (release / "scripts" / "deps" / "materialize_fastembed_pillow13.py").write_text(
+            "", encoding="utf-8"
+        )
+        live = tmp_path / "live"
+        for venv in (live / ".venv", tmp_path / "backup" / ".venv"):
+            (venv / "bin").mkdir(parents=True)
+            _write_executable(venv / "bin" / "python", stub_python)
+        env = os.environ.copy()
+        env["RADON_SHA256SUM"] = str(fake_bin / "sha256sum")
+        env["RADON_SYSTEM_PYTHON"] = str(fake_bin / "python")
+        env["RADON_WHEEL_CACHE"] = str(tmp_path / "wheel-cache")
+        env["RADON_DIR"] = str(live)
+        env["VENV_DIR"] = str(live / ".venv")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"source {DEPLOY!s}; RELEASE_BACKUP_DIR={tmp_path / 'backup'!s}; "
+                f"prepare_python_wheels {release!s} && install_target_python_env {release!s}",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        cwds = cwd_log.read_text(encoding="utf-8").split()
+        assert len(cwds) == 2, cwds
+        assert cwds == [str(release), str(release)]
+
     def test_validate_release_artifacts_accepts_live_reuse_marker(
         self, tmp_path: Path
     ) -> None:

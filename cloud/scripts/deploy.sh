@@ -750,9 +750,11 @@ prepare_python_wheels() {
     return 0
   fi
   mkdir -p "$target_wheels"
-  "${VENV_DIR}/bin/python" -m pip wheel --wheel-dir "$target_wheels" \
+  # pip resolves a `file:./vendor/...` requirement against its own cwd, not
+  # the requirements file, so both installs run inside the release.
+  (cd "$release_dir" && "${VENV_DIR}/bin/python" -m pip wheel --wheel-dir "$target_wheels" \
     --requirement "${release_dir}/requirements.txt" \
-    --requirement "${release_dir}/scripts/requirements-api.txt"
+    --requirement "${release_dir}/scripts/requirements-api.txt")
   mkdir -p "$cache_root"
   rm -rf -- "$cached"
   mv "$target_wheels" "$cached"
@@ -775,9 +777,9 @@ install_target_python_env() {
     return 1
   fi
   "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
-  "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "$wheelhouse" \
+  (cd "$release_dir" && "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "$wheelhouse" \
     --requirement "${release_dir}/requirements.txt" \
-    --requirement "${release_dir}/scripts/requirements-api.txt"
+    --requirement "${release_dir}/scripts/requirements-api.txt")
   req_hash="$(requirements_hash "$release_dir")"
   printf '%s\n' "$req_hash" > "${VENV_DIR}/.radon-req-hash"
   validate_target_python_env "$RADON_DIR"
