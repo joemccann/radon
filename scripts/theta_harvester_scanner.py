@@ -65,6 +65,18 @@ DEFAULT_MAX_WORKERS = 24
 # After this many consecutive UW 429s the rest of the universe will 429 too.
 RATE_LIMIT_ABORT = 8
 
+# The :05 signals refresh runs theta then strength back to back. The first
+# scan fills the UW governor's per-minute window; the client default (5s)
+# then refuses every ticker of the second scan (0/101 in 9s, 2026-10-23).
+UW_ADMISSION_WAIT_S = 120.0
+
+
+def _uw_client_kwargs(retry_transient: bool) -> dict:
+    kwargs: dict = {"admission_timeout": UW_ADMISSION_WAIT_S}
+    if not retry_transient:
+        kwargs.update(max_retries=0, backoff_factor=0)
+    return kwargs
+
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
     try:
@@ -503,7 +515,7 @@ def scan_ticker(
 ) -> Optional[ThetaCandidate]:
     own_client = None
     if client is None:
-        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        client_kwargs = _uw_client_kwargs(retry_transient)
         own_client = UWClient(**client_kwargs)
         client = own_client
     errors: List[str] = []
@@ -793,7 +805,7 @@ def scan_universe(
     # Earnings annotation is a post-process batch (one UW call per ticker) so
     # failures never drop a theta candidate and we avoid N serial calls inline.
     if results:
-        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        client_kwargs = _uw_client_kwargs(retry_transient)
         try:
             with UWClient(**client_kwargs) as earnings_client:
                 annotate_candidates_with_earnings(results, earnings_client)

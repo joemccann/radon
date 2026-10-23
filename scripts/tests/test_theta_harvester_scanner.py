@@ -644,3 +644,13 @@ def test_slim_earnings_field_null_when_missing() -> None:
         "source": "company",
         "expected_move_pct": 8.76,
     }
+
+
+def test_uw_clients_wait_through_the_shared_admission_window() -> None:
+    """Same :05 refresh as strength: whichever scanner runs second must wait
+    out the governor's minute instead of taking a 5s admission refusal."""
+    assert theta.UW_ADMISSION_WAIT_S >= 60
+    assert theta._uw_client_kwargs(True) == {"admission_timeout": theta.UW_ADMISSION_WAIT_S}
+    strict = theta._uw_client_kwargs(False)
+    assert strict["admission_timeout"] == theta.UW_ADMISSION_WAIT_S
+    assert strict["max_retries"] == 0 and strict["backoff_factor"] == 0
