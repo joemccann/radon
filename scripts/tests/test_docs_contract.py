@@ -2684,7 +2684,7 @@ class TestDocumentation20261022:
 
 
 class TestDocumentation20261023:
-    """DOC-223: a stop-market combo still uses the exact expiry payoff."""
+    """DOC-223 and DOC-224 after audited-through b7e0f6f0."""
 
     def test_stop_market_combo_uses_the_exact_expiry_payoff(self):
         bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
@@ -2703,4 +2703,18 @@ class TestDocumentation20261023:
         assert "forces the sell flag off" in gate3
         assert "effective_order_price" in gate3
         assert "discarded credit limit" in gate3
+
+    def test_subscription_keeper_rollout_is_not_waiting_on_a_merge(self):
+        blobs = [
+            (_ROOT / "docs/subscription-tokens.md").read_text(),
+            (_ROOT / "cloud/.env.example").read_text(),
+            (_ROOT / "cloud/config/required-env.txt").read_text(),
+        ]
+        for blob in blobs:
+            flat = " ".join(blob.split())
+            assert "before this change merges" not in flat
+            assert "before the publisher change merges" not in flat
+        doc = " ".join(blobs[0].split())
+        assert "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN" in doc
+        assert "next deploy stops" in doc
 
