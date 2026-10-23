@@ -537,79 +537,12 @@ mutation failed.
 
 ---
 
-## IBC Gateway Automation
+## IB Gateway
 
-IB Gateway is managed by the launchd definition `com.radon.ibc-gateway`. It has
-no autonomous start or restart schedule. Every start path that can mint a 2FA
-push must acquire `scripts/utils/ib_2fa_lock.py` first.
-
-### Service Management
-```bash
-~/ibc/bin/stop-secure-ibc-service.sh     # Stop Gateway
-~/ibc/bin/status-secure-ibc-service.sh   # Show launchd state
-scripts/ibc_remote_control.sh ibc-start  # Lease-gated start
-scripts/ibc_remote_control.sh ibc-restart # Lease-gated restart
-tail -f ~/ibc/logs/ibc-gateway-service.log
-```
-
-### Lifecycle
-| Trigger | Action |
-|---------|--------|
-| FastAPI startup with Gateway stopped | Acquire lease, then start launchd service |
-| Watchdog sustained functional failure | Persisted debounce/backoff/cap, acquire lease, then restart |
-| Operator start/restart | Use `scripts/ibc_remote_control.sh`; held/unreadable lease fails closed |
-| 2FA timeout | IBC exits with no relogin; watchdog owns the next bounded attempt |
-
-Daily-cycle semantics and the local installer limitation are owned by
+Runs on the broker VPS (`radon-ib-gateway.service`, IBC inside the gnzsnz
+container). Ports: 4001 live / 4002 paper on `10.0.0.4`. Daily cycle and 2FA:
 [Gateway recovery](ib-gateway-recovery.md#daily-cycle).
 
-### Config (`~/ibc/config.secure.ini`)
-Credentials are not stored in this file. The secure runner reads them from Keychain at launch, writes a temporary `0600` runtime config, and removes it after exit.
-- `ExistingSessionDetectedAction=primaryoverride` - Gateway yields the session to your own IBKR login instead of reclaiming it
-- `AcceptIncomingConnectionAction=accept` — suppress API connection prompt
-- `ReloginAfterSecondFactorAuthenticationTimeout=no`
-- `CommandServerPort=7462` - permits STOP only; do not issue RESTART directly
-
-### LaunchAgent and Runner
-- LaunchAgent: `~/Library/LaunchAgents/com.radon.ibc-gateway.plist`
-- Runner: `~/ibc/bin/run-secure-ibc-gateway.sh`
-- Logs: `~/ibc/logs/ibc-gateway-service.log` and IBC diagnostics in `~/ibc/logs/`
-
-### Phase 1 Remote Access Dependencies
-- `Tailscale.app` on the Mac
-- Tailscale on the iPhone, connected to the same tailnet
-- macOS `Remote Login` enabled
-- iPhone SSH client such as Termius, Blink Shell, or Prompt
-- Optional: dedicated SSH public key in `~/.ssh/authorized_keys`
-
-### Phase 1 Remote Access Usage
-```bash
-# Read-only/stop service commands may be called directly over SSH
-ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
-
-# Start/restart through the lease-gated repo helper
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-status'
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-restart'
-```
-
-Reference: `docs/ibc-remote-access.md`
-
-### Ports
-| Port | Service |
-|------|---------|
-| 4001 | IB Gateway API (Live) |
-| 4002 | IB Gateway API (Paper) |
-| 7462 | IBC Command Server (stop/restart) |
-
-### Logs
-| File | Content |
-|------|---------|
-| `~/ibc/logs/ibc-gateway-service.log` | stdout/stderr from launchd |
-| `~/ibc/logs/ibc-{version}_GATEWAY-{ver}_{day}.txt` | IBC diagnostic log (login, 2FA, config) |
-
-### Legacy
-`scripts/setup_ibc.sh` is legacy and is no longer the active service-management path on this machine.
-
-### Relay depth recovery
+### Relay depth recovery### Relay depth recovery
 
 REL-021b / R-040: rejected positional depth operations invalidate both sides of the book and remove pending snapshots before emitting `depth-unavailable`. They do not refresh feed health. The relay cancels the old depth ticket and requests a fresh book, at most once per subject per 30 monotonic seconds; late events for the old ticket are ignored. A failed cancellation refuses another ticket. This recovery is driven by incoming depth events; the existing stale-feed recovery still covers a silent connection.

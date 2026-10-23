@@ -67,15 +67,13 @@ The two `.env.example` files are the canonical variable reference. Read those be
 **Dev launchers**
 
 ```bash
-scripts/cloud.sh    # cloud-thin laptop development
-scripts/local.sh    # fully local: laptop runs everything including the IB Gateway Docker container
+scripts/cloud.sh    # laptop = Next.js attached to the VPS (FastAPI, IB relay, headlines)
 ```
 
-Choose a mode using the [mode-switch procedure](docs/cloud-services.md#mode-switch),
-including its Gateway and scheduler precautions. Market-data collection still
-requires upstream connectivity in local mode.
+The launcher never starts a Gateway, collector or scheduler; the env contract
+and prerequisites are in the [attach contract](docs/cloud-services.md#mode-switch).
 
-Open `http://localhost:3000`. Clerk auto-bypasses on localhost in non-production.
+Open `http://localhost:3000` and sign in with Clerk; the operator id must be in `ALLOWED_USER_IDS` in `web/.env`.
 
 ## Architecture at a glance
 
@@ -139,11 +137,10 @@ radon/
 ├─ web/                  Next.js 16 terminal (bun)
 ├─ site/                 Marketing site (npm, separate Vercel project)
 ├─ cloud/                VPS systemd, Caddy, deploy, IB Gateway compose
-├─ docker/ib-gateway/    Laptop IB Gateway compose
 ├─ lib/tools/            Pi tools (Vitest + CI)
 ├─ tests/                TWR money-math (CI collects this directory)
 ├─ docs/                 Topic-scoped documentation (index: docs/README.md)
-├─ config/               Laptop launchd plists
+├─ config/               Laptop/mini ops launchd plists (codemap, external probe, grok, incident responder, fx; no collectors)
 ├─ brand/                Design system and tokens
 └─ CLAUDE.md             Authoritative developer runbook
 ```

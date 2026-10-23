@@ -31,13 +31,12 @@ class TestRefusalReason:
     def test_local_mode_on_macos_is_allowed(self):
         assert guard.refusal_reason({"RADON_MODE": "local"}, platform="darwin") is None
 
-    def test_unset_mode_is_allowed(self, tmp_path: Path):
-        assert guard.refusal_reason({}, platform="darwin", ib_mode_file=tmp_path / "none") is None
+    def test_unset_mode_is_allowed(self):
+        assert guard.refusal_reason({}, platform="darwin") is None
 
-    def test_mode_falls_back_to_the_ib_mode_overlay(self, tmp_path: Path):
-        overlay = tmp_path / ".env.ib-mode"
-        overlay.write_text("IB_GATEWAY_HOST=ib-gateway\nRADON_MODE=hetzner\n", encoding="utf-8")
-        assert guard.refusal_reason({}, platform="darwin", ib_mode_file=overlay)
+    def test_mode_comes_from_the_environment_only(self):
+        assert guard.radon_mode({"RADON_MODE": " 'Hetzner' "}) == "hetzner"
+        assert guard.radon_mode({}) == ""
 
     def test_refuse_raises(self):
         with pytest.raises(guard.ProductionWriterRefused):

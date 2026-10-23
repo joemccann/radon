@@ -32,8 +32,8 @@ path consults BEFORE issuing a restart:
 The lock is *advisory* — any caller that doesn't consult it can still
 fire a push. The discipline is "every code path that can spawn a 2FA
 push MUST consult this module first." That includes API ensure/restart,
-the watchdog, operator control, and launchd setup/manual starts. Docker,
-launchd, and IBC automatic restart schedules must remain disabled.
+the watchdog, operator control and manual starts. Docker restart policy and
+IBC automatic restart schedules must remain disabled.
 
 State file path: ``IB_2FA_LOCK_PATH`` env, defaulting to
 ``/var/lib/radon/ib-lease/ib-2fa-push-lock.json`` on Linux and the per-user

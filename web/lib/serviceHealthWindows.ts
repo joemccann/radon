@@ -170,8 +170,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // missed weekday run quickly during trading hours. Pulls AA only — no IB.
   "llm-token-index": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
-  // ``margin-debt`` — run_margin_debt_refresh.sh fires daily every calendar
-  // day (FINRA monthly source; conditional GET no-ops unchanged days but the
+  // ``margin-debt`` — radon-margin-debt.timer runs fetch_margin_debt.py daily
+  // every calendar day (FINRA monthly source; conditional GET no-ops unchanged days but the
   // snapshot + heartbeat still write). Uniform 26h window: no weekend gap.
   "margin-debt": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
@@ -356,16 +356,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // stale on /admin through every pre-market and evening session.
   "breadth-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``vcg-scan`` has an autonomous 5-min cadence during market hours
-  // (radon-vcg-refresh.timer / com.radon.vcg-refresh). The 15-min open
+  // (radon-vcg-refresh.timer). The 15-min open
   // window tolerates 3 missed cycles before flagging — long enough to
   // absorb transient FastAPI or IB Gateway blips, short enough to
   // surface a real outage well inside the trading day. Closed window
   // covers the weekend gap (see cri-scan note above).
   "vcg-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``cta-sync`` has an autonomous Mon-Fri schedule on the VPS
-  // (radon-cta-sync.timer fires 18:15, 19:00, 21:30 UTC) plus the
-  // laptop launchd plist as a redundant local trigger. Stale > 25h
-  // means the timer failed across both regimes; 25h tolerates a long
+  // (radon-cta-sync.timer fires 18:15, 19:00, 21:30 UTC). Stale > 25h
+  // means the VPS timer failed; 25h tolerates a long
   // weekend (Friday 21:30 UTC → Monday 18:15 UTC ≈ 69h) plus any
   // single missed firing.
   // MenthorQ source via Playwright — no IB dependency.
@@ -661,8 +660,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "equibles-ats-venue-share": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-cot-positioning": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
 
-  // ``event-odds`` — laptop launchd Mon-Fri 07:00/11:00/15:00 local,
-  // holiday-aware (scripts/run_event_odds.sh). Three weekday fires like
+  // ``event-odds`` — run_event_odds.sh three times per weekday (scheduler:
+  // see scripts/watchdog/services.py event-odds note), holiday-aware.
+  // Three weekday fires like
   // catalysts: 7h spans the active-day gaps; 4d bridges a long weekend.
   // Polymarket only — no IB.
   "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },

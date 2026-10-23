@@ -1661,7 +1661,7 @@ class TestGatewayDailyCycleDocumentation:
 
     def test_cycle_owner_explains_blank_fields_without_copying_schedule(self):
         owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Daily cycle")
-        for required in ("blank", "stored", "does not disable", "setup_ibc.sh", "docker-compose.yml", "2FA", "stop", "rollback", "escalate"):
+        for required in ("blank", "stored", "does not disable", "docker-compose.yml", "2FA", "stop", "rollback", "escalate"):
             assert required.casefold() in owner.casefold(), required
         assert "11:45 PM" not in owner and "4:45 PM PT" not in owner
 
@@ -1688,16 +1688,6 @@ class TestRelayRecoveryDocumentation:
 
 class TestGatewayReadinessDocumentation:
     """DOC-161: listening sockets are diagnostic evidence, not readiness."""
-
-    def test_docker_health_defers_machine_inventory_and_requires_authentication(self):
-        text = (_ROOT / "docs/ib-gateway-docker.md").read_text()
-        health = _section(text, "Healthcheck")
-        assert "docker-compose.yml" in health
-        assert "does not prove authentication" in health
-        assert "ib-gateway-recovery.md#readiness-verification" in health
-        assert "healthy**: IB Gateway API is accepting connections" not in health
-        assert "2FA pending, login failed" not in health
-        assert "4:45 PM PT" not in text
 
     def test_startup_and_manual_recovery_require_authenticated_health(self):
         root = (_ROOT / "CLAUDE.md").read_text()
@@ -1809,16 +1799,11 @@ class TestNightlyInfrastructureOwners:
         assert "VPS that hosts FastAPI, IB Gateway" not in row
 
     def test_gateway_logging_has_one_scope_aware_recovery_owner(self):
-        local = (_ROOT / "docs/ib-gateway-docker.md").read_text()
-        assert "ib-gateway-recovery.md#gateway-logs" in local
-        assert "journald driver" not in local
         owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Gateway logs")
         assert "../cloud/docker-compose.yml" in owner
-        assert "../docker/ib-gateway/docker-compose.yml" in owner
         assert "installed" in owner and "recreate" in owner
         assert "journalctl CONTAINER_TAG=ib-gateway" in owner
         assert "radon-docker-gw logs" in owner
-        assert "scripts/docker_ib_gateway.sh logs" in owner
         for boundary in ("Symptom", "Prerequisites", "Blast radius", "Diagnosis", "Stop", "Verification", "Rollback", "Escalation"):
             assert f"**{boundary}:**" in owner
 
@@ -1891,13 +1876,12 @@ class TestDocumentation20261010:
 
     def test_gateway_upgrade_owner_keeps_the_support_floor(self):
         digests = set()
-        for rel in ("cloud/docker-compose.yml", "docker/ib-gateway/docker-compose.yml"):
+        for rel in ("cloud/docker-compose.yml",):
             text = (_ROOT / rel).read_text()
             assert _GATEWAY_SUPPORT_FLOOR in text
             match = re.search(r"ghcr.io/gnzsnz/ib-gateway@(sha256:[0-9a-f]{64})", text)
             assert match, rel
             digests.add(match.group(1))
-        assert len(digests) == 1
         owner = _section(
             (_ROOT / "docs/ib-gateway-recovery.md").read_text(),
             "Upgrading the Gateway image",

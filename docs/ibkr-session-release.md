@@ -33,7 +33,7 @@ Verified live (read-only, 2026-09-25):
 | broker `radon-broker` (100.67.204.57 / 10.0.0.4) | container `ib-gateway`, restart policy `no` | container netns: `172.18.0.2 -> 8.17.22.31:4000` ESTABLISHED (IBKR). Host `ss` does not show it (NAT); must use `nsenter -t <pid> -n ss` |
 | app `radon-app` (5.78.148.38 / 10.0.0.2) | none | uvicorn (3 sockets) + node relay (1) -> `10.0.0.4:4001` only |
 | Mac mini `joes-mac-mini` | **latent**: launchd `local.ibc-gateway` (`~/ibc/bin/run-secure-ibc-gateway.sh`, `~/ibc/config.secure.ini` with creds), loaded, `RunAtLoad=false`, `KeepAlive=false`, runs=0 | `launchctl print` |
-| laptop | latent: `~/Library/LaunchAgents/local.ibc-gateway.plist.disabled`; local Docker mode `docker/ib-gateway/docker-compose.yml` via `scripts/docker_ib_gateway.sh` / `scripts/local.sh` | not loaded |
+| laptop | none since 2026-10-23: local Docker mode, `scripts/local.sh` and `scripts/docker_ib_gateway.sh` removed | n/a |
 | demo `radon-demo` | none (no java, no :400x) | `pgrep`, `ss` |
 
 ---
@@ -45,7 +45,7 @@ Verified live (read-only, 2026-09-25):
 |---|---|---|---|
 | H1 | `ib-gateway` container (IBC + Gateway JVM) | broker | `/etc/radon/ib-gateway-compose.yml` (root-owned copy of `cloud/docker-compose.yml`) |
 | H2 | `local.ibc-gateway` launchd job | mini (loaded, idle), laptop (disabled) | `~/Library/LaunchAgents/local.ibc-gateway.plist` |
-| H3 | Local Docker gateway | laptop/mini in `IB_GATEWAY_MODE=docker` | `docker/ib-gateway/docker-compose.yml`, `scripts/docker_ib_gateway.sh`, `scripts/api/ib_gateway.py:_docker_compose` |
+| H3 | Local Docker gateway | retired 2026-10-23 (laptop Docker mode removed) | n/a |
 
 ### 1b. Gateway start / re-login paths (all must honour the hold)
 All production paths converge on **two chokepoints** on the broker:
@@ -61,9 +61,9 @@ All production paths converge on **two chokepoints** on the broker:
 | S5 | Relay `escalateStaleData -> requestGatewayRestart()` (POST `IB_RESTART_URL`) | app | RTH, no ticks after reconnect ladder | `scripts/ib_realtime_server.js:778-870` |
 | S6 | Admin Gateway Start / `radon restart` from UI | app | operator | `web/components/admin/Ib2faControls.tsx`, `/admin/services/radon-ib-gateway.service/{start,restart}` |
 | S7 | `radon start|restart` (`/usr/local/bin/radon`), `sudo radon ...` granted to user radon | broker | operator / scripts | `cloud/scripts/operator-radon.sh:gateway_control`, `cloud/config/sudoers.d/radon-ops` |
-| S8 | Laptop `scripts/cloud.sh` `ssh ib-gateway radon-ib-gateway-control start` | laptop | dev start | `scripts/cloud.sh:90-95` (targets app host; stale post-split, still a start path) |
+| S8 | Laptop `scripts/cloud.sh` broker start | retired 2026-10-23: the launcher is attach-only and never starts a Gateway | `scripts/cloud.sh` |
 | S9 | IBC internal relogin / `ExistingSessionDetectedAction=primary` | broker (in-container) | **IBKR "existing session" event - today's kicker** | compose env; `TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`, daily `AUTO_RESTART_TIME=11:45 PM` is a token restart, not a new login |
-| S10 | Local-mode FastAPI Docker auto-recovery (`restart_ib_gateway`), `scripts/docker_ib_gateway.sh`, `launchctl kickstart local.ibc-gateway` | laptop / mini | `scripts/local.sh` stacks | `scripts/api/ib_gateway.py:1429` |
+| S10 | Local-mode FastAPI Docker auto-recovery / `launchctl kickstart local.ibc-gateway` | retired 2026-10-23 with the laptop stacks | `scripts/api/ib_gateway.py` legacy branch |
 | S11 | Deploy / bootstrap | app (CI) | CI deploy is app-only and app role never execs helper; broker updates are manual root SSH | `cloud/scripts/deploy.sh:111,354`, `bootstrap-control-plane.sh` |
 
 Not start paths (verified): `restart_ib_gateway()` in cloud mode on app returns a refusal
@@ -193,7 +193,7 @@ The phone key remains restricted by its tailnet `from=` constraint. Broker publi
 | Admin UI | armed Release button POSTs exact `/api/admin/ib/hold` with `{confirm:true, reason}`; nothing fires while unconfirmed | `web/tests/admin-ib-hold-request.test.tsx` |
 | SSH forced command | allowlist `release|resume|status`; everything else rejected + audited; actor captured | `cloud/tests/test_ib_hold_ssh.py` |
 | Release orchestration | hold written before stop even with deploy lock held; falls back to shim `compose-down` then `kill`; converges within budget; app unreachable does not fail release | `cloud/tests/test_ib_release.py` |
-| Local paths | `docker_ib_gateway.sh` / local start refuse when broker hold is held or unknown | `scripts/tests/test_local_ib_hold_guard.py` |
+| Local paths | retired 2026-10-23 (no laptop Gateway start path remains) | `scripts/tests/test_laptop_scheduler_retired.py` |
 | Live drill (manual, off-hours) | release -> container gone + no IBKR conntrack -> operator web login stays up 10 min -> resume -> one push -> authenticated -> pool reconnects | runbook checklist |
 
 ### Phases

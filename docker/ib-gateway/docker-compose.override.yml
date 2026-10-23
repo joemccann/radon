@@ -1,4 +1,0 @@
-services:
-  ib-gateway:
-    ports:
-      - "127.0.0.1:${IB_VNC_PORT:-5901}:5900"

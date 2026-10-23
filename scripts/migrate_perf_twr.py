@@ -32,7 +32,6 @@ try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
 
     load_dotenv(_PROJECT_DIR / ".env")
-    load_dotenv(_PROJECT_DIR / ".env.ib-mode")
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass

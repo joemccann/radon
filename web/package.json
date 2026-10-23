@@ -7,10 +7,6 @@
   "scripts": {
     "dev": "bash ../scripts/dev",
     "dev:next": "next dev",
-    "dev:verbose": "concurrently -n next,ib,api,scraper,headlines -c cyan,yellow,green,magenta,white \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\" \"node ../scripts/mktnews/index.js --serve\"",
-    "dev:verbose:next": "concurrently -n next,ib,api,scraper,headlines -c cyan,yellow,green,magenta,white \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\" \"node ../scripts/mktnews/index.js --serve\"",
-    "dev:verbose:ib": "concurrently -n next,ib,api,scraper,headlines -c cyan,yellow,green,magenta,white \"next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\" \"node ../scripts/mktnews/index.js --serve\"",
-    "dev:prices": "node ../scripts/ib_realtime_server.js",
     "build": "next build --experimental-build-mode=compile && node scripts/audit-output-traces.mjs",
     "build:setup-gate": "NEXT_DIST_DIR=.next-setup-gate next build --experimental-build-mode=compile",
     "start": "next start --keepAliveTimeout 130000",
@@ -20,9 +16,6 @@
     "test:e2e": "npx playwright test --config playwright.no-server.config.ts",
     "test:e2e:setup-gate": "playwright test --config playwright.setup-gate.config.ts",
     "test:ib": "python3.13 ../scripts/test_ib_realtime.py",
-    "ib:start": "bash ../scripts/docker_ib_gateway.sh start",
-    "ib:stop": "bash ../scripts/docker_ib_gateway.sh stop",
-    "ib:status": "bash ../scripts/docker_ib_gateway.sh status",
     "test:tester-army": "npm --prefix tester-army test"
   },
   "dependencies": {
@@ -64,7 +57,6 @@
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
-    "concurrently": "9.2.5",
     "eslint": "^9.21.0",
     "eslint-config-next": "^16.4.2",
     "fast-check": "^4.8.0",

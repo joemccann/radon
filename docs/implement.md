@@ -187,79 +187,12 @@ If a script fails:
 | Monitor daemon status | `python3.13 -m monitor_daemon.run --status` |
 | Run monitor daemon once | `python3.13 -m monitor_daemon.run --once` |
 | Monitor daemon handlers | `python3.13 -m monitor_daemon.run --list-handlers` |
-| Install monitor daemon | `./scripts/setup_monitor_daemon.sh install` |
-| Monitor daemon status (launchd) | `./scripts/setup_monitor_daemon.sh status` |
-| **IBC Gateway status** | `~/ibc/bin/status-secure-ibc-service.sh` |
-| **IBC Gateway start** | `./scripts/ibc_remote_control.sh ibc-start` |
-| **IBC Gateway stop** | `~/ibc/bin/stop-secure-ibc-service.sh` |
-| **IBC Gateway restart** | `./scripts/ibc_remote_control.sh ibc-restart` |
-| **IBC remote helper** | `./scripts/ibc_remote_control.sh check` |
 
-### IB Gateway Management (IBC)
+### IB Gateway
 
-IB Gateway is managed by the launchd definition `com.radon.ibc-gateway`.
-Credentials are stored in macOS Keychain, not on disk. The definition has no
-autonomous schedule; FastAPI, the watchdog, and operator wrappers acquire the
-shared 2FA lease before every start/restart.
-
-**Service commands:**
-```bash
-~/ibc/bin/stop-secure-ibc-service.sh     # Stop Gateway
-~/ibc/bin/status-secure-ibc-service.sh   # Show launchd state
-scripts/ibc_remote_control.sh ibc-start  # Lease-gated start
-scripts/ibc_remote_control.sh ibc-restart # Lease-gated restart
-tail -f ~/ibc/logs/ibc-gateway-service.log
-```
-
-**Automated lifecycle:**
-1. FastAPI or the watchdog proves a start/restart is required.
-2. The caller acquires the atomic cross-process lease; any active or unreadable lease fails closed.
-3. IBC starts Gateway and the operator approves the single IBKR Mobile push.
-4. On 2FA timeout IBC exits without relogin. The watchdog waits for lease expiry before a bounded new attempt.
-
-Daily-cycle semantics and the local installer limitation are owned by
-[Gateway recovery](ib-gateway-recovery.md#daily-cycle).
-
-**Key config settings (`~/ibc/config.secure.ini`):**
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `ExistingSessionDetectedAction` | `primaryoverride` | Gateway yields the session to your own IBKR login (see `docs/ib-gateway-recovery.md`, operator hold) |
-| `AcceptIncomingConnectionAction` | `accept` | No popup for API connections |
-| `ReloginAfterSecondFactorAuthenticationTimeout` | `no` | Prevent stacked retry pushes |
-| `CommandServerPort` | `7462` | IBC command server for STOP only |
-| `IbLoginId` / `IbPassword` | unset in file | Credentials come from Keychain only |
-
-**Architecture:**
-- LaunchAgent: `~/Library/LaunchAgents/com.radon.ibc-gateway.plist`
-- Runner: `~/ibc/bin/run-secure-ibc-gateway.sh`
-- Logs: `~/ibc/logs/ibc-gateway-service.log` plus IBC diagnostics under `~/ibc/logs/`
-- `RunAtLoad=false`, no `StartCalendarInterval`, `KeepAlive=false`
-
-**Phase 1 remote access dependencies:**
-- `Tailscale.app` on the Mac
-- Tailscale on the iPhone, connected to the same tailnet
-- macOS `Remote Login` enabled so SSH listens on port `22`
-- iPhone SSH client such as Termius, Blink Shell, or Prompt
-- Optional: dedicated SSH public key in `~/.ssh/authorized_keys`
-
-**Phase 1 remote access usage:**
-```bash
-# Read-only status may be called directly over SSH
-ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
-
-# Start/restart through the lease-gated repo helper
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-restart'
-
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-status'
-```
-
-**Reference:** `docs/ibc-remote-access.md`
-
-**Troubleshooting:**
-- Gateway stopped: run `./scripts/ibc_remote_control.sh ibc-start` and approve the single 2FA push
-- `ExistingSessionDetectedAction=primaryoverride` means a fresh Gateway login takes the session, but a logged-in Gateway yields to your own IBKR login
-- IBC command server port 7462 is permitted for `STOP`; direct `RESTART` is forbidden because it bypasses the lease
-- `scripts/setup_ibc.sh` generates a schedule-free launchd definition and lease-gates install/manual starts
+The Gateway runs on the broker VPS under `radon-ib-gateway.service`; daily-cycle
+semantics are owned by [Gateway recovery](ib-gateway-recovery.md#daily-cycle);
+operator control is `radon ib status|release|resume` on the broker.
 
 ### IB Connection Ports
 | Port | Environment |
@@ -378,14 +311,14 @@ After entry fill, place exit orders:
 The monitor daemon is the active background service for post-entry workflows.
 
 Installed behavior:
-- launchd runs `python -m monitor_daemon.run --once` every 60 seconds
+- `radon-monitor.service` on radon-app runs the daemon loop (60 s cadence)
 - `fill_monitor` and `exit_orders` enforce market hours
 - `preset_rebalance` and `flex_token_check` are allowed to run off-hours
 
 **Status:**
 ```bash
 python3.13 -m monitor_daemon.run --status
-./scripts/setup_monitor_daemon.sh status
+ssh root@radon-app systemctl status radon-monitor.service
 ```
 
 **Run once manually:**
@@ -398,13 +331,12 @@ python3.13 -m monitor_daemon.run --once
 python3.13 -m monitor_daemon.run --list-handlers
 ```
 
-**Install / logs:**
+**Logs:**
 ```bash
-./scripts/setup_monitor_daemon.sh install
-./scripts/setup_monitor_daemon.sh logs
+ssh root@radon-app journalctl -u radon-monitor.service -f
 ```
 
-**Legacy note:** `scripts/exit_order_service.py` and `scripts/setup_exit_order_service.sh` are older standalone paths and should not be the primary scheduled service anymore.
+**Legacy note:** `scripts/exit_order_service.py` is an older standalone path and is not the primary scheduled service.
 
 ---
 

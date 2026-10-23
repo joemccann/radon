@@ -20,10 +20,8 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 ## IB Gateway Modes
 
-- `docker`: local development Docker Gateway; lock-aware recovery owns starts.
 - `cloud`: production lifecycle delegates to the installed Gateway control helper; app-role hosts proxy control over mTLS. Laptop remote aliases remain probe-only.
-- `launchd`: legacy local IBC wrappers.
-- Switching mode via `scripts/ib mode {local|cloud}` requires dev stack restart.
+- `docker` / `launchd` branches are legacy laptop paths kept only as the test harness; no launcher selects them.
 - Auto-recovery must verify port down or CLOSE_WAIT before restart. Client ID collision, VOL error, or transient timeout is not restart evidence.
 
 ## 2FA Restart Rules

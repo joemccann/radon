@@ -1,11 +1,11 @@
 # IB Gateway Connection Troubleshooting
 
-Runbook for local launchd connection failures. Docker setup is owned by
-[the Docker guide](ib-gateway-docker.md); production recovery is owned by
+Runbook for IB connection failures seen from FastAPI on radon-app against the
+broker Gateway (10.0.0.4:4001); production recovery is owned by
 [Gateway recovery](ib-gateway-recovery.md).
 
-**Prerequisites and blast radius:** select the Gateway mode before using local
-commands. Read-only process, socket and log checks do not place orders; a
+**Prerequisites and blast radius:** the Gateway runs on the broker; diagnose
+from radon-app. Read-only process, socket and log checks do not place orders; a
 start, restart or process kill can interrupt all IB clients and request 2FA.
 **Safe diagnosis, stop conditions and verification:** follow
 [readiness verification](ib-gateway-recovery.md#readiness-verification), preserve
@@ -19,8 +19,8 @@ the operator. Do not clear a hold or lease to make a command succeed.
 Run this first to classify the failure:
 
 ```bash
-# 1. Is the Gateway process running?
-~/ibc/bin/status-secure-ibc-service.sh
+# 1. Is the Gateway container running on the broker?
+ssh root@radon-broker radon ib status
 
 # 2. Is port 4001 listening?
 lsof -iTCP:4001 -sTCP:LISTEN
@@ -57,18 +57,18 @@ Match your diagnostic results to one of these scenarios:
 - `status-secure-ibc-service.sh` shows no PID or "could not find service"
 - Port 4001 not listening
 
-**Root cause:** Gateway crashed, launchd didn't restart, or service was manually stopped.
+**Root cause:** Gateway crashed, the container exited, or the operator hold released it.
 
 **Fix:**
 ```bash
-scripts/ibc_remote_control.sh ibc-start
+ssh root@radon-broker radon ib resume
 # Wait 15-30s for Java startup
 # Approve 2FA on IBKR Mobile when prompted
 ```
 
 **If start fails repeatedly:** Check the service log for Java errors:
 ```bash
-tail -50 ~/ibc/logs/ibc-gateway-service.log
+ssh root@radon-broker sudo -n /usr/local/sbin/radon-docker-gw logs
 ```
 
 ---
@@ -99,13 +99,13 @@ tail -50 ~/ibc/logs/ibc-gateway-service.log
 **Manual fix (if auto-recovery fails):**
 ```bash
 # Lease-gated restart (refuses while another push is in flight)
-scripts/ibc_remote_control.sh ibc-restart
+curl -s -X POST http://radon-app:8321/ib/restart
 
 # Wait 30-60s for Java startup + IBC login sequence
 # Approve 2FA push notification on IBKR Mobile
 
 # Verify recovery
-curl -s http://localhost:8321/health | python3.13 -m json.tool
+curl -s http://radon-app:8321/health | python3.13 -m json.tool
 # Check: ib_gateway.auth_state=authenticated, ib_gateway.upstream_dead=false
 # Also verify the pool roles required by the operation
 ```
@@ -184,12 +184,10 @@ is active. IBC exits and does not retry, because another login would invalidate
 the pending token. Check the lease and logs:
 ```bash
 python3.13 scripts/utils/ib_2fa_lock.py check
-tail -20 ~/ibc/logs/ibc-gateway-service.log
 ```
 After the lease expires, the watchdog can acquire a fresh lease and make one
-bounded recovery attempt. Operator starts/restarts must use
-`scripts/docker_ib_gateway.sh` or `scripts/ibc_remote_control.sh`, never raw
-Docker/IBC commands.
+bounded recovery attempt. Operator starts/restarts go through `radon ib resume`
+/ the admin panel on the broker, never raw Docker or IBC commands.
 
 ---
 
@@ -250,7 +248,7 @@ Add to daily startup routine:
 
 ```bash
 # Gateway health
-~/ibc/bin/status-secure-ibc-service.sh | grep -E "state|pid"
+ssh root@radon-broker radon ib status
 
 # API connectivity
 curl -s -o /dev/null -w "%{http_code} %{time_total}s" -X POST http://localhost:3000/api/portfolio
@@ -280,8 +278,8 @@ curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
               ┌───────────────▼───────────────┐
               │     IB Gateway (Java)          │
               │     Port 4001 (Live API)       │
-              │     Managed by IBC + launchd   │
-              │     PID tracked by launchd     │
+              │  Managed by IBC inside the    │
+              │  broker container; lifecycle   │
               └──┬─────────────┬──────────┬───┘
                  │             │          │
         ┌────────▼───┐  ┌─────▼────┐  ┌──▼──────────────┐

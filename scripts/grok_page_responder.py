@@ -46,7 +46,6 @@ def load_repo_dotenv(repo_root: Path | None = None) -> bool:
     except Exception:
         return False
     load_dotenv(root / ".env")
-    load_dotenv(root / ".env.ib-mode")
     load_dotenv(root / "web" / ".env")
     return True
 
