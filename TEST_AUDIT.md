@@ -11760,3 +11760,46 @@ Serial from the repo root. Root pytest exit 1 each round on the same 54 SSL node
 | 3 | 17,319 passed / 54 failed / 10 skipped / 23 subtests (147.22s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (164.58s) | 54 failed / 3,297 passed / 11 skipped (811.16s) | 0 added / 0 removed |
 
 Base cloud at `b7e0f6f0` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 54 failed / 3,297 passed / 11 skipped (814.95s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The 54 root failures are `Missing Authority Key Identifier`, identical on the base SHA. The cloud 54 are bash 3.2 `mapfile` / `pin[@]`, missing `/usr/bin/test`, `test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs` (`ConnectionRefusedError`), and `test_precloud_rollback_keeps_immutable_journal_support` (`/usr/bin/python3` 3.9 rejects `zip(..., strict=True)`).
+
+## Delta audit 2026-10-23
+
+Range `b7e0f6f0842f43269d04c3c1a5b9c0efff9af951..19e25a1d3fc09d12cb482f78c9ac8b39ad3072d4`: 41 commits / 89 paths. Newest trusted checkpoint is the 2026-10-22 collaborator comment on issue #83 (`audited-through: b7e0f6f0842f43269d04c3c1a5b9c0efff9af951`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-563.
+
+Kelly close exemption, the stop-market debit floor, leap admission waits, JWKS lookup by kid, credential block-scalar redaction, the vendored fastembed wheel, and the Gateway remote sudo hop each ship with tests that call the behavior. `ci.yml` materializes the wheel before `uv pip install` and pins Bun 1.4.4. No coverage-threshold change and no new blanket exclude. No new `pytest.skip` / `xfail` landed in the delta. The delta touches 26 root Python test files, 5 cloud files, and 1 Vitest file, not most of the suite.
+
+Not filed: the root pytest SSL failures (`Missing Authority Key Identifier`, 54 nodes in `test_remote_gateway_client.py`, `test_ib_gateway_remote.py`, `test_ib_gateway_remote_login_throttle.py`, `test_ib_gateway_remote_operator_hold.py`, `test_ib_gateway_remote_serve.py`) match the prior checkpoint's class. The five `next.config.mjs` Vitest timeouts are the prior load class. The cloud failures are the same 54 nodes as `19e25a1d`.
+
+### T-564 — P1 — the release pip install test searches source text
+
+`install_target_python_env` runs pip inside `(cd "$release_dir" && ...)` (`cloud/scripts/deploy.sh:781-784`) because `requirements.txt` uses `fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl`. The test added for that path, `test_install_target_python_env_installs_from_the_release_dir`, took `function_body` and asserted `'cd "$release_dir"'` appeared before `pip install --no-index`. `function_body` returns the raw body, comments included (`cloud/tests/test_deploy_corrections.py:43-50`). Replacing the subshell with a comment `# (cd "$release_dir" && true)` and a bare pip install left that assertion true, while pip's recorded cwd was the caller directory, not the release directory. That is the `FileNotFoundError` from deploy `9d91faf30`.
+
+Acceptance: the test runs `install_target_python_env` and the pip install's cwd is the release directory. A comment that contains `cd "$release_dir"` does not pass it.
+
+### T-563 — P2 — a split gitignore banner is a live ignore rule
+
+The Node section separator in `.gitignore` was one character short and the leftover line was `=`. Git treats a non-comment line as a pattern, so `git check-ignore --no-index -- =` ignored a file named `=`. `test_banner_lines_carry_no_rule_text` and `test_no_pattern_is_joined_to_a_banner` only reject a banner joined to rule text (`^# =+[^=\s]`), so both stayed green. `.env`, `node_modules`, and the other pinned paths were still ignored.
+
+Acceptance: no ignore rule is a run of `=` characters, and `git check-ignore --no-index -- =` exits 1. The existing secret and runtime paths stay ignored.
+
+Audited through: 19e25a1d3fc09d12cb482f78c9ac8b39ad3072d4 on 2026-10-23 — 2 new findings
+
+## Remediation 2026-10-23
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-564 | DONE | With the subshell replaced by a comment containing `cd "$release_dir"`, the old text search passed and the new run recorded pip's cwd as the caller directory (`AssertionError` against the release path, 1 failed). Restored `cloud/scripts/deploy.sh` subshell: `test_install_target_python_env_installs_from_the_release_dir` and `test_prepare_python_wheels_runs_pip_from_the_release_dir` passed. `cloud/tests/test_deploy_corrections.py` 158 passed, 3 skipped. Product source unchanged. |
+| T-563 | DONE | `test_a_split_banner_is_not_an_ignore_rule` failed on `59: '='` (1 failed). The Node separator is a comment again. `scripts/tests/test_gitignore_rules.py` and `scripts/tests/test_gitignore_contract.py` 13 passed. |
+
+Delta files, three times, after the fixes: root Python 780 passed each run (26 files; 17.25s, 17.16s, 17.56s). Vitest `web/tests/assistant-catalog-pin.test.ts` 7 passed each run. Cloud files 901 passed, 3 skipped each run (98.67s, 93.28s, 94.76s).
+
+### Closing gates 2026-10-23
+
+Serial from the repo root. Root pytest exit 1 each round on the same 54 `Missing Authority Key Identifier` nodes. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. The committed ceiling was not raised. Cloud exit 1 each round on the same 54 nodes as each other and as `19e25a1d` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `19e25a1d` |
+|---|---|---|---|---|
+| 1 | 17,391 passed / 54 failed / 10 skipped / 23 subtests (119.20s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (134.14s) | 54 failed / 3,310 passed / 11 skipped (835.98s) | 0 added / 0 removed |
+| 2 | 17,391 passed / 54 failed / 10 skipped / 23 subtests (153.44s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (161.86s) | 54 failed / 3,310 passed / 11 skipped (820.94s) | 0 added / 0 removed |
+| 3 | 17,391 passed / 54 failed / 10 skipped / 23 subtests (124.79s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (132.13s) | 54 failed / 3,310 passed / 11 skipped (799.51s) | 0 added / 0 removed |
+
+Base cloud at `19e25a1d` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 54 failed / 3,310 passed / 11 skipped (800.23s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed.
