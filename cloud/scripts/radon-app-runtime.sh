@@ -601,7 +601,13 @@ try:
 except FileNotFoundError:
     pass
 inbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-inbound.bind(listen)
+# Bind under a restrictive umask. chmod after bind leaves a window where the
+# socket exists as 0755 and the mode assertion can observe it.
+previous_umask = os.umask(0o177)
+try:
+    inbound.bind(listen)
+finally:
+    os.umask(previous_umask)
 # NotifyAccess=all makes systemd trust whatever this proxy relays, so the
 # socket is owner-only; start_notify_proxy chowns it to the container uid.
 os.chmod(listen, 0o600)

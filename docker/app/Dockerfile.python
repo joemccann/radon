@@ -40,8 +40,10 @@ COPY scripts/requirements-api.txt ./scripts/requirements-api.txt
 # pip vendors its own certifi, so the base image's pip keeps trusting the
 # eMudhra/emSign intermediates (keys recovered 2026-10) until pip itself moves
 # to 26.2.2 (certifi 2026.10.19). Upgrade it before anything is downloaded.
-RUN python -m pip install --no-cache-dir --upgrade "pip>=26.2.2" "certifi>=2026.10.19" \
-    && python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --upgrade "pip>=26.2.2" "certifi>=2026.10.19"
+COPY scripts/deps/materialize_fastembed_pillow13.py ./scripts/deps/materialize_fastembed_pillow13.py
+RUN python scripts/deps/materialize_fastembed_pillow13.py
+RUN python -m pip install --no-cache-dir \
     -r requirements.txt \
     -r scripts/requirements-api.txt
 

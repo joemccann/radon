@@ -1113,6 +1113,8 @@ setup_python() {
 
   log_info "Installing Python dependencies..."
   run_as_radon "${VENV_DIR}/bin/pip" install --upgrade pip --quiet
+  run_as_radon "${VENV_DIR}/bin/python" \
+    "${RADON_DIR}/scripts/deps/materialize_fastembed_pillow13.py"
   run_as_radon "${VENV_DIR}/bin/pip" install \
     -r "${RADON_DIR}/requirements.txt" \
     -r "${RADON_DIR}/scripts/requirements-api.txt" --quiet

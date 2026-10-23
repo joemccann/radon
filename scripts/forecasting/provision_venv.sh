@@ -83,6 +83,7 @@ log "installing CPU torch from ${TORCH_CPU_INDEX}"
 "${PIP}" install ${UP} "torch>=2.2.0" --index-url "${TORCH_CPU_INDEX}" >&2
 
 log "installing app + forecasting requirements"
+"${VENV}/bin/python" "${REPO_ROOT}/scripts/deps/materialize_fastembed_pillow13.py"
 # shellcheck disable=SC2086
 "${PIP}" install ${UP} -r "${APP_REQS}" -r "${FC_REQS}" >&2
 

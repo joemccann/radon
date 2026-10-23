@@ -10,6 +10,18 @@ Dependency graph: B1 -> B2 -> B3.
 
 Pending CI.
 
+# DeepSec dependency floors (2026-10-22)
+
+Dependency graph: D1 -> D2 -> D3.
+
+- [x] D1 depends_on: [] Pin Pillow 13.0.0, vite 8.3.5, vitest/@vitest/mocker 4.1.12. Braces stays 3.0.3: npm has no later release.
+- [x] D2 depends_on: [D1] Pillow 13 usage check and focused research/vitest runs.
+- [ ] D3 depends_on: [D2] Draft PR, exact-head CI, no merge and no host action.
+
+## Review
+
+Pillow 13 call sites are Image.open/new/paste/convert/split/point, ImageChops.lighter, getbbox, size, tobytes. No source change. Research pytest 72 passed with the wheel test. fastembed 0.8.0/0.9.0 cap pillow<13; the materializer rewrites only that cap on the official wheel. uv resolved pillow 13.0.0 with fastembed 0.8.0. Vitest 4.1.12: 11394 passed. The 55 local failures also fail on main vitest 4.1.2 here.
+
 # NYSE common-stock High-Low Line (2026-10-20)
 
 Dependency graph: H1 -> H2 -> [H3, H4, H5] -> H6 -> H7 -> H8 -> H9.

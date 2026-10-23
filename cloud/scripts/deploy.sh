@@ -733,6 +733,12 @@ prepare_python_wheels() {
   local cache_root="${RADON_WHEEL_CACHE:-/home/radon/.cache/radon-wheels}"
   local req_hash cached
 
+  # Direct file: requirement. pip install --no-index still reads this path,
+  # including when the wheelhouse cache hits.
+  if grep -q 'file:./vendor/fastembed-0.8.0-py3-none-any.whl' "${release_dir}/requirements.txt"; then
+    "$SYSTEM_PYTHON" "${release_dir}/scripts/deps/materialize_fastembed_pillow13.py"
+  fi
+
   req_hash="$(requirements_hash "$release_dir")"
   cached="${cache_root}/${req_hash}"
 
