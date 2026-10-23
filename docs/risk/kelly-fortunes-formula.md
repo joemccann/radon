@@ -161,13 +161,16 @@ as paying the worse supplied price.
 
 For a combo the Kelly guard prices the worst case with the bankroll guard's
 own `bankroll_guard.order_max_loss`, so the two Gate-3 implementations cannot
-drift. For a single-expiry limit combo, `bankroll_guard.order_max_loss` uses
-`_combo_expiry_loss` before any floor: a defined-risk debit is the premium,
-and a short put's debit is added to assignment. Stock legs, calendars, and a
-net-short call return no exact payoff, so those use
+drift. That helper calls `_combo_expiry_loss` before any floor, including a
+stop-market. A limit combo uses the signed limit: a defined-risk debit is the
+premium, and a short put's debit is added to assignment. A stop-market forces
+the sell flag off and prices that payoff at `effective_order_price`, the worse
+supplied price, so a discarded credit limit cannot shrink assignment. Stock legs,
+calendars, and a net-short call return no exact payoff. A limit order then uses
 `order_limits.combo_debit_floor` on the width or assignment proxy. A net
-credit is never a floor. A stop-market skips the exact payoff and counts the
-worse supplied price as paid.
+credit is never a floor. A stop-market with no exact payoff floors that proxy
+at the worse supplied price instead, because `combo_debit_floor` would read
+the discarded signed limit.
 
 What this does NOT cover, and the spec should not pretend it does: undefined
 risk structures (Gate 4 is disabled; a naked short has no `max_loss`, so

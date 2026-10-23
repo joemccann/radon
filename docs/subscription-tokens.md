@@ -127,8 +127,8 @@ this derived file. The vault socket and replica policy remain fixed unit
 settings. Provider credential locations and the keeper's `radon` UID remain
 unchanged.
 
-Write `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` in `/etc/radon/env` before this
-change merges. The next deploy stops if that variable is missing or its
+Write `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` in `/etc/radon/env` before the
+next deploy. The next deploy stops if that variable is missing or its
 value equals `TURSO_AUTH_TOKEN`. Mint the scoped token with:
 
 ```bash

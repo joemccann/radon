@@ -282,7 +282,8 @@ def test_operator_contract_names_the_scoped_token_and_rollout():
     doc = " ".join((CLOUD.parent / "docs/subscription-tokens.md").read_text().split())
     assert KEEPER_KEY in doc
     assert MINT in doc
-    assert "before this change merges" in doc
+    assert "before this change merges" not in doc
+    assert "before the publisher change merges" not in doc
     assert "next deploy stops" in doc
     assert "never logs or prints token values" in doc
 
