@@ -540,3 +540,31 @@ def test_build_market_context_populates_net_breadth(monkeypatch) -> None:
     context = strength.build_market_context(SectorClient())
 
     assert context.net_breadth_20d == pytest.approx(2100.0)
+
+
+def test_uw_clients_wait_through_the_shared_admission_window(monkeypatch) -> None:
+    """The :05 signals refresh runs theta then strength. Theta's 101 tickers
+    fill the governor's per-minute window, and with the client default (5s)
+    every strength ticker was refused: 0/101 in 9s, error row (2026-10-23)."""
+    assert strength.UW_ADMISSION_WAIT_S >= 60
+    assert strength._uw_client_kwargs(True) == {"admission_timeout": strength.UW_ADMISSION_WAIT_S}
+    strict = strength._uw_client_kwargs(False)
+    assert strict["admission_timeout"] == strength.UW_ADMISSION_WAIT_S
+    assert strict["max_retries"] == 0 and strict["backoff_factor"] == 0
+
+    seen: list[dict] = []
+
+    class FakeClient:
+        def close(self):
+            return None
+
+    def factory(**kwargs):
+        seen.append(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr(strength, "UWClient", factory)
+    monkeypatch.setattr(strength, "build_market_context", lambda _client: object())
+    monkeypatch.setattr(strength, "scan_ticker", lambda *_a, **_k: None)
+    strength.scan_universe(["MU"])
+    assert seen
+    assert all(k["admission_timeout"] == strength.UW_ADMISSION_WAIT_S for k in seen)
