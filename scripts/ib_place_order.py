@@ -12,6 +12,7 @@ Usage:
 
 import asyncio
 import json
+import math
 import sys
 import time
 import uuid
@@ -221,6 +222,39 @@ def _contract_identity_mismatch(params: dict, contract, expected_sec_type: str) 
             return "strike is unavailable on qualified contract"
         if abs(actual_strike - expected_strike) > 1e-8:
             return f"strike {actual_strike} does not match {expected_strike}"
+    return None
+
+
+def _bind_future_multiplier(params: dict, contract) -> str | None:
+    """Replace the request's futures multiplier with the qualified contract's.
+
+    DS-2026-10-23-02: ``order_notional`` priced a future with whatever
+    ``multiplier`` the request body carried, so an understated one shrank the
+    notional the fat-finger cap bounds by the full multiplier ratio. The
+    qualified broker contract is the only trustworthy source; a request value
+    that disagrees with it is refused rather than corrected silently, and a
+    contract with no usable multiplier fails closed the way
+    ``check_order_limits`` already does for a future it cannot price.
+    """
+    try:
+        actual = float(getattr(contract, "multiplier", None))
+    except (TypeError, ValueError):
+        return "qualified future carries no usable contract multiplier"
+    if not math.isfinite(actual) or actual <= 0:
+        return "qualified future carries no usable contract multiplier"
+
+    supplied = params.get("multiplier")
+    if supplied is not None and supplied != "":
+        try:
+            requested = float(supplied)
+        except (TypeError, ValueError):
+            return f"multiplier {supplied!r} is not a number"
+        if not math.isfinite(requested) or abs(requested - actual) > 1e-8:
+            return (
+                f"multiplier {supplied} does not match the qualified "
+                f"contract's {actual:g}"
+            )
+    params["multiplier"] = actual
     return None
 
 
@@ -462,6 +496,17 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 mismatch = _contract_identity_mismatch(params, contract, "FUT")
                 if mismatch:
                     return {"status": "error", "message": f"conId identity mismatch: {mismatch}"}
+            # The notional bound above ran before qualification, so it priced
+            # this future with the request's own multiplier. Re-bound it
+            # against the broker contract (DS-2026-10-23-02).
+            mismatch = _bind_future_multiplier(params, contract)
+            if mismatch:
+                return {"status": "error", "message": f"future contract mismatch: {mismatch}"}
+            if not what_if:
+                from order_limits import check_placement_limits as _recheck
+                violation = _recheck(params)
+                if violation:
+                    return {"status": "error", "message": violation["message"]}
 
         else:
             contract = Stock(symbol, "SMART", "USD")
