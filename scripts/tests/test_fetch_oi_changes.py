@@ -177,3 +177,41 @@ def test_ticker_uw_daily_quota_still_exits_nonzero(tmp_path, monkeypatch):
     assert _run_main(["MSFT", "--json"]) == 1
     assert healths == []
     assert mirrors == []
+
+
+def test_market_scan_waits_through_short_admission_window(monkeypatch):
+    """The 20:00 UTC fire shares its minute with garch/catalysts/flow-refresh.
+
+    The governor default (5s) turns that saturated minute into a 429 that
+    fails the oneshot and latches service_health[oi-changes] in error until
+    the next timer fire. The market scan must wait out the window instead.
+    """
+    import fetch_oi_changes as m
+
+    mock_client = MagicMock()
+    mock_client.get_oi_change.return_value = {"data": []}
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_client
+    mock_cm.__exit__.return_value = False
+    seen: list = []
+
+    def factory(*args, **kwargs):
+        seen.append(kwargs)
+        return mock_cm
+
+    monkeypatch.setattr(m, "UWClient", factory)
+
+    assert m.fetch_market_oi_changes() == []
+    assert seen == [{"admission_timeout": m.OI_ADMISSION_WAIT_S}]
+    assert m.OI_ADMISSION_WAIT_S == 120
+
+
+def test_short_admission_wait_fits_unit_budget():
+    """A 60s Retry-After embargo plus one saturated minute must clear the
+    governor cap and finish inside radon-oi-changes.service TimeoutStartSec."""
+    from utils import uw_governor
+    import fetch_oi_changes as m
+
+    unit_timeout_start_s = 180
+    assert m.OI_ADMISSION_WAIT_S <= uw_governor.MAX_WAIT_SECONDS
+    assert m.OI_ADMISSION_WAIT_S < unit_timeout_start_s
