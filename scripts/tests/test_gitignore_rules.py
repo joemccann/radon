@@ -42,3 +42,24 @@ def test_banner_lines_carry_no_rule_text():
         if re.match(r"^# ={10,}[^=\s]", line)
     ]
     assert folded == []
+
+
+def test_a_split_banner_is_not_an_ignore_rule():
+    """A banner whose last '=' falls onto the next line is a live pattern.
+
+    git check-ignore exit 0 means the path is ignored. A file named '=' must
+    not be, and no rule may be a run of '=' left over from a section banner.
+    """
+    lines = (ROOT / ".gitignore").read_text().splitlines()
+    equals_rules = [
+        f"{n}: {line!r}"
+        for n, line in enumerate(lines, 1)
+        if line.strip() and not line.startswith("#") and set(line.strip()) <= {"="}
+    ]
+    assert equals_rules == []
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", "="],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    assert result.returncode == 1, "a file named '=' is ignored"
