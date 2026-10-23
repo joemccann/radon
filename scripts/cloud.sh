@@ -188,15 +188,20 @@ fi
 #
 # Phase 5: in Hetzner mode the laptop runs only the newsfeed scraper +
 # Next.js. All other schedulers run inside the radon-services container
-# on the VPS. We unload the laptop's launchd plists so they don't race.
+# on the VPS. We boot out AND disable the laptop's launchd agents so they
+# don't race. A bare `launchctl unload` is not durable: RunAtLoad brings the
+# agent back at the next login and the laptop monitor daemon then overwrites
+# the VPS writer's service_health rows with its stale local state.
 if command -v launchctl >/dev/null 2>&1; then
+  launchd_domain="gui/$(id -u)"
   for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
                com.radon.exit-order-service com.radon.monitor-daemon \
                com.radon.vcg-refresh; do
     if launchctl list | grep -q "$plist"; then
-      log_info "Unloading $plist (Hetzner mode)..."
-      launchctl unload "$HOME/Library/LaunchAgents/$plist.plist" 2>/dev/null || true
+      log_info "Booting out $plist (Hetzner mode)..."
+      launchctl bootout "$launchd_domain/$plist" 2>/dev/null || true
     fi
+    launchctl disable "$launchd_domain/$plist" 2>/dev/null || true
   done
 fi
 "$SCRIPT_DIR/_set_radon_mode.sh" hetzner

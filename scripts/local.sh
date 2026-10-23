@@ -69,6 +69,9 @@ if command -v launchctl >/dev/null 2>&1; then
                com.radon.informed-flow com.radon.event-odds; do
     f="$HOME/Library/LaunchAgents/$plist.plist"
     if [[ -f "$f" ]]; then
+      # cloud.sh disables each agent durably; a disabled agent refuses a
+      # plain load, so re-enable the label first.
+      launchctl enable "gui/$(id -u)/$plist" 2>/dev/null || true
       launchctl load "$f" 2>/dev/null || true
       log_info "Loaded $plist (local mode)"
     fi

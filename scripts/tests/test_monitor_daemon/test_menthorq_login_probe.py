@@ -77,6 +77,20 @@ class TestLoginProbeVerdicts:
         message = health.call_args[1]["error"]["message"]
         assert "authentication" in message
 
+    def test_broken_login_message_has_no_em_dash(self):
+        """The admin Writer Freshness panel renders last_error verbatim."""
+        handler = _handler()
+        broken = _response(
+            503, {"detail": "Options exposure authentication is unavailable"}
+        )
+        with _patch_get(response=broken), \
+                patch.object(
+                    handler, "record_cycle_health",
+                    wraps=handler.record_cycle_health,
+                ) as health:
+            handler.run()
+        assert "\u2014" not in health.call_args[1]["error"]["message"]
+
     def test_connection_error_is_soft_failure_with_embargo(self):
         handler = _handler()
         with _patch_get(exc=requests.ConnectionError("refused")):

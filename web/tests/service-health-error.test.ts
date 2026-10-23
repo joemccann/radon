@@ -53,6 +53,15 @@ describe("formatServiceHealthError", () => {
     expect(formatServiceHealthError(raw)).toBe("rate limited");
   });
 
+  it("falls through to `summary` when no other conventional key is present", () => {
+    const raw = JSON.stringify({
+      summary: "config drift: file-mismatch:caddyfile",
+      drift_count: 1,
+      drifts: [{ id: "file-mismatch:caddyfile", detail: "live vs repo: +0/-10 lines" }],
+    });
+    expect(formatServiceHealthError(raw)).toBe("config drift: file-mismatch:caddyfile");
+  });
+
   it("respects key precedence: message > error > detail > reason", () => {
     const raw = JSON.stringify({
       reason: "fourth",

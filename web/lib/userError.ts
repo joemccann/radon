@@ -6,7 +6,7 @@ export function errorMessageCandidate(input: unknown, depth = 0): string {
   if (depth > 4 || input == null) return "";
   if (input instanceof Error) return errorMessageCandidate(input.message, depth + 1);
   if (typeof input === "object") {
-    for (const key of ["error", "detail", "message", "reason"]) {
+    for (const key of ["error", "detail", "message", "reason", "summary"]) {
       const value = (input as Record<string, unknown>)[key];
       if (value != null) { const result = errorMessageCandidate(value, depth + 1); if (result) return result; }
     }

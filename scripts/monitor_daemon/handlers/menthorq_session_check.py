@@ -100,7 +100,7 @@ def evaluate_session(
 
     if seconds_remaining <= 0:
         return _dead(
-            f"dashboard session expired {expires_at} — /options/net-gex is dark "
+            f"dashboard session expired {expires_at}; /options/net-gex is dark "
             "for every ticker until it is re-minted",
             days_remaining,
             expires_at=expires_at,

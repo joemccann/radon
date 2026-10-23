@@ -4,7 +4,8 @@ import { Fragment, useState, type MouseEvent } from "react";
 import { ChevronRight } from "lucide-react";
 import ErrorToast from "@/components/ErrorToast";
 
-import { userErrorMessage } from "@/lib/userError";
+import { isTechnicalError, userErrorMessage } from "@/lib/userError";
+import { formatServiceHealthError } from "@/lib/serviceHealthError";
 import { getMarketStateFromDate, getServiceCategory, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
@@ -104,6 +105,24 @@ function writerSortValue(row: ServiceHealthRow, key: WriterSortKey, market: Mark
   }
 }
 
+const FAILED_WRITER_FALLBACK = "Writer update failed. Review service logs for details.";
+const WRITER_DETAIL_MAX_LENGTH = 160;
+
+/**
+ * A failing writer's own summary is the operator's lead. The row stores a
+ * JSON-stringified payload, so pull its message out first (or take the API's
+ * normalized error_summary); only leaked diagnostics fall back to the generic
+ * copy. Never route it through userErrorMessage: its transport rewrites turn
+ * a writer's "session expired" into the viewer's own sign-in prompt.
+ */
+function writerDetail(row: ServiceHealthRow): string | null {
+  if (!row.last_error) return null;
+  if (row.state === "ok") return userErrorMessage(humanizeDetail(row.last_error), "Last run completed.");
+  const summary =
+    row.error_summary ?? formatServiceHealthError(row.last_error, { maxLength: WRITER_DETAIL_MAX_LENGTH });
+  return isTechnicalError(summary) ? FAILED_WRITER_FALLBACK : summary;
+}
+
 function WriterRow({ row }: { row: ServiceHealthRow }) {
   const market = getMarketStateFromDate();
   const onDemand = getServiceCategory(row.service) === "on-demand";
@@ -111,12 +130,7 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
   const stateTone =
     row.state === "ok" ? "positive" : row.state === "error" ? "negative" : "neutral";
   const lastRun = row.last_attempt_finished_at ?? row.updated_at ?? null;
-  const detail = row.last_error
-    ? userErrorMessage(
-        row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error,
-        row.state === "ok" ? "Last run completed." : "Writer update failed. Review service logs for details.",
-      )
-    : null;
+  const detail = writerDetail(row);
   // Only a failing or stale writer discloses its logs; healthy rows stay inert.
   const expandable = row.state === "error" || stale;
   const [expanded, setExpanded] = useState(false);

@@ -132,6 +132,8 @@ export type ServiceHealthRow = {
   last_attempt_started_at?: string | null;
   last_attempt_finished_at?: string | null;
   last_error?: string | null;
+  /** Normalized one-line message from /api/service-health; absent on the edge-health feed. */
+  error_summary?: string | null;
   age_secs?: number | null;
 };
 
