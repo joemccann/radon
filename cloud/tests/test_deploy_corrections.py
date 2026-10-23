@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import re
 import shutil
@@ -2980,6 +2981,67 @@ raise SystemExit(1)
         staged = release / ".deploy-wheels" / "target" / "fastapi-0.1-py3-none-any.whl"
         assert staged.read_bytes() == b"wheel"
         assert (release / ".deploy-wheels" / "target").is_symlink()
+
+    def test_prepare_python_wheels_runs_pip_from_the_release_dir(self, tmp_path: Path) -> None:
+        """requirements.txt carries `fastembed @ file:./vendor/...whl` (#1237).
+        pip resolves a relative file: URL against ITS working directory, not the
+        requirements file, so `pip wheel` must run with cwd = release dir. The
+        9d91faf30 deploy failed `FileNotFoundError: ./vendor/fastembed-0.8.0-py3-none-any.whl`
+        because it ran from the runner's directory."""
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "sha256sum",
+            f"""#!{sys.executable}
+print("deadbeef" + "0" * 56)
+""",
+        )
+        call_log = tmp_path / "python-calls.jsonl"
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        _write_executable(
+            venv_bin / "python",
+            f"""#!{sys.executable}
+import json, os, sys
+from pathlib import Path
+with Path({str(call_log)!r}).open("a", encoding="utf-8") as log:
+    log.write(json.dumps({{"cwd": os.getcwd(), "argv": sys.argv[1:]}}) + "\\n")
+""",
+        )
+        release = tmp_path / "release"
+        (release / "scripts" / "deps").mkdir(parents=True)
+        (release / "requirements.txt").write_text(
+            "fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl\n", encoding="utf-8"
+        )
+        (release / "scripts" / "requirements-api.txt").write_text("uvicorn==0.1\n", encoding="utf-8")
+        (release / "scripts" / "deps" / "materialize_fastembed_pillow13.py").write_text("", encoding="utf-8")
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["RADON_SHA256SUM"] = str(fake_bin / "sha256sum")
+        env["RADON_SYSTEM_PYTHON"] = str(venv_bin / "python")
+        env["RADON_WHEEL_CACHE"] = str(tmp_path / "wheel-cache")
+        env["VENV_DIR"] = str(tmp_path / "venv")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; prepare_python_wheels {release!s}"],
+            env=env,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+        wheel_calls = [c for c in calls if c["argv"][:3] == ["-m", "pip", "wheel"]]
+        assert len(wheel_calls) == 1, calls
+        assert Path(wheel_calls[0]["cwd"]).resolve() == release.resolve()
+        materialize_calls = [c for c in calls if any(a.endswith("materialize_fastembed_pillow13.py") for a in c["argv"])]
+        assert len(materialize_calls) == 1, calls
+
+    def test_install_target_python_env_installs_from_the_release_dir(self) -> None:
+        """The offline install re-reads the same file: requirement, so it runs
+        from the release dir too."""
+        body = function_body(DEPLOY.read_text(encoding="utf-8"), "install_target_python_env")
+        install_at = body.index("pip install --no-index")
+        assert 'cd "$release_dir"' in body[:install_at]
 
     def test_validate_release_artifacts_accepts_live_reuse_marker(
         self, tmp_path: Path
