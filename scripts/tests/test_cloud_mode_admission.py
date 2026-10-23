@@ -13,7 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 
 
 def _run(tmp_path, *, start_rc=0, stop_rc=0, health='authenticated', busy=False, docker_rc=0,
-         loaded_agents=()):
+         loaded_agents=(), routes=''):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (tmp_path / 'web').mkdir()
@@ -48,7 +48,7 @@ exec(compile(sys.stdin.read(), 'cloud-preflight', 'exec'), {{'__name__': '__main
         bin_dir / 'launchctl': ('launchctl', 'case "$1" in list) printf "%s\\n" '
                                 + ' '.join(loaded_agents) + ';; esac; exit 0'),
         bin_dir / 'ifconfig': ('ifconfig', 'exit 0'),
-        bin_dir / 'netstat': ('netstat', 'exit 0'),
+        bin_dir / 'netstat': ('netstat', f'cat <<"ROUTES"\n{routes}\nROUTES\nexit 0'),
         bin_dir / 'lsof': ('lsof', f'exit {0 if busy else 1}'),
         bin_dir / 'sleep': ('sleep', 'exit 0'),
         bin_dir / 'npm': ('npm', 'printf "api=%s ws=%s public=%s profile=%s\\n" "$RADON_API_URL" "$IB_REALTIME_WS_URL" "$NEXT_PUBLIC_IB_REALTIME_WS_URL" "$RADON_DEV_PROFILE"'),
@@ -201,3 +201,39 @@ def test_cloud_mode_boots_out_and_disables_laptop_agents(tmp_path):
     for label in HETZNER_MODE_AGENTS:
         assert f'launchctl disable {domain}/{label}' in calls
     assert not any(c.startswith('launchctl unload') for c in calls)
+
+
+# macOS keeps interface-scoped (flag I) default routes for every point-to-point
+# interface, including the ipsec0-2 pairs Continuity creates with the host's own
+# LAN address. They never carry traffic; only the unscoped default route does.
+SCOPED_IPSEC_ROUTES = """Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            192.168.0.1        UGScg                 en0
+default            link#25            UCSIg              ipsec1
+default            link#26            UCSIg              ipsec2
+192.168.0.0/24     link#14            UCS                   en0
+"""
+
+HIJACKED_ROUTES = """Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            10.2.0.1           UGScg               utun5
+192.168.0.0/24     link#14            UCS                   en0
+"""
+
+
+def test_scoped_ipsec_default_routes_are_not_a_vpn(tmp_path):
+    result, calls = _run(tmp_path, routes=SCOPED_IPSEC_ROUTES)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'owns the default route' not in result.stdout + result.stderr
+    assert any(c.startswith('npm') for c in calls)
+
+
+def test_unscoped_tunnel_default_route_still_refuses(tmp_path):
+    result, calls = _run(tmp_path, routes=HIJACKED_ROUTES)
+    assert result.returncode != 0
+    assert 'utun5 owns the default route' in result.stdout + result.stderr
+    assert not any(c.startswith('ssh') for c in calls)
