@@ -750,9 +750,12 @@ prepare_python_wheels() {
     return 0
   fi
   mkdir -p "$target_wheels"
-  "${VENV_DIR}/bin/python" -m pip wheel --wheel-dir "$target_wheels" \
+  # pip resolves a relative `file:` requirement (vendor/fastembed wheel)
+  # against ITS working directory, not the requirements file: run from the
+  # release dir, as the Dockerfile's WORKDIR does (9d91faf30 deploy refusal).
+  (cd "$release_dir" && "${VENV_DIR}/bin/python" -m pip wheel --wheel-dir "$target_wheels" \
     --requirement "${release_dir}/requirements.txt" \
-    --requirement "${release_dir}/scripts/requirements-api.txt"
+    --requirement "${release_dir}/scripts/requirements-api.txt")
   mkdir -p "$cache_root"
   rm -rf -- "$cached"
   mv "$target_wheels" "$cached"
@@ -775,9 +778,10 @@ install_target_python_env() {
     return 1
   fi
   "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
-  "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "$wheelhouse" \
+  # Same relative `file:` requirement as prepare_python_wheels: cwd = release dir.
+  (cd "$release_dir" && "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "$wheelhouse" \
     --requirement "${release_dir}/requirements.txt" \
-    --requirement "${release_dir}/scripts/requirements-api.txt"
+    --requirement "${release_dir}/scripts/requirements-api.txt")
   req_hash="$(requirements_hash "$release_dir")"
   printf '%s\n' "$req_hash" > "${VENV_DIR}/.radon-req-hash"
   validate_target_python_env "$RADON_DIR"

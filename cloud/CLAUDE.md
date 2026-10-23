@@ -345,7 +345,14 @@ push or every deploy step fails the handshake. The deploy job:
    before any dependency build, service stop, or transition journal write.
 7. Prepares target-SHA artifacts before teardown. The
    [deploy source](scripts/deploy.sh) owns frozen build, prestage and verified
-   image-reuse admission. The parallel prepull job is an optimization; deploy
+   image-reuse admission. `prepare_python_wheels` and `install_target_python_env`
+   run pip from the release dir: `requirements.txt` carries
+   `fastembed @ file:./vendor/fastembed-0.8.0-py3-none-any.whl` (materialized by
+   `scripts/deps/materialize_fastembed_pillow13.py` into the release's gitignored
+   `vendor/`), and pip resolves a relative `file:` URL against its working
+   directory, not the requirements file (the `9d91faf30` deploy refused with
+   `FileNotFoundError: ./vendor/...whl` from the runner's directory). Pinned by
+   `cloud/tests/test_deploy_corrections.py::TestFrozenArtifacts`. The parallel prepull job is an optimization; deploy
    still requires the exact-SHA app image pair locally before teardown and
    refuses if its pull fails. A bounded database preflight also refuses teardown
    when Turso does not answer, leaving the current release serving.
