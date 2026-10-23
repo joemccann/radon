@@ -20,6 +20,11 @@ def _stub_bankroll_snapshot(monkeypatch):
         yield
         return
     monkeypatch.setattr(bankroll_guard, "check_bankroll_admission", lambda *a, **k: None)
+    # DS-2026-10-23-03: the close-out exemption now nets working orders out of
+    # the holding and refuses when that book cannot be read. There is no Turso
+    # here, so the default is an empty book — the state these tests assumed.
+    # test_close_exemption_reservation.py supplies its own.
+    monkeypatch.setattr(bankroll_guard, "_load_working_orders", lambda: [])
     yield
 
 
