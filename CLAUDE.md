@@ -110,7 +110,6 @@ Never make Yahoo the scheduled, primary, or only source for a series IB or UW ca
 | File | Loaded by | Contains |
 |---|---|---|
 | `.env` (root) | python-dotenv | MenthorQ creds, Clerk JWKS / issuer / allowlist, optional local archive keys |
-| `.env.ib-mode` (root, gitignored) | overlayed after `.env` | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — toggled by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, Clerk keys |
 | `~/.radon/secrets.db` + `secret_store.key` (host-local, never Turso) | FastAPI lifespan export — **store wins over `.env`** for registry names | Profile Credentials tab keys. Key loss = unrecoverable ciphertext. Runbook: `docs/operations.md` "Encrypted credential store" |
 
@@ -124,21 +123,21 @@ Never make Yahoo the scheduled, primary, or only source for a series IB or UW ca
 
 ## Architecture
 
-Development process commands and log-filter names are defined in
-[`scripts/dev`](scripts/dev), launched with `bun run dev` from `web/`.
-`--only` filters logs; it does not stop the other services. Choose the
-[local or cloud-thin mode](docs/cloud-services.md#mode-switch) before starting
-collectors.
+Laptop dev is `scripts/cloud.sh`: Next.js only, attached to the VPS (FastAPI
+http://radon-app:8321 over Tailscale, wss://app.radon.run/ws,
+wss://app.radon.run/ws-headlines); env contract in
+[docs/cloud-services.md#mode-switch](docs/cloud-services.md#mode-switch).
+`scripts/dev` is the `bun run dev` wrapper and accepts only that profile.
 
 Next.js routes call FastAPI via `radonFetch()` (`web/lib/radonApi.ts`). **No `spawn()` from Next.js.** Detailed FastAPI rules in `scripts/api/CLAUDE.md`.
 
-### Two-Mode Deployment
+### Deployment
 
-Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`) **direct-to-cloud — no embedded replica anywhere as of 2026-05-20**. JSON files in `data/` are written alongside as fallback. The libsql embedded replica was retired after WAL conflicts between multi-writer-per-host and direct-cloud writers. Direct-to-cloud is the code default (DUR-07): a replica needs an explicit `RADON_DB_USE_REPLICA=1` opt-in, the legacy `RADON_DB_NO_REPLICA=1` kill switch always wins, and the fleet drop-in `radon-.service.d/common.conf` sets it on every `radon-*` unit as belt-and-suspenders. Reads +30–60 ms (absorbed by SWR); WAL contention structurally impossible. See `feedback_libsql_replica_one_writer.md`.
+Every Radon process reads/writes the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`) **direct-to-cloud — no embedded replica anywhere as of 2026-05-20**. JSON files in `data/` are written alongside as fallback. The libsql embedded replica was retired after WAL conflicts between multi-writer-per-host and direct-cloud writers. Direct-to-cloud is the code default (DUR-07): a replica needs an explicit `RADON_DB_USE_REPLICA=1` opt-in, the legacy `RADON_DB_NO_REPLICA=1` kill switch always wins, and the fleet drop-in `radon-.service.d/common.conf` sets it on every `radon-*` unit as belt-and-suspenders. Reads +30–60 ms (absorbed by SWR); WAL contention structurally impossible. See `feedback_libsql_replica_one_writer.md`.
 
-The [mode-switch owner](docs/cloud-services.md#mode-switch) describes which
-processes belong on each host. Production scheduling and deployment remain
-owned by the cloud runbook.
+Production hosts own every process; the laptop is a thin client
+([attach contract](docs/cloud-services.md#mode-switch)). Scheduling and
+deployment are owned by the cloud runbook.
 
 **Auto-deploy on push to main.** `.github/workflows/ci.yml` runs the Vitest + pytest gate then deploys on green via the immutable `cloud/` runner's `deploy.sh`; no manual approval. Confirm: `gh run list --workflow=ci.yml --limit 1`. Runner materialization, control-plane sync, health-gated relay restart, rollback: `cloud/CLAUDE.md` § Deployment Contract.
 
@@ -149,7 +148,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 - All scanner/indicator/journal writes must go through Turso, not host-local disk. Reads should be Turso-first. Host-local SQLite files are ephemeral on the VPS and will silently lose data after deploys.
 - When adding a new persisted table, include a migration and verify the row lands in Turso in production before calling the task done.
 
-**Image host:** `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Posts use absolute URLs. Fallback: `RADON_MEDIA_REMOTE=<user>@<prod-host>:/path/to/media/`.
+**Image host:** `https://media.radon.run` (Caddy on Hetzner; `radon-newsfeed` writes `/var/lib/radon/media/` directly). Posts use absolute URLs.
 
 **Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` with fallback to `data/blotter.json` for legacy rows lacking `realized_pnl`/`cost_basis`/`proceeds`. See `docs/cloud-services.md`.
 
@@ -191,9 +190,9 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 ## Startup Checklist
 
-- [ ] `scripts/cloud.sh` (default) or `scripts/local.sh`
-- [ ] `curl http://localhost:8321/health` → `ib_gateway.auth_state: authenticated`; verify [readiness](docs/ib-gateway-recovery.md#readiness-verification)
-- [ ] Reconciliation, exit orders, CRI scan auto-running
+- [ ] `scripts/cloud.sh` (VPN preflight, probes radon-app:8321, exports VPS URLs, runs `next dev`)
+- [ ] `curl http://radon-app:8321/health` → `ib_gateway.auth_state: authenticated`; verify [readiness](docs/ib-gateway-recovery.md#readiness-verification)
+- [ ] VPS timers own reconciliation, exit orders, CRI (`ssh root@radon-app radon status`)
 - [ ] Market hours: `TZ=America/New_York date +"%A %H:%M"` (9:30–16:00 ET, Mon–Fri)
 
 ## Response Format

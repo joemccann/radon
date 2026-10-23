@@ -106,13 +106,10 @@ from knowledge.retrieve import hybrid_search
 from knowledge.sources.journal import TRADE_LOG_KEY_PREFIX
 
 # Load .env from project root for Python scripts.
-# .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
-# IB_GATEWAY_MODE/HOST values win — single switch, no .env rewriting.
 try:
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env")
     load_dotenv(PROJECT_ROOT / "web" / ".env")
-    load_dotenv(PROJECT_ROOT / ".env.ib-mode", override=True)
 except ImportError:
     pass
 
@@ -965,9 +962,9 @@ async def lifespan(app: FastAPI):
 
     # Phase 6: lifespan warming hooks for CRI / GEX have been removed.
     # The Turso embedded replica keeps both reads sub-millisecond, and the
-    # systemd timers in radon-services (Hetzner) or laptop launchd plists
-    # (local mode) refresh the underlying snapshots on cadence — so the
-    # FastAPI server no longer needs to bootstrap those caches at boot.
+    # VPS systemd timers (cloud/services/) refresh the underlying snapshots
+    # on cadence — so the FastAPI server no longer needs to bootstrap those
+    # caches at boot.
     # Journal reconciliation still runs once at startup because trade-fill
     # rehydration is lifecycle-bound, not periodic.
     lifecycle_tasks.append(asyncio.create_task(_warm_journal_reconciliation_on_startup()))
@@ -1593,8 +1590,7 @@ async def _warm_knowledge_embedder_on_startup() -> None:
 # Phase 6: _warm_cri_cache_on_startup and _warm_gex_cache_on_startup were
 # deleted alongside their lifespan-task call sites. The Turso embedded
 # replica keeps both caches current without any FastAPI-side bootstrap;
-# scheduled refreshes are owned by the radon-services container (Hetzner
-# mode) or the laptop launchd plists (local mode).
+# scheduled refreshes are owned by the VPS systemd timers.
 
 
 def _atomic_save(path: str, data: dict) -> str:

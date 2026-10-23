@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# cloud.sh — Run local dev services against remote IB Gateway on Hetzner
-# Stops the local Docker session, admits the broker, then launches Next.js.
+# cloud.sh - attach-only laptop launcher
+# The laptop runs Next.js only, pointed at the Hetzner VPS over Tailscale.
+# It never starts a backend, a Gateway or a collector here: no ssh, no
+# container runtime, no launchd agents, no mode overlay file.
 # ---------------------------------------------------------------------------
 
 RED='\033[0;31m'
@@ -17,11 +19,21 @@ log_error() { echo -e "${RED}[cloud]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Next.js runs from THIS tree (a worktree runs its own code). web/.env is
+# gitignored, so a worktree has none; point at the main checkout's copy.
+# Outside a git checkout MAIN_ROOT equals PROJECT_ROOT.
+MAIN_ROOT="$PROJECT_ROOT"
+common="$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+[[ -n "$common" ]] && MAIN_ROOT="$(cd "$PROJECT_ROOT" && cd "$(dirname "$common")" && pwd)"
+if [[ ! -e "$PROJECT_ROOT/web/.env" && -f "$MAIN_ROOT/web/.env" ]]; then
+  log_warn "web/.env is missing in this tree; Next.js will start without Clerk keys."
+  log_warn "Link the main checkout's copy: ln -s \"$MAIN_ROOT/web/.env\" \"$PROJECT_ROOT/web/.env\""
+fi
 
 # Preflight: if any dev port is already bound, the user has a stale stack
 # from a prior session. Bail with guidance instead of stomping on it.
 busy=""
-for port in 3000 8321 8765; do
+for port in 3000; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     busy="${busy:+$busy }$port"
   fi
@@ -107,55 +119,10 @@ if ! tcp_probe radon-app 8321; then
 fi
 log_info "VPS reachable."
 
-# -- Step 2: Stop the local session before broker admission -----------------
-# R-729 / REL-313: the app host owns no Gateway. A remote login must not
-# precede local logout, and an SSH timeout never authorizes the mode switch.
-if ! python3.13 - "$SCRIPT_DIR/docker_ib_gateway.sh" <<'LOCAL'
-import subprocess
-import sys
-
-try:
-    inventory = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
-                               capture_output=True, text=True, timeout=10)
-    if inventory.returncode != 0:
-        print("Local Gateway inventory unavailable; no remote start.", file=sys.stderr)
-        raise SystemExit(1)
-    if any("ib-gateway" in name for name in inventory.stdout.splitlines()):
-        result = subprocess.run([sys.argv[1], "stop"], timeout=60)
-        if result.returncode != 0:
-            raise SystemExit(1)
-except (subprocess.TimeoutExpired, OSError):
-    print("Local Gateway logout unknown; no remote start.", file=sys.stderr)
-    raise SystemExit(1)
-LOCAL
-then
-  log_error "Local Gateway logout not confirmed. Cloud mode was not started."
-  exit 1
-fi
-
-# -- Step 3: Admit through the broker's installed lifecycle owner ------------
-log_info "Ensuring the broker IB Gateway is running through the lease-aware helper..."
-if ! python3.13 - <<'PYTHON'
-import subprocess
-import sys
-
-try:
-    result = subprocess.run([
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "root@radon-broker",
-        "/usr/local/bin/radon-ib-gateway-control start",
-    ], timeout=180)
-except (subprocess.TimeoutExpired, OSError):
-    print("Broker start outcome unknown; inspect broker status before retrying.", file=sys.stderr)
-    raise SystemExit(1)
-raise SystemExit(result.returncode)
-PYTHON
-then
-  log_error "Broker start not confirmed. Cloud mode was not started."
-  log_error "Inspect radon ib status on the broker; an operator hold requires explicit resume after local logout."
-  exit 1
-fi
-
-# Authentication, rather than an inaccessible tailnet 4001, proves readiness.
+# -- Step 2: Report cloud readiness ------------------------------------------
+# Report only. The laptop attaches whatever the broker state is; a hold or a
+# pending 2FA is the operator's call on the VPS, not a reason to refuse the
+# workspace. Fail only when the API itself is unreachable or untrusted.
 if ! python3.13 - <<'HEALTH'
 import json
 import sys
@@ -169,69 +136,50 @@ try:
         raise ValueError("health response too large")
     state = json.loads(raw)
 except (OSError, ValueError, urllib.error.URLError):
-    print("Cloud readiness unavailable; no mode change.", file=sys.stderr)
+    print("Cloud readiness unavailable (unreachable, 401 or non-JSON); fix tailnet trust before next dev.", file=sys.stderr)
     raise SystemExit(1)
-if not isinstance(state, dict) or not (
-    state.get("auth_state") == "authenticated"
-    and state.get("port_listening") is True
-    and state.get("operator_hold") is False
-):
-    print("Cloud broker is not ready; resolve authentication or hold before retrying.", file=sys.stderr)
-    raise SystemExit(1)
+if not isinstance(state, dict):
+    state = {}
+print(
+    f"auth_state={state.get('auth_state')} "
+    f"port_listening={state.get('port_listening')} "
+    f"operator_hold={state.get('operator_hold')}"
+)
 HEALTH
 then
-  log_error "Cloud broker readiness not confirmed. Cloud mode was not started."
+  log_error "Cloud readiness report failed. Workspace not started."
   exit 1
 fi
 
-# -- Step 4: Persist cloud mode in .env.ib-mode -----------------------------
-
-"$SCRIPT_DIR/ib" mode cloud
-
-# -- Step 4b: Persist RADON_MODE=hetzner so DB writes pick the right path ---
+# -- Step 3: Start cloud-thin dev (Next.js only) -----------------------------
 #
-# Phase 5: in Hetzner mode the laptop runs only the newsfeed scraper +
-# Next.js. All other schedulers run inside the radon-services container
-# on the VPS. We boot out AND disable the laptop's launchd agents so they
-# don't race. A bare `launchctl unload` is not durable: RunAtLoad brings the
-# agent back at the next login and the laptop monitor daemon then overwrites
-# the VPS writer's service_health rows with its stale local state.
-if command -v launchctl >/dev/null 2>&1; then
-  launchd_domain="gui/$(id -u)"
-  for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
-               com.radon.exit-order-service com.radon.monitor-daemon \
-               com.radon.vcg-refresh; do
-    if launchctl list | grep -q "$plist"; then
-      log_info "Booting out $plist (Hetzner mode)..."
-      launchctl bootout "$launchd_domain/$plist" 2>/dev/null || true
-    fi
-    launchctl disable "$launchd_domain/$plist" 2>/dev/null || true
-  done
-fi
-"$SCRIPT_DIR/_set_radon_mode.sh" hetzner
-
-# -- Step 6: Start cloud-thin dev (Next.js only) -----------------------------
+# The Hetzner VPS owns the full stack: radon-api, radon-relay, the newsfeed
+# and headlines writers, the schedulers and the broker Gateway. If the laptop
+# also launched FastAPI / IB relay / scraper, every shared resource would
+# double-book: IB Gateway returns Error 326 (clientId in use) and Turso emits
+# WalConflict on every dual-write.
 #
-# Post Phase 5 (cloud-services migration, 2026-05-03) the Hetzner VPS owns
-# the full stack: radon-api (clientIds 3/4/5), radon-relay (10/11/12),
-# radon-newsfeed (Turso writer), plus radon-monitor and radon-nextjs. If the
-# laptop also launched FastAPI / IB relay / scraper, every shared resource
-# would double-book — IB Gateway returns Error 326 (clientId in use) and
-# Turso emits WalConflict on every dual-write.
-#
-# So in cloud mode the laptop runs only Next.js, pointing radonFetch at
-# Hetzner FastAPI over Tailscale and the ticket-authenticated Caddy relay. The
-# tailnet bypass added to scripts/api/auth.py + server.py treats laptop's
-# 100.64/10 IP as 'local' for server-to-server calls.
+# So the laptop runs only Next.js, pointing radonFetch at Hetzner FastAPI over
+# Tailscale and the ticket-authenticated Caddy relay. The tailnet bypass in
+# scripts/api/auth.py + server.py treats the laptop's 100.64/10 IP as 'local'
+# for server-to-server calls.
 
 log_info "Starting cloud-thin dev (laptop = Next.js only)..."
-log_info "  → FastAPI:  http://radon-app:8321 (Tailscale)"
-log_info "  → WS relay: wss://app.radon.run/ws  (Tailscale)"
+log_info "  → FastAPI:   http://radon-app:8321 (Tailscale)"
+log_info "  → WS relay:  wss://app.radon.run/ws"
+log_info "  → Headlines: wss://app.radon.run/ws-headlines"
 
 export RADON_API_URL="http://radon-app:8321"
 export IB_REALTIME_WS_URL="wss://app.radon.run/ws"
 export NEXT_PUBLIC_IB_REALTIME_WS_URL="wss://app.radon.run/ws"
+export HEADLINES_WS_URL="wss://app.radon.run/ws-headlines"
+export NEXT_PUBLIC_HEADLINES_WS_URL="wss://app.radon.run/ws-headlines"
 export RADON_DEV_PROFILE="cloud-thin"
+
+if [[ -z "${ALLOWED_USER_IDS:-}" ]] && ! grep -q '^ALLOWED_USER_IDS=' "$PROJECT_ROOT/web/.env" 2>/dev/null; then
+  log_warn "ALLOWED_USER_IDS is not set in the environment or web/.env;"
+  log_warn "the operator routes will answer 403 until it is."
+fi
 
 cd "$PROJECT_ROOT/web"
 exec npm run dev

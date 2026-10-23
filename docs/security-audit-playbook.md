@@ -400,7 +400,7 @@ line here whenever you ship a security fix.**
 
   Redaction is a backstop for the renderer, not a licence to put secrets in the
   JSON. If a value is genuinely needed to reproduce a finding, reference where
-  it lives (`docker/ib-gateway/.env:4`) and leave it there.
+  it lives (`/etc/radon/env` on the broker, line N) and leave it there.
 
 ## Audit log
 

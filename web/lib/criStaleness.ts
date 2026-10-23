@@ -11,8 +11,8 @@
  *  - market_open unknown   + date === today      → fall back to TTL check
  *
  * This prevents the API from continuously re-running cri_scan.py after market
- * close. The launchd CRI service (every 30 min, 4:05 AM–8 PM ET) handles
- * scheduled refreshes; the API only needs to refresh during market hours.
+ * close. radon-refresh.timer on the VPS (cri_scan via scripts.data_refresh)
+ * handles scheduled refreshes; the API only needs to refresh during market hours.
  */
 
 import { lastCompletedSessionDate } from "./marketSession";

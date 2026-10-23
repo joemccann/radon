@@ -61,12 +61,11 @@ STATUS_SCRIPT = IBC_HOME / "status-secure-ibc-service.sh"
 START_SCRIPT = IBC_HOME / "start-secure-ibc-service.sh"
 RESTART_SCRIPT = IBC_HOME / "restart-secure-ibc-service.sh"
 
-# Docker paths. Defaults to the in-tree compose at <repo>/docker/ib-gateway/
-# (matches the laptop dev layout). Override with IB_GATEWAY_COMPOSE_DIR when
-# the compose project lives elsewhere — e.g. Hetzner runs the container from
-# the radon-cloud repo via /home/radon/radon-cloud/docker-compose.yml, so a
-# bare default would point FastAPI at the wrong project (and `docker compose
-# ps` would silently report not_found while the container is actually up).
+# Docker paths (legacy laptop branch, unreachable in production where
+# IB_GATEWAY_MODE=cloud; retained as the 2FA-lock / backoff test harness).
+# Production never runs compose from FastAPI: the broker Gateway is
+# /etc/radon/ib-gateway-compose.yml via radon-ib-gateway-control.
+# IB_GATEWAY_COMPOSE_DIR overrides the default.
 COMPOSE_DIR = Path(
     os.environ.get(
         "IB_GATEWAY_COMPOSE_DIR",
@@ -815,7 +814,7 @@ async def _ensure_docker_container(*, lease_preheld: bool = False) -> Dict:
             "gateway_mode": "docker",
             "error": (
                 f"Container started but Gateway not accepting connections after {RESTART_WAIT_SECS}s. "
-                "Check 2FA approval or container logs: scripts/docker_ib_gateway.sh logs"
+                "Check 2FA approval or the Gateway container logs (radon-docker-gw logs on the broker)"
             ),
         }
 

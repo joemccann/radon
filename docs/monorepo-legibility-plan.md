@@ -9,7 +9,7 @@ not moved. Dirty WIP in `scripts/`, `web/`, `cloud/` is out of scope.
 
 ## Verdict
 
-Do not reshape `web/`, `scripts/`, `cloud/`, `site/`, `docker/ib-gateway/`,
+Do not reshape `web/`, `scripts/`, `cloud/`, `site/`, `docker/app/`,
 `tests/`, or `lib/tools/` into an `apps/` / `packages/` monorepo. That is
 the fastest way to take production down. Fifty systemd units, sixteen
 launchd plists, `pyproject.toml` pythonpath, `.github/workflows/ci.yml`
@@ -76,7 +76,7 @@ Live GitHub state on 2026-08-20:
 | `lib/` | 29 | Pi tools. Vitest + CI include them. |
 | `context/` | 18 | Agent memory. March 2026 facts. Constructor still reads it. |
 | `tests/` | 17 | TWR money-math. CI collects this directory by name. |
-| `config/` | 16 | Laptop launchd plists. |
+| `config/` | 16 | Laptop ops launchd plists (pull/watch the VPS). |
 | Root `*.md` | 12 | Mix of live contracts and dead session notes. |
 
 Do not use "710 Python files at `scripts/` top level." Nested `scripts/**/*.py`
@@ -89,7 +89,6 @@ These look messy and are load-bearing.
 | Path | Why |
 |---|---|
 | `web/`, `scripts/`, `cloud/`, `site/` as roots | CI, deploy, systemd, imports. |
-| `docker/ib-gateway/` | Laptop IB Gateway. `scripts/docker_ib_gateway.sh` and `scripts/api/ib_gateway.py` default here. Distinct from `cloud/docker-compose.yml`. |
 | `tests/` at repo root | `ci.yml` pytest invocation names it. `pyproject.toml` comments T-051. |
 | `lib/tools/` | Root `vitest.config.ts` include + coverage. |
 | `config/*.plist` | Laptop schedulers. |
@@ -117,7 +116,7 @@ radon/
 ├─ TEST_AUDIT.md
 ├─ TEST_LOG.md
 ├─ REMEDIATION_LOG.md
-├─ web/  site/  scripts/  cloud/  docker/ib-gateway/
+├─ web/  site/  scripts/  cloud/  docker/
 ├─ lib/tools/  tests/  config/  brand/  docs/
 ├─ .github/CODEOWNERS
 ├─ .github/ISSUE_TEMPLATE/
@@ -127,7 +126,7 @@ radon/
     └─ monorepo-legibility-plan.md  # this file
 ```
 
-No `apps/`. No `packages/`. No merging `docker/ib-gateway` into `cloud/`.
+No `apps/`. No `packages/`. No merging `docker/` into `cloud/`.
 
 ## README rewrite
 
@@ -142,7 +141,7 @@ Keep:
 - Hero, CI badge, version from `VERSION` (0.7.0), proprietary license badge.
 - One-paragraph what / why.
 - Three gates table.
-- Quick start (Python 3.13, bun, two `.env.example` files, `cloud.sh` / `local.sh`).
+- Quick start (Python 3.13, bun, two `.env.example` files, `scripts/cloud.sh`).
 - Architecture ASCII + port list.
 - Project layout (complete: add `docker/`, `lib/tools/`, `tests/`, `site/`).
 - `## Now true` with 1-5 bullets (test-pinned).

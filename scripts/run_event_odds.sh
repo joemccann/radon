@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# FU4 — Polymarket event-odds overlay wrapper for launchd (F5).
+# FU4 — Polymarket event-odds overlay timer wrapper (F5).
 #
 # fetch_event_odds.py is per-ticker and currently maps macro / index markets.
 # This refreshes the representative index set a few times a day so the divergence

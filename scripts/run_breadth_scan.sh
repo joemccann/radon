@@ -82,8 +82,8 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-# Trading-day gate — match the run_data_refresh.sh probe verbatim so
-# we get the same calendar semantics for free.
+# Trading-day gate — match the trading-day probe used by the other
+# timer wrappers so we get the same calendar semantics for free.
 IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "yes"
 import sys
 try:

@@ -532,97 +532,6 @@ ${memoryContent}
     });
   };
 
-  // Check and start Monitor Daemon service
-  const checkMonitorDaemon = (cwd: string, ui: any): { running: boolean; error: string | null } => {
-    const serviceName = "com.radon.monitor-daemon";
-    const plistPath = path.join(process.env.HOME || "", "Library/LaunchAgents", `${serviceName}.plist`);
-    
-    // Check if plist is installed
-    if (!fs.existsSync(plistPath)) {
-      return { running: false, error: "Service not installed. Run: ./scripts/setup_monitor_daemon.sh install" };
-    }
-    
-    try {
-      // Check if service is running via launchctl
-      const result = execFileSync("launchctl", ["list", serviceName], {
-        encoding: "utf-8",
-        timeout: 5000 
-      }).trim();
-      
-      // launchctl list output: PID Status Label
-      // If PID is "-" or "0", service is loaded but idle (normal for interval-based)
-      // If we get a result, the service is loaded
-      if (result.includes(serviceName)) {
-        return { running: true, error: null };
-      }
-      
-      return { running: false, error: null };
-    } catch (e: any) {
-      // grep returns exit code 1 if no match - service not loaded
-      if (e.status === 1) {
-        return { running: false, error: null };
-      }
-      return { running: false, error: e.message };
-    }
-  };
-  
-  const startMonitorDaemon = (trust: WorkspaceTrust): { success: boolean; error: string | null } => {
-    const plistPath = path.join(process.env.HOME || "", "Library/LaunchAgents", "com.radon.monitor-daemon.plist");
-    const configPath = resolveTrustedWorkspaceScript(trust, "config/com.radon.monitor-daemon.plist");
-    
-    // If plist not in LaunchAgents, copy it
-    if (!fs.existsSync(plistPath)) {
-      if (!configPath) {
-        return { success: false, error: "Plist config is not trusted. Daemon not set up." };
-      }
-      
-      try {
-        // Copy plist to LaunchAgents
-        fs.copyFileSync(configPath, plistPath);
-      } catch (e: any) {
-        return { success: false, error: `Failed to copy plist: ${e.message}` };
-      }
-    }
-    
-    try {
-      // Load the service
-      execFileSync("launchctl", ["load", plistPath], {
-        encoding: "utf-8",
-        timeout: 5000 
-      });
-      return { success: true, error: null };
-    } catch (e: any) {
-      // Already loaded is not an error
-      if (e.message?.includes("already loaded")) {
-        return { success: true, error: null };
-      }
-      return { success: false, error: e.message };
-    }
-  };
-  
-  const ensureMonitorDaemonRunning = (trust: WorkspaceTrust, tracker: StartupTracker) => {
-    const status = checkMonitorDaemon(trust.root, tracker);
-    
-    if (status.running) {
-      tracker.complete("daemon", "success", "Monitor daemon running");
-      return;
-    }
-    
-    if (status.error?.includes("not installed")) {
-      tracker.complete("daemon", "warning", "Monitor daemon not installed");
-      return;
-    }
-    
-    // Try to start it
-    const startResult = startMonitorDaemon(trust);
-    
-    if (startResult.success) {
-      tracker.complete("daemon", "success", "Monitor daemon started");
-    } else {
-      tracker.complete("daemon", "error", `Daemon failed: ${startResult.error?.slice(0, 30)}`);
-    }
-  };
-
   // Run free trade analyzer asynchronously (non-blocking)
   const runFreeTradeAnalyzer = (trust: WorkspaceTrust, tracker: StartupTracker) => {
     const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/free_trade_analyzer.py");
@@ -875,7 +784,7 @@ ${memoryContent}
     // Build list of processes to track
     // Order matters: IB sync must complete BEFORE free trade analysis
     // because closed positions affect which multi-leg positions exist
-    const processNames: string[] = ["market", "docs", "ib", "free_trade", "daemon", "cri"];
+    const processNames: string[] = ["market", "docs", "ib", "free_trade", "cri"];
     
     // Add ALL X accounts to process list (not just pending scans)
     for (const scan of xScans) {
@@ -906,7 +815,6 @@ ${memoryContent}
     if (!trust) {
       tracker.complete("ib", "warning", "Startup automation disabled: workspace is not trusted");
       tracker.complete("free_trade", "warning", "Free trade analysis disabled: workspace is not trusted");
-      tracker.complete("daemon", "warning", "Daemon startup disabled: workspace is not trusted");
       tracker.complete("cri", "warning", "CRI scan disabled: workspace is not trusted");
       return;
     }
@@ -917,10 +825,6 @@ ${memoryContent}
       // Run free trade AFTER IB sync completes (positions may have changed)
       runFreeTradeAnalyzer(trust, tracker);
     });
-    
-    // Check and ensure Monitor Daemon is running (sync)
-    // This handles fill monitoring and exit order placement
-    ensureMonitorDaemonRunning(trust, tracker);
     
     // Run CRI scan in parallel (pre-warm /regime page data)
     runCriScan(trust, tracker);

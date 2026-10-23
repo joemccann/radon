@@ -9,7 +9,7 @@ Detailed derivation of the 2FA-aware restart + push lock + watchdog self-heal. S
 **Symptom and prerequisites:** after startup, restart or a daily cycle, the
 API socket can listen while login is incomplete. Use the selected mode's
 FastAPI `/health` response and the Gateway logs; a TCP connection or Docker
-`healthy` result does not prove authentication. The [compose healthcheck](../docker/ib-gateway/docker-compose.yml)
+`healthy` result does not prove authentication. The [compose healthcheck](../cloud/docker-compose.yml)
 only opens the configured API port. `_derive_auth_state` in
 [`ib_gateway.py`](../scripts/api/ib_gateway.py) requires a connected pool
 client with non-empty `managed_accounts` to report `auth_state=authenticated`.
@@ -32,8 +32,7 @@ operator using the applicable recovery procedure below.
 
 ## Daily cycle
 
-The [Docker compose configuration](../docker/ib-gateway/docker-compose.yml)
-and [production compose configuration](../cloud/docker-compose.yml) own the
+The [production compose configuration](../cloud/docker-compose.yml) owns the
 IBC daily token-restart setting and timezone. A token restart can avoid a new
 login while the token remains valid; expiry can still require 2FA. A blank
 restart field leaves the Gateway's stored daily-cycle setting unchanged; it
@@ -41,20 +40,16 @@ does not disable that cycle.
 
 **Symptom and prerequisites:** investigate a recurring login interruption
 using the selected Gateway mode and its effective configuration.
-[`setup_ibc.sh`](../scripts/setup_ibc.sh) writes blank restart fields for
-local launchd and reports that the Gateway's stored daily-cycle setting
-applies. The installer does not choose a cycle. The launchd definition's
-absence of a start schedule also does not disable the Gateway's own cycle.
+No laptop installer exists; the broker compose is the only configuration.
 
 **Blast radius and safe diagnosis:** inspect configuration and logs without
-changing the broker session. Do not copy container clock settings into local
-IBC: local configuration and timezone must be checked independently.
+changing the broker session.
 **Stop conditions and verification:** stop on an active hold, lease or login
 throttle; follow [readiness verification](#readiness-verification) after a
 cycle instead of relying on its elapsed time or open port.
 **Rollback and escalation:** diagnosis has no rollback. Do not change restart
-settings as an incident experiment; escalate a wanted local cycle change for a
-separately tested installer change.
+settings as an incident experiment; escalate a wanted cycle change as a tested
+compose change.
 
 ## Relay recovery
 
@@ -96,12 +91,11 @@ Symptoms before the lock:
 **Symptom:** login or recovery output disappears after a container recreate.
 **Prerequisites:** identify local Docker versus the production broker and retain
 read-only access to that host. The [production compose source](../cloud/docker-compose.yml)
-owns retained logging; the [local compose source](../docker/ib-gateway/docker-compose.yml)
-does not configure that driver. Production runs an installed root-owned compose
+owns retained logging. Production runs an installed root-owned compose
 artifact, so a source merge alone does not prove its logging configuration changed.
 **Blast radius:** the following diagnosis reads logs and does not change the
 Gateway, authentication, holds or leases.
-**Diagnosis:** locally, use `scripts/docker_ib_gateway.sh logs`. On the broker,
+**Diagnosis:** on the broker,
 `sudo -n /usr/local/sbin/radon-docker-gw logs` reads the live container's bounded
 recent output. For retained production output, as root use
 `journalctl CONTAINER_TAG=ib-gateway --since "<UTC time>"` with the incident's
@@ -124,7 +118,7 @@ operator when the installed configuration or journal retention cannot be confirm
 Every restart path that fires a push acquires the lock first. While held, restart requests REJECTED with `reason="2fa_push_in_flight"`.
 
 Required participants:
-- Local Docker recovery in `scripts/api/ib_gateway.py` and `scripts/docker_ib_gateway.sh`
+- FastAPI's `restart_ib_gateway` in `scripts/api/ib_gateway.py`
 - The production `/usr/local/bin/radon-ib-gateway-control` helper installed from `cloud/`
 - `radon-ib-watchdog`, which acquires the lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter exactly once
 - Boot, operator, admin-panel, and laptop cloud starts, all of which delegate to the production helper instead of acquiring independently
@@ -317,7 +311,7 @@ A later `-XX` flag overrides the vendor `20` and `5` above the marker. Lines abo
 ## Upgrading the Gateway image
 
 **Symptom:** a Gateway image change fails login, or a rollback would put an unsupported build back on the broker.
-**Prerequisites:** the digest comes from the image line in [production compose](../cloud/docker-compose.yml) and [local compose](../docker/ib-gateway/docker-compose.yml). Do not copy that digest into this page. Both comments say the same support floor: drops support for builds below 10.50.1 on 2026-12-15.
+**Prerequisites:** the digest comes from the image line in [production compose](../cloud/docker-compose.yml). Do not copy that digest into this page. The comment says the support floor: drops support for builds below 10.50.1 on 2026-12-15.
 **Blast radius:** one lease-held restart is one 2FA push and drops every IB client until login completes. A digest bump that skips the volume copy below fails login because IBC looks for a version directory the old volume hides.
 **Diagnosis:** read `IB_GATEWAY_VERSION` from the new image. Confirm `/seed/ibgateway/$VER` is missing before the copy. Confirm the installed body at `/etc/radon/ib-gateway-compose.yml` is the one `radon-docker-gw config-check` renders.
 **Stop:** stop if a hold, an unreadable lease, or a login throttle is active. Do not restart during the cash session. Do not roll back onto a build the compose comment says IBKR has dropped.
@@ -347,7 +341,7 @@ Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand
 
 - **Do not keep forcing restarts when no push arrives.** Check the Gateway log for `Too many failed login attempts` first. Each login is another failed attempt. Wait for the UTC time the app-path 409 names (Gate 6), then restart once from that path. Do not use broker-local `radon restart` during the quiet period.
 
-- **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
+- **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `cloud/docker-compose.yml`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — a clean stop does not `Restart=always` back, so the unit stays down until something starts it. Use `radon restart` instead. (Stopping `radon-ib-gateway` no longer cascade-stops api/relay/monitor: since 44e89e1b they are `After=`-ordered only, never `PartOf=`; a 2FA restart leaves the app plane up. See `docs/spof-host-split.md`.) See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.
 - **Do not assume `auth_state=authenticated` means the pool is healthy.** After 2FA resolves, the FastAPI `ib_pool` can stay stuck disconnected. As of 2026-06-24 (46ba1e1) the `recover_stuck_pool` self-heal (Gate 5) reconnects it in ~15-60s with no operator action, so **do not reflexively restart radon-api** — give the heartbeat a minute. `systemctl restart radon-api.service` remains the emergency override if the self-heal genuinely fails. See `feedback_ib_pool_stuck_after_2fa.md`.
 - **Do not set Gateway GC flags with `JAVA_TOOL_OPTIONS` or above `### keep on update`.** The launcher blanks the env var, and an upgrade replaces everything above the marker. Put overrides under the marker in `ibgateway.vmoptions`. See [JVM garbage collection](#jvm-garbage-collection).

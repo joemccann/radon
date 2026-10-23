@@ -12,11 +12,8 @@ CLI aliases live in `.pi/commands.json`. Human index:
 
 | Path | Role |
 |---|---|
-| `cloud.sh` | Everyday: laptop Next.js + newsfeed, VPS owns IB/API/relay |
-| `local.sh` | Fully local, including `docker/ib-gateway` |
-| `dev` | `web/` `bun run dev` supervisor (Next + IB WS + FastAPI + newsfeed) |
-| `ib` | `scripts/ib mode local\|cloud` |
-| `docker_ib_gateway.sh` | Laptop Gateway compose in `docker/ib-gateway/` |
+| `cloud.sh` | Attach-only laptop launcher: VPN preflight, `tcp_probe radon-app 8321`, `/health/lite` report, exports the VPS API/WS URLs, `exec next dev` |
+| `dev` | `web/` `bun run dev` wrapper (Next.js only, profile cloud-thin) |
 
 ## Ingest (`fetch_*.py`)
 

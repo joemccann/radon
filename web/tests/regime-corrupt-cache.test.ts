@@ -2,7 +2,7 @@
  * Unit tests: /api/regime resilience to corrupt CRI cache files.
  *
  * Regression target:
- *   When run_cri_scan.sh captures stderr into the JSON file (2>&1),
+ *   When a scan wrapper captures stderr into the JSON file (2>&1),
  *   the scheduled CRI files contain debug output before the JSON.
  *   The API route should:
  *   1. Skip corrupt files and try older ones in the scheduled dir

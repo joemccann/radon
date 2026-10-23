@@ -175,7 +175,7 @@ def test_lock_held_by_same_holder_blocks_second_restart(monkeypatch):
 def test_backoff_short_circuits_before_touching_push_lease(monkeypatch):
     """A deferred call must not acquire or refresh the cross-process lease."""
     # Force the local restart path. Importing scripts.api.server first can load
-    # .env.ib-mode with IB_GATEWAY_MODE=cloud, which returns before backoff.
+    # IB_GATEWAY_MODE=cloud from the environment, which returns before backoff.
     monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: False)
     ib_gateway._restart_state["attempt_count"] = 1
     ib_gateway._restart_state["next_attempt_after"] = time.time() + 120

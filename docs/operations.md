@@ -56,8 +56,6 @@ write. `setup-vps.sh` prints the staged form when the file is missing.
 
 **Service token.** `RADON_SERVICE_TOKEN` is the shared Next.js to FastAPI bearer. When set, `radonFetch` (`web/lib/radonApi.ts`) sends it as `X-Radon-Service-Token` and `is_trusted_service_request` (`scripts/api/auth.py`) admits the caller as a trusted service. It is set only on the demo deployment (Vercel `radon-demo` project plus the demo VM `.env`, same value in both; see `docs/demo-environment.md`). Leave it unset on prod: there the header is never sent and the API stays loopback/Clerk JWT gated.
 
-`.env.ib-mode` overlays `.env` and stores the IB mode toggle from `scripts/ib mode local|cloud`.
-
 ### Encrypted credential store (profile Credentials tab)
 
 **The store wins over `.env`.** Keys entered in the profile Credentials tab
@@ -509,13 +507,7 @@ production is untouched.
 
 ## IB Gateway
 
-Three deployment modes selected by `IB_GATEWAY_MODE`:
-
-| Mode | Description |
-|------|-------------|
-| `docker` (default; local development) | Local `ghcr.io/gnzsnz/ib-gateway` via Docker Compose with `restart: "no"`. Local start/restart paths acquire the shared lease. Reports Docker `container_state` / `container_health`. |
-| `cloud` (Hetzner production) | Lifecycle is externally owned by `/usr/local/bin/radon-ib-gateway-control` on the Hetzner VM. FastAPI performs TCP/API health checks only and reports `service_state=reachable` when the port/API path is up; local Compose restart returns 503. |
-| `launchd` (legacy) | IBC under macOS launchd. |
+`IB_GATEWAY_MODE=cloud` is the only deployed mode: lifecycle is owned by `/usr/local/bin/radon-ib-gateway-control` on the broker; FastAPI performs TCP/API health checks only and reports `service_state=reachable`; a local Compose restart returns 503. The `docker` / `launchd` code branches are legacy laptop paths kept as the test harness.
 
 **2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. `restart_ib_gateway()` runs an explicit `managedAccounts()` probe; non-empty resets backoff, empty advances it (1m → 2m → 5m → 15m → 30m → 60m capped). `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | reachable | unknown`), `upstream_dead`, and `restart_backoff` (attempt count, next attempt in seconds, push lock holder/TTL, last outcome). Schema-v2 `/status` treats nested broker degradation (`awaiting_2fa`, `upstream_dead`, unhealthy service) as aggregate-down even when FastAPI returns HTTP 200, and treats cloud-mode `reachable` as healthy. `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** after 3 consecutive `auth_state=awaiting_2fa` cycles with no active push or scheduled retry, the watchdog acquires the cross-process lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter. The adapter consumes that exact lease once and calls `/usr/local/bin/radon-ib-gateway-control`; boot, admin, operator, and laptop cloud starts use the same helper. Never run raw Docker or unmanaged `systemctl restart radon-ib-gateway.service` when the helper is installed.
 
@@ -542,31 +534,17 @@ As of 2026-05-20 monitor_daemon handlers (`fill_monitor`, `exit_orders`, `journa
 **Troubleshooting.**
 
 ```bash
-# Health
-curl -s http://localhost:8321/health | python3.13 -m json.tool
-
-# Gateway reachable?
-bash -c 'echo > /dev/tcp/ib-gateway/4001' && echo OK || echo FAIL
-
-# Connections on remote host
-ssh root@radon-app "ss -tnp | grep 4001"
-
-# Fresh client probe
-python3.13 -c "from ib_insync import IB; ib=IB(); ib.connect('ib-gateway',4001,clientId=99,timeout=10); print('OK'); ib.disconnect()"
+# Health (from the laptop over the tailnet)
+curl -s http://radon-app:8321/health | python3.13 -m json.tool
+# Gateway reachable from the app host?
+ssh root@radon-app "bash -c 'echo > /dev/tcp/10.0.0.4/4001' && echo OK"
+# Connections on the broker
+ssh root@radon-broker "ss -tnp | grep 4001"
 ```
 
-**Management commands** (laptop alias → SSH-wrapped; same names on the VPS):
+Operator Gateway control is `ssh root@radon-broker radon ib status|release|resume` and the admin panel; see [Gateway recovery](ib-gateway-recovery.md).
 
-| Command | Action |
-|---------|--------|
-| `ibstart` | Start container, wait for port 4001 |
-| `ibstop` | Stop and remove container |
-| `ibrestart` | Restart container |
-| `ibstatus` | Container state, port check, active connections |
-| `iblogs [N]` | Tail container logs |
-| `ibhealth` | Docker healthcheck status |
-
-Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md`](ib-gateway-docker.md) and [`docs/ib-connection-troubleshooting.md`](ib-connection-troubleshooting.md).
+Connection troubleshooting lives in [`docs/ib-connection-troubleshooting.md`](ib-connection-troubleshooting.md).
 
 ## Background Services
 
@@ -578,7 +556,7 @@ lands in `/var/lib/radon/knowledge-eval`. A hit@5 or MRR regression fails the
 unit. Enable steps: [`cloud-services.md`](cloud-services.md#knowledge-golden-eval-radon-knowledge-evaltimer).
 Contract: [`knowledge-embeddings.md`](knowledge-embeddings.md).
 
-Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
+Hetzner host systemd is the production surface. Laptop plists in `config/` are ops-only (pull from or watch the VPS); no laptop plist runs a collector. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
 
 **Nightly agent loops on the Mac mini.** All seven nightly agent loops (reliability, testing, ci-performance, performance, documentation, security, security-deepsec) run on the one-file runner: `scripts/runner/run_loop.sh <loop>` with `scripts/runner/loops/<loop>.env`, installed root-owned in `/usr/local/radon-runner` by `scripts/runner/install.sh` as the LaunchDaemon `com.radon.runner.<loop>`, which runs as the hidden unprivileged user `_radonbot` ([docs/runner.md](runner.md)). Each night the runner deletes and re-clones `main` into `/Users/_radonbot/radon-runner/work/<loop>`, runs the agent with the loop's prompt from `.claude/runner-prompts/<loop>.md`, and pages Pushover. The per-loop wrappers (`scripts/<loop>_nightly.sh`, `~/radon-weekend/<clone>`, `.weekend-runner.lock`, `.radon-<loop>-runner` markers, split gitdirs, per-loop venvs) are retired. The `Fires` column is each loop env's `SCHEDULE_HOUR:SCHEDULE_MINUTE`.
 
@@ -616,7 +594,7 @@ and vendor application updates retain independent activity checks. See
 - **Three phases, one session each.** `PHASES="audit:<secs> remediate:21600 deliver:10800"` (audit 2h for security, 8h for DeepSec, which runs `deepsec process` / `revalidate` / `export` in-session). Every phase runs whatever the earlier one returned; each gets its own header (`Phase:`, `State:`), timeout and page. The runner exits 75 when any phase is not OK and 2 when one was refused.
 - **Claude only, never fable.** `ALLOWED_AGENTS=claude` refuses any other rung (exit 2, one page, before cloning). `AGENTS_RESOLVER=lib/security_claude_ladder.py` lists the bot's `claude models`, skips the newest tier and prints `claude:<model>` rungs; empty or failed output keeps `AGENTS="claude:claude-opus-5 claude:claude-sonnet-5"` and is logged. Every claude launch passes `--model <rung> --effort medium`, `--disallowedTools ScheduleWakeup Monitor CronCreate` and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, and exports `RADON_RUNNER_MODEL` so the prompt's nested Stage 4 `claude` uses the same model.
 - **Subscription only.** `AGENT_UNSET` lists every API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway name the installed Claude Code honors (the per-name review is in [security-approved-tools.md](security-approved-tools.md)), plus `OPENAI_API_KEY`, `CODEX_API_KEY` and `PW_TEST_CONNECT_WS_ENDPOINT`. The runner unsets each and logs `IGNORING: <NAME>`, never the value. `AGENT_ENV` sets `RADON_LADDER_NO_AUTH_FILES=1` and `RADON_WEEKEND_BROWSER_HOST=unavailable:disabled`. The daemon's environment also carries `DISABLE_AUTOUPDATER=1` (rail 8).
-- **Pre-run hook** (`scripts/runner/hooks/security_pre.sh`, root-owned): asserts the phase runs in `~/radon-runner/work/<loop>` with `origin` = the loop's repository; `REFUSED`s (exit 2, no agent) a credential file (`.env`, `.env.ib-mode`, `web/.env`) and what `unset` cannot reach: a key line in `.env.local`, `.env.*.local` or any `.deepsec/**/.env*`, or an `apiKeyHelper` / reroute `env` entry in the bot's `~/.claude/settings.json`, `.claude/settings*.json` or the managed settings. Flag names count only when truthy (1/true/yes). The `refused=` reason names the class only (the public issue gets exit 2 and not the reason); the offending file goes to the private runner log. Then it runs `claude_cli_env_drift.py --notify` against the bot's claude (non-fatal; one page per CLI version with unreviewed env names), fetches, detaches at the newest CI-green `main` from `nightly_green_base.py` (REL-187), `git clean`s everything but `KEEP_PATHS` and `.venv`, keeps the bare `$LOOP_STATE/held.git`, writes `audit-context.md` for the audit phase and arms the branch-only deliver record before deliver (R-611). Every hook git call pins `core.hooksPath=/dev/null` and `core.fsmonitor=false`.
+- **Pre-run hook** (`scripts/runner/hooks/security_pre.sh`, root-owned): asserts the phase runs in `~/radon-runner/work/<loop>` with `origin` = the loop's repository; `REFUSED`s (exit 2, no agent) a credential file (`.env`, `web/.env`, the retired IB-mode overlay) and what `unset` cannot reach: a key line in `.env.local`, `.env.*.local` or any `.deepsec/**/.env*`, or an `apiKeyHelper` / reroute `env` entry in the bot's `~/.claude/settings.json`, `.claude/settings*.json` or the managed settings. Flag names count only when truthy (1/true/yes). The `refused=` reason names the class only (the public issue gets exit 2 and not the reason); the offending file goes to the private runner log. Then it runs `claude_cli_env_drift.py --notify` against the bot's claude (non-fatal; one page per CLI version with unreviewed env names), fetches, detaches at the newest CI-green `main` from `nightly_green_base.py` (REL-187), `git clean`s everything but `KEEP_PATHS` and `.venv`, keeps the bare `$LOOP_STATE/held.git`, writes `audit-context.md` for the audit phase and arms the branch-only deliver record before deliver (R-611). Every hook git call pins `core.hooksPath=/dev/null` and `core.fsmonitor=false`.
 - **Post-run hook** (`scripts/runner/hooks/security_post.sh`): the phase is `OK` only with a column-0 `SECURITY-NIGHTLY PHASE COMPLETE:` / `SECURITY-DEEPSEC PHASE COMPLETE:` line in this phase's own log slice (R-535; a recital does not count); `TRUNCATED` on the background-ceiling marker, `TIMEOUT` on rc 124, `FAILED (exit N)` otherwise, `INCOMPLETE (exit 0 without the phase-completion marker)` without the stamp. Deliver additionally needs its verdict: the durable record `$LOOP_STATE/.<loop>-deliver/record.json` first (R-613), then the slice's `NIGHTLY DELIVER READY:` / `NIGHTLY DELIVER INCOMPLETE:` line, and every URL must be a same-repo OPEN PR on the loop's prefix (`gh pr view -R joemccann/radon`). A branch-only `launched` record falls through to the verdict line. It then publishes the private report and posts the dead-man.
 - **Private operator reports.** At the end of every phase the agent writes `$RADON_RUNNER_LOOP_STATE/scratch/latest-report-<phase>.md`. The post-run hook (never the agent) takes it only if it is newer than the phase start and not a symlink, redacts known secret shapes, and pushes it to the PRIVATE repository `joemccann/radon-security-reports` at `reports/<loop>/<YYYY-MM-DD>/<phase>.md` from a fresh `mktemp` clone, over `ssh -i ~/.radon-runner-reports-key -o IdentitiesOnly=yes` with GitHub's published ed25519 host key pinned in a `mktemp` known-hosts file (`StrictHostKeyChecking=yes`). The key is the bot's, outside every clone, never exported and named only in that hook. The page links it as `url` / `url_title` "Open private report"; a page without it says `(no private report this phase)`. The public rolling issue never carries the link or the content (rail 7). Never make that repository public.
 - **Dead-man reporting.** Each phase posts one public comment that is only the machine-readable phase line (`<!-- radon-phase loop=<loop> phase=<phase> exit=<n> ... -->`, the same fields on the next line, and `audited-through: <sha>` only for an audit that exited 0) on the rolling issue labelled `security-nightly` or `security-deepsec`, creating the issue if absent, and one Pushover. Finding text, PR numbers, paths, secrets and the refusal class do not go on that issue. The harness writes the exit from the process status, including when the phase is killed. Older comments are pruned with `nightly_issue_prune.py` only after the new comment's post is confirmed and its numeric id is kept (R-612, R-657). The agent never writes an issue: the root-owned `gh` guard (`GH_GUARD=1`, `/usr/local/radon-runner/guard/<loop>/gh`, loop name and real `gh` baked in) routes every `pr` / `api` / `issue` / `alias` call through `nightly_pr_guard.py`, which refuses merges, aliases, unguarded PR creation and, for these two loops, any issue write. A missing daily comment means the runner did not fire.
@@ -856,7 +834,7 @@ bypass under enforcement.
 
 ### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
 
-`TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` (was `100.0.0.0/8`: every tailnet node plus public space). No laptop or Mac mini `/32`: local mode runs its own Docker Gateway on `127.0.0.1` (`scripts/ib mode local`), and cloud mode has no tailnet `4001` to reach since the split (broker binds `10.0.0.4` and loopback only).
+`TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` (was `100.0.0.0/8`: every tailnet node plus public space). No laptop or Mac mini `/32`: no laptop process opens an IB socket (broker binds `10.0.0.4` and loopback only).
 
 The file is a reference. Nothing in deploy, setup or compose reads it (`cloud/tests/test_ibc_trusted_ips.py` pins that), so merging changes nothing live. It is also moot for the Docker Gateway: the gnzsnz image relays `4003 -> 127.0.0.1:4001` with socat inside the container, so every API client reaches the Gateway as `127.0.0.1`. Who can open `4001` is decided by the compose bind address and the host and Hetzner firewalls below, not by IBC. Operator step: none. If a Gateway is ever run without the socat relay, copy this value into its IBC `config.ini` and restart it (one 2FA).
 
