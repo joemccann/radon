@@ -381,10 +381,17 @@ line here whenever you ship a security fix.**
   the raw `Set-Cookie: ...` header line: `cookie` is a credential key name in
   its own right, so a serialized header (`{"Cookie": "..."}`, a dict dump, an
   env line) is redacted and detected by the same generic assignment rules as
-  any other credential-named key. Both also share one triple-delimited
+  any other credential-named key. Detection reads every `name=value` pair on a
+  cookie header, not only the first, with no length cap. A quoted value may
+  open on the key line and start on the next one, and a single-quoted value
+  may double its quote. Both also share one triple-delimited
   assignment rule (`TOKEN = """` on one line, the value on the next), so a
   Python or TOML multi-line value is not mistaken for an empty two-quote value
-  with its real credential left in the body.
+  with its real credential left in the body. They also share the YAML
+  block-scalar rule (`password: |`, the value on the following lines); an
+  excerpt that is quoted (`> `) or commented (`# `) repeats that lead on every
+  continuation line, and the body is still redacted. The scrubber's multi-line
+  key alphabet includes `authorization`.
   The scrubber's own patterns are a denial-of-service surface, because the
   publication gate runs them over branch text an outside contributor shapes:
   every repeated character class in them is bounded, so a long run of

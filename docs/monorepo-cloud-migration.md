@@ -200,7 +200,7 @@ Documented fully in `tasks/lessons.md` (2026-07-11). Short list:
 - Gateway control root demotion must `cd` to a radon-readable home; `/root` cwd breaks Compose.
 - Deploy preflight must not require radon-readable installed sudoers; root helper owns that contract.
 - Output-trace excludes for host `data/**` are mandatory on disk-fallback API routes (VPS data >> local).
-- Host needs Bun 1.3.14 on radon PATH; prune must chmod u+w before deleting a-w runners.
+- Host needs Bun 1.4.4 on radon PATH; prune must chmod u+w before deleting a-w runners.
 
 ## Control-plane refresh evidence (2026-07-18)
 

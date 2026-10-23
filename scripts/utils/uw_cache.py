@@ -243,7 +243,7 @@ def singleflight(key: str, timeout: float = 10.0):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / ("flight-" + _disk_filename(key)[:2] + ".lock")
     with path.open("a+") as handle:
-        deadline = time.monotonic() + min(max(float(timeout), 0), 10.0)
+        deadline = time.monotonic() + min(max(float(timeout), 0), 120.0)
         while True:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -230,8 +230,10 @@ class TestNodeImage:
         images = _from_images(text)
         # DS-2026-10-11-03: both stages are digest-pinned like the Python image.
         assert re.fullmatch(r"node:22\.23\.4-bookworm-slim@sha256:[0-9a-f]{64}", images[-1])
-        assert re.fullmatch(r"oven/bun:1\.3\.14@sha256:[0-9a-f]{64}", images[0])
-        assert "1.3.14" in text
+        assert images[0] == (
+            "oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d"
+        )
+        assert "1.4.4" in text
         assert "COPY web/" in text or "COPY web" in text
         assert "scripts/" in text
         assert "bun install --frozen-lockfile" in text

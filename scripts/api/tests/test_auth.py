@@ -318,7 +318,7 @@ class TestVerifyClerkJwt:
 
     def _patch_jwks(self):
         signing_key = SimpleNamespace(key=_PUBLIC_PEM)
-        fake_client = SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key)
+        fake_client = SimpleNamespace(get_signing_key=lambda kid: signing_key)
         return patch.object(auth_mod, "_get_jwks_client", return_value=fake_client)
 
     def _env(self, allowed="user_ok"):

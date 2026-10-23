@@ -47,7 +47,7 @@ class TestCachedKidServesWithoutTheGate:
             def get_signing_keys(self):
                 return [type("K", (), {"key_id": "kid-cached"})()]
 
-            def get_signing_key_from_jwt(self, token):
+            def get_signing_key(self, kid):
                 return type("S", (), {"key": "the-cached-key"})()
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: CachedClient())

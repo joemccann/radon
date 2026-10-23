@@ -600,7 +600,7 @@ Source-green is not production-green. After source hardening, live recovery stil
 - After any live hot-patch of an installed control-plane target, re-run bootstrap so the readiness manifest hashes match the next release, or deploy preflight will refuse "incompatible with scripts/…".
 - Immutable runners are extracted with `chmod a-w`. Prune must restore write bits before `rmtree`, or a green deploy fails after success on runner retention.
 - Post-gate backup cleanup of managed release trees is best-effort. Root-owned venv files (e.g. py-spy) must not turn a gated green release into a hard failure.
-- Production VPS needs the exact Bun pin in PATH for radon (currently 1.3.14). Missing Bun fails staged builds after control-plane and env preflight already passed.
+- Production VPS needs the exact Bun pin in PATH for radon (currently 1.4.4). Missing Bun fails staged builds after control-plane and env preflight already passed.
 
 ### Production env invariants (Hetzner monorepo)
 
@@ -1308,3 +1308,6 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - Check repository visibility before committing provider captures. Approval for private automation, storage and operator display does not imply permission to publish history in Git. Use explicitly synthetic fixtures in public repositories and retain real-source captures and independent reference checks privately.
 - Removing a captured file in a later commit does not remove it from branch history. Before the first push, build the public commit directly on the public base and verify that no captured-data commit or blob is reachable from the pushed branch.
+
+### 2026-10-22 LEAP scanner admission
+- A scanner must explicitly wait through the provider's rolling minute or short Retry-After; a five-second UI deadline is not a batch scheduling policy. Preserve shared reservations, interactive headroom, hard quota refusal and bounded waits. Prove the behavior with a real isolated ledger and synthetic HTTP before rerunning a production universe.
