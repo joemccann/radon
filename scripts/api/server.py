@@ -6834,28 +6834,58 @@ async def short_availability(ticker: str, request: Request):
     source = "none"
     as_of = datetime.now(timezone.utc).isoformat()
 
-    # --- IB probe (primary) ---
-    if ib_pool is not None and ib_pool.is_connected("data"):
-        try:
-            async with ib_pool.acquire("data") as client:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(_probe_short_ticks_in_thread, client, upper),
-                    timeout=_SHORT_PROBE_TIMEOUT_SECS + 2.0,
-                )
-            difficulty = result.get("difficulty")
-            shortable_shares = result.get("shortable_shares")
+    async def _ib_probe() -> dict:
+        async with ib_pool.acquire("data") as client:
+            return await asyncio.wait_for(
+                asyncio.to_thread(_probe_short_ticks_in_thread, client, upper),
+                timeout=_SHORT_PROBE_TIMEOUT_SECS + 2.0,
+            )
+
+    # IB ticks and UW short-data are independent (PERF-024). Overlap them.
+    ib_coro = (
+        _ib_probe()
+        if ib_pool is not None and ib_pool.is_connected("data")
+        else None
+    )
+    uw_coro = (
+        asyncio.to_thread(_fetch_uw_short_data, upper) if uw_available else None
+    )
+    ib_done: Any = None
+    uw_done: Any = None
+    coros: list[Awaitable] = []
+    labels: list[str] = []
+    if ib_coro is not None:
+        coros.append(ib_coro)
+        labels.append("ib")
+    if uw_coro is not None:
+        coros.append(uw_coro)
+        labels.append("uw")
+    if coros:
+        for label, value in zip(
+            labels, await asyncio.gather(*coros, return_exceptions=True)
+        ):
+            if label == "ib":
+                ib_done = value
+            else:
+                uw_done = value
+
+    if ib_coro is not None:
+        if isinstance(ib_done, asyncio.TimeoutError):
+            logger.warning("short-availability/%s: IB probe timed out", upper)
+        elif isinstance(ib_done, Exception):
+            logger.warning("short-availability/%s: IB probe error: %s", upper, ib_done)
+        elif isinstance(ib_done, dict):
+            difficulty = ib_done.get("difficulty")
+            shortable_shares = ib_done.get("shortable_shares")
             if difficulty is not None or shortable_shares is not None:
                 source = "ib"
                 as_of = datetime.now(timezone.utc).isoformat()
-        except asyncio.TimeoutError:
-            logger.warning("short-availability/%s: IB probe timed out", upper)
-        except Exception as exc:
-            logger.warning("short-availability/%s: IB probe error: %s", upper, exc)
 
-    # --- UW fallback (for fee/rebate or when IB returned nothing) ---
-    if uw_available:
-        try:
-            raw = await asyncio.to_thread(_fetch_uw_short_data, upper)
+    if uw_coro is not None:
+        if isinstance(uw_done, Exception):
+            logger.warning("short-availability/%s: UW fallback error: %s", upper, uw_done)
+        else:
+            raw = uw_done
             if raw is not None:
                 if _uw_short_data_is_fresh(raw, upper):
                     uw_fee, uw_rebate, uw_as_of = _extract_uw_fee_rebate(raw)
@@ -6869,8 +6899,6 @@ async def short_availability(ticker: str, request: Request):
                         "short-availability/%s: UW data too old, ignoring (SPCX-style stale row)",
                         upper,
                     )
-        except Exception as exc:
-            logger.warning("short-availability/%s: UW fallback error: %s", upper, exc)
 
     shortable = _derive_shortability(difficulty, shortable_shares)
     missing = source == "none"
