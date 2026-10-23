@@ -702,10 +702,10 @@ grok path. The claim still counts against the daily action cap.
 ## Filesystem sandbox
 
 The unit's stripped `EnvironmentFile` is pointless if the agent can read the
-real secrets off disk, so `/home/radon/radon-cloud` (which holds the 0600
-`.env` with IB Flex, Clerk, UW and archive credentials) is in
-`InaccessiblePaths`, as are `/var/lib/radon/flex-secrets` and
-`/var/lib/radon/rh-mcp`. `/home/radon` and `/var/lib/radon` are
+real secrets off disk. Live production secrets are `/etc/radon/env`.
+`/home/radon/radon-cloud/.env` is retired. Both the retired checkout and
+`/etc/radon/env` are in `InaccessiblePaths`, as are
+`/var/lib/radon/flex-secrets` and `/var/lib/radon/rh-mcp`. `/home/radon` and `/var/lib/radon` are
 `ReadOnlyPaths`. The unit writes only the dedicated clone, `~/.grok` (session
 state) and `/var/lib/radon/grok-runtime` (the shared flock). `~/.grok/bin`,
 `~/.grok/hooks` and `~/.grok/downloads` stay read-only inside `~/.grok`,
