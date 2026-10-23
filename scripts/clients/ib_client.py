@@ -736,12 +736,26 @@ class IBClient:
                 raise IBOrderError("Order requires a positive finite reference price") from None
             if not math.isfinite(reference_price) or reference_price <= 0:
                 raise IBOrderError("Order requires a positive finite reference price")
-            violation = check_order_limits({
-                "type": "stock" if sec_type == "STK" else "option",
+            # DS-2026-10-23-02: a FUT typed as an option was priced with the
+            # option's 100 multiplier, under-counting a 1000-multiplier
+            # contract 10x at the one guard a new call site cannot go around.
+            # The broker contract carries the multiplier; check_order_limits
+            # fails a future closed when it has no usable one.
+            if sec_type == "STK":
+                limit_type = "stock"
+            elif sec_type == "FUT":
+                limit_type = "future"
+            else:
+                limit_type = "option"
+            limit_params = {
+                "type": limit_type,
                 "quantity": getattr(order, "totalQuantity", 0),
                 "symbol": getattr(contract, "symbol", ""),
                 "limitPrice": reference_price,
-            })
+            }
+            if limit_type == "future":
+                limit_params["multiplier"] = getattr(contract, "multiplier", None)
+            violation = check_order_limits(limit_params)
         if violation:
             raise IBOrderError(violation["message"])
         try:

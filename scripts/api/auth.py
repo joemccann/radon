@@ -256,8 +256,12 @@ def _get_jwks_client():
         if not jwks_url:
             raise RuntimeError("CLERK_JWKS_URL not set")
         # Per-kid negative caching bounds refreshes without delaying a new rotation.
+        # DS-2026-10-23-01: no cache_keys — it wraps get_signing_key in a
+        # functools.lru_cache with no expiry, so a kid the operator revoked
+        # would keep verifying for the life of the worker. The expiring
+        # jwk_set_cache is the only key cache.
         _jwks_client = pyjwt.PyJWKClient(
-            jwks_url, cache_keys=True, cooldown_duration=0
+            jwks_url, cooldown_duration=0
         )
     return _jwks_client
 
