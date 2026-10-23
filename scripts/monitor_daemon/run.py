@@ -29,6 +29,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from monitor_daemon.daemon import MonitorDaemon
+from utils.production_writer_guard import EXIT_REFUSED, refusal_reason
 from monitor_daemon.handlers import FillMonitorHandler, PresetRebalanceHandler, JournalSyncHandler
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 from monitor_daemon.handlers.menthorq_session_check import MenthorQSessionCheck
@@ -229,6 +230,12 @@ def main():
     if args.list_handlers:
         list_handlers()
         return
+    
+    if args.once or args.daemon:
+        refused = refusal_reason()
+        if refused:
+            print(f"monitor daemon refused: {refused}", file=sys.stderr)
+            sys.exit(EXIT_REFUSED)
     
     # Create daemon
     daemon = create_daemon()
