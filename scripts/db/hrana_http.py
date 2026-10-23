@@ -45,6 +45,10 @@ try:  # scripts/ on sys.path (watchdog, pytest)
     from health_service.turso_http import http_url_from_libsql, read_env
 except ImportError:  # imported as scripts.db.hrana_http from the repo root
     from scripts.health_service.turso_http import http_url_from_libsql, read_env
+try:
+    from utils.production_writer_guard import refuse_developer_host_in_cloud_mode
+except ImportError:
+    from scripts.utils.production_writer_guard import refuse_developer_host_in_cloud_mode
 
 # Direct-to-cloud Turso writes are 30-60 ms in steady state; 4 s absorbs a
 # slow tail while staying far below every caller's cycle ceiling.
@@ -353,6 +357,7 @@ def hrana_execute(
     (the watchdog's heartbeat is best-effort by contract).
     """
     _refuse_pytest_pollution()
+    refuse_developer_host_in_cloud_mode()
     db_url, token = read_env()
     http_origin = http_url_from_libsql(db_url)
     if not http_origin or not token:

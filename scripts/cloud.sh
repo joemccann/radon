@@ -60,7 +60,10 @@ fi
 # look for `default` / `0/1` / `128.0/1` routes owned by any *other*
 # tunnel-class interface (utun, ipsec, ppp, tun). Tailscale itself can
 # install a default route via its own interface (e.g. with --exit-node);
-# excluding ts_iface keeps that case from firing.
+# excluding ts_iface keeps that case from firing. Interface-scoped routes
+# (flag I) are skipped: macOS keeps one per point-to-point interface,
+# including the idle ipsec0-2 pairs Continuity creates, and they only
+# apply to sockets bound to that interface.
 tailscale_tun_iface() {
   ifconfig 2>/dev/null | awk '
     /^[a-z]/ { iface=$1; sub(/:$/,"",iface) }
@@ -77,6 +80,7 @@ detect_hijacking_interfaces() {
   ts_iface="$(tailscale_tun_iface)"
   netstat -nr -f inet 2>/dev/null | awk -v ts="$ts_iface" '
     ($1 == "default" || $1 == "0/1" || $1 == "128.0/1") &&
+    $3 !~ /I/ &&
     $NF ~ /^(utun|ipsec|ppp|tun)/ &&
     $NF != ts {
       print $NF

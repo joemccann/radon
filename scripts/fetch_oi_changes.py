@@ -42,6 +42,13 @@ _OI_PAGE_LIMIT = 500
 _OI_MAX_PAGES = 40
 # Market-wide /api/market/oi-change: max 200, no page cursor.
 _MARKET_OI_LIMIT = 200
+# The 20:00 UTC timer fire shares its minute with radon-garch, radon-catalysts
+# and radon-flow-refresh, which saturate the shared UW admission governor. Its
+# 5s default turned that into a 429 that failed the oneshot and latched the
+# service_health row in error until the next fire. A 60s Retry-After embargo
+# plus one saturated minute is 120s (uw_governor.MAX_WAIT_SECONDS), which still
+# fits inside radon-oi-changes.service TimeoutStartSec=180.
+OI_ADMISSION_WAIT_S = 120.0
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -162,7 +169,7 @@ def fetch_market_oi_changes(
     UW market endpoint has no page cursor (max 200). Request the max, then
     filter/sort; ``limit`` only truncates the final ranked list.
     """
-    with UWClient() as client:
+    with UWClient(admission_timeout=OI_ADMISSION_WAIT_S) as client:
         result = client.get_oi_change(limit=_MARKET_OI_LIMIT)
         data = result.get("data") or []
         if not isinstance(data, list):

@@ -1184,6 +1184,43 @@ class TestSweepBudget:
         assert closes.sources == {s: "yahoo" for s in symbols}
 
 
+# ── Yahoo rung reachability on the VPS ───────────────────────────
+
+
+class TestYahooRungReachability:
+    def test_module_import_prefers_ipv4_before_any_yahoo_request(self):
+        """Hetzner blackholes query1.finance.yahoo.com over IPv6, so without
+        prefer_ipv4() every spark batch burns 2x YAHOO_TIMEOUT_S on the AAAA
+        records and the 600s sweep admits 200/515 symbols, never reaching
+        VIX (2026-10-22, both timer slots)."""
+        import importlib
+        from unittest.mock import patch
+
+        calls: list[str] = []
+        with patch("utils.ipv4_first.prefer_ipv4", lambda: calls.append("prefer_ipv4")):
+            importlib.reload(fetch_dispersion)
+
+        assert calls == ["prefer_ipv4"]
+
+    def test_yahoo_rung_fetches_vix_in_its_first_batch(self, monkeypatch):
+        """VIX is the master calendar: a budget-spent Yahoo sweep that fetched
+        it still builds the series, one that fetched 200 stocks first does not."""
+        symbols = [f"S{i}" for i in range(fetch_dispersion.YAHOO_SPARK_BATCH_SIZE * 2)] + [VIX_SYMBOL]
+        batches: list[list[str]] = []
+
+        monkeypatch.setattr(fetch_dispersion, "_fetch_ib_closes", lambda *_: {})
+        monkeypatch.setattr(
+            fetch_dispersion,
+            "_fetch_yahoo_spark_batch",
+            lambda batch, *rest: batches.append(list(batch)) or {s: {"2026-08-28": 100.0} for s in batch},
+        )
+
+        closes = fetch_dispersion.fetch_closes_ladder(symbols, backfill=False)
+
+        assert VIX_SYMBOL in batches[0]
+        assert set(closes) == set(symbols)
+
+
 # ── non-positive closes (R-449) ───────────────────────────────────
 
 

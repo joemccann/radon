@@ -129,7 +129,7 @@ class MenthorQLoginProbe(BaseHandler):
     def _broken_login(self, detail: str, started_at: str) -> Dict[str, Any]:
         message = (
             "menthorq credential re-login chain is broken: "
-            f"{detail} — /options/net-gex re-mints will fail until fixed"
+            f"{detail}; /options/net-gex re-mints will fail until fixed"
         )
         logger.warning(message)
         self._reset_transient_bookkeeping()

@@ -702,11 +702,15 @@ class MenthorQDashboardClient:
                 raise MenthorQDashboardTimeoutError("dashboard provider timed out")
             timeout = min(timeout, remaining)
         try:
+            # 2026-10-14: cf.menthorq.io's WAF answers 403 "Automated clients
+            # are not allowed on this API." to non-browser UAs; the 401/403 ->
+            # AuthError mapping below then forces a re-login + embargo.
             response = self._http.get(
                 url,
                 headers={
                     "Accept": "application/json",
                     "Authorization": f"Bearer {token}",
+                    "User-Agent": _BROWSER_USER_AGENT,
                 },
                 timeout=timeout,
             )

@@ -44,7 +44,7 @@ const DEFAULT_MAX_LENGTH = 80;
 const ELLIPSIS = "...";
 // Conventional keys, MOST common first. The first present and non-empty
 // wins — order matters because some rows ship multiple fields.
-const MESSAGE_KEYS = ["message", "error", "detail", "reason"] as const;
+const MESSAGE_KEYS = ["message", "error", "detail", "reason", "summary"] as const;
 
 export type ServiceHealthErrorInput =
   | string
