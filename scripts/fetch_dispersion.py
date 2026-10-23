@@ -59,6 +59,9 @@ from lib.dispersion_math import (  # noqa: E402
     master_sessions,
 )
 from utils.market_calendar import last_completed_session_date  # noqa: E402
+from utils.ipv4_first import prefer_ipv4  # noqa: E402
+
+prefer_ipv4()
 
 # ── constants (docs/indicators/dispersion.md section E.1) ─────────
 SERVICE = "dispersion"
@@ -365,9 +368,16 @@ def fetch_closes_ladder(symbols: list[str], backfill: bool, duration: Optional[s
     _log(f"IB served {len(closes)}/{len(symbols)} symbols ({duration})")
     yahoo_deadline = max(started + SWEEP_BUDGET_S, time.monotonic() + YAHOO_SWEEP_BUDGET_S)
     closes.take(
-        _fetch_yahoo_closes(closes.missing(symbols), backfill, yahoo_deadline, duration), SOURCE_YAHOO
+        _fetch_yahoo_closes(_vix_first(closes.missing(symbols)), backfill, yahoo_deadline, duration),
+        SOURCE_YAHOO,
     )
     return closes
+
+
+def _vix_first(symbols: list[str]) -> list[str]:
+    """VIX is the master calendar; a budget-spent fallback that fetched it still
+    builds the series, one that spent its budget on stocks first serves stale."""
+    return sorted(symbols, key=lambda s: s != VIX_SYMBOL)
 
 
 def _describe_fetch(symbols: list[str], closes: dict[str, Closes]) -> dict[str, Any]:

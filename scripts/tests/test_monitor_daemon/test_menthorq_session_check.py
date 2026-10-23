@@ -129,6 +129,17 @@ class TestSessionExpiryEvaluation:
         assert health.call_args[0][0] == "error"
         assert "menthorq" in json.dumps(health.call_args[1]["error"]).lower()
 
+    def test_expired_message_has_no_em_dash(self, tmp_path: Path):
+        """The admin Writer Freshness panel renders last_error verbatim."""
+        jar = _jar(tmp_path / "jar.json", [
+            _cookie("cognito", expires_at=NOW - timedelta(days=11)),
+            _cookie("__Secure-authjs.session-token.0", expires_at=NOW - timedelta(days=2)),
+        ])
+        handler = _handler(jar)
+        with patch.object(handler, "record_cycle_health") as health:
+            handler.execute()
+        assert "\u2014" not in json.dumps(health.call_args[1]["error"], ensure_ascii=False)
+
     def test_authjs_within_warn_days_warns_before_it_dies(self, tmp_path: Path):
         jar = _jar(tmp_path / "jar.json", [
             _cookie("cognito", expires_at=NOW - timedelta(hours=3)),

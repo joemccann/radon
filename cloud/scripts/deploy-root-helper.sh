@@ -1148,7 +1148,9 @@ prepare_public_media_publication() {
     status=0
     "${publisher[@]}" || status=$?
     if (( status == 0 )); then
-      "$SYSTEMCTL" reset-failed radon-media-publish.service radon-media-publish.path || return 1
+      "$SYSTEMCTL" reset-failed radon-media-publish.service || return 1
+      # systemd unloads the disabled path unit, so its reset-failed is hygiene only.
+      "$SYSTEMCTL" reset-failed radon-media-publish.path 2>/dev/null || true
       "$SYSTEMCTL" enable --now radon-media-publish.timer
       return $?
     fi

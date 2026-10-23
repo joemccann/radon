@@ -334,6 +334,47 @@ def test_initial_backfill_retires_path_and_drains_before_timer_is_enabled(tmp_pa
     assert not any(line.startswith("enable ") and "radon-media-publish.path" in line for line in operations)
 
 
+@pytest.mark.parametrize("entrypoint", ["helper", "setup"])
+def test_backfill_tolerates_garbage_collected_path_unit(tmp_path, entrypoint):
+    # systemd drops a disabled, unreferenced path unit from memory, so every
+    # later reset-failed on it exits 1; that must not block the edge publish.
+    import re
+    import shlex
+    import subprocess
+    import sys
+    filename, name = ("deploy-root-helper.sh", "prepare_public_media_publication") if entrypoint == "helper" else ("setup-vps.sh", "install_media_publication")
+    source = (CLOUD / "scripts" / filename).read_text()
+    function = re.search(r"^" + name + r"\(\) \{.*?^\}", source, re.M | re.S).group()
+    if entrypoint == "setup":
+        function = function.replace('/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py', '"$SESSION_PYTHON" -I "$RADON_TEST_MEDIA_PUBLISHER"')
+    stub = tmp_path / "publisher.py"
+    stub.write_text("import sys\nsys.exit(0)\n")
+    calls = tmp_path / "systemctl"
+    ctl = tmp_path / "ctl"
+    ctl.write_text(
+        f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
+        'if [[ "$*" == *reset-failed* && "$*" == *radon-media-publish.path* ]]; then\n'
+        '  echo "Failed to reset failed state of unit radon-media-publish.path: Unit radon-media-publish.path not loaded." >&2\n'
+        "  exit 1\nfi\n"
+    )
+    ctl.chmod(0o755)
+    command = (
+        "set -uo pipefail\nHELPER_TEST_MODE=1\n"
+        f"SESSION_PYTHON={shlex.quote(sys.executable)}\n"
+        f"RADON_TEST_MEDIA_PUBLISHER={shlex.quote(str(stub))}\n"
+        f"SYSTEMCTL={shlex.quote(str(ctl))}\n"
+        f"CLOUD_DIR={shlex.quote(str(CLOUD))}\n"
+        'systemctl() { "$SYSTEMCTL" "$@"; }\n'
+        'stage_from_checkout() { :; }; log_error() { :; }\n'
+        f"{function}\n{name}\n"
+    )
+    result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    operations = [line for line in calls.read_text().splitlines() if line != "daemon-reload"]
+    assert operations[-1] == "enable --now radon-media-publish.timer"
+    assert any(line.startswith("reset-failed ") and "radon-media-publish.service" in line for line in operations)
+
+
 def test_edge_switch_follows_successful_initial_backfill():
     source = (CLOUD / "scripts" / "deploy-root-helper.sh").read_text()
     publish = source.split("\npublish_caddy() {", 1)[1].split("\n}\n", 1)[0]
