@@ -435,6 +435,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   The library's global cooldown must not deny a newly rotated Clerk key
   after another kid's fetch; negative caches, concurrency caps and timeout
   controls remain in place.
+  Neither client sets `cache_keys`: it installs a non-expiring `lru_cache` in
+  front of `get_signing_key`, which would keep honouring a signing key the
+  operator has removed from the JWKS for the life of the worker. Revocation
+  takes effect when the expiring key-set cache lapses
+  (`scripts/tests/test_jwks_revocation_cache.py`).
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
