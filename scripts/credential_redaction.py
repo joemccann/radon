@@ -73,7 +73,13 @@ def build_triple_quoted_assignment_re(key_pattern: str) -> "re.Pattern[str]":
     delimiter pair as an empty value, so the credential survived both.
     """
     return re.compile(
-        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')(?s:.*?)(?:\2|\Z)",
+        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')"
+        # A backslash escape consumes the next character, so an escaped first
+        # quote of the closer does not end the value and leave the rest
+        # published (DS-2026-10-22-11). Each position takes exactly one branch
+        # - an escape pair, or a character that cannot start the closer - so
+        # the body stays linear and unambiguous.
+        r"(?s:(?:\\.|(?!\2).)*)(?:\2|\Z)",
         re.IGNORECASE,
     )
 
@@ -200,7 +206,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
         "[redacted-jwt]",
     ),
     (re.compile(r"\b(?:D?U|F)\d{6,}\b"), "[redacted-account]"),
-    (re.compile(r"(://[^\s/:@]+:)[^\s/@]+@"), r"\1[redacted]@"),
+    # The username run is optional: password-only userinfo (`://:secret@`)
+    # is valid and used to escape this rule entirely (DS-2026-10-22-13).
+    (re.compile(r"(://[^\s/:@]*:)[^\s/@]+@"), r"\1[redacted]@"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"), "[redacted-key]"),
@@ -216,38 +224,142 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # Generic `password = ...` / `token: ...` shapes. They scrub well but match
 # ordinary code (`token = uuid4().hex`), so detection uses only the
 # specific shapes above.
+# ── One value tokenizer, shared by redaction and detection ───────────────
+#
+# DS-2026-10-22-10 .. -15: the value of a credential assignment used to be
+# matched by a family of single-purpose regexes, each modelling part of a
+# quoted literal. Every one of them had an edge the others did not cover, and
+# each gap published a credential or its tail: a value spanning more than one
+# newline kept its continuation lines, an escaped quote before a triple-quote
+# closer ended the value early, a Python `r`/`b`/`u`/`f` prefix hid the value
+# from every quoted rule, and punctuation truncated an unquoted value. The
+# value is now tokenized ONCE, by a hand-written scanner, and both the
+# scrubber and the detector read the same span.
+#
+# The scanner is linear by construction: it visits each character of a value
+# at most once and never backtracks, which matters because the publication
+# gate runs over text an outside contributor shapes.
+
+# Only a prefix that is actually followed by a quote is a string prefix; `rb`
+# at the start of an unquoted value is part of the value.
+_STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
+
+_ASSIGNMENT_HEAD = re.compile(
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*",
+    re.IGNORECASE,
+)
+
+
+def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
+    """``(body_start, body_end, delimiter)`` of the value starting at ``pos``.
+
+    The delimiter is ``""`` for an unquoted value, which runs to the next
+    whitespace: `,`, `;` and `&` used to end it, so the tail of an env-style
+    value survived (DS-2026-10-22-14), while whitespace keeps the rest of a
+    prose sentence that merely quotes a key. A quoted value
+    runs to its REAL close, honouring a backslash escape and a doubled quote,
+    and may span lines. A single-delimited value with no close falls back to
+    the end of the line rather than swallowing the rest of the report; a
+    triple-delimited one runs to the end of the input, which is what the
+    triple-quote rule above already documents for a truncated excerpt.
+    """
+    length = len(text)
+    index = pos
+    prefix = _STRING_PREFIX.match(text, index)
+    if prefix is not None:
+        index = prefix.end()
+
+    if index < length and text[index] in "\"'":
+        quote = text[index]
+        delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
+        body = index + len(delimiter)
+        cursor = body
+        while cursor < length:
+            if text[cursor] == "\\":
+                cursor += 2
+                continue
+            if len(delimiter) == 1 and text.startswith(quote * 2, cursor):
+                # A doubled quote escapes itself (SQL, TOML literal).
+                cursor += 2
+                continue
+            if text.startswith(delimiter, cursor):
+                return body, cursor, delimiter
+            cursor += 1
+        if len(delimiter) == 1:
+            return body, _end_of_line(text, body), ""
+        return body, length, delimiter
+
+    cursor = index
+    while cursor < length and not text[cursor].isspace():
+        cursor += 1
+    return index, cursor, ""
+
+
+def _end_of_line(text: str, pos: int) -> int:
+    newline = min(
+        (i for i in (text.find("\r", pos), text.find("\n", pos)) if i != -1),
+        default=-1,
+    )
+    return len(text) if newline == -1 else newline
+
+
+def _iter_assignments(text: str):
+    """``(head_end, body_start, body_end, delimiter)`` per credential assignment.
+
+    Non-overlapping: the scan resumes past each value, so a credential inside
+    an already-consumed value is not re-reported.
+    """
+    cursor = 0
+    while cursor < len(text):
+        head = _ASSIGNMENT_HEAD.search(text, cursor)
+        if head is None:
+            return
+        body_start, body_end, delimiter = _scan_value(text, head.end())
+        yield head.end(), body_start, body_end, delimiter
+        cursor = max(body_end + len(delimiter), head.end() + 1)
+
+
+def _redact_assignments(text: str) -> str:
+    """Replace every credential assignment's value with the redaction label.
+
+    Runs after the specific shapes, so a value one of them already tagged
+    keeps its own tag.
+    """
+    out: list[str] = []
+    last = 0
+    for head_end, body_start, body_end, delimiter in _iter_assignments(text):
+        body = text[body_start:body_end]
+        if body.startswith("[redacted") or (not delimiter and not body):
+            # An EMPTY quoted value still gets the label (the key is the tell);
+            # an absent unquoted value has nothing to replace.
+            continue
+        out.append(text[last:head_end])
+        if delimiter:
+            out.append(f"{delimiter}[redacted-secret]{delimiter}")
+        else:
+            out.append("[redacted-secret]")
+        last = body_end + len(delimiter)
+    out.append(text[last:])
+    return "".join(out)
+
+
+_QUOTED_VALUE_TOKEN = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
+
+
+def _quoted_value_is_secret(body: str) -> bool:
+    """True when a QUOTED credential value carries an opaque literal.
+
+    Quoted only: an unquoted value runs to the end of the line, so feeding it
+    here would report ordinary code (`token = uuid4().hex`) as a credential.
+    The conservative literal scanner below still owns the unquoted case.
+    """
+    return any(_is_opaque(m.group(0)) for m in _QUOTED_VALUE_TOKEN.finditer(body))
+
+
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
     (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
-    # Generic key-value assignment (env files, config dumps, JSON), last so a
-    # value the specific shapes above already tagged keeps its tag. A quoted
-    # value is redacted through its real closing quote (multi-word
-    # passwords). Each quote style is handled separately and a backslash
-    # escape consumes the next character: a shared `[^"']*` body ended the
-    # match at the FIRST opposite or escaped quote inside the value and
-    # published the tail.
-    (
-        re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(\")(?!\[redacted)(?:[ \t]*\r?\n)?(?:\\.|[^\"\\\n])*\"",
-            re.IGNORECASE,
-        ),
-        r"\1\2[redacted-secret]\2",
-    ),
-    (
-        re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*)(')(?!\[redacted)(?:[ \t]*\r?\n)?(?:''|\\.|[^'\\\n])*'",
-            re.IGNORECASE,
-        ),
-        r"\1\2[redacted-secret]\2",
-    ),
-    (
-        re.compile(
-            rf"([\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\s*[:=]\s*[\"']?)(?!\[redacted)[^\"'\s,;&]+",
-            re.IGNORECASE,
-        ),
-        r"\1[redacted-secret]",
-    ),
 ]
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
@@ -290,10 +402,16 @@ _PLACEHOLDER = re.compile(
 # above reads only the first pair as the value, so a short first cookie hid an
 # opaque session cookie after it; check every pair on the header line.
 _COOKIE_HEADER = re.compile(
-    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n\"']*)",
+    # The pair run carries quote characters: a quoted pair value
+    # (`sid="..."`) stopped the run dead and was never inspected
+    # (DS-2026-10-22-15). Each pair's value is split on quotes below, so a
+    # serialized header (`{"Cookie": "sid=...", "other": "..."}`) still
+    # yields the cookie value as its own fragment.
+    r"\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*[\"']?(?P<pairs>[^\r\n]*)",
     re.IGNORECASE,
 )
 _COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
+_QUOTE_SPLIT = re.compile(r"[\"']")
 
 
 def _is_opaque(value: str) -> bool:
@@ -311,11 +429,19 @@ def find_secret_assignments(text: str) -> list[str]:
     for match in _SECRET_LITERAL_ASSIGNMENT.finditer(text or ""):
         if _is_opaque(match.group("value")):
             return ["[redacted-secret]"]
+    # The same tokenizer the scrubber uses, so the two cannot drift: the
+    # literal scanner above permits one opening quote and no string prefix,
+    # which is how a multi-line, triple-delimited or prefixed value was
+    # redacted but published as clean (DS-2026-10-22-10/-11/-12).
+    for _head_end, body_start, body_end, delimiter in _iter_assignments(text or ""):
+        if delimiter and _quoted_value_is_secret((text or "")[body_start:body_end]):
+            return ["[redacted-secret]"]
     for match in _COOKIE_HEADER.finditer(text or ""):
         for pair in match.group("pairs").split(";"):
-            value = pair.partition("=")[2].strip()
-            if _COOKIE_VALUE.fullmatch(value) and _is_opaque(value):
-                return ["[redacted-secret]"]
+            for value in _QUOTE_SPLIT.split(pair.partition("=")[2]):
+                value = value.strip()
+                if _COOKIE_VALUE.fullmatch(value) and _is_opaque(value):
+                    return ["[redacted-secret]"]
     return []
 
 
@@ -351,7 +477,7 @@ def scrub_credential_text(value: Any) -> Any:
         value = _redact_triple_quoted(value)
         for pattern, repl in _SECRET_SCRUB_PATTERNS:
             value = pattern.sub(repl, value)
-        return value
+        return _redact_assignments(value)
     if isinstance(value, dict):
         return {k: scrub_credential_text(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
