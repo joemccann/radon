@@ -10,7 +10,7 @@ Host modes:
   - API container (no systemctl) with the radon-control socket mounted ->
     status and actions go through the host daemon (``host_control``,
     ``scripts/control_service``), which runs the sudoers-granted operator CLI.
-  - Anything else (laptop docker, launchd, dev)  -> returns ``supported=False``
+  - No systemd and no control socket (CI, tests) -> returns ``supported=False``
     so the UI can render a "service control is host-only" notice without an
     error spike.
 

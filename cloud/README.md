@@ -215,8 +215,8 @@ pytest tests/ -v
 The [cloud environment owner](CLAUDE.md#environment-handling) owns staging,
 file permissions and build/runtime separation. Exact required names and role
 checks live in [required-env.txt](config/required-env.txt) and
-[check-env.py](scripts/check-env.py). [Mode switching](../docs/cloud-services.md#mode-switch)
-owns launcher effects; [Gateway recovery](../docs/ib-gateway-recovery.md)
+[check-env.py](scripts/check-env.py). [Laptop attach](../docs/cloud-services.md#mode-switch)
+owns the dev launcher; [Gateway recovery](../docs/ib-gateway-recovery.md)
 owns authentication and cycle semantics.
 
 ## Authentication

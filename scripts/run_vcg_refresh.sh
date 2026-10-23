@@ -3,14 +3,13 @@
 # Autonomous VCG refresh wrapper.
 #
 # Runs every 5 minutes during ET trading hours (09:30-16:00) via
-# radon-vcg-refresh.timer on Hetzner and com.radon.vcg-refresh on the
-# laptop. Gives vcg-scan the same "real-time during market hours"
-# cadence the user expects without depending on a browser tab being
-# open.
+# radon-vcg-refresh.timer on Hetzner. Gives vcg-scan the same "real-time
+# during market hours" cadence the user expects without depending on a
+# browser tab being open.
 #
 # Behaviour:
 #
-#   1. Skip on weekends / market holidays (matches run_data_refresh.sh).
+#   1. Skip on weekends / market holidays (matches the radon-refresh.timer gate).
 #   2. POST through the local FastAPI /vcg/scan endpoint when the
 #      server is reachable — keeps the cache write, Turso dual-write,
 #      and service_health row update on the same code path the

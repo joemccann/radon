@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# FU4 — Informed-flow watchlist sweep wrapper for launchd (F4).
+# FU4 — Informed-flow watchlist sweep timer wrapper (F4).
 #
 # fetch_informed_flow.py is per-ticker; this drives the sweep entrypoint
 # (sweep_informed_flow.py) which iterates the Turso watchlist. Holiday-aware:

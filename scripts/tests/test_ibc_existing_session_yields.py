@@ -30,18 +30,6 @@ def test_production_compose_pins_primaryoverride():
     assert not any(e.startswith("EXISTING_SESSION_DETECTED_ACTION=$") for e in env)
 
 
-def test_local_docker_compose_yields_too():
-    compose = yaml.safe_load((ROOT / "docker" / "ib-gateway" / "docker-compose.yml").read_text())
-    env = compose["services"]["ib-gateway"]["environment"]
-    assert env["EXISTING_SESSION_DETECTED_ACTION"] == "primaryoverride"
-
-
-def test_launchd_ibc_setup_yields_too():
-    setup = (ROOT / "scripts" / "setup_ibc.sh").read_text()
-    assert 'patch_config_setting "ExistingSessionDetectedAction" "primaryoverride"' in setup
-    assert '"ExistingSessionDetectedAction" "primary"' not in setup
-
-
 def test_2fa_recovery_settings_are_unchanged():
     env = _env_list(ROOT / "cloud" / "docker-compose.yml")
     assert "TWOFA_TIMEOUT_ACTION=exit" in env
@@ -62,14 +50,3 @@ def test_watchdog_recognises_the_yield_line_ibc_prints():
         "session and let the other one proceed (scenario 6)"
     )
     assert parse_session_yield(line) == line
-
-
-def test_launchd_ibc_setup_does_not_claim_blank_restart_disables_cycle():
-    """DOC-159: a blank AutoRestartTime/ColdRestartTime leaves the Gateway's
-    stored daily-cycle setting in force; the installer must not print
-    "disabled" for it."""
-    setup = (ROOT / "scripts" / "setup_ibc.sh").read_text()
-    assert 'patch_config_setting "AutoRestartTime" ""' in setup
-    assert 'patch_config_setting "ColdRestartTime" ""' in setup
-    assert "RestartTime=disabled" not in setup
-    assert setup.count("Gateway's stored daily-cycle setting applies") == 2

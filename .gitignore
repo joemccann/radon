@@ -240,10 +240,6 @@ vendor/
 # Autoresearch
 autoresearch.*
 
-# Docker
-docker/ib-gateway/.env
-docker/ib-gateway/secrets/*.txt
-
 # Firecrawl
 .firecrawl/
 .worktrees/

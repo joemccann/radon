@@ -1,15 +1,15 @@
 # Cloud Services — Operator Runbook
 
-This document covers Radon's two-mode architecture introduced in Phase 0–6 of the cloud-services migration. Both modes serve identical data to `localhost:3000` (laptop dev) and `app.radon.run` (Hetzner production).
+This document covers Radon's production topology on Hetzner. The laptop is a thin client: `localhost:3000` (Next.js via `scripts/cloud.sh`) reads the same VPS FastAPI and relays as `app.radon.run`.
 
 ## Architecture (TL;DR)
 
 Production host boundaries are owned by [the host-split runbook](spof-host-split.md).
-Laptop process ownership depends on the [selected mode](#mode-switch).
+The laptop runs only Next.js ([attach contract](#mode-switch)).
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
-- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount; laptop-only media transfer is described under [Laptop media push requires the tailnet](#laptop-media-push-requires-the-tailnet).
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
+- **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount.
+- **Schedulers**: Hetzner host systemd only; no laptop plist runs a collector. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -28,7 +28,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 
 **Operating procedure:**
 
-1. **Laptop dev stack**: the full profile includes the scraper; cloud-thin does not. Follow [Mode switch](#mode-switch) before launching a collector. Process commands live in [`scripts/dev`](../scripts/dev); polling is owned by the scraper scheduler.
+1. **Laptop**: the scraper never runs on the laptop; `scripts/cloud.sh` starts Next.js only ([attach contract](#mode-switch)).
 2. **Standalone (laptop or Hetzner)** — `node scripts/newsfeed/index.js` runs forever; `node scripts/newsfeed/index.js --once` runs a single cycle (use for smoke tests).
 3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
 4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
@@ -54,19 +54,8 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
    For a missing or changed unit, use the reviewed root control-plane procedure
    from [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not copy a unit from an
    obsolete containerized-services path.
-5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/var/lib/radon/media/` (no `host:` prefix, no SSH). `/home/radon/radon-cloud/media` is a compatibility symlink. The Tailscale rsync target is for laptop development only (see below).
+5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/var/lib/radon/media/` (no `host:` prefix, no SSH). `/home/radon/radon-cloud/media` is a compatibility symlink.
 6. **Closing the laptop after the cutover does not break `app.radon.run`** — the newsfeed now runs entirely on Hetzner. No chrome-cdp, no Chrome Debug.app, no Tailscale dependency for new posts.
-
-### Laptop media push requires the tailnet
-
-The laptop rsync target (`radon@radon-app:/home/radon/radon-cloud/media/`)
-requires Tailscale and operator SSH access. If Tailscale is down, the cycle
-can keep scraping but media delivery logs `[push-media] non-fatal: rsync exit …`.
-Restore Tailscale, verify a fresh key-based SSH connection to the app's tailnet
-address, and retry the push. Changing `RADON_MEDIA_REMOTE` to the public app
-address cannot bypass this: `fw-radon-app` blocks public SSH. Do not reopen
-public SSH as a media-upload workaround. The server-side newsfeed uses the
-local media path and needs no SSH hop.
 
 The [network-trust runbook](operations.md#network-trust-ops-plane-step-2)
 owns console recovery and access verification.
@@ -87,38 +76,28 @@ Snapshot queue saturation and cancellation retain their independent bounds.
 
 ## Mode switch
 
-`cloud.sh` selects `RADON_DEV_PROFILE=cloud-thin`: the laptop runs only Next.js.
-FastAPI, relay and newsfeed collection stay on Hetzner. The full local profile
-and log-filter names are defined by [`scripts/dev`](../scripts/dev), reached
-through `web/package.json`. `--only` hides other logs; it does not disable
-collectors.
+Historic name; there is one laptop mode. `scripts/cloud.sh` selects
+`RADON_DEV_PROFILE=cloud-thin`: the laptop runs only Next.js. FastAPI, relay,
+headlines hub, newsfeed and every scheduler stay on Hetzner.
 
-**Use and prerequisites:** choose this mode when developing against the cloud
-stack; use local mode only when intentionally moving collection to the laptop.
-Read [`cloud.sh`](../scripts/cloud.sh) or [`local.sh`](../scripts/local.sh)
-before switching. These are lifecycle commands: they persist mode, change
-scheduler ownership and may stop/start a Gateway, requiring IBKR approval.
-Tailscale/SSH access and operator control of the current stack are prerequisites. Cloud mode requires a responsive local Docker inventory and root SSH to `radon-broker`. It refuses busy dev ports before changing anything, confirms local Docker logout before the bounded broker-owned start, and requires authenticated, unheld `/health/lite` before persisting mode. An unknown start or readiness result stops without replay (R-729 / REL-313). The API uses `http://radon-app:8321`; relay traffic uses the existing ticket-authenticated `wss://app.radon.run/ws` Caddy path, never tailnet port 8765 or app port 4001. Local mode requires root SSH access to `radon-broker` and the installed `radon ib release` helper. Before persisting mode or loading laptop schedulers, `local.sh` requests broker-owned release with a 180-second bound. Any refusal, missing helper, unreachable broker or unknown logout stops the switch before local Gateway startup (R-044 / REL-311). The durable hold remains set while using local mode; only explicitly resume the broker after the local session is stopped, following [Gateway recovery](ib-gateway-recovery.md#operator-escape-hatches).
+**Env contract** (exported by the launcher before `exec next dev`):
 
-**Safe diagnosis and stop conditions:** inspect `scripts/ib mode` and existing
-local listeners before launching. A VPN preflight refusal, busy dev ports, or
-pending Gateway authentication is a stop condition; do not start a second
-collector stack to work around it. **Verify** the selected profile in launcher
-output and the intended remote API/relay targets. A persisted mode does not
-reconfigure processes already running. **Rollback** a mode change by stopping
-the dev session and using the previous mode's launcher after reviewing its
-Gateway effects. **Escalate** failed authentication through the
-[Gateway recovery owner](ib-gateway-recovery.md), without repeated starts.
+- `RADON_API_URL=http://radon-app:8321`
+- `IB_REALTIME_WS_URL` / `NEXT_PUBLIC_IB_REALTIME_WS_URL=wss://app.radon.run/ws`
+- `HEADLINES_WS_URL` / `NEXT_PUBLIC_HEADLINES_WS_URL=wss://app.radon.run/ws-headlines`
+- `ALLOWED_USER_IDS` in `web/.env` (the operator signs in with Clerk on localhost)
 
-| Action | Command |
-|--------|---------|
-| Switch to **Hetzner mode** | `scripts/cloud.sh` |
-| Switch to **Local mode**   | `scripts/local.sh` |
-| Inspect current mode       | `scripts/ib mode` |
+**Prerequisites:** Tailscale up; the laptop is admitted by
+`RADON_TAILNET_TRUST_MODE` unset or `log`, or by its `/32` listed in
+`RADON_TRUSTED_TAILNET_PEERS`; WS tickets are minted on radon-app.
+**Probe:** `curl http://radon-app:8321/health/lite`.
+**Stop conditions:** a VPN preflight refusal, a busy `:3000`, or a 401 from
+trust enforcement; do not start a laptop backend to work around them.
+**Rollback:** the launcher never touches Docker, ssh, launchd or a Gateway;
+nothing persists, so there is no rollback. **Escalate** failed Gateway
+authentication through the [Gateway recovery owner](ib-gateway-recovery.md).
 
-`RADON_MODE` is persisted to `.env.ib-mode` at the project root (gitignored). All Python and Node entry points read this overlay file after `.env`, so the choice survives shell restarts.
-
-`cloud.sh` runs a Step 0 preflight that scans the IPv4 routing table for a non-Tailscale tunnel interface (`utun*`, `ipsec*`, `ppp*`, `tun*`) owning a `default`, `0/1`, or `128.0/1` route — the signature of a third-party VPN (NordVPN, ProtonVPN, WireGuard, Cisco AnyConnect, Cloudflare WARP, OpenVPN, IKEv2, …) hijacking traffic. If found, the script bails before the TCP probe so the failure mode is named, not "Tailscale not running?". Tailscale's own interface is identified by its 100.64/10 IP and excluded, so `--exit-node` users don't false-positive.
+`scripts/cloud.sh` runs a Step 0 preflight that scans the IPv4 routing table for a non-Tailscale tunnel interface (`utun*`, `ipsec*`, `ppp*`, `tun*`) owning a `default`, `0/1`, or `128.0/1` route — the signature of a third-party VPN (NordVPN, ProtonVPN, WireGuard, Cisco AnyConnect, Cloudflare WARP, OpenVPN, IKEv2, …) hijacking traffic. If found, the script bails before the TCP probe so the failure mode is named, not "Tailscale not running?". Tailscale's own interface is identified by its 100.64/10 IP and excluded, so `--exit-node` users don't false-positive.
 
 ## Deployment
 
@@ -243,10 +222,10 @@ marked deprecated. Don't extend them.
 | Scenario | Recovery |
 |----------|----------|
 | Cold-start a new laptop | Clone repo, `bun install`, set `TURSO_DB_URL` + `TURSO_AUTH_TOKEN`, run `bun run db:migrate`, then `scripts/cloud.sh`. No replica file to seed — every process talks directly to the cloud DB. |
-| Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. Laptop's `scripts/cloud.sh` flips IB host to the new VPS through the same helper. |
+| Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
 | Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
-| Hetzner outage | `scripts/local.sh` requires confirmed broker logout; an unreachable broker refuses the switch. Confirm/release the broker session through the operator recovery procedure before local login. |
+| Hetzner outage | No laptop fallback: the laptop cannot hold an IB socket (broker 4001 binds `10.0.0.4`/loopback, ACL-denied). Recover the hosts per [cloud/README.md](../cloud/README.md) and [Gateway recovery](ib-gateway-recovery.md). |
 
 ## Health & observability
 
@@ -459,8 +438,7 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
 
 When MenthorQ's session cookie rotates, the headless Playwright run will fail. To re-establish the session:
 
-- **Hetzner mode**: `ssh radon@radon-app docker exec -it radon-services python3.13 scripts/cta_sync_service.py --interactive` — Playwright opens a VNC-visible Chrome for one-time MFA approval. Session persists to a named volume.
-- **Local mode**: `python3 scripts/cta_sync_service.py --interactive` — opens a visible Chrome window on the laptop for MFA approval.
+- On radon-app as `radon`: run `python3.13 scripts/cta_sync_service.py --interactive` inside the app container via `radon-app-runtime` (see cloud/CLAUDE.md § Runtime planes); Playwright opens a VNC-visible Chrome for the one-time MFA approval. Session persists to a named volume.
 
 ## Security
 

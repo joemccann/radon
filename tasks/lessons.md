@@ -222,11 +222,10 @@
 - User-facing assistant speaker labels and generated self-identification must
   say Radon, never Grok. Model selectors may keep factual provider/model names.
 
-## 2026-09-02 — localhost needs local.sh; local.sh stops the VPS gateway
+## 2026-09-02 — localhost is attach-only
 
-- Do not curl localhost:3000 / :8321 unless `scripts/local.sh` is already
-  running. Starting local.sh during live cloud trading stops the Hetzner
-  IB gateway and requires 2FA. Diagnose against Turso / production instead.
+- `scripts/cloud.sh` is the only laptop launcher; it never starts a Gateway.
+  Diagnose backend state against `radon-app:8321` / Turso, never a laptop FastAPI.
 
 ## 2026-09-02 — EXT fills need orders-sync + fill-monitor past 16:00 ET
 
@@ -722,7 +721,7 @@ Test-suite audit (a "improve coverage" request that turned up a live auth hole):
 
 ## 2026-05-31
 
-- For local Radon verification, use `scripts/local.sh` as the canonical launcher instead of hand-starting Next.js and FastAPI unless the task explicitly requires isolated services.
+- For local Radon verification use `scripts/cloud.sh` (Next.js attached to the VPS).
 - When checking Unusual Whales access in Radon, load `UW_TOKEN` from `web/.env` before concluding provider access is unavailable; the repo-root `.env` may not carry UW credentials.
 - When fixing mobile dashboard section layout, do not rely only on visual screenshots or implicit flex stretching. Add a geometry regression that compares left/right/width across every reordered dashboard section and across the actual bordered inner panels (`.snapshot-card` vs `.dashboard-news`) so one panel cannot silently shrink.
 

@@ -31,7 +31,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
 | Unattended maintenance releases and toolchain recovery | [`docs/unattended-releases.md`](unattended-releases.md) · [`docs/nightly-toolchain-updates.md`](nightly-toolchain-updates.md) |
 | Nightly agent runner (one clone, one prompt, one session) | [`docs/runner.md`](runner.md) |
-| Cloud architecture, Turso, two-mode deploy | [`docs/cloud-services.md`](cloud-services.md) |
+| Cloud architecture, Turso, laptop attach contract | [`docs/cloud-services.md`](cloud-services.md) |
 | Network topology (private CI, app/broker, recovery SSH, isolated demo) | [`docs/spof-host-split.md`](spof-host-split.md) · [`docs/radon-network-topology.svg`](radon-network-topology.svg) |
 | Retired beta.radon.run (do not recreate) | [`docs/cloud-services.md`](cloud-services.md#retired-betaradonrun-2026-08-20) |
 | Monorepo cutover and rollback | [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) |
@@ -62,7 +62,6 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 
 | Topic | Doc |
 |-------|-----|
-| IB Gateway Docker (laptop) | [`docs/ib-gateway-docker.md`](ib-gateway-docker.md) |
 | IB connection troubleshooting | [`docs/ib-connection-troubleshooting.md`](ib-connection-troubleshooting.md) |
 | IB Gateway recovery / 2FA | [`docs/ib-gateway-recovery.md`](ib-gateway-recovery.md) |
 | IB Flex sFTP setup (install) | [`docs/flex-sftp-setup.md`](flex-sftp-setup.md) |

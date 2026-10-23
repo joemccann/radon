@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
-"""Standalone helper for combined CRI + VCG refresh.
+"""Combined CRI + VCG refresh entrypoint.
 
-NOT wired into any scheduler. The autonomous entry points are:
+Entry point of radon-refresh.timer on radon-app (cloud/services/radon-refresh.service
+runs ``python -m scripts.data_refresh``); VCG also has radon-vcg-refresh.timer.
+No laptop scheduler runs this.
 
-  - radon-cri-scan.timer        (CRI: every 30 minutes, ET trading hours)
-  - radon-data-refresh.timer    (scanner / flow_analysis / discover)
-  - radon-vcg-refresh.timer     (VCG: every 5 minutes, ET trading hours)
-  - com.radon.cri-scan          (laptop launchd)
-  - com.radon.data-refresh      (laptop launchd)
-  - com.radon.vcg-refresh       (laptop launchd)
-
-Kept for ad-hoc invocation (``python -m scripts.data_refresh``) — runs
-both scans sequentially, writes atomically, and exits 0 on success or
+Runs both scans sequentially, writes atomically, and exits 0 on success or
 skipped holiday/weekend. Useful when reconciling discrepancies between
 the two cache files at the same instant.
 """

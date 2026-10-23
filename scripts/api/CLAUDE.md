@@ -1,18 +1,14 @@
 # Radon FastAPI — CLAUDE.md
 
-FastAPI service on `localhost:8321`. Loaded automatically when cwd is under `scripts/api/`. Project root + `scripts/CLAUDE.md` rules also apply.
+FastAPI service on `radon-app:8321` (loopback `127.0.0.1:8321` on the host; the laptop reaches it over Tailscale). Loaded automatically when cwd is under `scripts/api/`. Project root + `scripts/CLAUDE.md` rules also apply.
 
 ---
 
-## IB Gateway — Three Modes
+## IB Gateway — cloud mode
 
-`IB_GATEWAY_MODE` env, persisted to `.env.ib-mode`. Toggle via `scripts/ib mode {local|cloud}`. Switching does NOT auto-reconnect — restart the dev stack.
+`IB_GATEWAY_MODE=cloud` is the only deployed mode (production `/etc/radon/env`, cloud/scripts/check-env.py:18). The laptop never runs FastAPI against a Gateway and no launcher sets a mode. The `docker` and `launchd` branches in `ib_gateway.py` are legacy laptop paths retained only as the 2FA-lock / backoff test harness, scheduled for removal.
 
-- **`docker`** (default local development): `ghcr.io/gnzsnz/ib-gateway`, `restart: "no"`. The lock-aware watchdog/FastAPI control plane owns starts. `npm run ib:start`. Reports Docker `container_state` / `container_health`.
 - **`cloud`** (**Hetzner production**): Lifecycle is owned by `/usr/local/bin/radon-ib-gateway-control` from monorepo `cloud/`. FastAPI does TCP/API health only and reports `service_state=reachable` when the port path is up. `POST /ib/restart` DELEGATES to `systemctl restart radon-ib-gateway.service` (via `admin_services.control_unit` — polkit path, helper owns the 2FA lease + latched-transition state machine) when the host has systemd + the helper; the laptop remote-alias case still gets the 503 refusal (2026-07-26 incident: the operator page's restart button had NO working path while the watchdog stood down at its awaiting-2fa cap). **App/broker split:** `RADON_HOST_ROLE=app` never execs the helper. FastAPI proxies Force 2FA / Stop / Start / reset-lease over mTLS to `https://10.0.0.4:8340` (`scripts/ib_gateway_remote`, `radon-ib-gateway-remote.service`). Loopback Clerk bypass is disabled for those POSTs. **Required VPS env:** `IB_GATEWAY_MODE=cloud`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (not `~/radon-cloud`), secrets at `/etc/radon/env` only. `/home/radon/radon-cloud/.env` is retired. Laptop remote-gateway alias mode also uses `cloud` over Tailscale. **Whole-stack VPS control** via `/usr/local/bin/radon` (or `ssh root@radon-app radon <cmd>`): `radon stop|start|restart|status` operates on all `radon-*` units. Source: `cloud/scripts/operator-radon.sh`.
-- **`launchd`** (legacy): `~/ibc/bin/`, loaded as a service definition only. No `RunAtLoad`, calendar start, IBC auto-restart, or cold-restart schedule; lock-aware FastAPI/watchdog calls own starts.
-
-Auto-recovery (docker): stopped/missing containers start under the shared lease. Running-but-unhealthy containers defer to the watchdog's auth-aware direct protocol probe. Client ID collisions, VOL errors, and transient timeouts do not trigger restart.
 
 ---
 
@@ -31,8 +27,8 @@ After restart, IB Gateway sits at IBKR Mobile push prompt with API socket open �
 IBC-side relogin on 2FA timeout is disabled; do not re-enable it. The
 [Gateway recovery owner](../../docs/ib-gateway-recovery.md#daily-cycle) explains
 token restart, expiry and why blank fields do not disable the daily cycle.
-Compose owns the container schedule; local IBC configuration and timezone
-require independent verification.
+Compose owns the container schedule; the broker compose is the only IBC
+configuration and timezone source.
 
 **4. Watchdog API-hang self-heal (2026-06-10).** Separate from stuck-2FA: `is_api_hang()` fires when the gateway is authenticated + `port_listening` but `upstream_dead` (the Java API listener wedged in place — socat accepts TCP but the API handshake times out, Docker's TCP healthcheck misses it). After 3 cycles it restarts the gateway via the lock. The api-watchdog runs as a oneshot every minute; it MUST have `TimeoutStartSec=60` (set on `radon-ib-watchdog.service`) — without it a hung cycle stalls the timer forever. The companion replica hazard (a 1.36GB replica sync every cycle) is structurally gone since DUR-07: `db.client` is direct-to-cloud by default and the fleet drop-in `radon-.service.d/common.conf` keeps `RADON_DB_NO_REPLICA=1` as belt-and-suspenders (see `feedback_gateway_api_hang_and_watchdog_self_hang`). Production `radon start/restart` and every other operator path MUST acquire the same push lease before touching the Gateway; bypasses are release-blocking defects.
 
