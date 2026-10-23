@@ -345,7 +345,10 @@ push or every deploy step fails the handshake. The deploy job:
    before any dependency build, service stop, or transition journal write.
 7. Prepares target-SHA artifacts before teardown. The
    [deploy source](scripts/deploy.sh) owns frozen build, prestage and verified
-   image-reuse admission. The parallel prepull job is an optimization; deploy
+   image-reuse admission. Both pip calls (`pip wheel`, `pip install`) run
+   inside the staged release: pip resolves a `file:./vendor/...` requirement
+   against its own cwd, not the requirements file, and the vendored fastembed
+   wheel lives under the release's `vendor/` (2026-10-23, run 39892532422). The parallel prepull job is an optimization; deploy
    still requires the exact-SHA app image pair locally before teardown and
    refuses if its pull fails. A bounded database preflight also refuses teardown
    when Turso does not answer, leaving the current release serving.
