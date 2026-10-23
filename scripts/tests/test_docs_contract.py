@@ -2682,3 +2682,25 @@ class TestDocumentation20261022:
         assert "/Users/" not in text
         assert "joemccann-mac-mini" not in text
 
+
+class TestDocumentation20261023:
+    """DOC-223: a stop-market combo still uses the exact expiry payoff."""
+
+    def test_stop_market_combo_uses_the_exact_expiry_payoff(self):
+        bankroll = (_ROOT / "scripts/bankroll_guard.py").read_text()
+        fn = bankroll.split("def order_max_loss", 1)[1].split("\ndef ", 1)[0]
+        assert "expiry_sell = False if stop_market else sell" in fn
+        expiry_at = fn.index("_combo_expiry_loss")
+        floor_at = fn.index("return max(loss, abs(quantity * price) * 100.0)")
+        assert expiry_at < floor_at
+        text = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        gate3 = " ".join(
+            text.split("For a combo the Kelly guard", 1)[1]
+            .split("What this does NOT cover", 1)[0]
+            .split()
+        )
+        assert "skips the exact payoff" not in gate3
+        assert "forces the sell flag off" in gate3
+        assert "effective_order_price" in gate3
+        assert "discarded credit limit" in gate3
+
