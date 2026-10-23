@@ -1,3 +1,15 @@
+# Bun 1.4.4 security pin (2026-10-22)
+
+Dependency graph: B1 -> B2 -> B3.
+
+- [x] B1 depends_on: [] Red tests for the 1.4.4 image digest, workflow `bun-version` pins, and host `BUN_VERSION`.
+- [x] B2 depends_on: [B1] Pin `oven/bun:1.4.4` by registry index digest, CI `bun-version`, and `deploy.sh` / `setup-vps.sh`. Frozen lockfiles unchanged.
+- [ ] B3 depends_on: [B2] Draft PR, local web and Python suites, GitHub CI green. No host changes. No merge.
+
+## Review
+
+Pending CI.
+
 # DeepSec dependency floors (2026-10-22)
 
 Dependency graph: D1 -> D2 -> D3.
@@ -10254,3 +10266,21 @@ UW follow-up: Sol/Luna re-reviewed `e92c723d2` and closed their final quota/repl
 Review pending. First CLI completed18:18:12Z and committed5a5bf2b9 before parent repeated the same CLI via its resolved LKG path at18:18:13Z. Parent did not retain the original triggering stdout/stderr. Cloud RED12failures (7 behavioral,5 missing-helper assertions); GREEN87focusedchecks; final broader cloud run323Pythonchecks and84cloudcontracts passed. No local tests or credential changes. Original responder finished18:22:35Z; incident commit separately surfaced as PR1220. Preserve that work. The clone was also held dirty by root/web node_modules because a missing newline commented out its ignore rule; added one more cloud RED/GREEN regression and restored that rule.
 
 Integration review: merged current main0ba43e597, preserving atomic daily-budget reservation and no-fallback-on-budget-refusal. Isolated cloud tests333passed plus84cloudcontracts. Four initial remote harness failures were its real host deploy-transition journal leaking into rerun tests; a per-test temporary transition/lock/LKG plugin isolated those external files without altering production behavior or test assertions. Original PR-head full test CI passed; integrated head must rerun after the current main deploy finishes.
+
+## LEAP admission-window incident 2026-10-22
+- [x] L1 depends_on: [] Confirm journal, cache, provider canary and shared governor state.
+- [x] L2 depends_on: [L1] Cloud failing regressions for transient embargo/minute windows and scanner client policy.
+- [x] L3 depends_on: [L2] Allow explicitly bounded scanner admission waits; preserve fast interactive defaults and hard quota refusals.
+- [ ] L4 depends_on: [L3] Cloud focused tests, PR full CI, deploy and successful production LEAP refresh.
+- [ ] L5 depends_on: [L4] Verify cache coverage, service health, watchdog and review.
+
+L2 evidence: isolated VPS red run: 7 failed, 2 passed (real SQLite governor, virtual clock and synthetic HTTP).
+
+L3 verification: isolated cloud focused suite 250 passed; final admission regressions 10 passed, including full scan retention across embargo and rolling windows. Local checks are static only.
+
+L3 cache-path review: a separate cloud red test proved singleflight still truncated the opt-in wait to ten seconds. Its explicit ceiling now matches admission; normal five-second and absolute 120-second bounds are regression-tested. Expanded cloud compatibility: 277 passed; final admission/cache regressions: 13 passed.
+
+L3 broader importers: cloud health wiring exposed one legacy zero-argument client stub; updated it for the explicit policy. Broader service health, honest exhaustion and Robinhood-priority suites: 64 passed. Final main compatibility suite: 279 passed.
+
+### LEAP review before release
+- Preserved shared reservations, 80% background allowance, quotas, cache identity, exhaustion status and duplicate-scan refusal. Only LEAP opts into longer waits; cache lock and governor each retain a 120-second ceiling. Original per-ticker exception details are unknown; runbook states that evidence limit. Full exact-head CI and live scan remain release conditions.

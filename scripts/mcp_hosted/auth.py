@@ -175,7 +175,7 @@ def _signing_key_for(token: str):
             raise AuthError(503, "authentication temporarily unavailable") from exc
         cached_kids = set()
     if kid in cached_kids:
-        return _resolve_signing_key(client, token, kid)
+        return _resolve_signing_key(client, kid)
 
     if not _jwks_gate.acquire(blocking=False):
         raise AuthError(503, "authentication unavailable")
@@ -188,15 +188,19 @@ def _signing_key_for(token: str):
             _jwks_refresh_after.move_to_end(kid)
             while len(_jwks_refresh_after) > 256:
                 _jwks_refresh_after.popitem(last=False)
-        return _resolve_signing_key(client, token, kid)
+        return _resolve_signing_key(client, kid)
     finally:
         _jwks_gate.release()
 
 
-def _resolve_signing_key(client, token: str, kid):
-    """The lookup itself, with the R-606 outage-vs-verdict error mapping."""
+def _resolve_signing_key(client, kid):
+    """The lookup itself, with the R-606 outage-vs-verdict error mapping.
+
+    Looks up by the already-extracted kid, never by the token, so a lookup
+    verdict depends only on the key set. The caller verifies the token.
+    """
     try:
-        return client.get_signing_key_from_jwt(token).key
+        return client.get_signing_key(kid).key
     except AuthError:
         raise
     except Exception as exc:

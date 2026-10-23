@@ -11,6 +11,22 @@ import pytest
 CLOUD = Path(__file__).resolve().parents[1]
 PUBLISHER = CLOUD / "scripts/subscription_service_env.py"
 TARGET = "/etc/radon/subscription-tokens/env"
+OPERATOR_TOKEN = "synthetic-operator-token"
+KEEPER_TOKEN = "synthetic-keeper-token"
+KEEPER_KEY = "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN"
+MINT = (
+    "turso db tokens create <DB> "
+    "-p service_health:data_read,data_add,data_update "
+    "-p service_health_events:data_add"
+)
+DERIVED = (
+    "TURSO_DB_URL=libsql://synthetic.example.test\n"
+    f"TURSO_AUTH_TOKEN={KEEPER_TOKEN}\n"
+    "PUSHOVER_USER=synthetic-user\n"
+    "PUSHOVER_TOKEN=synthetic-page-token\n"
+    "CLAUDE_CONFIG_DIR=/home/radon/.claude\n"
+    "CODEX_HOME=/home/radon/.codex\n"
+)
 
 
 @pytest.fixture
@@ -26,7 +42,8 @@ def paths(tmp_path):
     source = tmp_path / "canonical.env"
     source.write_text(
         "TURSO_DB_URL=libsql://synthetic.example.test\n"
-        "TURSO_AUTH_TOKEN=synthetic-heartbeat-token\n"
+        f"TURSO_AUTH_TOKEN={OPERATOR_TOKEN}\n"
+        f"{KEEPER_KEY}={KEEPER_TOKEN}\n"
         "PUSHOVER_USER=synthetic-user\n"
         "PUSHOVER_TOKEN=synthetic-page-token\n"
         "CLAUDE_CONFIG_DIR=/home/radon/.claude\n"
@@ -45,7 +62,10 @@ def publish(publisher, paths):
 def test_publishes_only_needed_keys_with_private_metadata(publisher, paths):
     source, target = paths
     publish(publisher, paths)
-    assert target.read_text() == "\n".join(source.read_text().splitlines()[:6]) + "\n"
+    assert target.read_text() == DERIVED
+    assert OPERATOR_TOKEN not in target.read_text()
+    assert KEEPER_KEY not in target.read_text()
+    assert "CLERK_SECRET_KEY" not in target.read_text()
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
     assert target.stat().st_uid == os.getuid()
@@ -55,13 +75,28 @@ def test_publishes_only_needed_keys_with_private_metadata(publisher, paths):
 def test_rotation_replaces_old_values_and_removes_omitted_options(publisher, paths):
     source, target = paths
     publish(publisher, paths)
-    source.write_text("TURSO_DB_URL=libsql://rotated.example.test\nTURSO_AUTH_TOKEN=rotated\nPUSHOVER_USER=user\nPUSHOVER_TOKEN=rotated-page\n")
+    source.write_text(
+        "TURSO_DB_URL=libsql://rotated.example.test\n"
+        "TURSO_AUTH_TOKEN=rotated-operator\n"
+        f"{KEEPER_KEY}=rotated-keeper\n"
+        "PUSHOVER_USER=user\n"
+        "PUSHOVER_TOKEN=rotated-page\n"
+    )
     publish(publisher, paths)
-    assert target.read_text() == source.read_text()
+    assert target.read_text() == (
+        "TURSO_DB_URL=libsql://rotated.example.test\n"
+        "TURSO_AUTH_TOKEN=rotated-keeper\n"
+        "PUSHOVER_USER=user\n"
+        "PUSHOVER_TOKEN=rotated-page\n"
+    )
+    assert "rotated-operator" not in target.read_text()
     assert "CLAUDE_CONFIG_DIR" not in target.read_text()
 
 
-@pytest.mark.parametrize("missing", ["TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN"])
+@pytest.mark.parametrize(
+    "missing",
+    ["TURSO_DB_URL", "TURSO_AUTH_TOKEN", KEEPER_KEY, "PUSHOVER_USER", "PUSHOVER_TOKEN"],
+)
 def test_incomplete_inputs_preserve_existing_output(publisher, paths, missing):
     source, target = paths
     publish(publisher, paths)
@@ -122,6 +157,135 @@ def test_literal_quoted_values_are_preserved_without_expansion(publisher, paths)
     source.write_text(source.read_text().replace("PUSHOVER_TOKEN=synthetic-page-token", "PUSHOVER_TOKEN='synthetic-$NOT_EXPANDED'"))
     publish(publisher, paths)
     assert "PUSHOVER_TOKEN='synthetic-$NOT_EXPANDED'" in target.read_text()
+    assert f"TURSO_AUTH_TOKEN={KEEPER_TOKEN}" in target.read_text()
+    assert OPERATOR_TOKEN not in target.read_text()
+
+
+def test_keeper_quoting_is_preserved_and_operator_token_is_omitted(publisher, paths):
+    source, target = paths
+    source.write_text(source.read_text().replace(
+        f"{KEEPER_KEY}={KEEPER_TOKEN}",
+        f"{KEEPER_KEY}='{KEEPER_TOKEN}-$NOT_EXPANDED'",
+    ))
+    publish(publisher, paths)
+    body = target.read_text()
+    assert f"TURSO_AUTH_TOKEN='{KEEPER_TOKEN}-$NOT_EXPANDED'" in body
+    assert OPERATOR_TOKEN not in body
+    assert KEEPER_KEY not in body
+
+
+def test_missing_keeper_token_does_not_create_output(publisher, paths):
+    source, target = paths
+    source.write_text("\n".join(
+        line for line in source.read_text().splitlines() if not line.startswith(KEEPER_KEY + "=")
+    ) + "\n")
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    assert KEEPER_KEY in str(caught.value)
+    assert OPERATOR_TOKEN not in str(caught.value)
+    assert KEEPER_TOKEN not in str(caught.value)
+    assert not target.exists()
+
+
+def test_identical_tokens_do_not_create_output(publisher, paths):
+    source, target = paths
+    source.write_text(source.read_text().replace(
+        f"{KEEPER_KEY}={KEEPER_TOKEN}", f"{KEEPER_KEY}={OPERATOR_TOKEN}",
+    ))
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    assert "matches" in str(caught.value)
+    assert OPERATOR_TOKEN not in str(caught.value)
+    assert not target.exists()
+
+
+def test_equal_tokens_fail_closed_without_echoing_secrets(publisher, paths):
+    source, target = paths
+    publish(publisher, paths)
+    before = target.read_bytes()
+    source.write_text(source.read_text().replace(
+        f"{KEEPER_KEY}={KEEPER_TOKEN}", f"{KEEPER_KEY}={OPERATOR_TOKEN}",
+    ))
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    message = str(caught.value)
+    assert "matches" in message
+    assert "missing" not in message
+    assert OPERATOR_TOKEN not in message
+    assert KEEPER_TOKEN not in message
+    assert target.read_bytes() == before
+
+
+def test_quoted_duplicate_of_operator_token_is_rejected(publisher, paths):
+    source, target = paths
+    publish(publisher, paths)
+    before = target.read_bytes()
+    text = source.read_text()
+    text = text.replace(f"TURSO_AUTH_TOKEN={OPERATOR_TOKEN}", f"TURSO_AUTH_TOKEN='{OPERATOR_TOKEN}'")
+    text = text.replace(f"{KEEPER_KEY}={KEEPER_TOKEN}", f'{KEEPER_KEY}="{OPERATOR_TOKEN}"')
+    source.write_text(text)
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    assert OPERATOR_TOKEN not in str(caught.value)
+    assert target.read_bytes() == before
+
+
+def test_later_duplicate_that_copies_the_operator_token_is_rejected(publisher, paths):
+    source, target = paths
+    publish(publisher, paths)
+    before = target.read_bytes()
+    source.write_text(source.read_text() + f"{KEEPER_KEY}={OPERATOR_TOKEN}\n")
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    assert OPERATOR_TOKEN not in str(caught.value)
+    assert target.read_bytes() == before
+
+
+def test_blank_keeper_token_preserves_previous_file(publisher, paths):
+    source, target = paths
+    publish(publisher, paths)
+    before = target.read_bytes()
+    source.write_text(source.read_text().replace(f"{KEEPER_KEY}={KEEPER_TOKEN}", f"{KEEPER_KEY}="))
+    with pytest.raises(ValueError) as caught:
+        publish(publisher, paths)
+    assert OPERATOR_TOKEN not in str(caught.value)
+    assert KEEPER_TOKEN not in str(caught.value)
+    assert target.read_bytes() == before
+
+
+def test_cli_reports_failure_without_token_text(publisher, paths, monkeypatch, capsys):
+    source, target = paths
+    publish(publisher, paths)
+    before = target.read_bytes()
+
+    def boom(*_args, **_kwargs):
+        raise ValueError(f"leaked {OPERATOR_TOKEN}")
+
+    monkeypatch.setattr(publisher, "publish", boom)
+    monkeypatch.setattr(publisher.os, "geteuid", lambda: 0)
+    code = publisher.main([str(source), str(target)])
+    captured = capsys.readouterr()
+    blob = captured.out + captured.err
+    assert code == 78
+    assert blob.strip() == "service environment publication failed: ValueError"
+    assert OPERATOR_TOKEN not in blob
+    assert target.read_bytes() == before
+
+
+def test_operator_contract_names_the_scoped_token_and_rollout():
+    required = (CLOUD / "config/required-env.txt").read_text().splitlines()
+    keys = [line.strip() for line in required if line.strip() and not line.lstrip().startswith("#")]
+    assert KEEPER_KEY in keys
+    example = (CLOUD / ".env.example").read_text()
+    assert f"{KEEPER_KEY}=" in example
+    assert MINT in example
+    doc = " ".join((CLOUD.parent / "docs/subscription-tokens.md").read_text().split())
+    assert KEEPER_KEY in doc
+    assert MINT in doc
+    assert "before this change merges" in doc
+    assert "next deploy stops" in doc
+    assert "never logs or prints token values" in doc
+
 
 def test_service_and_publication_lifecycle_contracts():
     unit = (CLOUD / "services/radon-subscription-tokens.service").read_text()

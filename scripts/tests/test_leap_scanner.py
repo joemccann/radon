@@ -377,7 +377,7 @@ def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypa
     previous = {"scan_time": "old", "results": [{"ticker": "SPY"}]}
     cache.write_text(json.dumps(previous))
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         sys,
@@ -411,7 +411,7 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
     """
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
 
     # REL-049 / R-095: the universe proportions matter now. A name with no
@@ -452,6 +452,199 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
     assert payload["status"] == "ok"
 
 
+def test_short_admission_embargo_is_retried_and_does_not_fail_the_oneshot(
+    tmp_path, monkeypatch
+):
+    """A minute-scale governor embargo must not page radon-leap as a wipeout.
+
+    2026-10-22 14:01:35Z to 14:04:27Z: the largecaps oneshot wrote 7 results
+    and 502 provider failures, then FastAPI returned an indeterminate HTTP
+    502. The same minute's catalysts log was "UW admission is busy; retry
+    after the current window". The daily tally was a few hundred, not the
+    40000 cap, and the governor embargo was about a minute, not the 20:00 ET
+    reset. The first call is busy; the call after that window succeeds.
+    """
+    import threading
+    from datetime import datetime
+
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+
+    started = datetime.fromisoformat("2026-10-22T14:01:35+00:00")
+    embargo = datetime.fromisoformat("2026-10-22T14:02:05+00:00")
+    remaining = (embargo - started).total_seconds()
+    frozen = 1_800_000_000.0
+    sleeps: list[float] = []
+    calls: dict[str, int] = {}
+    lock = threading.Lock()
+    busy = {f"B{i}" for i in range(8)}
+    ready = ["OK0", "OK1"]
+
+    def fake_scan(ticker, *args, **kwargs):
+        with lock:
+            calls[ticker] = calls.get(ticker, 0) + 1
+            attempt = calls[ticker]
+        if ticker in busy and attempt == 1:
+            raise leap_scanner_uw.UWRateLimitError(
+                "UW admission is busy; retry after the current window",
+                status_code=429,
+            )
+        return _one_scan_result(ticker)
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", fake_scan)
+    monkeypatch.setattr(
+        "utils.uw_governor.snapshot",
+        lambda token=None: {"embargo_until": frozen + remaining},
+    )
+    monkeypatch.setattr("time.time", lambda: frozen)
+    monkeypatch.setattr("time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "leap_scanner_uw.py",
+            *ready,
+            *sorted(busy),
+            "--json",
+            "--workers",
+            "4",
+            "--output",
+            str(tmp_path / "report.html"),
+        ],
+    )
+
+    assert leap_scanner_uw.main() == 0
+    payload = json.loads(cache.read_text())
+    assert payload["status"] == "ok"
+    assert payload["provider_failures"] == []
+    assert sorted(row["ticker"] for row in payload["results"]) == sorted([*ready, *busy])
+    assert calls == {ticker: 1 for ticker in ready} | {ticker: 2 for ticker in busy}
+    assert sleeps == [remaining] * len(busy)
+
+
+def _admission_oneshot(
+    tmp_path,
+    monkeypatch,
+    *,
+    message: str,
+    embargo_remaining: float,
+    succeed_after: int | None,
+):
+    """2 names succeed immediately. 8 raise `message` until `succeed_after`."""
+    import threading
+
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+
+    frozen = 1_800_000_000.0
+    sleeps: list[float] = []
+    calls: dict[str, int] = {}
+    lock = threading.Lock()
+    busy = {f"B{i}" for i in range(8)}
+    ready = ["OK0", "OK1"]
+
+    def fake_scan(ticker, *args, **kwargs):
+        with lock:
+            calls[ticker] = calls.get(ticker, 0) + 1
+            attempt = calls[ticker]
+        if ticker in busy and (succeed_after is None or attempt <= succeed_after):
+            raise leap_scanner_uw.UWRateLimitError(message, status_code=429)
+        return _one_scan_result(ticker)
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", fake_scan)
+    monkeypatch.setattr(
+        "utils.uw_governor.snapshot",
+        lambda token=None: {"embargo_until": frozen + embargo_remaining},
+    )
+    monkeypatch.setattr("time.time", lambda: frozen)
+    monkeypatch.setattr("time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "leap_scanner_uw.py",
+            *ready,
+            *sorted(busy),
+            "--json",
+            "--workers",
+            "4",
+            "--output",
+            str(tmp_path / "report.html"),
+        ],
+    )
+    code = leap_scanner_uw.main()
+    payload = json.loads(cache.read_text())
+    return code, payload, calls, sleeps, busy, ready
+
+
+def test_admission_busy_second_try_still_exhausts_the_oneshot(tmp_path, monkeypatch):
+    """One retry, then a second busy reply is still a provider wipeout."""
+    from datetime import datetime
+
+    started = datetime.fromisoformat("2026-10-22T14:01:35+00:00")
+    embargo = datetime.fromisoformat("2026-10-22T14:02:05+00:00")
+    remaining = (embargo - started).total_seconds()
+    code, payload, calls, sleeps, busy, ready = _admission_oneshot(
+        tmp_path,
+        monkeypatch,
+        message="UW admission is busy; retry after the current window",
+        embargo_remaining=remaining,
+        succeed_after=2,
+    )
+
+    assert code == 1
+    assert payload["status"] == "degraded"
+    assert set(payload["provider_failures"]) == busy
+    assert calls == {ticker: 1 for ticker in ready} | {ticker: 2 for ticker in busy}
+    assert sleeps == [remaining] * len(busy)
+
+
+def test_quota_exhaustion_does_not_wait_out_the_embargo(tmp_path, monkeypatch):
+    """Daily quota text is not the short admission window."""
+    from datetime import datetime
+
+    started = datetime.fromisoformat("2026-10-22T14:01:35+00:00")
+    embargo = datetime.fromisoformat("2026-10-22T14:02:05+00:00")
+    remaining = (embargo - started).total_seconds()
+    code, payload, calls, sleeps, busy, ready = _admission_oneshot(
+        tmp_path,
+        monkeypatch,
+        message="UW provider quota is exhausted",
+        embargo_remaining=remaining,
+        succeed_after=None,
+    )
+
+    assert code == 1
+    assert payload["status"] == "degraded"
+    assert set(payload["provider_failures"]) == busy
+    assert calls == {ticker: 1 for ticker in ready} | {ticker: 1 for ticker in busy}
+    assert sleeps == []
+
+
+def test_multi_hour_embargo_does_not_wait(tmp_path, monkeypatch):
+    """A multi-hour embargo is the daily reset. Do not burn the scan waiting."""
+    from datetime import timedelta
+
+    remaining = timedelta(hours=6).total_seconds()
+    code, payload, calls, sleeps, busy, ready = _admission_oneshot(
+        tmp_path,
+        monkeypatch,
+        message="UW admission is busy; retry after the current window",
+        embargo_remaining=remaining,
+        succeed_after=None,
+    )
+
+    assert code == 1
+    assert payload["status"] == "degraded"
+    assert set(payload["provider_failures"]) == busy
+    assert calls == {ticker: 1 for ticker in ready} | {ticker: 1 for ticker in busy}
+    assert sleeps == []
+
+
 def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monkeypatch):
     """R-095: UW's daily cap tripping after the third ticker yielded
     results=2 / failed=516, an overwritten data/leap.json, an unconditional
@@ -459,7 +652,7 @@ def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monk
     banner."""
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     health: list = []
     monkeypatch.setattr(
         leap_scanner_uw,
@@ -505,7 +698,7 @@ def test_unwritable_html_report_still_writes_cache_and_exits_zero(tmp_path, monk
     reports.mkdir()
     reports.chmod(0o555)
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
-    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
     monkeypatch.setattr(
         leap_scanner_uw,

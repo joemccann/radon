@@ -202,6 +202,17 @@ Operator commands after the cut:
   Verify from the app host, no Gateway side effect:
   `curl --cacert /etc/radon/ib-remote/ca.pem --cert /etc/radon/ib-remote/client.pem --key /etc/radon/ib-remote/client-key.pem https://10.0.0.4:8340/healthz`
   → `{"ok":true,"service":"ib-gateway-remote"}`.
+  Then `/status` must report `"state": "running"` (or `stopped`), never
+  `"state": "unknown", "returncode": 2`. The daemon runs as `radon`, which
+  left group docker (2026-09-04), so `ib-gateway-control` reaches the
+  container only through `sudo -n /usr/local/sbin/radon-docker-gw`. The unit
+  therefore carries neither `NoNewPrivileges=yes` nor an empty
+  `CapabilityBoundingSet=`: either refuses that setuid hop, every verb
+  answers `unknown` rc=2, the API row reads `active_state=unknown`, and the
+  operator UI disables every Gateway control (2026-10-22). Privilege is
+  bounded by the exact verb list in `sudoers.d/radon-ops`, not by systemd;
+  `ProtectSystem=strict` and `PrivateTmp` stay. Pinned by
+  `cloud/tests/test_systemd_services.py::TestIBGatewayRemote`.
   Certificates expire 825 days after minting (`-days 825` in the script).
   The proxy's status ladder (`scripts/api/services.py`,
   `scripts/ib_gateway_remote/serve.py`) discriminates the failure:

@@ -25,10 +25,14 @@ MemoryMax=256M
 # helper. The helper (as radon) writes the 2FA lease, control guard and
 # transition file under /var/lib/radon and takes the deploy lock under
 # /home/radon, so those stay writable; everything else is read-only.
-NoNewPrivileges=yes
+# No NoNewPrivileges= and no empty CapabilityBoundingSet= here: radon left
+# group docker (2026-09-04), so the helper reaches the container only through
+# `sudo -n /usr/local/sbin/radon-docker-gw` (exact verbs in sudoers.d/radon-ops).
+# Either setting refuses that setuid hop, the helper answers `unknown` rc=2
+# for every verb, and the operator UI disables every Gateway control
+# (2026-10-22). Privilege is bounded by the sudoers verb list, not by systemd.
 ProtectSystem=strict
 PrivateTmp=yes
-CapabilityBoundingSet=
 ReadWritePaths=/var/lib/radon /home/radon
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ib_gateway_remote.serve
 Restart=always

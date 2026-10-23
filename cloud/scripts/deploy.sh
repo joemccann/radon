@@ -98,7 +98,7 @@ readonly GATEWAY_READY_RETRIES=12
 readonly GATEWAY_READY_WAIT=5
 readonly DEPLOY_TIMEOUT="${DEPLOY_TIMEOUT:-900}"
 readonly DEPLOY_KILL_AFTER="${DEPLOY_KILL_AFTER:-30}"
-readonly BUN_VERSION="1.3.14"
+readonly BUN_VERSION="1.4.4"
 
 # Optional research collector joins subsequent release transactions only once
 # activated. A first deploy installs its code/unit before channel admission.

@@ -1010,6 +1010,42 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
 
 ---
 
+## leap-admission-window-exhaustion
+
+**`radon-leap.service` fails with provider exhaustion after a shared UW embargo.**
+Observed 2026-10-22 14:04:27Z: HTTP 502, `502 provider failures vs 7 results`,
+`data/leap.json` status `degraded`; API health remained `ok` and authenticated.
+The account admission ledger retained a short 429 embargo ending 14:05:07Z;
+AAPL IV/contracts and a bounded AAPL scan subsequently succeeded. Exact original
+per-ticker errors were not retained by the API's stderr-only failure log;
+transient admission is the reproduced failure mechanism, not proof that every
+one of the 502 failures had that cause.
+
+- **Mechanism:** each typed UW request used the interactive-sized five-second
+  admission deadline, and the governor capped even explicit waits at ten
+  seconds. A sixty-second embargo or exhausted rolling minute refused all
+  queued ticker requests before HTTP, rapidly converting a healthy provider
+  into an exhausted scan. Do not bypass the governor, raise unverified rate
+  limits, or change the exhaustion success threshold.
+- **Discriminating checks:** read `leap.json` status/result/provider-failure
+  counts, the API journal and `utils.uw_governor.snapshot()` metadata. Low daily
+  usage with a short embargo/minute pressure differs from daily/provider quota
+  exhaustion. One ticker canary after the window is sufficient; do not loop
+  reruns or overlap a pending `/leap/scan` child.
+- **Remediation:** LEAP explicitly waits up to 120 seconds for typed client
+  admission; the governor releases its DB lock while waiting. The cache singleflight wait also respects that explicit ceiling. Normal clients
+  retain five seconds, explicit request deadlines override the client default,
+  and hard budgets/long embargoes still fail closed. After deploy, confirm no
+  active scan or production deploy and perform one guarded unit start through
+  the existing operator control. Verify `Result=success`, fresh `leap.json`
+  status `ok`, restored coverage, healthy `leap-scan`, and watchdog resolution.
+- **Regressions:** `scripts/tests/test_leap_admission_window.py` exercises real
+  SQLite admission and synthetic HTTP with a virtual clock, the scanner client
+  policy, full ticker retention, fast defaults, explicit overrides, hard caps
+  and long embargo refusal.
+
+---
+
 ## leap-reports-permission-502
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -1076,8 +1112,11 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   body (this case). A ~60–120s run whose 502 body is `PermissionError`
   on `reports` is `leap-reports-permission-502`. A long run that ends
   `Script leap_scanner_uw.py failed (code 1)` after `SCAN COMPLETE` is
-  `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
-  stop-clean. If `/health/lite` is down too → API/IB, stand down.
+  `leap-partial-ticker-exit-pages-p1`. A ~3 minute run that writes
+  `leap.json` with `status` `degraded` and a sibling
+  `UW admission is busy` line is `leap-admission-busy-exhausted`.
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down too
+  → API/IB, stand down.
 - **Remediation (code):** wait/retry HTTP 502/503 only when the body
   matches `subprocess capacity exhausted` (R-221), charged against
   `RADON_LEAP_SHED_WAIT_SECS` default 240 (fits under
@@ -1092,6 +1131,62 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   `test_persistent_capacity_shed_no_duplicate_still_fails`.
 - **Code:** `scripts/run_leap_refresh.sh`
   (`RADON_LEAP_SHED_WAIT_SECS`, `CAPACITY_SHED_MARKER`).
+
+---
+
+## leap-admission-busy-exhausted
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when a short UW governor embargo is counted as a provider wipeout.**
+Peak: 2026-10-22 14:05:00Z, page `dd71d822b3bc9870a24ec1804a82cea4`.
+
+- **Mechanism:** the 10:00 ET largecaps timer POSTs `/leap/scan`. Peer
+  traffic fills the shared minute window, and `reserve()` raises
+  `UW admission is busy; retry after the current window` before a row
+  is inserted. `scan_ticker` re-raises that `UWRateLimitError`.
+  `scan_universe` counted every name as a provider failure on the first
+  try. With 7 results and 502 provider failures the ratio exceeded 25%
+  (R-095), `leap.json` was written `status=degraded`, `main()` returned
+  1, and FastAPI returned HTTP 502. The wrapper logged
+  `LEAP FastAPI outcome indeterminate (curl=0, http=502)` because the
+  body was not the capacity marker. The oneshot had already run about
+  172s (serial IB plus instant admission refusals). The governor embargo
+  was about a minute (until 14:05:07Z), not the 20:00 ET daily reset.
+  The daily tally was a few hundred, not 40000. `/health/lite` stayed
+  authenticated.
+- **Detection:** unit journal POST `/leap/scan?preset=largecaps&min_gap=10`,
+  then about three minutes later the indeterminate 502 line.
+  `systemctl show` is `Result=exit-code`, `ExecMainStatus=1`,
+  `NRestarts=0`. `data/leap.json` has `status` `degraded`, nonempty
+  `results`, and `provider_failures` above 25% of
+  results plus provider failures. A sibling log in the same minute quotes
+  `UW admission is busy; retry after the current window`.
+- **Discriminating check:** governor `embargo_until` is seconds to about
+  a minute ahead, `auth_status` 200, and `uw_budget.json` count is far
+  below 40000. The 502 is not instant and the body is not
+  `subprocess capacity exhausted` (`leap-capacity-502`). It is not
+  `PermissionError` on `reports` (`leap-reports-permission-502`).
+  Cache `status` `ok` with exit 1 is
+  `leap-partial-ticker-exit-pages-p1`. Zero results with the previous
+  cache kept is HB-013. `Result=signal` is deploy stop-clean. A
+  multi-hour embargo or daily-quota text is a real wipeout and must
+  still exit 1. If `/health/lite` is down, stand down.
+- **Remediation (code):** on `admission is busy`, sleep once until the
+  governor embargo lifts when that remainder is at most 70s, then scan
+  the ticker once more. Waits overlap across the worker pool, so a
+  minute-scale embargo on 518 names stays inside the 3610s curl budget.
+  Quota exhaustion, `budget is reserved`, and an embargo longer than
+  70s still count as provider failures and the oneshot still exits 1
+  when the ratio exceeds 25%. A second busy reply does not loop. Do
+  not `reset-failed` as the fix. The next timer after deploy, or one
+  `reset-failed` plus start once the unit is on a newer green deploy
+  (`RERUNNABLE_ONESHOT_UNITS`), reruns the scan.
+- **Regression:**
+  `scripts/tests/test_leap_scanner.py::test_short_admission_embargo_is_retried_and_does_not_fail_the_oneshot`,
+  `test_admission_busy_second_try_still_exhausts_the_oneshot`,
+  `test_quota_exhaustion_does_not_wait_out_the_embargo`,
+  `test_multi_hour_embargo_does_not_wait`.
+- **Code:** `scripts/leap_scanner_uw.py` (`_scan_ticker_after_admission`).
 
 ---
 

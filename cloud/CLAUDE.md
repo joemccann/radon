@@ -565,7 +565,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
   Never copy the complete production env into the web tree.
 - Setup validates the stable env before dependency installation or builds.
-- Host needs the exact Bun pin on radon PATH for staged Next builds.
+- Host needs Bun 1.4.4 on radon PATH for staged Next builds (`deploy.sh` and `setup-vps.sh` `BUN_VERSION`).
 
 **IB Flex / Gateway env (Hetzner `/etc/radon/env` mode `0640`, owner `root:radon`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections — NAV in Base, Cash Transactions and Transfers — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`.
 

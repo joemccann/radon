@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Publish the subscription keeper's private, bounded environment file."""
+"""Publish the subscription keeper's private, bounded environment file.
+
+The derived ``TURSO_AUTH_TOKEN`` is ``TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN``
+from the canonical env. Publication fails when that value is missing or equal
+to the operator ``TURSO_AUTH_TOKEN``. Token values are never printed.
+"""
 from __future__ import annotations
 
 import os
@@ -9,8 +14,20 @@ import shlex
 import stat
 import sys
 
-REQUIRED_KEYS = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
+# Canonical inputs. The operator token is read only so it can be rejected
+# when the keeper token is the same secret.
+REQUIRED_SOURCE_KEYS = (
+    "TURSO_DB_URL",
+    "TURSO_AUTH_TOKEN",
+    "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN",
+    "PUSHOVER_USER",
+    "PUSHOVER_TOKEN",
+)
+# Derived file. TURSO_AUTH_TOKEN here is the keeper token, not the operator token.
+OUTPUT_KEYS = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
 OPTIONAL_KEYS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME")
+KEEPER_TOKEN_KEY = "TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN"
+_READ_KEYS = REQUIRED_SOURCE_KEYS + OPTIONAL_KEYS
 MAX_SOURCE_BYTES = 1_048_576
 
 
@@ -54,9 +71,10 @@ def _payload(source: Path, owner_uid: int) -> bytes:
         if fd >= 0:
             os.close(fd)
     values = {}
+    secrets = {}
     for line in raw.decode("utf-8").splitlines():
         key, sep, value = line.partition("=")
-        if sep and key in REQUIRED_KEYS + OPTIONAL_KEYS:
+        if sep and key in _READ_KEYS:
             try:
                 parsed = shlex.split(value.strip(), comments=False)
             except ValueError:
@@ -64,15 +82,22 @@ def _payload(source: Path, owner_uid: int) -> bytes:
             if not parsed or (len(parsed) == 1 and not parsed[0].strip()):
                 if key in OPTIONAL_KEYS:
                     values.pop(key, None)
+                    secrets.pop(key, None)
                     continue
                 raise ValueError(f"empty service environment value: {key}")
             if len(parsed) != 1:
                 raise ValueError(f"malformed service environment value: {key}")
             values[key] = value
-    missing = [key for key in REQUIRED_KEYS if key not in values]
+            secrets[key] = parsed[0]
+    missing = [key for key in REQUIRED_SOURCE_KEYS if key not in values]
     if missing:
         raise ValueError("missing service environment keys: " + ", ".join(missing))
-    return ("\n".join(f"{key}={values[key]}" for key in REQUIRED_KEYS + OPTIONAL_KEYS if key in values) + "\n").encode()
+    if secrets[KEEPER_TOKEN_KEY] == secrets["TURSO_AUTH_TOKEN"]:
+        raise ValueError("subscription keeper token matches TURSO_AUTH_TOKEN")
+    values["TURSO_AUTH_TOKEN"] = values[KEEPER_TOKEN_KEY]
+    return (
+        "\n".join(f"{key}={values[key]}" for key in OUTPUT_KEYS + OPTIONAL_KEYS if key in values) + "\n"
+    ).encode()
 
 
 def publish(source: Path, target: Path, *, owner_uid: int = 0) -> None:

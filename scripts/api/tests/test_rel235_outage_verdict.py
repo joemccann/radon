@@ -32,7 +32,7 @@ async def test_oserror_is_503_and_the_kid_stays_reprobeable(monkeypatch):
     calls = []
 
     class Flaky:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             calls.append(1)
             if state["fail"]:
                 raise OSError("connection refused")
@@ -58,7 +58,7 @@ async def test_outage_does_not_populate_the_negative_cache_via_task_callback(mon
     import asyncio
 
     class Down:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             raise TimeoutError("clerk 5xx / socket timeout")
 
     monkeypatch.setattr(auth, "_get_jwks_client", lambda: Down())
@@ -77,7 +77,7 @@ async def test_pyjwk_connection_error_is_an_outage_not_a_verdict(monkeypatch):
     import jwt as pyjwt
 
     class Down:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             raise pyjwt.PyJWKClientConnectionError("failed to reach JWKS")
 
     monkeypatch.setattr(auth, "_get_jwks_client", lambda: Down())
@@ -94,7 +94,7 @@ async def test_a_pyjwt_verdict_is_still_negative_cached(monkeypatch):
     calls = []
 
     class NoSuchKid:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             calls.append(1)
             raise pyjwt.exceptions.PyJWKClientError("Unable to find a signing key")
 

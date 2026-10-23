@@ -95,7 +95,7 @@ async def test_oversized_jwt_is_rejected_before_jwks(monkeypatch):
     called = False
 
     class Client:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             nonlocal called
             called = True
             raise AssertionError("JWKS must not be reached")
@@ -128,7 +128,7 @@ async def test_jwks_lookup_is_single_flight_per_key_id(monkeypatch):
     calls = 0
 
     class Client:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             nonlocal calls
             import time
 
@@ -154,7 +154,7 @@ async def test_failed_jwks_key_id_is_negative_cached(monkeypatch):
     calls = 0
 
     class Client:
-        def get_signing_key_from_jwt(self, token):
+        def get_signing_key(self, kid):
             nonlocal calls
             import jwt as pyjwt
 

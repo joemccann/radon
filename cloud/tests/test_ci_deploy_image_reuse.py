@@ -58,7 +58,7 @@ def test_final_deploy_reuses_proven_image_or_compiles_host_bundle(
 
     executable(fake_bin / "git", f"printf '%s\\n' {'short' if proof == 'bad-sha' else sha}\n")
     executable(fake_bin / "bun", '''if [[ "$*" == "--version" ]]; then
-  echo 1.3.14
+  echo 1.4.4
 else
   printf 'bun %s\\n' "$*" >> "$CALL_LOG"
 fi
