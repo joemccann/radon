@@ -84,6 +84,18 @@ class TestRedaction:
         ):
             assert scrub_credential_text(text) == text, text
 
+    def test_a_structural_tail_after_a_label_survives(self):
+        """An earlier rule redacts the value; the NEXT query parameter is not it."""
+        text = f"https://provider.invalid/v1?api_key={OPAQUE}&symbol=SPY\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+        assert "symbol=SPY" in out, out
+
+    def test_an_opaque_tail_past_punctuation_is_redacted(self):
+        """Structure may follow a label; a credential hiding behind it may not."""
+        text = f"api_key = [redacted]!{TAIL}\n"
+        assert _clean(scrub_credential_text(text)), text
+
     def test_13_password_only_url_userinfo_is_redacted(self):
         text = f"https://:{OPAQUE}@db.internal/path\n"
         out = scrub_credential_text(text)
