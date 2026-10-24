@@ -270,6 +270,17 @@ def _rows_as_tuples(result: dict) -> list[tuple]:
     ]
 
 
+def _refuse_developer_host() -> None:
+    """REL-330 / R-741. The VPS is Linux and passes. A laptop process must not write."""
+    try:
+        from utils.production_writer_guard import refuse_developer_host_in_cloud_mode
+    except ImportError:
+        from scripts.utils.production_writer_guard import (
+            refuse_developer_host_in_cloud_mode,
+        )
+    refuse_developer_host_in_cloud_mode()
+
+
 @measure_operation("database")
 def hrana_execute(
     sql: str, args: Sequence[Any] = (), timeout: float = HRANA_TIMEOUT_S
@@ -283,6 +294,7 @@ def hrana_execute(
     Raises :class:`DbHttpError` on any failure; the caller owns the
     fallback. Call via ``asyncio.to_thread`` from route handlers.
     """
+    _refuse_developer_host()
     db_url, token = read_env()
     http_origin = http_url_from_libsql(db_url)
     if not http_origin or not token:
@@ -340,6 +352,7 @@ def hrana_transaction(statements: Sequence[tuple[str, Sequence[Any]]], timeout: 
     """
     if not statements or len(statements) > 100:
         raise ValueError("transaction requires 1..100 statements")
+    _refuse_developer_host()
     db_url, token = read_env()
     origin = http_url_from_libsql(db_url)
     if not origin or not token:

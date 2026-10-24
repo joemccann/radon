@@ -162,6 +162,16 @@ def get_db() -> object:
                 "Refusing to open a production connection from pytest."
             )
 
+        # REL-330 / R-741: the HTTP writer refuses a developer host. This
+        # native connection can write the same tables, so it refuses too.
+        try:
+            from utils.production_writer_guard import refuse_developer_host_in_cloud_mode
+        except ImportError:
+            from scripts.utils.production_writer_guard import (
+                refuse_developer_host_in_cloud_mode,
+            )
+        refuse_developer_host_in_cloud_mode()
+
         url, token = _read_env()
 
         if _replica_opted_in():

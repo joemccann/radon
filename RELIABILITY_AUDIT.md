@@ -3223,3 +3223,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:708-749` and `:864-906`, wire `placeOrder` at `:752` and `:910`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6146`, exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224-241` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2821-2834`.
 
 Audited through: e5426fb17d91d2c1224b070c5865a526d358fd7d on 2026-10-21 — 1 new finding
+
+## Delta audit 2026-10-24
+
+Trusted cursor `19e25a1d3fc09d12cb482f78c9ac8b39ad3072d4` (rolling issue #81, 2026-10-23) through `d3fd4ee08b38c2a6fda231b7dc6b104798461a06`: 33 commits, 186 paths. No open `reliability/` PR. Highest IDs before tonight: R-740 / REL-329. Codemap `generated_at` 2026-10-23T09:00:08Z. Importers of changed modules were taken from codemap edges (438 files outside the delta; `scripts/db/hrana_http.py` 63, `scripts/api/server.py` 49, `scripts/clients/ib_client.py` 27, `scripts/ib_place_order.py` 17, `scripts/bankroll_guard.py` 9) and the money-path callers were read. `scripts/utils/production_writer_guard.py` is absent from the codemap; its callers were confirmed with `rg`.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-741 / REL-330 | P1 | `scripts/utils/production_writer_guard.py` `refusal_reason` | DONE. The guard refused a developer host only when `RADON_MODE=hetzner`. The same range deleted `.env.ib-mode` and every loader of it, and the launchd plist that overwrote `service_health` on 2026-10-22 sets no mode. An unset or `local` mode on macOS therefore passed `refusal_reason` and `hrana_execute` reached the wire. Acceptance: a non-Linux process with `RADON_MODE` unset, `local`, or `hetzner` and no `PYTEST_CURRENT_TEST` does not open a production write. `hrana_execute`, `get_db`, and `api.db_http` execute and transaction raise `ProductionWriterRefused` before any socket; `monitor_daemon --once` exits 78 before `create_daemon`. Linux still writes and still starts the daemon. RED 4 failed (wire reached, daemon started). GREEN 45 passed across the guard, Hrana failure, API HTTP, and portfolio-delete receipt suites. |
+
+Reviewed and not filed: `IBClient.modify_order` types a future as an option, and production modify goes through `scripts/ib_order_manage.py`, which calls `client.place_order` after qualify so the future multiplier still applies. The bankroll close-out waiver on a stale snapshot is the tested `is_close_out` contract; the 15-minute freshness window stays on the fat-finger loss cap. JWKS `cache_keys` removal matches PyJWT's own cache. Typed Unusual Whales methods use the 120s admission wait. Catalog window numbers did not change. `event-odds` still has no in-repo VPS timer; that is the existing open question, not a new writer.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:705-763` and `:875-921`, wire `placeOrder` at `:763` and `:921`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6176` (used at `:6285` and `:6363`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. Catalog parity (`test_watchdog_catalog_parity.py` and `test_rel141_catalog_exemptions_are_true.py`) 38 passed; the range changed catalog comments only.
+
+Audited through: d3fd4ee08b38c2a6fda231b7dc6b104798461a06 on 2026-10-24 — 1 new finding

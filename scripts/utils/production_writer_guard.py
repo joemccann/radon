@@ -1,11 +1,10 @@
-"""Refuse production Turso writes from a developer machine in cloud mode.
+"""Refuse production Turso writes from a developer machine.
 
-Laptop and VPS share one Turso database. ``RADON_MODE=hetzner`` means the
-production schedulers run on the VPS, so a process on a developer host that
-still carries that mode (a leftover launchd agent, a stray ``--once`` run with
-the VPS environment) must not write rows the VPS writers own. Production is
-Linux; every macOS process in cloud mode is such a stray. The laptop has no
-local mode: ``RADON_MODE`` comes from the environment only.
+Laptop and VPS share one Turso database. Production writers run on Linux.
+A non-Linux process must not write rows the VPS owns. ``RADON_MODE`` is not
+a permit: the launchd agent that overwrote ``service_health`` on 2026-10-22
+sets no mode (its plist carries PATH and PYTHONPATH only), and nothing in
+this tree loads ``.env.ib-mode`` anymore (REL-330 / R-741).
 """
 
 from __future__ import annotations
@@ -33,16 +32,24 @@ def refusal_reason(
     env: Mapping[str, str] | None = None,
     platform: str | None = None,
 ) -> str | None:
-    """Why this process may not write production rows, or ``None``."""
+    """Why this process may not write production rows, or ``None``.
+
+    Linux is the VPS. Every other platform refuses, whatever ``RADON_MODE``
+    says. ``PYTEST_CURRENT_TEST`` is set only by pytest, never by launchd or
+    a service unit, so the suite can still exercise the transport on a
+    developer machine. A test of the production decision deletes that
+    variable (or passes an env mapping that lacks it).
+    """
+    env = os.environ if env is None else env
     platform = sys.platform if platform is None else platform
     if platform.startswith(PRODUCTION_PLATFORM_PREFIX):
         return None
-    if radon_mode(env) != CLOUD_MODE:
+    if env.get("PYTEST_CURRENT_TEST"):
         return None
+    mode = radon_mode(env) or "unset"
     return (
-        f"RADON_MODE={CLOUD_MODE} on {platform}: production writers run on the "
-        "VPS; this host must not write shared Turso rows (unset RADON_MODE "
-        "in this shell; the laptop owns no writers)"
+        f"production writers run on Linux; refusing shared Turso writes from "
+        f"{platform} (RADON_MODE={mode} is not a permit)"
     )
 
 
