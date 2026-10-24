@@ -43,6 +43,7 @@
         "scripts/api/services.py",
         "cloud/services/radon-ib-gateway-remote.service",
         "cloud/scripts/ib-gateway-remote-certs.sh",
+        "cloud/scripts/radon-ib-gateway-credential.py",
         "cloud/scripts/check-env.py",
         "tools/render_network_topology.py",
         "docs/radon-network-topology.svg"

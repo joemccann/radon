@@ -43,10 +43,12 @@ def _write_executable(path: Path, body: str) -> None:
 @pytest.fixture()
 def box(tmp_path: Path):
     log = tmp_path / "docker.log"
+    env_log = tmp_path / "docker-env.log"
     docker = tmp_path / "docker"
     _write_executable(
         docker,
         f'#!/bin/bash\nprintf \'%s\\n\' "$*" >> {log}\n'
+        f'printf \'%s\\n\' "${{RADON_COMPOSE_ENV_FILE:-unset}}" >> {env_log}\n'
         'if [[ "${RADON_STUB_DOCKER_RC:-0}" != "0" ]]; then\n'
         '  echo "Error: No such object: ib-gateway" >&2\n'
         '  exit "${RADON_STUB_DOCKER_RC}"\n'
@@ -58,12 +60,17 @@ def box(tmp_path: Path):
     compose_file.write_text("services: {}\n", encoding="utf-8")
     env_file = tmp_path / "env"
     env_file.write_text("X=1\n", encoding="utf-8")
+    gateway_env = tmp_path / "ib-gateway" / "gateway.env"
+    gateway_env.parent.mkdir(mode=0o700)
+    gateway_env.write_text("TWS_PASSWORD='x'\n", encoding="utf-8")
+    gateway_env.chmod(0o600)
     env = {
         **os.environ,
         "RADON_DOCKER_GW_TEST_MODE": "1",
         "RADON_TEST_DOCKER": str(docker),
         "RADON_TEST_COMPOSE_FILE": str(compose_file),
         "RADON_TEST_COMPOSE_ENV_FILE": str(env_file),
+        "RADON_TEST_GATEWAY_ENV_FILE": str(gateway_env),
         "RADON_TEST_OPERATOR_HOLD_PATH": str(tmp_path / "ib-operator-hold.json"),
     }
 
@@ -71,6 +78,9 @@ def box(tmp_path: Path):
         def __init__(self) -> None:
             self.env = env
             self.log = log
+            self.env_log = env_log
+            self.env_file = env_file
+            self.gateway_env = gateway_env
             self.compose_file = compose_file
             self.tmp = tmp_path
             self.hold = tmp_path / "ib-operator-hold.json"
@@ -171,6 +181,93 @@ def test_a_missing_compose_body_is_refused(box) -> None:
     result = box.run("compose-down")
     assert result.returncode == 78
     assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+# --- Gateway env split: the container gets only gateway.env ----------------
+# /etc/radon/env carries every app secret on the broker. compose-up/down hand
+# the container /etc/radon/ib-gateway/gateway.env (env_file via
+# RADON_COMPOSE_ENV_FILE) and keep /etc/radon/env only for interpolation.
+
+
+def test_compose_up_uses_gateway_env_file_for_container_and_root_env_for_interpolation(box) -> None:
+    assert box.run("compose-up").returncode == 0
+    line = box.log.read_text(encoding="utf-8").strip()
+    assert f"--env-file {box.env_file}" in line
+    assert box.env_log.read_text(encoding="utf-8").strip() == str(box.gateway_env)
+
+
+def test_compose_down_uses_gateway_env_file(box) -> None:
+    assert box.run("compose-down").returncode == 0
+    assert box.env_log.read_text(encoding="utf-8").strip() == str(box.gateway_env)
+    assert f"--env-file {box.env_file}" in box.log.read_text(encoding="utf-8")
+
+
+def test_compose_up_refuses_missing_gateway_env_after_cutover(box) -> None:
+    """Once /etc/radon/env no longer carries TWS_PASSWORD (prune-root-env ran),
+    a missing gateway.env is refused: the fallback would start a Gateway
+    with no password, which is a failed IBKR login."""
+    box.gateway_env.unlink()
+    result = box.run("compose-up")
+    assert result.returncode == 78, result.stderr
+    assert "gateway.env" in result.stderr
+    assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+# The unattended release controller syncs the broker control plane within
+# minutes of a main deploy, before anyone runs `migrate`. Until then the
+# Gateway must keep its pre-split behaviour (env_file = /etc/radon/env), or
+# every watchdog, admin and boot start path exits 78 and a crashed Gateway
+# stays down.
+
+
+@pytest.mark.parametrize("verb", ["compose-up", "compose-down"])
+def test_missing_gateway_env_before_cutover_falls_back_to_root_env(box, verb: str) -> None:
+    box.gateway_env.unlink()
+    box.env_file.write_text("X=1\nTWS_PASSWORD='pw-sentinel-7Q'\n", encoding="utf-8")
+    result = box.run(verb)
+    assert result.returncode == 0, result.stderr
+    assert box.env_log.read_text(encoding="utf-8").strip() == str(box.env_file)
+    assert "radon-ib-gateway-credential migrate" in result.stderr
+    assert "WARNING" in result.stderr
+    assert "pw-sentinel-7Q" not in result.stderr
+
+
+def test_fallback_never_follows_a_dangling_gateway_env_symlink(box) -> None:
+    box.gateway_env.unlink()
+    box.gateway_env.symlink_to(box.tmp / "absent.env")
+    box.env_file.write_text("TWS_PASSWORD='old'\n", encoding="utf-8")
+    assert box.run("compose-up").returncode == 78
+    assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+def test_compose_up_refuses_symlink_gateway_env(box) -> None:
+    planted = box.tmp / "planted.env"
+    planted.write_text("TWS_PASSWORD='x'\n", encoding="utf-8")
+    planted.chmod(0o600)
+    box.gateway_env.unlink()
+    box.gateway_env.symlink_to(planted)
+    assert box.run("compose-up").returncode == 78
+    assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o604, 0o660, 0o644])
+def test_compose_up_refuses_group_readable_gateway_env(box, mode: int) -> None:
+    box.gateway_env.chmod(mode)
+    result = box.run("compose-up")
+    assert result.returncode == 78, result.stderr
+    assert not box.log.exists() or box.log.read_text(encoding="utf-8") == ""
+
+
+def test_config_check_needs_no_gateway_env(box) -> None:
+    """App-host deploy preflight renders with /etc/radon/env alone."""
+    box.gateway_env.unlink()
+    assert box.run("config-check").returncode == 0
+    assert box.env_log.read_text(encoding="utf-8").strip() == str(box.env_file)
+
+
+def test_production_gateway_env_path_is_pinned() -> None:
+    text = SHIM.read_text(encoding="utf-8")
+    assert "GATEWAY_ENV_FILE=/etc/radon/ib-gateway/gateway.env" in text
 
 
 # --- operator hold (2026-09-25: the Gateway kept reclaiming the operator's

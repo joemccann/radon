@@ -371,3 +371,281 @@ class TestDelete:
     def test_delete_field_not_in_service_400(self, client):
         response = client.delete("/credentials/unusual_whales/ANTHROPIC_API_KEY")
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# IB Gateway password rotation. Saving the ib_gateway service sends the new
+# password to the broker (one mTLS POST), which writes the Gateway env file and
+# recreates the Gateway once. The app store holds the new password if and only
+# if the broker says it wrote it. No vendor validator runs: a login probe IS a
+# Gateway login and fires an IBKR Mobile push.
+# ---------------------------------------------------------------------------
+
+IB_PASSWORD = "N3w$pa ss#9"
+OLD_ENV_PASSWORD = "old-env-password-sentinel"
+
+
+@pytest.fixture()
+def broker(monkeypatch):
+    """Async recorder standing in for services.rotate_gateway_password."""
+
+    class Broker:
+        def __init__(self) -> None:
+            self.calls: list[tuple[dict, str]] = []
+            self.reply: tuple[int, dict] = (
+                200,
+                {"ok": True, "written": True, "restarted": True, "detail": "Gateway restarted"},
+            )
+
+        async def __call__(self, values, actor):
+            self.calls.append((dict(values), actor))
+            return self.reply
+
+    recorder = Broker()
+    for module in _route_module_instances():
+        monkeypatch.setattr(module.gateway_services, "rotate_gateway_password", recorder)
+    monkeypatch.setenv("TWS_PASSWORD", OLD_ENV_PASSWORD)
+    monkeypatch.setenv("TWS_USERID", "env-user")
+    return recorder
+
+
+@pytest.fixture()
+def no_validator(monkeypatch):
+    def _validate(service_id, values):
+        raise AssertionError("ib_gateway must never run a live login probe")
+
+    for module in _route_module_instances():
+        monkeypatch.setattr(module.credential_validators, "validate", _validate)
+
+
+def _put_ib(client, values):
+    return client.put("/credentials/ib_gateway", json={"values": values})
+
+
+class TestIbGatewayRotation:
+    def test_ib_applied_stores_and_calls_broker_once(self, client, broker, no_validator):
+        import os
+
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["rotation"]["status"] == "applied"
+        assert body["validation"]["status"] == "unchecked"
+        assert broker.calls == [({"TWS_PASSWORD": IB_PASSWORD}, "trusted-local")]
+        assert _store().get_secret("TWS_PASSWORD") == IB_PASSWORD
+        assert os.environ["TWS_PASSWORD"] == IB_PASSWORD
+        assert IB_PASSWORD not in response.text
+        field = next(f for f in body["service"]["fields"] if f["name"] == "TWS_PASSWORD")
+        assert field["configured"] is True
+
+    def test_ib_userid_and_password_forwarded(self, client, broker, no_validator):
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD, "TWS_USERID": "newuser9"})
+        assert response.status_code == 200, response.text
+        assert broker.calls[0][0] == {"TWS_PASSWORD": IB_PASSWORD, "TWS_USERID": "newuser9"}
+        assert _store().get_secret("TWS_USERID") == "newuser9"
+
+    def test_ib_deferred_stores(self, client, broker, no_validator):
+        broker.reply = (202, {
+            "ok": True, "written": True, "restarted": False, "code": "RESTART_DEFERRED",
+            "detail": "IBKR operator hold active",
+        })
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 200, response.text
+        assert response.json()["rotation"] == {
+            "status": "deferred", "detail": "IBKR operator hold active",
+        }
+        assert _store().get_secret("TWS_PASSWORD") == IB_PASSWORD
+        assert IB_PASSWORD not in response.text
+
+    def test_ib_restart_failed_stores_200(self, client, broker, no_validator):
+        broker.reply = (502, {
+            "ok": False, "written": True, "restarted": False, "code": "RESTART_FAILED",
+            "returncode": 1, "detail": "compose up failed",
+        })
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 200, response.text
+        assert response.json()["rotation"]["status"] == "restart_failed"
+        assert _store().get_secret("TWS_PASSWORD") == IB_PASSWORD
+
+    @pytest.mark.parametrize(
+        ("reply", "status", "code"),
+        [
+            pytest.param((409, {"ok": False, "code": "LOGIN_BLOCKED", "reason": "cooldown",
+                                "detail": "cooldown: stop ran 3s ago"}),
+                         409, "GATEWAY_LOGIN_BLOCKED", id="409"),
+            pytest.param((423, {"ok": False, "code": "OPERATOR_HOLD", "detail": "held"}),
+                         423, "GATEWAY_OPERATOR_HOLD", id="423"),
+            pytest.param((-1, {"ok": False, "detail": "timed out"}),
+                         504, "GATEWAY_ROTATION_UNKNOWN", id="504-transport"),
+            pytest.param((502, {"ok": False, "written": None, "code": "WRITE_UNKNOWN",
+                                "detail": "writer timed out"}),
+                         504, "GATEWAY_ROTATION_UNKNOWN", id="504-written-null"),
+            pytest.param((404, {"ok": False, "error": "not found"}),
+                         503, "GATEWAY_ROTATION_UNAVAILABLE", id="503-old-daemon"),
+            pytest.param((503, {"ok": False, "code": "GATEWAY_ROTATION_UNAVAILABLE",
+                                "detail": "not configured"}),
+                         503, "GATEWAY_ROTATION_UNAVAILABLE", id="503-local"),
+            pytest.param((502, {"ok": False, "written": False, "code": "WRITE_FAILED",
+                                "detail": "target untrusted"}),
+                         502, "GATEWAY_WRITE_FAILED", id="502-write-failed"),
+            pytest.param((400, {"ok": False, "code": "INVALID_VALUE", "detail": "password: rule"}),
+                         422, "GATEWAY_CREDENTIAL_INVALID", id="400"),
+            # Daemon refusals before any write (_refuse: peer / cert-CN
+            # allowlist, method, body size) carry no `written`.
+            pytest.param((401, {"ok": False, "error": "unauthorized"}),
+                         502, "GATEWAY_WRITE_FAILED", id="401-refused"),
+            pytest.param((403, {"ok": False, "error": "client certificate not allowlisted"}),
+                         502, "GATEWAY_WRITE_FAILED", id="403-cert-cn"),
+            pytest.param((405, {"ok": False, "error": "method not allowed"}),
+                         502, "GATEWAY_WRITE_FAILED", id="405-refused"),
+            pytest.param((413, {"ok": False, "error": "body exceeds 4096 bytes"}),
+                         502, "GATEWAY_WRITE_FAILED", id="413-refused"),
+            # Connection refused / TLS handshake: the request never left.
+            pytest.param((-1, {"ok": False, "sent": False, "detail": "Connection refused"}),
+                         503, "GATEWAY_BROKER_UNREACHABLE", id="503-not-sent"),
+        ],
+    )
+    def test_ib_refusals_leave_store_and_env_untouched(
+        self, client, broker, no_validator, reply, status, code
+    ):
+        import os
+
+        broker.reply = reply
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == status, response.text
+        assert response.json()["detail"]["code"] == code
+        assert _store().get_secret("TWS_PASSWORD") is None
+        assert os.environ["TWS_PASSWORD"] == OLD_ENV_PASSWORD
+        assert len(broker.calls) == 1
+        assert IB_PASSWORD not in response.text
+
+    def test_ib_unknown_outcome_tells_the_operator_not_to_resubmit(self, client, broker, no_validator):
+        broker.reply = (-1, {"ok": False, "detail": "timed out"})
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert "Do not resubmit" in response.json()["detail"]["message"]
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            pytest.param((401, {"ok": False, "error": "unauthorized"}), id="401"),
+            pytest.param((403, {"ok": False, "error": "source not allowlisted"}), id="403"),
+            pytest.param((405, {"ok": False, "error": "method not allowed"}), id="405"),
+            pytest.param((413, {"ok": False, "error": "body too large"}), id="413"),
+            pytest.param((-1, {"ok": False, "sent": False, "detail": "refused"}), id="not-sent"),
+        ],
+    )
+    def test_ib_pre_write_refusal_says_nothing_was_saved(self, client, broker, no_validator, reply):
+        broker.reply = reply
+        message = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD}).json()["detail"]["message"]
+        assert "Nothing was saved" in message
+        assert "Do not resubmit" not in message
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            pytest.param((-1, {"ok": False, "detail": "timed out"}), id="sent-unknown"),
+            pytest.param((-1, {"ok": False, "sent": None, "detail": "reset"}), id="sent-none"),
+            pytest.param((500, {"ok": False, "error": "boom"}), id="500-no-written"),
+            pytest.param((200, {"ok": True}), id="200-no-written"),
+        ],
+    )
+    def test_ib_after_send_without_written_stays_unknown(self, client, broker, no_validator, reply):
+        broker.reply = reply
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 504, response.text
+        assert response.json()["detail"]["code"] == "GATEWAY_ROTATION_UNKNOWN"
+
+    @pytest.mark.parametrize(
+        "value",
+        ["it's", "abc\\", " lead", "trail ", "a\nb", "a\x00b", "a\x01b", "x" * 257, "",
+         "a\u2028X=1", "a\u2029X=1", "a\x85X=1"],
+        ids=["quote", "backslash", "lead", "trail", "newline", "nul", "control", "too-long", "empty",
+             "u2028", "u2029", "nel-u0085"],
+    )
+    def test_ib_invalid_vectors_422_broker_not_called(self, client, broker, no_validator, value):
+        response = _put_ib(client, {"TWS_PASSWORD": value})
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "GATEWAY_CREDENTIAL_INVALID"
+        assert broker.calls == []
+        assert _store().get_secret("TWS_PASSWORD") is None
+        if value.strip():
+            assert value.strip() not in response.text
+
+    def test_ib_userid_only_422(self, client, broker, no_validator):
+        response = _put_ib(client, {"TWS_USERID": "newuser9"})
+        assert response.status_code == 422
+        assert broker.calls == []
+
+    def test_ib_unknown_field_400(self, client, broker, no_validator):
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD, "UW_TOKEN": "x"})
+        assert response.status_code in {400, 422}
+        assert broker.calls == []
+
+    def test_ib_broker_detail_echoing_password_is_redacted(self, client, broker, no_validator):
+        broker.reply = (502, {
+            "ok": False, "written": True, "restarted": False, "code": "RESTART_FAILED",
+            "detail": f"helper said {IB_PASSWORD}",
+        })
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 200
+        assert IB_PASSWORD not in response.text
+        assert "[redacted]" in response.json()["rotation"]["detail"]
+
+        broker.reply = (409, {"ok": False, "code": "LOGIN_BLOCKED", "detail": f"x {IB_PASSWORD}"})
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert IB_PASSWORD not in response.text
+
+    def test_ib_store_unopenable_503_broker_not_called(self, client, broker, no_validator, monkeypatch):
+        from secret_store import SecretStoreError
+
+        def _broken():
+            raise SecretStoreError("secret_store.key is missing")
+
+        for module in _route_module_instances():
+            monkeypatch.setattr(module, "_store", _broken)
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 503
+        assert broker.calls == []
+
+    def test_ib_store_write_failure_after_broker_write_says_so(
+        self, client, broker, no_validator, monkeypatch
+    ):
+        from secret_store import SecretStoreError
+
+        def _fail(self, values, actor=None):
+            raise SecretStoreError("disk full")
+
+        monkeypatch.setattr(SecretStore, "set_secrets", _fail)
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert detail["code"] == "CREDENTIAL_STORE_UNAVAILABLE"
+        assert "Broker has the new password" in detail["message"]
+        assert IB_PASSWORD not in response.text
+
+    def test_ib_validator_never_invoked(self, client, broker, no_validator):
+        # no_validator raises if called; a 200 proves it never ran, and a
+        # second save right away is not throttled by the 5s validator cooldown.
+        assert _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD}).status_code == 200
+
+    def test_ib_lock_held_409(self, client, broker, no_validator):
+        modules = _route_module_instances()
+        locks = [module._IB_ROTATE_LOCK for module in modules]
+        for lock in locks:
+            assert lock.acquire(blocking=False)
+        try:
+            response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        finally:
+            for lock in locks:
+                lock.release()
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "GATEWAY_ROTATION_IN_PROGRESS"
+        assert broker.calls == []
+
+    def test_other_services_still_validate_then_store(self, client, valid_verdict, broker):
+        response = client.put(
+            "/credentials/unusual_whales", json={"values": {"UW_TOKEN": "uw-new-value"}}
+        )
+        assert response.status_code == 200
+        assert valid_verdict and broker.calls == []
+        assert "rotation" not in response.json()

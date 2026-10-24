@@ -27,6 +27,7 @@ if [[ "${RADON_DOCKER_GW_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
   COMPOSE_FILE="${RADON_TEST_COMPOSE_FILE:?test compose file is required}"
   COMPOSE_ENV_FILE="${RADON_TEST_COMPOSE_ENV_FILE:?test compose env file is required}"
+  GATEWAY_ENV_FILE="${RADON_TEST_GATEWAY_ENV_FILE:-/nonexistent/ib-gateway/gateway.env}"
   HOLD_FILE="${RADON_TEST_OPERATOR_HOLD_PATH:-/nonexistent/ib-operator-hold.json}"
 else
   if (( EUID != 0 )); then
@@ -36,6 +37,11 @@ else
   DOCKER=/usr/bin/docker
   COMPOSE_FILE=/etc/radon/ib-gateway-compose.yml
   COMPOSE_ENV_FILE=/etc/radon/env
+  # The Gateway container's env_file: only the names IBC and the image read
+  # (radon-ib-gateway-credential migrate builds it, the password rotation
+  # writes it). /etc/radon/env carries every app secret on the broker and
+  # stays an interpolation source only.
+  GATEWAY_ENV_FILE=/etc/radon/ib-gateway/gateway.env
   HOLD_FILE=/var/lib/radon/ib-operator-hold.json
 fi
 
@@ -86,6 +92,30 @@ require_trusted_env_file() {
   fi
 }
 
+# The Gateway env file carries the IBKR password. It must be a root-owned
+# regular file nobody else can read: a symlink or a group-readable file there
+# leaks the password or lets radon choose what root hands the container.
+require_trusted_gateway_env_file() {
+  local perms
+  if [[ -L "$GATEWAY_ENV_FILE" || ! -f "$GATEWAY_ENV_FILE" ]]; then
+    echo "radon-docker-gw: ${GATEWAY_ENV_FILE} must be a regular, non-symlink file (run radon-ib-gateway-credential migrate)" >&2
+    exit 78
+  fi
+  if ! perms="$(stat -c '%a' "$GATEWAY_ENV_FILE" 2>/dev/null)"; then
+    perms="$(stat -f '%Lp' "$GATEWAY_ENV_FILE")"
+  fi
+  if (( ( $((8#$perms)) & 8#077 ) != 0 )); then
+    echo "radon-docker-gw: ${GATEWAY_ENV_FILE} must have no group/other access" >&2
+    exit 78
+  fi
+  if [[ "${RADON_DOCKER_GW_TEST_MODE:-0}" != "1" ]]; then
+    if [[ "$(stat -c '%u' "$GATEWAY_ENV_FILE")" != "0" ]]; then
+      echo "radon-docker-gw: ${GATEWAY_ENV_FILE} must be owned by root" >&2
+      exit 78
+    fi
+  fi
+}
+
 # `radon ib release` holds the Gateway logged out so the operator can use the
 # shared IBKR username (2026-09-25: IBC reclaimed it three times). Every start
 # funnels through compose-up here, so this is the backstop for any caller.
@@ -113,10 +143,34 @@ refuse_while_held() {
 # --project-name is pinned so the named volume stays cloud_ib-config no matter
 # where the file lives; moving it off the checkout must not orphan the
 # Gateway's Jts settings and 2FA state.
+#
+# RADON_COMPOSE_ENV_FILE is the body's `env_file:` (what the container gets);
+# --env-file is interpolation only (VNC_SERVER_PASSWORD,
+# IB_GATEWAY_TAILSCALE_BIND). compose-up/compose-down switch the container
+# file to the Gateway env file; config-check keeps /etc/radon/env for both so
+# the app host's deploy preflight needs no Gateway file.
+CONTAINER_ENV_FILE="$COMPOSE_ENV_FILE"
+
+# Cutover window: the release controller installs this shim on the broker
+# minutes after a main deploy, before root has run `migrate`. While nothing
+# (not even a dangling symlink) sits at the Gateway path AND /etc/radon/env
+# still carries TWS_PASSWORD, keep the pre-split env_file so every start and
+# stop path keeps working. After prune-root-env a missing file is refused: the
+# fallback would start a Gateway with no password, a failed IBKR login.
+use_gateway_env_file() {
+  if [[ ! -e "$GATEWAY_ENV_FILE" && ! -L "$GATEWAY_ENV_FILE" ]] \
+    && grep -q '^TWS_PASSWORD=' "$COMPOSE_ENV_FILE" 2>/dev/null; then
+    echo "radon-docker-gw: WARNING ${GATEWAY_ENV_FILE} is missing; the container keeps ${COMPOSE_ENV_FILE} until root runs radon-ib-gateway-credential migrate" >&2
+    return 0
+  fi
+  require_trusted_gateway_env_file
+  CONTAINER_ENV_FILE="$GATEWAY_ENV_FILE"
+}
+
 compose() {
   require_trusted_compose_file
   require_trusted_env_file
-  RADON_COMPOSE_ENV_FILE="$COMPOSE_ENV_FILE" \
+  RADON_COMPOSE_ENV_FILE="$CONTAINER_ENV_FILE" \
     "$DOCKER" compose \
     --env-file "$COMPOSE_ENV_FILE" \
     --project-name "$PROJECT" \
@@ -133,10 +187,12 @@ main() {
     compose-up)
       (( $# == 0 )) || usage
       refuse_while_held
+      use_gateway_env_file
       compose up -d
       ;;
     compose-down)
       (( $# == 0 )) || usage
+      use_gateway_env_file
       compose down
       ;;
     # Last-resort release step for `radon ib release` when a graceful down is

@@ -12,14 +12,25 @@ import ErrorToast from "@/components/ErrorToast";
  * credential saves NOTHING and gets the playful retry line; a vendor outage
  * saves on good faith and says so. MenthorQ / TheMarketEar do a real browser
  * login, so their submit shows a scenic-route delay notice while in flight.
+ *
+ * IB Gateway is different: saving writes the password on the broker and
+ * restarts the Gateway once, which fires an IBKR Mobile 2FA push. Save opens
+ * an inline confirm step; Confirm stays disabled until the operator
+ * acknowledges the push, and only Confirm fires the PUT.
  */
 
 import { userErrorMessage } from "@/lib/userError";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CredentialsRequestError,
+  GATEWAY_BUSY_NOTICE,
+  GATEWAY_CONFIRM_ACK,
+  GATEWAY_CONFIRM_COPY,
+  GATEWAY_SERVICE_ID,
+  GATEWAY_UNKNOWN_NOTICE,
   deleteCredential,
   fetchCredentials,
+  gatewayRotationNotice,
   groupCredentialServices,
   outageNotice,
   playfulRejection,
@@ -45,6 +56,22 @@ function serviceSlug(id: string): string {
   return id.replace(/_/g, "-");
 }
 
+// FastAPI names every rotation outcome with a GATEWAY_ code. Any other 5xx
+// (Next UPSTREAM_ERROR, an empty Caddy 502/504, an unhandled 500) and any
+// failure with no response at all (timeout, dropped connection) may have
+// landed after the broker wrote and restarted, so resubmitting could fire a
+// second write, restart and IBKR push. A 4xx the proxy refused before
+// FastAPI saved nothing and keeps the generic error.
+function gatewayErrorText(error: unknown): string | null {
+  if (error instanceof CredentialsRequestError) {
+    if (error.code.startsWith("GATEWAY_") || error.code === "CREDENTIAL_STORE_UNAVAILABLE") {
+      return error.message;
+    }
+    return error.status >= 500 ? GATEWAY_UNKNOWN_NOTICE : null;
+  }
+  return GATEWAY_UNKNOWN_NOTICE;
+}
+
 function fieldStatus(field: CredentialFieldEntry): string {
   if (field.configured) return `Stored ${field.hint}`;
   if (field.exported_only) return "Active in this process until restart";
@@ -62,6 +89,12 @@ export default function CredentialsPanel() {
   const [busyService, setBusyService] = useState<string | null>(null);
   const [notices, setNotices] = useState<Record<string, ServiceNotice>>({});
   const [attempts, setAttempts] = useState<Record<string, number>>({});
+  // IB Gateway confirm step: which service shows it, and whether the operator
+  // acknowledged the 2FA push. Both reset after every outcome.
+  const [confirmService, setConfirmService] = useState<string | null>(null);
+  const [confirmAck, setConfirmAck] = useState(false);
+  // A second click lands before the busy state re-renders; this does not.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -113,8 +146,13 @@ export default function CredentialsPanel() {
     (service: CredentialServiceEntry): Record<string, string> => {
       const values: Record<string, string> = {};
       for (const field of service.fields) {
-        const draft = (drafts[field.name] ?? "").trim();
-        if (draft) values[field.name] = draft;
+        const raw = drafts[field.name] ?? "";
+        const draft = raw.trim();
+        if (!draft) continue;
+        // The Gateway password goes untrimmed: the server rejects edge
+        // whitespace instead of this form silently changing the password.
+        values[field.name] =
+          service.id === GATEWAY_SERVICE_ID && field.name === "TWS_PASSWORD" ? raw : draft;
       }
       return values;
     },
@@ -124,19 +162,28 @@ export default function CredentialsPanel() {
   const submitService = useCallback(
     async (service: CredentialServiceEntry) => {
       const values = draftValuesFor(service);
-      if (Object.keys(values).length === 0 || busyService !== null) return;
+      if (Object.keys(values).length === 0 || busyService !== null || inFlight.current) return;
+      const gateway = service.id === GATEWAY_SERVICE_ID;
+      if (gateway && (confirmService !== service.id || !confirmAck)) return;
+      inFlight.current = true;
       setBusyService(service.id);
+      setConfirmService(null);
+      setConfirmAck(false);
       setNotice(
         service.id,
-        service.slow
-          ? { tone: "info", text: slowValidationNotice(service.label) }
-          : { tone: "info", text: "Checking with the vendor..." },
+        gateway
+          ? { tone: "info", text: GATEWAY_BUSY_NOTICE }
+          : service.slow
+            ? { tone: "info", text: slowValidationNotice(service.label) }
+            : { tone: "info", text: "Checking with the vendor..." },
       );
       try {
         const result = await saveCredentials(service.id, values);
         applyService(result.service);
         setAttempts((current) => ({ ...current, [service.id]: 0 }));
-        if (result.validation.status === "valid") {
+        if (gateway) {
+          setNotice(service.id, gatewayRotationNotice(result.rotation));
+        } else if (result.validation.status === "valid") {
           setNotice(service.id, { tone: "ok", text: `${service.label} says the handshake is good. Stored.` });
         } else if (result.validation.status === "error") {
           setNotice(service.id, { tone: "info", text: outageNotice(service.label) });
@@ -144,7 +191,10 @@ export default function CredentialsPanel() {
           setNotice(service.id, { tone: "ok", text: "Stored. No live check exists for this one." });
         }
       } catch (error: unknown) {
-        if (
+        const gatewayText = gateway ? gatewayErrorText(error) : null;
+        if (gatewayText !== null) {
+          setNotice(service.id, { tone: "error", text: gatewayText });
+        } else if (
           error instanceof CredentialsRequestError &&
           error.code === "CREDENTIAL_REJECTED"
         ) {
@@ -158,11 +208,24 @@ export default function CredentialsPanel() {
           setNotice(service.id, { tone: "error", text: errorMessage(error) });
         }
       } finally {
+        inFlight.current = false;
         setBusyService(null);
+        setConfirmService(null);
+        setConfirmAck(false);
       }
     },
-    [applyService, attempts, busyService, draftValuesFor, setNotice],
+    [applyService, attempts, busyService, confirmAck, confirmService, draftValuesFor, setNotice],
   );
+
+  const openConfirm = useCallback((serviceId: string) => {
+    setConfirmService(serviceId);
+    setConfirmAck(false);
+  }, []);
+
+  const cancelConfirm = useCallback(() => {
+    setConfirmService(null);
+    setConfirmAck(false);
+  }, []);
 
   const clearField = useCallback(
     async (service: CredentialServiceEntry, field: CredentialFieldEntry) => {
@@ -225,6 +288,8 @@ export default function CredentialsPanel() {
             const notice = notices[service.id];
             const dirty = Object.keys(draftValuesFor(service)).length > 0;
             const slug = serviceSlug(service.id);
+            const gateway = service.id === GATEWAY_SERVICE_ID;
+            const confirming = gateway && confirmService === service.id && !busy;
             const configuredCount = service.fields.filter((field) =>
               field.configured || field.env_fallback || field.exported_only,
             ).length;
@@ -339,14 +404,61 @@ export default function CredentialsPanel() {
                     type="button"
                     className="admin-btn admin-btn-primary"
                     data-testid={`credential-save-${slug}`}
-                    disabled={!dirty || busy}
+                    disabled={!dirty || busy || confirming}
                     onClick={() => {
-                      void submitService(service);
+                      if (gateway) openConfirm(service.id);
+                      else void submitService(service);
                     }}
                   >
-                    {busy ? "Checking..." : "Verify and save"}
+                    {gateway
+                      ? busy ? "Restarting Gateway..." : "Save and restart Gateway"
+                      : busy ? "Checking..." : "Verify and save"}
                   </button>
                 </div>
+
+                {confirming ? (
+                  <div
+                    className="credentials-confirm"
+                    role="group"
+                    aria-labelledby={`credential-confirm-title-${slug}`}
+                    data-testid={`credential-confirm-${slug}`}
+                  >
+                    <p className="admin-confirm-title" id={`credential-confirm-title-${slug}`}>
+                      Restart IB Gateway with the new password?
+                    </p>
+                    <p className="admin-confirm-body">{GATEWAY_CONFIRM_COPY}</p>
+                    <label className="credentials-confirm__ack">
+                      <input
+                        type="checkbox"
+                        data-testid={`credential-confirm-ack-${slug}`}
+                        checked={confirmAck}
+                        onChange={(e) => setConfirmAck(e.target.checked)}
+                      />
+                      <span>{GATEWAY_CONFIRM_ACK}</span>
+                    </label>
+                    <div className="admin-confirm-actions">
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-ghost"
+                        data-testid={`credential-confirm-cancel-${slug}`}
+                        onClick={cancelConfirm}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-primary"
+                        data-testid={`credential-confirm-submit-${slug}`}
+                        disabled={!confirmAck || !dirty}
+                        onClick={() => {
+                          void submitService(service);
+                        }}
+                      >
+                        Confirm and restart
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {notice?.tone === "error" ? <ErrorToast message={notice.text} testId={`credential-notice-${slug}`} /> : notice ? (
                   <p
