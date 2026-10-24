@@ -21,8 +21,8 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX; diagnostic I/O limits) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
-| ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (an ok-heartbeat timeout no longer fails the oneshot) |
-| rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) (diagnostic I/O limits) |
+| ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (timer 16:20 ET, close-anchored across DST) |
+| rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) (timer 16:40 ET, 20 min behind ma-ratio) |
 | calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers; an empty Cboe SPX body keeps last-good, 2026-10-10) |
 | record-high-breadth | `/regime/record-high-breadth` | `record-high-breadth` | [Implementation](record-high-breadth-validation.md), [source parity](record-high-breadth-source-parity.md) (TradingView variant; formula suite is `scripts/tests/test_record_high_breadth.py`) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |

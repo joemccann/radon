@@ -45,6 +45,9 @@ export type FreshnessRail = {
   behind: boolean;
   /** That session, or null when the panel is current. */
   awaitingSession: string | null;
+  /** Behind, the run that owes the session has fired, and its grace is not
+   *  spent: the writer is working. The rail reads DUE, not a day away. */
+  due: boolean;
   /** Behind, and the run that should have delivered it has already fired. */
   overdue: boolean;
   /** No `asOf` at all — the panel holds no date, which is not "current". */
@@ -137,6 +140,7 @@ export function computeFreshnessRail(
       elapsedFraction: Math.min(1, Math.max(0, elapsed / intervalMs)),
       behind: false,
       awaitingSession: null,
+      due: false,
       overdue: false,
       unknown,
       msOverdue: 0,
@@ -159,6 +163,7 @@ export function computeFreshnessRail(
       elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs)),
       behind,
       awaitingSession: null,
+      due: behind && !pastGrace,
       overdue,
       unknown,
       msOverdue: overdue ? Math.max(0, now.getTime() - expectedRunFor(schedule, asOf!, lastSampleAt)) : 0,
@@ -174,15 +179,21 @@ export function computeFreshnessRail(
   const ranAfterSessionClosed =
     behind && lastPrintedSessionDate(lastSampleAt) >= latestSession;
   const overdue = ranAfterSessionClosed && pastGrace;
+  // Same run, grace not yet spent. On 2026-10-23 the RSI OVERSOLD rail read
+  // "Awaiting 2026-10-23" beside a 23h 55m countdown one minute after its
+  // slot, while the sweep was still running: `nextSampleAt` had already
+  // rolled to tomorrow. The wait for THIS session is over either way.
+  const due = ranAfterSessionClosed && !pastGrace;
 
   return {
     nextSampleAt,
     lastSampleAt,
     msRemaining,
-    // A late run reads as a full track: the wait is over and the data is not here.
-    elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs)),
+    // A fired run reads as a full track: the wait is over and the data is not here.
+    elapsedFraction: due || overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs)),
     behind,
     awaitingSession: behind ? latestSession : null,
+    due,
     overdue,
     unknown,
     // Measured from the run that should have carried `asOf`, not from the most

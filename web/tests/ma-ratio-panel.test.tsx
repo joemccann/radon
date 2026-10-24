@@ -50,10 +50,11 @@ import MaRatioPanel from "../components/MaRatioPanel";
 
 /* ─── Fixtures ──────────────────────────────────────────── */
 
-// The fake clock is pinned to a mid-week evening one hour before the 22:45
-// UTC timer slot, with the payload holding that same completed session, so
-// the rail reads "current" with a deterministic 1h countdown.
-const FAKE_NOW_UTC = "2026-09-02T21:45:00Z"; // Wednesday, 17:45 ET
+// The fake clock is pinned to a mid-week afternoon one hour before the 16:20
+// ET timer slot, with the payload holding that session (the panel is never
+// behind a close that has not printed), so the rail reads "current" with a
+// deterministic 1h countdown.
+const FAKE_NOW_UTC = "2026-09-02T19:20:00Z"; // Wednesday, 15:20 EDT
 const SESSION_DATE = "2026-09-02";
 
 function buildSeries(n: number): MaRatioPoint[] {
@@ -269,7 +270,7 @@ describe("MaRatioPanel — content", () => {
     const q = within(container);
     expect(q.getByTestId("ma-ratio-freshness-rail")).toBeTruthy();
     expect(q.getByTestId("ma-ratio-strip-asof").textContent).toBe(SESSION_DATE);
-    // 21:45 UTC is one hour before the 22:45 UTC slot.
+    // 15:20 ET is one hour before the 16:20 ET slot.
     expect(q.getByTestId("ma-ratio-freshness-rail-countdown").textContent).toBe(
       formatCountdown(60 * 60 * 1000),
     );

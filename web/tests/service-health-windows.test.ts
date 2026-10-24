@@ -466,7 +466,7 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("div-yield")).toBe(false);
   });
 
-  // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar
+  // ``ma-ratio`` — radon-ma-ratio.timer fires daily 16:20 ET every calendar
   // day (weekend/holiday runs are unchanged-data heartbeats), so a uniform
   // 26h window matches its div-yield sibling. Shared price_history_daily
   // member closes (Yahoo sweep) + Turso only, no IB.
@@ -482,7 +482,7 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ma-ratio")).toBe(false);
   });
 
-  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 23:05 UTC every
+  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 16:40 ET every
   // calendar day (weekend/holiday runs are unchanged-data heartbeats), so a
   // uniform 26h window matches its ma-ratio sibling. Shared
   // price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
