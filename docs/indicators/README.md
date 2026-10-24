@@ -14,7 +14,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
-| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`) |
+| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`; timer 22:15 UTC between ivrank 22:10 and dispersion 22:20) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
