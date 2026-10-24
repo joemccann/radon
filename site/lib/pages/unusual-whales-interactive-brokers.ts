@@ -13,6 +13,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -39,7 +40,7 @@ export const pageUrl = `${siteUrl}/${SLUG}`;
 export const pageMetadata: Metadata = {
   title: PAGE_TITLE,
   description: PAGE_DESCRIPTION,
-  alternates: { canonical: `/${SLUG}` },
+  alternates: pageAlternates(`/${SLUG}`),
   openGraph: {
     type: "article",
     url: `/${SLUG}`,

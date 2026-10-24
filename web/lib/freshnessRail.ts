@@ -12,7 +12,11 @@
 
 import { lastCompletedSessionDate } from "./marketSession";
 import { isUsTradingDay } from "./serviceHealthWindows";
-import { nextRefreshUtc, type UtcSchedule } from "./refreshSchedule";
+import {
+  nextRefreshUtc,
+  previousRefreshUtc,
+  type RefreshSchedule,
+} from "./refreshSchedule";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -37,19 +41,15 @@ export type FreshnessRail = {
   msOverdue: number;
 };
 
-function intervalMs(schedule: UtcSchedule): number {
-  return schedule.cadence === "weekly" ? 7 * DAY_MS : DAY_MS;
-}
-
 /**
- * The timer carries `RandomizedDelaySec=120`, then the job has to actually
+ * Timers carry a randomized delay, then the job has to actually
  * run, and the panel polls hourly — so for a while after the slot the writer
  * is legitimately still working. Alarming inside that window is a false page,
  * and a rail that cries wolf every evening stops being read. R-307.
  *
- * Sixty minutes is the sum the finding names: `RandomizedDelaySec=120`, plus
- * the job's own runtime, plus the panel's hourly poll — until a poll has had a
- * chance to land, the rail is looking at data fetched BEFORE the run.
+ * Sixty minutes covers that delay, the job's own runtime, and the panel's
+ * hourly poll — until a poll has had a chance to land, the rail is looking at
+ * data fetched BEFORE the run.
  *
  * Note this is "due", not "late": the countdown already reads `Due` at the
  * slot; this only holds back the ALARM colour.
@@ -89,27 +89,33 @@ function lastPrintedSessionDate(at: Date): string {
  * The instant of the first scheduled run that should have carried a reading
  * newer than `asOf`. Everything since then is the outage.
  */
-function expectedRunFor(schedule: UtcSchedule, asOf: string, lastSampleAt: Date): number {
-  // End of the held session's DAY: a session dated D is carried by D's own
-  // evening run, so the first run that owed something newer is the next one.
-  // Anchoring at noon counted D's own run as missing and over-reported by a
-  // full interval.
-  const asOfMs = Date.parse(`${asOf.slice(0, 10)}T23:59:59Z`);
-  if (Number.isNaN(asOfMs)) return lastSampleAt.getTime();
-  const step = intervalMs(schedule);
+function expectedRunFor(schedule: RefreshSchedule, asOf: string, lastSampleAt: Date): number {
+  // The outage begins at the first scheduled run that could see a completed
+  // session newer than the held reading. This supports both same-day evening
+  // writers and morning-after writers without inventing a fixed offset.
+  const asOfDate = asOf.slice(0, 10);
+  if (Number.isNaN(Date.parse(`${asOfDate}T00:00:00Z`))) return lastSampleAt.getTime();
   let run = lastSampleAt.getTime();
-  // Walk back while the previous run still post-dates the held session.
-  while (run - step > asOfMs) run -= step;
+  // Walk back through actual slots while the previous run already owed a
+  // session newer than the held reading. Comparing the session available AT
+  // each slot, rather than the slot's calendar date, keeps the performance
+  // timer honest: Saturday carries Friday; it cannot carry Monday.
+  for (let guard = 0; guard < 3_700; guard += 1) {
+    const previous = previousRefreshUtc(schedule, new Date(run)).getTime();
+    if (lastPrintedSessionDate(new Date(previous)) <= asOfDate) break;
+    run = previous;
+  }
   return Math.min(run, lastSampleAt.getTime());
 }
 
 export function computeFreshnessRail(
-  schedule: UtcSchedule,
+  schedule: RefreshSchedule,
   asOf: string | null | undefined,
   now: Date = new Date(),
 ): FreshnessRail {
   const nextSampleAt = nextRefreshUtc(schedule, now);
-  const lastSampleAt = new Date(nextSampleAt.getTime() - intervalMs(schedule));
+  const lastSampleAt = previousRefreshUtc(schedule, nextSampleAt);
+  const interval = nextSampleAt.getTime() - lastSampleAt.getTime();
 
   // A null/empty date is UNKNOWN, not current: the rail used to render the
   // calm state with a ticking countdown over a panel holding no date at all.
@@ -135,7 +141,7 @@ export function computeFreshnessRail(
     lastSampleAt,
     msRemaining,
     // A late run reads as a full track: the wait is over and the data is not here.
-    elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs(schedule))),
+    elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / interval)),
     behind,
     awaitingSession: behind ? latestSession : null,
     overdue,
@@ -150,9 +156,9 @@ export function computeFreshnessRail(
 
 /**
  * Seconds are noise beyond an hour and the only thing worth reading inside a
- * minute. The timer carries `RandomizedDelaySec=120`, so the real fire time is
- * up to two minutes past the slot — this counts to the earliest one, and the
- * DUE state absorbs the rest.
+ * minute. Timers may fire shortly after their nominal slot because of a
+ * randomized delay, so this counts to the earliest instant and the DUE state
+ * absorbs the writer window.
  */
 export function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));

@@ -19,6 +19,10 @@ describe("markdown path negotiation", () => {
   });
 
   it("always rewrites explicit .md URLs", () => {
+    expect(negotiate("/index.md", "text/html")).toEqual({
+      action: "rewrite",
+      pathname: "/api/markdown",
+    });
     expect(negotiate("/crash-risk-index.md", "text/html")).toEqual({
       action: "rewrite",
       pathname: "/api/markdown/crash-risk-index",
@@ -47,6 +51,7 @@ describe("markdown path negotiation", () => {
     expect(shouldNegotiate("/_next/static/chunk.js")).toBe(false);
     expect(shouldNegotiate("/api/markdown/developers")).toBe(false);
     expect(markdownApiPath("/")).toBe("/api/markdown");
+    expect(markdownApiPath("/index.md")).toBe("/api/markdown");
     expect(markdownApiPath("/status.md")).toBe("/api/markdown/status");
   });
 });

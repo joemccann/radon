@@ -15,6 +15,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -132,9 +133,7 @@ export const crashRiskIndexFaqEntries: FaqEntry[] = [
 export const crashRiskIndexMetadata: Metadata = {
   title: CRASH_RISK_INDEX_TITLE,
   description: CRASH_RISK_INDEX_DESCRIPTION,
-  alternates: {
-    canonical: `/${CRASH_RISK_INDEX_SLUG}`,
-  },
+  alternates: pageAlternates(`/${CRASH_RISK_INDEX_SLUG}`),
   openGraph: {
     type: "article",
     url: `/${CRASH_RISK_INDEX_SLUG}`,

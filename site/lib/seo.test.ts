@@ -15,6 +15,7 @@ import {
   SITE_TITLE,
   STATUS_PAGE_ROBOTS,
   X_PROFILE_URL,
+  pageAlternates,
   siteMetadata,
   siteStructuredData,
   siteUrl,
@@ -22,11 +23,25 @@ import {
 } from "./seo";
 
 describe("site SEO contract", () => {
+  it("advertises a discoverable Markdown alternate for every page", () => {
+    expect(pageAlternates("/")).toEqual({
+      canonical: "/",
+      types: { "text/markdown": "/index.md" },
+    });
+    expect(pageAlternates("/crash-risk-index")).toEqual({
+      canonical: "/crash-risk-index",
+      types: { "text/markdown": "/crash-risk-index.md" },
+    });
+  });
+
   it("publishes canonical and social metadata", () => {
     expect(siteUrl).toBe(DEFAULT_SITE_URL);
     expect(siteMetadata.title).toBe(SITE_TITLE);
     expect(siteMetadata.description).toBe(SITE_DESCRIPTION);
     expect(siteMetadata.alternates?.canonical).toBe("/");
+    expect(siteMetadata.alternates?.types).toEqual({
+      "text/markdown": "/index.md",
+    });
     expect(siteMetadata.openGraph).toMatchObject({
       type: "website",
       url: "/",

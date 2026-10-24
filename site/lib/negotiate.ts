@@ -28,7 +28,8 @@ export function markdownApiPath(pathname: string): string {
   const withoutMd = pathname.endsWith(".md")
     ? pathname.slice(0, -3) || "/"
     : pathname;
-  const normalized = withoutMd === "/" ? "" : withoutMd.replace(/\/$/, "");
+  const homepagePath = withoutMd === "/index" ? "/" : withoutMd;
+  const normalized = homepagePath === "/" ? "" : homepagePath.replace(/\/$/, "");
   return `/api/markdown${normalized}`;
 }
 

@@ -29,7 +29,12 @@ describe("FAQ content contract", () => {
     const corpus = faqEntries.map((entry) => entry.answer).join(" ");
     expect(corpus).toContain("Interactive Brokers");
     expect(corpus).toContain("demo.radon.run");
-    expect(corpus).not.toMatch(/Robinhood is (integrated|supported)/i);
+    expect(corpus).toContain("official trading MCP");
+    expect(corpus).toContain("read-only quote and chain failover");
+    expect(corpus).toContain("retail-crowding overlay");
+    expect(corpus).toContain("does not supply dark-pool, OTC, sweeps, GEX, or vol-surface data");
+    expect(corpus).toContain("Execution remains on Interactive Brokers");
+    expect(corpus).not.toMatch(/Robinhood[^.]{0,120}(routes?|routing) orders/i);
   });
 
   it("generates FAQPage schema that mirrors the visible content exactly", () => {

@@ -53,6 +53,19 @@ export const siteUrl = normalizeSiteUrl(
 
 export const metadataBase = new URL(siteUrl);
 
+export function pageAlternates(
+  pathname: string,
+): NonNullable<Metadata["alternates"]> {
+  const path = pathname.trim().replace(/^\/+|\/+$/g, "");
+  const canonical = path ? `/${path}` : "/";
+  const markdownPath = canonical === "/" ? "/index.md" : `${canonical}.md`;
+
+  return {
+    canonical,
+    types: { "text/markdown": markdownPath },
+  };
+}
+
 export const siteMetadata: Metadata = {
   metadataBase,
   title: SITE_TITLE,
@@ -64,9 +77,7 @@ export const siteMetadata: Metadata = {
   referrer: "origin-when-cross-origin",
   keywords: SITE_KEYWORDS,
   category: "finance",
-  alternates: {
-    canonical: "/",
-  },
+  alternates: pageAlternates("/"),
   openGraph: {
     type: "website",
     locale: "en_US",

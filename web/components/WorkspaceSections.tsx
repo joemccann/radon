@@ -54,12 +54,15 @@ import { useTableFilter } from "@/lib/useTableFilter";
 import TableSearch from "./TableSearch";
 import SortTh from "./SortTh";
 import { usePriceDirection } from "@/lib/usePriceDirection";
-import { fmtPrice, fmtUsd, legPriceKey } from "@/lib/positionUtils";
+import { fmtPrice, fmtPriceOrCalculated, fmtUsd, legPriceKey, resolveRealtimePrice } from "@/lib/positionUtils";
 import {
   buildOpenOrderDisplayRows,
   type OpenOrderDisplayRow,
   buildExecutedGroupDescription,
   resolveOpenOrderComboPrice,
+  resolveOpenOrderComboPriceData,
+  resolveSignedComboPrice,
+  type ResolvedOpenOrderPrice,
   findPortfolioLegDirection,
 } from "@/lib/openOrderCombos";
 import {
@@ -2637,37 +2640,136 @@ function orderPriceKey(contract: OpenOrder["contract"]): string | null {
   return contract.symbol;
 }
 
+function normalizedOptionRight(right: string | null | undefined): "C" | "P" | null {
+  if (right === "C" || right === "CALL") return "C";
+  if (right === "P" || right === "PUT") return "P";
+  return null;
+}
+
+function portfolioLegMatchesComboLeg(
+  position: PortfolioPosition,
+  leg: PortfolioPosition["legs"][number],
+  comboLeg: NonNullable<OpenOrder["contract"]["comboLegs"]>[number],
+): boolean {
+  if (comboLeg.conId > 0 && leg.con_id != null && leg.con_id > 0) {
+    return comboLeg.conId === leg.con_id;
+  }
+  const comboRight = normalizedOptionRight(comboLeg.right);
+  const comboExpiry = comboLeg.expiry?.replace(/-/g, "") ?? "";
+  if (!comboRight || comboLeg.strike == null || comboExpiry.length !== 8) return false;
+  const legRight = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
+  const legExpiry = (leg.expiry ?? position.expiry).replace(/-/g, "");
+  return legRight === comboRight && leg.strike === comboLeg.strike && legExpiry === comboExpiry;
+}
+
+function matchingPortfolioLeg(
+  position: PortfolioPosition,
+  comboLeg: NonNullable<OpenOrder["contract"]["comboLegs"]>[number],
+) {
+  return position.legs.find((leg) => portfolioLegMatchesComboLeg(position, leg, comboLeg)) ?? null;
+}
+
+function positionMatchesComboLegs(
+  position: PortfolioPosition,
+  comboLegs: NonNullable<OpenOrder["contract"]["comboLegs"]>,
+): boolean {
+  if (
+    position.legs.length !== comboLegs.length
+    || !Number.isFinite(position.contracts)
+    || position.contracts === 0
+  ) {
+    return false;
+  }
+
+  const unmatchedLegs = [...position.legs];
+  return comboLegs.every((comboLeg) => {
+    const direction = comboLeg.action === "BUY" ? "LONG" : comboLeg.action === "SELL" ? "SHORT" : null;
+    if (!direction || !Number.isFinite(comboLeg.ratio) || comboLeg.ratio <= 0) return false;
+    const index = unmatchedLegs.findIndex((leg) => {
+      if (leg.direction !== direction) return false;
+      const ratio = Math.abs(leg.contracts / position.contracts);
+      if (Math.abs(ratio - comboLeg.ratio) > Number.EPSILON) return false;
+      return portfolioLegMatchesComboLeg(position, leg, comboLeg);
+    });
+    if (index < 0) return false;
+    unmatchedLegs.splice(index, 1);
+    return true;
+  });
+}
+
+function matchingBagPosition(
+  order: OpenOrder,
+  portfolio: PortfolioData | null | undefined,
+): PortfolioPosition | null {
+  if (!portfolio) return null;
+  const candidates = portfolio.positions.filter(
+    (position) => position.ticker.toUpperCase() === order.contract.symbol.toUpperCase() && position.legs.length > 1,
+  );
+  const comboLegs = order.contract.comboLegs;
+  if (!comboLegs?.length) return candidates.length === 1 ? candidates[0] : null;
+  const matches = candidates.filter((position) => positionMatchesComboLegs(position, comboLegs));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 /**
  * Resolve the "last price" for an order.
  * For STK/OPT: use the WS price directly.
- * For BAG (spread): find the matching portfolio position and compute
- * the net mid from each leg's WS bid/ask (long leg mid − short leg mid).
+ * For BAG (spread): resolve each structural leg with the same stale-last /
+ * calculated-mid policy as the portfolio, then aggregate one signed BAG unit.
  */
-function resolveOrderLastPrice(
+function resolveOrderLastPriceData(
   order: OpenOrder,
   prices: Record<string, PriceData> | undefined,
   portfolio: PortfolioData | null | undefined,
-): number | null {
-  if (!prices) return null;
+): ResolvedOpenOrderPrice {
+  if (!prices) return { price: null, isCalculated: false };
   const pk = orderPriceKey(order.contract);
-  if (pk) return prices[pk]?.last ?? null;
-
-  // BAG: compute net mid from portfolio legs
-  if (order.contract.secType !== "BAG" || !portfolio) return null;
-  const pos = portfolio.positions.find((p) => p.ticker === order.contract.symbol && p.legs.length > 1);
-  if (!pos) return null;
-
-  let netMid = 0;
-  for (const leg of pos.legs) {
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    if (!key) return null;
-    const lp = prices[key];
-    if (!lp || lp.bid == null || lp.ask == null) return null;
-    const mid = (lp.bid + lp.ask) / 2;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    netMid += sign * mid;
+  if (pk) {
+    const priceData = prices[pk];
+    if (order.contract.secType === "OPT") return resolveRealtimePrice(priceData);
+    return {
+      price: priceData?.last ?? null,
+      isCalculated: Boolean(priceData?.lastIsCalculated),
+    };
   }
-  return Math.round(netMid * 100) / 100;
+
+  if (order.contract.secType !== "BAG") return { price: null, isCalculated: false };
+  const position = matchingBagPosition(order, portfolio);
+
+  const comboLegs = order.contract.comboLegs;
+  if (comboLegs?.length) {
+    const resolved = resolveSignedComboPrice(comboLegs.map((comboLeg) => {
+      const right = normalizedOptionRight(comboLeg.right);
+      const expiry = comboLeg.expiry?.replace(/-/g, "") ?? "";
+      const symbol = (comboLeg.symbol || order.contract.symbol).toUpperCase();
+      const key = right && comboLeg.strike != null && expiry.length === 8
+        ? optionKey({ symbol, expiry, strike: comboLeg.strike, right })
+        : null;
+      const fallbackLeg = position ? matchingPortfolioLeg(position, comboLeg) : null;
+      return {
+        action: comboLeg.action,
+        ratio: comboLeg.ratio,
+        priceData: key ? prices[key] : null,
+        fallbackPrice: fallbackLeg?.market_price,
+        fallbackIsCalculated: fallbackLeg?.market_price_is_calculated,
+      };
+    }));
+    if (resolved.price != null) return resolved;
+  }
+
+  if (!position || !Number.isFinite(position.contracts) || position.contracts === 0) {
+    return { price: null, isCalculated: false };
+  }
+  return resolveSignedComboPrice(position.legs.map((leg) => {
+    const key = legPriceKey(position.ticker, position.expiry, leg);
+    return {
+      action: leg.direction === "LONG" ? "BUY" : "SELL",
+      ratio: Math.abs(leg.contracts / position.contracts),
+      priceData: key ? prices[key] : null,
+      fallbackPrice: leg.market_price,
+      fallbackIsCalculated: leg.market_price_is_calculated,
+    };
+  }));
 }
 
 function makeOpenOrderExtract(
@@ -2687,7 +2789,7 @@ function makeOpenOrderExtract(
       case "lastPrice":
         return item.kind === "combo"
           ? resolveOpenOrderComboPrice(item.orders, prices)
-          : resolveOrderLastPrice(item.order, prices, portfolio);
+          : resolveOrderLastPriceData(item.order, prices, portfolio).price;
       case "deltaFill": {
         if (item.kind === "combo") {
           const last = resolveOpenOrderComboPrice(item.orders, prices);
@@ -2701,7 +2803,7 @@ function makeOpenOrderExtract(
         return distanceToFill({
           action: item.order.action,
           limitPrice: item.order.limitPrice,
-          lastPrice: resolveOrderLastPrice(item.order, prices, portfolio),
+          lastPrice: resolveOrderLastPriceData(item.order, prices, portfolio).price,
         })?.delta ?? null;
       }
       case "implied":
@@ -2723,11 +2825,11 @@ function makeOpenOrderExtract(
 }
 
 /** Wrapper so usePriceDirection can be called per-order row (hooks can't go in map callbacks). */
-function OrderPriceCell({ price }: { price: number | null }) {
+function OrderPriceCell({ price, isCalculated = false }: ResolvedOpenOrderPrice) {
   const { direction, flashDirection } = usePriceDirection(price);
   return (
     <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
-      {price != null ? fmtPrice(price) : "—"}
+      {price != null ? fmtPriceOrCalculated(price, isCalculated) : "—"}
       {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
       {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
     </td>
@@ -3341,7 +3443,8 @@ function OrdersSections({
                     const comboQtyLabel = partialLeg
                       ? formatFillQuantity(partialLeg)
                       : String(o.totalQuantity);
-                    const comboLast = resolveOpenOrderComboPrice(o.orders, prices);
+                    const comboPrice = resolveOpenOrderComboPriceData(o.orders, prices);
+                    const comboLast = comboPrice.price;
                     const comboDistance = distanceToFill({
                       action: o.orders[0]?.action ?? "BUY",
                       limitPrice: o.limitPrice,
@@ -3400,7 +3503,7 @@ function OrdersSections({
                           </td>
                         )}
                         {orderColumns.lastPrice && (
-                          <OrderPriceCell price={comboLast} />
+                          <OrderPriceCell {...comboPrice} />
                         )}
                         {orderColumns.deltaFill && (
                           <td className="right">
@@ -3469,7 +3572,8 @@ function OrdersSections({
                   const isPendingCancel = pendingCancels.has(o.order.permId);
                   const isPendingModify = pendingModifies.has(o.order.permId);
                   const isPending = isPendingCancel || isPendingModify;
-                  const singleLast = resolveOrderLastPrice(o.order, prices, portfolio);
+                  const singlePrice = resolveOrderLastPriceData(o.order, prices, portfolio);
+                  const singleLast = singlePrice.price;
                   const singleDistance = distanceToFill({
                     action: o.order.action,
                     limitPrice: o.order.limitPrice,
@@ -3540,7 +3644,7 @@ function OrdersSections({
                         </td>
                       )}
                       {orderColumns.lastPrice && (
-                        <OrderPriceCell price={singleLast} />
+                        <OrderPriceCell {...singlePrice} />
                       )}
                       {orderColumns.deltaFill && (
                         <td className="right">

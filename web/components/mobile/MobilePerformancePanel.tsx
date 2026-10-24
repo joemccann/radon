@@ -11,10 +11,12 @@ import {
 } from "@/lib/performanceData";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import { gateCopy, TWR_GATES, type GatedValue } from "@/lib/performanceTwr";
+import { PERFORMANCE_REFRESH } from "@/lib/refreshSchedule";
 import type { PerformanceData } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
 import { MarketState } from "@/lib/useMarketHours";
 import ChartPanel from "../charts/ChartPanel";
+import FreshnessRail from "../FreshnessRail";
 import SectionEmptyState from "../SectionEmptyState";
 import SpectralLoader from "../SpectralLoader";
 import { BottomSheet } from "./BottomSheet";
@@ -575,9 +577,16 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               }}
             >
               <div>Time-weighted, beginning-of-day flow convention, chained geometrically</div>
-              <div style={{ marginTop: 4 }}>NAV as of {view.navAsOf || EMPTY}</div>
             </div>
           </div>
+          {view.navAsOf ? (
+            <FreshnessRail
+              schedule={PERFORMANCE_REFRESH}
+              asOf={view.navAsOf}
+              testId="performance-freshness-rail"
+              asOfTestId="performance-freshness-asof"
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -611,8 +620,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
             </div>
             <div className="performance-hero-subtitle" data-testid="performance-hero-subtitle" style={{ fontSize: 10, lineHeight: 1.5 }}>
               Ending equity {fmtUsdExact(view.endingEquity)}
-              {view.benchmark ? ` / ${view.benchmark.symbol} ${fmtPct(view.benchmark.benchmark_return)}` : ""} / as of{" "}
-              {view.navAsOf} / N={returnSessions}
+              {view.benchmark ? ` / ${view.benchmark.symbol} ${fmtPct(view.benchmark.benchmark_return)}` : ""} / N={returnSessions}
             </div>
           </div>
           <div className="performance-hero-pills" style={{ justifyContent: "flex-start", gap: 6 }}>
@@ -629,6 +637,12 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
             ) : null}
           </div>
         </div>
+        <FreshnessRail
+          schedule={PERFORMANCE_REFRESH}
+          asOf={view.navAsOf}
+          testId="performance-freshness-rail"
+          asOfTestId="performance-freshness-asof"
+        />
       </div>
 
       {view.isDegraded ? (

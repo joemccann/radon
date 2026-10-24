@@ -288,7 +288,7 @@ test.describe("/performance page", () => {
     await page.goto("/performance");
 
     await expect(page.locator('[data-testid="performance-panel"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=AS OF 2026-03-13")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("performance-freshness-asof")).toHaveText("2026-03-13", { timeout: 10_000 });
     expect(performanceGetCalls).toBeGreaterThan(1);
   });
 
@@ -370,13 +370,13 @@ test.describe("/performance page", () => {
     await page.goto("/performance");
 
     await expect(page.locator('[data-testid="performance-panel"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=AS OF 2026-03-12")).toBeVisible();
+    await expect(page.getByTestId("performance-freshness-asof")).toHaveText("2026-03-12");
 
     const callsBeforeSync = performanceGetCalls;
     await page.getByRole("button", { name: "Sync Now" }).click();
 
     await expect(page.locator("text=Ending equity $1,218,410.03")).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=AS OF 2026-03-13")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("performance-freshness-asof")).toHaveText("2026-03-13", { timeout: 10_000 });
     expect(performanceGetCalls).toBeGreaterThan(callsBeforeSync);
   });
 

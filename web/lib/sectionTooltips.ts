@@ -75,7 +75,8 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "RTH vs EXT chips show whether a working order can fill after 16:00 ET. " +
     "Options and option combos stay RTH-only even with FILL OUTSIDE RTH. " +
     "Stocks and ETFs fill after RTH only when that flag is on. Futures can fill outside equity RTH. " +
-    "Last Price shows the current market mid for the contract. Orders can be modified " +
+    "Last Price uses a reliable last trade, or a calculated mark prefixed C. Calculated marks normally use the bid/ask midpoint when the last is stale or unavailable. " +
+    "Combo marks are the signed sum of those resolved leg prices. Orders can be modified " +
     "(price/quantity) or cancelled directly. Status reflects IB order state " +
     "(PreSubmitted, Submitted, Filled, Cancelled).",
 

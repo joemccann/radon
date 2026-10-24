@@ -165,6 +165,7 @@ describe("ModifyOrderModal close-out P&L", () => {
     expect(summary.getByText("$38,000")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$535")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$535 (+1.4%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
     expect(summary.queryByText("Max Loss:")).toBeNull();
   });
@@ -180,6 +181,17 @@ describe("ModifyOrderModal close-out P&L", () => {
     expect(summary.getByText("$800")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$200")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$200 (+20.0%)");
+  });
+
+  it("shows a signed negative percentage when the modified close realizes a loss", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("SELL", 4, 100),
+      portfolioWithLeg("LONG", 4, 9_366.25),
+      "90",
+    );
+
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("-$1,465 (-3.9%)");
   });
 
   it("does not classify quantity beyond the held contracts as a pure close", () => {
@@ -369,6 +381,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     expect(summary.getByText("$40,000")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$15,000")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$15,000 (+60.0%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
     expect(summary.queryByText("Max Loss:")).toBeNull();
     expect(summary.queryByText("$1,035,835")).toBeNull();
@@ -440,6 +453,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     expect(summary.getByText("Close Credit:")).toBeTruthy();
     expect(summary.getByText("$20,000")).toBeTruthy();
     expect(summary.getByText("$7,500")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$7,500 (+60.0%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
   });
 

@@ -1,3 +1,114 @@
+# Task: Restore modify-order P&L percentage (2026-09-04) [WIP]
+
+Ensure order modification confirmation shows estimated realized P&L as both a
+dollar amount and percentage, using the shared order-risk convention.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace the modify-order data path and reproduce the missing P&L percentage in unit and browser coverage.
+- T2 depends_on: [T1] - Add a failing regression that pins signed dollar and percentage output for close modifications.
+- T3 depends_on: [T2] - Implement the smallest shared-summary fix without bypassing `useOrderRisk` or hand-building risk data.
+- T4 depends_on: [T3] - Run focused Vitest, relevant Playwright, and visual desktop verification against the reported surface.
+- T5 depends_on: [T4] - Run the full web suite, typecheck, lint, diff review, and document evidence.
+
+## Checklist
+
+- [ ] T1 Trace and reproduce the defect.
+- [ ] T2 Add red regression coverage.
+- [ ] T3 Implement the shared fix.
+- [ ] T4 Complete focused and visual verification.
+- [ ] T5 Complete full verification and review.
+
+---
+
+# Task: Diagnose stale performance update (2026-09-03) [DONE]
+
+Determine whether today's IB Flex SFTP delivery landed, whether the performance
+builder consumed it, and why production `/performance` is still behind.
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect the live `/performance` surface and API payload for its authoritative as-of and refresh state.
+- T2 depends_on: [] - Inspect the SFTP pull, performance timer/service, heartbeats, and latest persisted NAV/TWR rows.
+- T3 depends_on: [T1, T2] - Correlate delivery, ingestion, build, and publish timestamps to identify the first failed stage.
+- T4 depends_on: [T3] - Record the diagnosis, evidence, and any safe remediation performed.
+
+## Checklist
+
+- [x] T1 Verify live performance state.
+- [x] T2 Verify delivery and pipeline state.
+- [x] T3 Identify the failed stage.
+- [x] T4 Document evidence and outcome.
+
+## Review
+
+- At 2026-09-03 21:54 ET, the latest expected finalized session was 2026-09-02; the 2026-09-03 session is due at the 2026-09-04 07:30 ET pull.
+- IBKR delivered both Sep 2 Activity and Trade History files; `flex_deliveries` recorded both as applied and the 07:30 ingest mirrored NAV/TWR through Sep 2.
+- The 07:34 ET performance build published status `ok`, `nav_as_of=2026-09-02`, `nav_sessions_behind=0`, and `flows_status=ok`.
+- No delivery, ingest, builder, or publish stage failed. The 08:30 retry re-read only applied files, exited 1, and overwrote the successful `flex-pull` heartbeat with a duplicate-only false alarm.
+- The route's 60-minute closed-market TTL can label this expected T+1 payload stale later the same day; production SHA `159aaf23` does not yet include the pending schedule-aware countdown.
+- Diagnosis was read-only; no production data, services, or schedules were changed.
+
+---
+
+# Task: Performance next-update countdown (2026-09-03) [DONE]
+
+Add the scheduled performance-builder countdown to `/performance`, using the
+same freshness rail contract as the regime indicators and the timer's real
+Tue-Sat 07:30 America/New_York cadence.
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect the live page, existing freshness rail, performance data date, and builder timer; add failing regression coverage.
+- T2 depends_on: [T1] - Extend refresh-schedule arithmetic for the performance timer's selected weekdays and DST-aware local time.
+- T3 depends_on: [T2] - Render the shared freshness rail in desktop and mobile performance states with the canonical NAV as-of date.
+- T4 depends_on: [T3] - Run focused Vitest and Playwright coverage, then visually verify desktop and mobile renderings.
+- T5 depends_on: [T4] - Run the full web test suite, review the diff, and document evidence.
+
+## Checklist
+
+- [x] T1 Inspect contract and add red tests.
+- [x] T2 Implement the performance schedule.
+- [x] T3 Render the countdown on desktop and mobile.
+- [x] T4 Complete focused automated and visual verification.
+- [x] T5 Complete full-suite verification and review.
+
+## Review
+
+- `/performance` now renders the shared freshness rail beneath the hero on desktop and mobile, anchored to the canonical finalized NAV date; insufficient-data states render it when that date exists.
+- The timer model mirrors `radon-perf-twr.timer`: Tue-Sat at 07:30 America/New_York, including DST shifts, weekend gaps, and morning-after overdue timing.
+- Focused Vitest passed 76/76; countdown Playwright passed 3/3; the isolated revalidation-anchor Playwright passed 1/1; desktop and 393px mobile screenshots were inspected with no overflow.
+- Full web Vitest passed 8,176/8,176; typecheck passed; lint passed with 0 errors and 17 unrelated existing warnings; `git diff --check` passed.
+- The broader legacy `performance-page.spec.ts` baseline remains 3/6 red at untouched stale assertions; countdown-specific and changed-anchor scenarios are green.
+
+---
+
+# Task: Clean stale worktrees and branches (2026-09-03) [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory worktrees and local/remote branches; classify current, dirty, open, unmerged, merged, and stale targets.
+- T2 depends_on: [T1] - Remove only clean obsolete worktrees and stale worktree metadata.
+- T3 depends_on: [T1, T2] - Delete only obsolete merged local and remote branches while preserving current, open, dirty, and uniquely unmerged work.
+- T4 depends_on: [T3] - Fetch/prune, verify retained work and repository integrity, then document exact cleanup results.
+
+## Checklist
+
+- [x] T1 Classify all cleanup candidates.
+- [x] T2 Remove obsolete worktrees.
+- [x] T3 Remove obsolete branches.
+- [x] T4 Verify and document cleanup.
+
+## Review
+
+- Removed two clean merged temporary worktrees and pruned their registrations, reclaiming approximately 1.2 GB.
+- Deleted three obsolete local branches and 47 SHA-leased obsolete remote branches; fetch/prune also cleared six refs already deleted on GitHub.
+- Fast-forwarded the sole local `main` branch to `origin/main` at `5d7cc087`; local and remote tracking were exact at verification.
+- Preserved open PR branches `cursor/code-path-webgl-map-90ec` (#176) and `docs/ai-boom-leading-indicators` (#126), plus `cursor/profile-preferences-credentials-ca53`, whose PR #249 work is not in `main`.
+- Verification found one registered worktree, one local branch, four remote branches including `main`, and no prune candidates; `.claude/launch.json` remains untouched.
+
+---
+
 # Task: Require PR CI supervision and green notification (2026-09-03) [DONE]
 
 ## Dependency graph
@@ -4419,3 +4530,137 @@ Goal: ≤640px position cards expose the desktop default-ON field set (position 
 - All figures route through the shared positionUtils / impliedValue helpers; the card still resolves ONE market value per position.
 - Full mobile Playwright project: 21–23 failures are pre-existing on main in this environment (same specs, verified in a main worktree); mobile-positions.spec.ts and mobile-same-day-pnl-parity.spec.ts pass.
 - Follow-up candidate (out of scope): InstrumentDetailModal still opens the desktop modal on mobile rather than a BottomSheet.
+
+# Task: Provision radon-api encrypted systemd credential on Hetzner (2026-09-03)
+
+## Dependency graph
+
+- T1 depends_on: [] - Identify the canonical Hetzner app host and audit the effective unit, container paths, key, database persistence, and systemd capability without exposing secrets.
+- T2 depends_on: [T1] - Preserve the existing key, provision and validate the encrypted credential blob, and establish a rollback path without restarting production.
+- T3 depends_on: [T1, T2] - Add the source-controlled systemd-to-container credential handoff and regression coverage.
+- T4 depends_on: [T3] - Run focused and full verification, commit the isolated change, and deliver it through the repository deployment path.
+- T5 depends_on: [T4] - Verify two radon-api cold starts, credential precedence, existing-row decryption, API health, and clean logs on the Hetzner host.
+- T6 depends_on: [T5] - Record review evidence and remove only task-created temporary material and worktree state.
+
+## Checklist
+
+- [x] T1 Confirm host identity and current runtime state.
+- [x] T2 Provision and validate the encrypted credential blob.
+- [x] T3 Implement and test the credential handoff.
+- [x] T4 Commit and deploy the verified source change.
+- [x] T5 Verify production twice end to end.
+- [x] T6 Record results and clean temporary state.
+
+## Review
+
+- Source: `ed487ae3` pins the production secret-store database, decrypts the named systemd credential, stages it as a read-only API-only container mount, and fails closed before replacing a healthy container.
+- Verification: full pytest `11,495 passed, 1 skipped, 90 deselected`; focused cloud `539 passed`; secret-store `34 passed`; gitleaks, shell syntax, unit hash, and diff checks green.
+- Delivery: GitHub Actions run `33796383821` completed `35/35` jobs successfully and deployed the exact Python image to Hetzner.
+- Production: deploy cold start and independent manual restart both passed exact 32-byte credential matching, `0400` staged permissions, `0600` persistent store permissions, store authentication, clean credential logs, and `/health/lite` 200.
+- Recovery: root and Mac mini `.radon-systemd-credential` files are mode `0600`, hash-matched, and gitignored; Hetzner rollback backup is `/root/radon-secret-store-backup-20260903T181318Z`.
+
+# Task: Unify combo price definitions across Orders and Portfolio (2026-09-03)
+
+## Dependency graph
+
+- T1 depends_on: [] - Pin the SMH-style mismatch with a failing regression covering actual-last versus calculated-mid leg resolution.
+- T2 depends_on: [T1] - Route open-order BAG marks through the canonical per-leg realtime price resolver and preserve calculated-price provenance.
+- T3 depends_on: [T2] - Run focused Vitest, relevant Playwright, visual browser verification, typecheck, and the full web test suite.
+- T4 depends_on: [T3] - Review the diff for one pricing definition, record evidence, and document results.
+- T5 depends_on: [T4] - Isolate task-owned changes from the unrelated dirty branch and verify the clean patch.
+- T6 depends_on: [T5] - Commit, push, open the pull request, and confirm the expected CI suite registers on the exact head SHA.
+- T7 depends_on: [T6] - Watch CI, repair any in-scope failures, confirm the latest head is fully green, and send the required Pushover notification.
+
+## Checklist
+
+- [x] T1 Add and confirm the failing regression.
+- [x] T2 Implement the shared pricing definition.
+- [x] T3 Complete focused, browser, and full verification.
+- [x] T4 Review and document results.
+- [ ] T5 Isolate and verify the clean PR patch.
+- [ ] T6 Commit, push, and open the pull request.
+- [ ] T7 Confirm CI green and notify.
+
+## Review
+
+- Result: Open Orders now resolves single-option, grouped-option, and BAG marks with the same reliable-last / calculated-mark policy used by Portfolio; calculated provenance renders with the `C` prefix.
+- BAG safety: structural BUY/SELL signs and leg ratios remain independent of the order envelope; synced portfolio fallback requires one unique exact structure with one-to-one contract, direction, and ratio matches.
+- Regression: the original SMH fixture failed at `$-1.95` and now renders `C$-1.73` from `$9.60 - C$11.33`; a same-ticker superset decoy cannot supply fallback marks.
+- Verification: focused Vitest 68/68, Playwright 2/2 with inspected Orders and Portfolio screenshots, full Vitest 8,169/8,169, TypeScript 0 errors, ESLint 0 errors/warnings, and `git diff --check` clean.
+- Runner note: `web/package.json`'s `npm test` wrapper is cwd-sensitive because one existing test prepends `web/` to `process.cwd()`; the identical full suite passes from the repository root.
+
+# Task: Apply Vercel AI-agent readability guidance to radon.run (2026-09-03)
+
+## Dependency graph
+
+- T1 depends_on: [] - Read the Vercel guide, repository instructions, current marketing-site implementation, and production HTTP behavior; define evidence-based gaps.
+- T2 depends_on: [T1] - Audit first-party HTML, discovery links, sitemap/robots, llms.txt, Markdown representations, status semantics, and developer surfaces against the guide.
+- T3 depends_on: [T1] - Probe radon.run as fetch-only and agent user agents, including content negotiation, redirects, headers, missing paths, and public reachability.
+- T4 depends_on: [T2, T3] - Add regression tests for confirmed gaps, implement the smallest complete source changes, and preserve accurate visible first-party content.
+- T5 depends_on: [T4] - Run focused tests, typecheck, lint, production build, full project tests, Playwright coverage, and browser/HTTP verification.
+- T6 depends_on: [T5] - Review the diff, record exact evidence and residual deployment-only checks, and leave unrelated worktree changes untouched.
+
+## Checklist
+
+- [x] T1 Establish constraints and current baseline.
+- [x] T2 Complete source/readability audit.
+- [x] T3 Complete production fetchability audit.
+- [x] T4 Implement and regression-test confirmed gaps.
+- [x] T5 Complete automated and runtime verification.
+- [x] T6 Record review results.
+
+## Review
+
+- Discovery: all 16 HTML surfaces now advertise their canonical `.md` representation, and every page footer plus `/developers` links llms.txt, OpenAPI, agent instructions, and sitemap resources directly.
+- Retrieval: six dossier mirrors now contain 598 to 5,232 words sourced from their shared method, table, catalog, and FAQ data; all 16 Markdown routes contain 13,696 words total with correct content type and `Vary`.
+- Actionability: `/developers/mcp` includes a rendered and fenced anonymous `radon_identity` call that returned HTTP 200 against the hosted MCP; protected-tool auth limits are explicit.
+- Accuracy: OpenAPI fixed resources and negotiable pages now publish truthful media/status contracts, and Robinhood is documented as read-only fallback/crowding data with execution retained on Interactive Brokers.
+- Verification: focused Vitest 54/54, site-lib 98/98, full repo Vitest 8,656/8,656, focused Playwright 6/6, TypeScript clean, lint 0 errors with 3 baseline warnings, production compile 23 routes, and diff checks clean.
+- Baselines: full site Playwright is 11/12 because the March surface-preview test still targets a section removed by the June Editorial redesign; the pre-existing EvidenceSection min-content track causes 94px homepage mobile overflow, while all new footer/MCP surfaces remain in bounds.
+- Delivery: source only; no commit, push, PR, or production deploy was performed because radon.run deployment is operator-only.
+
+# Task: Execute PR #269 operator actions except IB Gateway 2FA (2026-09-03)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit PR #269, current CI/head state, host topology, credentials/config paths, service units, and rollback-safe execution order.
+- T2 depends_on: [T1] - Start the app-host drift audit, inspect every `DRIFT <id>`, and re-sync from `cloud/` or narrowly allowlist each intentional difference.
+- T3 depends_on: [T1] - Provision the app-host durable `data/flex_token_config.json` from existing secret material without exposing it, set mode 0600, and verify the container bind path.
+- T4 depends_on: [T1, T3] - Run Flex SFTP list-only, verify the newest statement `toDate`, and reset the failed `radon-flex-pull.service` latch.
+- T5 depends_on: [T1] - Inspect the latest external-health-probe workflow cadence and Turso-write evidence; validate token availability if green runs coexist with stale ledger rows.
+- T6 depends_on: [T1] - Read the latest `position-reconcile` service-health detail and resync the portfolio snapshot only if a non-zero quantity mismatch is present.
+- T7 depends_on: [T2, T4, T5, T6] - Merge the fully green PR if required by the post-landing actions, then supervise exact-main CI and production deployment to completion.
+- T8 depends_on: [T7] - Restart `radon-monitor`, request `/options/exposure/SPX?frequency=eod`, and classify any remaining 503 using the landed embargo/auth distinction.
+- T9 depends_on: [T2] - Add red regressions and the smallest role-aware drift-audit correction for app hosts, verify it in isolation, and deliver it without touching the dirty primary worktree.
+- T10 depends_on: [T9] - Supervise the correction's exact-head CI, merge, exact-main deploy, and required green notification.
+- T11 depends_on: [T3, T4, T5, T6, T8, T10] - Re-run the drift audit, recheck service health, permissions, latches, and action outcomes; record evidence and excluded 2FA work.
+
+## Checklist
+
+- [x] T1 Establish execution constraints and baseline.
+- [x] T2 Clear or classify app-host configuration drift.
+- [x] T3 Provision and verify durable Flex token configuration.
+- [x] T4 Verify Flex delivery and clear the failed latch.
+- [x] T5 Verify external probe cadence and ledger-write health.
+- [x] T6 Verify position reconciliation and resync only if required.
+- [x] T7 Land PR #269 and supervise deployment if required.
+- [x] T8 Restart monitor and verify MenthorQ exposure behavior.
+- [x] T9 Correct the app-role drift-audit false positives with regression coverage.
+- [x] T10 Deliver the drift-audit correction through green CI and production deployment.
+- [x] T11 Record final operational evidence.
+
+## Review
+
+- All requested non-2FA operator actions completed. The broker-host `fill-monitor`/IB Gateway 2FA action was deliberately excluded and no Gateway lifecycle command ran.
+- T1: PR #269 head `08a988e164d74e03256dbdc5303eceffd0d885fd` was fully green; the user merged it as `eb7a39cada08b5ade23a25ee41176a389308e0f3` while pre-merge checks were running. Production is the split app role at `radon@ib-gateway`; Gateway work on the broker host is explicitly excluded.
+- T3: `/home/radon/radon/data/flex_token_config.json` is durable through the production data bind, owned `radon:radon`, mode `0600`, and contains the eight-field runtime schema with a masked token matching production. `flex-token-check` returned `ok` at 2026-09-04T02:15:59Z.
+- T4: Flex list-only returned 8 encrypted and 8 decryptable files, newest `FlexStatement toDate=20260902`. The constrained operator wrapper started the oneshot successfully, leaving it inactive/dead with `Result=success`, `ExecMainStatus=0`, and `flex-pull=ok` at 2026-09-04T02:17:42Z, clearing the failed latch without direct systemctl privilege.
+- T5: external-health-probe has 11 successful runs in the latest 12; latest run `33823143162` emitted a successful Turso payload inside the two-hour dead-man window. The sole `aggregate_down` failure recovered on the next run; `TURSO_AUTH_TOKEN` is configured in Actions.
+- T6: a fresh production reconciliation at 2026-09-04T02:15:06.155901Z reported `needs_attention=false`, `quantity_mismatch_count=0`, and zero missing/closed/new-trade/expired-local counts; `service_health[position-reconcile]` was `ok` at 2026-09-04T02:15:06.221478Z. The current 10-position snapshot was taken at 2026-09-04T02:14:42.771056Z, so no additional snapshot resync was required.
+- T7: exact-main CI/deploy run `33828589948` completed successfully at 2026-09-04T02:16:03Z for `eb7a39cada08b5ade23a25ee41176a389308e0f3`: 32 jobs passed, 3 conditional jobs skipped, 0 failed. Production deploy marker and active services matched the SHA. Pushover accepted the one required `radon PR green` notification as request `44a19e45-362a-4c90-ae78-152d4cb519f2`.
+- T8: `/usr/local/bin/radon unit restart radon-monitor.service` restarted only the app-host monitor from PID 4091400 to 4105641 on the exact deployed image. The local exposure request returned HTTP 503 with `Options exposure authentication is unavailable`, correctly classifying a genuine MenthorQ credential failure; credential recovery is being checked separately without touching Gateway/2FA.
+- Re-plan trigger: the newly visible drift IDs are `live-missing:ib-gateway-control` and `compose:unresolvable`, both intentional on `RADON_HOST_ROLE=app`; re-sync would violate the split-host topology and a global allowlist would be stale on broker/combined hosts, so completion requires role-aware audit logic.
+- T9: PR #270 (`a389f891f632bd81fa66084a76d51eda1fc20bd2`) adds app-role-only skips for the Gateway control and compose surfaces while preserving broker/combined enforcement. Red/green evidence: new regression failed on both production IDs, then targeted 3/3 and drift-audit 48/48 passed. Full Python reached 11,544 passed and 1 skipped; two unrelated load-timeout flakes passed 2/2 in isolation. PR CI finished 31 successful, 7 expected skips, 0 failures; Pushover request `f0e59966-d46b-4167-b89b-433c2e4fe075` was accepted.
+- T10: PR #270 merged as `2b936ebc6cae4a4eba20cabfa0153fd8dfca34fa`; exact-main run `33830913939` completed 32 successful, 3 expected skips, and 0 failures. Deploy job `100894058709` installed the exact SHA, stabilized all units, and recorded the production marker at 2026-09-04T02:53:13.679872Z.
+- T11: the post-deploy drift audit completed with `drift_count=0`; app-only Gateway surfaces appear only as role-skipped notes. Flex config remained `0600 radon:radon`, both Flex services were `ok`, the failed latch stayed clear, and position reconciliation remained `ok` with every discrepancy count zero. Manual external probe run `33831373960` closed a 129-minute scheduler gap and wrote a fresh 2026-09-04T02:56:39Z row with HTTP 200 and edge/user/freshness all healthy.
+- Residual discovered by the requested MenthorQ probe: the credentials and durable `0600` jar exist, but the API image lacks its expected Chromium executable/mount. The request now returns the correct embargo-specific 503 after the initial genuine-auth 503; durable remediation requires a separate runtime change, then the headed Authorize/export runbook only if self-remint still fails.

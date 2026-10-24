@@ -269,6 +269,10 @@ tasks/artifacts/*.png
 # Keep them in the PRIVATE radon-cloud:security-archive, never this public repo.
 docs/security-audit-*.html
 
+# Local operator systemd credential backup (mode 0600; never commit)
+/.radon-systemd-credential
+/data/secret_store/
+
 # Weekend reliability runner marker (dedicated clone only, never committed)
 /.radon/
 .radon-weekend-runner

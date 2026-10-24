@@ -54,6 +54,22 @@ export function EditorialFooter() {
         <a href="/developers" className={footerLink}>
           Developers
         </a>
+        <span aria-hidden="true">·</span>
+        <a href="/llms.txt" className={footerLink}>
+          llms.txt
+        </a>
+        <span aria-hidden="true">·</span>
+        <a href="/openapi.json" className={footerLink}>
+          OpenAPI
+        </a>
+        <span aria-hidden="true">·</span>
+        <a href="/agent-instructions" className={footerLink}>
+          Agent guide
+        </a>
+        <span aria-hidden="true">·</span>
+        <a href="/sitemap.xml" className={footerLink}>
+          Sitemap
+        </a>
       </div>
     </footer>
   );

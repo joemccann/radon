@@ -53,4 +53,18 @@ describe("llms.txt agent index", () => {
       // Served from app/llms.txt/route.ts; the module is the source of truth.
     }
   });
+
+  it("states the complete source priority and Robinhood limits", () => {
+    expect(llmsTxt).toContain(
+      "Interactive Brokers > Unusual Whales > official Cboe and specialized official feeds > Robinhood > Yahoo Finance",
+    );
+    expect(llmsTxt).toContain("official trading MCP");
+    expect(llmsTxt).toContain("read-only quote and chain failover");
+    expect(llmsTxt).toContain("retail-crowding overlay");
+    expect(llmsTxt).toContain(
+      "does not provide dark-pool, OTC, sweeps, GEX, or vol-surface data",
+    );
+    expect(llmsTxt).toContain("Execution remains on Interactive Brokers");
+    expect(llmsTxt).not.toMatch(/Robinhood[^.]{0,120}(routes?|routing) orders/i);
+  });
 });

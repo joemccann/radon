@@ -17,10 +17,10 @@
 import { useEffect, useState } from "react";
 
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
-import type { UtcSchedule } from "@/lib/refreshSchedule";
+import type { RefreshSchedule } from "@/lib/refreshSchedule";
 
 type FreshnessRailProps = {
-  schedule: UtcSchedule;
+  schedule: RefreshSchedule;
   /** Latest session the panel holds, `YYYY-MM-DD`. */
   asOf: string | null;
   testId: string;

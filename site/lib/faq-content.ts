@@ -40,7 +40,7 @@ export const faqEntries: FaqEntry[] = [
   {
     question: "Can I use Radon with Robinhood?",
     answer:
-      "No. Robinhood is not integrated, and Radon does not route orders through it. A Robinhood user can explore the free demo at demo.radon.run, but live use requires an Interactive Brokers account. Radon is a research instrument, not a broker.",
+      "Radon can use Robinhood's official trading MCP only for read-only quote and chain failover plus a retail-crowding overlay. It does not supply dark-pool, OTC, sweeps, GEX, or vol-surface data and never routes orders. Execution remains on Interactive Brokers, and the free demo at demo.radon.run needs no brokerage connection.",
   },
   {
     question: "Is there a free demo?",

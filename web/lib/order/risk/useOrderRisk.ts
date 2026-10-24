@@ -310,6 +310,7 @@ function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
     summary.maxLoss,
     summary.breakeven,
     summary.estimatedPnl,
+    summary.estimatedPnlPct,
     summary.marginImpact?.requirement,
     summary.marginImpact?.availableBefore,
     summary.marginImpact?.availableAfter,
@@ -317,6 +318,17 @@ function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
   return figures.every(
     (value) => typeof value !== "number" || Number.isFinite(value),
   );
+}
+
+/** Return on entry basis for an estimated close. The close paths carry entry
+ * credits as negative and debits as positive, so the denominator is always
+ * the absolute signed basis, matching the realized-orders convention. */
+function estimatedPnlPct(
+  pnl: number | null,
+  entryCostDollars: number | null,
+): number | null {
+  if (pnl == null || entryCostDollars == null || entryCostDollars === 0) return null;
+  return (pnl / Math.abs(entryCostDollars)) * 100;
 }
 
 
@@ -727,6 +739,7 @@ export function useOrderRisk(
               ? "Proceeds:"
               : "Cost to Cover:",
           estimatedPnl: pnl,
+          estimatedPnlPct: estimatedPnlPct(pnl, basis),
           estimatedPnlLabel: input.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
           maxLossUnbounded: hasPostCloseUndefinedRisk ? true : undefined,
           undefinedRiskReason: postCloseUndefinedRiskReason,
@@ -821,6 +834,7 @@ export function useOrderRisk(
         totalCost: Math.abs(proceeds),
         totalLabel: opt.totalLabel ?? (proceeds >= 0 ? "Close Credit:" : "Close Debit:"),
         estimatedPnl: pnl,
+        estimatedPnlPct: estimatedPnlPct(pnl, basis),
         estimatedPnlLabel: opt.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
         maxLossUnbounded: residualRisk?.unbounded || undefined,
         undefinedRiskReason: residualRisk?.reason ?? null,

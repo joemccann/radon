@@ -17,6 +17,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -144,9 +145,7 @@ export const privacySections: LegalSection[] = [
 export const privacyMetadata: Metadata = {
   title: PRIVACY_TITLE,
   description: PRIVACY_DESCRIPTION,
-  alternates: {
-    canonical: `/${PRIVACY_SLUG}`,
-  },
+  alternates: pageAlternates(`/${PRIVACY_SLUG}`),
   openGraph: {
     type: "website",
     url: `/${PRIVACY_SLUG}`,

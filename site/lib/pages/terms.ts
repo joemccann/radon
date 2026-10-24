@@ -16,6 +16,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -140,9 +141,7 @@ export const termsSections: LegalSection[] = [
 export const termsMetadata: Metadata = {
   title: TERMS_TITLE,
   description: TERMS_DESCRIPTION,
-  alternates: {
-    canonical: `/${TERMS_SLUG}`,
-  },
+  alternates: pageAlternates(`/${TERMS_SLUG}`),
   openGraph: {
     type: "website",
     url: `/${TERMS_SLUG}`,

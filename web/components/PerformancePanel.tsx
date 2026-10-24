@@ -16,11 +16,13 @@ import {
 } from "@/lib/performanceData";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import { gateCopy, TWR_GATES, type GatedValue } from "@/lib/performanceTwr";
+import { PERFORMANCE_REFRESH } from "@/lib/refreshSchedule";
 import type { PerformanceData } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
 import { MarketState } from "@/lib/useMarketHours";
 import { useViewport } from "@/lib/useViewport";
 import ChartPanel from "./charts/ChartPanel";
+import FreshnessRail from "./FreshnessRail";
 import MetricDefinitionModal from "./MetricDefinitionModal";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
@@ -514,10 +516,16 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
               <span className="performance-meta-value">
                 Time-weighted, beginning-of-day flow convention, chained geometrically
               </span>
-              <span className="performance-meta-label">NAV as of</span>
-              <span className="performance-meta-value">{view.navAsOf || EMPTY}</span>
             </div>
           </div>
+          {view.navAsOf ? (
+            <FreshnessRail
+              schedule={PERFORMANCE_REFRESH}
+              asOf={view.navAsOf}
+              testId="performance-freshness-rail"
+              asOfTestId="performance-freshness-asof"
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -551,8 +559,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             </div>
             <div className="performance-hero-subtitle" data-testid="performance-hero-subtitle">
               Ending equity {fmtUsdExact(view.endingEquity)}
-              {view.benchmark ? ` / ${view.benchmark.symbol} ${fmtPct(view.benchmark.benchmark_return)}` : ""} / as of{" "}
-              {view.navAsOf} / N={returnSessions}
+              {view.benchmark ? ` / ${view.benchmark.symbol} ${fmtPct(view.benchmark.benchmark_return)}` : ""} / N={returnSessions}
             </div>
           </div>
           <div className="performance-hero-pills">
@@ -567,6 +574,12 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             ) : null}
           </div>
         </div>
+        <FreshnessRail
+          schedule={PERFORMANCE_REFRESH}
+          asOf={view.navAsOf}
+          testId="performance-freshness-rail"
+          asOfTestId="performance-freshness-asof"
+        />
       </div>
 
       {view.isDegraded ? (

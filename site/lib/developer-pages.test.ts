@@ -5,8 +5,14 @@ import {
   developersPage,
   HOSTED_MCP_URL,
   mcpPage,
+  mcpMetadata,
   openapiPage,
+  openapiMetadata,
   pageToMarkdown,
+  developersMetadata,
+  authMetadata,
+  webhooksMetadata,
+  agentInstructionsMetadata,
   webhooksPage,
 } from "./developer-pages";
 
@@ -67,5 +73,67 @@ describe("developer resource pages", () => {
     const developers = pageToMarkdown(developersPage);
     expect(developers).toContain(HOSTED_MCP_URL);
     expect(developers).toContain("no public order-placement API");
+  });
+
+  it("links every discovery file and named developer document", () => {
+    const markdown = pageToMarkdown(developersPage);
+    for (const [label, href] of [
+      ["llms.txt", "https://radon.run/llms.txt"],
+      ["OpenAPI 3.1 JSON", "https://radon.run/openapi.json"],
+      ["Sitemap", "https://radon.run/sitemap.xml"],
+      ["Agent instructions", "https://radon.run/agent-instructions"],
+      ["OpenAPI docs", "https://radon.run/developers/openapi"],
+      ["Auth docs", "https://radon.run/developers/auth"],
+      ["MCP docs", "https://radon.run/developers/mcp"],
+      ["Webhook status", "https://radon.run/developers/webhooks"],
+    ]) {
+      expect(markdown).toContain(`- [${label}](${href})`);
+    }
+  });
+
+  it("publishes a copyable anonymous MCP first call and truthful auth boundary", () => {
+    const markdown = pageToMarkdown(mcpPage);
+    expect(markdown).toContain("```bash");
+    expect(markdown).toContain("curl -s -X POST https://app.radon.run/mcp");
+    expect(markdown).toContain("'Content-Type: application/json'");
+    expect(markdown).toContain("'Accept: application/json, text/event-stream'");
+    expect(markdown).toContain('"method":"tools/call"');
+    expect(markdown).toContain('"name":"radon_identity"');
+    expect(markdown).toContain('"arguments":{}');
+    expect(markdown).toContain("user-supplied Clerk session token");
+    expect(markdown).toContain("not yet agent-completable");
+    expect(markdown).not.toContain("/.well-known");
+  });
+
+  it("advertises each developer page markdown alternate", () => {
+    const pairs = [
+      [developersPage, developersMetadata],
+      [openapiPage, openapiMetadata],
+      [authPage, authMetadata],
+      [mcpPage, mcpMetadata],
+      [webhooksPage, webhooksMetadata],
+      [agentPages[5], agentInstructionsMetadata],
+    ] as const;
+
+    for (const [page, metadata] of pairs) {
+      const alternates = metadata.alternates as {
+        canonical?: string;
+        types?: Record<string, string>;
+      };
+      expect(alternates.canonical).toBe(`/${page.slug}`);
+      expect(alternates.types?.["text/markdown"]).toBe(`/${page.slug}.md`);
+    }
+  });
+
+  it("documents the complete Robinhood data boundary", () => {
+    const markdown = pageToMarkdown(agentPages[5]);
+    expect(markdown).toContain(
+      "Interactive Brokers > Unusual Whales > official Cboe and specialized official feeds > Robinhood > Yahoo Finance",
+    );
+    expect(markdown).toContain("read-only quote and chain failover");
+    expect(markdown).toContain("retail-crowding overlay");
+    expect(markdown).toContain("never supplies dark-pool, OTC, sweeps, GEX, or vol-surface data");
+    expect(markdown).toContain("Execution stays on Interactive Brokers");
+    expect(markdown).not.toMatch(/Robinhood[^.]{0,120}(routes?|routing) orders/i);
   });
 });
