@@ -299,6 +299,15 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     the real initMargin and return WITHOUT routing the order (no transmit, no
     permId, no confirm-poll). The finally still disconnects.
     """
+    # DS-2026-10-24-07: every guard reads `type` case-insensitively, but the
+    # contract dispatch below compared it exactly and built a Stock for
+    # anything unmatched, so `COMBO` was bounded as a combo and placed as
+    # stock. Canonicalize once, before any guard, and refuse the unknown.
+    order_type = str(params.get("type") or "stock").strip().lower()
+    if order_type not in ("stock", "option", "combo", "future"):
+        return {"status": "error", "message": f"unsupported order type {params.get('type')!r}"}
+    params["type"] = order_type
+
     # Kill switch (REL-004): every placement path funnels through here
     # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
     kelly_warning = None
@@ -333,7 +342,6 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "message": kelly_warning["message"],
             }
 
-    order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
 
