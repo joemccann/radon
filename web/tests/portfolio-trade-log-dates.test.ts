@@ -16,7 +16,11 @@ const mockRadonFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 const mockExecute = vi.fn();
-vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
+const mockBatch = vi.fn();
+vi.mock("@/lib/db", () => ({
+  resetDb: () => {},
+  getDb: () => ({ execute: mockExecute, batch: mockBatch }),
+}));
 
 function makePortfolio(lastSync = "2026-05-07T12:00:00Z") {
   return {
@@ -45,7 +49,7 @@ function mockDb({
   contractRows?: Array<Record<string, unknown>>;
   journalThrows?: boolean;
 } = {}) {
-  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+  const run = async ({ sql }: { sql: string }) => {
     if (/FROM\s+portfolio_snapshots/i.test(sql)) {
       return {
         rows: portfolio
@@ -62,7 +66,11 @@ function mockDb({
       return { rows: journalRows };
     }
     return { rows: [] };
-  });
+  };
+  mockExecute.mockImplementation(run);
+  mockBatch.mockImplementation(async (stmts: Array<{ sql: string }>) =>
+    Promise.all(stmts.map((stmt) => run(stmt))),
+  );
 }
 
 beforeEach(() => {
