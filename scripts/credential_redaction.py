@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 # `_pass` / `_pwd` need the underscore so prose ("tests pass: 3") survives.
 _SECRET_KEY = (
@@ -280,18 +280,18 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
         quote = text[index]
         delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
         body = index + len(delimiter)
-        cursor = body
-        while cursor < length:
-            if text[cursor] == "\\":
-                cursor += 2
-                continue
-            if len(delimiter) == 1 and text.startswith(quote * 2, cursor):
-                # A doubled quote escapes itself (SQL, TOML literal).
-                cursor += 2
-                continue
-            if text.startswith(delimiter, cursor):
-                return body, cursor, delimiter
-            cursor += 1
+        close = _find_close(text, body, delimiter, backslash_escapes=True)
+        if len(delimiter) == 1:
+            # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
+            # backslash escape, so `\''` there is a literal backslash then an
+            # embedded quote, not an escaped quote then the close. Which
+            # grammar applies is unknowable here; the later close redacts
+            # the whole value under either.
+            literal = _find_close(text, body, delimiter, backslash_escapes=False)
+            if close is None or (literal is not None and literal > close):
+                close = literal
+        if close is not None:
+            return body, close, delimiter
         if len(delimiter) == 1:
             return body, _end_of_line(text, body), ""
         return body, length, delimiter
@@ -300,6 +300,25 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     while cursor < length and not text[cursor].isspace():
         cursor += 1
     return index, cursor, ""
+
+
+def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
+    """Index of the delimiter that closes a quoted value opened at ``body``."""
+    quote = delimiter[0]
+    cursor = body
+    length = len(text)
+    while cursor < length:
+        if backslash_escapes and text[cursor] == "\\":
+            cursor += 2
+            continue
+        if len(delimiter) == 1 and text.startswith(quote * 2, cursor):
+            # A doubled quote escapes itself (SQL, TOML literal).
+            cursor += 2
+            continue
+        if text.startswith(delimiter, cursor):
+            return cursor
+        cursor += 1
+    return None
 
 
 def _end_of_line(text: str, pos: int) -> int:
