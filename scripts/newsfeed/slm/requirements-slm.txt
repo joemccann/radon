@@ -102,7 +102,7 @@ fastapi==0.142.2
     #   llamafactory
 ffmpy==1.0.0
     # via gradio
-filelock==4.0.12
+filelock==4.2.1
     # via
     #   datasets
     #   huggingface-hub
