@@ -11803,3 +11803,46 @@ Serial from the repo root. Root pytest exit 1 each round on the same 54 `Missing
 | 3 | 17,391 passed / 54 failed / 10 skipped / 23 subtests (124.79s) | 5 failed / 11,444 passed / 21 skipped / 1,160 files (132.13s) | 54 failed / 3,310 passed / 11 skipped (799.51s) | 0 added / 0 removed |
 
 Base cloud at `19e25a1d` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 54 failed / 3,310 passed / 11 skipped (800.23s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed.
+
+## Delta audit 2026-10-24
+
+Range `19e25a1d3fc09d12cb482f78c9ac8b39ad3072d4..d3fd4ee08b38c2a6fda231b7dc6b104798461a06`: 33 commits / 186 paths. Newest trusted checkpoint is the 2026-10-23 collaborator comment on issue #83 (`audited-through: 19e25a1d3fc09d12cb482f78c9ac8b39ad3072d4`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-565.
+
+The close-exemption, JWKS, writer-guard, open-interest wait, strength-scan wait, freshness Due, timer, and VPN-route changes in the range each execute the behavior their existing tests name. `.env.ib-mode` removals retire local mode. No `ci.yml` change, no coverage-threshold change, and no new `pytest.skip`, `xfail`, `it.skip`, or `test.skip`. The one added `time.sleep` is the overlap window in `scripts/api/tests/test_short_availability_overlap_budget.py`; a sequential run stays at one in flight. `scripts/api/db_http.py` `hrana_execute` is not in the delta.
+
+Not filed: the five `next.config.mjs` Vitest timeouts (`Test timed out in 5000ms`) pass at a 20s ceiling. The cloud failures are the same 52 nodes as `d3fd4ee0` (`pin[@]: unbound variable` under bash 3.2). Root pytest was clean with OpenSSL 3 first on `PATH`.
+
+The 186-path delta was not re-run as its own three-times bundle. The two files changed tonight were. The three full rounds cover the suite.
+
+### T-565 — P1 — the place funnel can send a future at the request multiplier
+
+`ib_place_order.place_order` qualifies the future, calls `_bind_future_multiplier`, then rechecks `check_placement_limits` (`scripts/ib_place_order.py:502-509`). `scripts/tests/test_future_multiplier_trust.py` called the helper and `IBClient.place_order` only. Deleting the bind left those cases green and returned `status: ok` for a 10-lot VIX future whose request multiplier is 1 and whose qualified multiplier is 1000 (`BUY 10 VIX @ $20.00 — Submitted`).
+
+Acceptance: `place_order` with request multiplier 1 and a qualified future multiplier of 1000 returns an error that names the multiplier and does not call the broker. Deleting the bind leaves the helper and `IBClient` cases green and fails this case. Product source stays unchanged when the bind is present.
+
+### T-566 — P2 — the theta admission wait is proven only on the helper
+
+`_uw_client_kwargs` returns `admission_timeout` 120.0 plus `max_retries` 0 and `backoff_factor` 0 when retries are off (`scripts/theta_harvester_scanner.py:71-78`). `scan_ticker` and the earnings pass construct `UWClient(**client_kwargs)` (`scripts/theta_harvester_scanner.py:519` and `:810`). `test_uw_clients_wait_through_the_shared_admission_window` only asserts the helper equals `{"admission_timeout": theta.UW_ADMISSION_WAIT_S}`. Replacing both constructors with bare `UWClient()` left that helper green and both call sites received `{}`.
+
+Acceptance: `scan_ticker` and the earnings pass construct `UWClient` with `admission_timeout` 120, `max_retries` 0, and `backoff_factor` 0. Bare `UWClient()` leaves the helper test green and fails both new cases. Product source stays unchanged.
+
+Audited through: d3fd4ee08b38c2a6fda231b7dc6b104798461a06 on 2026-10-24 — 2 new findings
+
+## Remediation 2026-10-24
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-565 | DONE | With the bind deleted, `test_understated_request_multiplier_never_reaches_the_broker` returned `status: ok` (`BUY 10 VIX @ $20.00 — Submitted`) while the older future cases stayed in the 8 passed. Restored `scripts/ib_place_order.py`. `scripts/tests/test_future_multiplier_trust.py` 8 passed on each of three serial runs (0.13s). Product source unchanged. |
+| T-566 | DONE | Bare `UWClient()` left `test_uw_clients_wait_through_the_shared_admission_window` green. Both new cases saw `[{}]` (3 failed / 8 passed across the two files). Restored `scripts/theta_harvester_scanner.py`. The three admission cases passed on each of three serial runs (0.11s). The full theta file passed 28 on each of three serial runs (0.41s, 0.15s, 0.15s). Product source unchanged. |
+
+### Closing gates 2026-10-24
+
+Serial from the repo root, OpenSSL 3 and the 3.13 venv first on `PATH`. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. Those five files passed 29 tests at a 20s ceiling in 44.32s. The committed ceiling was not raised. The Vitest summary printed no skipped count. Cloud exit 1 each round on the same 52 nodes as each other and as `d3fd4ee0` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `d3fd4ee0` |
+|---|---|---|---|---|
+| 1 | 17,506 passed / 10 skipped / 23 subtests (98.42s) | 5 failed / 11,473 passed / 1,160 files (117.81s) | 52 failed / 3,314 passed / 11 skipped (720.06s) | 0 added / 0 removed |
+| 2 | 17,506 passed / 10 skipped / 23 subtests (82.76s) | 5 failed / 11,473 passed / 1,160 files (120.90s) | 52 failed / 3,314 passed / 11 skipped (736.66s) | 0 added / 0 removed |
+| 3 | 17,506 passed / 10 skipped / 23 subtests (127.60s) | 5 failed / 11,473 passed / 1,160 files (182.72s) | 52 failed / 3,314 passed / 11 skipped (734.56s) | 0 added / 0 removed |
+
+Base cloud at `d3fd4ee0` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 52 failed / 3,314 passed / 11 skipped (708.97s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 52 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`, plus the control-service, deploy-lock, gateway-control, media-publication, and responder-account cases in that same set.

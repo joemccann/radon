@@ -1323,3 +1323,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-564 | DONE | A comment containing `cd "$release_dir"` left the old text search green while pip's cwd was the caller directory (1 failed on the new run). Restored subshell: the install and wheel cwd cases passed, and `cloud/tests/test_deploy_corrections.py` passed 158 with 3 skipped. Product source unchanged. |
 | T-563 | DONE | `test_a_split_banner_is_not_an_ignore_rule` failed on `59: '='`. The Node separator is a comment again. Gitignore rules and contract tests passed 13. Closing rounds: root pytest 17,391 passed / 54 failed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,444 passed / 21 skipped each round (five `next.config.mjs` imports over 5s). Cloud 54 failed / 3,310 passed / 11 skipped each round, 0 added / 0 removed against `19e25a1d` (54 failed / 3,310 passed / 11 skipped). |
+
+## 2026-10-24
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-565 | DONE | Deleting `_bind_future_multiplier` in `place_order` left the older future cases green and `test_understated_request_multiplier_never_reaches_the_broker` returned `status: ok` (`BUY 10 VIX @ $20.00 — Submitted`). Restored `scripts/ib_place_order.py`. `scripts/tests/test_future_multiplier_trust.py` 8 passed, three serial runs (0.13s). Product source unchanged. |
+| T-566 | DONE | Bare `UWClient()` left `test_uw_clients_wait_through_the_shared_admission_window` green. Both new cases saw `[{}]` (3 failed / 8 passed across the two files). Restored `scripts/theta_harvester_scanner.py`. The three admission cases passed three times (0.11s). The full theta file passed 28 three times. Product source unchanged. Closing rounds: root pytest 17,506 passed / 10 skipped / 23 subtests each round. Vitest 5 failed / 11,473 passed / 1,160 files each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 20s ceiling in 44.32s). Cloud 52 failed / 3,314 passed / 11 skipped each round, 0 added / 0 removed against `d3fd4ee0` (52 failed / 3,314 passed / 11 skipped). |
