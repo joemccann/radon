@@ -3685,14 +3685,13 @@ async def _find_working_order(order_id: Any, perm_id: Any) -> Optional[dict]:
         return None
     from order_limits import order_ids_match
 
-    for payload in snapshot.get("open_orders", []):
-        if not isinstance(payload, dict):
-            continue
-        if order_ids_match(payload.get("permId"), perm_id):
-            return payload
-        if order_ids_match(payload.get("orderId"), order_id):
-            return payload
-    return None
+    rows = [p for p in snapshot.get("open_orders", []) if isinstance(p, dict)]
+    # DS-2026-10-24-01: resolve the way ib_order_manage.find_trade does —
+    # permId across every row first, orderId only when no permId was sent —
+    # so the row validated here is the order the subprocess mutates.
+    if order_ids_match(perm_id, perm_id):
+        return next((p for p in rows if order_ids_match(p.get("permId"), perm_id)), None)
+    return next((p for p in rows if order_ids_match(p.get("orderId"), order_id)), None)
 
 
 @app.post("/orders/modify")
@@ -3727,9 +3726,22 @@ async def orders_modify(request: Request):
     # `> 0`. An unreadable working order is refused rather than resized
     # against the contract-count cap alone.
     if new_quantity is not None or new_price is not None:
-        from order_limits import check_modify_limits
+        from order_limits import check_modify_limits, order_ids_match
 
         working_order = await _find_working_order(order_id, perm_id)
+        if (
+            working_order is not None
+            and order_ids_match(order_id, order_id)
+            and working_order.get("orderId")
+            and not order_ids_match(working_order.get("orderId"), order_id)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "ORDER_MODIFY_IDENTITY_MISMATCH",
+                    "message": "orderId and permId name different working orders — refused",
+                },
+            )
         violation = check_modify_limits(
             working_order, new_quantity=new_quantity, new_price=new_price
         )

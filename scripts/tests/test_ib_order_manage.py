@@ -514,3 +514,55 @@ class TestOutput:
         data = json.loads(captured.out)
         assert data["orderId"] == 42
         assert data["newPrice"] == 22.5
+
+
+# ─── DS-2026-10-24-01 / -03: the modified order is the validated one ──────
+
+class TestModifyIdentityAndFutureNotional:
+    @pytest.fixture(autouse=True)
+    def _no_halt(self, monkeypatch):
+        monkeypatch.setitem(
+            sys.modules, "trading_halt",
+            type("T", (), {"is_trading_halted": staticmethod(lambda: False),
+                           "get_halt_state": staticmethod(lambda: {})}),
+        )
+
+    def test_modify_by_perm_id_does_not_fall_back_to_order_id(self, capsys):
+        other = make_trade(order_id=10, perm_id=555)
+        client = make_client([other])
+        client.place_order = MagicMock()
+
+        with pytest.raises(SystemExit):
+            modify_order(client, 10, 12345, 22.0, "127.0.0.1", 4001)
+
+        client.place_order.assert_not_called()
+        assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+    def _future(self, multiplier):
+        trade = make_trade(order_id=10, perm_id=12345, lmt_price=4000.0)
+        trade.order.totalQuantity = 1
+        trade.contract.secType = "FUT"
+        trade.contract.symbol = "ES"
+        trade.contract.multiplier = multiplier
+        return trade
+
+    def test_future_modify_is_priced_with_the_contract_multiplier(self, capsys, monkeypatch):
+        # 1 x 4000 x 1000 = $4M, under a $1M cap only when priced at 100.
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+        client = make_client([self._future("1000")])
+        client.place_order = MagicMock()
+
+        with pytest.raises(SystemExit):
+            modify_order(client, 10, 12345, 4000.0, "127.0.0.1", 4001)
+
+        client.place_order.assert_not_called()
+        assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+    def test_future_without_a_multiplier_is_refused(self, capsys):
+        client = make_client([self._future("")])
+        client.place_order = MagicMock()
+
+        with pytest.raises(SystemExit):
+            modify_order(client, 10, 12345, 1.0, "127.0.0.1", 4001)
+
+        client.place_order.assert_not_called()

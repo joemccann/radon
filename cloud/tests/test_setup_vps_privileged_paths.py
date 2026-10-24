@@ -1637,3 +1637,41 @@ class TestSetupVpsEnvAdvice:
         body = script[script.index("validate_env() {"):]
         body = body[: body.index("\n}\n")]
         assert "stage_from_checkout" in body
+
+
+class TestInstalledArtifactSurvivesARefusedReplacement:
+    """DS-2026-10-24-06: the drop-in installer removed the INSTALLED
+    runtime-container.conf before provenance had validated its replacement,
+    so a refused replacement left the key-loading base unit with no container
+    isolation at the next daemon-reload. A planted link at the target is
+    replaced only once the replacement's bytes are trusted."""
+
+    def test_a_refused_replacement_leaves_the_installed_file(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# tampered after commit\n")
+        target = harness["tmp"] / "installed"
+        target.write_text("# previously installed\n")
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert target.read_text() == "# previously installed\n"
+
+    def test_a_planted_link_is_replaced_not_followed(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        target.symlink_to(harness["victim"])
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert not target.is_symlink()
+        assert target.read_text() == source.read_text()
+        _assert_victim_untouched(harness)
+
+    def test_the_dropin_installer_never_removes_before_staging(self) -> None:
+        body = _function_body(SETUP.read_text(encoding="utf-8"), "install_container_dropins")
+        assert "stage_from_checkout" in body
+        assert not re.search(r"^\s*rm\b", body, re.M), (
+            "the installed drop-in must survive until its replacement is validated"
+        )

@@ -430,3 +430,33 @@ class TestRel166PricelessOrders(TestTheTransportIsTheLastFunnel):
         order.auxPrice = 100
         getattr(self._client(placed), operation)(contract, order)
         assert placed == [(contract, order)]
+
+
+class TestFutureModifyAtTheTransport(TestTheTransportIsTheLastFunnel):
+    """DS-2026-10-24-03: the modify re-submit prices a FUT with its own multiplier."""
+
+    def _future(self, multiplier):
+        contract, order = self._order(1, sec_type="FUT")
+        contract.multiplier = multiplier
+        order.orderType = "LMT"
+        order.lmtPrice = 4000.0
+        return contract, order
+
+    @pytest.mark.parametrize("operation", ["place_order", "modify_order"])
+    def test_a_future_is_priced_with_the_contract_multiplier(self, operation, monkeypatch):
+        from clients.ib_client import IBOrderError
+
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+        placed = []
+        contract, order = self._future("1000")
+        with pytest.raises(IBOrderError, match="notional"):
+            getattr(self._client(placed), operation)(contract, order)
+        assert placed == []
+
+    @pytest.mark.parametrize("operation", ["place_order", "modify_order"])
+    def test_a_small_future_still_places(self, operation, monkeypatch):
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+        placed = []
+        contract, order = self._future("50")
+        getattr(self._client(placed), operation)(contract, order)
+        assert placed == [(contract, order)]

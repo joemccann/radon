@@ -258,6 +258,38 @@ def _bind_future_multiplier(params: dict, contract) -> str | None:
     return None
 
 
+def _broker_close_violation(params: dict, client) -> dict | None:
+    """The admission refusal for a store-proven close the broker does not confirm.
+
+    The close exemptions read the latest portfolio snapshot, which still shows
+    a holding an earlier close has since sold, and the working-order book,
+    which no longer shows that close once it fills. Every guard that waived
+    a cap for the close runs again against the broker's live book; None when
+    the order was never exempted or the broker confirms the close.
+    """
+    from bankroll_guard import (
+        _load_latest_snapshot,
+        broker_book,
+        check_if_enforced_on_all_paths,
+        is_close_out,
+        read_broker_book,
+    )
+
+    if not is_close_out(params, _load_latest_snapshot()):
+        return None
+    from kelly import kelly_config
+    from kelly_guard import check_kelly_ticket
+    from order_limits import check_placement_limits
+
+    with broker_book(read_broker_book(client)):
+        violation = check_placement_limits(params) or check_if_enforced_on_all_paths(params)
+        if violation is None:
+            warning = check_kelly_ticket(params)
+            if warning and kelly_config()["enforce_mode"] == "block":
+                violation = warning
+    return violation
+
+
 def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     """Place a limit order and return result as dict.
 
@@ -267,6 +299,15 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     the real initMargin and return WITHOUT routing the order (no transmit, no
     permId, no confirm-poll). The finally still disconnects.
     """
+    # DS-2026-10-24-07: every guard reads `type` case-insensitively, but the
+    # contract dispatch below compared it exactly and built a Stock for
+    # anything unmatched, so `COMBO` was bounded as a combo and placed as
+    # stock. Canonicalize once, before any guard, and refuse the unknown.
+    order_type = str(params.get("type") or "stock").strip().lower()
+    if order_type not in ("stock", "option", "combo", "future"):
+        return {"status": "error", "message": f"unsupported order type {params.get('type')!r}"}
+    params["type"] = order_type
+
     # Kill switch (REL-004): every placement path funnels through here
     # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
     kelly_warning = None
@@ -301,7 +342,6 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "message": kelly_warning["message"],
             }
 
-    order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
 
@@ -599,6 +639,16 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                     "message": "IB what-if timed out — gateway may be awaiting 2FA or unreachable.",
                 }
             return _whatif_result(state)
+
+        # DS-2026-10-24-02: a close exempted against the store is re-admitted
+        # against the broker's live book before it transmits.
+        close_violation = _broker_close_violation(params, client)
+        if close_violation:
+            return {
+                "status": "error",
+                "code": close_violation.get("code"),
+                "message": close_violation["message"],
+            }
 
         # Place
         trade = client.place_order(contract, order)
