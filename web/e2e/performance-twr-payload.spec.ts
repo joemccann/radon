@@ -156,6 +156,9 @@ test.describe("/performance TWR payload contract", () => {
 
     await expect(page.locator('[data-testid="performance-hero-twr"]')).toHaveText("+10.00%");
     await expect(page.locator('[data-testid="performance-hero-subtitle"]')).toContainText("Ending equity $110,000.00");
+    await expect(page.getByTestId("performance-freshness-rail")).toBeVisible();
+    await expect(page.getByTestId("performance-freshness-asof")).toHaveText(PERIOD_END);
+    await expect(page.getByTestId("performance-freshness-rail-countdown")).not.toHaveText("--");
     await expect(page.getByText("RUNTIME ERROR")).toHaveCount(0);
     expect(pageErrors.filter((message) => message.includes("length") || message.includes("toUpperCase"))).toEqual([]);
     await page.screenshot({ path: "test-results/performance-twr-payload.png", fullPage: true });
@@ -165,5 +168,22 @@ test.describe("/performance TWR payload contract", () => {
     await openPerformanceWith(page, legacyPayloadWithoutSchemaVersion());
 
     await expect(page.locator('[data-testid="performance-hero-twr"]')).toHaveText("--");
+  });
+});
+
+test.describe("/performance mobile freshness", () => {
+  test.use({ viewport: { width: 393, height: 852 } });
+
+  test("keeps the next-update countdown visible without horizontal overflow", async ({ page }) => {
+    await openPerformanceWith(page, v2OkPayload());
+
+    await expect(page.locator('[data-testid="performance-panel"][data-mobile="true"]')).toBeVisible();
+    await expect(page.getByTestId("performance-freshness-rail")).toBeVisible();
+    await expect(page.getByTestId("performance-freshness-asof")).toHaveText(PERIOD_END);
+    await expect(page.getByTestId("performance-freshness-rail-countdown")).not.toHaveText("--");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: "test-results/performance-countdown-mobile.png", fullPage: true });
   });
 });

@@ -29,7 +29,12 @@ import {
   type CatalogStructure,
   type RiskVerdict,
 } from "@/lib/pages/defined-risk-options-structures";
-import { SITE_NAME, SOCIAL_IMAGE_ALT, SOCIAL_IMAGE_PATH } from "@/lib/seo";
+import {
+  SITE_NAME,
+  SOCIAL_IMAGE_ALT,
+  SOCIAL_IMAGE_PATH,
+  pageAlternates,
+} from "@/lib/seo";
 
 // TODO(integrator): replace with clusterPageMetadata({ slug, title, description })
 // from @/lib/seo once the shared helper lands. The shape below matches the
@@ -38,7 +43,7 @@ import { SITE_NAME, SOCIAL_IMAGE_ALT, SOCIAL_IMAGE_PATH } from "@/lib/seo";
 export const metadata: Metadata = {
   title: PAGE_TITLE,
   description: META_DESCRIPTION,
-  alternates: { canonical: `/${SLUG}` },
+  alternates: pageAlternates(`/${SLUG}`),
   openGraph: {
     type: "article",
     url: `/${SLUG}`,

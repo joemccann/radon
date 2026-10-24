@@ -4,29 +4,75 @@ import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "./seo";
 
 export const OPENAPI_CONTENT_TYPE = "application/json; charset=utf-8";
 
-const documentedPaths = [
+type JsonSchema = Record<string, unknown>;
+
+type OpenApiResponse = {
+  description: string;
+  content?: Record<string, { schema: JsonSchema }>;
+};
+
+type OpenApiPathItem = {
+  get: {
+    summary: string;
+    description: string;
+    parameters?: Array<{
+      name: string;
+      in: "header";
+      required: boolean;
+      description: string;
+      schema: JsonSchema;
+    }>;
+    responses: Record<string, OpenApiResponse>;
+  };
+};
+
+const textSchema = { type: "string" } as const;
+
+const publicOpenApiSchema = {
+  type: "object",
+  required: ["openapi", "info", "servers", "paths"],
+  properties: {
+    openapi: { type: "string", const: "3.1.0" },
+    info: { type: "object" },
+    servers: { type: "array", items: { type: "object" } },
+    paths: { type: "object", additionalProperties: true },
+  },
+} as const;
+
+const fixedResources = [
   {
     path: "/llms.txt",
     summary: "Radon Terminal agent index (llms.txt)",
     description:
       "Markdown index with when-to-use guidance, product links, dossiers, and developer resources.",
+    contentType: "text/markdown",
+    schema: textSchema,
   },
   {
     path: "/openapi.json",
     summary: "Radon Terminal OpenAPI spec",
     description:
       "This document. Public radon.run developer surface only. Not the operator FastAPI map.",
+    contentType: "application/json",
+    schema: publicOpenApiSchema,
   },
   {
     path: "/sitemap.xml",
     summary: "Public sitemap",
     description: "Every public HTML URL on radon.run.",
+    contentType: "application/xml",
+    schema: textSchema,
   },
   {
     path: "/robots.txt",
     summary: "Robots rules",
     description: "Allows standard crawlers and AI answer-engine bots.",
+    contentType: "text/plain",
+    schema: textSchema,
   },
+] as const;
+
+const negotiablePages = [
   {
     path: "/developers",
     summary: "Radon Terminal developer resources",
@@ -60,22 +106,63 @@ const documentedPaths = [
   },
 ] as const;
 
-function getOperation(summary: string, description: string) {
+function fixedResourceOperation(
+  summary: string,
+  description: string,
+  contentType: string,
+  schema: JsonSchema,
+): OpenApiPathItem {
   return {
     get: {
       summary,
       description,
       responses: {
         "200": {
-          description: "Document or page",
+          description: "Resource returned successfully.",
+          content: {
+            [contentType]: { schema },
+          },
         },
-        "404": {
+      },
+    },
+  };
+}
+
+function negotiablePageOperation(
+  summary: string,
+  description: string,
+): OpenApiPathItem {
+  return {
+    get: {
+      summary,
+      description,
+      parameters: [
+        {
+          name: "Accept",
+          in: "header",
+          required: false,
           description:
-            "Unknown path. Markdown body lists sitemap, llms.txt, and developer resources.",
+            "Choose text/html (default) or text/markdown. Quality values and wildcards are supported.",
+          schema: {
+            type: "string",
+            examples: ["text/html", "text/markdown"],
+          },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Page returned as HTML or Markdown.",
+          content: {
+            "text/html": { schema: textSchema },
+            "text/markdown": { schema: textSchema },
+          },
         },
         "406": {
           description:
-            "Accept header rejects both text/html and text/markdown.",
+            "The Accept header rejects both text/html and text/markdown.",
+          content: {
+            "text/plain": { schema: textSchema },
+          },
         },
       },
     },
@@ -83,9 +170,20 @@ function getOperation(summary: string, description: string) {
 }
 
 export function buildPublicOpenApi() {
-  const paths: Record<string, ReturnType<typeof getOperation>> = {};
-  for (const entry of documentedPaths) {
-    paths[entry.path] = getOperation(entry.summary, entry.description);
+  const paths: Record<string, OpenApiPathItem> = {};
+  for (const entry of fixedResources) {
+    paths[entry.path] = fixedResourceOperation(
+      entry.summary,
+      entry.description,
+      entry.contentType,
+      entry.schema,
+    );
+  }
+  for (const entry of negotiablePages) {
+    paths[entry.path] = negotiablePageOperation(
+      entry.summary,
+      entry.description,
+    );
   }
 
   return {

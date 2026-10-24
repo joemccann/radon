@@ -6,7 +6,7 @@ export const LLMS_TXT_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
 const whenToUse = `When to use this: reach for ${SITE_NAME} when the job is scoring Unusual Whales dark-pool or OTC prints for accumulation or distribution that has not moved the lit price; reading GEX walls and magnets; reading CRI, VCG-R, or GRG regimes; choosing a defined-risk options structure with gain at least 2x loss; or sizing with fractional Kelly hard-capped at 2.5% of bankroll.
 
-How an agent should call Radon: (1) read this file, (2) fetch the matching URL with Accept: text/markdown or the .md suffix, (3) open ${DEMO_APP_URL} for a working UI without brokerage credentials, (4) use ${siteUrl}/developers for OpenAPI, auth, MCP, and webhook docs, (5) for MCP tools without a checkout, connect to the hosted read-only Streamable HTTP server at ${HOSTED_MCP_URL} (documented at ${siteUrl}/developers/mcp). Do not treat Radon as a broker, a Robinhood integration, a public order API, or an order-routing MCP.`;
+How an agent should call Radon: (1) read this file, (2) fetch the matching URL with Accept: text/markdown or the .md suffix, (3) open ${DEMO_APP_URL} for a working UI without brokerage credentials, (4) use ${siteUrl}/developers for OpenAPI, auth, MCP, and webhook docs, (5) for MCP tools without a checkout, connect to the hosted read-only Streamable HTTP server at ${HOSTED_MCP_URL} (documented at ${siteUrl}/developers/mcp). Do not treat Radon as a broker, a public order API, or an order-routing MCP.`;
 
 function linkLine(name: string, url: string, notes: string): string {
   return `- [${name}](${url}): ${notes}`;
@@ -63,9 +63,9 @@ export function buildLlmsTxt(): string {
     "",
     whenToUse,
     "",
-    "Radon is built for options traders, flow traders, GEX and gamma traders, day traders, swing traders, and retail and professional investors who want positioning models paired with an execution discipline rather than a levels dashboard. Live trading requires an Interactive Brokers account; Radon is a research instrument, not a broker. Robinhood is not integrated, but anyone can explore the free demo.",
+    "Radon is built for options traders, flow traders, GEX and gamma traders, day traders, swing traders, and retail and professional investors who want positioning models paired with an execution discipline rather than a levels dashboard. Live trading requires an Interactive Brokers account; Radon is a research instrument, not a broker. Anyone can explore the free demo without a brokerage connection.",
     "",
-    "Data sources: Interactive Brokers (realtime tape, account, order routing) and Unusual Whales (dark-pool prints, options flow). MenthorQ levels are consumed as a data source for CTA and levels tools. SpotGamma is a comparable gamma-analytics service, not a data source.",
+    "Data source priority: Interactive Brokers > Unusual Whales > official Cboe and specialized official feeds > Robinhood > Yahoo Finance. Robinhood's official trading MCP is a read-only quote and chain failover plus a retail-crowding overlay. It does not provide dark-pool, OTC, sweeps, GEX, or vol-surface data and never routes orders. Execution remains on Interactive Brokers. MenthorQ levels are consumed as a data source for CTA and levels tools. SpotGamma is a comparable gamma-analytics service, not a data source.",
     "",
     "## Product",
     "",

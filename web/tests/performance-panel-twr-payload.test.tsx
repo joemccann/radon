@@ -161,6 +161,9 @@ describe("PerformancePanel TWR snapshot", () => {
       expect(screen.getByTestId("performance-panel")).toBeTruthy();
       expect(screen.getByTestId("performance-hero-twr").textContent).toBe("+10.00%");
       expect(screen.getByTestId("performance-hero-subtitle").textContent).toContain("Ending equity $110,000.00");
+      expect(screen.getByTestId("performance-hero-subtitle").textContent).not.toContain("as of");
+      expect(screen.getByTestId("performance-freshness-rail")).toBeTruthy();
+      expect(screen.getByTestId("performance-freshness-asof").textContent).toBe("2026-03-20");
     });
   });
 
@@ -210,6 +213,7 @@ describe("PerformancePanel TWR snapshot", () => {
   it("renders the insufficient-data empty state when warnings and series are absent", () => {
     stubPerformance({
       status: "insufficient_data",
+      as_of: "2026-03-20",
       methodology: {
         curve_type: "twr_modified_dietz_daily",
         return_basis: "time_weighted",
@@ -221,6 +225,7 @@ describe("PerformancePanel TWR snapshot", () => {
 
     expect(() => render(<PerformancePanel />)).not.toThrow();
     expect(screen.getByTestId("performance-insufficient")).toBeTruthy();
+    expect(screen.getByTestId("performance-freshness-asof").textContent).toBe("2026-03-20");
   });
 });
 
@@ -234,6 +239,9 @@ describe("MobilePerformancePanel TWR snapshot", () => {
       expect(screen.getByTestId("performance-panel")).toBeTruthy();
       expect(screen.getByTestId("performance-hero-twr").textContent).toBe("+10.00%");
       expect(screen.getByTestId("performance-hero-subtitle").textContent).toContain("Ending equity $110,000.00");
+      expect(screen.getByTestId("performance-hero-subtitle").textContent).not.toContain("as of");
+      expect(screen.getByTestId("performance-freshness-rail")).toBeTruthy();
+      expect(screen.getByTestId("performance-freshness-asof").textContent).toBe("2026-03-20");
     });
   });
 
@@ -368,6 +376,7 @@ describe("v2 payload — degraded and stale states", () => {
 
     const banner = screen.getByTestId("performance-degraded-banner");
     expect(banner.textContent).toContain(payload.warnings[0].message);
+    expect(screen.getByTestId("performance-freshness-rail")).toBeTruthy();
     expect(screen.getByTestId("performance-hero-twr").textContent ?? "").not.toMatch(/\d/);
     // No card may fabricate a zero for a suppressed metric.
     for (const text of renderedValueTexts()) {
@@ -384,6 +393,7 @@ describe("v2 payload — degraded and stale states", () => {
     const banner = screen.getByTestId("performance-stale-banner");
     expect(banner.textContent).toContain("2026-03-20");
     expect(banner.textContent).toContain("105");
+    expect(screen.getByTestId("performance-freshness-rail")).toBeTruthy();
   });
 
   it("guards an absurd annualized magnitude instead of printing it", () => {

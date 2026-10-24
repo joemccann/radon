@@ -18,8 +18,22 @@ export const LEGAL_CONTACT_EMAIL = "hello@radon.run";
 // mirrored into the sitemap lastmod.
 export const LEGAL_EFFECTIVE_DATE = "2026-07-04";
 
+export type LegalResourceLink = {
+  label: string;
+  href: string;
+  description?: string;
+};
+
+export type LegalCodeExample = {
+  label?: string;
+  language: string;
+  code: string;
+};
+
 export type LegalSection = {
   id: string;
   heading: string;
   paragraphs: string[];
+  resourceLinks?: LegalResourceLink[];
+  codeExamples?: LegalCodeExample[];
 };

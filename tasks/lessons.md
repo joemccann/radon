@@ -1,5 +1,22 @@
 # Lessons
 
+## 2026-09-04 — Close-order P&L must include dollars and percent
+
+- Every close or modify confirmation that renders estimated realized P&L must
+  show both the signed dollar amount and the return on verified entry cost.
+- Pin this at the shared `OrderConfirmSummary` boundary and in the modify-order
+  browser path so a surface cannot silently drop one representation.
+
+## 2026-09-03 — Performance freshness is finalized-session T+1
+
+- Diagnose `/performance` against the prior finalized IB Flex session, not the
+  current ET trading date. A Thursday evening `nav_as_of` Wednesday is current;
+  Thursday NAV is due Friday at the Tue-Sat 07:30 ET pull.
+- Do not interpret the route's generic 60-minute closed-market TTL as a missed
+  daily build; freshness messaging must follow the finalized-session schedule.
+- Correlate both timer invocations before calling sFTP missing. The unconditional
+  08:30 duplicate-only retry can overwrite a successful 07:30 delivery heartbeat.
+
 ## 2026-09-03 — Assistant identity is Radon, not a provider model
 
 - User-facing assistant speaker labels and generated self-identification must
@@ -634,8 +651,10 @@ Test-suite audit (a "improve coverage" request that turned up a live auth hole):
 - When the modify-order modal surfaces spread telemetry without displaying quantity, do not scale the dollar figure by `order.totalQuantity`; use the quote-level execution friction the operator can act on, not hidden order-size notional.
 - When a quote ladder is shared across non-order tabs like `Company` and `Position`, do not scale spread notional by the held position size; reserve quantity-sized spread friction for explicit order-entry and modify flows.
 - When an operator corrects quote presentation on an order ticket, identify the actual shared telemetry component from the screenshot before patching the nearest modal; quote-order bugs can live in `PriceBar` or another shared display layer rather than the modify form you first suspect.
+- When an operator compares prices across screenshots, identify each surface and reconstruct each displayed value from its visible legs before concluding the images or quote semantics match.
 - For order-ticket spread telemetry, render the quote ladder in market convention order (`BID`, `MID`, `ASK`) and show spread width in both dollars and midpoint-based basis points so fill-quality context is visible without manual conversion.
 - When an operator says the spread notional on an order ticket is wrong, verify whether the display should scale by displayed quantity as well as contract multiplier; per-contract option points are not the same thing as order-level notional friction.
+- When production has moved IB Flex delivery to sFTP, distinguish the source-side IBKR query that generates the delivered statement from the host-side Flex Web Service query ID; audit scheduled callers before treating either as dead, and remove vestigial env guards before deleting host configuration.
 - `border-collapse: collapse` on a `<table>` breaks `position: sticky` on `<th>` elements in all major browsers; always use `border-collapse: separate; border-spacing: 0` when sticky headers are needed.
 - When a helper like `computeNetPrice()` already multiplies by `leg.quantity`, the display layer must not multiply by quantity again; always trace the data flow to verify what's already baked into the value before adding multipliers.
 - When IB returns error code 200 ("No security definition"), handle it like code 354 — silently clean up the subscription instead of logging red errors that flood the console for every invalid option strike.

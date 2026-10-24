@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { IV_RANK_REFRESH } from "@/lib/refreshSchedule";
+import { IV_RANK_REFRESH, PERFORMANCE_REFRESH } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
 
 // 2026-08-26 is a Wednesday. The IV RANK timer fires 22:10 UTC = 18:10 ET.
@@ -87,6 +87,40 @@ describe("computeFreshnessRail", () => {
     expect(rail.behind).toBe(false);
     expect(rail.awaitingSession).toBeNull();
     expect(rail.msRemaining).toBeGreaterThan(0);
+  });
+
+  it("uses the actual multi-day performance interval over the weekend", () => {
+    // Sunday 07:30 ET is one day into the Sat -> Tue three-day timer window.
+    const rail = computeFreshnessRail(
+      PERFORMANCE_REFRESH,
+      "2026-08-28",
+      new Date("2026-08-30T11:30:00Z"),
+    );
+    expect(rail.lastSampleAt.toISOString()).toBe("2026-08-29T11:30:00.000Z");
+    expect(rail.nextSampleAt.toISOString()).toBe("2026-09-01T11:30:00.000Z");
+    expect(rail.elapsedFraction).toBeCloseTo(1 / 3, 6);
+  });
+
+  it("waits for Tuesday's performance run after Monday closes", () => {
+    const rail = computeFreshnessRail(
+      PERFORMANCE_REFRESH,
+      "2026-08-28",
+      new Date("2026-08-31T21:00:00Z"),
+    );
+    expect(rail.behind).toBe(true);
+    expect(rail.awaitingSession).toBe("2026-08-31");
+    expect(rail.overdue).toBe(false);
+    expect(rail.nextSampleAt.toISOString()).toBe("2026-09-01T11:30:00.000Z");
+  });
+
+  it("measures a missed Monday performance sample from Tuesday's run", () => {
+    const rail = computeFreshnessRail(
+      PERFORMANCE_REFRESH,
+      "2026-08-28",
+      new Date("2026-09-01T12:35:00Z"),
+    );
+    expect(rail.overdue).toBe(true);
+    expect(rail.msOverdue).toBe(65 * 60 * 1000);
   });
 });
 

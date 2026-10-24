@@ -11,7 +11,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import WorkspaceSections, { groupExecutedOrders, closedGroupReturnPct } from "../components/WorkspaceSections";
 import { bsCall, bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
-import type { ExecutedOrder, OrdersData, PriceData } from "../lib/types";
+import type { ExecutedOrder, OrdersData, PortfolioData, PriceData } from "../lib/types";
 
 // Lighten the render: stub out interactive children that pull contexts we don't care about.
 vi.mock("../components/TickerLink", () => ({
@@ -100,6 +100,142 @@ function enableAllImpliedOrderColumns() {
 }
 
 describe("WorkspaceSections orders — Implied column", () => {
+  it("uses the portfolio pricing definition for a BAG last price", () => {
+    const matchingPosition: PortfolioData["positions"][number] = {
+      id: 1,
+      ticker: "SMH",
+      structure: "Bull Put Spread $545.0/$550.0",
+      structure_type: "Bull Put Spread",
+      risk_profile: "defined",
+      expiry: "2026-09-18",
+      contracts: 150,
+      direction: "COMBO",
+      entry_cost: -34_200,
+      max_risk: 40_800,
+      market_value: -25_950,
+      legs: [
+        {
+          con_id: 545,
+          direction: "LONG",
+          contracts: 150,
+          type: "Put",
+          strike: 545,
+          entry_cost: 187_050,
+          avg_cost: 1_247,
+          market_price: 9.6,
+          market_value: 144_000,
+        },
+        {
+          con_id: 550,
+          direction: "SHORT",
+          contracts: 150,
+          type: "Put",
+          strike: 550,
+          entry_cost: 221_250,
+          avg_cost: 1_475,
+          market_price: 11.33,
+          market_price_is_calculated: true,
+          market_value: 169_950,
+        },
+      ],
+      ib_daily_pnl: 289,
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: "2026-08-01",
+    };
+    const supersetDecoy: PortfolioData["positions"][number] = {
+      ...matchingPosition,
+      id: 2,
+      structure: "Three-leg SMH position",
+      legs: [
+        { ...matchingPosition.legs[0], market_price: 8 },
+        { ...matchingPosition.legs[1], market_price: 12 },
+        {
+          con_id: 600,
+          direction: "LONG",
+          contracts: 150,
+          type: "Call",
+          strike: 600,
+          entry_cost: 15_000,
+          avg_cost: 100,
+          market_price: 1,
+          market_value: 15_000,
+        },
+      ],
+    };
+    const portfolio: PortfolioData = {
+      bankroll: 100_000,
+      peak_value: 100_000,
+      last_sync: NOW.toISOString(),
+      total_deployed_pct: 0,
+      total_deployed_dollars: 0,
+      remaining_capacity_pct: 100,
+      position_count: 2,
+      defined_risk_count: 2,
+      undefined_risk_count: 0,
+      avg_kelly_optimal: null,
+      positions: [supersetDecoy, matchingPosition],
+    };
+    const orders: OrdersData = {
+      last_sync: NOW.toISOString(),
+      open_count: 1,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        {
+          orderId: 71,
+          permId: 7101,
+          symbol: "SMH Spread",
+          contract: {
+            conId: 0,
+            symbol: "SMH",
+            secType: "BAG",
+            strike: null,
+            right: null,
+            expiry: null,
+            comboLegs: [
+              { conId: 545, ratio: 1, action: "BUY", symbol: "SMH", strike: 545, right: "P", expiry: "2026-09-18" },
+              { conId: 550, ratio: 1, action: "SELL", symbol: "SMH", strike: 550, right: "P", expiry: "2026-09-18" },
+            ],
+          },
+          action: "SELL",
+          orderType: "LMT",
+          totalQuantity: 150,
+          limitPrice: -1.95,
+          auxPrice: null,
+          status: "Submitted",
+          filled: 0,
+          remaining: 150,
+          avgFillPrice: null,
+          tif: "GTC",
+        },
+      ],
+    };
+    const prices: Record<string, PriceData> = {
+      SMH_20260918_545_P: pd({
+        symbol: "SMH_20260918_545_P",
+        last: 9.6,
+        bid: 9.16,
+        ask: 9.6,
+      }),
+    };
+
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices,
+        portfolio,
+      }),
+    );
+
+    const table = screen.getByTestId("open-orders-table");
+    const row = within(table).getByText("SMH").closest("tr");
+    expect(row?.textContent).toContain("C$-1.73");
+    expect(row?.textContent).toContain("-0.22");
+  });
+
   it("groups executions by durable order identity instead of calendar minute", () => {
     const fill = (execId: string, orderRef: string, time: string): ExecutedOrder => ({
       execId, orderRef, symbol: "SPY", side: "BOT", quantity: 1, avgPrice: 2,

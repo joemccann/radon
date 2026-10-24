@@ -10,6 +10,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -45,7 +46,7 @@ export function clusterPageMetadata({
   return {
     title,
     description,
-    alternates: { canonical: `/${slug}` },
+    alternates: pageAlternates(`/${slug}`),
     openGraph: {
       type: "article",
       url: `/${slug}`,

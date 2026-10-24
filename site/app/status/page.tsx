@@ -3,7 +3,11 @@ import Link from "next/link";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_APP_URL, STATUS_PAGE_ROBOTS, siteUrl } from "@/lib/seo";
+import {
+  DEMO_APP_URL,
+  STATUS_PAGE_ROBOTS,
+  pageAlternates,
+} from "@/lib/seo";
 
 /**
  * Public system-surface map (P3).
@@ -16,7 +20,7 @@ export const metadata: Metadata = {
   title: "System surfaces | Radon Terminal",
   description:
     "Where Radon public and operator surfaces live: marketing site, free demo, and authenticated terminal.",
-  alternates: { canonical: `${siteUrl}/status` },
+  alternates: pageAlternates("/status"),
   robots: STATUS_PAGE_ROBOTS,
 };
 

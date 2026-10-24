@@ -12,6 +12,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -207,9 +208,7 @@ export function pageMetadata(): Metadata {
   return {
     title: PAGE_TITLE,
     description: PAGE_DESCRIPTION,
-    alternates: {
-      canonical: `/${CLUSTER_SLUG}`,
-    },
+    alternates: pageAlternates(`/${CLUSTER_SLUG}`),
     openGraph: {
       type: "article",
       url: `/${CLUSTER_SLUG}`,

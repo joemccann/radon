@@ -121,6 +121,37 @@ export function LegalDocument({
                   {section.paragraphs.map((paragraph) => (
                     <p key={paragraph}>{paragraph}</p>
                   ))}
+                  {section.resourceLinks && section.resourceLinks.length > 0 ? (
+                    <ul className="space-y-3 font-mono text-[13px] leading-[1.55]">
+                      {section.resourceLinks.map((resource) => (
+                        <li key={resource.href}>
+                          <a
+                            href={resource.href}
+                            className={`text-signal-deep underline decoration-hairline-soft underline-offset-4 transition-colors hover:text-accent ${focusRing}`}
+                          >
+                            {resource.label}
+                          </a>
+                          {resource.description ? (
+                            <span className="text-muted">
+                              {`: ${resource.description}`}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {section.codeExamples?.map((example) => (
+                    <figure key={`${example.language}:${example.code}`} className="space-y-2">
+                      {example.label ? (
+                        <figcaption className="font-mono text-[11.5px] uppercase tracking-[0.12em] text-muted">
+                          {example.label}
+                        </figcaption>
+                      ) : null}
+                      <pre className="overflow-x-auto rounded-[4px] border border-hairline-soft bg-figure-bg p-4 font-mono text-[12px] leading-[1.6] text-primary">
+                        <code data-language={example.language}>{example.code}</code>
+                      </pre>
+                    </figure>
+                  ))}
                 </div>
               </section>
             ))}

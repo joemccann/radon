@@ -3,6 +3,7 @@ import {
   agentPages,
   pageToMarkdown,
 } from "./developer-pages";
+import { dossierMarkdown } from "./dossier-markdown";
 import {
   DEMO_URL,
   flowArgumentSteps,
@@ -102,19 +103,6 @@ function statusMarkdown(): string {
   ]);
 }
 
-function clusterMarkdown(slug: string, title: string, description: string): string {
-  return joinBlocks([
-    `# ${title.replace(/ \| Radon Terminal$/, "")}`,
-    description,
-    `Canonical URL: ${siteUrl}/${slug}`,
-    `Markdown: send Accept: text/markdown or open ${siteUrl}/${slug}.md`,
-    "## Next",
-    `- [${SITE_NAME}](${siteUrl})`,
-    `- [When to use Radon Terminal](${siteUrl}/agent-instructions)`,
-    `- [Radon Terminal developer resources](${siteUrl}/developers)`,
-  ]);
-}
-
 const pages = new Map<string, string>();
 
 pages.set("/", homeMarkdown());
@@ -126,7 +114,11 @@ pages.set(
 pages.set("/terms", legalMarkdown(TERMS_H1, TERMS_INTRO, termsSections));
 
 for (const page of clusterPages) {
-  pages.set(`/${page.slug}`, clusterMarkdown(page.slug, page.title, page.description));
+  const markdown = dossierMarkdown(page.slug);
+  if (!markdown) {
+    throw new Error(`Missing dossier Markdown for ${page.slug}`);
+  }
+  pages.set(`/${page.slug}`, markdown);
 }
 
 for (const page of agentPages) {

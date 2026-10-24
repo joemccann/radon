@@ -9,6 +9,7 @@ import {
   SITE_NAME,
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
+  pageAlternates,
   siteUrl,
 } from "../seo";
 
@@ -157,9 +158,7 @@ export function kellyPageMetadata(): Metadata {
   return {
     title: PAGE_TITLE,
     description: PAGE_DESCRIPTION,
-    alternates: {
-      canonical: `/${PAGE_SLUG}`,
-    },
+    alternates: pageAlternates(`/${PAGE_SLUG}`),
     openGraph: {
       type: "article",
       url: `/${PAGE_SLUG}`,

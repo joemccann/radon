@@ -1,6 +1,6 @@
 /**
  * Refresh-schedule helper: the single frontend source of truth for the
- * Equibles indicator timers. Cadence copy is never hardcoded in panels —
+ * scheduled data timers. Cadence copy is never hardcoded in panels —
  * it is derived from these constants, and these constants are pinned to
  * the actual systemd OnCalendar lines in cloud/services/ so they cannot
  * silently drift from the schedule that really runs.
@@ -16,10 +16,12 @@ import {
   IV_RANK_REFRESH,
   IV_SPREAD_REFRESH,
   MA_RATIO_REFRESH,
+  PERFORMANCE_REFRESH,
   SHORT_CROWDING_REFRESH,
   dataAgeDays,
   nextRefreshLabel,
   nextRefreshUtc,
+  previousRefreshUtc,
   type UtcSchedule,
 } from "@/lib/refreshSchedule";
 
@@ -71,6 +73,19 @@ describe("schedule constants are pinned to the systemd timers", () => {
       timerOnCalendar("radon-equibles-cot.timer"),
     );
   });
+
+  it("performance mirrors radon-perf-twr.timer", () => {
+    expect(PERFORMANCE_REFRESH).toEqual({
+      cadence: "selected-weekdays",
+      weekdaysLocal: [2, 3, 4, 5, 6],
+      hourLocal: 7,
+      minuteLocal: 30,
+      timeZone: "America/New_York",
+    });
+    expect(timerOnCalendar("radon-perf-twr.timer")).toBe(
+      "Tue..Sat *-*-* 07:30:00 America/New_York",
+    );
+  });
 });
 
 describe("nextRefreshUtc", () => {
@@ -102,6 +117,35 @@ describe("nextRefreshUtc", () => {
     expect(nextRefreshUtc(COT_POSITIONING_REFRESH, from).toISOString()).toBe(
       "2026-08-29T01:00:00.000Z",
     );
+  });
+
+  it("selected weekdays: skips the performance timer's Sunday and Monday gap", () => {
+    expect(nextRefreshUtc(PERFORMANCE_REFRESH, new Date("2026-08-29T12:00:00Z")).toISOString()).toBe(
+      "2026-09-01T11:30:00.000Z",
+    );
+  });
+
+  it("selected weekdays: keeps 07:30 ET across daylight-saving changes", () => {
+    expect(nextRefreshUtc(PERFORMANCE_REFRESH, new Date("2026-08-28T12:00:00Z")).toISOString()).toBe(
+      "2026-08-29T11:30:00.000Z",
+    );
+    expect(nextRefreshUtc(PERFORMANCE_REFRESH, new Date("2026-12-04T13:00:00Z")).toISOString()).toBe(
+      "2026-12-05T12:30:00.000Z",
+    );
+  });
+
+  it("selected weekdays: exposes the real 71h and 73h DST weekend intervals", () => {
+    const springNext = nextRefreshUtc(PERFORMANCE_REFRESH, new Date("2026-03-07T12:30:00Z"));
+    const springPrevious = previousRefreshUtc(PERFORMANCE_REFRESH, springNext);
+    expect(springPrevious.toISOString()).toBe("2026-03-07T12:30:00.000Z");
+    expect(springNext.toISOString()).toBe("2026-03-10T11:30:00.000Z");
+    expect(springNext.getTime() - springPrevious.getTime()).toBe(71 * 60 * 60 * 1000);
+
+    const fallNext = nextRefreshUtc(PERFORMANCE_REFRESH, new Date("2026-10-31T11:30:00Z"));
+    const fallPrevious = previousRefreshUtc(PERFORMANCE_REFRESH, fallNext);
+    expect(fallPrevious.toISOString()).toBe("2026-10-31T11:30:00.000Z");
+    expect(fallNext.toISOString()).toBe("2026-11-03T12:30:00.000Z");
+    expect(fallNext.getTime() - fallPrevious.getTime()).toBe(73 * 60 * 60 * 1000);
   });
 });
 

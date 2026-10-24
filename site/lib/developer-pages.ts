@@ -4,10 +4,11 @@ import {
   SOCIAL_IMAGE_ALT,
   SOCIAL_IMAGE_PATH,
   SITE_NAME,
+  pageAlternates,
   siteUrl,
 } from "./seo";
 
-export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-02";
+export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-03";
 
 // The hosted Streamable HTTP MCP endpoint (issue #232 chunk 1). Served by a
 // dedicated process behind the app.radon.run edge; mcp.radon.run does not
@@ -30,7 +31,7 @@ function pageMetadata(page: Pick<AgentPage, "slug" | "title" | "description">): 
   return {
     title: page.title,
     description: page.description,
-    alternates: { canonical: `/${page.slug}` },
+    alternates: pageAlternates(`/${page.slug}`),
     openGraph: {
       type: "website",
       url: `/${page.slug}`,
@@ -72,20 +73,58 @@ export const developersPage: AgentPage = {
       id: "public-files",
       heading: "Public machine-readable files",
       paragraphs: [
-        `llms.txt at ${siteUrl}/llms.txt is the agent index, including when-to-use guidance.`,
-        `OpenAPI at ${siteUrl}/openapi.json describes the public radon.run developer surface.`,
-        `Sitemap at ${siteUrl}/sitemap.xml lists every public HTML URL.`,
-        `Agent instructions at ${siteUrl}/agent-instructions name the jobs Radon is right for and how an agent should call it.`,
+        "These files are linked here because agents usually discover machine-readable resources by following links from a page they already reached.",
+      ],
+      resourceLinks: [
+        {
+          label: "llms.txt",
+          href: `${siteUrl}/llms.txt`,
+          description: "agent index with when-to-use guidance",
+        },
+        {
+          label: "OpenAPI 3.1 JSON",
+          href: `${siteUrl}/openapi.json`,
+          description: "public radon.run request and response contract",
+        },
+        {
+          label: "Sitemap",
+          href: `${siteUrl}/sitemap.xml`,
+          description: "every public HTML URL",
+        },
+        {
+          label: "Agent instructions",
+          href: `${siteUrl}/agent-instructions`,
+          description: "best-fit jobs and the agent calling sequence",
+        },
       ],
     },
     {
       id: "named-docs",
       heading: "Named developer docs",
       paragraphs: [
-        `Radon Terminal OpenAPI spec: ${siteUrl}/developers/openapi and ${siteUrl}/openapi.json.`,
-        `Radon Terminal auth docs: ${siteUrl}/developers/auth.`,
-        `Radon Terminal MCP server: ${siteUrl}/developers/mcp.`,
-        `Radon Terminal webhooks: ${siteUrl}/developers/webhooks.`,
+        "Each document is server-rendered in the initial HTML and also available as linked Markdown through content negotiation or its .md URL.",
+      ],
+      resourceLinks: [
+        {
+          label: "OpenAPI docs",
+          href: `${siteUrl}/developers/openapi`,
+          description: "scope and download location for the public specification",
+        },
+        {
+          label: "Auth docs",
+          href: `${siteUrl}/developers/auth`,
+          description: "public, demo, and operator authentication boundaries",
+        },
+        {
+          label: "MCP docs",
+          href: `${siteUrl}/developers/mcp`,
+          description: "hosted endpoint, tool rungs, and first successful call",
+        },
+        {
+          label: "Webhook status",
+          href: `${siteUrl}/developers/webhooks`,
+          description: "current inbound-only webhook scope",
+        },
       ],
     },
     {
@@ -195,7 +234,7 @@ export const mcpPage: AgentPage = {
       heading: "Hosted MCP",
       paragraphs: [
         `Endpoint: ${HOSTED_MCP_URL} (MCP Streamable HTTP JSON-RPC). Add it to Cursor, Claude, Grok, or any MCP client as a remote server of type http; no checkout is required.`,
-        "Send Accept: application/json, text/event-stream. Authentication is an optional Authorization: Bearer header carrying a Clerk session token from demo.radon.run or the operator terminal.",
+        "Send Content-Type: application/json and Accept: application/json, text/event-stream. Anonymous public tools need no Authorization header.",
         "The server is read-only. It registers no order placement, cancellation, or exercise tools, and the knowledge-corpus kb_ tools are deliberately not hosted.",
       ],
     },
@@ -206,6 +245,26 @@ export const mcpPage: AgentPage = {
         "No token: radon_identity, radon_docs, and radon_health. Product identity, public radon.run documents as markdown, and the trust-scoped edge health verdict. No live quotes, no portfolio.",
         "Demo Clerk token (free trial at https://demo.radon.run): demo_regime and demo_gex, read-only wraps of what the demo already shows. No Interactive Brokers data and no operator book.",
         "Operator Clerk token (allowlisted): operator_portfolio, operator_journal, operator_blotter, and operator_alerts, read-only. A demo token calling an operator tool is refused.",
+      ],
+    },
+    {
+      id: "first-call",
+      heading: "First successful anonymous call",
+      paragraphs: [
+        "Call radon_identity with no credentials. This is the complete public path from the hosted endpoint to a successful tool response.",
+        "Protected demo and operator calls are not yet agent-completable. They require an Authorization: Bearer header with a user-supplied Clerk session token. Radon does not publish an API key flow, OAuth flow, or discovery metadata for obtaining that token.",
+      ],
+      codeExamples: [
+        {
+          label: "Anonymous radon_identity call",
+          language: "bash",
+          code: [
+            `curl -s -X POST ${HOSTED_MCP_URL} \\`,
+            "  -H 'Content-Type: application/json' \\",
+            "  -H 'Accept: application/json, text/event-stream' \\",
+            `  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"radon_identity","arguments":{}}}'`,
+          ].join("\n"),
+        },
       ],
     },
     {
@@ -294,9 +353,10 @@ export const agentInstructionsPage: AgentPage = {
       id: "avoid",
       heading: "Jobs Radon is not for",
       paragraphs: [
-        "Do not treat Radon as a broker, a Robinhood integration, a public order API, or an order-routing MCP. The hosted MCP is read-only.",
+        "Do not treat Radon as a broker, a public order API, or an order-routing MCP. The hosted MCP is read-only.",
         "Do not use it as a SpotGamma-style levels dashboard. MenthorQ levels are an input, not the product.",
-        "Do not invent Yahoo as the primary data source. Interactive Brokers first, Unusual Whales second, Yahoo last.",
+        "Data source priority is Interactive Brokers > Unusual Whales > official Cboe and specialized official feeds > Robinhood > Yahoo Finance.",
+        "Robinhood's official trading MCP provides read-only quote and chain failover plus a retail-crowding overlay. It never supplies dark-pool, OTC, sweeps, GEX, or vol-surface data and never routes orders. Execution stays on Interactive Brokers.",
       ],
     },
     {
@@ -364,6 +424,19 @@ export function pageToMarkdown(page: AgentPage): string {
     lines.push(`## ${section.heading}`, "");
     for (const paragraph of section.paragraphs) {
       lines.push(paragraph, "");
+    }
+    for (const resource of section.resourceLinks ?? []) {
+      const description = resource.description ? `: ${resource.description}` : "";
+      lines.push(`- [${resource.label}](${resource.href})${description}`);
+    }
+    if (section.resourceLinks?.length) {
+      lines.push("");
+    }
+    for (const example of section.codeExamples ?? []) {
+      if (example.label) {
+        lines.push(`### ${example.label}`, "");
+      }
+      lines.push(`\`\`\`${example.language}`, example.code, "```", "");
     }
   }
   return lines.join("\n").trim() + "\n";
