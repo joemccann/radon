@@ -738,9 +738,9 @@ Heartbeat `div-yield`. Installed by the deploy's `install-units` verb from
 
 ### MA RATIO (`radon-ma-ratio.timer`)
 
-Daily `22:45 UTC` (`RandomizedDelaySec=300`, five minutes behind
-`radon-divyield`'s 22:40 pass so the two SPX constituent sweeps never share
-a minute), oneshot `scripts/ma_ratio_scan.py`, `TimeoutStartSec=2100`.
+Daily `16:20 America/New_York` (`RandomizedDelaySec=300`, twenty minutes
+after the close across DST, clear of the other SPX constituent sweeps),
+oneshot `scripts/ma_ratio_scan.py`, `TimeoutStartSec=2100`.
 Percent of S&P 500 members whose close is strictly above their own 50-day
 SMA, over the percent strictly above their own 200-day SMA (the StockCharts
 `$SPXA50R:$SPXA200R` construction, computed from constituent closes, never
@@ -752,8 +752,8 @@ unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 
 ### RSI OVERSOLD (`radon-rsi-oversold.timer`)
 
-Daily `23:05 UTC` (`RandomizedDelaySec=300`, twenty minutes behind
-`radon-ma-ratio`'s 22:45 pass so the shared SPX member-close store is
+Daily `16:40 America/New_York` (`RandomizedDelaySec=300`, twenty minutes
+behind `radon-ma-ratio`'s 16:20 pass so the shared SPX member-close store is
 already fresh), oneshot `scripts/rsi_oversold_scan.py`,
 `TimeoutStartSec=2100`. Percent of current S&P 500 members whose own
 14-day Wilder RSI closed strictly below 30. Member closes ride the

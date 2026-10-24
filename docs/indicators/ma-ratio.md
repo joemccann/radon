@@ -157,7 +157,7 @@ migration executed into in-memory sqlite.
   `web/lib/assistant/nextLoaders.ts`.
 - `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'ma-ratio'`,
   `fromDisk` = `data/ma_ratio.json`, fresher content timestamp wins.
-- `MAX_AGE_MS = 48h` — daily 22:45 UTC timer with slack; older than 48h means the
+- `MAX_AGE_MS = 48h` — daily 16:20 ET timer with slack; older than 48h means the
   writer is down, not merely between runs. Missing contract: HTTP 200 + frozen
   `{ missing: true, scan_time: null, data_date: null, current: null, series: [], zone: null }`;
   past 48h the route serves `staleCollapse(MISSING_MA_RATIO, result)`, i.e. that
@@ -180,7 +180,7 @@ migration executed into in-memory sqlite.
   asOf={data.data_date ?? current.date} testId="ma-ratio-freshness-rail"
   asOfTestId="ma-ratio-strip-asof" />` directly under the strip (IvRankPanel
   exemplar). `MA_RATIO_REFRESH` in `web/lib/refreshSchedule.ts` mirrors the timer
-  (daily 22:45 UTC) and is pinned to the unit file by `refresh-schedule.test.ts`.
+  (daily 16:20 ET) and is pinned to the unit file by `refresh-schedule.test.ts`.
 - Chart: `CriHistoryChart`, SPX overlay on the LEFT axis
   (`chartSeriesColor("primary")`, `scaleType: "log"`), ratio on the RIGHT axis, and
   the 0.25-0.5 signal zone painted as a right-axis reference band in
@@ -206,9 +206,9 @@ migration executed into in-memory sqlite.
   (`SWEEP_BUDGET_S=1500` + one in-flight fetch + persist slack; sized for an
   SPX-only sweep against the divyield 503-symbol precedent, NOT bpi's 3-index
   6900s budget).
-- Timer: `OnCalendar=*-*-* 22:45:00 UTC` — after the 16:00 ET close year-round,
-  five minutes behind radon-divyield's 22:40 so the two SPX constituent sweeps
-  never share a minute. `Persistent=true`, `RandomizedDelaySec=300`. Runs every
+- Timer: `OnCalendar=*-*-* 16:20:00 America/New_York` — twenty minutes after the
+  16:00 ET close across DST, clear of the other SPX constituent sweeps (bpi
+  21:30 UTC, divyield 22:40 UTC). `Persistent=true`, `RandomizedDelaySec=300`. Runs every
   calendar day: weekend and holiday runs are unchanged-data heartbeats that keep
   service_health fresh inside the 26h window (ivrank convention).
 - Register: `setup-vps.sh` `SERVICE_FILES` + `cloud/config/installed-units.sha256`
@@ -238,7 +238,7 @@ migration executed into in-memory sqlite.
 - `web/tests/ma-ratio-panel.test.tsx` (`@vitest-environment jsdom`) — loader label,
   empty state, strip values, zone/state boundary pins, chart title, NaN guard,
   reference band rendered, freshness rail (fake timers pinned one hour before the
-  22:45 UTC slot).
+  16:20 ET slot).
 - Lockstep pins updated with the feature in the same commit:
   `regime-tab-routes.test.tsx`, `service-health-windows.test.ts`,
   `refresh-schedule.test.ts`, `cloud/tests/test_systemd_services.py`.

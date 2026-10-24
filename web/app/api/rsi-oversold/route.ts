@@ -20,7 +20,7 @@ const MISSING_RSI_OVERSOLD = Object.freeze({
   threshold: null,
 });
 
-// radon-rsi-oversold.timer runs the sweep once daily at 23:05 UTC; 48h covers a
+// radon-rsi-oversold.timer runs the sweep once daily at 16:40 ET; 48h covers a
 // full missed day plus slack. A snapshot older than that means the writer is
 // down, not merely between runs.
 const RSI_OVERSOLD_MAX_AGE_MS = 48 * 60 * 60_000;

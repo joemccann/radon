@@ -704,7 +704,7 @@ since host radon cannot traverse `/var/lib/radon-private`. Heartbeat
 archive".
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
-`enable_services` enables the timer. Daily 23:05 UTC, twenty minutes
+`enable_services` enables the timer. Daily 16:40 ET, twenty minutes
 after `radon-ma-ratio`. Oneshot `scripts/rsi_oversold_scan.py`,
 `TimeoutStartSec=2100`. Heartbeat `rsi-oversold` (26h). Spec:
 [`docs/indicators/rsi-oversold.md`](../docs/indicators/rsi-oversold.md).

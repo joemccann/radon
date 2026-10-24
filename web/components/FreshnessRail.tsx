@@ -86,17 +86,21 @@ export default function FreshnessRail({
       ? "unknown"
       : rail.overdue
         ? "overdue"
-        : rail.behind
-          ? "behind"
-          : "current";
+        : rail.due
+          ? "due"
+          : rail.behind
+            ? "behind"
+            : "current";
 
-  const countdown = rail ? (rail.overdue ? "Due" : formatCountdown(rail.msRemaining)) : "--";
+  const countdown = rail ? (rail.due || rail.overdue ? "Due" : formatCountdown(rail.msRemaining)) : "--";
   const fillPct = rail ? (rail.elapsedFraction * 100).toFixed(2) : "0.00";
   const note = !rail
     ? null
     : rail.overdue
       ? `${formatCountdown(rail.msOverdue)} past the run`
-      : targetLabel(rail.nextSampleAt, now!);
+      : rail.due
+        ? `Fired ${targetLabel(rail.lastSampleAt, now!)}`
+        : targetLabel(rail.nextSampleAt, now!);
   const anchorNote = !rail
     ? null
     : rail.unknown
@@ -116,7 +120,9 @@ export default function FreshnessRail({
         rail
           ? rail.overdue
             ? `Data as of ${asOf ?? "unknown"}. The ${targetLabel(rail.lastSampleAt, now!)} sample has not landed.`
-            : `Data as of ${asOf ?? "unknown"}. ${model === "release" ? "Next check" : "Next sample"} ${countdown} from now.`
+            : rail.due
+              ? `Data as of ${asOf ?? "unknown"}. The ${targetLabel(rail.lastSampleAt, now!)} sample is running.`
+              : `Data as of ${asOf ?? "unknown"}. ${model === "release" ? "Next check" : "Next sample"} ${countdown} from now.`
           : undefined
       }
     >

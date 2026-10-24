@@ -1328,7 +1328,7 @@ class TestDivyieldScanBudget:
 
 
 class TestMaRatioScanBudget:
-    """Daily 22:45 UTC SPX member-close sweep for the MA RATIO tab. The
+    """Daily 16:20 ET SPX member-close sweep for the MA RATIO tab. The
     script self-limits at SWEEP_BUDGET_S=1500 (an SPX-only universe, one
     fifth of bpi's), so the start budget covers that plus one in-flight
     FETCH_TIMEOUT_S and persist slack — the divyield precedent, not bpi's
@@ -1346,7 +1346,7 @@ class TestMaRatioScanBudget:
 
 
 class TestRsiOversoldScanBudget:
-    """Daily 23:05 UTC SPX member-close sweep for the RSI OVERSOLD tab.
+    """Daily 16:40 ET SPX member-close sweep for the RSI OVERSOLD tab.
     Same SPX-only budget as ma-ratio. Nesting is pinned in
     scripts/tests/test_rsi_oversold.py::TestSweepBudget."""
 

@@ -45,8 +45,8 @@ vi.mock("../lib/useViewport", () => ({
 
 import RsiOversoldPanel from "../components/RsiOversoldPanel";
 
-// Fake clock pinned one hour before the 23:05 UTC timer slot.
-const FAKE_NOW_UTC = "2026-09-02T22:05:00Z";
+// Fake clock pinned one hour before the 16:40 ET timer slot.
+const FAKE_NOW_UTC = "2026-09-02T19:40:00Z"; // Wednesday, 15:40 EDT
 const SESSION_DATE = "2026-09-02";
 
 function buildSeries(n: number): RsiOversoldPoint[] {
