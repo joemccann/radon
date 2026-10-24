@@ -654,3 +654,64 @@ def test_uw_clients_wait_through_the_shared_admission_window() -> None:
     strict = theta._uw_client_kwargs(False)
     assert strict["admission_timeout"] == theta.UW_ADMISSION_WAIT_S
     assert strict["max_retries"] == 0 and strict["backoff_factor"] == 0
+
+
+def test_scan_ticker_opens_the_uw_client_with_the_admission_wait(monkeypatch) -> None:
+    """The helper can stay correct while both constructors drop it."""
+    seen: list[dict] = []
+
+    class _Client:
+        def close(self) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> bool:
+            return False
+
+    def factory(**kwargs):
+        seen.append(kwargs)
+        return _Client()
+
+    monkeypatch.setattr(theta, "UWClient", factory)
+    monkeypatch.setattr(theta, "fetch_surface", lambda *args, **kwargs: {"ohlc": []})
+
+    assert theta.scan_ticker("MU") is None
+    assert seen == [{"admission_timeout": 120.0, "max_retries": 0, "backoff_factor": 0}]
+
+
+def test_earnings_pass_opens_the_uw_client_with_the_admission_wait(monkeypatch) -> None:
+    seen: list[dict] = []
+
+    class _Client:
+        def close(self) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> bool:
+            return False
+
+    def factory(**kwargs):
+        seen.append(kwargs)
+        return _Client()
+
+    @contextmanager
+    def _no_ib():
+        yield None
+
+    candidate = SimpleNamespace(
+        verdict="WATCH", score=1.0, earnings=None, errors=[]
+    )
+    monkeypatch.setattr(theta, "UWClient", factory)
+    monkeypatch.setattr(theta, "scan_ib_session", _no_ib)
+    monkeypatch.setattr(theta, "scan_ticker", lambda *args, **kwargs: candidate)
+    monkeypatch.setattr(theta, "annotate_candidates_with_earnings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(theta, "should_block_universe_scan", lambda: False)
+    monkeypatch.setattr(theta, "build_output", lambda *args, **kwargs: {})
+
+    theta.scan_universe(["MU"], max_workers=1)
+
+    assert seen == [{"admission_timeout": 120.0, "max_retries": 0, "backoff_factor": 0}]

@@ -111,3 +111,46 @@ class TestTransportBackstop:
         with pytest.raises(IBOrderError):
             client.place_order(_qualified_future(multiplier=None), order)
         mock_ib.placeOrder.assert_not_called()
+
+
+class TestPlaceOrderFunnel:
+    """``ib_place_order.place_order`` is the /orders/place subprocess.
+
+    Binding the helper and the transport backstop does not run this funnel.
+    Deleting the post-qualify bind leaves both of those green and transmits
+    a future whose request multiplier is 1 against a 1000-multiplier contract.
+    """
+
+    def test_understated_request_multiplier_never_reaches_the_broker(self, monkeypatch):
+        import eventkit
+
+        qualified = _qualified_future("1000")
+        trade = MagicMock()
+        trade.order = MagicMock(orderId=99, permId=12345)
+        trade.orderStatus = MagicMock(status="Submitted", whyHeld="")
+        trade.log = []
+        client = MagicMock()
+        client._ib = MagicMock()
+        client._ib.errorEvent = eventkit.Event("errorEvent")
+        client.qualify_contracts.return_value = [qualified]
+        client.place_order.return_value = trade
+        monkeypatch.setattr(ib_place_order, "IBClient", lambda: client)
+        monkeypatch.setattr(
+            "clients.contract_resolver.resolve_future_contract",
+            lambda symbol, expiry: qualified,
+        )
+        monkeypatch.setattr("kelly_guard.check_kelly_ticket", lambda params: None)
+
+        result = ib_place_order.place_order({
+            "type": "future",
+            "symbol": "VIX",
+            "action": "BUY",
+            "quantity": 10,
+            "limitPrice": 20.0,
+            "expiry": "20261118",
+            "multiplier": 1,
+        })
+
+        assert result["status"] == "error", result
+        assert "multiplier" in result["message"]
+        client.place_order.assert_not_called()
