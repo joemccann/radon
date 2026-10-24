@@ -91,6 +91,11 @@ test-results-setup-gate/
 *.pem
 *.key
 *.cert
+# A credential file holding a BARE literal (an IB password read by path, no
+# key name) matches no gitleaks rule, so this is its only net. Path-free on
+# purpose: it survives the subsystem that introduced it being retired.
+secrets/**/*.txt
+**/secrets/**/*.txt
 
 # ======================================================================
 # Data & runtime artifacts

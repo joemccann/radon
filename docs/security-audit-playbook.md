@@ -355,6 +355,29 @@ line here whenever you ship a security fix.**
   because the publication gate runs it over text an outside contributor shapes.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
+- **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
+  to rewrite a value it has already tagged, so repeated scrubbing is
+  idempotent. That opt-out may never be a prefix test: a value whose prefix is
+  a redaction label published its remainder verbatim, which is the same
+  value-tail survival the tokenizer closed, in the one branch that declines to
+  redact. An earlier rule may legitimately leave STRUCTURE after its label (the
+  next URL query parameter), so the opt-out holds only when nothing after the
+  label continues the value — no value-alphabet first character and no opaque
+  literal in the remainder. Any future skip, allowlist or short-circuit in a
+  sanitizer carries the same burden: prove it cannot be satisfied by a prefix
+  of attacker-shaped text.
+  (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
+
+- **An ignore rule for a credential FILE is path-independent.** A credential
+  file holding a bare literal (a password read by path, no key name beside it)
+  matches no gitleaks rule, as a local fixture confirms, so the root
+  `.gitignore` is its only net. Retiring the subsystem that introduced such a
+  file must not retire its net with it: the rule is written against the shape
+  (`secrets/**/*.txt`), not against the subsystem's path, and no tracked file
+  may become ignored by it. This was the second ignore-rule regression in three
+  days.
+  (`scripts/tests/test_gitignore_rules.py`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not
