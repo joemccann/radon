@@ -73,6 +73,31 @@ class TestRedaction:
         assert _clean(out), out
         assert "OTHER=keepme" in out
 
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"])
+    def test_a_value_on_the_next_line_is_redacted(self, newline):
+        # DS-2026-10-24-04: the head allowed spaces and tabs only after `:`.
+        for value in (OPAQUE, f'"{OPAQUE}"'):
+            text = f"password:{newline}    {value}{newline}other: keepme{newline}"
+            out = scrub_credential_text(text)
+            assert _clean(out), out
+            assert "other: keepme" in out
+
+    def test_the_tail_after_a_partial_specific_redaction_is_redacted(self):
+        # DS-2026-10-24-04: a value that merely STARTED with a marker was skipped.
+        text = "api_key=" + "sk-ant-" + f"{OPAQUE}.{TAIL}\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+
+    def test_a_query_tail_after_a_marker_is_not_a_secret_tail(self):
+        out = scrub_credential_text(f"https://h.invalid/v1?api_key={OPAQUE}&symbol=SPY&{TAIL}\n")
+        assert OPAQUE not in out and "symbol=SPY" in out, out
+        out = scrub_credential_text("token=" + "sk-ant-" + f"{OPAQUE}&{TAIL}\n")
+        assert _clean(out), out
+
+    def test_an_exact_marker_keeps_its_own_tag(self):
+        out = scrub_credential_text("api_key=" + "sk-ant-" + f"{OPAQUE}\n")
+        assert out == "api_key=[redacted-key]\n", out
+
     def test_a_single_quoted_value_still_keeps_its_delimiters(self):
         out = scrub_credential_text(f'api_key = "{OPAQUE}"\n')
         assert _clean(out)
