@@ -2770,8 +2770,9 @@ class TestDocumentation20261024:
         assert "exits 78" in arch
         guard = (_ROOT / "scripts/utils/production_writer_guard.py").read_text()
         fn = guard.split("def refusal_reason", 1)[1].split("\ndef ", 1)[0]
-        assert 'return env.get("RADON_MODE"' in guard or "CLOUD_MODE" in fn
-        assert "radon_mode(env) != CLOUD_MODE" in fn
+        # REL-330: every non-Linux host refuses, whatever RADON_MODE says.
+        assert "platform.startswith(PRODUCTION_PLATFORM_PREFIX)" in fn
+        assert "is not a permit" in fn
         assert "EXIT_REFUSED = 78" in guard
 
     def test_iv_spread_neighbors_are_the_current_utc_slots(self):
