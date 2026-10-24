@@ -240,12 +240,23 @@ line here whenever you ship a security fix.**
   not a finite parseable number refuses the order (never coerces to 0/None and
   skips a bound); a future with no valid contract multiplier refuses; a stock
   leg in a BAG never nulls the combo loss computation.
-  A SELL BAG prices each leg with its side inverted, and a leg with no action
-  stays long. A leg labelled STK that also carries an expiry, a right, or a
-  strike above zero is refused (`ORDER_COMBO_LEG_SEC_TYPE`) rather than skipped.
-  A future modify keeps that order's contract multiplier and refuses when the
-  multiplier is missing (`ORDER_FUTURE_MULTIPLIER`).
-  (`scripts/tests/test_order_limits_fail_open_inputs.py`)
+  A SELL BAG is short the legs it marks BUY. `combo_max_loss` performs that
+  reversal from the envelope and must receive the original legs.
+  `order_max_loss` reverses those legs once, for `_combo_expiry_loss` only.
+  Handing the reversed legs to `combo_max_loss` prices the short as all-long
+  and the loss as zero, and both Gate-3 guards then read zero.
+  A leg with no action stays long. A leg labelled STK that also carries an
+  expiry, a right, or a strike above zero is refused
+  (`ORDER_COMBO_LEG_SEC_TYPE`) rather than skipped.
+  A future placement binds `multiplier` from the qualified contract
+  (`ib_place_order._bind_future_multiplier`). A request value that disagrees
+  is refused, and a contract with no usable multiplier is refused. The limits
+  check still refuses a future that arrives with no positive multiplier
+  (`ORDER_FUTURE_MULTIPLIER`). A future modify keeps that order's contract
+  multiplier.
+  (`scripts/tests/test_order_limits_fail_open_inputs.py`,
+  `scripts/tests/test_close_exemption_reservation.py`,
+  `scripts/tests/test_future_multiplier_trust.py`)
 - **Unattended agent push authority is enforced by git, not prompt text** — a
   push-capable Grok responder cycle installs the `fix/*`-only `pre-push` guard
   (no deletes, no tags) before launching the agent and stands down when it

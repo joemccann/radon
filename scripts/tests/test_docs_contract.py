@@ -2716,3 +2716,116 @@ class TestDocumentation20261023:
         assert "/home/radon/radon-cloud" in inaccessible
         assert "-/etc/radon/env" in inaccessible
 
+
+class TestDocumentation20261024:
+    """DOC-226..232 after audited-through 19e25a1d."""
+
+    def test_sell_bag_proxy_keeps_the_original_legs(self):
+        text = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        start = text.index("**Order-limit inputs fail closed**")
+        section = text[start:text.index("**Unattended agent push authority", start)]
+        assert "prices each leg with its side inverted" not in section
+        assert "original legs" in section
+        assert "combo_max_loss" in section
+        assert "_combo_expiry_loss" in section
+        guard = (_ROOT / "scripts/bankroll_guard.py").read_text()
+        fn = guard.split("def order_max_loss", 1)[1].split("\ndef ", 1)[0]
+        assert "combo_max_loss(params)" in fn
+        assert "combo_max_loss(as_executed)" not in fn
+
+    def test_future_multiplier_comes_from_the_qualified_contract(self):
+        text = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        start = text.index("**Order-limit inputs fail closed**")
+        section = text[start:text.index("**Unattended agent push authority", start)]
+        assert "qualified contract" in section
+        assert "_bind_future_multiplier" in section
+        bind = (_ROOT / "scripts/ib_place_order.py").read_text()
+        fn = bind.split("def _bind_future_multiplier", 1)[1].split("\ndef ", 1)[0]
+        assert "does not match the qualified" in fn
+        assert 'params["multiplier"] = actual' in fn
+
+    def test_laptop_does_not_run_the_newsfeed_or_a_local_api(self):
+        text = (_ROOT / "docs/cloud-services.md").read_text()
+        news = text.split("## Newsfeed", 1)[1].split("## Realtime relay", 1)[0]
+        assert "laptop or Hetzner" not in news
+        assert "anywhere Chromium" not in news
+        assert "never runs on the laptop" in news
+        health = text.split("## Health & observability", 1)[1].split("\n## ", 1)[0]
+        assert "curl http://localhost:8321/health" not in health
+        assert "http://radon-app:8321/health/lite" in health
+        row = next(
+            line for line in text.splitlines()
+            if line.startswith("| Cold-start a new laptop")
+        )
+        assert "Do not run `bun run db:migrate`" in row
+        assert "migrate.py" in row
+        unit = (_ROOT / "cloud/services/radon-api.service").read_text()
+        assert "scripts/db/migrate.py --boot" in unit
+
+    def test_hetzner_mode_on_a_developer_host_cannot_write(self):
+        text = (_ROOT / "docs/cloud-services.md").read_text()
+        arch = text.split("## Architecture", 1)[1].split("## Newsfeed", 1)[0]
+        assert "ProductionWriterRefused" in arch
+        assert "RADON_MODE=hetzner" in arch
+        assert "exits 78" in arch
+        guard = (_ROOT / "scripts/utils/production_writer_guard.py").read_text()
+        fn = guard.split("def refusal_reason", 1)[1].split("\ndef ", 1)[0]
+        assert 'return env.get("RADON_MODE"' in guard or "CLOUD_MODE" in fn
+        assert "radon_mode(env) != CLOUD_MODE" in fn
+        assert "EXIT_REFUSED = 78" in guard
+
+    def test_iv_spread_neighbors_are_the_current_utc_slots(self):
+        text = (_ROOT / "docs/indicators/iv-spread.md").read_text()
+        sched = text.split("## E. Scheduling", 1)[1].split("\n## ", 1)[0]
+        assert "22:45" not in sched
+        assert "22:10" in sched and "22:20" in sched
+        timer = (_ROOT / "cloud/services/radon-ma-ratio.timer").read_text()
+        assert "16:20:00 America/New_York" in timer
+        index = (_ROOT / "docs/indicators/README.md").read_text()
+        row = next(line for line in index.splitlines() if line.startswith("| iv-spread"))
+        assert "22:15" in row
+
+    def test_strength_and_theta_wait_out_the_uw_minute(self):
+        doc = (_ROOT / "docs/uw-rest-governance.md").read_text()
+        assert "strength_confirmation_scanner.py" in doc
+        assert "theta_harvester_scanner.py" in doc
+        assert "420" in doc and "480" in doc
+        for name in (
+            "strength_confirmation_scanner.py",
+            "theta_harvester_scanner.py",
+        ):
+            src = (_ROOT / "scripts" / name).read_text()
+            assert "UW_ADMISSION_WAIT_S = 120.0" in src
+            assert '"admission_timeout": UW_ADMISSION_WAIT_S' in src
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        theta = server.split('"/theta-harvester/scan"', 1)[1].split("@app.", 1)[0]
+        strength = server.split('"/strength-confirmation/scan"', 1)[1].split("@app.", 1)[0]
+        assert "timeout=420" in theta
+        assert "timeout=480" in strength
+
+    def test_golden_docs_patterns_match_a_file(self):
+        golden = json.loads(
+            (_ROOT / "scripts/knowledge/golden_set.json").read_text(encoding="utf-8")
+        )
+        docs = [
+            str(path.relative_to(_ROOT))
+            for path in (_ROOT / "docs").rglob("*.md")
+        ]
+        missing = []
+        for entry in golden["questions"]:
+            for want in entry["relevant"]:
+                if want["source"] != "docs":
+                    continue
+                pattern = want["doc_key_pattern"]
+                if not pattern.startswith("^docs/"):
+                    continue
+                rx = re.compile(pattern)
+                if not any(rx.search(path) for path in docs):
+                    missing.append(entry["id"])
+        assert missing == []
+        owner = (_ROOT / "docs/knowledge-embeddings.md").read_text(encoding="utf-8")
+        assert f"{len(golden['questions'])} draft questions" in owner
+        blob = json.dumps(golden)
+        assert "ib-gateway-docker" not in blob
+        assert "ibc-remote-access" not in blob
+
