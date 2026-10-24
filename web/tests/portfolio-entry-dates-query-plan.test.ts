@@ -15,7 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const MIGRATIONS_DIR = path.join(__dirname, "../../scripts/db/migrations");
 const MANUAL_DIRECTIVE = "-- radon-migrate: manual";
 
-const db = vi.hoisted(() => ({ current: null as null | { execute: (s: unknown) => Promise<unknown> } }));
+const db = vi.hoisted(() => ({
+  current: null as null | {
+    execute: (s: unknown) => Promise<unknown>;
+    batch: (s: unknown) => Promise<unknown>;
+  },
+}));
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => db.current }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: vi.fn() }));
 
@@ -87,6 +92,13 @@ beforeEach(async () => {
       const stmt = statement as InStatement;
       sent.push(typeof stmt === "string" ? stmt : stmt.sql);
       return client.execute(stmt);
+    },
+    batch: (statements: unknown) => {
+      const stmts = statements as InStatement[];
+      return Promise.all(stmts.map((statement) => {
+        sent.push(typeof statement === "string" ? statement : statement.sql);
+        return client.execute(statement);
+      }));
     },
   };
 });

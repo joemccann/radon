@@ -9,15 +9,14 @@ import {
   scrubSecrets,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { dbExecute } from "@/lib/dbExecute";
+import { dbBatch, dbExecute } from "@/lib/dbExecute";
 import { PRODUCER_SYNC_WAIT_MS } from "@/lib/edgeBudget";
 import { markSyncFallback } from "@/lib/syncFallback";
 import { demoDbIsolationViolation } from "@/lib/demo/demoDbIsolation";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 import {
   invalidatePortfolioReadCaches,
-  readCachedPortfolioContractOpenDates,
-  readCachedPortfolioTradeLogDates,
+  readCachedPortfolioEntryDates,
 } from "@/lib/portfolio/portfolioReadCache";
 import {
   PortfolioSnapshotCorruptError,
@@ -36,66 +35,20 @@ export const runtime = "nodejs";
 
 const DB_READ_TIMEOUT_MS = 3_000;
 
-/** Load ticker → latest trade date.
- *
- * The canonical source is the `journal` table. Missing rows or query
- * failures return an empty map; this route never falls back to
- * the old flat trade-log mirror.
- *
- * The ticker expression and IS NOT NULL filter match idx_journal_ticker
- * (migration 0095) textually; change one, change both.
- */
-async function loadTradeLogDates(): Promise<Record<string, string>> {
-  try {
-    const result = await dbExecute({
-      sql: `
+/** Ticker expression and IS NOT NULL filter match idx_journal_ticker
+ * (migration 0095) textually; change one, change both. */
+const TRADE_LOG_DATES_SQL = `
         SELECT
           json_extract(payload, '$.ticker') AS ticker,
           MAX(COALESCE(filled_at, json_extract(payload, '$.date'))) AS date
         FROM journal
         WHERE json_extract(payload, '$.ticker') IS NOT NULL
         GROUP BY json_extract(payload, '$.ticker')
-      `,
-      args: [],
-    }, { label: "portfolio trade-log date", timeoutMs: DB_READ_TIMEOUT_MS });
-    if (result.rows.length > 0) {
-      const dates: Record<string, string> = {};
-      for (const row of result.rows) {
-        const r = row as unknown as { ticker?: string; date?: string };
-        if (typeof r.ticker === "string" && typeof r.date === "string") {
-          dates[r.ticker] = r.date;
-        }
-      }
-      return dates;
-    }
-  } catch (error) {
-    // dbExecute scrubs its own diagnostic and rethrows the ORIGINAL error, so
-    // a raw copy here put libsql URLs, bearer tokens and account ids in the
-    // server log. Route it through the same scrubber.
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      scrubSecrets(`[Portfolio] trade_log_dates journal query failed: ${message}`),
-    );
-  }
-  return {};
-}
+      `;
 
-/** Load per-contract opening-episode date.
- *
- * Keyed `SYMBOL|EXPIRY|RIGHT|STRIKE` (the conId-free journal form the share
- * card reconstructs). `buildContractEntryDates` walks each contract's fills by
- * signed net quantity and returns the date its current open episode began — the
- * position's true entry day even once it is fully closed and gone from the
- * portfolio, which the per-ticker trade_log_dates MAX cannot give. Correct
- * across re-opens, duplicated session/Flex rows, and out-of-order fills.
- *
- * The right/strike WHERE clause matches idx_journal_option_contract
- * (migration 0095) textually; change one, change both.
- */
-async function loadContractOpenDates(): Promise<Record<string, string>> {
-  try {
-    const result = await dbExecute({
-      sql: `
+/** Right/strike WHERE clause matches idx_journal_option_contract
+ * (migration 0095) textually; change one, change both. */
+const CONTRACT_OPEN_DATES_SQL = `
         SELECT
           json_extract(payload, '$.ticker')    AS ticker,
           json_extract(payload, '$.expiry')    AS expiry,
@@ -107,48 +60,85 @@ async function loadContractOpenDates(): Promise<Record<string, string>> {
         FROM journal
         WHERE json_extract(payload, '$.right')  IS NOT NULL
           AND json_extract(payload, '$.strike') IS NOT NULL
-      `,
-      args: [],
-    }, { label: "portfolio contract open date", timeoutMs: DB_READ_TIMEOUT_MS });
-    // `right` is a SQL reserved word, so it is aliased opt_right in the query;
-    // map it back to the JournalEntryRow field the builder reads. Coerce
-    // contracts to a number in case the driver hands it back as text.
-    const rows: JournalEntryRow[] = result.rows.map((row) => {
-      const r = row as unknown as {
-        ticker?: string; expiry?: string; opt_right?: string;
-        strike?: number | string; action?: string; contracts?: number | string; date?: string;
-      };
-      return {
-        ticker: r.ticker,
-        expiry: r.expiry,
-        right: r.opt_right,
-        strike: r.strike,
-        action: r.action,
-        contracts: r.contracts == null ? null : Number(r.contracts),
-        date: r.date,
-      };
-    });
-    return buildContractEntryDates(rows);
+      `;
+
+function tradeLogDatesFromRows(rows: unknown[]): Record<string, string> {
+  const dates: Record<string, string> = {};
+  for (const row of rows) {
+    const r = row as { ticker?: string; date?: string };
+    if (typeof r.ticker === "string" && typeof r.date === "string") {
+      dates[r.ticker] = r.date;
+    }
+  }
+  return dates;
+}
+
+function contractOpenDatesFromRows(rows: unknown[]): Record<string, string> {
+  // `right` is a SQL reserved word, so it is aliased opt_right in the query;
+  // map it back to the JournalEntryRow field the builder reads. Coerce
+  // contracts to a number in case the driver hands it back as text.
+  const parsed: JournalEntryRow[] = rows.map((row) => {
+    const r = row as {
+      ticker?: string; expiry?: string; opt_right?: string;
+      strike?: number | string; action?: string; contracts?: number | string; date?: string;
+    };
+    return {
+      ticker: r.ticker,
+      expiry: r.expiry,
+      right: r.opt_right,
+      strike: r.strike,
+      action: r.action,
+      contracts: r.contracts == null ? null : Number(r.contracts),
+      date: r.date,
+    };
+  });
+  return buildContractEntryDates(parsed);
+}
+
+/** Load ticker → latest trade date and per-contract opening-episode date.
+ *
+ * The canonical source is the `journal` table. Missing rows or query
+ * failures return empty maps; this route never falls back to
+ * the old flat trade-log mirror.
+ *
+ * One `/v2/pipeline` for both SELECTs (PERF-025). WorkspaceShell polls
+ * `?include=entry-dates` every 2s on /orders during RTH; the maps share a
+ * 60s cache so a miss used to issue two Turso HTTP round-trips.
+ */
+async function loadPortfolioEntryDatesFromDb(): Promise<{
+  trade_log_dates: Record<string, string>;
+  contract_open_dates: Record<string, string>;
+}> {
+  try {
+    const [tradeResult, contractResult] = await dbBatch(
+      [
+        { sql: TRADE_LOG_DATES_SQL, args: [] },
+        { sql: CONTRACT_OPEN_DATES_SQL, args: [] },
+      ],
+      { label: "portfolio entry dates", timeoutMs: DB_READ_TIMEOUT_MS, mode: "read" },
+    );
+    return {
+      trade_log_dates: tradeLogDatesFromRows(tradeResult.rows),
+      contract_open_dates: contractOpenDatesFromRows(contractResult.rows),
+    };
   } catch (error) {
+    // dbExecute/dbBatch scrub their own diagnostic and rethrow the ORIGINAL
+    // error, so a raw copy here put libsql URLs, bearer tokens and account
+    // ids in the server log. Route it through the same scrubber.
     const message = error instanceof Error ? error.message : String(error);
     console.warn(
-      scrubSecrets(`[Portfolio] contract_open_dates journal query failed: ${message}`),
+      scrubSecrets(`[Portfolio] entry-dates journal query failed: ${message}`),
     );
-    return {};
+    return { trade_log_dates: {}, contract_open_dates: {} };
   }
 }
 
-/** The two journal-derived entry-date maps the share card consults, read
- *  concurrently and cached independently. */
+/** The two journal-derived entry-date maps the share card consults. */
 async function loadPortfolioEntryDates(): Promise<{
   trade_log_dates: Record<string, string>;
   contract_open_dates: Record<string, string>;
 }> {
-  const [trade_log_dates, contract_open_dates] = await Promise.all([
-    readCachedPortfolioTradeLogDates(loadTradeLogDates),
-    readCachedPortfolioContractOpenDates(loadContractOpenDates),
-  ]);
-  return { trade_log_dates, contract_open_dates };
+  return readCachedPortfolioEntryDates(loadPortfolioEntryDatesFromDb);
 }
 
 async function portfolioResponseFromSnapshot(

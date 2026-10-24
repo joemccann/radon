@@ -18,6 +18,7 @@ import {
   PORTFOLIO_SNAPSHOT_CACHE_TTL_MS,
   invalidatePortfolioReadCaches,
   readCachedPortfolioContractOpenDates,
+  readCachedPortfolioEntryDates,
   readCachedPortfolioSnapshot,
   readCachedPortfolioTradeLogDates,
 } from "@/lib/portfolio/portfolioReadCache";
@@ -159,9 +160,13 @@ describe("portfolio read cache policy", () => {
     const contractDates = vi.fn()
       .mockResolvedValueOnce("contract-v1")
       .mockResolvedValueOnce("contract-v2");
+    const entryDates = vi.fn()
+      .mockResolvedValueOnce({ trade: "v1" })
+      .mockResolvedValueOnce({ trade: "v2" });
     await readCachedPortfolioSnapshot(snapshot);
     await readCachedPortfolioTradeLogDates(tradeDates);
     await readCachedPortfolioContractOpenDates(contractDates);
+    await readCachedPortfolioEntryDates(entryDates);
 
     const response = await POST();
     expect(response.status).toBe(200);
@@ -172,6 +177,7 @@ describe("portfolio read cache policy", () => {
     await expect(readCachedPortfolioSnapshot(snapshot)).resolves.toMatchObject({ value: "snapshot-v2" });
     await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v2");
     await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v2");
+    await expect(readCachedPortfolioEntryDates(entryDates)).resolves.toEqual({ trade: "v2" });
   });
 
   it("invalidates snapshot and both entry-date caches after a successful sync", async () => {
@@ -185,16 +191,22 @@ describe("portfolio read cache policy", () => {
       .mockResolvedValueOnce("contract-v1")
       .mockResolvedValueOnce("contract-v2");
 
+    const entryDates = vi.fn()
+      .mockResolvedValueOnce({ trade: "v1" })
+      .mockResolvedValueOnce({ trade: "v2" });
     await readCachedPortfolioSnapshot(snapshot);
     await readCachedPortfolioTradeLogDates(tradeDates);
     await readCachedPortfolioContractOpenDates(contractDates);
+    await readCachedPortfolioEntryDates(entryDates);
     invalidatePortfolioReadCaches();
 
     await expect(readCachedPortfolioSnapshot(snapshot)).resolves.toMatchObject({ value: "snapshot-v2" });
     await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v2");
     await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v2");
+    await expect(readCachedPortfolioEntryDates(entryDates)).resolves.toEqual({ trade: "v2" });
     expect(snapshot).toHaveBeenCalledTimes(2);
     expect(tradeDates).toHaveBeenCalledTimes(2);
     expect(contractDates).toHaveBeenCalledTimes(2);
+    expect(entryDates).toHaveBeenCalledTimes(2);
   });
 });

@@ -14,7 +14,13 @@ const mockReadDataFile = vi.fn();
 vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
 
 const mockExecute = vi.fn();
-vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({
+  resetDb: () => {},
+  getDb: () => ({
+    execute: mockExecute,
+    batch: async (stmts: Array<{ sql: string }>) => Promise.all(stmts.map((s) => mockExecute(s))),
+  }),
+}));
 
 function makePortfolio(lastSync: string) {
   return {

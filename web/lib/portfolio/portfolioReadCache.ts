@@ -10,6 +10,7 @@ import {
 export const PORTFOLIO_SNAPSHOT_CACHE_KEY = "portfolio:snapshot";
 export const PORTFOLIO_TRADE_LOG_DATES_CACHE_KEY = "portfolio:tradeLogDates";
 export const PORTFOLIO_CONTRACT_OPEN_DATES_CACHE_KEY = "portfolio:contractOpenDates";
+export const PORTFOLIO_ENTRY_DATES_CACHE_KEY = "portfolio:entryDates";
 
 // The open-market poll is 2s. Keep the coalescing window inside that interval
 // so the next poll sees a snapshot another process published to Turso.
@@ -52,6 +53,17 @@ export function readCachedPortfolioContractOpenDates<T>(
   );
 }
 
+/** Both journal maps share one 60s window and one Turso pipeline (PERF-025). */
+export function readCachedPortfolioEntryDates<T>(
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  return cachedRead(
+    PORTFOLIO_ENTRY_DATES_CACHE_KEY,
+    PORTFOLIO_ENTRY_DATES_CACHE_TTL_MS,
+    fetcher,
+  );
+}
+
 export function invalidatePortfolioSnapshotCache(): void {
   invalidateCache(PORTFOLIO_SNAPSHOT_CACHE_KEY);
 }
@@ -61,4 +73,5 @@ export function invalidatePortfolioReadCaches(): void {
   invalidateCache(PORTFOLIO_SNAPSHOT_CACHE_KEY);
   invalidateCache(PORTFOLIO_TRADE_LOG_DATES_CACHE_KEY);
   invalidateCache(PORTFOLIO_CONTRACT_OPEN_DATES_CACHE_KEY);
+  invalidateCache(PORTFOLIO_ENTRY_DATES_CACHE_KEY);
 }

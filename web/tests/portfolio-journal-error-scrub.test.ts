@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  *
- * The two journal queries behind `GET /api/portfolio?include=entry-dates`
+ * The journal batch behind `GET /api/portfolio?include=entry-dates`
  * logged `error.message` verbatim. `web/lib/dbExecute.ts` scrubs its own
  * diagnostic and then rethrows the ORIGINAL error, and that scrubber's pattern
  * list (libsql/Turso URLs, bearer and auth tokens, API keys, JWTs, account ids)
@@ -25,30 +25,33 @@ const SNAPSHOT = {
 };
 
 const db = vi.hoisted(() => ({ fail: null as null | Error }));
+function runStatement(statement: unknown) {
+  const sql =
+    typeof statement === "string"
+      ? statement
+      : ((statement as { sql: string }).sql ?? "");
+  if (/journal/i.test(sql) && db.fail) throw db.fail;
+  if (/portfolio_snapshots/i.test(sql)) {
+    return {
+      rows: [
+        {
+          taken_at: SNAPSHOT.last_sync,
+          payload: JSON.stringify(SNAPSHOT),
+        },
+      ],
+      columns: ["taken_at", "payload"],
+    };
+  }
+  return { rows: [], columns: [] };
+}
+
 vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: () => ({
     // Only the journal reads fail: the snapshot must still load, or the route
-    // 503s before it ever reaches the two queries under test.
-    execute: async (statement: unknown) => {
-      const sql =
-        typeof statement === "string"
-          ? statement
-          : ((statement as { sql: string }).sql ?? "");
-      if (/journal/i.test(sql) && db.fail) throw db.fail;
-      if (/portfolio_snapshots/i.test(sql)) {
-        return {
-          rows: [
-            {
-              taken_at: SNAPSHOT.last_sync,
-              payload: JSON.stringify(SNAPSHOT),
-            },
-          ],
-          columns: ["taken_at", "payload"],
-        };
-      }
-      return { rows: [], columns: [] };
-    },
+    // 503s before it ever reaches the batch under test.
+    execute: async (statement: unknown) => runStatement(statement),
+    batch: async (statements: unknown[]) => statements.map(runStatement),
   }),
 }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: vi.fn() }));
