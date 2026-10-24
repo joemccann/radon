@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from _bash_toolchain import requires_flock
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = "/var/lib/radon-lock/deploy.lock"
@@ -124,6 +126,7 @@ def test_provisioning_refuses_unsafe_existing_primary(tmp_path, unsafe):
     assert elsewhere.read_text() == "keep"
 
 
+@requires_flock
 @pytest.mark.parametrize("recover_only", [False, True])
 def test_first_upgrade_only_recovery_may_use_legacy_alone(tmp_path, recover_only):
     import os
@@ -401,6 +404,7 @@ def test_entrypoint_prestage_does_not_treat_unknown_lookup_as_first_bootstrap(tm
     assert not selected.exists()
 
 
+@requires_flock
 def test_entrypoint_prestage_refuses_inode_replacement_after_open(tmp_path):
     result, calls, _, canonical = _probe_deploy_entrypoint(
         tmp_path, state="regular", python_fault="replace-after-open", journal_present=False,
@@ -410,6 +414,7 @@ def test_entrypoint_prestage_refuses_inode_replacement_after_open(tmp_path):
     assert canonical.is_symlink(), "the isolated race sensor must actually replace the name"
 
 
+@requires_flock
 @pytest.mark.parametrize("selector", ["custom", "custom-with-legacy"])
 def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path, selector):
     result, calls, selected, _ = _probe_deploy_entrypoint(
@@ -425,6 +430,7 @@ def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path
         assert not selected.exists()
 
 
+@requires_flock
 def test_entrypoint_ready_canonical_locks_reach_bounded_child_sensor(tmp_path):
     result, calls, _, _ = _probe_deploy_entrypoint(tmp_path, state="regular", journal_present=False)
     assert result.returncode == 97, result.stdout + result.stderr
