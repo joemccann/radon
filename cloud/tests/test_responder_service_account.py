@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from _bash_toolchain import requires_linux_test_binary
+
 CLOUD = Path(__file__).resolve().parents[1]
 HOME = "/var/lib/radon-responder"
 USER = "radon-responder"
@@ -327,6 +329,7 @@ def test_handover_fails_closed_on_state_lookup_errors(maintenance, tmp_path, res
     assert not any(args[1:3] == ["enable", "--now"] and args[-1] in maintenance.NEW_TIMERS for args in calls)
 
 
+@requires_linux_test_binary
 @pytest.mark.parametrize("layout", ["native", "canonical", "canonical-link", "installer-native", "installer-empty", "dangling", "nonexecutable", "directory"])
 def test_preparation_normalizes_native_installer_layout_without_overwriting_slots(maintenance, tmp_path, monkeypatch, layout):
     monkeypatch.setattr(maintenance, "ACCOUNT_HOME", tmp_path)
