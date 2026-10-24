@@ -1046,3 +1046,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-329 / R-740 | DONE | RED 6 failed (route 422 ORDER_MAX_LOSS_LIMIT on the fresh 10-lot SPX close, loss $10,999,000); GREEN 6 passed; focused neighborhood 229 passed | A SELL-envelope close of held longs is no longer priced as new short assignment. The loss cap still refuses an empty, stale, or unreadable book, an oversell, and a quantity over the contract cap. The snapshot is read only after ORDER_MAX_LOSS_LIMIT, and a failed read keeps the refusal. No halt change. |
+
+## Nightly remediation 2026-10-24
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-330 / R-741 | DONE | RED 4 failed (`refusal_reason` returned None for unset and local mode; `hrana_execute` raised `HranaHttpError` from the wire tripwire; `monitor_daemon --once` called `create_daemon`); GREEN 45 passed (guard, Hrana failure modes, API HTTP, portfolio-delete receipt). Permanent drills 114 passed. | A non-Linux process is refused whatever `RADON_MODE` is. Pytest still exercises the transport because `PYTEST_CURRENT_TEST` is set only by the runner. `get_db` and `api.db_http` execute and transaction refuse before connect. Linux is unchanged. No catch was widened and no retry was added. |
