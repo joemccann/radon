@@ -268,7 +268,7 @@ class TestOutageIsNotASignatureVerdict:
             def get_signing_keys(self):
                 if state["fail"]:
                     raise TimeoutError("clerk timed out")
-                return [type("K", (), {"key_id": "kid-a"})()]
+                return [type("K", (), {"key_id": "kid-a", "key": "the-key"})()]
 
             def get_signing_key(self, kid):
                 return type("S", (), {"key": "the-key"})()
@@ -313,7 +313,7 @@ class TestOutageIsNotASignatureVerdict:
 
         class Rotating:
             def get_signing_keys(self):
-                return [type("K", (), {"key_id": k})() for k in keys["set"]]
+                return [type("K", (), {"key_id": k, "key": f"key-{k}"})() for k in keys["set"]]
 
             def get_signing_key(self, kid):
                 import jwt as pyjwt

@@ -169,16 +169,18 @@ def _signing_key_for(token: str):
     # RC-A3: a kid the client can already serve needs no live refetch, so it
     # must not compete for the refresh gate — 4 in-flight slow unknown-kid
     # lookups used to 503 every caller, cached signing key in hand or not.
+    # DS-2026-10-24-05: served from that set, not through get_signing_key,
+    # which waits on the client lock a forged-kid refetch holds.
     try:
-        cached_kids = {key.key_id for key in client.get_signing_keys()}
+        cached_keys = {key.key_id: key for key in client.get_signing_keys()}
     except AuthError:
         raise
     except Exception as exc:
         if _is_upstream_outage(exc):
             raise AuthError(503, "authentication temporarily unavailable") from exc
-        cached_kids = set()
-    if kid in cached_kids:
-        return _resolve_signing_key(client, kid)
+        cached_keys = {}
+    if kid in cached_keys:
+        return cached_keys[kid].key
 
     if not _jwks_gate.acquire(blocking=False):
         raise AuthError(503, "authentication unavailable")
