@@ -109,6 +109,31 @@ class TestRedaction:
         assert _clean(out), out
         assert "OTHER=keepme" in out
 
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"])
+    def test_a_value_on_the_next_line_is_redacted(self, newline):
+        # DS-2026-10-24-04: the head allowed spaces and tabs only after `:`.
+        for value in (OPAQUE, f'"{OPAQUE}"'):
+            text = f"password:{newline}    {value}{newline}other: keepme{newline}"
+            out = scrub_credential_text(text)
+            assert _clean(out), out
+            assert "other: keepme" in out
+
+    def test_the_tail_after_a_partial_specific_redaction_is_redacted(self):
+        # DS-2026-10-24-04: a value that merely STARTED with a marker was skipped.
+        text = "api_key=" + "sk-ant-" + f"{OPAQUE}.{TAIL}\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+
+    def test_a_query_tail_after_a_marker_is_not_a_secret_tail(self):
+        out = scrub_credential_text(f"https://h.invalid/v1?api_key={OPAQUE}&symbol=SPY&{TAIL}\n")
+        assert OPAQUE not in out and "symbol=SPY" in out, out
+        out = scrub_credential_text("token=" + "sk-ant-" + f"{OPAQUE}&{TAIL}\n")
+        assert _clean(out), out
+
+    def test_an_exact_marker_keeps_its_own_tag(self):
+        out = scrub_credential_text("api_key=" + "sk-ant-" + f"{OPAQUE}\n")
+        assert out == "api_key=[redacted-key]\n", out
+
     def test_a_single_quoted_value_still_keeps_its_delimiters(self):
         out = scrub_credential_text(f'api_key = "{OPAQUE}"\n')
         assert _clean(out)
@@ -124,6 +149,30 @@ class TestRedaction:
             'HELP = """usage text"""\n',
         ]:
             assert scrub_credential_text(text) == text, text
+
+
+class TestSingleQuotedScalarGrammar:
+    def test_a_yaml_backslash_before_a_doubled_quote_keeps_no_suffix(self):
+        # YAML single-quoted: `\` is literal and `''` is an embedded quote.
+        text = f"password: '{OPAQUE}\\''{TAIL}'\nother: keepme\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+        assert "other: keepme" in out
+
+    def test_a_python_escaped_quote_still_keeps_no_suffix(self):
+        text = f"password = '{OPAQUE}\\'{TAIL}'\nother = 1\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+        assert "other = 1" in out
+
+
+class TestLongUnquotedLiteralIsDetected:
+    def test_a_literal_past_the_scanner_bound_is_detected(self):
+        long_value = (OPAQUE + TAIL) * 40  # 1,440 chars of key alphabet
+        assert find_secret_assignments(f"AWS_SESSION_TOKEN={long_value}\n")
+
+    def test_a_long_expression_is_not_a_literal(self):
+        assert not find_secret_assignments("token = " + "a1." * 400 + "hex\n")
 
 
 class TestDetection:

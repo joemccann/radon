@@ -12,6 +12,7 @@ client-supplied flag.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -185,6 +186,90 @@ def _resting_changes(orders: Any) -> Optional[dict[tuple, tuple[float, float]]]:
     return resting
 
 
+# DS-2026-10-24-02: the placement funnel's broker-confirmed book. While set,
+# is_close_out measures holdings and resting orders from the broker instead of
+# the store, whose snapshot can still show a holding a filled close removed.
+_BROKER_BOOK: Any = ...
+
+
+@contextmanager
+def broker_book(book: Optional[tuple[dict, dict]]):
+    """Measure close-outs against ``book`` (None: no close is provable)."""
+    global _BROKER_BOOK
+    previous, _BROKER_BOOK = _BROKER_BOOK, book
+    try:
+        yield
+    finally:
+        _BROKER_BOOK = previous
+
+
+def _contract_key(contract: Any) -> Optional[tuple]:
+    symbol = str(getattr(contract, "symbol", "") or "").upper()
+    sec_type = str(getattr(contract, "secType", "") or "")
+    if sec_type == "STK":
+        return (symbol, "STK", None, "")
+    if sec_type == "OPT":
+        return (
+            symbol,
+            _norm_right(getattr(contract, "right", "")),
+            _finite(getattr(contract, "strike", None)),
+            _norm_expiry(getattr(contract, "lastTradeDateOrContractMonth", "")),
+        )
+    return None
+
+
+def read_broker_book(client: Any) -> Optional[tuple[dict, dict]]:
+    """(held, resting) from the connected broker; None when unreadable.
+
+    Same shapes as ``_held_quantities`` / ``_resting_changes``. A combo leg's
+    conId resolves through the held positions: a leg on a contract nobody
+    holds cannot reserve held size.
+    """
+    try:
+        held: dict[tuple, float] = {}
+        by_con_id: dict[Any, tuple] = {}
+        for pos in client.get_positions():
+            key = _contract_key(pos.contract)
+            size = _finite(pos.position)
+            if key is None or size is None:
+                continue
+            held[key] = held.get(key, 0.0) + size
+            by_con_id[getattr(pos.contract, "conId", None)] = key
+        resting: dict[tuple, tuple[float, float]] = {}
+        for trade in client.get_open_orders():
+            status = str(trade.orderStatus.status or "").upper().replace(" ", "")
+            if status not in _RESTING_STATUSES:
+                continue
+            remaining = _finite(trade.orderStatus.remaining)
+            if remaining is None:
+                return None
+            if remaining <= 0:
+                continue
+            sell = str(trade.order.action or "").upper().startswith("SELL")
+            if str(getattr(trade.contract, "secType", "")) == "BAG":
+                changes = []
+                for leg in trade.contract.comboLegs or []:
+                    key = by_con_id.get(leg.conId)
+                    if key is None:
+                        continue
+                    leg_sell = str(leg.action or "").upper().startswith("SELL") != sell
+                    ratio = abs(_finite(leg.ratio) or 1.0)
+                    changes.append((key, (-1.0 if leg_sell else 1.0) * remaining * ratio))
+            else:
+                key = _contract_key(trade.contract)
+                changes = [] if key is None else [(key, (-1.0 if sell else 1.0) * remaining)]
+            for key, change in changes:
+                selling, buying = resting.get(key, (0.0, 0.0))
+                if change < 0:
+                    selling += change
+                else:
+                    buying += change
+                resting[key] = (selling, buying)
+        return held, resting
+    except Exception:  # noqa: BLE001 - an unreadable broker book proves no close
+        return None
+
+
 def _available_position(position: float, resting: tuple[float, float]) -> float:
     """``position`` less the part a resting order has already claimed.
 
@@ -267,18 +352,24 @@ def is_close_out(
     The holding is measured net of what working orders have already claimed
     (DS-2026-10-23-03). ``working_orders`` defaults to a read of today's book;
     pass a list to supply it, and a book that cannot be read is not a waiver.
+    Inside ``broker_book`` both come from the broker instead (DS-2026-10-24-02).
     """
     if not isinstance(snapshot, dict):
         return False
     legs = _order_legs(params)
     if not legs:
         return False
-    if working_orders is ...:
-        working_orders = _load_working_orders()
-    resting = _resting_changes(working_orders)
-    if resting is None:
-        return False
-    held = _held_quantities(snapshot)
+    if _BROKER_BOOK is not ...:
+        if _BROKER_BOOK is None:
+            return False
+        held, resting = _BROKER_BOOK
+    else:
+        if working_orders is ...:
+            working_orders = _load_working_orders()
+        resting = _resting_changes(working_orders)
+        if resting is None:
+            return False
+        held = _held_quantities(snapshot)
     changes: dict[tuple, float] = {}
     for key, change in legs:
         if _finite(change) is None:

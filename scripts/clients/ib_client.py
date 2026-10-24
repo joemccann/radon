@@ -713,7 +713,7 @@ class IBClient:
         # is the inversion ib_place_order.py was restructured to avoid. Pure
         # function over a process-local snapshot (app_preferences contract: no
         # inline I/O, never raises), so double-checking costs nothing. R-427/R-428.
-        from order_limits import check_order_limits, check_quantity_limit  # noqa: PLC0415
+        from order_limits import check_order_limits, check_quantity_limit, contract_limit_shape  # noqa: PLC0415
 
         # A BAG's leg detail (strikes, ratios) is not derivable here — a
         # `comboLeg` carries a conId, not a strike — and `check_order_limits`
@@ -741,21 +741,12 @@ class IBClient:
             # contract 10x at the one guard a new call site cannot go around.
             # The broker contract carries the multiplier; check_order_limits
             # fails a future closed when it has no usable one.
-            if sec_type == "STK":
-                limit_type = "stock"
-            elif sec_type == "FUT":
-                limit_type = "future"
-            else:
-                limit_type = "option"
-            limit_params = {
-                "type": limit_type,
+            violation = check_order_limits({
+                **contract_limit_shape(contract),
                 "quantity": getattr(order, "totalQuantity", 0),
                 "symbol": getattr(contract, "symbol", ""),
                 "limitPrice": reference_price,
-            }
-            if limit_type == "future":
-                limit_params["multiplier"] = getattr(contract, "multiplier", None)
-            violation = check_order_limits(limit_params)
+            })
         if violation:
             raise IBOrderError(violation["message"])
         try:
@@ -891,7 +882,7 @@ class IBClient:
         # REL-186: the modify re-submit is a placement at the wire, so it takes
         # the same last-funnel bound as place_order — secType-aware, with the
         # BAG carve-out (leg detail is not derivable from comboLegs). R-427/R-428.
-        from order_limits import check_order_limits, check_quantity_limit  # noqa: PLC0415
+        from order_limits import check_order_limits, check_quantity_limit, contract_limit_shape  # noqa: PLC0415
 
         sec_type = str(getattr(contract, "secType", "") or "")
         if sec_type == "BAG":
@@ -908,7 +899,7 @@ class IBClient:
             if not math.isfinite(reference_price) or reference_price <= 0:
                 raise IBOrderError("Order requires a positive finite reference price")
             violation = check_order_limits({
-                "type": "stock" if sec_type == "STK" else "option",
+                **contract_limit_shape(contract),
                 "quantity": getattr(order, "totalQuantity", 0),
                 "symbol": getattr(contract, "symbol", ""),
                 "limitPrice": reference_price,

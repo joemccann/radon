@@ -319,7 +319,11 @@ for sizing/eval is unchanged.
   same holding individually reducing, and the surplus opened a short once more
   than one filled. Only a resting change that opposes the holding reduces it,
   and a working-order book that cannot be read is not a waiver
-  (`scripts/tests/test_close_exemption_reservation.py`).
+  (`scripts/tests/test_close_exemption_reservation.py`). The snapshot still
+  shows a holding a filled close has sold, so `ib_place_order.py` re-runs every
+  guard that exempted a close against the broker's live positions and working
+  orders before it transmits; an unreadable broker book proves no close
+  (`scripts/tests/test_close_exemption_broker_book.py`).
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.

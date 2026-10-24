@@ -169,16 +169,12 @@ def _signing_key_for(token: str):
     # RC-A3: a kid the client can already serve needs no live refetch, so it
     # must not compete for the refresh gate — 4 in-flight slow unknown-kid
     # lookups used to 503 every caller, cached signing key in hand or not.
-    try:
-        cached_kids = {key.key_id for key in client.get_signing_keys()}
-    except AuthError:
-        raise
-    except Exception as exc:
-        if _is_upstream_outage(exc):
-            raise AuthError(503, "authentication temporarily unavailable") from exc
-        cached_kids = set()
-    if kid in cached_kids:
-        return _resolve_signing_key(client, kid)
+    # DS-2026-10-24-05: read from the unexpired cached set only. Through
+    # get_signing_key it waited on the client lock a forged-kid refetch holds,
+    # and get_signing_keys fetched an empty or expired set outside the gate.
+    cached = _cached_signing_key(client, kid)
+    if cached is not None:
+        return cached.key
 
     if not _jwks_gate.acquire(blocking=False):
         raise AuthError(503, "authentication unavailable")
@@ -191,9 +187,36 @@ def _signing_key_for(token: str):
             _jwks_refresh_after.move_to_end(kid)
             while len(_jwks_refresh_after) > 256:
                 _jwks_refresh_after.popitem(last=False)
-        return _resolve_signing_key(client, kid)
+        try:
+            return _resolve_signing_key(client, kid)
+        except AuthError as exc:
+            # An outage is not a verdict: the kid stays re-probeable once the
+            # key set is reachable again, now that a cached kid cannot be
+            # served from a set the fast path itself refetched.
+            if exc.status == 503:
+                with _jwks_refresh_lock:
+                    _jwks_refresh_after.pop(kid, None)
+            raise
     finally:
         _jwks_gate.release()
+
+
+def _cached_signing_key(client, kid):
+    """The key for ``kid`` from the unexpired cached JWKS, or None. Never fetches.
+
+    Same contract as scripts/api/auth.py:_cached_signing_key.
+    """
+    try:
+        cache = getattr(client, "jwk_set_cache", None)
+        jwk_set = cache.get() if cache is not None else None
+    except Exception:  # noqa: BLE001 - the gated lookup owns error mapping
+        return None
+    if jwk_set is None:
+        return None
+    for key in jwk_set.keys:
+        if key.key_id == kid and key.public_key_use in ("sig", None):
+            return key
+    return None
 
 
 def _resolve_signing_key(client, kid):
