@@ -66,10 +66,10 @@ export const IV_RANK_REFRESH: RefreshSchedule = [daily(22, 10)];
 export const IV_SPREAD_REFRESH: RefreshSchedule = [daily(22, 15)];
 
 /** cloud/services/radon-ma-ratio.timer */
-export const MA_RATIO_REFRESH: RefreshSchedule = [daily(22, 45)];
+export const MA_RATIO_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [16], minutes: [20] }];
 
 /** cloud/services/radon-rsi-oversold.timer */
-export const RSI_OVERSOLD_REFRESH: RefreshSchedule = [daily(23, 5)];
+export const RSI_OVERSOLD_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [16], minutes: [40] }];
 
 /** cloud/services/radon-calm-streak.timer */
 export const CALM_STREAK_REFRESH: RefreshSchedule = [daily(2, 40), daily(14, 30)];

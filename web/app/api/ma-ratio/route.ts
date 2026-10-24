@@ -25,7 +25,7 @@ const MISSING_MA_RATIO = Object.freeze({
   zone: null,
 });
 
-// radon-ma-ratio.timer runs the sweep once daily at 22:45 UTC; 48h covers a
+// radon-ma-ratio.timer runs the sweep once daily at 16:20 ET; 48h covers a
 // full missed day plus slack. A snapshot older than that means the writer is
 // down, not merely between runs.
 const MA_RATIO_MAX_AGE_MS = 48 * 60 * 60_000;

@@ -4,7 +4,7 @@
  * /api/rsi-oversold — SPX percent of members with Wilder RSI(14) below 30
  * (regime tab RSI OVERSOLD).
  *
- * GET-only (radon-rsi-oversold timer runs the sweep once daily at 23:05 UTC).
+ * GET-only (radon-rsi-oversold timer runs the sweep once daily at 16:40 ET).
  * Reads through dbFirstRead — Turso scan_snapshots (service='rsi-oversold')
  * first, disk data/rsi_oversold.json fallback — and ALWAYS returns 200; absent
  * data is the contract's `missing: true` shape, never a 4xx.
