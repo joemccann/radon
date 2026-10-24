@@ -115,6 +115,21 @@ class TestRedaction:
             assert scrub_credential_text(text) == text, text
 
 
+class TestSingleQuotedScalarGrammar:
+    def test_a_yaml_backslash_before_a_doubled_quote_keeps_no_suffix(self):
+        # YAML single-quoted: `\` is literal and `''` is an embedded quote.
+        text = f"password: '{OPAQUE}\\''{TAIL}'\nother: keepme\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+        assert "other: keepme" in out
+
+    def test_a_python_escaped_quote_still_keeps_no_suffix(self):
+        text = f"password = '{OPAQUE}\\'{TAIL}'\nother = 1\n"
+        out = scrub_credential_text(text)
+        assert _clean(out), out
+        assert "other = 1" in out
+
+
 class TestLongUnquotedLiteralIsDetected:
     def test_a_literal_past_the_scanner_bound_is_detected(self):
         long_value = (OPAQUE + TAIL) * 40  # 1,440 chars of key alphabet
