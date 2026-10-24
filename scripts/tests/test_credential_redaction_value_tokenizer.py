@@ -60,6 +60,30 @@ class TestRedaction:
         text = f'api_key = {prefix}"""{OPAQUE}"""\n'
         assert _clean(scrub_credential_text(text)), text
 
+    @pytest.mark.parametrize("label", ["[redacted]", "[redacted-secret]", "[redacted-key]"])
+    @pytest.mark.parametrize("quote", ['"', "'", ""])
+    def test_a_label_prefixed_value_is_still_redacted(self, label, quote):
+        """The idempotency skip must test the WHOLE value, not its prefix.
+
+        The skip exists so an already-tagged assignment is not re-wrapped. It
+        asked whether the value STARTS WITH a redaction label, so a value whose
+        prefix is the label published its remainder verbatim: the same
+        value-tail survival this file's six shapes closed, in the one branch
+        that opts out of redaction.
+        """
+        text = f"password = {quote}{label}{OPAQUE}{quote}\n"
+        assert _clean(scrub_credential_text(text)), text
+
+    @pytest.mark.parametrize("label", ["[redacted]", "[redacted-secret]", "[redacted-key]"])
+    def test_an_exactly_labelled_value_is_left_alone(self, label):
+        """Idempotency: scrubbing already-scrubbed text changes nothing."""
+        for text in (
+            f'password = "{label}"\n',
+            f"password = {label}\n",
+            f"password = {label}  \n",
+        ):
+            assert scrub_credential_text(text) == text, text
+
     def test_13_password_only_url_userinfo_is_redacted(self):
         text = f"https://:{OPAQUE}@db.internal/path\n"
         out = scrub_credential_text(text)
