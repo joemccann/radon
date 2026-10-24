@@ -51,11 +51,7 @@ def test_connection_error_is_503_and_the_kid_stays_reprobeable(monkeypatch):
 
     class Flaky:
         def get_signing_keys(self):
-            # The kid is not in the set until the outage clears; a cached kid
-            # resolves from the set and never reaches get_signing_key.
-            if state["fail"]:
-                return []
-            return [type("K", (), {"key_id": "kid-conn", "key": "the-key"})()]
+            return [type("K", (), {"key_id": "kid-conn"})()]
 
         def get_signing_key(self, kid):
             if state["fail"]:
