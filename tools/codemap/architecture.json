@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-10-23T09:00:08Z",
-  "node_count": 4151,
-  "edge_count": 8494,
+  "generated_at": "2026-10-24T09:00:09Z",
+  "node_count": 4157,
+  "edge_count": 8513,
   "areas": {
     "web": 2367,
     "site": 159,
-    "scripts": 1456,
+    "scripts": 1462,
     "cloud": 121,
     "lib": 28,
     "tests": 17,
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 141
+      "count": 143
     },
     {
       "id": "scripts/backtest",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 765
+      "count": 768
     },
     {
       "id": "scripts/trade_blotter",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/utils",
       "area": "scripts",
-      "count": 46
+      "count": 47
     },
     {
       "id": "scripts/uw_stream",
@@ -363,14 +363,14 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 101,
+      "in": 102,
       "out": 0,
       "test": false
     },
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 100,
+      "in": 101,
       "out": 1,
       "test": false
     },
@@ -399,7 +399,7 @@
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
       "in": 65,
-      "out": 3,
+      "out": 4,
       "test": false
     },
     {
@@ -515,6 +515,13 @@
       "test": false
     },
     {
+      "id": "scripts/utils/__init__.py",
+      "area": "scripts",
+      "in": 42,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/userError.ts",
       "area": "web",
       "in": 41,
@@ -529,17 +536,17 @@
       "test": false
     },
     {
-      "id": "scripts/utils/__init__.py",
+      "id": "scripts/clients/ib_client.py",
       "area": "scripts",
-      "in": 40,
-      "out": 0,
+      "in": 38,
+      "out": 3,
       "test": false
     },
     {
-      "id": "scripts/clients/ib_client.py",
+      "id": "scripts/api/auth.py",
       "area": "scripts",
-      "in": 37,
-      "out": 3,
+      "in": 40,
+      "out": 0,
       "test": false
     },
     {
@@ -552,13 +559,6 @@
     {
       "id": "web/lib/serviceHealthWindows.ts",
       "area": "web",
-      "in": 39,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/api/auth.py",
-      "area": "scripts",
       "in": 39,
       "out": 0,
       "test": false
