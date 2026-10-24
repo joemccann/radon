@@ -265,12 +265,9 @@ class TestOutageIsNotASignatureVerdict:
         state = {"fail": True}
 
         class Flaky:
-            def get_signing_keys(self):
+            def get_signing_key(self, kid):
                 if state["fail"]:
                     raise TimeoutError("clerk timed out")
-                return [type("K", (), {"key_id": "kid-a", "key": "the-key"})()]
-
-            def get_signing_key(self, kid):
                 return type("S", (), {"key": "the-key"})()
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Flaky())
@@ -289,13 +286,10 @@ class TestOutageIsNotASignatureVerdict:
         calls = []
 
         class Known:
-            def get_signing_keys(self):
-                calls.append(1)
-                return [type("K", (), {"key_id": "kid-real"})()]
-
             def get_signing_key(self, kid):
                 import jwt as pyjwt
 
+                calls.append(1)
                 raise pyjwt.exceptions.InvalidTokenError("no such kid")
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Known())
@@ -313,7 +307,7 @@ class TestOutageIsNotASignatureVerdict:
 
         class Rotating:
             def get_signing_keys(self):
-                return [type("K", (), {"key_id": k, "key": f"key-{k}"})() for k in keys["set"]]
+                return [type("K", (), {"key_id": k})() for k in keys["set"]]
 
             def get_signing_key(self, kid):
                 import jwt as pyjwt
