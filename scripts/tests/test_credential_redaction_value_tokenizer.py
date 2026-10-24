@@ -115,6 +115,15 @@ class TestRedaction:
             assert scrub_credential_text(text) == text, text
 
 
+class TestLongUnquotedLiteralIsDetected:
+    def test_a_literal_past_the_scanner_bound_is_detected(self):
+        long_value = (OPAQUE + TAIL) * 40  # 1,440 chars of key alphabet
+        assert find_secret_assignments(f"AWS_SESSION_TOKEN={long_value}\n")
+
+    def test_a_long_expression_is_not_a_literal(self):
+        assert not find_secret_assignments("token = " + "a1." * 400 + "hex\n")
+
+
 class TestDetection:
     """Detection must cover every shape redaction covers (publication gate)."""
 

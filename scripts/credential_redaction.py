@@ -399,6 +399,7 @@ _SECRET_LITERAL_ASSIGNMENT = re.compile(
     r"(?![A-Za-z0-9_+/=~-])(?![.(\[$])",
     re.IGNORECASE,
 )
+_LONG_LITERAL = re.compile(r"[A-Za-z0-9_+/=~-]+")
 _PLACEHOLDER = re.compile(
     r"test|fake|dummy|example|sample|placeholder|changeme|redacted|your|x{4}",
     re.IGNORECASE,
@@ -441,7 +442,12 @@ def find_secret_assignments(text: str) -> list[str]:
     # which is how a multi-line, triple-delimited or prefixed value was
     # redacted but published as clean (DS-2026-10-22-10/-11/-12).
     for _head_end, body_start, body_end, delimiter in _iter_assignments(text or ""):
-        if delimiter and _quoted_value_is_secret((text or "")[body_start:body_end]):
+        body = (text or "")[body_start:body_end]
+        if delimiter and _quoted_value_is_secret(body):
+            return ["[redacted-secret]"]
+        # The literal scanner bounds its value run at 1024, so a longer
+        # unquoted literal (a session token) matched neither rule.
+        if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):
             return ["[redacted-secret]"]
     for match in _COOKIE_HEADER.finditer(text or ""):
         for pair in match.group("pairs").split(";"):
