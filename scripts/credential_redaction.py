@@ -244,10 +244,17 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # at the start of an unquoted value is part of the value.
 _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 
+# One line break plus indentation may sit between the key and its value: a
+# YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*",
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?",
     re.IGNORECASE,
 )
+
+# A value that IS a label one of the specific shapes wrote keeps that label,
+# as does one the query-string rule ended at the next `&name=` parameter. Any
+# other text after the label is the shape's unmatched tail (DS-2026-10-24-04).
+_REDACTION_MARKER = re.compile(r"\[redacted(?:-[a-z]+)*\](?=$|&[A-Za-z_][A-Za-z0-9_.-]*=)")
 
 
 def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
@@ -329,7 +336,7 @@ def _redact_assignments(text: str) -> str:
     last = 0
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
         body = text[body_start:body_end]
-        if body.startswith("[redacted") or (not delimiter and not body):
+        if _REDACTION_MARKER.match(body) or (not delimiter and not body):
             # An EMPTY quoted value still gets the label (the key is the tell);
             # an absent unquoted value has nothing to replace.
             continue
