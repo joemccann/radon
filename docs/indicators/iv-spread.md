@@ -286,9 +286,9 @@ environment variables: every path derives from the project directory.
 
 ## E. Scheduling
 
-`OnCalendar=*-*-* 22:15:00 UTC`, every calendar day. Verified free
-2026-09-02 (22:10 ivrank, 22:20 dispersion, 22:30 yield-curve, 22:40
-divyield, 22:45 ma-ratio). 22:15 UTC is after the 16:00 ET close year-round
+`OnCalendar=*-*-* 22:15:00 UTC`, every calendar day, between
+`radon-ivrank` at 22:10 UTC and `radon-dispersion` at 22:20 UTC.
+22:15 UTC is after the 16:00 ET close year-round
 (20:00/21:00 UTC), so both daily IV bars are final, and it sits between the
 two neighbouring IB daily pulls so the three never share a minute (each uses
 an auto client id anyway). Weekend and holiday runs are unchanged-data
