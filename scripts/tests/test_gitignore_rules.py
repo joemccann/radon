@@ -22,6 +22,13 @@ MUST_IGNORE = [
     ".vscode/settings.json",
     "vendor/tool",
     "scripts/__pycache__/x.pyc",
+    # A credential file that is a BARE literal (no key name) is invisible to
+    # gitleaks, so .gitignore is its only net. Retiring a subsystem must not
+    # take the net with it.
+    "secrets/ib_password.txt",
+    "docker/ib-gateway/secrets/ib_password.txt",
+    "cloud/secrets/token.txt",
+    "web/secrets/nested/deep.txt",
 ]
 
 

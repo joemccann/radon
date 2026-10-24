@@ -319,6 +319,39 @@ def _iter_assignments(text: str):
         cursor = max(body_end + len(delimiter), head.end() + 1)
 
 
+# The idempotency opt-out tests the value in FULL. `startswith` let a value
+# whose PREFIX is a label publish its remainder verbatim -- the same value-tail
+# survival the tokenizer closed, in the one branch that declines to redact.
+_REDACTION_LABEL = re.compile(r"\[redacted(?:-[a-z-]+)?\]")
+_VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
+
+
+def _is_already_redacted(body: str) -> bool:
+    """True when the value IS redaction output rather than a surviving tail.
+
+    A rule that ran earlier may redact only part of a value and leave
+    STRUCTURE behind: a URL query redactor rewrites `api_key=<secret>` and the
+    following `&symbol=SPY` is the next parameter, not the credential. That
+    tail must survive, so the opt-out cannot simply be "the value is exactly a
+    label".
+
+    What must NOT survive is a tail that CONTINUES the value. Two tells, both
+    already defined in this module: a first character from the value alphabet
+    (`[redacted]<secret>`), or an opaque literal anywhere in the remainder (a
+    tail reached past punctuation).
+    """
+    rest = body.strip()
+    label = _REDACTION_LABEL.match(rest)
+    if label is None:
+        return False
+    rest = rest[label.end() :]
+    if not rest:
+        return True
+    if _VALUE_CHAR.match(rest):
+        return False
+    return not _quoted_value_is_secret(rest)
+
+
 def _redact_assignments(text: str) -> str:
     """Replace every credential assignment's value with the redaction label.
 
@@ -329,7 +362,7 @@ def _redact_assignments(text: str) -> str:
     last = 0
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
         body = text[body_start:body_end]
-        if body.startswith("[redacted") or (not delimiter and not body):
+        if _is_already_redacted(body) or (not delimiter and not body):
             # An EMPTY quoted value still gets the label (the key is the tell);
             # an absent unquoted value has nothing to replace.
             continue
