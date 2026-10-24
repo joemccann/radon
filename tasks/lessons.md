@@ -1310,3 +1310,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 ### 2026-10-22 LEAP scanner admission
 - A scanner must explicitly wait through the provider's rolling minute or short Retry-After; a five-second UI deadline is not a batch scheduling policy. Preserve shared reservations, interactive headroom, hard quota refusal and bounded waits. Prove the behavior with a real isolated ledger and synthetic HTTP before rerunning a production universe.
+
+
+## 2026-09-08 - Research rejection counts need source-level verification
+- Do not describe zero publication as normal quality filtering until representative failures are replayed against actual source evidence. Distinguish pipeline defects from unsupported claims, and report candidate-level rejection counts separately from individual numerical assertions.
+- Text grounding must account for extraction formatting without weakening numeric/sign/unit checks. Preserve range context when generating checks: extracting the endpoint of 2-3% as -3% creates a false negative.
