@@ -135,7 +135,7 @@
       "relevant": [
         {
           "source": "docs",
-          "doc_key_pattern": "^docs/cross_asset_volatility_credit_gap_spec_(VCG)\\.md$",
+          "doc_key_pattern": "^docs/cross_asset_volatility_credit_gap_spec_\\(VCG\\)\\.md$",
           "grade": 3
         }
       ]
@@ -213,18 +213,6 @@
       ]
     },
     {
-      "id": "q-docs-018-gateway-docker",
-      "question": "What is the runbook for running IB Gateway in Docker?",
-      "category": "exact_term",
-      "relevant": [
-        {
-          "source": "docs",
-          "doc_key_pattern": "^docs/ib[-]gateway-docker\\.md$",
-          "grade": 3
-        }
-      ]
-    },
-    {
       "id": "q-docs-019-ib-connection-troubleshooting",
       "question": "What happens when the WS relay stops receiving ticks?",
       "category": "paraphrase",
@@ -244,18 +232,6 @@
         {
           "source": "docs",
           "doc_key_pattern": "^docs/ib[-]gateway-healthcheck-hardening\\.md$",
-          "grade": 3
-        }
-      ]
-    },
-    {
-      "id": "q-docs-021-ibc-remote-access",
-      "question": "How is IBC remote access configured for the Gateway?",
-      "category": "exact_term",
-      "relevant": [
-        {
-          "source": "docs",
-          "doc_key_pattern": "^docs/ibc-remote-access\\.md$",
           "grade": 3
         }
       ]
