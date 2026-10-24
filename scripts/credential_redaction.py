@@ -319,6 +319,12 @@ def _iter_assignments(text: str):
         cursor = max(body_end + len(delimiter), head.end() + 1)
 
 
+# The idempotency opt-out tests the value in FULL. `startswith` let a value
+# whose PREFIX is a label publish its remainder verbatim -- the same value-tail
+# survival the tokenizer closed, in the one branch that declines to redact.
+_REDACTION_LABEL = re.compile(r"\[redacted(?:-[a-z-]+)?\]")
+
+
 def _redact_assignments(text: str) -> str:
     """Replace every credential assignment's value with the redaction label.
 
@@ -329,7 +335,7 @@ def _redact_assignments(text: str) -> str:
     last = 0
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
         body = text[body_start:body_end]
-        if body.startswith("[redacted") or (not delimiter and not body):
+        if _REDACTION_LABEL.fullmatch(body.strip()) or (not delimiter and not body):
             # An EMPTY quoted value still gets the label (the key is the tell);
             # an absent unquoted value has nothing to replace.
             continue
