@@ -62,6 +62,18 @@ describe("FreshnessRail", () => {
     expect(screen.getByTestId("rail").textContent).toContain("1h 20m past the run");
   });
 
+  it("reads DUE, muted, while the run that owes the session is inside its grace", () => {
+    // 18:30 ET Wednesday: 20 minutes past the 18:10 ET slot, Wednesday's close
+    // printed, the panel still holds Tuesday. The writer is working; the rail
+    // must not count down to tomorrow's slot as if today's had been skipped.
+    renderAt("2026-08-26T22:30:00Z", "2026-08-25");
+    expect(screen.getByTestId("rail-countdown").textContent).toBe("Due");
+    expect(screen.getByTestId("rail").getAttribute("data-state")).toBe("due");
+    expect(screen.getByTestId("rail").textContent).toContain("Awaiting 2026-08-26");
+    expect(screen.getByTestId("rail").textContent).not.toContain("23h");
+    expect(screen.getByTestId("rail").textContent).toContain("Fired Today");
+  });
+
   it("ticks", () => {
     renderAt("2026-08-26T23:09:00Z", "2026-08-26");
     expect(screen.getByTestId("rail-countdown").textContent).toBe("23h 01m");

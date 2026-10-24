@@ -11285,6 +11285,17 @@ tr {
   background: color-mix(in srgb, var(--signal-core) 70%, transparent);
 }
 
+/* The run fired, the session is not here yet, and the writer's grace is not
+   spent: the job is working. Same muted track as behind; the countdown reads
+   Due in muted ink because nothing is late yet. */
+.freshness-rail[data-state="due"] .freshness-rail-countdown {
+  color: var(--text-muted);
+}
+
+.freshness-rail[data-state="due"] .freshness-rail-track-fill {
+  background: color-mix(in srgb, var(--signal-core) 70%, transparent);
+}
+
 /* The run fired and the session still is not here. This is the only state that
    earns a colour — and it takes --warn, never --fault: the data is late, not
    wrong (mirrors ivrankRegimeColor's restraint). */

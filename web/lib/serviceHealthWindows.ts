@@ -187,10 +187,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``div-yield`` — radon-divyield.timer fires daily 22:40 UTC every calendar day (weekend runs are unchanged-day heartbeats), so a uniform 26h window matches its yield-curve sibling; GitHub constituents + Yahoo dividends + Turso y10, no IB.
   "div-yield": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its div-yield sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
+  // ``ma-ratio`` — radon-ma-ratio.timer fires daily 16:20 ET every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its div-yield sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
   "ma-ratio": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 23:05 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its ma-ratio sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
+  // ``rsi-oversold`` — radon-rsi-oversold.timer fires daily 16:40 ET every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its ma-ratio sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
   "rsi-oversold": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every calendar day (304 runs are heartbeats), so a uniform 26h window; Cboe SPX HTTP + Turso only.
   "calm-streak": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },

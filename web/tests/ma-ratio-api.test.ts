@@ -4,7 +4,7 @@
  * /api/ma-ratio — SPX percent above 50d MA over percent above 200d MA
  * (regime tab MA RATIO).
  *
- * GET-only (radon-ma-ratio timer runs the sweep once daily at 22:45 UTC).
+ * GET-only (radon-ma-ratio timer runs the sweep once daily at 16:20 ET).
  * Reads through dbFirstRead — Turso scan_snapshots (service='ma-ratio')
  * first, disk data/ma_ratio.json fallback — and ALWAYS returns 200; absent
  * data is the contract's `missing: true` shape, never a 4xx.

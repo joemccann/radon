@@ -194,12 +194,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. GitHub/Wikipedia
     # constituents + Yahoo quotes + Turso y10 — no IB dependency.
     "div-yield":        {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # ma-ratio — radon-ma-ratio.timer, daily 22:45 UTC every calendar day
+    # ma-ratio — radon-ma-ratio.timer, daily 16:20 ET every calendar day
     # (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
     # window: no weekend/holiday gap to widen for. Shared price_history_daily
     # member closes (Yahoo sweep) + Turso — no IB dependency.
     "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # rsi-oversold — radon-rsi-oversold.timer, daily 23:05 UTC every calendar
+    # rsi-oversold — radon-rsi-oversold.timer, daily 16:40 ET every calendar
     # day (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
     # window. Shared price_history_daily member closes (Yahoo sweep) + Turso
     # — no IB dependency.
@@ -631,10 +631,10 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:40 UTC SPX dividend-yield breadth sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "div-yield",
-        # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
+        # Daily 16:20 ET SPX 50d/200d MA breadth-ratio sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "ma-ratio",
-        # Daily 23:05 UTC SPX RSI(14)<30 breadth sweep — hourly check
+        # Daily 16:40 ET SPX RSI(14)<30 breadth sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "rsi-oversold",
         "record-high-breadth",

@@ -146,7 +146,7 @@ chunked multi-row `INSERT ... ON CONFLICT(date) DO UPDATE`.
   `web/lib/assistant/nextLoaders.ts`.
 - `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'rsi-oversold'`,
   `fromDisk` = `data/rsi_oversold.json`.
-- `MAX_AGE_MS = 48h` — daily 23:05 UTC timer with slack. Missing contract:
+- `MAX_AGE_MS = 48h` — daily 16:40 ET timer with slack. Missing contract:
   HTTP 200 + frozen
   `{ missing: true, scan_time: null, data_date: null, current: null, series: [], threshold: null }`.
 - `setCacheResponseHeaders(..., { maxAgeSeconds: 300, staleWhileRevalidateSeconds: 3600, tags: ["rsi-oversold"] })`.
@@ -166,7 +166,7 @@ chunked multi-row `INSERT ... ON CONFLICT(date) DO UPDATE`.
 - **FreshnessRail**: `<FreshnessRail schedule={RSI_OVERSOLD_REFRESH}
   asOf={data.data_date ?? current.date} testId="rsi-oversold-freshness-rail"
   asOfTestId="rsi-oversold-strip-asof" />`.
-  `RSI_OVERSOLD_REFRESH` mirrors daily 23:05 UTC.
+  `RSI_OVERSOLD_REFRESH` mirrors daily 16:40 ET.
 - Chart: `CriHistoryChart`, SPX overlay on the LEFT axis (log),
   `pct_below_30` on the RIGHT axis, the 10% threshold as a right-axis
   `referenceBands` line (`from = to = 10`). Title
@@ -178,9 +178,9 @@ chunked multi-row `INSERT ... ON CONFLICT(date) DO UPDATE`.
 
 - Service: same oneshot shape as ma-ratio, `TimeoutStartSec=2100`,
   `ExecStart=.../scripts/rsi_oversold_scan.py`.
-- Timer: `OnCalendar=*-*-* 23:05:00 UTC` — after ma-ratio's 22:45 sweep so
-  members are already fresh. 23:05 was unused (nearest neighbors: ma-ratio
-  22:45, dispersion's second pass 23:20, bpi 23:30). `Persistent=true`,
+- Timer: `OnCalendar=*-*-* 16:40:00 America/New_York` — forty minutes after the
+  close across DST, twenty behind ma-ratio's 16:20 sweep so members are already
+  fresh. `Persistent=true`,
   `RandomizedDelaySec=300`. Weekend/holiday runs are unchanged-data
   heartbeats (ivrank convention).
 - Register: `setup-vps.sh` `SERVICE_FILES` + `installed-units.sha256` +

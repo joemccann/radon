@@ -65,6 +65,36 @@ describe("computeFreshnessRail", () => {
     expect(rail.overdue).toBe(false);
   });
 
+  // 2026-10-23: the RSI OVERSOLD rail read "Awaiting 2026-10-23" next to a
+  // 23h 55m countdown one minute after its slot, while the run was still
+  // sweeping. Inside the grace the run is DUE, not a day away: the slot has
+  // fired, the session it owes has closed, and the data is not here yet.
+  it("reads DUE inside the grace: the slot fired, the session closed, nothing landed", () => {
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+    expect(rail.due).toBe(true);
+    expect(rail.overdue).toBe(false);
+    expect(rail.elapsedFraction).toBe(1);
+  });
+
+  it("is not DUE while the slot is still ahead, even when behind", () => {
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET);
+    expect(rail.behind).toBe(true);
+    expect(rail.due).toBe(false);
+  });
+
+  it("hands DUE over to OVERDUE once the grace is spent", () => {
+    const wellPastSlot = new Date("2026-08-26T23:30:00Z");
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", wellPastSlot);
+    expect(rail.due).toBe(false);
+    expect(rail.overdue).toBe(true);
+  });
+
+  it("is not DUE when the panel already holds the session the slot carried", () => {
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", WED_1830_ET);
+    expect(rail.due).toBe(false);
+    expect(rail.behind).toBe(false);
+  });
+
   it("fills the track with the elapsed share of the interval between runs", () => {
     // Six hours after the 22:10 UTC slot, a quarter of the 24h interval is gone.
     const sixHoursOn = new Date("2026-08-27T04:10:00Z");
