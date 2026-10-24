@@ -7,14 +7,14 @@ This document covers Radon's production topology on Hetzner. The laptop is a thi
 Production host boundaries are owned by [the host-split runbook](spof-host-split.md).
 The laptop runs only Next.js ([attach contract](#mode-switch)).
 
-- **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
+- **Database**: Turso (libSQL). Production processes talk **directly** to the cloud DB for both reads and writes. A non-Linux host with `RADON_MODE=hetzner` cannot make that write: `db.hrana_http.hrana_execute` raises `ProductionWriterRefused`, and `scripts/monitor_daemon/run.py` exits 78. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount.
 - **Schedulers**: Hetzner host systemd only; no laptop plist runs a collector. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
-- **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
+- **Self-contained**: themarketear.com newsfeed scraper is a headless Playwright flow that runs on Hetzner. The laptop does not run it. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
 
-The newsfeed used to be the only part of Radon that fundamentally required the laptop. As of `feature/newsfeed-headless`, the scraper drives Playwright's bundled Chromium, logs in with email + password, and persists the FirebaseUI session to `data/newsfeed-storage.json` (gitignored). It can run anywhere Chromium can launch.
+The newsfeed used to be the only part of Radon that fundamentally required the laptop. The scraper drives Playwright's bundled Chromium, logs in with email + password, and persists the FirebaseUI session to `data/newsfeed-storage.json` (gitignored). Production runs it on Hetzner inside `radon-newsfeed.service`.
 
 **Required env (root `.env` — do NOT commit):**
 
@@ -29,7 +29,7 @@ In production both keys must also survive `render_env_file`'s newsfeed allowlist
 **Operating procedure:**
 
 1. **Laptop**: the scraper never runs on the laptop; `scripts/cloud.sh` starts Next.js only ([attach contract](#mode-switch)).
-2. **Standalone (laptop or Hetzner)** — `node scripts/newsfeed/index.js` runs forever; `node scripts/newsfeed/index.js --once` runs a single cycle (use for smoke tests).
+2. **On the VPS.** `node scripts/newsfeed/index.js` is the long-running process; `node scripts/newsfeed/index.js --once` runs a single cycle. Do not start either command on the laptop.
 3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
 4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
 5. **Cookie rotation** — themarketear can rotate FirebaseUI cookies on its own; just delete `data/newsfeed-storage.json` and the next cycle will re-authenticate from scratch.
@@ -221,7 +221,7 @@ marked deprecated. Don't extend them.
 
 | Scenario | Recovery |
 |----------|----------|
-| Cold-start a new laptop | Clone repo, `bun install`, set `TURSO_DB_URL` + `TURSO_AUTH_TOKEN`, run `bun run db:migrate`, then `scripts/cloud.sh`. No replica file to seed — every process talks directly to the cloud DB. |
+| Cold-start a new laptop | Clone the repo, `bun install`, set the attach env in `web/.env` (`ALLOWED_USER_IDS` and the Clerk keys), then `scripts/cloud.sh`. Do not run `bun run db:migrate` against the shared database from the laptop. `radon-api` applies `scripts/db/migrate.py` on the VPS before start. No replica file to seed. |
 | Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
 | Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
@@ -230,12 +230,11 @@ marked deprecated. Don't extend them.
 ## Health & observability
 
 ```bash
-# Laptop
-curl http://localhost:8321/health | jq          # FastAPI + IB Gateway
+# Laptop (Next.js only; FastAPI stays on the VPS)
+curl -sS http://radon-app:8321/health/lite
 
-# Query Turso directly (no replica — all reads round-trip)
-PYTHONPATH=scripts python3.13 -c "from db.client import get_db; \
-    print(get_db().execute('SELECT service, state, updated_at FROM service_health').rows)"
+# On the VPS: read service_health. A laptop process is not a production writer.
+ssh radon@radon-app 'cd /home/radon/radon && PYTHONPATH=scripts python3.13 -c "from db.client import get_db; print(get_db().execute(\"SELECT service, state, updated_at FROM service_health\").rows)"'
 
 # Hetzner
 ssh radon@radon-app 'systemctl list-units "radon-*"'
