@@ -369,6 +369,22 @@ def order_notional(params: dict) -> Optional[float]:
     return premium or None
 
 
+def contract_limit_shape(contract: Any) -> dict[str, Any]:
+    """`check_order_limits` type fields for a broker contract on re-submit.
+
+    DS-2026-10-24-03: the modify funnels typed every non-STK contract as an
+    option, so a future was priced with the option's 100 multiplier. A FUT
+    carries the broker contract's own multiplier; an absent one fails closed
+    in check_order_limits.
+    """
+    sec_type = str(getattr(contract, "secType", "") or "")
+    if sec_type == "STK":
+        return {"type": "stock"}
+    if sec_type == "FUT":
+        return {"type": "future", "multiplier": getattr(contract, "multiplier", None)}
+    return {"type": "option"}
+
+
 def _future_multiplier(params: dict) -> Optional[float]:
     """The caller-supplied contract multiplier; None when absent/invalid."""
     multiplier = _finite(params.get("multiplier"))

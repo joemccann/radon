@@ -43,9 +43,14 @@ class TestCachedKidServesWithoutTheGate:
 
     @pytest.fixture
     def cached_client(self, monkeypatch):
+        cached_key = type(
+            "K", (), {"key_id": "kid-cached", "public_key_use": "sig", "key": "the-cached-key"}
+        )()
+
         class CachedClient:
-            def get_signing_keys(self):
-                return [type("K", (), {"key_id": "kid-cached"})()]
+            jwk_set_cache = type(
+                "C", (), {"get": staticmethod(lambda: type("S", (), {"keys": [cached_key]})())}
+            )()
 
             def get_signing_key(self, kid):
                 return type("S", (), {"key": "the-cached-key"})()
@@ -77,3 +82,78 @@ class TestCachedKidServesWithoutTheGate:
         with pytest.raises(AuthError) as exc:
             mcp_auth._signing_key_for(_token_with_kid("kid-bad"))
         assert exc.value.status == 401
+
+
+class TestTheFastPathNeverFetches:
+    """DS-2026-10-24-05: the cached-kid check read get_signing_keys, which
+    fetches an empty or expired key set with no gate at all."""
+
+    def test_an_empty_cache_sends_the_lookup_through_the_gate(self, monkeypatch):
+        fetched = []
+
+        class EmptyCache:
+            jwk_set_cache = type("C", (), {"get": staticmethod(lambda: None)})()
+
+            def get_signing_keys(self, refresh=False):
+                fetched.append(1)
+                return []
+
+            def get_signing_key(self, kid):
+                raise AssertionError("must not be reached when saturated")
+
+        monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: EmptyCache())
+        monkeypatch.setattr(mcp_auth, "_jwks_negative", type(mcp_auth._jwks_negative)())
+        monkeypatch.setattr(
+            mcp_auth, "_jwks_gate", threading.BoundedSemaphore(mcp_auth.MAX_JWKS_INFLIGHT)
+        )
+        for _ in range(mcp_auth.MAX_JWKS_INFLIGHT):
+            assert mcp_auth._jwks_gate.acquire(blocking=False)
+        with pytest.raises(AuthError) as exc:
+            mcp_auth._signing_key_for(_token_with_kid("kid-any"))
+        assert exc.value.status == 503
+        assert fetched == [], "the fast path fetched the key set outside the gate"
+
+
+class TestCachedKidDoesNotWaitOnTheClientLock:
+    """DS-2026-10-24-05: PyJWKClient.get_signing_key holds the client lock,
+    which a forged-kid refetch keeps for its whole network round trip. A kid
+    already in the unexpired key set resolves from that set without it."""
+
+    def test_cached_kid_resolves_while_a_refetch_holds_the_lock(self, monkeypatch):
+        import json
+
+        import jwt as pyjwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from jwt.algorithms import RSAAlgorithm
+
+        private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(RSAAlgorithm.to_jwk(private.public_key()))
+        jwk.update({"kid": "kid-cached", "use": "sig", "alg": "RS256"})
+        client = pyjwt.PyJWKClient("https://jwks.invalid/.well-known/jwks.json")
+        client.jwk_set_cache.put(pyjwt.PyJWKSet.from_dict({"keys": [jwk]}))
+        monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: client)
+        monkeypatch.setattr(mcp_auth, "_jwks_negative", type(mcp_auth._jwks_negative)())
+
+        held = threading.Event()
+        release = threading.Event()
+
+        def refetch_in_flight():
+            with client._client_lock:
+                held.set()
+                release.wait(5)
+
+        holder = threading.Thread(target=refetch_in_flight)
+        holder.start()
+        held.wait(5)
+        result: list = []
+        worker = threading.Thread(
+            target=lambda: result.append(mcp_auth._signing_key_for(_token_with_kid("kid-cached")))
+        )
+        try:
+            worker.start()
+            worker.join(1.0)
+            assert result, "a cached kid waited on the client lock a refetch holds"
+        finally:
+            release.set()
+            holder.join()
+            worker.join()

@@ -83,6 +83,18 @@ def find_trade(client: IBClient, order_id: int, perm_id: int):
     return None
 
 
+def find_modify_trade(client: IBClient, order_id: int, perm_id: int):
+    """find_trade without the orderId fallback when a permId was sent.
+
+    DS-2026-10-24-01: the caller bounded the order that permId names; an
+    orderId match on another order would modify one nobody validated.
+    """
+    trade = find_trade(client, order_id, perm_id)
+    if trade is not None and perm_id > 0 and trade.order.permId != perm_id:
+        return None
+    return trade
+
+
 def cancel_order(client: IBClient, order_id: int, perm_id: int,
                  host: str, port: int):
     """Cancel an open order.
@@ -209,7 +221,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
             f"Resume via POST /trading/resume.",
         )
 
-    trade = find_trade(client, order_id, perm_id)
+    trade = find_modify_trade(client, order_id, perm_id)
     if trade is None:
         output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")
 
@@ -241,7 +253,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
         if original_client_id == 0:
             client.ib.reqAutoOpenOrders(True)
             client.ib.sleep(0.5)
-        trade = find_trade(client, order_id, perm_id)
+        trade = find_modify_trade(client, order_id, perm_id)
         if trade is None:
             output("error", f"{working_order_missing_message()} after reconnect as original clientId")
 
@@ -283,7 +295,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
     # script is directly invocable on the host, and a guard that lives in the
     # caller rather than at the placement funnel is the exact inversion
     # ib_place_order.py was restructured to avoid.
-    from order_limits import check_order_limits, check_quantity_limit
+    from order_limits import check_order_limits, check_quantity_limit, contract_limit_shape
 
     # A BAG's leg detail (strikes, ratios) is not derivable here — a
     # `comboLeg` carries a conId, not a strike — and `check_order_limits`
@@ -296,7 +308,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
         violation = check_quantity_limit(trade.order.totalQuantity)
     else:
         violation = check_order_limits({
-            "type": "stock" if trade.contract.secType == "STK" else "option",
+            **contract_limit_shape(trade.contract),
             "quantity": trade.order.totalQuantity,
             "symbol": getattr(trade.contract, "symbol", ""),
             "limitPrice": getattr(trade.order, "lmtPrice", None),

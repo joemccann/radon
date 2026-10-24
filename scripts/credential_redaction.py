@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 # `_pass` / `_pwd` need the underscore so prose ("tests pass: 3") survives.
 _SECRET_KEY = (
@@ -244,8 +244,10 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # at the start of an unquoted value is part of the value.
 _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 
+# One line break plus indentation may sit between the key and its value: a
+# YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*",
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?",
     re.IGNORECASE,
 )
 
@@ -273,18 +275,18 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
         quote = text[index]
         delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
         body = index + len(delimiter)
-        cursor = body
-        while cursor < length:
-            if text[cursor] == "\\":
-                cursor += 2
-                continue
-            if len(delimiter) == 1 and text.startswith(quote * 2, cursor):
-                # A doubled quote escapes itself (SQL, TOML literal).
-                cursor += 2
-                continue
-            if text.startswith(delimiter, cursor):
-                return body, cursor, delimiter
-            cursor += 1
+        close = _find_close(text, body, delimiter, backslash_escapes=True)
+        if len(delimiter) == 1:
+            # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
+            # backslash escape, so `\''` there is a literal backslash then an
+            # embedded quote, not an escaped quote then the close. Which
+            # grammar applies is unknowable here; the later close redacts
+            # the whole value under either.
+            literal = _find_close(text, body, delimiter, backslash_escapes=False)
+            if close is None or (literal is not None and literal > close):
+                close = literal
+        if close is not None:
+            return body, close, delimiter
         if len(delimiter) == 1:
             return body, _end_of_line(text, body), ""
         return body, length, delimiter
@@ -293,6 +295,25 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     while cursor < length and not text[cursor].isspace():
         cursor += 1
     return index, cursor, ""
+
+
+def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
+    """Index of the delimiter that closes a quoted value opened at ``body``."""
+    quote = delimiter[0]
+    cursor = body
+    length = len(text)
+    while cursor < length:
+        if backslash_escapes and text[cursor] == "\\":
+            cursor += 2
+            continue
+        if len(delimiter) == 1 and text.startswith(quote * 2, cursor):
+            # A doubled quote escapes itself (SQL, TOML literal).
+            cursor += 2
+            continue
+        if text.startswith(delimiter, cursor):
+            return cursor
+        cursor += 1
+    return None
 
 
 def _end_of_line(text: str, pos: int) -> int:
@@ -324,6 +345,9 @@ def _iter_assignments(text: str):
 # survival the tokenizer closed, in the one branch that declines to redact.
 _REDACTION_LABEL = re.compile(r"\[redacted(?:-[a-z-]+)?\]")
 _VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
+# The query-string rule ends a value at the next `&name=` parameter; that
+# parameter is structure, not a continuation of the credential.
+_QUERY_PARAMETER = re.compile(r"&[A-Za-z_][A-Za-z0-9_.-]*=")
 
 
 def _is_already_redacted(body: str) -> bool:
@@ -345,7 +369,7 @@ def _is_already_redacted(body: str) -> bool:
     if label is None:
         return False
     rest = rest[label.end() :]
-    if not rest:
+    if not rest or _QUERY_PARAMETER.match(rest):
         return True
     if _VALUE_CHAR.match(rest):
         return False
@@ -425,6 +449,7 @@ _SECRET_LITERAL_ASSIGNMENT = re.compile(
     r"(?![A-Za-z0-9_+/=~-])(?![.(\[$])",
     re.IGNORECASE,
 )
+_LONG_LITERAL = re.compile(r"[A-Za-z0-9_+/=~-]+")
 _PLACEHOLDER = re.compile(
     r"test|fake|dummy|example|sample|placeholder|changeme|redacted|your|x{4}",
     re.IGNORECASE,
@@ -467,7 +492,12 @@ def find_secret_assignments(text: str) -> list[str]:
     # which is how a multi-line, triple-delimited or prefixed value was
     # redacted but published as clean (DS-2026-10-22-10/-11/-12).
     for _head_end, body_start, body_end, delimiter in _iter_assignments(text or ""):
-        if delimiter and _quoted_value_is_secret((text or "")[body_start:body_end]):
+        body = (text or "")[body_start:body_end]
+        if delimiter and _quoted_value_is_secret(body):
+            return ["[redacted-secret]"]
+        # The literal scanner bounds its value run at 1024, so a longer
+        # unquoted literal (a session token) matched neither rule.
+        if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):
             return ["[redacted-secret]"]
     for match in _COOKIE_HEADER.finditer(text or ""):
         for pair in match.group("pairs").split(";"):

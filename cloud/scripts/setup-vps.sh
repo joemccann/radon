@@ -1380,9 +1380,10 @@ install_container_dropins() {
       [[ -f "$dropin" ]] || continue
     fi
     target="/etc/systemd/system/${svc}.d/runtime-container.conf"
-    # Never follow a planted link into another privileged file; the drop-in is
-    # a regular canonical artifact, same contract as the units above.
-    rm -f "$target"
+    # DS-2026-10-24-06: no rm before staging. Removing the installed drop-in
+    # first meant a refused replacement left the base unit with no container
+    # isolation at the next daemon-reload. install replaces a planted link
+    # rather than following it, and only after provenance passed.
     stage_from_checkout "$dropin" "$target" 0644 -o root -g root
   done
   systemctl daemon-reload
