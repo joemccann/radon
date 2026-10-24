@@ -128,7 +128,7 @@ Default `--mode all` runs every mode. Metrics per mode: hit@1, hit@5, recall@10,
 
 `--baseline PATH` exits 1 when hit@5 or MRR for any scored mode drops more than `--max-drop` (default 0.03). `--write-baseline PATH` writes the compact metrics snapshot. `scripts/knowledge/golden_eval_baseline.json` is the initial live Turso `--mode all` snapshot (`placeholder: false`, NVIDIA 2048-d, no fallback). `golden_set_candidates.json` is gone. Keep `draft: true` until a human reviews the set. The nightly timer stays off until that review.
 
-The retired Foreman factory question was removed on 2026-10-17; 128 draft questions remain. Its obsolete owner document and setup contract are removed from the repository. Keep the same human-review and baseline-regeneration gates before enabling nightly evaluation.
+The retired Foreman factory question was removed on 2026-10-17; 126 draft questions remain. Every graded `docs/` pattern matches a file in the tree. The set does not grade the retired laptop Gateway Docker page or the retired IBC remote-access page. Keep the same human-review and baseline-regeneration gates before enabling nightly evaluation.
 
 Three production-derived journal questions and their exact trade identifiers have been removed from the tracked golden set; existing semantic journal patterns remain. `scripts/tests/test_knowledge_golden.py::TestGoldenSetFile::test_shipped_golden_set_has_no_journal_trade_ids` rejects journal `doc_key_pattern` values containing six or more consecutive digits. Do not commit production trade identifiers or private brokerage details in evaluation fixtures. The baseline predates the removal and must be regenerated against the reviewed set before enabling nightly evaluation.
 
