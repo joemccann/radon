@@ -31,9 +31,14 @@ MemoryMax=256M
 # Either setting refuses that setuid hop, the helper answers `unknown` rc=2
 # for every verb, and the operator UI disables every Gateway control
 # (2026-10-22). Privilege is bounded by the sudoers verb list, not by systemd.
+# The password rotation writer (sudo -n radon-ib-gateway-credential write)
+# runs as a child of this unit and inherits its read-only /etc, so the one
+# root-owned Gateway env directory is writable. `-`: optional, so the unit
+# still starts before `radon-ib-gateway-credential migrate` created it (the
+# bind applies only if the directory exists when the unit starts).
 ProtectSystem=strict
 PrivateTmp=yes
-ReadWritePaths=/var/lib/radon /home/radon
+ReadWritePaths=/var/lib/radon /home/radon -/etc/radon/ib-gateway
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ib_gateway_remote.serve
 Restart=always
 RestartSec=2

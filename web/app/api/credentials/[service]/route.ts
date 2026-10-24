@@ -12,15 +12,18 @@ import { applyLiveWebCredentials } from "@/lib/setup/envFiles";
  * Per-service credential mutations, proxied to FastAPI `/credentials/{id}`.
  *
  * PUT validates against the vendor before storing; MenthorQ/TheMarketEar run
- * a real browser login the backend bounds at 90s, so the proxy budget is
- * 100s. Upstream status is preserved verbatim — a 422 CREDENTIAL_REJECTED
- * must reach the operator as 422 with the verdict, never a blanket 500.
+ * a real browser login the backend bounds at 90s. An ib_gateway PUT rotates
+ * the IB Gateway password on the broker (write plus one Gateway restart),
+ * which FastAPI bounds at ROTATE_TIMEOUT_S = 150s, so the proxy budget is
+ * 165s. radonFetch never replays a PUT. Upstream status is preserved
+ * verbatim: a 422 CREDENTIAL_REJECTED or a 409 GATEWAY_LOGIN_BLOCKED must
+ * reach the operator with its code, never a blanket 500.
  */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const MUTATE_TIMEOUT_MS = 100_000;
+const MUTATE_TIMEOUT_MS = 165_000;
 const DELETE_TIMEOUT_MS = 15_000;
 const SERVICE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const FIELD_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;

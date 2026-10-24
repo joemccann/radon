@@ -1,6 +1,8 @@
 # Production variables required before bootstrap or deployment may start units.
-TWS_USERID
-TWS_PASSWORD
+# TWS_USERID / TWS_PASSWORD are deliberately NOT required here: no unit or
+# script reads them from /etc/radon/env. The IB Gateway container reads them
+# from /etc/radon/ib-gateway/gateway.env (radon-ib-gateway-credential migrate
+# seeds it; the web app's Credentials tab rotates the password).
 TRADING_MODE
 TURSO_DB_URL
 TURSO_AUTH_TOKEN

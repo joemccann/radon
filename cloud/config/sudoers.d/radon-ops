@@ -36,5 +36,13 @@ radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw compose-up, /usr/loca
 radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw pgrep-jvm, /usr/local/sbin/radon-docker-gw pgrep-java, /usr/local/sbin/radon-docker-gw thread-dump [0-9]*
 radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw logs, /usr/local/sbin/radon-docker-gw stats, /usr/local/sbin/radon-docker-gw ps
 
+# --- IB Gateway password rotation (broker) ---
+# The broker daemon (scripts/ib_gateway_remote/serve.py, POST /rotate-password)
+# writes the new password into /etc/radon/ib-gateway/gateway.env through this
+# root-owned writer. The password travels on stdin only, never in argv. Exactly
+# one verb: migrate, prune-root-env and rollback stay root-only. Do not add a
+# log_input Default for radon: it would record that stdin.
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-ib-gateway-credential write
+
 # Anything else still requires the password; no blanket NOPASSWD or direct
 # systemctl/docker mutator is authorized.

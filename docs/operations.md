@@ -81,8 +81,17 @@ value (`bootstrap_exported_names()` in
 `scripts/api/routes/credentials.py`), and subprocesses inherit it. Rotating a
 key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
-value first. Exception: the IB Gateway password. Saving it in the tab does
-not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
+value first. The IB Gateway password is a rotation, not a plain save:
+change it on the IBKR website first, then save it in the tab. FastAPI sends
+it once over mTLS to the broker daemon (`POST /rotate-password`), which
+writes `/etc/radon/ib-gateway/gateway.env` through the root writer
+`radon-ib-gateway-credential` and restarts the Gateway once (one IBKR Mobile
+push). The app store keeps the value only when the broker wrote it. A 409
+(cooldown, 2FA lease, rotation running) saves nothing; an operator hold or
+IBKR login throttle writes the file and defers the restart. Runbook:
+`docs/spof-host-split.md` (rotate-password); the one-time broker cutover
+that must precede the first rotation is its "Gateway env split cutover
+(one time)" section.
 The Next.js process that proxies a save also applies the per-request web keys
 (`UW_TOKEN`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`,
 `EXA_API_KEY`; `LIVE_WEB_ENV_KEYS` in `web/lib/setup/envFiles.ts`) to its own
@@ -513,7 +522,7 @@ production is untouched.
 
 **IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`, with the hold CLI it runs staged root-owned at `/usr/local/lib/radon/ib_operator_hold.py`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
 
-**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are loaded only from `/etc/radon/env` (`0640` root:radon). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`). <!-- pragma: allowlist secret -->
+**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are loaded from `/etc/radon/env` (`0640` root:radon); the IB Gateway container alone reads the root-only `/etc/radon/ib-gateway/gateway.env` (built by `radon-ib-gateway-credential migrate`). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`). <!-- pragma: allowlist secret -->
 
 Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` serves protected snapshots from `/var/lib/radon-public/media` via group `caddy`. Legacy `radon-media` staging read ACLs remain during rollout and rollback; publication never changes source ownership or permissions. For permission errors, inspect the publisher unit and the affected leaf rather than recursively changing staging ownership.
 

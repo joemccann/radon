@@ -272,10 +272,10 @@ SERVICES: Tuple[CredentialService, ...] = (
             CredentialField("TWS_PASSWORD", "IBKR password"),
         ),
         note=(
-            "Never live-validated: a login probe fires a real IBKR Mobile "
-            "2FA push. Saving here does NOT rotate the Gateway password on "
-            "the broker host — that still comes from TWS_PASSWORD_FILE / "
-            "docker secrets until wired separately."
+            "Saving writes this password to the broker Gateway and restarts "
+            "IB Gateway once. The restart fires an IBKR Mobile 2FA push. "
+            "Change the password on the IBKR website first. Never "
+            "live-validated."
         ),
     ),
     CredentialService(

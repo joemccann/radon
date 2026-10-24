@@ -47,9 +47,18 @@ export type ValidationVerdict = {
   message: string;
 };
 
+export type GatewayRotationStatus = "applied" | "deferred" | "restart_failed";
+
+export type GatewayRotation = {
+  status: GatewayRotationStatus;
+  detail: string;
+};
+
 export type CredentialMutationResult = {
   service: CredentialServiceEntry;
   validation: ValidationVerdict;
+  /** ib_gateway only: what the broker did with the new password. */
+  rotation?: GatewayRotation;
 };
 
 export class CredentialsRequestError extends Error {
@@ -73,10 +82,12 @@ export class CredentialsRequestError extends Error {
 
 const CREDENTIALS_ENDPOINT = "/api/credentials";
 
-// PUT can carry a real Playwright login (MenthorQ / TheMarketEar) which the
-// backend bounds at 90s; the proxy allows 100s, this backstop sits above it.
+// PUT can carry a real Playwright login (MenthorQ / TheMarketEar, bounded at
+// 90s) or an IB Gateway password rotation (broker write plus one Gateway
+// restart, FastAPI ROTATE_TIMEOUT_S = 150s). The proxy allows 165s; this
+// backstop sits above it and below the Caddy @credential_mutate bound (200s).
 const READ_TIMEOUT_MS = 20_000;
-const MUTATE_TIMEOUT_MS = 110_000;
+const MUTATE_TIMEOUT_MS = 175_000;
 
 function errorFromBody(status: number, body: unknown): CredentialsRequestError {
   const payload = (body ?? {}) as Record<string, unknown>;
@@ -200,4 +211,54 @@ export function outageNotice(vendorLabel: string): string {
 
 export function slowValidationNotice(vendorLabel: string): string {
   return `${vendorLabel} makes us log in the long way. Give it up to a minute.`;
+}
+
+/* ── IB Gateway password rotation ───────────────────────
+ * Saving the ib_gateway service writes the password on the broker and
+ * restarts the Gateway once, which fires an IBKR Mobile 2FA push. */
+
+export const GATEWAY_SERVICE_ID = "ib_gateway";
+
+export const GATEWAY_CONFIRM_COPY =
+  "Saving sends this password to the broker and restarts IB Gateway once. " +
+  "The restart fires an IBKR Mobile 2FA push. Approve it on your phone to finish the login. " +
+  "Change the password on the IBKR website first.";
+
+export const GATEWAY_CONFIRM_ACK = "I changed it on IBKR and will approve the push";
+
+// The longest the operator waits for a rotation before the client gives up
+// and reports an unknown outcome.
+export const GATEWAY_ROTATE_TIMEOUT_MS = MUTATE_TIMEOUT_MS;
+
+export const GATEWAY_BUSY_NOTICE =
+  "Writing the password on the broker and restarting the Gateway. " +
+  `This can take up to ${Math.ceil(GATEWAY_ROTATE_TIMEOUT_MS / 60_000)} minutes. Do not resubmit.`;
+
+export const GATEWAY_UNKNOWN_NOTICE =
+  "Outcome unknown. Do not resubmit. Check the Gateway in /admin.";
+
+export function gatewayRotationNotice(rotation: GatewayRotation | undefined): {
+  tone: "ok" | "error" | "info";
+  text: string;
+} {
+  const detail = (rotation?.detail ?? "").trim().replace(/\.+$/, "");
+  switch (rotation?.status) {
+    case "applied":
+      return {
+        tone: "ok",
+        text: "Stored on the broker and the Gateway restarted. Approve the IBKR Mobile push to finish the login.",
+      };
+    case "deferred":
+      return {
+        tone: "info",
+        text: `Stored on the broker. Gateway restart deferred: ${detail || "a login is not allowed right now"}. The next restart uses the new password.`,
+      };
+    case "restart_failed":
+      return {
+        tone: "error",
+        text: `Stored on the broker, but the Gateway restart failed: ${detail || "unknown error"}. Check the logs, then restart once from /admin.`,
+      };
+    default:
+      return { tone: "info", text: GATEWAY_UNKNOWN_NOTICE };
+  }
 }
