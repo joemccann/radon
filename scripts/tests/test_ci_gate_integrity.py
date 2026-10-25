@@ -402,3 +402,35 @@ def test_path_filter_only_queries_the_actions_api_on_push() -> None:
     assert "GITHUB_EVENT_NAME" in body.group(0)
     assert "!= 'push'" in body.group(0) or '!= "push"' in body.group(0)
     assert "BASE_SHA" in body.group(0)
+
+
+# The VPS runs Ubuntu 24.04. `ubuntu-latest` rolled to the 26.04 image on
+# 2026-10-25 and the cloud suite went red on coreutils behaviour the host does
+# not have (`install -T /dev/null` onto a directory). CI must exercise the
+# production OS, so every workflow job names it.
+PRODUCTION_RUNNER = "ubuntu-24.04"
+WORKFLOWS_DIR = WORKFLOW.parent
+
+
+def _every_workflow_job() -> list[tuple[str, str, dict]]:
+    found = []
+    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        for name, job in (data.get("jobs") or {}).items():
+            found.append((path.name, name, job))
+    return found
+
+
+def test_every_workflow_job_runs_on_the_production_os() -> None:
+    jobs = _every_workflow_job()
+    assert jobs, "no workflow jobs found"
+    floating = [
+        f"{file}:{name} runs-on {job.get('runs-on')!r}"
+        for file, name, job in jobs
+        if "runs-on" in job and job["runs-on"] != PRODUCTION_RUNNER
+    ]
+    assert not floating, (
+        f"every job must pin `runs-on: {PRODUCTION_RUNNER}` (the VPS OS); "
+        "`ubuntu-latest` drifts to a newer image than production:\n  "
+        + "\n  ".join(floating)
+    )

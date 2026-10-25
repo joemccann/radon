@@ -29,7 +29,7 @@ permissions:
 jobs:
   secret-scan:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-secret-scan-${{ github.ref }}
       cancel-in-progress: true
@@ -103,7 +103,7 @@ jobs:
 
   changes:
     name: Path filter
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # R-509: a stalled `gh api` lookback must not park every gate and the
     # deploy for the default 360 min (path_filter.py bounds the call too).
     timeout-minutes: 5
@@ -164,7 +164,7 @@ jobs:
     name: Cross-tree contracts (cloud)
     needs: [changes]
     if: needs.changes.outputs.contract_cloud_tests != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-contract-cloud-${{ github.ref }}
       cancel-in-progress: true
@@ -187,7 +187,7 @@ jobs:
     name: Cross-tree contracts (scripts)
     needs: [changes]
     if: needs.changes.outputs.contract_script_tests != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-contract-scripts-${{ github.ref }}
       cancel-in-progress: true
@@ -213,7 +213,7 @@ jobs:
     name: Cross-tree contracts (root)
     needs: [changes]
     if: needs.changes.outputs.contract_root_tests != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-contract-root-${{ github.ref }}
       cancel-in-progress: true
@@ -235,7 +235,7 @@ jobs:
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -310,7 +310,7 @@ jobs:
     name: Vitest coverage ratchet
     needs: [web-tests]
     if: needs.web-tests.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-web-coverage-${{ github.ref }}
       cancel-in-progress: true
@@ -335,7 +335,7 @@ jobs:
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -457,7 +457,7 @@ jobs:
     name: pytest coverage ratchet
     needs: [py-tests]
     if: needs.py-tests.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-py-coverage-${{ github.ref }}
       cancel-in-progress: true
@@ -525,7 +525,7 @@ jobs:
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -634,7 +634,7 @@ jobs:
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ci-perimeter-smoke-${{ github.ref }}
       cancel-in-progress: true
@@ -733,7 +733,7 @@ jobs:
     # shard queues for a slot. Still non-gating for deploy.
     needs: [changes, secret-scan]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # One serial `playwright test` (workers=1) ran ~263s and made this the
     # longest PR check. Playwright --shard splits the curated files across
     # parallel jobs; each builds its own bundle. Pinned by
@@ -1087,7 +1087,7 @@ jobs:
     # port 3000 or the authless header with e2e-financial-smoke. Non-gating.
     needs: [changes, secret-scan]
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
@@ -1155,7 +1155,7 @@ jobs:
       && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     concurrency:
       group: ci-stage-release-${{ github.ref }}
@@ -1258,7 +1258,7 @@ jobs:
       && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
       group: ci-prepull-images-${{ github.ref }}
@@ -1317,7 +1317,7 @@ jobs:
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
       && (needs.stage-release.result == 'success' || needs.stage-release.result == 'failure' || needs.stage-release.result == 'skipped')
       && (needs.prepull-images.result == 'success' || needs.prepull-images.result == 'failure')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
     # action can hold its lifecycle lock for 180s. Worst-case durable recovery
     # can serialize four such helper actions after waiting 190s. SSH gets 55m
@@ -1552,7 +1552,7 @@ jobs:
     # history after the merge and tagged only once it is serving.
     needs: [deploy]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled() && needs.deploy.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
