@@ -165,7 +165,7 @@ def _write_db_cache(
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     COR_JSON.parent.mkdir(parents=True, exist_ok=True)
-    COR_JSON.write_text(json.dumps(payload, indent=2))
+    COR_JSON.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def _read_json_cache() -> Optional[dict[str, Any]]:
