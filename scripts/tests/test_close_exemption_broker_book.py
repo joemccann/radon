@@ -24,6 +24,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import bankroll_guard  # noqa: E402
 from bankroll_guard import check_bankroll_admission as _real_bankroll_admission  # noqa: E402
+from clients.ib_client import IBClient  # noqa: E402
 
 NOW = datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc)
 STOCK = SimpleNamespace(symbol="TQQQ", secType="STK", conId=1)
@@ -147,3 +148,107 @@ class TestBrokerBook:
         key = ("SPX", "P", 5000.0, "20261120")
         assert held == {key: 10.0}
         assert resting == {key: (-4.0, 0.0)}
+
+
+class _EndEvent:
+    def __init__(self):
+        self._handlers = []
+
+    def __iadd__(self, handler):
+        self._handlers.append(handler)
+        return self
+
+    def __isub__(self, handler):
+        if handler in self._handlers:
+            self._handlers.remove(handler)
+        return self
+
+    def emit(self):
+        for handler in list(self._handlers):
+            handler()
+
+
+def _snapshot_client(mock_ib, *, positions_end, orders_end, open_trades=()):
+    """A connected client whose end events fire only when the test says so."""
+    mock_ib.isConnected.return_value = True
+    mock_ib.errorEvent = eventkit.Event("errorEvent")
+    position_end = _EndEvent()
+    order_end = _EndEvent()
+    mock_ib.positionEndEvent = position_end
+    mock_ib.openOrderEndEvent = order_end
+    held = SimpleNamespace(contract=STOCK, position=100.0, avgCost=60.0)
+    mock_ib.positions.return_value = [held]
+    mock_ib.openTrades.return_value = list(open_trades)
+    mock_ib.qualifyContracts.return_value = [
+        SimpleNamespace(conId=1, symbol="TQQQ", secType="STK")
+    ]
+
+    def req_positions():
+        if positions_end:
+            position_end.emit()
+
+    def req_orders():
+        if orders_end:
+            order_end.emit()
+
+    mock_ib.reqPositions.side_effect = req_positions
+    mock_ib.reqAllOpenOrders.side_effect = req_orders
+    client = IBClient()
+    return client, mock_ib
+
+
+class TestBrokerBookNeedsAFinishedSnapshot:
+    """REL-331 / R-742. An unfinished snapshot is not proof the holding is free."""
+
+    def _place_through(self, client):
+        with patch("ib_place_order.IBClient", return_value=client):
+            import ib_place_order
+
+            return ib_place_order.place_order(_sell(100))
+
+    @patch("clients.ib_client.IB")
+    def test_open_order_end_timeout_does_not_admit_the_close(self, MockIB):
+        client, mock_ib = _snapshot_client(
+            MockIB.return_value, positions_end=True, orders_end=False
+        )
+
+        result = self._place_through(client)
+
+        assert result["status"] == "error", result
+        assert "Connection failed" not in result.get("message", "")
+        mock_ib.placeOrder.assert_not_called()
+
+    @patch("clients.ib_client.IB")
+    def test_position_end_timeout_does_not_admit_the_close(self, MockIB):
+        client, mock_ib = _snapshot_client(
+            MockIB.return_value, positions_end=False, orders_end=True
+        )
+
+        result = self._place_through(client)
+
+        assert result["status"] == "error", result
+        mock_ib.placeOrder.assert_not_called()
+
+    @patch("clients.ib_client.IB")
+    def test_a_finished_empty_book_still_admits_the_close(self, MockIB):
+        client, mock_ib = _snapshot_client(
+            MockIB.return_value, positions_end=True, orders_end=True
+        )
+
+        result = self._place_through(client)
+
+        assert result["status"] == "ok", result
+        mock_ib.placeOrder.assert_called_once()
+
+    def test_a_resting_bag_with_no_legs_does_not_prove_the_holding_free(self):
+        bag = SimpleNamespace(secType="BAG", comboLegs=[])
+        client = _client(broker_shares=100, resting=[SimpleNamespace(
+            contract=bag,
+            order=SimpleNamespace(action="SELL"),
+            orderStatus=SimpleNamespace(status="Submitted", remaining=100.0),
+        )])
+
+        result = _place(_sell(100), client)
+
+        assert result["status"] == "error", result
+        client.place_order.assert_not_called()
