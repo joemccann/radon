@@ -20,6 +20,8 @@ BASE = Path('/private/var/root/radon-runner-update')
 PREFIX = Path('/usr/local/radon-runner')
 ORIGIN = 'https://github.com/joemccann/radon.git'
 API = 'https://api.github.com/repos/joemccann/radon/'
+# Forced: the store is shallow, so a moved main is never a fast-forward of its tip.
+MAIN_REFSPEC = '+refs/heads/main:refs/heads/main'
 LOOPS = ('documentation', 'ci-performance', 'performance', 'testing', 'reliability', 'security', 'security-deepsec')
 SERVICES = tuple('system/com.radon.runner.' + loop for loop in LOOPS) + ('system/com.radon.runner-perf-probe',)
 ENV = {'HOME': '/var/root', 'PATH': '/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'C',
@@ -148,7 +150,7 @@ def refresh():
         store = BASE / 'origin.git'
         if not store.exists(): command(['/usr/bin/git', '-c', 'init.templateDir=', 'init', '--bare', str(store)])
         protected(store)
-        git(store, 'fetch', '--no-tags', '--depth=1', ORIGIN, 'refs/heads/main:refs/heads/main')
+        git(store, 'fetch', '--no-tags', '--depth=1', ORIGIN, MAIN_REFSPEC)
         sha = git(store, 'rev-parse', 'refs/heads/main')
         if not re.fullmatch(r'[0-9a-f]{40}', sha): raise RuntimeError('main did not resolve to an immutable commit')
         if public_json('git/ref/heads/main')['object']['sha'] != sha: raise RuntimeError('main advanced during update')

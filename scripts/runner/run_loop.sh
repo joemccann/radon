@@ -692,7 +692,7 @@ capture_audited_sha() {
 # reaches this from the SIGTERM trap.
 post_phase_marker() {
   local phase="$1" status="$2" body issue gh title
-  [[ -n "${DEADMAN_LABEL:-}" ]] || return 0
+  [[ -n "${DEADMAN_LABEL:-}" ]] || { log "phase marker not posted: no DEADMAN_LABEL"; return 0; }
   [[ -z "${MARKER_POSTED:-}" ]] || return 0
   phase="${phase:-audit}"
   body="$(phase_status_body "$LOOP" "$phase" "$status" || true)"

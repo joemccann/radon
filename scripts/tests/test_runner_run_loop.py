@@ -1364,3 +1364,26 @@ def test_without_a_token_the_runner_says_so_and_claude_falls_back_to_its_login(r
     env = (rig.calls / "claude.env").read_text()
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert "claude: CLAUDE_CODE_OAUTH_TOKEN absent" in rig.log()
+
+
+# --- loop configs refresh together (2026-10-25) ----------------------------------
+#
+# `install.sh performance` on 2026-10-19 refreshed run_loop.sh and phase_status.sh
+# but only performance.env. The other six loop envs stayed at their 2026-10-17
+# shape, which predates DEADMAN_LABEL, so reliability, testing, documentation and
+# ci-performance ran a harness that posts phase markers with no label to post to.
+# The runner files are shared; the loop envs must refresh with them.
+
+
+def test_install_refreshes_every_loop_env_not_only_the_named_loops():
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text()
+    runner = src.split("install_runner() {", 1)[1].split("\n}\n", 1)[0]
+    assert 'for file in "$SRC/loops/"*.env; do' in runner
+    assert 'atomic_install -o root -g wheel -m 644 "$file" "$PREFIX/loops/$(basename "$file")"' in runner
+
+
+def test_a_missing_dead_man_label_is_logged_not_silent(rig):
+    proc = rig.run()
+    assert proc.returncode == 0, rig.log()
+    assert "phase marker not posted: no DEADMAN_LABEL" in rig.log()
+    assert "issue comment" not in _gh_argv(rig)
