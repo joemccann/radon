@@ -51,7 +51,16 @@ def _arm(monkeypatch: pytest.MonkeyPatch, client_mod, connect_calls: list):
     PYTEST_CURRENT_TEST is removed so the assertions exercise the env-flag
     logic itself, not the pytest poisoning guard (covered separately in
     test_db_client_pytest_guard.py).
+
+    Removing it also removes the only reason the production-writer guard lets
+    a non-Linux host through, and `get_db()` consults that guard BEFORE it
+    reaches the replica decision. So the platform is pinned to the production
+    one: without it these DUR-07 contracts raise ProductionWriterRefused and
+    stop executing on every non-Linux host, including the macOS runner the
+    nightly loops and developers use, leaving the inverted default and the
+    legacy kill switch asserted on the Linux CI shard alone.
     """
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("TURSO_DB_URL", _FAKE_URL)
     monkeypatch.setenv("TURSO_AUTH_TOKEN", _FAKE_TOKEN)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)

@@ -389,6 +389,22 @@ line here whenever you ship a security fix.**
   days.
   (`scripts/tests/test_gitignore_rules.py`)
 
+- **A guard added at a chokepoint may not disable the contract that guards it.**
+  A precondition check inserted upstream of a decision runs before the tests
+  of that decision reach it, and a fixture that deliberately clears the
+  check's escape hatch then turns its own assertions into a refusal. Three
+  DUR-07 replica-default contracts stopped executing on every non-Linux host
+  that way: they did not skip, they raised, so the nodes were permanently red
+  on the runner and on every developer machine and a real regression in the
+  retired-replica default would have read as that same known-red baseline,
+  leaving one CI shard as the only place the contract held. A contract test
+  pins the production precondition (platform, mode, identity) explicitly so
+  the decision under test executes everywhere, and a guard added at a
+  chokepoint carries the burden of proving every existing contract through it
+  still reaches its subject. A permanently failing node is a missing control,
+  never an accepted baseline.
+  (`scripts/tests/test_db_replica_opt_in.py`)
+
 ## Triage & patch policy
 
 - Severity = verifier-revised, real-world impact for a **single-operator** app, not
