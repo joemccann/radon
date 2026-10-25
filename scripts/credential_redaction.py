@@ -194,9 +194,10 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (
         re.compile(
             r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
-            # Any scheme word: a fixed list redacted `ApiKey` and kept the
-            # credential after it (DS-2026-10-25-08).
-            r"(?:[A-Za-z][\w.~+/-]*[ \t]+)?\S+",
+            # The whole rest of the line: a fixed scheme list redacted
+            # `ApiKey` and kept the credential after it, and one token kept
+            # a Digest header's later fields (DS-2026-10-25-08).
+            r"[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -222,11 +223,15 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\bnvapi-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"(?<![A-Za-z0-9])csk-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
-    # Every credential-named parameter, not three: the assignment pass skips
-    # a value that starts with this label, so a later `&client_secret=` in
-    # the same query was never inspected (DS-2026-10-25-10).
+    # Every credential-named parameter, prefixed names included, not three:
+    # the assignment pass skips a value that starts with this label, so a
+    # later `&client_secret=` or `&refresh_token=` in the same query was never
+    # inspected (DS-2026-10-25-10).
     (
-        re.compile(rf"([?&](?:t|{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+", re.IGNORECASE),
+        re.compile(
+            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+",
+            re.IGNORECASE,
+        ),
         r"\1[redacted]",
     ),
 ]
@@ -256,11 +261,12 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 
 # One line break plus indentation may sit between the key and its value: a
 # YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
-# A YAML comment may end that header line (DS-2026-10-25-11); it needs the
-# whitespace YAML requires before `#`, so an env value starting `#` stays one.
+# A YAML comment may end that header line, and whole comment lines may sit
+# before the value (DS-2026-10-25-11); a trailing comment needs the whitespace
+# YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
     rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
-    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*)?",
+    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*){0,8})?",
     re.IGNORECASE,
 )
 
@@ -397,16 +403,24 @@ def _redact_assignments(text: str) -> str:
     """
     out: list[str] = []
     last = 0
+    eol = -1
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
         if head_end < last:
+            continue
+        # Decided on the value token itself: the line's later text is other
+        # assignments or prose, and re-reading it per value is quadratic.
+        if _is_already_redacted(text[body_start:body_end]):
             continue
         if not delimiter:
             # DS-2026-10-25-04: an unquoted value is redacted to the end of
             # its line. Stopping at whitespace published every word after
             # the first of a passphrase; detection keeps the narrower span.
-            body_end = _end_of_line(text, body_start)
+            # The line end is reused while it lies ahead, keeping this linear.
+            if eol < body_start:
+                eol = _end_of_line(text, body_start)
+            body_end = eol
         body = text[body_start:body_end]
-        if _is_already_redacted(body) or (not delimiter and not body):
+        if not delimiter and not body:
             # An EMPTY quoted value still gets the label (the key is the tell);
             # an absent unquoted value has nothing to replace.
             continue
