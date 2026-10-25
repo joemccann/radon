@@ -227,3 +227,126 @@ def test_tokenizer_stays_linear_on_adversarial_text():
 
     small, large = elapsed(200), elapsed(1600)
     assert large < max(small * 40, 2.0), (small, large)
+
+
+class TestUnquotedValueRunsToEndOfLine:
+    """DS-2026-10-25-04: an unquoted value ended at the first whitespace, so
+    every word after the first of a multi-word passphrase was published."""
+
+    def test_a_multi_word_unquoted_value_keeps_no_word(self):
+        scrubbed = scrub_credential_text(f"password: {OPAQUE} {TAIL} again\nnext line\n")
+        assert _clean(scrubbed), scrubbed
+        assert "again" not in scrubbed
+        assert "next line" in scrubbed
+
+    def test_later_assignments_on_the_line_stay_redacted_once(self):
+        scrubbed = scrub_credential_text(f"password={OPAQUE} token={TAIL}\n")
+        assert _clean(scrubbed), scrubbed
+        assert scrubbed.count("[redacted-secret]") == 1
+
+
+def test_an_authorization_header_with_any_scheme_keeps_no_credential():
+    """DS-2026-10-25-08: only four scheme words were recognised."""
+    for scheme in ("ApiKey", "Negotiate", "SSWS"):
+        scrubbed = scrub_credential_text(f"Authorization: {scheme} {OPAQUE}\n")
+        assert OPAQUE not in scrubbed, scrubbed
+
+
+@pytest.mark.parametrize("props", ["!!str ", "&creds ", "!!str &creds "])
+def test_a_yaml_tag_or_anchor_before_a_block_scalar_keeps_no_body(props):
+    """DS-2026-10-25-09: node properties before `|` hid the block body."""
+    text = f"password: {props}|\n  {OPAQUE}\n  {TAIL}\nnext: ok\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed), scrubbed
+    assert "next: ok" in scrubbed
+    assert find_credential_shapes(text)
+
+
+def test_a_redacted_query_parameter_does_not_shield_the_next():
+    """DS-2026-10-25-10."""
+    scrubbed = scrub_credential_text(f"https://h/x?api_key={TAIL}&client_secret={OPAQUE}&symbol=SPY")
+    assert _clean(scrubbed), scrubbed
+    assert scrubbed.endswith("&symbol=SPY")
+
+
+def test_a_yaml_comment_after_the_key_keeps_no_next_line_value():
+    """DS-2026-10-25-11."""
+    scrubbed = scrub_credential_text(f"password: # db credential\n  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
+
+
+def test_an_env_value_starting_with_a_hash_is_still_the_value():
+    scrubbed = scrub_credential_text(f"PASSWORD=#{OPAQUE}\nNEXT=1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "NEXT=1" in scrubbed
+
+
+def test_a_prefixed_query_credential_is_redacted():
+    """DS-2026-10-25-10: `refresh_token` after a redacted `access_token`."""
+    scrubbed = scrub_credential_text(f"https://h/cb?access_token={TAIL}&refresh_token={OPAQUE}&limit=5")
+    assert _clean(scrubbed), scrubbed
+    assert scrubbed.endswith("&limit=5")
+
+
+def test_a_digest_authorization_keeps_no_field():
+    """DS-2026-10-25-08: only the first field after the scheme was redacted."""
+    scrubbed = scrub_credential_text(
+        f'Authorization: Digest username="u", nonce="{TAIL}", response="{OPAQUE}"\nnext\n'
+    )
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_comment_lines_between_key_and_value_keep_no_value():
+    """DS-2026-10-25-11."""
+    scrubbed = scrub_credential_text(f"password:\n  # rotated monthly\n  # owner: ops\n  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
+
+
+def test_many_skipped_values_on_one_line_stay_linear():
+    import time
+
+    def elapsed(n):
+        payload = "x?api_key=1 " * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        return time.perf_counter() - start
+
+    small, large = elapsed(500), elapsed(8000)
+    assert large < max(small * 40, 2.0), (small, large)
+
+
+def test_a_truncated_value_after_an_escaped_quote_keeps_no_tail():
+    """An escaped quote is not the close of a value that never closes."""
+    scrubbed = scrub_credential_text(f'password="ab\\"{OPAQUE}\nnext\n')
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_many_assignment_lines_stay_linear():
+    import time
+
+    def elapsed(n):
+        payload = "password=a\n" * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        return time.perf_counter() - start
+
+    # 16x the lines; a per-line scan to the end of the text is quadratic.
+    small, large = min(elapsed(8000) for _ in range(3)), elapsed(128000)
+    assert large < small * 32, (small, large)
+
+
+def test_words_after_a_partially_redacted_first_word_are_redacted():
+    scrubbed = scrub_credential_text(f"password: [redacted] {OPAQUE} {TAIL}\nnext\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_any_number_of_comment_lines_before_the_value():
+    comments = "".join(f"  # note {i}\n" for i in range(12))
+    scrubbed = scrub_credential_text(f"password:\n{comments}  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
