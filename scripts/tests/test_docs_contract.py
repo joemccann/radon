@@ -2862,3 +2862,15 @@ class TestDocumentation20261025:
         assert 'not in ("stock", "option", "combo", "future")' in fn
         assert "unsupported order type" in fn
 
+    def test_modify_does_not_fall_back_from_perm_id(self):
+        for rel in ("scripts/CLAUDE.md", "web/CLAUDE.md"):
+            text = (_ROOT / rel).read_text()
+            section = text.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+            assert "ORDER_MODIFY_IDENTITY_MISMATCH" in section
+            assert "find_modify_trade" in section
+            assert "does not fall back to orderId" in section
+        src = (_ROOT / "scripts/ib_order_manage.py").read_text()
+        fn = src.split("def find_modify_trade", 1)[1].split("\ndef ", 1)[0]
+        assert "perm_id > 0" in fn
+        assert "return None" in fn
+
