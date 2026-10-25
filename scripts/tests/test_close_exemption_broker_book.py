@@ -339,3 +339,27 @@ class TestAComboModifyMeetsTheBankrollCap(TestAModifyMeetsTheBankrollCap):
 
         assert self._modify(client, 2) == 1
         client.place_order.assert_not_called()
+
+
+class TestTheBookReadCannotRevertTheModify(TestAModifyMeetsTheBankrollCap):
+    """Rescan of DS-2026-10-25-02: ib_insync rewrites a known trade's quantity
+    and price from the broker's copy on every open-order refresh."""
+
+    def test_the_requested_quantity_is_what_transmits(self):
+        working = self._working(1)
+        transmitted = {}
+        calls = {"n": 0}
+
+        def refresh():
+            calls["n"] += 1
+            if not transmitted:
+                working.order.totalQuantity = 1  # the broker's copy
+            return [working]
+
+        client = self._client(working, working)
+        client.get_open_orders.side_effect = refresh
+        client.place_order.side_effect = lambda c, o: transmitted.update(qty=o.totalQuantity)
+
+        self._modify(client, 2)
+
+        assert transmitted == {"qty": 2}
