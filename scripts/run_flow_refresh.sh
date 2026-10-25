@@ -153,6 +153,10 @@ SHED_EXIT=75
 # tell a shed from a fault, and the body is the only signal there is; the
 # marker matches scripts/api/server.py's _CAPACITY_SHED_MARKER. R-221.
 CAPACITY_SHED_MARKER="subprocess capacity exhausted"
+# discover.py sets this on a short UW rate limit (admission busy or HTTP
+# 429) after its one wait. The oneshot must not page. A provider-outage
+# 400 keeps the hard error string and still exits 1.
+ADMISSION_SHED_MARKER="discover rate limit shed"
 
 _is_capacity_shed() {
     # $1 = curl exit, $2 = http code, $3 = response body
@@ -162,6 +166,13 @@ _is_capacity_shed() {
         *) return 1 ;;
     esac
     printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$CAPACITY_SHED_MARKER"
+}
+
+_is_admission_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    [ "$2" = "400" ] || return 1
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$ADMISSION_SHED_MARKER"
 }
 
 _retryable_flow_shed() {
@@ -235,6 +246,13 @@ refresh_scan() {
         return "$SHED_EXIT"
     fi
 
+    # One POST already waited out the short window and spent the UW budget.
+    # A second copy would hit the same stampede. The next timer retries.
+    if _is_admission_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        echo "$(date): ${label} shed for a short UW rate limit (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$SHED_EXIT"
+    fi
+
     if [ "$CURL_EXIT" -ne 7 ]; then
         echo "$(date): ${label} FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
         return 1
@@ -279,10 +297,11 @@ if [ "$FAILURES" -gt 0 ]; then
 fi
 
 if [ "$SHED" -gt 0 ]; then
-    echo "$(date): Flow refresh shed ${SHED} scan(s) for subprocess capacity; the next slot retries" >&2
-    # Exit 0 still, so a transient shed does not page - but the row records
-    # that no scan ran, which is what makes a PERMANENT shed visible. R-265.
-    _flow_health "warn" "shed ${SHED} scan(s) for subprocess capacity"
+    echo "$(date): Flow refresh shed ${SHED} scan(s); the next slot retries" >&2
+    # Exit 0 still, so a transient shed does not page. The warn row is what
+    # makes a permanent shed visible. R-265. The per-scan line names capacity
+    # or the rate limit.
+    _flow_health "warn" "shed ${SHED} scan(s); the next slot retries"
     exit 0
 fi
 

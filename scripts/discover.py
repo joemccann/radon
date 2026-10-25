@@ -445,14 +445,18 @@ def _provider_failure(operation: str, exc: Exception, ticker: str | None = None)
     return failure
 
 
-def _apply_provider_failures(result: dict, provider_failures: list) -> None:
+def _apply_provider_failures(
+    result: dict, provider_failures: list, *, shed_admission: bool = False,
+) -> None:
     """Record skipped tickers without turning a scored scan into a hard error.
 
     The flow-tab route maps a top-level ``error`` to HTTP 400 and then drops
     the payload. The hourly oneshot treats that 400 as a failed unit
     (2026-10-02 14:02Z, page b224647c). A scan that scored candidates is
     degraded: keep the skips, do not publish or alert, and leave the hard
-    error for a result that has nothing to cache.
+    error for a result that has nothing to cache. A total miss that is only
+    a short UW rate limit uses the shed marker instead, so the oneshot does
+    not page (2026-10-22 20:01Z, page 9d06ddf8).
     """
     if not provider_failures:
         return
@@ -462,7 +466,10 @@ def _apply_provider_failures(result: dict, provider_failures: list) -> None:
         key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
     )
     if not result.get("candidates"):
-        result["error"] = "required provider data unavailable"
+        result["error"] = (
+            DISCOVER_ADMISSION_SHED if shed_admission
+            else "required provider data unavailable"
+        )
 
 
 def discover_targeted(tickers: list, dp_days: int = 3,
@@ -550,6 +557,14 @@ def discover_targeted(tickers: list, dp_days: int = 3,
 OPTIONS_FLOW_ADMISSION_WAIT_S = 70.0
 _OPTIONS_FLOW_ADMISSION_POLL_S = 8.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
+# The wrapper sheds HTTP 400 only when the body carries this exact phrase.
+# Quota exhaustion and a multi-hour embargo keep the hard provider error.
+DISCOVER_ADMISSION_SHED = "discover rate limit shed"
+_QUOTA_MARKERS = (
+    "daily request limit",
+    "quota is exhausted",
+    "budget is reserved",
+)
 
 
 def _governor_embargo_remaining() -> float | None:
@@ -568,6 +583,34 @@ def _governor_embargo_remaining() -> float | None:
     if remaining != remaining:  # NaN
         return None
     return max(0.0, remaining)
+
+
+def _is_transient_rate_limit(exc: BaseException) -> bool:
+    """True for a short 429. Daily quota text is a real miss."""
+    if not isinstance(exc, UWRateLimitError):
+        return False
+    message = str(exc).lower()
+    return not any(marker in message for marker in _QUOTA_MARKERS)
+
+
+def _rate_limit_is_a_hard_outage(exc: BaseException) -> bool:
+    """Quota and a multi-hour embargo still fail the oneshot.
+
+    A second short window after the one admission wait is the top-of-hour
+    stampede. That sheds. It does not page.
+    """
+    if not _is_transient_rate_limit(exc):
+        return True
+    if _ADMISSION_BUSY_MARKER not in str(exc).lower():
+        return False
+    remaining = _governor_embargo_remaining()
+    return remaining is not None and remaining > OPTIONS_FLOW_ADMISSION_WAIT_S
+
+
+def _provider_error_key(exc: BaseException) -> str:
+    if isinstance(exc, UWRateLimitError) and not _rate_limit_is_a_hard_outage(exc):
+        return DISCOVER_ADMISSION_SHED
+    return "required provider data unavailable"
 
 
 def _admission_retry_delay(exc: BaseException) -> float | None:
@@ -661,7 +704,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
                 "candidates_found": 0,
                 "candidates": [],
                 "degraded": True,
-                "error": "required provider data unavailable",
+                "error": _provider_error_key(exc),
                 "provider_failures": [_provider_failure("options_flow", exc)],
             }
 
@@ -695,6 +738,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
 
         candidates = []
         provider_failures = []
+        admission_sheds = []
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
@@ -713,6 +757,10 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
                     candidate = future.result()
                 except UWAPIError as exc:
                     provider_failures.append(_provider_failure("darkpool", exc, ticker))
+                    admission_sheds.append(
+                        isinstance(exc, UWRateLimitError)
+                        and not _rate_limit_is_a_hard_outage(exc)
+                    )
                     print(f"    [{done}/{total}] {ticker}... SKIP (provider unavailable)", file=sys.stderr)
                     continue
                 print(f"    [{done}/{total}] {ticker}... Score: {candidate['score']}", file=sys.stderr)
@@ -729,7 +777,11 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         "candidates_found": len(candidates),
         "candidates": candidates[:top]
     }
-    _apply_provider_failures(result, provider_failures)
+    _apply_provider_failures(
+        result,
+        provider_failures,
+        shed_admission=bool(provider_failures) and all(admission_sheds),
+    )
     return result
 
 

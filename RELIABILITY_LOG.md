@@ -1052,3 +1052,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-330 / R-741 | DONE | RED 4 failed (`refusal_reason` returned None for unset and local mode; `hrana_execute` raised `HranaHttpError` from the wire tripwire; `monitor_daemon --once` called `create_daemon`); GREEN 45 passed (guard, Hrana failure modes, API HTTP, portfolio-delete receipt). Permanent drills 114 passed. | A non-Linux process is refused whatever `RADON_MODE` is. Pytest still exercises the transport because `PYTEST_CURRENT_TEST` is set only by the runner. `get_db` and `api.db_http` execute and transaction refuse before connect. Linux is unchanged. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-10-25
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-331 / R-742 | DONE | RED 3 failed, 6 passed in `test_close_exemption_broker_book.py` (open-order end timeout, position end timeout, and a legless resting bag each transmitted). GREEN 9 passed in that file; 167 passed across broker-book, IB client, event-wait, and bankroll suites. Catalog parity 38 passed. Permanent drills 114 passed. | A close is re-admitted only when `positionEnd` and `openOrderEnd` both arrived. The returned cache is unchanged for other callers. A resting BAG with no legs makes the book unprovable, same as an unreadable snapshot. A finished book that still holds the shares and has nothing resting still transmits. No catch was widened and no wait was lengthened. |

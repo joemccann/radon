@@ -613,6 +613,10 @@ class IBClient:
         avgCost snapshot. No event (unit mocks) falls through to the cap.
         """
         self._require_connection()
+        # REL-331 / R-742. Callers that prove a close must see whether
+        # positionEnd actually arrived. The returned cache is otherwise the
+        # pre-request book when the wait lapses.
+        self._positions_snapshot_ended = False
         if refresh:
             try:
                 ended = False
@@ -637,6 +641,7 @@ class IBClient:
                             "get_positions: positionEnd/avgCost wait lapsed — "
                             "returning a possibly stale cache"
                         )
+                    self._positions_snapshot_ended = ended
                 finally:
                     unbind()
             except Exception as exc:
@@ -948,8 +953,12 @@ class IBClient:
         Uses ``reqAllOpenOrders`` (master client sees everything).
         Waits for ``openOrderEndEvent``, hard-capped at 0.5s. Empty book
         is valid — do not return just because ``openTrades()`` is empty.
+        ``_open_orders_snapshot_ended`` is False when that end event did not
+        arrive, so a caller cannot treat the returned list as the whole book
+        (REL-331 / R-742).
         """
         self._require_connection()
+        self._open_orders_snapshot_ended = False
         ended = False
 
         def _on_end() -> None:
@@ -960,6 +969,7 @@ class IBClient:
         try:
             self._ib.reqAllOpenOrders()
             self.wait_until(lambda: ended, timeout=0.5)
+            self._open_orders_snapshot_ended = ended
         finally:
             unbind()
         return self._ib.openTrades()
