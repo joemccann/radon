@@ -318,10 +318,19 @@ class TestRemoteDaemonUnit:
         assert "role_skips_control_plane_source" in helper
 
     @pytest.mark.parametrize(
+        "source",
+        (
+            "services/radon-ib-gateway-remote.service",
+            # The Gateway credential writer is broker-only: the app host has
+            # no gateway.env to write.
+            "scripts/radon-ib-gateway-credential.py",
+        ),
+    )
+    @pytest.mark.parametrize(
         ("role", "skips"),
         (("app", True), ("broker", False), ("combined", False)),
     )
-    def test_role_skip_arm_executes_for_remote_unit(self, role: str, skips: bool):
+    def test_role_skip_arm_executes_for_remote_unit(self, role: str, skips: bool, source: str):
         """EXECUTE the helper's role_skips_control_plane_source, not just grep it.
 
         Deleting the remote-unit case arm falls through to `*) return 1` —
@@ -340,11 +349,15 @@ role_skips_control_plane_source() {{
 {body}
 }}
 read_host_role() {{ printf '%s\\n' "$RADON_TEST_ROLE_SHIM"; }}
-role_skips_control_plane_source services/radon-ib-gateway-remote.service
+role_skips_control_plane_source "$RADON_TEST_SOURCE"
 """
         result = subprocess.run(
             ["bash", "-c", shell],
-            env={**os.environ, "RADON_TEST_ROLE_SHIM": role},
+            env={
+                **os.environ,
+                "RADON_TEST_ROLE_SHIM": role,
+                "RADON_TEST_SOURCE": source,
+            },
             capture_output=True,
             text=True,
             timeout=30,

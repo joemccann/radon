@@ -742,6 +742,34 @@ def test_privileged_refresh_refuses_a_python_helper_with_a_syntax_error(tmp_path
     _refused_without_install(box, "refresh-control-plane-privileged", "python syntax validation failed")
 
 
+CREDENTIAL_WRITER_SOURCE = "scripts/radon-ib-gateway-credential.py"
+
+
+def test_privileged_refresh_refuses_a_credential_writer_with_a_syntax_error(tmp_path: Path) -> None:
+    """The Gateway password writer runs as root under sudo; a body that does
+    not parse must never replace the installed one. It is Python, so the
+    shell helpers' `bash -n` arm would refuse even a valid body."""
+    box = Sandbox(tmp_path)
+    source = box.cloud / CREDENTIAL_WRITER_SOURCE
+    source.write_text(source.read_text(encoding="utf-8") + "\ndef broken(:\n", encoding="utf-8")
+    box.commit_sources()
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "python syntax validation failed")
+
+
+def test_privileged_refresh_installs_a_valid_credential_writer(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(CREDENTIAL_WRITER_SOURCE)
+    expected = (box.cloud / CREDENTIAL_WRITER_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed = box.installed_path(CREDENTIAL_WRITER_SOURCE)
+    assert installed == box.rootfs / "usr" / "local" / "sbin" / "radon-ib-gateway-credential"
+    assert installed.read_bytes() == expected
+
+
 def test_unit_refresh_refuses_a_unit_systemd_analyze_rejects(tmp_path: Path) -> None:
     box = Sandbox(tmp_path)
     box.mutate_source(HEALTH_UNIT)

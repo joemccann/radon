@@ -18,6 +18,13 @@ mid-session).
 Event-loop discipline: the store is local sqlite and validators do network
 I/O, so every call goes through asyncio.to_thread. Slow browser-login
 validators run as their own subprocess inside that thread.
+
+IB Gateway (service ``ib_gateway``): saving rotates the Gateway password on
+the broker host. No validator runs (a login probe IS a Gateway login and
+fires an IBKR Mobile push). The value goes to the broker once over mTLS
+(services.rotate_gateway_password), which writes the Gateway env file and
+restarts the Gateway once; the app store is written only when the broker
+says it wrote the file.
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ import asyncio
 import logging
 import math
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -45,6 +53,11 @@ try:
 except ImportError:  # pragma: no cover - depends on which root is on sys.path
     from scripts.api.auth import is_trusted_local_request
 
+try:
+    from api import services as gateway_services
+except ImportError:  # pragma: no cover - depends on which root is on sys.path
+    from scripts.api import services as gateway_services
+
 logger = logging.getLogger("radon.credentials")
 
 router = APIRouter()
@@ -61,6 +74,12 @@ VALIDATOR_CONCURRENCY = 2
 VALIDATOR_COOLDOWN_S = 5.0
 _validator_slots: Optional[asyncio.Semaphore] = None
 _validator_last_run: Dict[str, float] = {}
+
+# IB Gateway password rotation: one save in flight per process. The broker
+# holds its own lock too; this one keeps a double submit off the wire.
+IB_GATEWAY_SERVICE = "ib_gateway"
+GATEWAY_VALUE_MAX = 256
+_IB_ROTATE_LOCK = threading.Lock()
 
 
 def _generated_at() -> str:
@@ -288,6 +307,191 @@ async def list_credentials(request: Request):
     }
 
 
+def _gateway_value_error(value: object) -> Optional[str]:
+    """Why a Gateway credential cannot be written as KEY='value', else None.
+
+    Same rule as value_error() in cloud/scripts/radon-ib-gateway-credential.py
+    and _gateway_value_error() in scripts/ib_gateway_remote/serve.py. docker
+    compose reads the broker file with single-quote semantics, so a quote, a
+    control byte or a trailing backslash would change or break the password.
+    """
+    if not isinstance(value, str):
+        return "must be a string"
+    if not value:
+        return "must not be empty"
+    if len(value) > GATEWAY_VALUE_MAX:
+        return f"must be at most {GATEWAY_VALUE_MAX} characters"
+    if value != value.strip():
+        return "must not start or end with spaces"
+    if "'" in value:
+        return "must not contain a single quote (')"
+    # C0, DEL and C1 (U+0085 NEL is C1), then U+2028/U+2029, the only Zl/Zp
+    # code points. The writer splits the file on \n only, but
+    # str.splitlines() breaks on all of these, so a stored one could split
+    # the line on a later rewrite and inject its tail as a KEY=value line.
+    if any(ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F for ch in value):
+        return "must not contain control characters"
+    if "\u2028" in value or "\u2029" in value or len((value + "x").splitlines()) != 1:
+        return "must not contain line separators"
+    if value.endswith("\\"):
+        return "must not end with a backslash"
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return "must be valid UTF-8 text"
+    return None
+
+
+def _gateway_error(status: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status,
+        detail={"code": code, "service": IB_GATEWAY_SERVICE, "message": message},
+    )
+
+
+def _scrub(text: object, secrets: list) -> str:
+    out = str(text or "")
+    for secret in sorted({v for v in secrets if v}, key=len, reverse=True):
+        out = out.replace(secret, "[redacted]")
+    return out
+
+
+def _gateway_values(service, body: dict) -> Dict[str, str]:
+    """Raw submitted Gateway values (never stripped), or a refusal."""
+    raw = body.get("values")
+    if not isinstance(raw, dict) or not raw:
+        raise _bad_request("body must carry a non-empty 'values' object")
+    allowed = {field.name for field in service.fields}
+    for name in raw:
+        if name not in allowed:
+            raise _bad_request(f"{name} is not a field of {service.id}")
+    if "TWS_PASSWORD" not in raw:
+        raise _gateway_error(
+            422, "GATEWAY_CREDENTIAL_INVALID",
+            "Enter the new IBKR password. The username alone cannot be rotated.",
+        )
+    for name in ("TWS_PASSWORD", "TWS_USERID"):
+        if name in raw:
+            reason = _gateway_value_error(raw[name])
+            if reason:
+                label = "IBKR password" if name == "TWS_PASSWORD" else "IBKR username"
+                raise _gateway_error(
+                    422, "GATEWAY_CREDENTIAL_INVALID",
+                    f"The {label} {reason}. Nothing was saved.",
+                )
+    return {name: raw[name] for name in ("TWS_PASSWORD", "TWS_USERID") if name in raw}
+
+
+_ROTATION_STATUS = {200: "applied", 202: "deferred"}
+
+
+async def _put_ib_gateway(service, body: dict, request: Request):
+    """Write the new password on the broker, restart the Gateway once, then
+    store it here. The app store holds it if and only if the broker wrote it."""
+    submitted = _gateway_values(service, body)
+    actor = _actor(request, body)
+    store = _open_store()
+    secrets = list(submitted.values())
+    if not _IB_ROTATE_LOCK.acquire(blocking=False):
+        raise _gateway_error(
+            409, "GATEWAY_ROTATION_IN_PROGRESS",
+            "A Gateway password save is already running. Wait for it to finish.",
+        )
+    try:
+        status, reply = await gateway_services.rotate_gateway_password(submitted, actor)
+        if not isinstance(reply, dict):
+            reply = {}
+        detail = _scrub(reply.get("detail") or reply.get("error") or "", secrets)
+        written = reply.get("written")
+        logger.info(
+            "ib_gateway rotation: service=%s status=%s code=%s written=%s actor=%s",
+            IB_GATEWAY_SERVICE, status, reply.get("code"), written, actor,
+        )
+
+        if written is True and status in (200, 202, 502):
+            rotation_status = _ROTATION_STATUS.get(status, "restart_failed")
+
+            def _save() -> None:
+                store.set_secrets(submitted, actor=actor)
+                for name, value in submitted.items():
+                    try:
+                        os.environ[name] = value
+                    except (ValueError, UnicodeEncodeError) as exc:
+                        logger.warning("credential save: skipping env export of %s: %s", name, type(exc).__name__)
+                        continue
+                    _SESSION_EXPORTED.add(name)
+
+            try:
+                await asyncio.to_thread(_save)
+            except SecretStoreError as exc:
+                logger.warning("ib_gateway store write failed after broker write: %s", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "CREDENTIAL_STORE_UNAVAILABLE",
+                        "service": IB_GATEWAY_SERVICE,
+                        "message": (
+                            "Broker has the new password; app store write failed. "
+                            "Do not resubmit; fix the store, then save again."
+                        ),
+                    },
+                ) from exc
+            stored = await asyncio.to_thread(_stored_by_name, store)
+            return {
+                "service": _service_entry(service, stored),
+                "validation": {
+                    "status": "unchecked",
+                    "message": "IB Gateway logins are never live-checked from here",
+                },
+                "rotation": {"status": rotation_status, "detail": detail},
+            }
+
+        if status == 409:
+            raise _gateway_error(
+                409, "GATEWAY_LOGIN_BLOCKED",
+                f"Gateway login blocked: {detail or 'try again shortly'}. Nothing was saved.",
+            )
+        if status == 423:
+            raise _gateway_error(
+                423, "GATEWAY_OPERATOR_HOLD",
+                f"IBKR operator hold active: {detail}. Nothing was saved.",
+            )
+        if status == 400:
+            raise _gateway_error(
+                422, "GATEWAY_CREDENTIAL_INVALID",
+                f"The broker refused the value: {detail}. Nothing was saved.",
+            )
+        if status in (404, 503):
+            raise _gateway_error(
+                503, "GATEWAY_ROTATION_UNAVAILABLE",
+                "The broker cannot rotate the Gateway password yet. Nothing was saved.",
+            )
+        if status == -1 and reply.get("sent") is False:
+            # Connect or TLS handshake failed: the broker never got the request.
+            raise _gateway_error(
+                503, "GATEWAY_BROKER_UNREACHABLE",
+                "Broker unreachable. Nothing was saved.",
+            )
+        if 400 <= status < 500 and written is None:
+            # A daemon refusal before any write (peer or cert-CN allowlist,
+            # method, body size) carries no `written`.
+            raise _gateway_error(
+                502, "GATEWAY_WRITE_FAILED",
+                f"The broker refused the request: {detail or f'HTTP {status}'}. Nothing was saved.",
+            )
+        if status == -1 or written is None:
+            raise _gateway_error(
+                504, "GATEWAY_ROTATION_UNKNOWN",
+                "Outcome unknown. Do not resubmit. Check the Gateway in /admin.",
+            )
+        raise _gateway_error(
+            502, "GATEWAY_WRITE_FAILED",
+            f"The broker could not write the password: {detail or f'HTTP {status}'}. Nothing was saved.",
+        )
+    finally:
+        _IB_ROTATE_LOCK.release()
+
+
 @router.put("/credentials/{service_id}")
 async def put_credentials(service_id: str, request: Request):
     """Validate against the vendor, then store + apply. Invalid saves nothing."""
@@ -295,6 +499,8 @@ async def put_credentials(service_id: str, request: Request):
     if service is None:
         raise _unknown_service(service_id)
     body = await _json_object(request)
+    if service_id == IB_GATEWAY_SERVICE:
+        return await _put_ib_gateway(service, body, request)
     submitted = _clean_values(service, body)
     actor = _actor(request, body)
     store = _open_store()

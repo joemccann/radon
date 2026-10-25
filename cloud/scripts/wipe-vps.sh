@@ -146,6 +146,7 @@ log_info "Removing root control-plane helpers..."
 rm -f /usr/local/sbin/radon-deploy-root
 rm -f /usr/local/sbin/radon-app-runtime
 rm -f /usr/local/sbin/radon-docker-gw /usr/local/sbin/radon-ib-hold
+rm -f /usr/local/sbin/radon-ib-gateway-credential
 rm -f /usr/local/bin/radon
 rm -f /usr/local/bin/radon-ib-gateway-control
 rm -rf /usr/local/lib/radon

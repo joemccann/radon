@@ -57,3 +57,34 @@ describe("remote Gateway deadlines are monotonic (REL-171)", () => {
     }
   });
 });
+
+describe("IB Gateway password rotation deadlines are monotonic", () => {
+  function tsConstantMs(relPath: string, name: string): number {
+    const src = stripComments(readFileSync(resolve(ROOT, relPath), "utf8"));
+    const match = src.match(new RegExp(`\\b${name}\\s*=\\s*([0-9_]+)`));
+    if (!match) throw new Error(`${name} missing from ${relPath}`);
+    return Number(match[1].replace(/_/g, ""));
+  }
+
+  const rotateMs = pythonSeconds("ROTATE_TIMEOUT_S") * 1000;
+  const routeMs = tsConstantMs("web/app/api/credentials/[service]/route.ts", "MUTATE_TIMEOUT_MS");
+  const clientMs = tsConstantMs("web/lib/credentials.ts", "MUTATE_TIMEOUT_MS");
+
+  it("the credential route outlives FastAPI's broker rotation budget", () => {
+    expect(routeMs).toBeGreaterThan(rotateMs);
+  });
+
+  it("the browser backstop outlives the route", () => {
+    expect(clientMs).toBeGreaterThan(routeMs);
+  });
+
+  it("the Caddy credential handle outlives the browser backstop", () => {
+    const caddy = stripComments(readFileSync(resolve(ROOT, "cloud/caddy/Caddyfile"), "utf8"));
+    const start = caddy.indexOf("handle @credential_mutate");
+    expect(start).toBeGreaterThan(-1);
+    const block = caddy.slice(start, caddy.indexOf("\n    }\n", start));
+    const match = block.match(/response_header_timeout (\d+)s/);
+    expect(match).not.toBeNull();
+    expect(Number(match![1]) * 1000).toBeGreaterThan(clientMs);
+  });
+});

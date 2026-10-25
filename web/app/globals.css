@@ -21916,6 +21916,31 @@ body[data-mobile="true"] .alerts-rule__channel {
   min-width: 0;
 }
 
+/* IB Gateway password rotation: inline confirm before a Gateway restart. */
+.credentials-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  background-color: var(--bg-panel-raised);
+}
+
+.credentials-confirm .admin-confirm-title,
+.credentials-confirm .admin-confirm-body {
+  margin-bottom: 0;
+}
+
+.credentials-confirm__ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
 .credentials-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 300px);

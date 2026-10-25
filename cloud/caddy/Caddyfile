@@ -286,6 +286,31 @@
         }
     }
 
+    # An IB Gateway password save (Credentials tab) writes the broker's Gateway
+    # env file and recreates the Gateway before it answers: the broker budget
+    # is 150s, the Next route 165s, the browser 175s. On the catch-all 30s
+    # guard the browser read an empty 5xx while the broker was still working
+    # and the operator would resubmit, a second login with the new password.
+    # Scoped to PUT. No retry loop: a replayed PUT is a second Gateway restart.
+    @credential_mutate {
+        path /api/credentials/*
+        method PUT
+    }
+    handle @credential_mutate {
+        # Same edge body cap as @scan_routes above.
+        request_body {
+            max_size 12MB
+        }
+
+        reverse_proxy 127.0.0.1:3000 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 200s
+                read_timeout 300s
+            }
+        }
+    }
+
     handle {
         # Same edge body cap as @scan_routes above.
         request_body {

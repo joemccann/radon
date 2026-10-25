@@ -889,3 +889,152 @@ class TestRemoteFailuresAreStructured:
         status, payload = admin_services._remote_http("start", 1.0)
         assert payload["ok"] is False
         assert "detail" in payload
+
+
+# ---------------------------------------------------------------------------
+# IB Gateway password rotation: one mTLS POST to the broker, never a helper
+# verb on the app host, never reachable from /admin/services.
+# ---------------------------------------------------------------------------
+
+
+ROTATE_PASSWORD = "N3w$pa ss#9"
+
+
+class TestRotateGatewayPassword:
+    def test_rotate_posts_full_url_method_body(self, monkeypatch, tmp_path: Path) -> None:
+        import json
+        import urllib.request
+
+        _configure_app_remote(monkeypatch, tmp_path)
+        seen: list[tuple[object, float]] = []
+
+        class _Resp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"ok": True, "written": True, "restarted": True, "detail": "ok"}
+                ).encode()
+
+        def fake_urlopen(req, context=None, timeout=None):
+            seen.append((req, timeout))
+            return _Resp()
+
+        monkeypatch.setattr(admin_services, "_remote_ssl_context", lambda: None)
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        status, payload = asyncio.run(
+            admin_services.rotate_gateway_password(
+                {"TWS_PASSWORD": ROTATE_PASSWORD, "TWS_USERID": "user9"}, actor="user_op"
+            )
+        )
+        assert status == 200
+        assert payload["written"] is True
+        assert len(seen) == 1
+        req, timeout = seen[0]
+        assert req.full_url == "https://10.0.0.4:8340/rotate-password"
+        assert req.get_method() == "POST"
+        assert req.get_header("Content-type") == "application/json"
+        assert json.loads(req.data.decode()) == {
+            "password": ROTATE_PASSWORD,
+            "userid": "user9",
+            "actor": "user_op",
+        }
+        assert timeout == admin_services.ROTATE_TIMEOUT_S == 150.0
+
+    def test_rotate_omits_userid_when_not_submitted(self, monkeypatch, tmp_path: Path) -> None:
+        _configure_app_remote(monkeypatch, tmp_path)
+        bodies: list[dict] = []
+
+        def fake_remote(verb, timeout, body=None):
+            bodies.append(body)
+            return 200, {"ok": True, "written": True, "restarted": True, "detail": "ok"}
+
+        monkeypatch.setattr(admin_services, "_remote_http", fake_remote)
+        asyncio.run(admin_services.rotate_gateway_password({"TWS_PASSWORD": "pw1"}, actor="a"))
+        assert bodies == [{"password": "pw1", "actor": "a"}]
+
+    def test_rotate_not_configured_503_no_io(self, monkeypatch) -> None:
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.delenv("RADON_IB_REMOTE_URL", raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("no broker I/O without a configured remote")
+
+        monkeypatch.setattr(admin_services, "_remote_http", boom)
+        status, payload = asyncio.run(
+            admin_services.rotate_gateway_password({"TWS_PASSWORD": "pw1"}, actor="a")
+        )
+        assert status == 503
+        assert payload["code"] == "GATEWAY_ROTATION_UNAVAILABLE"
+
+    def test_rotate_transport_error_no_password_in_detail(self, monkeypatch, tmp_path: Path) -> None:
+        _configure_app_remote(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            admin_services,
+            "_remote_http",
+            lambda verb, timeout, body=None: (-1, {"ok": False, "detail": f"boom {ROTATE_PASSWORD}"}),
+        )
+        status, payload = asyncio.run(
+            admin_services.rotate_gateway_password({"TWS_PASSWORD": ROTATE_PASSWORD}, actor="a")
+        )
+        assert status == -1
+        assert ROTATE_PASSWORD not in str(payload)
+        assert "[redacted]" in payload["detail"]
+
+    def test_remote_http_connection_refused_is_marked_not_sent(self, monkeypatch, tmp_path: Path) -> None:
+        import socket
+
+        _configure_app_remote(monkeypatch, tmp_path)
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        listener.close()  # nothing listens: ECONNREFUSED on connect
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", f"https://127.0.0.1:{port}")
+        monkeypatch.setattr(admin_services, "_remote_ssl_context", lambda: None)
+        status, payload = admin_services._remote_http(
+            "rotate-password", 2.0, {"password": ROTATE_PASSWORD, "actor": "a"}
+        )
+        assert status == -1
+        assert payload["sent"] is False
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            pytest.param(TimeoutError("read timed out"), id="read-timeout"),
+            pytest.param(ConnectionResetError("reset"), id="reset-after-send"),
+        ],
+    )
+    def test_remote_http_failure_after_send_is_not_marked_not_sent(
+        self, monkeypatch, tmp_path: Path, exc
+    ) -> None:
+        import urllib.request
+
+        _configure_app_remote(monkeypatch, tmp_path)
+        monkeypatch.setattr(admin_services, "_remote_ssl_context", lambda: None)
+
+        def fake_urlopen(req, context=None, timeout=None):
+            raise exc
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        status, payload = admin_services._remote_http(
+            "rotate-password", 2.0, {"password": ROTATE_PASSWORD, "actor": "a"}
+        )
+        assert status == -1
+        assert payload.get("sent") is not False
+
+    def test_rotate_budget_outlives_writer_plus_helper(self) -> None:
+        from ib_gateway_remote import serve
+
+        assert admin_services.ROTATE_TIMEOUT_S >= serve.HELPER_TIMEOUT_S + serve.WRITER_TIMEOUT_S + 15
+
+    def test_remote_verbs_exclude_rotate(self) -> None:
+        assert "rotate-password" not in admin_services.REMOTE_VERBS
+        result = asyncio.run(admin_services.remote_gateway_action("rotate-password"))
+        assert result.ok is False
+        assert result.returncode == -1

@@ -282,12 +282,16 @@ def _shim_box(tmp_path: Path) -> dict[str, object]:
     env_file = tmp_path / "env"
     env_file.write_text("X=1\n", encoding="utf-8")
     env_file.chmod(0o600)
+    gateway_env = tmp_path / "gateway.env"
+    gateway_env.write_text("TWS_PASSWORD='x'\n", encoding="utf-8")
+    gateway_env.chmod(0o600)
     env = {
         **os.environ,
         "RADON_DOCKER_GW_TEST_MODE": "1",
         "RADON_TEST_DOCKER": str(docker),
         "RADON_TEST_COMPOSE_FILE": str(compose_file),
         "RADON_TEST_COMPOSE_ENV_FILE": str(env_file),
+        "RADON_TEST_GATEWAY_ENV_FILE": str(gateway_env),
     }
     return {"env": env, "env_file": env_file, "tmp": tmp_path}
 

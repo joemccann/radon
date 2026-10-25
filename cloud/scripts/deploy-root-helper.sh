@@ -21,6 +21,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
   scripts/radon-docker-gw.sh
+  scripts/radon-ib-gateway-credential.py
   docker-compose.yml
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
@@ -84,6 +85,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
   /usr/local/sbin/radon-docker-gw
+  /usr/local/sbin/radon-ib-gateway-credential
   /etc/radon/ib-gateway-compose.yml
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
@@ -145,6 +147,7 @@ readonly -a CONTROL_PLANE_MODES=(
   755
   644
   644
+  755
   755
   755
   644
@@ -463,7 +466,8 @@ broker_control_plane_source() {
     scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
     scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
     repo/scripts/utils/ib_operator_hold.py|\
-    scripts/radon-docker-gw.sh|docker-compose.yml|config/tmpfiles.d/radon-deploy.conf|\
+    scripts/radon-docker-gw.sh|scripts/radon-ib-gateway-credential.py|\
+    docker-compose.yml|config/tmpfiles.d/radon-deploy.conf|\
     services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
     services/radon-ib-gateway-remote.service) return 0 ;;
@@ -508,6 +512,7 @@ role_skips_control_plane_source() {
   fi
   case "$1" in
     scripts/ib-gateway-control.sh|scripts/ib-operator-hold.sh|repo/scripts/utils/ib_operator_hold.py|\
+    scripts/radon-ib-gateway-credential.py|\
     services/radon-ib-gateway.service|\
     services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|\
@@ -2200,7 +2205,9 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */lib/radon/*.py)
+    # The broker's Gateway credential writer: Python with no .py suffix, so
+    # neither the shell arm (`bash -n` refuses Python) nor the lib arm matches.
+    */radon-ib-gateway-credential|*/lib/radon/*.py)
       # Parse only; importing would execute candidate code as root.
       if ! "$SESSION_PYTHON" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
         echo "python syntax validation failed: ${dest}" >&2

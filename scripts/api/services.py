@@ -176,6 +176,10 @@ def host_role() -> str:
 
 _HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status", "hold", "unhold"})
+# The broker route _remote_http may call. rotate-password is reachable only
+# through rotate_gateway_password() (the Credentials tab), never through
+# remote_gateway_action() or /admin/services, which gate on REMOTE_VERBS.
+_REMOTE_HTTP_VERBS = REMOTE_VERBS | {"rotate-password"}
 
 
 
@@ -613,6 +617,12 @@ REMOTE_TIMEOUT_S = 135.0
 # it instead of stacking executor threads) and a brief result cache.
 REMOTE_STATUS_TIMEOUT_S = 5.0
 REMOTE_STATUS_CACHE_S = 2.0
+# IB Gateway password rotation: the broker runs the root writer (10s,
+# WRITER_TIMEOUT_S) then one helper restart (120s, HELPER_TIMEOUT_S). This
+# budget outlives both plus the mTLS round trip; the Next credential route
+# (web/app/api/credentials/[service]/route.ts) and the Caddy
+# @credential_mutate handle must outlive it. Literal: both tests parse it.
+ROTATE_TIMEOUT_S = 150.0
 # ActionResult.returncode sentinels for the remote path (R-500): a dead mTLS
 # link is a gateway timeout, a malformed broker reply is a bad gateway —
 # never the -1 "caller error" bucket the route maps to 400.
@@ -670,7 +680,7 @@ def _decode_remote_body(raw: bytes) -> dict:
 
 
 def _remote_http(verb: str, timeout: float, body: Optional[dict] = None) -> tuple[int, dict]:
-    if verb not in REMOTE_VERBS:
+    if verb not in _REMOTE_HTTP_VERBS:
         return -1, {"ok": False, "detail": f"verb not allowed: {verb}"}
     base = os.environ["RADON_IB_REMOTE_URL"].rstrip("/")
     path = "/status" if verb == "status" else f"/{verb}"
@@ -689,8 +699,14 @@ def _remote_http(verb: str, timeout: float, body: Optional[dict] = None) -> tupl
         payload = _decode_remote_body(exc.read())
         payload.setdefault("detail", str(exc))
         return exc.code, payload
+    except urllib.error.URLError as exc:
+        # urlopen wraps in URLError only what fails inside the send phase
+        # (connect, TLS handshake, writing the request). The broker never got
+        # a whole request, so it acted on nothing; the rotation path reports
+        # that as "nothing was saved" instead of an unknown outcome. A read
+        # timeout or reset after the send raises unwrapped, below.
+        return -1, {"ok": False, "sent": False, "detail": str(exc)}
     except (
-        urllib.error.URLError,
         TimeoutError,
         OSError,
         ValueError,
@@ -902,6 +918,45 @@ async def set_operator_hold(
     if not isinstance(payload, dict) or payload.get("malformed"):
         return 502, {"ok": False, "detail": "broker reply is not an object"}
     return status, payload
+
+
+def _scrub_secrets(text: object, secrets: list) -> str:
+    out = str(text or "")
+    for secret in sorted({v for v in secrets if v}, key=len, reverse=True):
+        out = out.replace(secret, "[redacted]")
+    return out
+
+
+async def rotate_gateway_password(values: Dict[str, str], actor: str) -> tuple[int, dict]:
+    """POST the new IB Gateway password to the broker once, over mTLS.
+
+    The broker validates, refuses while a login would stack a 2FA push,
+    writes /etc/radon/ib-gateway/gateway.env through its root writer, and
+    restarts the Gateway once. No retry here: a resubmitted wrong password is
+    a second failed IBKR login. Returns (HTTP status or -1 for transport
+    failure, broker body with every submitted value scrubbed).
+    """
+    if not is_remote_gateway_configured():
+        return 503, {
+            "ok": False,
+            "code": "GATEWAY_ROTATION_UNAVAILABLE",
+            "detail": "this host has no broker control channel configured",
+        }
+    body: dict = {"password": values["TWS_PASSWORD"], "actor": actor}
+    if "TWS_USERID" in values:
+        body["userid"] = values["TWS_USERID"]
+    status, payload = await asyncio.to_thread(
+        _remote_http, "rotate-password", ROTATE_TIMEOUT_S, body
+    )
+    _reset_remote_status_cache()
+    if not isinstance(payload, dict):
+        payload = {"ok": False, "detail": "broker reply is not an object", "malformed": True}
+    secrets = list(values.values())
+    clean = {
+        key: (_scrub_secrets(value, secrets) if isinstance(value, str) else value)
+        for key, value in payload.items()
+    }
+    return status, clean
 
 
 @dataclass
