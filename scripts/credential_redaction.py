@@ -222,7 +222,13 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\bnvapi-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"(?<![A-Za-z0-9])csk-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
-    (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
+    # Every credential-named parameter, not three: the assignment pass skips
+    # a value that starts with this label, so a later `&client_secret=` in
+    # the same query was never inspected (DS-2026-10-25-10).
+    (
+        re.compile(rf"([?&](?:t|{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+", re.IGNORECASE),
+        r"\1[redacted]",
+    ),
 ]
 
 # Generic `password = ...` / `token: ...` shapes. They scrub well but match
@@ -250,8 +256,11 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 
 # One line break plus indentation may sit between the key and its value: a
 # YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
+# A YAML comment may end that header line (DS-2026-10-25-11); it needs the
+# whitespace YAML requires before `#`, so an env value starting `#` stays one.
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?",
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
+    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*)?",
     re.IGNORECASE,
 )
 

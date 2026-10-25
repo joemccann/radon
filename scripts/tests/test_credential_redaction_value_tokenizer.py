@@ -260,3 +260,23 @@ def test_a_yaml_tag_or_anchor_before_a_block_scalar_keeps_no_body(props):
     assert _clean(scrubbed), scrubbed
     assert "next: ok" in scrubbed
     assert find_credential_shapes(text)
+
+
+def test_a_redacted_query_parameter_does_not_shield_the_next():
+    """DS-2026-10-25-10."""
+    scrubbed = scrub_credential_text(f"https://h/x?api_key={TAIL}&client_secret={OPAQUE}&symbol=SPY")
+    assert _clean(scrubbed), scrubbed
+    assert scrubbed.endswith("&symbol=SPY")
+
+
+def test_a_yaml_comment_after_the_key_keeps_no_next_line_value():
+    """DS-2026-10-25-11."""
+    scrubbed = scrub_credential_text(f"password: # db credential\n  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
+
+
+def test_an_env_value_starting_with_a_hash_is_still_the_value():
+    scrubbed = scrub_credential_text(f"PASSWORD=#{OPAQUE}\nNEXT=1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "NEXT=1" in scrubbed
