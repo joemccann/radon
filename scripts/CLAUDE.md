@@ -163,6 +163,8 @@ deliberately a small multiple of each default; widening one is a code change.
 
 `ib_insync.positions()` returns an in-memory cache. TWS push updates `pos.position` immediately but `pos.avgCost` lags while TWS recomputes VWAP server-side. `IBClient.get_positions()` calls `reqPositions()` then waits for `positionEndEvent` AND finite `avgCost` on every row (1s cap) BEFORE reading. Do not return on the first `positionEvent` — size can arrive before VWAP. Opt out via `get_positions(refresh=False)` for tight read loops. Try/except so gateway hiccups fall back to cache. Tests: `test_ib_client.py::TestPortfolioOperations`, `test_ib_event_waits.py`. Added 2026-05-20 (commit 5d10def); event wait 2026-08-22.
 
+The close re-admission (REL-331 / R-742) does not treat a lapsed wait as a book. `read_broker_book` admits a close only when both `positionEnd` and `openOrderEnd` arrived. A resting BAG with no legs is unprovable. Other callers still receive the cache.
+
 ---
 
 ## Journal Lot-Matched Basis
