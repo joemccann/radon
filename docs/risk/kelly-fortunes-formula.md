@@ -327,7 +327,8 @@ for sizing/eval is unchanged.
   whenever admission proved a close, even if the snapshot has since changed,
   and the broker holding must be the order's own contract (conId), not a
   sibling trading class with the same coordinates. With the all-placer gate
-  on, a single-leg modify in `ib_order_manage.py` is held under the same cap,
+  on, a modify in `ib_order_manage.py` (single-leg or combo, legs resolved
+  from the broker) is held under the same cap on its unfilled remainder,
   against the broker book with its own resting remainder replaced.
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe

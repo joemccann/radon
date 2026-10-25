@@ -288,3 +288,54 @@ class TestAModifyMeetsTheBankrollCap:
 
         assert self._modify(client, 5) == 0
         client.place_order.assert_called_once()
+
+    def test_a_partially_filled_close_is_priced_on_its_remainder(self):
+        working = self._working(10, "SELL")
+        working.orderStatus.filled = 6.0
+        working.orderStatus.remaining = 4.0
+        confirmed = self._working(10, "SELL")
+        confirmed.order.lmtPrice = 3.10
+        client = self._client(working, confirmed, held=4.0)
+
+        from ib_order_manage import modify_order
+
+        with pytest.raises(SystemExit) as exc:
+            modify_order(client, 10, 12345, 3.10, "127.0.0.1", 4001)
+        assert exc.value.code == 0
+        client.place_order.assert_called_once()
+
+
+class TestAComboModifyMeetsTheBankrollCap(TestAModifyMeetsTheBankrollCap):
+    """DS-2026-10-25-02 residual: the combo branch skipped Gate 3 entirely."""
+
+    LONG = SimpleNamespace(conId=31, symbol="SLV", secType="OPT", right="C", strike=26.0,
+                           lastTradeDateOrContractMonth="20261120")
+    SHORT = SimpleNamespace(conId=32, symbol="SLV", secType="OPT", right="C", strike=28.0,
+                            lastTradeDateOrContractMonth="20261120")
+
+    def _working(self, quantity, action="BUY"):
+        trade = super()._working(quantity, action)
+        trade.order.lmtPrice = 0.80
+        trade.contract = SimpleNamespace(symbol="SLV", secType="BAG", conId=0, comboLegs=[
+            SimpleNamespace(conId=31, action="BUY", ratio=1),
+            SimpleNamespace(conId=32, action="SELL", ratio=1),
+        ])
+        return trade
+
+    def _client(self, working, confirmed, held=0.0):
+        client = super()._client(working, confirmed)
+        client.qualify_contracts.return_value = [self.LONG, self.SHORT]
+        return client
+
+    def test_a_close_is_not_reserved_against_itself(self):
+        pytest.skip("single-leg close covered by the parent class")
+
+    def test_a_partially_filled_close_is_priced_on_its_remainder(self):
+        pytest.skip("single-leg close covered by the parent class")
+
+    def test_an_unresolvable_leg_is_unpriceable(self, capsys):
+        client = self._client(self._working(1), self._working(2))
+        client.qualify_contracts.return_value = [self.LONG]
+
+        assert self._modify(client, 2) == 1
+        client.place_order.assert_not_called()

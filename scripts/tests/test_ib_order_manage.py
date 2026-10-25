@@ -116,6 +116,18 @@ class TestCancelOrder:
             cancel_order(client, 99, 88, "127.0.0.1", 4001)
         assert exc.value.code == 1
 
+    def test_a_stale_perm_id_never_cancels_another_order(self):
+        """DS-2026-10-25-07: orderId is client-scoped; a permId miss must not
+        fall back to whichever order shares the orderId."""
+        other = make_trade(order_id=10, perm_id=777, status="Submitted")
+        client = make_client([other])
+        client.cancel_order = MagicMock()
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        assert exc.value.code == 1
+        client.cancel_order.assert_not_called()
+
     def test_cancel_reconnects_as_original_client_id(self):
         """When cancel script connects as clientId 0 but order was placed by clientId 9,
         it should disconnect + reconnect as clientId 9 before cancelling."""
