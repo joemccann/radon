@@ -115,6 +115,8 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
         rf"^(?P<indent>[ \t]*)"
         rf"(?P<lead>(?:(?P<mark>[#>*+\-](?:[#>*+\- \t]{{0,22}}[#>*+\-])?)[ \t]{{0,23}})?)"
         rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
+        # A YAML tag or anchor may precede the indicator (DS-2026-10-25-09).
+        r"(?:[!&][^\s]{0,64}[ \t]+){0,2}"
         r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
         r"(?:[ \t]*\r?\n|(?P=indent)(?P=mark)[ \t]*\r?\n"
         r"|(?P=indent)(?:(?P=lead))?[ \t]+[^\r\n]*\r?\n?)+",
@@ -192,7 +194,10 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (
         re.compile(
             r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
-            r"(?:(?:basic|bearer|digest|token)\s+)?\S+",
+            # The whole rest of the line: a fixed scheme list redacted
+            # `ApiKey` and kept the credential after it, and one token kept
+            # a Digest header's later fields (DS-2026-10-25-08).
+            r"[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -218,7 +223,17 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\bnvapi-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"(?<![A-Za-z0-9])csk-[A-Za-z0-9_-]{16,}"), "[redacted-key]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
-    (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
+    # Every credential-named parameter, prefixed names included, not three:
+    # the assignment pass skips a value that starts with this label, so a
+    # later `&client_secret=` or `&refresh_token=` in the same query was never
+    # inspected (DS-2026-10-25-10).
+    (
+        re.compile(
+            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+",
+            re.IGNORECASE,
+        ),
+        r"\1[redacted]",
+    ),
 ]
 
 # Generic `password = ...` / `token: ...` shapes. They scrub well but match
@@ -246,8 +261,12 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 
 # One line break plus indentation may sit between the key and its value: a
 # YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
+# A YAML comment may end that header line, and whole comment lines may sit
+# before the value (DS-2026-10-25-11); a trailing comment needs the whitespace
+# YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?",
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
+    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
 
@@ -283,7 +302,15 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
             # grammar applies is unknowable here; the later close redacts
             # the whole value under either.
             literal = _find_close(text, body, delimiter, backslash_escapes=False)
-            if close is None or (literal is not None and literal > close):
+            if close is None:
+                # No close under the escaping grammar: the value runs at
+                # least to the end of the line, so an earlier literal close
+                # (an escaped quote in a truncated excerpt) must not end it.
+                eol = _end_of_line(text, body)
+                if literal is None or literal < eol:
+                    return body, eol, ""
+                close = literal
+            elif literal is not None and literal > close:
                 close = literal
         if close is not None:
             return body, close, delimiter
@@ -316,12 +343,15 @@ def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool
     return None
 
 
+_LINE_BREAK = re.compile(r"[\r\n]")
+
+
 def _end_of_line(text: str, pos: int) -> int:
-    newline = min(
-        (i for i in (text.find("\r", pos), text.find("\n", pos)) if i != -1),
-        default=-1,
-    )
-    return len(text) if newline == -1 else newline
+    # One search for the nearest break: finding `\r` and `\n` separately
+    # scanned to the end of an LF-only text on every call, quadratic over
+    # its lines.
+    newline = _LINE_BREAK.search(text, pos)
+    return len(text) if newline is None else newline.start()
 
 
 def _iter_assignments(text: str):
@@ -384,9 +414,30 @@ def _redact_assignments(text: str) -> str:
     """
     out: list[str] = []
     last = 0
+    eol = -1
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
+        if head_end < last:
+            continue
+        # Decided on the value token itself: the line's later text is other
+        # assignments or prose, and re-reading it per value is quadratic. A
+        # label with more words after it on the line is a partial redaction
+        # (a provider rule took the first word of a passphrase): redact on.
+        if _is_already_redacted(text[body_start:body_end]):
+            after = body_end + len(delimiter)
+            while after < len(text) and text[after] in " \t":
+                after += 1
+            if delimiter or after >= len(text) or text[after] in "\r\n":
+                continue
+        if not delimiter:
+            # DS-2026-10-25-04: an unquoted value is redacted to the end of
+            # its line. Stopping at whitespace published every word after
+            # the first of a passphrase; detection keeps the narrower span.
+            # The line end is reused while it lies ahead, keeping this linear.
+            if eol < body_start:
+                eol = _end_of_line(text, body_start)
+            body_end = eol
         body = text[body_start:body_end]
-        if _is_already_redacted(body) or (not delimiter and not body):
+        if not delimiter and not body:
             # An EMPTY quoted value still gets the label (the key is the tell);
             # an absent unquoted value has nothing to replace.
             continue
