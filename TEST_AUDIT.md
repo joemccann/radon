@@ -11846,3 +11846,37 @@ Serial from the repo root, OpenSSL 3 and the 3.13 venv first on `PATH`. Root pyt
 | 3 | 17,506 passed / 10 skipped / 23 subtests (127.60s) | 5 failed / 11,473 passed / 1,160 files (182.72s) | 52 failed / 3,314 passed / 11 skipped (734.56s) | 0 added / 0 removed |
 
 Base cloud at `d3fd4ee0` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 52 failed / 3,314 passed / 11 skipped (708.97s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 52 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`, plus the control-service, deploy-lock, gateway-control, media-publication, and responder-account cases in that same set.
+
+## Delta audit 2026-10-25
+
+Range `d3fd4ee08b38c2a6fda231b7dc6b104798461a06..3301426796e582e1112305c12ddb263f9acc83f2`: 47 commits / 63 paths. Newest trusted checkpoint is the 2026-10-24 collaborator comment on issue #83 (`audited-through: d3fd4ee08b38c2a6fda231b7dc6b104798461a06`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-567.
+
+Order placement, modify identity, close re-admission, redaction, JWKS, portfolio entry-date batching, the writer guard, and the drop-in installer each ship a test that calls the behavior. `ci.yml` and the coverage thresholds are unchanged. New `skipif` marks in `cloud/tests/_bash_toolchain.py` name a missing host tool (`flock`, `/usr/bin/test`) and still run on Linux. The delta Python files passed 411 tests on each of three runs. The delta Vitest files passed 134 on each of three runs. The delta cloud files passed 196 with 14 skipped on each of three runs.
+
+Not filed: with `/usr/bin/openssl` (LibreSSL 3.3.6) first on `PATH`, 54 mTLS nodes fail `Missing Authority Key Identifier` because Python is linked to OpenSSL 3.6.5. The same node passes when `/opt/homebrew/opt/openssl@3/bin` is first. That is the runner PATH, not a suite change. The five `next.config.mjs` Vitest timeouts (`Test timed out in 5000ms`) pass 29 tests at a 20 second ceiling. The cloud failures are the same 42 nodes as `33014267`.
+
+### T-567 — P1 — the replica-default cases never reach the connection on a non-Linux host
+
+`get_db` calls `refuse_developer_host_in_cloud_mode` before `libsql.connect` (`scripts/db/client.py:165-173`). `refusal_reason` returns a reason for every non-Linux platform once `PYTEST_CURRENT_TEST` is absent (`scripts/utils/production_writer_guard.py:45-53`). `_arm` deletes that variable so the replica cases can watch `connect` (`scripts/tests/test_db_replica_opt_in.py:51-57`). On darwin all three cases raised `ProductionWriterRefused`. Forcing `_replica_opted_in` to return true produced the same exception, so a default replica was not what failed.
+
+Acceptance: the three cases reach `libsql.connect` on darwin by describing the Linux writer. Forcing `_replica_opted_in` to return true fails `test_clean_env_defaults_to_direct_cloud` on the connect URL. The darwin refusal stays in `test_production_writer_guard.py`.
+
+Audited through: 3301426796e582e1112305c12ddb263f9acc83f2 on 2026-10-25 — 1 new finding
+
+## Remediation 2026-10-25
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-567 | DONE | Before the platform pin, `test_clean_env_defaults_to_direct_cloud` raised `ProductionWriterRefused` both with the real `_replica_opted_in` and with it forced to return true (1 failed). After `sys.platform` is `linux` inside `_arm`, the forced replica failed `expected a direct-to-cloud connection` (`data/replica.db` against `libsql://example.invalid`). Restored `scripts/db/client.py`. `scripts/tests/test_db_replica_opt_in.py` passed 4 on each of three serial runs (0.11s). Product source unchanged. |
+
+### Closing gates 2026-10-25
+
+Serial from the repo root, OpenSSL 3 and the 3.13 venv first on `PATH`. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `await import("../next.config.mjs")` cases (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. Those five files passed 29 tests at a 20s ceiling in 12.44s. The committed ceiling was not raised. Cloud exit 1 each round on the same 42 nodes as each other and as `33014267` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `33014267` |
+|---|---|---|---|---|
+| 1 | 17,577 passed / 10 skipped / 23 subtests (94.99s) | 5 failed / 11,453 passed / 21 skipped / 1,161 files (59.82s) | 42 failed / 3,313 passed / 25 skipped (768.11s) | 0 added / 0 removed |
+| 2 | 17,577 passed / 10 skipped / 23 subtests (89.33s) | 5 failed / 11,453 passed / 21 skipped / 1,161 files (67.88s) | 42 failed / 3,313 passed / 25 skipped (874.11s) | 0 added / 0 removed |
+| 3 | 17,577 passed / 10 skipped / 23 subtests (127.30s) | 5 failed / 11,453 passed / 21 skipped / 1,161 files (117.90s) | 42 failed / 3,313 passed / 25 skipped (779.61s) | 0 added / 0 removed |
+
+Base cloud at `33014267` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 42 failed / 3,313 passed / 25 skipped (931.54s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 42 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`, plus the control-service, gateway-control, media-publication, and monorepo-cutover cases in that same set.
