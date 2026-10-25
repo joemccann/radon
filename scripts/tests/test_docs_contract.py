@@ -2766,7 +2766,8 @@ class TestDocumentation20261024:
         text = (_ROOT / "docs/cloud-services.md").read_text()
         arch = text.split("## Architecture", 1)[1].split("## Newsfeed", 1)[0]
         assert "ProductionWriterRefused" in arch
-        assert "RADON_MODE=hetzner" in arch
+        assert "is not a permit" in arch
+        assert "with `RADON_MODE=hetzner` cannot" not in arch
         assert "exits 78" in arch
         guard = (_ROOT / "scripts/utils/production_writer_guard.py").read_text()
         fn = guard.split("def refusal_reason", 1)[1].split("\ndef ", 1)[0]
@@ -2829,4 +2830,47 @@ class TestDocumentation20261024:
         blob = json.dumps(golden)
         assert "ib-gateway-docker" not in blob
         assert "ibc-remote-access" not in blob
+
+
+class TestDocumentation20261025:
+    """Contracts that landed after the 2026-10-24 documentation audit."""
+
+    def test_non_linux_writer_refusal_ignores_mode(self):
+        text = (_ROOT / "docs/cloud-services.md").read_text()
+        arch = text.split("## Architecture", 1)[1].split("## Newsfeed", 1)[0]
+        assert "ProductionWriterRefused" in arch
+        assert "is not a permit" in arch
+        assert "api.db_http.hrana_transaction" in arch
+        assert "db.client.get_db" in arch
+        assert "with `RADON_MODE=hetzner` cannot" not in arch
+        deploy = (_ROOT / "CLAUDE.md").read_text().split("### Deployment", 1)[1]
+        deploy = deploy.split("## Data Persistence", 1)[0]
+        assert "Every Radon process reads/writes" not in deploy
+        assert "is not a permit" in deploy
+        guard = (_ROOT / "scripts/utils/production_writer_guard.py").read_text()
+        fn = guard.split("def refusal_reason", 1)[1].split("\ndef ", 1)[0]
+        assert "platform.startswith(PRODUCTION_PLATFORM_PREFIX)" in fn
+        assert "is not a permit" in fn
+
+    def test_place_order_canonicalizes_type_before_the_guards(self):
+        text = (_ROOT / "scripts/CLAUDE.md").read_text()
+        section = text.split("## Order Placement Contract", 1)[1].split("\n## ", 1)[0]
+        assert "canonicalized before any guard" in section
+        assert "unsupported order type" in section
+        src = (_ROOT / "scripts/ib_place_order.py").read_text()
+        fn = src.split("def place_order", 1)[1].split("\ndef ", 1)[0]
+        assert 'not in ("stock", "option", "combo", "future")' in fn
+        assert "unsupported order type" in fn
+
+    def test_modify_does_not_fall_back_from_perm_id(self):
+        for rel in ("scripts/CLAUDE.md", "web/CLAUDE.md"):
+            text = (_ROOT / rel).read_text()
+            section = text.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+            assert "ORDER_MODIFY_IDENTITY_MISMATCH" in section
+            assert "find_modify_trade" in section
+            assert "does not fall back to orderId" in section
+        src = (_ROOT / "scripts/ib_order_manage.py").read_text()
+        fn = src.split("def find_modify_trade", 1)[1].split("\ndef ", 1)[0]
+        assert "perm_id > 0" in fn
+        assert "return None" in fn
 
