@@ -464,7 +464,7 @@ The build.nvidia.com key is free but rate limited per key, about 40 requests a m
 
 ## Loop config
 
-`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`. `fx:cerebras`, where present, is always the last rung (`scripts/tests/test_cerebras_last_rung.py`).
+`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`. `install.sh` installs every `loops/*.env` on any invocation, named or not, because `run_loop.sh` reads the installed env: the 2026-10-19 `install.sh performance` refreshed the harness but left six envs at a shape without `DEADMAN_LABEL`, so four loops ran a marker-posting harness with nothing to post to. `fx:cerebras`, where present, is always the last rung (`scripts/tests/test_cerebras_last_rung.py`).
 
 Optional knobs (empty means off; the security loops use them):
 
@@ -484,7 +484,7 @@ Every agent gets `RADON_RUNNER_LOOP_STATE` (the loop's state directory), `RADON_
 
 ## Phase status line
 
-The harness (`scripts/runner/phase_status.sh`, called from `run_loop.sh` and the security post-run hook) posts one comment per phase from the real process exit. The agent does not write it. `finish_phase` posts it, and the SIGTERM trap posts it again when the hook did not print `marker_posted=1`, so a crashed or killed phase still leaves a code.
+The harness (`scripts/runner/phase_status.sh`, called from `run_loop.sh` and the security post-run hook) posts one comment per phase from the real process exit. The agent does not write it. `finish_phase` posts it, and the SIGTERM trap posts it again when the hook did not print `marker_posted=1`, so a crashed or killed phase still leaves a code. A loop whose installed env has no `DEADMAN_LABEL` logs `phase marker not posted: no DEADMAN_LABEL` instead of returning silently.
 
 ```
 <!-- radon-phase loop=testing phase=audit exit=0 audited-through=<sha> ts=2026-10-18T15:47:00Z -->
@@ -515,7 +515,7 @@ Loops without `PHASES` (reliability, ci-performance, documentation, testing) run
 
 `scripts/nightly_phase_status.py` parses the line and falls back to the banner (`Healthy` / `Fixed` / `Needs you` / `Incomplete`) and the old `**PHASE** STAMP **status**` wording. There is no separate nightly-runners report script in this repo. `joemccann/radon-factory` was not found; the runner lives here.
 
-`install.sh` copies `phase_status.sh` next to `run_loop.sh` and `nightly_phase_status.py` into `$PREFIX/lib`. Prompts update when the night re-clones `main`. The installed harness does not, until `install.sh` runs again (the scheduled root updater, or the operator command in the PR).
+`install.sh` copies `phase_status.sh` next to `run_loop.sh` and `nightly_phase_status.py` into `$PREFIX/lib`. Prompts update when the night re-clones `main`. The installed harness does not, until `install.sh` runs again (the scheduled root updater, or the operator command in the PR). The updater's store is shallow, so it fetches `main` with a forced refspec (`+refs/heads/main:refs/heads/main`); the unforced form was rejected as a non-fast-forward on every run after the first, and `/var/log/radon-runner-update.log` read `git failed (exit 1)` until 2026-10-25.
 
 ## Migration from the per-loop wrappers
 

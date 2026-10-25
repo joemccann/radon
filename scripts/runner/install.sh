@@ -351,6 +351,11 @@ install_runner() {
   for file in "$SRC/hooks/"*; do
     [[ -f "$file" ]] && atomic_install -o root -g wheel -m 755 "$file" "$PREFIX/hooks/$(basename "$file")"
   done
+  # Every loop env, not only the named loops: run_loop.sh reads the installed
+  # env, so a single-loop install must not leave a sibling's config behind it.
+  for file in "$SRC/loops/"*.env; do
+    atomic_install -o root -g wheel -m 644 "$file" "$PREFIX/loops/$(basename "$file")"
+  done
   for file in $LIB_FILES; do
     if [[ "$file" == utils/* ]]; then
       install -d -o root -g wheel -m 755 "$PREFIX/lib/utils"
@@ -365,7 +370,6 @@ install_runner() {
 install_loop() {
   local loop="$1" label="com.radon.runner.$1"
   local plist="/Library/LaunchDaemons/$label.plist"
-  atomic_install -o root -g wheel -m 644 "$SRC/loops/$loop.env" "$PREFIX/loops/$loop.env"
   if [[ "$(loop_setting "$loop" GH_GUARD)" == 1 ]]; then
     install -d -o root -g wheel -m 755 "$PREFIX/guard/$loop"
     atomic_text "$PREFIX/guard/$loop/gh" 755 print_guard "$loop"
