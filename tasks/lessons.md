@@ -1,3 +1,8 @@
+# A second short UW rate limit is a shed, not a provider outage (2026-10-22)
+
+- `flow-refresh-discover-admission-busy` waits once. If that retry is still inside a short embargo, or every darkpool ticker raises a transient 429, discover used to set `required provider data unavailable`. The wrapper treated HTTP 400 as exit 1 and `radon-flow-refresh.service` paged with `NRestarts=0`. Shed that body (`discover rate limit shed`, exit 75). Quota text and an embargo longer than 70s stay a hard 400.
+- The oneshot's `Result` after the page can be the next day's success. Read the journal at `paged_at` before calling the unit healthy.
+
 # The unit Result is the latest run, not the paged one (2026-10-17)
 
 - `radon-ai-cycle.service` keeps only the last oneshot result. A P1 at 07:20Z can be an uncaught cloud insert, while `systemctl show` the next day shows a different publisher `error` from the following timer. Read `service_health_events` at `paged_at` before treating the live `/ai-cycle` source list as the page cause.
