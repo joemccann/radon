@@ -243,3 +243,10 @@ class TestUnquotedValueRunsToEndOfLine:
         scrubbed = scrub_credential_text(f"password={OPAQUE} token={TAIL}\n")
         assert _clean(scrubbed), scrubbed
         assert scrubbed.count("[redacted-secret]") == 1
+
+
+def test_an_authorization_header_with_any_scheme_keeps_no_credential():
+    """DS-2026-10-25-08: only four scheme words were recognised."""
+    for scheme in ("ApiKey", "Negotiate", "SSWS"):
+        scrubbed = scrub_credential_text(f"Authorization: {scheme} {OPAQUE}\n")
+        assert OPAQUE not in scrubbed, scrubbed
