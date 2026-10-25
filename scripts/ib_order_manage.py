@@ -87,12 +87,74 @@ def find_modify_trade(client: IBClient, order_id: int, perm_id: int):
     """find_trade without the orderId fallback when a permId was sent.
 
     DS-2026-10-24-01: the caller bounded the order that permId names; an
-    orderId match on another order would modify one nobody validated.
+    orderId match on another order would modify one nobody validated. A
+    cancel resolves the same way (DS-2026-10-25-07): orderId is scoped to
+    the placing client, so a stale permId must not cancel a different order.
     """
     trade = find_trade(client, order_id, perm_id)
     if trade is not None and perm_id > 0 and trade.order.permId != perm_id:
         return None
     return trade
+
+
+def _bankroll_modify_violation(client: IBClient, trade, order_type: str) -> Optional[dict]:
+    """Gate 3 for a modify, which retransmits, when the all-paths preference is on.
+
+    DS-2026-10-25-02: measured at the broker with this order's own resting
+    remainder replaced rather than reserved, and priced on the unfilled
+    remainder (filled size is already a holding). A combo's legs are resolved
+    from the broker; an unresolvable leg leaves the risk unpriceable.
+    """
+    from bankroll_guard import (
+        broker_book,
+        check_bankroll_admission,
+        enforced_on_all_paths,
+        read_broker_book,
+    )
+    from order_limits import _finite, contract_limit_shape
+
+    if not enforced_on_all_paths():
+        return None
+    contract = trade.contract
+    total = _finite(trade.order.totalQuantity) or 0.0
+    filled = _finite(getattr(trade.orderStatus, "filled", None)) or 0.0
+    params = {
+        "symbol": getattr(contract, "symbol", ""),
+        "action": trade.order.action,
+        "quantity": max(total - filled, 0.0),
+        "orderType": order_type,
+        "limitPrice": getattr(trade.order, "lmtPrice", None),
+        "stopPrice": getattr(trade.order, "auxPrice", None) if order_type == "STP LMT" else None,
+    }
+    if contract.secType == "BAG":
+        from ib_insync import Contract
+
+        combo_legs = list(contract.comboLegs or [])
+        resolved = client.qualify_contracts(*[Contract(conId=leg.conId) for leg in combo_legs])
+        by_con_id = {getattr(c, "conId", None): c for c in resolved or []}
+        legs = []
+        for leg in combo_legs:
+            leg_contract = by_con_id.get(leg.conId)
+            if leg_contract is None:
+                legs = None
+                break
+            legs.append({
+                "action": leg.action,
+                "ratio": leg.ratio,
+                "right": getattr(leg_contract, "right", None),
+                "strike": getattr(leg_contract, "strike", None),
+                "expiry": getattr(leg_contract, "lastTradeDateOrContractMonth", None),
+            })
+        params.update(type="combo", legs=legs)
+    else:
+        params.update(
+            contract_limit_shape(contract),
+            strike=getattr(contract, "strike", None),
+            right=getattr(contract, "right", None),
+            expiry=getattr(contract, "lastTradeDateOrContractMonth", None),
+        )
+    with broker_book(read_broker_book(client, contract=contract, exclude=trade)):
+        return check_bankroll_admission(params)
 
 
 def cancel_order(client: IBClient, order_id: int, perm_id: int,
@@ -104,7 +166,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     Error 10147 (order not found).  We detect the original clientId
     from trade.order.clientId and reconnect as that client before cancelling.
     """
-    trade = find_trade(client, order_id, perm_id)
+    trade = find_modify_trade(client, order_id, perm_id)
     if trade is None:
         output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")
 
@@ -125,7 +187,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
         if original_client_id == 0:
             client.ib.reqAutoOpenOrders(True)
             client.ib.sleep(0.5)
-        trade = find_trade(client, order_id, perm_id)
+        trade = find_modify_trade(client, order_id, perm_id)
         if trade is None:
             output("error", f"{working_order_missing_message()} after reconnect as original clientId")
 
@@ -313,31 +375,8 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
             "symbol": getattr(trade.contract, "symbol", ""),
             "limitPrice": getattr(trade.order, "lmtPrice", None),
         })
-        # DS-2026-10-25-02: with the all-paths preference on, Gate 3 holds a
-        # modify as it holds a placement, measured at the broker with this
-        # order's own resting remainder replaced rather than reserved.
-        from bankroll_guard import (
-            broker_book,
-            check_bankroll_admission,
-            enforced_on_all_paths,
-            read_broker_book,
-        )
-
-        if violation is None and enforced_on_all_paths():
-            contract = trade.contract
-            with broker_book(read_broker_book(client, contract=contract, exclude=trade)):
-                violation = check_bankroll_admission({
-                    **contract_limit_shape(contract),
-                    "symbol": getattr(contract, "symbol", ""),
-                    "action": trade.order.action,
-                    "quantity": trade.order.totalQuantity,
-                    "orderType": order_type,
-                    "limitPrice": getattr(trade.order, "lmtPrice", None),
-                    "stopPrice": getattr(trade.order, "auxPrice", None) if order_type == "STP LMT" else None,
-                    "strike": getattr(contract, "strike", None),
-                    "right": getattr(contract, "right", None),
-                    "expiry": getattr(contract, "lastTradeDateOrContractMonth", None),
-                })
+    if violation is None:
+        violation = _bankroll_modify_violation(client, trade, order_type)
     if violation:
         output("error", f"{violation['message']} (order not modified).")
         return
