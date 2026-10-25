@@ -594,6 +594,16 @@ class TestIBGatewayRemote:
         assert "/var/lib/radon" in rw
         assert "/home/radon" in rw
 
+    def test_gateway_env_dir_is_the_only_new_writable_path(self, unit):
+        """The password rotation writer runs as a sudo child of this daemon and
+        inherits ProtectSystem=strict, so /etc is read-only to it. Only the
+        dedicated root-owned Gateway env directory is opened, optional (`-`)
+        so the unit still starts before `migrate` created it."""
+        svc = unit(self.FILENAME)["Service"]
+        paths = svc.get("readwritepaths", "").split()
+        assert paths == ["/var/lib/radon", "/home/radon", "-/etc/radon/ib-gateway"]
+        assert "/etc/radon" not in paths and "-/etc/radon" not in paths
+
     def test_daemon_can_take_the_helper_sudo_hop(self, unit, services_dir):
         """`radon` left group docker (2026-09-04), so ib-gateway-control.sh
         reaches the container only through `sudo -n radon-docker-gw`. Under

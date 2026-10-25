@@ -9,6 +9,10 @@ Routes:
   GET  /status       helper status
   POST /start|stop|restart|reset-lease
   POST /hold|unhold   IBKR operator hold (JSON body: reason, actor)
+  POST /rotate-password  IB Gateway password rotation (JSON body: password,
+                         userid?, actor?). Writes the new value through the
+                         root writer (`sudo -n radon-ib-gateway-credential
+                         write`, value on stdin), then one helper `restart`.
 """
 from __future__ import annotations
 
@@ -40,6 +44,8 @@ DEFAULT_ALLOW = "10.0.0.2"
 DEFAULT_CLIENT_NAMES = "radon-app"
 DEFAULT_HELPER = "/usr/local/bin/radon-ib-gateway-control"
 DEFAULT_WATCHDOG_STATE = "/var/lib/radon/ib-watchdog-state.json"
+DEFAULT_CREDENTIAL_WRITER = "/usr/local/sbin/radon-ib-gateway-credential"
+DEFAULT_SUDO = "/usr/bin/sudo"
 # Verbs that start a Gateway login. Inside an IBKR login throttle each one is
 # another failed attempt (2026-09-26), so they wait out the watchdog's quiet
 # period; stop and reset-lease never log in.
@@ -62,15 +68,31 @@ VERBS = MUTATIONS | {"status"}
 HOLD_VERBS = frozenset({"hold", "unhold"})
 HOLD_REASON_MAX = 200
 HOLD_ACTOR_MAX = 80
+# IB Gateway password rotation. Not a helper verb either: run_helper never
+# sees it. The daemon calls the root writer itself (password on stdin; the
+# helper's own `python - <<'PY'` re-execs replace fd 0, so it cannot carry a
+# secret), then runs the helper's `restart` exactly once. No retry: a wrong
+# password retried is how an IBKR account gets locked.
+ROTATE_VERB = "rotate-password"
+ROTATE_FIELDS = frozenset({"password", "userid", "actor"})
+WRITER_TIMEOUT_S = 10.0
+GATEWAY_VALUE_MAX = 256
+# Helper exits that mean "not now", not "broken": operator hold (73), control
+# busy (74), push lease held (75). After a write they defer the restart.
+HELPER_DEFER_RCS = frozenset({73, 74, 75})
 # REL-172 (R-475): a per-verb cooldown a caller cannot clear. `stop` releases
 # the lease unconditionally and `reset-lease` exists to release it, so either
 # followed by a fresh login within seconds stacks a second IBKR push behind
 # one still in flight. Only time clears an entry; no verb does.
 VERB_COOLDOWN_S = 60.0
 _COOLDOWN_AFTER: dict[str, tuple[str, ...]] = {
-    "start": ("stop", "reset-lease"),
-    "restart": ("stop", "reset-lease"),
+    "start": ("stop", "reset-lease", ROTATE_VERB),
+    "restart": ("stop", "reset-lease", ROTATE_VERB),
+    # A rotation ends in a Gateway restart (one push). It waits out the same
+    # stop/reset-lease window, a prior restart, and a prior rotation.
+    ROTATE_VERB: ("stop", "reset-lease", "restart", ROTATE_VERB),
 }
+_rotate_guard = threading.Lock()
 _verb_history: dict[str, float] = {}
 _verb_history_guard = threading.Lock()
 
@@ -237,6 +259,10 @@ def load_config(env: dict[str, str] | None = None) -> dict:
     helper = source.get("RADON_IB_GATEWAY_CONTROL") or DEFAULT_HELPER
     if not os.path.isabs(helper):
         raise ConfigError("helper path must be absolute")
+    writer = source.get("RADON_IB_CREDENTIAL_WRITER") or DEFAULT_CREDENTIAL_WRITER
+    sudo = source.get("RADON_IB_REMOTE_SUDO") or DEFAULT_SUDO
+    if not os.path.isabs(writer) or not os.path.isabs(sudo):
+        raise ConfigError("credential writer and sudo paths must be absolute")
     cert = Path(source.get("RADON_IB_REMOTE_CERT") or "")
     key = Path(source.get("RADON_IB_REMOTE_KEY") or "")
     ca = Path(source.get("RADON_IB_REMOTE_CA") or "")
@@ -249,6 +275,8 @@ def load_config(env: dict[str, str] | None = None) -> dict:
         "allow": allow,
         "client_names": client_names,
         "helper": helper,
+        "writer": writer,
+        "sudo": sudo,
         "watchdog_state": source.get("RADON_IB_WATCHDOG_STATE_PATH") or DEFAULT_WATCHDOG_STATE,
         "cert": str(cert),
         "key": str(key),
@@ -287,6 +315,70 @@ def run_helper(helper: str, verb: str, timeout: float) -> tuple[int, str]:
     text = (proc.stderr or proc.stdout or "").strip()
     rc = proc.returncode if proc.returncode is not None else 1
     return rc, text
+
+
+def _gateway_value_error(value: object) -> str | None:
+    """Why a Gateway credential cannot be written as KEY='value', else None.
+
+    Same rule as value_error() in cloud/scripts/radon-ib-gateway-credential.py
+    and _gateway_value_error() in scripts/api/routes/credentials.py.
+    """
+    if not isinstance(value, str):
+        return "must be a string"
+    if not value:
+        return "must not be empty"
+    if len(value) > GATEWAY_VALUE_MAX:
+        return f"must be at most {GATEWAY_VALUE_MAX} characters"
+    if value != value.strip():
+        return "must not start or end with whitespace"
+    if "'" in value:
+        return "must not contain a single quote"
+    # C0, DEL and C1 (U+0085 NEL is C1), then U+2028/U+2029, the only Zl/Zp
+    # code points. The writer splits the file on \n only, but
+    # str.splitlines() breaks on all of these, so a stored one could split
+    # the line on a later rewrite and inject its tail as a KEY=value line.
+    if any(ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F for ch in value):
+        return "must not contain control characters"
+    if "\u2028" in value or "\u2029" in value or len((value + "x").splitlines()) != 1:
+        return "must not contain line separators"
+    if value.endswith("\\"):
+        return "must not end with a backslash"
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return "must be valid UTF-8 text"
+    return None
+
+
+def scrub(text: str, secrets: Iterable[str]) -> str:
+    """Replace every submitted value in helper/writer output."""
+    out = text or ""
+    for secret in sorted({s for s in secrets if s}, key=len, reverse=True):
+        out = out.replace(secret, "[redacted]")
+    return out
+
+
+def run_credential_writer(cfg: dict, values: dict) -> tuple[int | None, str]:
+    """`sudo -n <writer> write` with the values as JSON on stdin.
+
+    Returns (returncode, output); returncode None means the writer timed out
+    and the outcome is unknown.
+    """
+    try:
+        proc = subprocess.run(
+            [cfg["sudo"], "-n", cfg["writer"], "write"],
+            input=json.dumps(values),
+            text=True,
+            capture_output=True,
+            timeout=WRITER_TIMEOUT_S,
+            check=False,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"credential writer timed out after {WRITER_TIMEOUT_S:.0f}s"
+    except OSError:
+        return 127, "credential writer could not be started"
+    return proc.returncode, (proc.stderr or proc.stdout or "").strip()
 
 
 def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
@@ -427,7 +519,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         verb = path[1:] if path.startswith("/") else path
-        if verb not in MUTATIONS and verb not in HOLD_VERBS:
+        if verb not in MUTATIONS and verb not in HOLD_VERBS and verb != ROTATE_VERB:
             self._refuse(404, "not found")
             return
         try:
@@ -443,7 +535,98 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         if verb in HOLD_VERBS:
             self._operator_hold(verb, body)
             return
+        if verb == ROTATE_VERB:
+            code, payload = self._rotate_password(body)
+            self._ok(payload, code)
+            return
         self._helper(verb)
+
+    def _rotate_password(self, body: bytes) -> tuple[int, dict]:
+        """Validate, gate, write, then restart once. Never echoes a value.
+
+        Refuse-before-write for the short gates (a rotation in flight, the
+        per-verb cooldown, a held 2FA lease): nothing changes on disk and the
+        operator retries. Write-then-defer for an operator hold or an IBKR
+        login throttle: the operator already changed the password on IBKR, so
+        the old one is dead and leaving it in place makes the next sanctioned
+        login a guaranteed failure.
+        """
+        cfg = self.server.gateway_config
+        try:
+            request = json.loads(body.decode("utf-8")) if body else None
+        except (UnicodeDecodeError, ValueError):
+            request = None
+        if not isinstance(request, dict):
+            return 400, {"ok": False, "code": "INVALID_VALUE", "detail": "body must be a JSON object"}
+        unknown = sorted(str(key)[:40] for key in request if key not in ROTATE_FIELDS)
+        if unknown:
+            return 400, {"ok": False, "code": "INVALID_VALUE",
+                         "detail": f"unsupported fields: {', '.join(unknown)}"}
+        if "password" not in request:
+            return 400, {"ok": False, "code": "INVALID_VALUE", "detail": "password: is required"}
+        values = {"TWS_PASSWORD": request["password"]}
+        if "userid" in request:
+            values["TWS_USERID"] = request["userid"]
+        for field, key in (("password", "TWS_PASSWORD"), ("userid", "TWS_USERID")):
+            if key in values:
+                reason = _gateway_value_error(values[key])
+                if reason:
+                    return 400, {"ok": False, "code": "INVALID_VALUE", "detail": f"{field}: {reason}"}
+        actor = request.get("actor")
+        if actor is not None and not isinstance(actor, str):
+            return 400, {"ok": False, "code": "INVALID_VALUE", "detail": "actor: must be a string"}
+        secrets = list(values.values())
+
+        if not _rotate_guard.acquire(blocking=False):
+            return 409, {"ok": False, "code": "ROTATION_IN_PROGRESS",
+                         "detail": "a password rotation is already running"}
+        try:
+            refusal = cooldown_refusal(ROTATE_VERB)
+            if refusal is not None:
+                return 409, {"ok": False, "code": "LOGIN_BLOCKED", "reason": "cooldown",
+                             "detail": refusal}
+            lease = broker_lease()
+            if lease is not None:
+                return 409, {"ok": False, "code": "LOGIN_BLOCKED", "reason": "lease",
+                             "detail": (f"2FA push lease held by {lease['holder']}, "
+                                        f"{lease['remaining_secs']}s left")}
+
+            rc, output = run_credential_writer(cfg, values)
+            if rc is None:
+                return 502, {"ok": False, "written": None, "restarted": False,
+                             "code": "WRITE_UNKNOWN", "detail": scrub(output, secrets)}
+            if rc != 0:
+                return 502, {"ok": False, "written": False, "restarted": False,
+                             "code": "WRITE_FAILED", "returncode": rc,
+                             "detail": scrub(output, secrets)}
+            record_verb(ROTATE_VERB)
+
+            deferred = None
+            if ib_operator_hold.is_held():
+                deferred = ("IBKR operator hold active; Resume Gateway in /admin "
+                            "or `radon ib resume` on the broker logs in with the new password")
+            else:
+                deferred = login_throttle_refusal("restart", cfg["watchdog_state"])
+            if deferred is not None:
+                return 202, {"ok": True, "written": True, "restarted": False,
+                             "code": "RESTART_DEFERRED", "detail": deferred}
+
+            rc, detail = run_helper(cfg["helper"], "restart", cfg["timeout"])
+            detail = scrub(detail, secrets)
+            if rc == 0:
+                record_verb("restart")
+                return 200, {"ok": True, "written": True, "restarted": True,
+                             "detail": detail or "Gateway restarted"}
+            if rc in HELPER_DEFER_RCS:
+                # The helper found a lease or a hold after the write. The old
+                # password is dead: keep the new one, defer the restart.
+                return 202, {"ok": True, "written": True, "restarted": False,
+                             "code": "RESTART_DEFERRED", "returncode": rc,
+                             "detail": detail or f"Gateway restart deferred (rc={rc})"}
+            return 502, {"ok": False, "written": True, "restarted": False,
+                         "code": "RESTART_FAILED", "returncode": rc, "detail": detail}
+        finally:
+            _rotate_guard.release()
 
     def _operator_hold(self, verb: str, body: bytes) -> None:
         cfg = self.server.gateway_config

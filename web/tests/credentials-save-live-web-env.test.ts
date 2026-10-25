@@ -92,6 +92,70 @@ describe("PUT /api/credentials/[service] live web env", () => {
     expect(webEnv).toContain("UW_TOKEN=old-uw");
   });
 
+  it("forwards the IB Gateway values untouched with the operator id and the rotation budget", async () => {
+    radonFetch.mockResolvedValue({ ok: true });
+    const { PUT } = await import("../app/api/credentials/[service]/route");
+
+    await PUT(put("ib_gateway", { TWS_PASSWORD: " N3w$pa ss " }) as never, {
+      params: Promise.resolve({ service: "ib_gateway" }),
+    });
+
+    expect(radonFetch).toHaveBeenCalledTimes(1);
+    expect(radonFetch).toHaveBeenCalledWith("/credentials/ib_gateway", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: { TWS_PASSWORD: " N3w$pa ss " }, updated_by: "user_op" }),
+      timeout: 165_000,
+    });
+  });
+
+  it("never replays the IB Gateway PUT on a stale socket and reports an upstream error", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/radonApi")>("@/lib/radonApi");
+    radonFetch.mockImplementation(actual.radonFetch);
+    const wire = vi.fn(async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("other side closed"), { code: "ECONNRESET" }),
+      });
+    });
+    vi.stubGlobal("fetch", wire);
+    try {
+      const { PUT } = await import("../app/api/credentials/[service]/route");
+
+      const res = await PUT(put("ib_gateway", { TWS_PASSWORD: "N3w$pa ss" }) as never, {
+        params: Promise.resolve({ service: "ib_gateway" }),
+      });
+
+      expect(wire).toHaveBeenCalledTimes(1);
+      const [url, init] = wire.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("http://localhost:8321/credentials/ib_gateway");
+      expect(init.method).toBe("PUT");
+      expect(init.body).toBe(
+        JSON.stringify({ values: { TWS_PASSWORD: "N3w$pa ss" }, updated_by: "user_op" }),
+      );
+      expect(res.status).toBe(502);
+      expect((await res.json()).code).toBe("UPSTREAM_ERROR");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("preserves a broker 409 GATEWAY_LOGIN_BLOCKED verbatim", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    radonFetch.mockRejectedValue(
+      new RadonApiError(409, { code: "GATEWAY_LOGIN_BLOCKED", message: "cooldown. Nothing was saved." }),
+    );
+    const { PUT } = await import("../app/api/credentials/[service]/route");
+
+    const res = await PUT(put("ib_gateway", { TWS_PASSWORD: "pw" }) as never, {
+      params: Promise.resolve({ service: "ib_gateway" }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      detail: { code: "GATEWAY_LOGIN_BLOCKED", message: "cooldown. Nothing was saved." },
+    });
+  });
+
   it("never applies boot-only keys live", async () => {
     radonFetch.mockResolvedValue({ ok: true });
     const { PUT } = await import("../app/api/credentials/[service]/route");

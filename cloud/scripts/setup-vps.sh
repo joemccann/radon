@@ -1984,6 +1984,55 @@ install_docker_gw() {
   log_success "Gateway docker shim installed"
 }
 
+# The root writer behind IB Gateway password rotation, and the Gateway's own
+# env file. The container's env_file is /etc/radon/ib-gateway/gateway.env
+# (radon-docker-gw pins it), holding only the names IBC and the image read, so
+# it no longer inherits every app secret in /etc/radon/env. `migrate` builds
+# it from /etc/radon/env and is idempotent; it must run before any Gateway
+# start, or compose-up refuses with 78. App-role hosts run no Gateway.
+install_gateway_credential() {
+  local source="${CLOUD_DIR}/scripts/radon-ib-gateway-credential.py"
+  local target="${RADON_GATEWAY_CREDENTIAL_TARGET:-/usr/local/sbin/radon-ib-gateway-credential}"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local role staged
+
+  role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$ENV_FILE" 2>/dev/null || true)"
+  role="${role//[\"\']/}"
+  if [[ "$role" == "app" ]]; then
+    log_info "App-role host: no IB Gateway credential writer"
+    return 0
+  fi
+  if [[ ! -f "$source" ]]; then
+    log_error "radon-ib-gateway-credential.py missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+
+  log_info "Installing ${target}..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
+  if ! "${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$staged" \
+    || [[ ! -x "$staged" ]]; then
+    rm -f "$staged"
+    log_error "Gateway credential writer failed syntax/permission validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+
+  if [[ "${RADON_SKIP_GATEWAY_ENV_MIGRATE:-0}" == "1" ]]; then
+    return 0
+  fi
+  log_info "Building /etc/radon/ib-gateway/gateway.env from ${ENV_FILE} (names only below)..."
+  if ! "$target" migrate; then
+    log_error "Gateway env migrate failed; set TWS_USERID/TWS_PASSWORD in ${ENV_FILE} and re-run"
+    return 1
+  fi
+  log_success "Gateway credential writer installed and gateway.env built"
+}
+
 # The only direct systemd privilege left to the radon user is the watchdog's
 # fixed preheld adapter. All other mutations route through /usr/local/bin/radon.
 install_admin_polkit_rule() {
@@ -2182,6 +2231,7 @@ main() {
   install_operator_cli
   install_app_runtime
   install_docker_gw
+  install_gateway_credential
   install_ib_hold
   configure_sudoers
   install_admin_polkit_rule

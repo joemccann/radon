@@ -956,6 +956,10 @@ Do not recreate that drop-in. After reconciling configuration, run
 publish a fresh audit verdict. The audit reads `cloud/config/drift-allowlist.conf`
 from the GitHub main-tip blob, not the host checkout, so an acknowledgment
 takes effect only once it is merged; an unreadable blob suppresses nothing.
+On the broker it also compares `/usr/local/sbin/radon-ib-gateway-credential`
+(the IB Gateway password writer) against `cloud/scripts/radon-ib-gateway-credential.py`
+(drift id `file-mismatch:ib-gateway-credential`); app-role hosts report it as
+`role-skipped:ib-gateway-credential`.
 
 ### Model catalog (`radon-model-catalog.timer`)
 

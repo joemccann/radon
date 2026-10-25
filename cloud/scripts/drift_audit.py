@@ -34,6 +34,8 @@ Live file -> repo source of truth (install command, for when live is stale):
   /usr/local/sbin/radon-app-runtime <- scripts/radon-app-runtime.sh
   /usr/local/sbin/radon-docker-gw <- scripts/radon-docker-gw.sh
       all three installed by bootstrap-control-plane.sh / refresh-control-plane
+  /usr/local/sbin/radon-ib-gateway-credential <- scripts/radon-ib-gateway-credential.py
+      broker only; installed by bootstrap-control-plane.sh / refresh-control-plane
   /etc/radon/ib-gateway-compose.yml <- GitHub main-tip blob cloud/docker-compose.yml
       (R-636 provenance: the working tree is radon-writable and is NOT the
       comparison basis; installed by install_docker_gw / refresh-control-plane)
@@ -152,6 +154,12 @@ FILE_PAIRS = [
         "/usr/local/sbin/radon-docker-gw",
         "scripts/radon-docker-gw.sh",
         "radon-docker-gw",
+    ),
+    # The root writer behind IB Gateway password rotation (broker only).
+    (
+        "/usr/local/sbin/radon-ib-gateway-credential",
+        "scripts/radon-ib-gateway-credential.py",
+        "ib-gateway-credential",
     ),
     # R-636/F20260913-D02: the installed compose body's canonical source is
     # the git blob at the GitHub main tip, never the radon-writable working
@@ -648,7 +656,13 @@ ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
 # visible as role-skipped notes without weakening broker/combined audits.
 ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
     "app": frozenset(
-        {"ib-gateway-control", "compose", "radon-docker-gw", "ib-gateway-compose"}
+        {
+            "ib-gateway-control",
+            "compose",
+            "radon-docker-gw",
+            "ib-gateway-compose",
+            "ib-gateway-credential",
+        }
     ),
 }
 

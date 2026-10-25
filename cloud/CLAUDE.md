@@ -126,6 +126,23 @@ not the Gateway), and
 `--project-name cloud` is pinned so the `cloud_ib-config` volume — the
 Gateway's Jts settings and 2FA state — survives the move.
 
+The container does NOT inherit `/etc/radon/env`. `compose-up` and
+`compose-down` set `RADON_COMPOSE_ENV_FILE` (the body's `env_file:`) to
+`/etc/radon/ib-gateway/gateway.env` and keep `/etc/radon/env` only as the
+`--env-file` interpolation source; `config-check` keeps `/etc/radon/env` for
+both, so the app host's deploy preflight needs no Gateway file. The shim
+refuses a symlinked, non-root or group/other-accessible `gateway.env` with
+exit 78 (`require_trusted_gateway_env_file`), and a missing one too once
+`/etc/radon/env` no longer carries `TWS_PASSWORD`. Before that (the window
+between the automatic broker sync and `migrate`) a missing `gateway.env`
+falls back to `/etc/radon/env` with a WARNING. One-time ordered cutover:
+`docs/spof-host-split.md` "Gateway env split cutover (one time)". Build it with
+`/usr/local/sbin/radon-ib-gateway-credential migrate` (root, idempotent,
+copies only `GATEWAY_ENV_KEYS`, keeps a rotated password); re-run it after
+changing a Gateway setting such as `TRADING_MODE` in `/etc/radon/env`. The
+web app rotates `TWS_PASSWORD` through the same writer's `write` verb
+(`docs/spof-host-split.md`, rotate-password).
+
 The newsfeed Chromium seccomp profile is the same kind of artifact:
 `cloud/config/seccomp/chromium.json` installs root-owned at
 `/etc/radon/seccomp/chromium.json` (bootstrap kind `seccomp`, refresh arm
@@ -186,8 +203,9 @@ in all three copies.
 **The broker uses a separate bundle.** `radon-deploy-root sync-control-plane`
 reads its `broker` role from the host environment file and invokes the trusted
 bootstrap with that role. The broker installs only the deploy helper, Gateway
-control helpers, the existing root-owned operator hold CLI, compose and broker
-units. It installs no app runtime, sudoers, polkit, app units or container
+control helpers, the existing root-owned operator hold CLI, the Gateway
+credential writer (`/usr/local/sbin/radon-ib-gateway-credential`, 14 artifacts
+in all), compose and broker units. It installs no app runtime, sudoers, polkit, app units or container
 drop-ins, and requires neither Node nor visudo. It does not restart Gateway.
 Initial provisioning uses root SSH and a root-owned archive of the tested
 commit; subsequent syncs use the pinned root provision store. Root release

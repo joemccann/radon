@@ -407,6 +407,65 @@ class TestModifyRouteOutlivesTheCatchAll:
         assert seconds == 30
 
 
+CREDENTIAL_MATCHER = "@credential_mutate"
+CREDENTIAL_ROUTE = REPO / "web" / "app" / "api" / "credentials" / "[service]" / "route.ts"
+CREDENTIAL_CLIENT = REPO / "web" / "lib" / "credentials.ts"
+
+
+def _ts_ms_constant(path: Path, name: str) -> float:
+    match = re.search(rf"\b{name}\s*=\s*([\d_]+)", path.read_text(encoding="utf-8"))
+    assert match, f"{name} missing from {path}"
+    return int(match.group(1).replace("_", "")) / 1000
+
+
+class TestCredentialPutHasItsOwnHandle:
+    """An IB Gateway password save writes the broker file and recreates the
+    Gateway before it answers, which takes longer than the catch-all 30s guard.
+    On that guard the browser would read an empty 502/504 while the broker was
+    still restarting, and the operator would resubmit: a second login with the
+    same password, and possibly a second 2FA push."""
+
+    def _block(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        return reverse_proxy_block(handle_block(content, CREDENTIAL_MATCHER), APP_UPSTREAM)
+
+    def test_credential_put_has_own_handle_200s_no_retry(self, caddy_dir):
+        block = self._block(caddy_dir)
+        header = _directive_seconds(block, "response_header_timeout")
+        read = _directive_seconds(block, "read_timeout")
+        assert header == 200
+        assert read is not None and header <= read
+        assert retry_window_seconds(block) == 0
+        assert "lb_retry_match" not in block
+
+    def test_the_matcher_is_put_on_the_credentials_path_only(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        match = re.search(r"@credential_mutate\s*\{([^}]*)\}", active)
+        assert match, "no @credential_mutate matcher"
+        body = " ".join(match.group(1).split())
+        assert "path /api/credentials/*" in body
+        assert "method PUT" in body
+
+    def test_the_credential_handle_precedes_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        handle = active.find("handle " + CREDENTIAL_MATCHER)
+        catch_all = re.search(r"handle\s*\{", active)
+        assert handle != -1 and catch_all
+        assert handle < catch_all.start()
+
+    def test_the_edge_outlives_the_client_backstop(self, caddy_dir):
+        header = _directive_seconds(self._block(caddy_dir), "response_header_timeout")
+        client = _ts_ms_constant(CREDENTIAL_CLIENT, "MUTATE_TIMEOUT_MS")
+        route = _ts_ms_constant(CREDENTIAL_ROUTE, "MUTATE_TIMEOUT_MS")
+        assert route < client < header
+
+    def test_the_catch_all_guard_is_unchanged(self, caddy_dir):
+        seconds = _directive_seconds(
+            proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM), "response_header_timeout"
+        )
+        assert seconds == 30
+
+
 # ── Mechanism tests ──────────────────────────────────────────────────────
 #
 # The assertions above prove the config STATES the right behaviour. These drive

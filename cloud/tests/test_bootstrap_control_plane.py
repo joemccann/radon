@@ -47,6 +47,13 @@ ARTIFACTS = (
     # compose body it runs as root -- which is why the body cannot stay in the
     # radon-writable checkout.
     Artifact("scripts/radon-docker-gw.sh", "/usr/local/sbin/radon-docker-gw", 0o755),
+    # The root writer the broker daemon calls (sudo -n) to rotate the Gateway
+    # password in /etc/radon/ib-gateway/gateway.env, and to build that file.
+    Artifact(
+        "scripts/radon-ib-gateway-credential.py",
+        "/usr/local/sbin/radon-ib-gateway-credential",
+        0o755,
+    ),
     Artifact("docker-compose.yml", "/etc/radon/ib-gateway-compose.yml", 0o644),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
@@ -846,6 +853,7 @@ BROKER_SOURCES = {
     "scripts/ib-operator-hold.sh", "scripts/operator-radon.sh",
     "repo/scripts/utils/ib_operator_hold.py",
     "scripts/radon-docker-gw.sh", "docker-compose.yml",
+    "scripts/radon-ib-gateway-credential.py",
     "services/radon-ib-gateway.service", "services/radon-ib-gateway-preheld-restart.service",
     "services/radon-ib-watchdog.service", "services/radon-ib-watchdog.timer",
     "services/radon-ib-gateway-remote.service",
@@ -862,7 +870,7 @@ def test_broker_bootstrap_installs_only_its_bundle_without_node_or_sudoers(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     for artifact in ARTIFACTS:
         assert _installed_path(sandbox.rootfs, artifact).exists() == (artifact.source in BROKER_SOURCES)
-    assert "Installed and verified 13 control-plane artifacts" in result.stdout
+    assert "Installed and verified 14 control-plane artifacts" in result.stdout
     host_env = sandbox.rootfs / "etc/radon/env"
     host_env.write_text("RADON_HOST_ROLE=broker\n")
     verified = _run_root_control_plane_verifier(sandbox)
@@ -893,6 +901,7 @@ def test_bootstrap_rejects_writable_dependency_parent(tmp_path):
 
 APP_EXCLUDED_SOURCES = {
     "scripts/ib-gateway-control.sh", "scripts/ib-operator-hold.sh",
+    "scripts/radon-ib-gateway-credential.py",
     "repo/scripts/utils/ib_operator_hold.py",
     "services/radon-ib-gateway.service", "services/radon-ib-gateway-preheld-restart.service",
     "services/radon-ib-watchdog.service", "services/radon-ib-watchdog.timer",
