@@ -250,3 +250,13 @@ def test_an_authorization_header_with_any_scheme_keeps_no_credential():
     for scheme in ("ApiKey", "Negotiate", "SSWS"):
         scrubbed = scrub_credential_text(f"Authorization: {scheme} {OPAQUE}\n")
         assert OPAQUE not in scrubbed, scrubbed
+
+
+@pytest.mark.parametrize("props", ["!!str ", "&creds ", "!!str &creds "])
+def test_a_yaml_tag_or_anchor_before_a_block_scalar_keeps_no_body(props):
+    """DS-2026-10-25-09: node properties before `|` hid the block body."""
+    text = f"password: {props}|\n  {OPAQUE}\n  {TAIL}\nnext: ok\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed), scrubbed
+    assert "next: ok" in scrubbed
+    assert find_credential_shapes(text)

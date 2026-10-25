@@ -115,6 +115,8 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
         rf"^(?P<indent>[ \t]*)"
         rf"(?P<lead>(?:(?P<mark>[#>*+\-](?:[#>*+\- \t]{{0,22}}[#>*+\-])?)[ \t]{{0,23}})?)"
         rf"(?P<key>[\"']?{key_pattern}[\"']?[ \t]*:[ \t]*)"
+        # A YAML tag or anchor may precede the indicator (DS-2026-10-25-09).
+        r"(?:[!&][^\s]{0,64}[ \t]+){0,2}"
         r"[|>][0-9+-]*[ \t]*(?:\#[^\r\n]*)?\r?\n"
         r"(?:[ \t]*\r?\n|(?P=indent)(?P=mark)[ \t]*\r?\n"
         r"|(?P=indent)(?:(?P=lead))?[ \t]+[^\r\n]*\r?\n?)+",
