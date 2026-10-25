@@ -95,6 +95,7 @@ Mirror of the rule in `web/CLAUDE.md`:
 1. Use subprocess with original `clientId`. Master (0) sees all orders but can't modify (Error 10147/103). `ib_order_manage.py` reconnects as original.
 2. Clear VOL fields before modify. Reset `volatility` / `volatilityType` to IB sentinels (`1.7976931348623157e+308` / `2147483647`) to avoid Error 321.
 3. Preserve upstream error detail — never collapse to 500.
+4. **A permId names the order.** When `permId` is sent, `find_modify_trade` does not fall back to orderId. `/orders/modify` resolves the snapshot the same way and returns 422 `ORDER_MODIFY_IDENTITY_MISMATCH` when the two ids name different working orders. Nothing is transmitted.
 
 Browser-side regression tests live in `web/`; this side has unit + route coverage.
 
@@ -114,7 +115,9 @@ Every IB-placing subprocess MUST follow these rules. Disregarding any one of the
 
 5. **IB Gateway will auto-restart under heavy subprocess load.** Hammering `place_order` / `qualify_contracts` from many fresh clients in rapid succession can trigger an IB Gateway 2FA-renewal cycle (~30s downtime + pool clients reset). Each probe should reuse a single `IBClient` connection across all test cases rather than connect-disconnect per case.
 
-6. **A combo `limitPrice` is a SIGNED net price — negative = net credit.** Only single-leg orders are bounded to `> 0`; a BAG's limit carries the credit/debit sign (IB's own convention, and what the chain builder sends as `signedLimitPrice`). Zero is the only invalid combo price. A blanket `limitPrice <= 0` refusal at this funnel made every net-credit combo unplaceable even though `/api/orders/place` already allowed the sign (NVDA calendar spread, 2026-08-12). Tests: `test_ib_place_order_input_bounds.py::TestComboSignedLimitPrice`. A combo STP does not transmit `limitPrice` (`StopOrder` carries `stopPrice` only). The loss cap must not book that discarded field as credit (REL-328 / R-739).
+6. **The type is canonicalized before any guard.** `place_order` lowercases `type` and accepts only `stock`, `option`, `combo`, and `future`. Any other value returns an error whose message contains `unsupported order type` and does not open a broker client. A missing type stays a stock order. Matching the spelling exactly and building a stock for anything else transmits a combo the guards already bounded as a combo.
+
+7. **A combo `limitPrice` is a SIGNED net price — negative = net credit.** Only single-leg orders are bounded to `> 0`; a BAG's limit carries the credit/debit sign (IB's own convention, and what the chain builder sends as `signedLimitPrice`). Zero is the only invalid combo price. A blanket `limitPrice <= 0` refusal at this funnel made every net-credit combo unplaceable even though `/api/orders/place` already allowed the sign (NVDA calendar spread, 2026-08-12). Tests: `test_ib_place_order_input_bounds.py::TestComboSignedLimitPrice`. A combo STP does not transmit `limitPrice` (`StopOrder` carries `stopPrice` only). The loss cap must not book that discarded field as credit (REL-328 / R-739).
 
 FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subprocess + 30s `radonFetch`.
 
