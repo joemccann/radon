@@ -56,7 +56,7 @@ av==16.0.0
     # via llamafactory
 bitsandbytes==0.50.2
     # via -r /tmp/slm-qlora.in
-brotli==1.2.0
+brotli==1.2.1
     # via gradio
 certifi==2026.10.19
     # via
