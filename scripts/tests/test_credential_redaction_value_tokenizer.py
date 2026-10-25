@@ -227,3 +227,19 @@ def test_tokenizer_stays_linear_on_adversarial_text():
 
     small, large = elapsed(200), elapsed(1600)
     assert large < max(small * 40, 2.0), (small, large)
+
+
+class TestUnquotedValueRunsToEndOfLine:
+    """DS-2026-10-25-04: an unquoted value ended at the first whitespace, so
+    every word after the first of a multi-word passphrase was published."""
+
+    def test_a_multi_word_unquoted_value_keeps_no_word(self):
+        scrubbed = scrub_credential_text(f"password: {OPAQUE} {TAIL} again\nnext line\n")
+        assert _clean(scrubbed), scrubbed
+        assert "again" not in scrubbed
+        assert "next line" in scrubbed
+
+    def test_later_assignments_on_the_line_stay_redacted_once(self):
+        scrubbed = scrub_credential_text(f"password={OPAQUE} token={TAIL}\n")
+        assert _clean(scrubbed), scrubbed
+        assert scrubbed.count("[redacted-secret]") == 1

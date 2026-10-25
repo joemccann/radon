@@ -344,10 +344,11 @@ def test_suffixed_credential_keys_are_scrubbed_not_only_detected():
     `SECRET_KEY_PROD=<value>` passed the scrubber the knowledge pipeline runs
     before sending document text to a model provider."""
     for key in ("SECRET_KEY_PROD", "DB_PASSWORD_BACKUP", "UW_TOKEN_STAGING", "api_key_v2"):
-        text = f"the excerpt held {key}=NOTREALSUFFIXED1x9 and more"
+        text = f"the excerpt held {key}=NOTREALSUFFIXED1x9 and more\nnext line"
         out = scrub_credential_text(text)
         assert "NOTREALSUFFIXED1x9" not in out, out
-        assert out.endswith("and more"), out
+        # An unquoted value is redacted to the end of its line (DS-2026-10-25-04).
+        assert out == f"the excerpt held {key}=[redacted-secret]\nnext line", out
 
 
 # A serialized cookie header (JSON / dict dump) has no colon directly after the
