@@ -1,6 +1,7 @@
 """Tests for discover.py — dark pool day analysis and scoring."""
 import json
 import sys
+from contextlib import ExitStack
 
 import pytest
 from datetime import datetime
@@ -282,7 +283,7 @@ def _dp_ok() -> dict:
     }
 
 
-def _discover_market_wide(darkpool):
+def _discover_market_wide(darkpool, *, embargo_until=None, now=None):
     """Market-wide scan with the hourly min-alerts gate. `darkpool` is ticker -> result or exception."""
     from discover import discover
 
@@ -299,10 +300,18 @@ def _discover_market_wide(darkpool):
     mock_client = MagicMock()
     mock_client.__enter__ = MagicMock(return_value=mock_client)
     mock_client.__exit__ = MagicMock(return_value=False)
-    with patch("discover.UWClient", return_value=mock_client), \
-         patch("discover.fetch_options_flow", return_value=alerts), \
-         patch("discover.get_existing_tickers", return_value=set()), \
-         patch("discover.fetch_darkpool_multi", side_effect=_fetch):
+    with ExitStack() as stack:
+        stack.enter_context(patch("discover.UWClient", return_value=mock_client))
+        stack.enter_context(patch("discover.fetch_options_flow", return_value=alerts))
+        stack.enter_context(patch("discover.get_existing_tickers", return_value=set()))
+        stack.enter_context(patch("discover.fetch_darkpool_multi", side_effect=_fetch))
+        if embargo_until is not None:
+            stack.enter_context(patch(
+                "utils.uw_governor.snapshot",
+                return_value={"embargo_until": embargo_until},
+            ))
+        if now is not None:
+            stack.enter_context(patch("time.time", return_value=now))
         return discover(min_alerts=3, dp_pages=2)
 
 
@@ -375,6 +384,67 @@ def test_every_darkpool_miss_still_sets_the_hard_error():
     assert result["degraded"] is True
     assert result["error"] == "required provider data unavailable"
     assert "budget" not in json.dumps(result)
+
+
+def test_every_darkpool_rate_limit_sheds_instead_of_failing_the_oneshot():
+    """A short UW rate limit on every ticker must not page the hourly oneshot.
+
+    2026-10-22 20:01:26Z, page 9d06ddf8616c14c31c1fcabca8d29369: scanner and
+    flow-analysis were OK, then POST /discover returned HTTP 400 about 50s
+    later. No darkpool cache was written. The same shape repeated through
+    the session. A non-rate-limit miss stays a hard error.
+    """
+    frozen = 1_800_000_000.0
+    result = _discover_market_wide(
+        {
+            "AAPL": UWRateLimitError(
+                "UW admission is busy; retry after the current window",
+                status_code=429,
+            ),
+            "MSFT": UWRateLimitError("Too Many Requests", status_code=429),
+        },
+        embargo_until=frozen + 30,
+        now=frozen,
+    )
+
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["degraded"] is True
+    assert result["error"] == "discover rate limit shed"
+    assert result["alerts_analyzed"] == 6
+    dumped = json.dumps(result)
+    assert "admission is busy" not in dumped
+    assert "Too Many Requests" not in dumped
+
+
+def test_darkpool_outage_mixed_with_a_rate_limit_stays_a_hard_error():
+    """One real provider miss still fails the oneshot, even if another ticker is busy."""
+    result = _discover_market_wide({
+        "AAPL": UWAPIError("budget"),
+        "MSFT": UWRateLimitError("Too Many Requests", status_code=429),
+    })
+
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert "budget" not in json.dumps(result)
+    assert "Too Many Requests" not in json.dumps(result)
+
+
+def test_darkpool_rate_limit_past_the_wait_budget_stays_a_hard_error():
+    """A multi-hour embargo is the daily reset, not a shed."""
+    frozen = 1_800_000_000.0
+    result = _discover_market_wide(
+        {
+            "AAPL": _admission_busy(),
+            "MSFT": _admission_busy(),
+        },
+        embargo_until=frozen + 6 * 3600,
+        now=frozen,
+    )
+
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert "admission is busy" not in json.dumps(result)
 
 
 def _admission_busy():
@@ -467,8 +537,8 @@ def test_options_flow_admission_busy_past_the_wait_budget_stays_a_hard_error():
     assert "admission is busy" not in json.dumps(result)
 
 
-def test_options_flow_admission_busy_retries_once_then_stays_a_hard_error():
-    """A second busy reply is a real miss. Do not loop inside the POST."""
+def test_options_flow_admission_busy_retries_once_then_sheds():
+    """A second short busy reply sheds. Do not loop inside the POST."""
     remaining = _embargo_remaining_s()
     result, calls, sleeps = _discover_after_options_flow(
         [_admission_busy(), _admission_busy()],
@@ -479,7 +549,32 @@ def test_options_flow_admission_busy_retries_once_then_stays_a_hard_error():
     assert len(sleeps) == 1
     assert sleeps[0] == pytest.approx(remaining)
     assert result["candidates"] == []
-    assert result["error"] == "required provider data unavailable"
+    assert result["error"] == "discover rate limit shed"
+    assert result["provider_failures"][0]["error_type"] == "UWRateLimitError"
+    assert "admission is busy" not in json.dumps(result)
+
+
+def test_options_flow_still_busy_after_the_wait_sheds_the_oneshot():
+    """One wait that lands in another short window must not exit 1.
+
+    2026-10-22 20:00:36Z to 20:01:26Z, page 9d06ddf8616c14c31c1fcabca8d29369.
+    The first options-flow fetch hit a short embargo. The retry was still
+    rate limited. Discover returned the hard provider error, the wrapper
+    logged http=400, and radon-flow-refresh.service exited 1.
+    """
+    remaining = _embargo_remaining_s()
+    result, calls, sleeps = _discover_after_options_flow(
+        [_admission_busy(), _admission_busy()],
+        embargo_remaining=remaining,
+    )
+
+    assert calls == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(remaining)
+    assert result["candidates"] == []
+    assert result["degraded"] is True
+    assert result["error"] == "discover rate limit shed"
+    assert result["provider_failures"][0]["operation"] == "options_flow"
     assert result["provider_failures"][0]["error_type"] == "UWRateLimitError"
     assert "admission is busy" not in json.dumps(result)
 
