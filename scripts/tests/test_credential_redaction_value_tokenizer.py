@@ -316,3 +316,24 @@ def test_many_skipped_values_on_one_line_stay_linear():
 
     small, large = elapsed(500), elapsed(8000)
     assert large < max(small * 40, 2.0), (small, large)
+
+
+def test_a_truncated_value_after_an_escaped_quote_keeps_no_tail():
+    """An escaped quote is not the close of a value that never closes."""
+    scrubbed = scrub_credential_text(f'password="ab\\"{OPAQUE}\nnext\n')
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_many_assignment_lines_stay_linear():
+    import time
+
+    def elapsed(n):
+        payload = "password=a\n" * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        return time.perf_counter() - start
+
+    # 16x the lines; a per-line scan to the end of the text is quadratic.
+    small, large = min(elapsed(8000) for _ in range(3)), elapsed(128000)
+    assert large < small * 32, (small, large)
