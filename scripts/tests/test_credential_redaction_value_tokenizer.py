@@ -280,3 +280,39 @@ def test_an_env_value_starting_with_a_hash_is_still_the_value():
     scrubbed = scrub_credential_text(f"PASSWORD=#{OPAQUE}\nNEXT=1\n")
     assert _clean(scrubbed), scrubbed
     assert "NEXT=1" in scrubbed
+
+
+def test_a_prefixed_query_credential_is_redacted():
+    """DS-2026-10-25-10: `refresh_token` after a redacted `access_token`."""
+    scrubbed = scrub_credential_text(f"https://h/cb?access_token={TAIL}&refresh_token={OPAQUE}&limit=5")
+    assert _clean(scrubbed), scrubbed
+    assert scrubbed.endswith("&limit=5")
+
+
+def test_a_digest_authorization_keeps_no_field():
+    """DS-2026-10-25-08: only the first field after the scheme was redacted."""
+    scrubbed = scrub_credential_text(
+        f'Authorization: Digest username="u", nonce="{TAIL}", response="{OPAQUE}"\nnext\n'
+    )
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_comment_lines_between_key_and_value_keep_no_value():
+    """DS-2026-10-25-11."""
+    scrubbed = scrub_credential_text(f"password:\n  # rotated monthly\n  # owner: ops\n  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
+
+
+def test_many_skipped_values_on_one_line_stay_linear():
+    import time
+
+    def elapsed(n):
+        payload = "x?api_key=1 " * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        return time.perf_counter() - start
+
+    small, large = elapsed(500), elapsed(8000)
+    assert large < max(small * 40, 2.0), (small, large)
