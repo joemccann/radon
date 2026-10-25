@@ -258,7 +258,7 @@ def _bind_future_multiplier(params: dict, contract) -> str | None:
     return None
 
 
-def _broker_close_violation(params: dict, client) -> dict | None:
+def _broker_close_violation(params: dict, client, contract, admitted_as_close: bool) -> dict | None:
     """The admission refusal for a store-proven close the broker does not confirm.
 
     The close exemptions read the latest portfolio snapshot, which still shows
@@ -266,6 +266,10 @@ def _broker_close_violation(params: dict, client) -> dict | None:
     which no longer shows that close once it fills. Every guard that waived
     a cap for the close runs again against the broker's live book; None when
     the order was never exempted or the broker confirms the close.
+
+    ``admitted_as_close``: admission proved a store close. The store can move
+    before transmit, so a re-read that no longer shows the close must not
+    skip the broker (DS-2026-10-25-01).
     """
     from bankroll_guard import (
         _load_latest_snapshot,
@@ -275,13 +279,13 @@ def _broker_close_violation(params: dict, client) -> dict | None:
         read_broker_book,
     )
 
-    if not is_close_out(params, _load_latest_snapshot()):
+    if not admitted_as_close and not is_close_out(params, _load_latest_snapshot()):
         return None
     from kelly import kelly_config
     from kelly_guard import check_kelly_ticket
     from order_limits import check_placement_limits
 
-    with broker_book(read_broker_book(client)):
+    with broker_book(read_broker_book(client, contract=contract)):
         violation = check_placement_limits(params) or check_if_enforced_on_all_paths(params)
         if violation is None:
             warning = check_kelly_ticket(params)
@@ -307,6 +311,9 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     if order_type not in ("stock", "option", "combo", "future"):
         return {"status": "error", "message": f"unsupported order type {params.get('type')!r}"}
     params["type"] = order_type
+    from bankroll_guard import take_store_close_proven
+
+    take_store_close_proven()
 
     # Kill switch (REL-004): every placement path funnels through here
     # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
@@ -413,6 +420,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "message": bankroll_violation["message"],
             }
 
+    admitted_as_close = take_store_close_proven()
     client = IBClient()
     timer = PhaseTimer("ib_place_order")
 
@@ -642,7 +650,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
 
         # DS-2026-10-24-02: a close exempted against the store is re-admitted
         # against the broker's live book before it transmits.
-        close_violation = _broker_close_violation(params, client)
+        close_violation = _broker_close_violation(params, client, contract, admitted_as_close)
         if close_violation:
             return {
                 "status": "error",

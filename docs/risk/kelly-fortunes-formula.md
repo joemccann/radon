@@ -323,7 +323,12 @@ for sizing/eval is unchanged.
   shows a holding a filled close has sold, so `ib_place_order.py` re-runs every
   guard that exempted a close against the broker's live positions and working
   orders before it transmits; an unreadable broker book proves no close
-  (`scripts/tests/test_close_exemption_broker_book.py`).
+  (`scripts/tests/test_close_exemption_broker_book.py`). That re-check runs
+  whenever admission proved a close, even if the snapshot has since changed,
+  and the broker holding must be the order's own contract (conId), not a
+  sibling trading class with the same coordinates. With the all-placer gate
+  on, a single-leg modify in `ib_order_manage.py` is held under the same cap,
+  against the broker book with its own resting remainder replaced.
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.
