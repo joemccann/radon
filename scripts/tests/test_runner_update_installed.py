@@ -219,3 +219,41 @@ def test_only_proven_recovery_accepts_missing_launchd_service(monkeypatch, code,
     if accepted: assert update.command(args, allow_missing=recovery) == 'state = not running\n'
     else:
         with pytest.raises(RuntimeError): update.command(args, allow_missing=recovery)
+
+
+# --- the shallow store must follow a moved main (2026-10-25) ----------------------
+#
+# The first refresh fetched main into BASE/origin.git with --depth=1. Every later
+# refresh fetched `refs/heads/main:refs/heads/main` into that store: a shallow tip
+# cannot fast-forward to a main that moved, git rejects the update and exits 1,
+# and the updater logged `git failed (exit 1)` on all 31 runs. The six loop envs
+# never left their 2026-10-17 shape. The refspec must force the update.
+
+
+def test_refresh_fetches_main_with_a_forced_refspec(tmp_path,monkeypatch):
+    refresh_fixture(tmp_path,monkeypatch)
+    fetches=[]
+    def git(store,*args,**kw):
+        if args[0]=='fetch':fetches.append(args)
+        if args[0]=='rev-parse':return SHA
+        if args[0]=='archive':return b'fixture validated by extraction stub'
+        return ''
+    monkeypatch.setattr(update,'git',git)
+    assert update.refresh()['status']=='installed'
+    assert fetches==[('fetch','--no-tags','--depth=1',update.ORIGIN,update.MAIN_REFSPEC)]
+    assert update.MAIN_REFSPEC=='+refs/heads/main:refs/heads/main'
+
+
+def test_the_forced_refspec_follows_a_moved_main_in_a_shallow_store(tmp_path):
+    import subprocess
+    src=tmp_path/'src';store=tmp_path/'origin.git'
+    env={'GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1','HOME':str(tmp_path),'PATH':'/usr/bin:/bin'}
+    def src_git(*args):subprocess.run(['/usr/bin/git','-C',str(src),'-c','user.name=t','-c','user.email=t@t',*args],env=env,check=True,capture_output=True)
+    subprocess.run(['/usr/bin/git','init','-q','-b','main',str(src)],env=env,check=True,capture_output=True)
+    src_git('commit','-q','--allow-empty','-m','A')
+    update.command(['/usr/bin/git','-c','init.templateDir=','init','--bare',str(store)])
+    update.git(store,'fetch','--no-tags','--depth=1',str(src),update.MAIN_REFSPEC)
+    src_git('commit','-q','--allow-empty','-m','B')
+    update.git(store,'fetch','--no-tags','--depth=1',str(src),update.MAIN_REFSPEC)
+    moved=subprocess.run(['/usr/bin/git','-C',str(src),'rev-parse','main'],env=env,check=True,capture_output=True,text=True).stdout.strip()
+    assert update.git(store,'rev-parse','refs/heads/main')==moved
