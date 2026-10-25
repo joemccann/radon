@@ -980,3 +980,189 @@ def test_bridge_multi_commit_rejection_persists_compatible_actionable_feedback(t
     assert list(refs) == [f'refs/heads/validation/feedback/{BASE}/{HEAD}']
     assert sum(path.endswith('git/refs') for path, _, _ in calls) == 1
     assert json.loads(marker.read_text())['feedback_published'] == refs[f'refs/heads/validation/feedback/{BASE}/{HEAD}']
+
+
+_CI_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+_PR = "  pull_request:\n"
+_PUSH = "  push:\n    branches: [main]\n"
+_MERGE_GROUP = "  merge_group:\n    branches: [main]\n"
+_VALIDATION_ON = "on:\n  pull_request:\n    branches: ['validation/base/**']\n"
+_WORKFLOW_TAIL = (
+    "jobs:\n"
+    "  tests:\n"
+    "    if: github.event_name == 'push'\n"
+    "    # on:\n"
+    "    #   pull_request:\n"
+    "    #   push:\n"
+    "    #     branches: [main]\n"
+)
+
+
+def _workflow(on_body):
+    block = on_body if on_body.startswith("on:") else "on:\n" + on_body
+    if not block.endswith("\n"):
+        block += "\n"
+    return "name: CI\n\n" + block + "\n" + _WORKFLOW_TAIL
+
+
+def _validation_ci(tmp_path, source):
+    github = FakeGitHub()
+    github.workflow_sources[github.workflow_paths[0]] = source
+    _bridge(tmp_path, github=github).ensure_validation_workflows(BASE)
+    _archive, entries = github.workflow_pushes[0]
+    return next(entry["content"] for entry in entries if entry["path"].endswith("/ci.yml"))
+
+
+def _assert_validation_trigger(source, rewritten):
+    head = source[: source.index("\non:") + 1]
+    assert rewritten.startswith(head)
+    trigger, separator, tail = rewritten[len(head) :].partition("\n" + _WORKFLOW_TAIL)
+    assert separator
+    assert trigger == _VALIDATION_ON
+    assert tail == ""
+    assert "merge_group" not in trigger
+    assert "push:" not in trigger
+
+
+@pytest.mark.parametrize(
+    "on_body",
+    [
+        _PR + _PUSH,
+        _MERGE_GROUP + _PR + _PUSH,
+        _PR + _MERGE_GROUP + _PUSH,
+        _PR + _PUSH + _MERGE_GROUP,
+        _PR + "  # queue trigger, any position\n" + _MERGE_GROUP + _PUSH,
+        _PUSH + _PR,
+        _PR + "  push:\n    branches:\n      - main\n",
+        _PR + "  push: {branches: [main]}\n",
+        _PR + "  push:\n    branches: ['main']\n",
+        _PR + '  push:\n    branches: ["main"]\n',
+        _PR + "  push:\n    branches: [main,]\n" + _MERGE_GROUP,
+        _PR.replace("pull_request:", "pull_request: {}") + _PUSH,
+        _PR.replace("pull_request:", "pull_request: null") + _PUSH,
+        "on: {pull_request: null, push: {branches: [main]}}\n",
+        "on: # public contract\n" + _PR + _MERGE_GROUP + _PUSH,
+        _PR + _PUSH + "  workflow_dispatch:\n",
+        _PR + _PUSH + "  schedule:\n    - cron: '17 */6 * * *'\n",
+    ],
+    ids=(
+        "merge-group-absent",
+        "merge-group-before",
+        "merge-group-between",
+        "merge-group-after",
+        "merge-group-with-comment",
+        "push-before-pull-request",
+        "block-branch-list",
+        "flow-push",
+        "single-quoted-main",
+        "double-quoted-main",
+        "trailing-comma",
+        "empty-pull-request-map",
+        "null-pull-request",
+        "inline-on-map",
+        "comment-on-header",
+        "extra-workflow-dispatch",
+        "extra-schedule",
+    ),
+)
+def test_validation_workflow_accepts_merge_group_in_any_position(tmp_path, on_body):
+    source = _workflow(on_body)
+    rewritten = _validation_ci(tmp_path, source)
+    _assert_validation_trigger(source, rewritten)
+
+
+def test_current_public_ci_workflow_matches_validation_event_contract(tmp_path):
+    source = _CI_PATH.read_text(encoding="utf-8")
+    rewritten = _validation_ci(tmp_path, source)
+    head = source[: source.index("\non:\n") + 1]
+    kept = source[source.index("# Least privilege:") :]
+    assert rewritten.startswith(head)
+    assert rewritten.endswith(kept)
+    assert rewritten[: len(rewritten) - len(kept)] == head + _VALIDATION_ON + "\n"
+    assert bridge_module._public_ci_events(rewritten) == {
+        "pull_request": {"branches": ["validation/base/**"]}
+    }
+
+
+def test_public_ci_event_parser_matches_pyyaml_for_the_checked_in_workflow():
+    import yaml
+
+    source = _CI_PATH.read_text(encoding="utf-8")
+    assert bridge_module._public_ci_events(source) == yaml.safe_load(source)[True]
+
+
+@pytest.mark.parametrize(
+    "on_body",
+    [
+        _PR + _MERGE_GROUP + _PUSH,
+        _PR + "  push:\n    branches:\n      - main\n",
+        "on: {pull_request: null, push: {branches: [main]}, merge_group: {branches: [main]}}\n",
+        _PR + _PUSH + "  schedule:\n    - cron: '17 */6 * * *'\n      display: nightly\n",
+        "  pull_request:\n    paths:\n      - web/**\n" + _PUSH,
+    ],
+)
+def test_public_ci_event_parser_matches_pyyaml(on_body):
+    import yaml
+
+    source = _workflow(on_body)
+    assert bridge_module._public_ci_events(source) == yaml.safe_load(source)[True]
+
+
+@pytest.mark.parametrize(
+    "on_body",
+    [
+        _PR,
+        _PUSH,
+        "  pull_request:\n    branches: [main]\n" + _PUSH,
+        "  pull_request:\n    types: [opened, synchronize, reopened]\n" + _PUSH,
+        "  pull_request:\n    paths:\n      - web/**\n" + _PUSH,
+        _PR + "  push:\n    branches: [main, develop]\n",
+        _PR + "  push:\n    branches: [develop]\n",
+        _PR + "  push:\n    branches: [main]\n    paths:\n      - web/**\n",
+        _PR + "  push:\n    tags: ['v*']\n",
+        _PR + "  push:\n",
+        _PR + "  push:\n    branches: [main]\n    branches-ignore: [release]\n",
+        "  workflow_dispatch:\n",
+        "on: [pull_request, push]\n",
+        "on: push\n",
+        "name: CI\n\njobs: {}\n",
+        "on:\n\tpull_request:\n\tpush:\n\t  branches: [main]\n",
+        _PR + "  pull_request:\n" + _PUSH,
+        _PR + "  push: |\n    branches: [main]\n",
+        "  pull_request: *alias\n" + _PUSH,
+    ],
+    ids=(
+        "missing-push",
+        "missing-pull-request",
+        "filtered-pull-request-branches",
+        "filtered-pull-request-types",
+        "filtered-pull-request-paths",
+        "extra-push-branch",
+        "push-not-main",
+        "push-paths",
+        "push-tags",
+        "bare-push",
+        "push-branches-ignore",
+        "workflow-dispatch-only",
+        "on-list",
+        "on-scalar",
+        "missing-on",
+        "tab-indent",
+        "duplicate-pull-request",
+        "block-scalar",
+        "yaml-alias",
+    ),
+)
+def test_validation_workflow_rejects_incompatible_ci_event_contract(tmp_path, on_body):
+    github = FakeGitHub()
+    source = on_body if on_body.startswith("name:") else _workflow(on_body)
+    github.workflow_sources[github.workflow_paths[0]] = source
+    with pytest.raises(RuntimeError, match="unrecognized public CI event contract"):
+        _bridge(tmp_path, github=github).ensure_validation_workflows(BASE)
+    assert github.workflow_pushes == []
+    assert github.private_variables == {}
+
+
+def test_validation_copy_is_not_a_public_ci_event_contract():
+    with pytest.raises(RuntimeError, match="unrecognized public CI event contract"):
+        bridge_module._ci_workflow_for_validation(_VALIDATION_ON)

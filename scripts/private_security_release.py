@@ -217,6 +217,361 @@ def export_candidate(base, head, *, severity, cwd):
     return {'status': 'private-validation-pending', 'head_sha': head}
 
 
+_VALIDATION_CI_ON = "on:\n  pull_request:\n    branches: ['validation/base/**']\n"
+_CI_EVENT_CONTRACT = 'unrecognized public CI event contract'
+_ON_HEADER = re.compile(r'on:[ \t]*(?:#.*)?\Z')
+_ON_INLINE = re.compile(r'on:[ \t]+(.+)\Z')
+_BLOCK_SCALAR = frozenset(('|', '>', '|-', '>+', '|+', '>-'))
+
+
+def _reject_ci_contract():
+    raise RuntimeError(_CI_EVENT_CONTRACT)
+
+
+def _strip_yaml_comment(text):
+    quote = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote == "'":
+            if char == "'" and index + 1 < len(text) and text[index + 1] == "'":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+        if quote == '"':
+            if char == '\\':
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            index += 1
+            continue
+        if char == '#':
+            return text[:index].rstrip()
+        index += 1
+    return text.rstrip()
+
+
+def _parse_quoted(text, index):
+    quote = text[index]
+    index += 1
+    chars = []
+    while index < len(text):
+        char = text[index]
+        if quote == "'" and char == "'":
+            if index + 1 < len(text) and text[index + 1] == "'":
+                chars.append("'")
+                index += 2
+                continue
+            return ''.join(chars), index + 1
+        if quote == '"' and char == '\\':
+            if index + 1 >= len(text):
+                _reject_ci_contract()
+            mapped = {'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\', '/': '/'}
+            if text[index + 1] not in mapped:
+                _reject_ci_contract()
+            chars.append(mapped[text[index + 1]])
+            index += 2
+            continue
+        if char == quote:
+            return ''.join(chars), index + 1
+        chars.append(char)
+        index += 1
+    _reject_ci_contract()
+
+
+def _plain_scalar(raw):
+    if raw == '' or raw in {'null', 'Null', 'NULL', '~'}:
+        return None
+    if raw[0] in '*&!|>%@`':
+        _reject_ci_contract()
+    return raw
+
+
+def _skip_space(text, index):
+    while index < len(text) and text[index] in ' \t':
+        index += 1
+    return index
+
+
+def _parse_flow_value(text, index, terminators):
+    index = _skip_space(text, index)
+    if index >= len(text):
+        _reject_ci_contract()
+    if text[index] in '[{':
+        return _parse_flow_collection(text, index)
+    if text[index] in "'\"":
+        return _parse_quoted(text, index)
+    start = index
+    while index < len(text) and text[index] not in terminators:
+        index += 1
+    return _plain_scalar(text[start:index].strip()), index
+
+
+def _parse_flow_collection(text, index):
+    opener = text[index]
+    closer = ']' if opener == '[' else '}'
+    mapping = opener == '{'
+    index = _skip_space(text, index + 1)
+    if index < len(text) and text[index] == closer:
+        return ({} if mapping else []), index + 1
+    result = {} if mapping else []
+    while True:
+        if mapping:
+            key, index = _parse_flow_value(text, index, set(':,]}#'))
+            if not isinstance(key, str) or key in result:
+                _reject_ci_contract()
+            index = _skip_space(text, index)
+            if index >= len(text) or text[index] != ':':
+                _reject_ci_contract()
+            value, index = _parse_flow_value(text, index + 1, set(',]}#'))
+            result[key] = value
+        else:
+            value, index = _parse_flow_value(text, index, set(',]}#'))
+            result.append(value)
+        index = _skip_space(text, index)
+        if index < len(text) and text[index] == ',':
+            index = _skip_space(text, index + 1)
+            if index < len(text) and text[index] == closer:
+                return result, index + 1
+            continue
+        if index < len(text) and text[index] == closer:
+            return result, index + 1
+        _reject_ci_contract()
+
+
+def _parse_inline(text):
+    text = text.strip()
+    if text == '':
+        return None
+    if text[0] in '[{':
+        value, index = _parse_flow_collection(text, 0)
+        if text[index:].strip():
+            _reject_ci_contract()
+        return value
+    if text[0] in "'\"":
+        value, index = _parse_quoted(text, 0)
+        if text[index:].strip():
+            _reject_ci_contract()
+        return value
+    return _plain_scalar(text)
+
+
+def _split_mapping(text):
+    quote = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote == "'":
+            if char == "'" and index + 1 < len(text) and text[index + 1] == "'":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+        if quote == '"':
+            if char == '\\':
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            index += 1
+            continue
+        if char == ':':
+            after = text[index + 1:]
+            if after != '' and after[0] not in ' \t':
+                return None, None
+            key = text[:index].strip()
+            if key[:1] in "'\"":
+                parsed, end = _parse_quoted(key, 0)
+                if key[end:].strip():
+                    _reject_ci_contract()
+                key = parsed
+            if not isinstance(key, str) or key == '' or key == '<<':
+                _reject_ci_contract()
+            return key, after.strip()
+        index += 1
+    return None, None
+
+
+def _block_lines(lines):
+    logical = []
+    for line in lines:
+        if '\t' in line:
+            _reject_ci_contract()
+        if line.strip() == '' or line.lstrip().startswith('#'):
+            continue
+        indent = len(line) - len(line.lstrip(' '))
+        content = _strip_yaml_comment(line.strip())
+        if content:
+            logical.append((indent, content))
+    return logical
+
+
+def _parse_node(logical, index, min_indent):
+    if index >= len(logical) or logical[index][0] < min_indent:
+        _reject_ci_contract()
+    indent, content = logical[index]
+    if content == '-' or content.startswith('- '):
+        return _parse_sequence(logical, index, indent)
+    return _parse_mapping(logical, index, indent)
+
+
+def _parse_mapping(logical, index, indent):
+    if index >= len(logical) or logical[index][0] != indent:
+        _reject_ci_contract()
+    mapping = {}
+    while index < len(logical) and logical[index][0] == indent:
+        key, rest = _split_mapping(logical[index][1])
+        if key is None or key in mapping:
+            _reject_ci_contract()
+        index += 1
+        if rest in _BLOCK_SCALAR:
+            _reject_ci_contract()
+        if rest == '':
+            if index < len(logical) and logical[index][0] > indent:
+                value, index = _parse_node(logical, index, indent + 1)
+            else:
+                value = None
+        elif index < len(logical) and logical[index][0] > indent:
+            _reject_ci_contract()
+        else:
+            value = _parse_inline(rest)
+        mapping[key] = value
+    return mapping, index
+
+
+def _parse_dash_mapping(logical, index, dash_indent, item):
+    key_indent = dash_indent + 2
+    virtual = [(key_indent, item)]
+    index += 1
+    while index < len(logical) and logical[index][0] > dash_indent:
+        virtual.append(logical[index])
+        index += 1
+    mapping, consumed = _parse_mapping(virtual, 0, key_indent)
+    if consumed != len(virtual):
+        _reject_ci_contract()
+    return mapping, index
+
+
+def _parse_sequence(logical, index, indent):
+    if index >= len(logical) or logical[index][0] != indent:
+        _reject_ci_contract()
+    items = []
+    while index < len(logical) and logical[index][0] == indent:
+        content = logical[index][1]
+        if content == '-':
+            index += 1
+            if index < len(logical) and logical[index][0] > indent:
+                value, index = _parse_node(logical, index, indent + 1)
+            else:
+                value = None
+        elif content.startswith('- '):
+            item = content[2:].strip()
+            key, _rest = _split_mapping(item) if item else (None, None)
+            if key is not None:
+                value, index = _parse_dash_mapping(logical, index, indent, item)
+            else:
+                index += 1
+                if index < len(logical) and logical[index][0] > indent:
+                    _reject_ci_contract()
+                value = _parse_inline(item) if item else None
+        else:
+            _reject_ci_contract()
+        items.append(value)
+    return items, index
+
+
+def _events_in_block(block_lines):
+    header = block_lines[0].rstrip('\r\n')
+    if _ON_HEADER.fullmatch(header):
+        logical = _block_lines(line.rstrip('\r\n') for line in block_lines[1:])
+        if not logical:
+            return {}
+        events, index = _parse_node(logical, 0, logical[0][0])
+        if not isinstance(events, dict) or index != len(logical):
+            _reject_ci_contract()
+        return events
+    inline = _ON_INLINE.fullmatch(header)
+    if not inline or len(block_lines) != 1:
+        _reject_ci_contract()
+    value = _parse_inline(_strip_yaml_comment(inline.group(1)))
+    if not isinstance(value, dict):
+        _reject_ci_contract()
+    return value
+
+
+def _locate_on_block(lines):
+    for index, line in enumerate(lines):
+        body = line.rstrip('\r\n')
+        if not body or body[0] in ' \t#':
+            continue
+        if _ON_HEADER.fullmatch(body):
+            end = index + 1
+            while end < len(lines):
+                nxt = lines[end].rstrip('\r\n')
+                if nxt.strip() == '' or nxt[:1] in ' \t':
+                    end += 1
+                    continue
+                break
+            while end > index + 1 and lines[end - 1].strip() == '':
+                end -= 1
+            return index, end
+        if _ON_INLINE.fullmatch(body):
+            return index, index + 1
+    _reject_ci_contract()
+
+
+def _public_ci_events(content):
+    """Return the parsed top-level ``on`` mapping from a workflow file."""
+    if not isinstance(content, str):
+        _reject_ci_contract()
+    lines = content.splitlines(keepends=True)
+    start, end = _locate_on_block(lines)
+    return _events_in_block(lines[start:end])
+
+
+def _push_targets_main(value):
+    if not isinstance(value, dict) or set(value) != {'branches'}:
+        return False
+    branches = value['branches']
+    if isinstance(branches, str):
+        branches = [branches]
+    return isinstance(branches, list) and branches == ['main'] and all(isinstance(item, str) for item in branches)
+
+
+def _ci_workflow_for_validation(content):
+    """Copy ``content`` with a pull-request-only trigger for validation.
+
+    The public workflow must trigger on an unfiltered pull_request and on push
+    to main. Extra events are accepted in any order and removed from the copy,
+    so a later trigger addition does not reject the file. A change to either
+    required event's filters is refused.
+    """
+    events = _public_ci_events(content)
+    if 'pull_request' not in events or 'push' not in events:
+        _reject_ci_contract()
+    if events['pull_request'] not in (None, {}):
+        _reject_ci_contract()
+    if not _push_targets_main(events['push']):
+        _reject_ci_contract()
+    lines = content.splitlines(keepends=True)
+    start, end = _locate_on_block(lines)
+    return ''.join(lines[:start]) + _VALIDATION_CI_ON + ''.join(lines[end:])
+
+
 class PrivateReleaseBridge:
     def __init__(self, github, reviewer, policy, state_directory, *, on_public_green=None):
         self.github, self.reviewer, self.policy = github, reviewer, policy
@@ -479,10 +834,7 @@ class PrivateReleaseBridge:
         for path in paths:
             content = base64.b64decode(self._api(f'repos/{PUBLIC}/contents/{path}?ref={source_sha}')['content']).decode()
             if path.endswith('/ci.yml'):
-                old = 'on:\n  pull_request:\n  push:\n    branches: [main]'
-                new = "on:\n  pull_request:\n    branches: ['validation/base/**']"
-                if old not in content: raise RuntimeError('unrecognized public CI event contract')
-                content = content.replace(old, new, 1)
+                content = _ci_workflow_for_validation(content)
             encoded = content.encode()
             blob = hashlib.sha1(f'blob {len(encoded)}\0'.encode() + encoded).hexdigest()
             if existing.get(path) != blob:
