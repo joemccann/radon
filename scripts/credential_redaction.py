@@ -302,7 +302,15 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
             # grammar applies is unknowable here; the later close redacts
             # the whole value under either.
             literal = _find_close(text, body, delimiter, backslash_escapes=False)
-            if close is None or (literal is not None and literal > close):
+            if close is None:
+                # No close under the escaping grammar: the value runs at
+                # least to the end of the line, so an earlier literal close
+                # (an escaped quote in a truncated excerpt) must not end it.
+                eol = _end_of_line(text, body)
+                if literal is None or literal < eol:
+                    return body, eol, ""
+                close = literal
+            elif literal is not None and literal > close:
                 close = literal
         if close is not None:
             return body, close, delimiter
@@ -335,12 +343,15 @@ def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool
     return None
 
 
+_LINE_BREAK = re.compile(r"[\r\n]")
+
+
 def _end_of_line(text: str, pos: int) -> int:
-    newline = min(
-        (i for i in (text.find("\r", pos), text.find("\n", pos)) if i != -1),
-        default=-1,
-    )
-    return len(text) if newline == -1 else newline
+    # One search for the nearest break: finding `\r` and `\n` separately
+    # scanned to the end of an LF-only text on every call, quadratic over
+    # its lines.
+    newline = _LINE_BREAK.search(text, pos)
+    return len(text) if newline is None else newline.start()
 
 
 def _iter_assignments(text: str):
