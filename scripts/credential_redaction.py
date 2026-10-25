@@ -192,7 +192,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (
         re.compile(
             r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
-            r"(?:(?:basic|bearer|digest|token)\s+)?\S+",
+            # Any scheme word: a fixed list redacted `ApiKey` and kept the
+            # credential after it (DS-2026-10-25-08).
+            r"(?:[A-Za-z][\w.~+/-]*[ \t]+)?\S+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",

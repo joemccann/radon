@@ -366,7 +366,8 @@ line here whenever you ship a security fix.**
   because the publication gate runs it over text an outside contributor shapes.
   The scrubber redacts an unquoted value to the end of its line: a passphrase
   holds spaces, and stopping at the first one published every later word.
-  Detection keeps the narrower whitespace-bounded span.
+  Detection keeps the narrower whitespace-bounded span. An `Authorization`
+  value is redacted after any scheme word, not a fixed list of schemes.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
