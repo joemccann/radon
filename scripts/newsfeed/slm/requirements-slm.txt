@@ -356,7 +356,7 @@ semantic-version==2.10.0
     # via gradio
 sentencepiece==0.2.2
     # via llamafactory
-setuptools==84.0.0
+setuptools==84.1.0
     # via
     #   modelscope
     #   torch
