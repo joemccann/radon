@@ -218,25 +218,45 @@ def _contract_key(contract: Any) -> Optional[tuple]:
     return None
 
 
+def _broker_snapshot_proved(client: Any, attr: str) -> bool:
+    """Whether ``client`` finished the snapshot ``attr`` names.
+
+    ``IBClient`` sets the attribute to a bool (REL-331 / R-742). A double that
+    only supplies the list leaves it unset; that list is the whole book.
+    """
+    flag = getattr(client, attr, None)
+    if isinstance(flag, bool):
+        return flag
+    return True
+
+
 def read_broker_book(client: Any) -> Optional[tuple[dict, dict]]:
     """(held, resting) from the connected broker; None when unreadable.
 
     Same shapes as ``_held_quantities`` / ``_resting_changes``. A combo leg's
     conId resolves through the held positions: a leg on a contract nobody
-    holds cannot reserve held size.
+    holds cannot reserve held size. A snapshot whose end event did not arrive
+    is not an empty book, and a resting bag with no legs has no measurable
+    effect: both prove nothing, so no close is admitted (REL-331 / R-742).
     """
     try:
+        positions = client.get_positions()
+        if not _broker_snapshot_proved(client, "_positions_snapshot_ended"):
+            return None
         held: dict[tuple, float] = {}
         by_con_id: dict[Any, tuple] = {}
-        for pos in client.get_positions():
+        for pos in positions:
             key = _contract_key(pos.contract)
             size = _finite(pos.position)
             if key is None or size is None:
                 continue
             held[key] = held.get(key, 0.0) + size
             by_con_id[getattr(pos.contract, "conId", None)] = key
+        trades = client.get_open_orders()
+        if not _broker_snapshot_proved(client, "_open_orders_snapshot_ended"):
+            return None
         resting: dict[tuple, tuple[float, float]] = {}
-        for trade in client.get_open_orders():
+        for trade in trades:
             status = str(trade.orderStatus.status or "").upper().replace(" ", "")
             if status not in _RESTING_STATUSES:
                 continue
@@ -247,8 +267,11 @@ def read_broker_book(client: Any) -> Optional[tuple[dict, dict]]:
                 continue
             sell = str(trade.order.action or "").upper().startswith("SELL")
             if str(getattr(trade.contract, "secType", "")) == "BAG":
+                legs = list(getattr(trade.contract, "comboLegs", None) or [])
+                if not legs:
+                    return None
                 changes = []
-                for leg in trade.contract.comboLegs or []:
+                for leg in legs:
                     key = by_con_id.get(leg.conId)
                     if key is None:
                         continue

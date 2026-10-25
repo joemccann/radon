@@ -323,7 +323,12 @@ for sizing/eval is unchanged.
   shows a holding a filled close has sold, so `ib_place_order.py` re-runs every
   guard that exempted a close against the broker's live positions and working
   orders before it transmits; an unreadable broker book proves no close
-  (`scripts/tests/test_close_exemption_broker_book.py`).
+  (`scripts/tests/test_close_exemption_broker_book.py`). A read is the book
+  only after both `positionEnd` and `openOrderEnd` have arrived (REL-331).
+  The cache returned when `positionEnd` misses its wait, an `openTrades()`
+  list returned when `openOrderEnd` misses its wait, and a resting bag with
+  no legs are all unreadable. A finished read that still shows the shares
+  and no resting order still admits the close.
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.
