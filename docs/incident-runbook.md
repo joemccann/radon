@@ -2842,16 +2842,77 @@ retries, then completed.
   in the same minute, stand down.
 - **Remediation (code):** on `UW admission is busy`, sleep once until
   the governor embargo lifts when that remainder is at most 70s, then
-  fetch options flow once more. Quota exhaustion, a longer embargo,
-  and any other provider error still set the hard `error` and the
-  oneshot still exits 1. Do not `reset-failed`. The next timer after
-  deploy is enough.
+  fetch options flow once more. A second short rate limit sheds
+  (`flow-refresh-discover-rate-limit-shed`). Quota exhaustion, a
+  longer embargo, and any other provider error still set the hard
+  `error` and the oneshot still exits 1. Do not `reset-failed`. The
+  next timer after deploy is enough.
 - **Regression:**
   `scripts/tests/test_discover.py::test_options_flow_admission_busy_waits_out_the_short_embargo_then_scores`,
-  `test_options_flow_admission_busy_retries_once_then_stays_a_hard_error`,
+  `test_options_flow_admission_busy_retries_once_then_sheds`,
+  `test_options_flow_still_busy_after_the_wait_sheds_the_oneshot`,
   `test_options_flow_admission_busy_past_the_wait_budget_stays_a_hard_error`,
   `test_options_flow_quota_exhausted_does_not_wait`.
 - **Code:** `scripts/discover.py` (`_fetch_options_flow_after_admission`).
+
+---
+
+## flow-refresh-discover-rate-limit-shed
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when discover's one admission wait still lands in a
+short UW rate limit.** Peak: 2026-10-22 20:01:26Z, page
+`9d06ddf8616c14c31c1fcabca8d29369`. Scanner and flow-analysis in the
+same fire exited OK. Flow-analysis spent two instant HTTP 502 capacity
+retries, then completed.
+
+- **Mechanism:** the top-of-hour burst leaves a short governor embargo.
+  Discover waits once (remainder at most 70s) and fetches options flow
+  again. The retry is still a short 429, either `admission is busy` or
+  the provider `Too Many Requests` reply. The same stampede can also
+  fetch options flow and then skip every darkpool ticker on a transient
+  rate limit, so `candidates` stays empty. Either way discover used to
+  set `error: required provider data unavailable`. `_run_flow_tab`
+  returned HTTP 400. The wrapper does not retry 400, so the oneshot
+  exited 1. No successful darkpool cache write is required. The next
+  hour can still score. `/health/lite` stayed authenticated.
+- **Detection:** unit journal scanner OK, flow-analysis OK (optional
+  capacity retries), then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)` about
+  45s to 70s after the discover POST. `systemctl show` is `exit-code`
+  / `ExecMainStatus=1` / `NRestarts=0`. A 4s 400 with no governor
+  request in that second is still the over-budget embargo in
+  `flow-refresh-discover-admission-busy`.
+- **Discriminating check:** HTTP 400 about a minute after the discover
+  POST, not about 2s and not instant 502. Body detail was
+  `required provider data unavailable` before this fix, and
+  `discover rate limit shed` after it. `/health/lite` authenticated.
+  A scored scan with one darkpool skip (HTTP 200, degraded) is
+  `flow-refresh-discover-partial-400`. An embargo longer than 70s, or
+  quota text, stays a hard 400 and the oneshot still exits 1. Instant
+  `Subprocess capacity exhausted` is `flow-refresh-capacity-502`. A
+  ~120s flow-analysis 502 is `flow-refresh-analysis-timeout`.
+  `curl: (7)` then fallback is `flow-refresh-connect-refused`.
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down, or
+  a Turso `SELECT 1` fails in the same minute, stand down.
+- **Remediation (code):** when the only miss is a short rate limit,
+  set `error` to `discover rate limit shed`. The wrapper returns exit
+  75 and the oneshot exits 0 with a warn health row. It does not retry
+  the POST and does not launch a direct `discover.py`. The previous
+  `discover.json` stays, because HTTP 400 is not cached. Quota
+  exhaustion, a longer embargo, and any non-rate-limit provider error
+  still set the hard error and the oneshot still exits 1. Do not
+  `reset-failed`. The next timer after deploy is enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_options_flow_still_busy_after_the_wait_sheds_the_oneshot`,
+  `test_every_darkpool_rate_limit_sheds_instead_of_failing_the_oneshot`,
+  `test_darkpool_rate_limit_past_the_wait_budget_stays_a_hard_error`,
+  `test_darkpool_outage_mixed_with_a_rate_limit_stays_a_hard_error`,
+  `scripts/tests/test_run_flow_refresh_wrapper.py::test_discover_rate_limit_400_sheds_without_retry_or_fallback`,
+  `test_discover_provider_outage_400_still_fails_the_unit`.
+- **Code:** `scripts/discover.py` (`_provider_error_key`,
+  `_apply_provider_failures`), `scripts/run_flow_refresh.sh`
+  (`_is_admission_shed`).
 
 ---
 

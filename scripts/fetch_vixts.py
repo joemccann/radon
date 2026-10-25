@@ -108,7 +108,7 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     """Atomic write of data/vixts.json — fallback only; Turso is the truth."""
     VIXTS_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = VIXTS_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, VIXTS_JSON)
 
 
