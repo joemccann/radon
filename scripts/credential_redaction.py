@@ -385,6 +385,13 @@ def _redact_assignments(text: str) -> str:
     out: list[str] = []
     last = 0
     for head_end, body_start, body_end, delimiter in _iter_assignments(text):
+        if head_end < last:
+            continue
+        if not delimiter:
+            # DS-2026-10-25-04: an unquoted value is redacted to the end of
+            # its line. Stopping at whitespace published every word after
+            # the first of a passphrase; detection keeps the narrower span.
+            body_end = _end_of_line(text, body_start)
         body = text[body_start:body_end]
         if _is_already_redacted(body) or (not delimiter and not body):
             # An EMPTY quoted value still gets the label (the key is the tell);
