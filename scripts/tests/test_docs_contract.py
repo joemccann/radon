@@ -2852,3 +2852,13 @@ class TestDocumentation20261025:
         assert "platform.startswith(PRODUCTION_PLATFORM_PREFIX)" in fn
         assert "is not a permit" in fn
 
+    def test_place_order_canonicalizes_type_before_the_guards(self):
+        text = (_ROOT / "scripts/CLAUDE.md").read_text()
+        section = text.split("## Order Placement Contract", 1)[1].split("\n## ", 1)[0]
+        assert "canonicalized before any guard" in section
+        assert "unsupported order type" in section
+        src = (_ROOT / "scripts/ib_place_order.py").read_text()
+        fn = src.split("def place_order", 1)[1].split("\ndef ", 1)[0]
+        assert 'not in ("stock", "option", "combo", "future")' in fn
+        assert "unsupported order type" in fn
+
