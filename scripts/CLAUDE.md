@@ -95,6 +95,7 @@ Mirror of the rule in `web/CLAUDE.md`:
 1. Use subprocess with original `clientId`. Master (0) sees all orders but can't modify (Error 10147/103). `ib_order_manage.py` reconnects as original.
 2. Clear VOL fields before modify. Reset `volatility` / `volatilityType` to IB sentinels (`1.7976931348623157e+308` / `2147483647`) to avoid Error 321.
 3. Preserve upstream error detail — never collapse to 500.
+4. **A permId names the order.** When `permId` is sent, `find_modify_trade` does not fall back to orderId. `/orders/modify` resolves the snapshot the same way and returns 422 `ORDER_MODIFY_IDENTITY_MISMATCH` when the two ids name different working orders. Nothing is transmitted.
 
 Browser-side regression tests live in `web/`; this side has unit + route coverage.
 
