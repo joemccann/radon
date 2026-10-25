@@ -266,7 +266,7 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 # YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
     rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
-    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*){0,8})?",
+    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
 
@@ -419,9 +419,15 @@ def _redact_assignments(text: str) -> str:
         if head_end < last:
             continue
         # Decided on the value token itself: the line's later text is other
-        # assignments or prose, and re-reading it per value is quadratic.
+        # assignments or prose, and re-reading it per value is quadratic. A
+        # label with more words after it on the line is a partial redaction
+        # (a provider rule took the first word of a passphrase): redact on.
         if _is_already_redacted(text[body_start:body_end]):
-            continue
+            after = body_end + len(delimiter)
+            while after < len(text) and text[after] in " \t":
+                after += 1
+            if delimiter or after >= len(text) or text[after] in "\r\n":
+                continue
         if not delimiter:
             # DS-2026-10-25-04: an unquoted value is redacted to the end of
             # its line. Stopping at whitespace published every word after

@@ -337,3 +337,16 @@ def test_many_assignment_lines_stay_linear():
     # 16x the lines; a per-line scan to the end of the text is quadratic.
     small, large = min(elapsed(8000) for _ in range(3)), elapsed(128000)
     assert large < small * 32, (small, large)
+
+
+def test_words_after_a_partially_redacted_first_word_are_redacted():
+    scrubbed = scrub_credential_text(f"password: [redacted] {OPAQUE} {TAIL}\nnext\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next" in scrubbed
+
+
+def test_any_number_of_comment_lines_before_the_value():
+    comments = "".join(f"  # note {i}\n" for i in range(12))
+    scrubbed = scrub_credential_text(f"password:\n{comments}  {OPAQUE}\nnext: 1\n")
+    assert _clean(scrubbed), scrubbed
+    assert "next: 1" in scrubbed
