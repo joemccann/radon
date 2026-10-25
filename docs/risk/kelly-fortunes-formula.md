@@ -323,7 +323,12 @@ for sizing/eval is unchanged.
   shows a holding a filled close has sold, so `ib_place_order.py` re-runs every
   guard that exempted a close against the broker's live positions and working
   orders before it transmits; an unreadable broker book proves no close
-  (`scripts/tests/test_close_exemption_broker_book.py`). That re-check runs
+  (`scripts/tests/test_close_exemption_broker_book.py`). A read is the book
+  only after both `positionEnd` and `openOrderEnd` have arrived (REL-331).
+  The cache returned when `positionEnd` misses its wait, an `openTrades()`
+  list returned when `openOrderEnd` misses its wait, and a resting bag with
+  no legs are all unreadable. A finished read that still shows the shares
+  and no resting order still admits the close. That re-check runs
   whenever admission proved a close, even if the snapshot has since changed,
   and the broker holding must be the order's own contract (conId), not a
   sibling trading class with the same coordinates. With the all-placer gate
