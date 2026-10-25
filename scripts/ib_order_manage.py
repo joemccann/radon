@@ -313,6 +313,31 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
             "symbol": getattr(trade.contract, "symbol", ""),
             "limitPrice": getattr(trade.order, "lmtPrice", None),
         })
+        # DS-2026-10-25-02: with the all-paths preference on, Gate 3 holds a
+        # modify as it holds a placement, measured at the broker with this
+        # order's own resting remainder replaced rather than reserved.
+        from bankroll_guard import (
+            broker_book,
+            check_bankroll_admission,
+            enforced_on_all_paths,
+            read_broker_book,
+        )
+
+        if violation is None and enforced_on_all_paths():
+            contract = trade.contract
+            with broker_book(read_broker_book(client, contract=contract, exclude=trade)):
+                violation = check_bankroll_admission({
+                    **contract_limit_shape(contract),
+                    "symbol": getattr(contract, "symbol", ""),
+                    "action": trade.order.action,
+                    "quantity": trade.order.totalQuantity,
+                    "orderType": order_type,
+                    "limitPrice": getattr(trade.order, "lmtPrice", None),
+                    "stopPrice": getattr(trade.order, "auxPrice", None) if order_type == "STP LMT" else None,
+                    "strike": getattr(contract, "strike", None),
+                    "right": getattr(contract, "right", None),
+                    "expiry": getattr(contract, "lastTradeDateOrContractMonth", None),
+                })
     if violation:
         output("error", f"{violation['message']} (order not modified).")
         return

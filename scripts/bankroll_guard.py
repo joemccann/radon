@@ -191,6 +191,18 @@ def _resting_changes(orders: Any) -> Optional[dict[tuple, tuple[float, float]]]:
 # the store, whose snapshot can still show a holding a filled close removed.
 _BROKER_BOOK: Any = ...
 
+# DS-2026-10-25-01: set when a store-measured close is proven, so the funnel
+# re-admits at the broker an order its admission exempted even after the
+# store stops showing the close.
+_STORE_CLOSE_PROVEN = False
+
+
+def take_store_close_proven() -> bool:
+    """Whether a store-measured close was proven since the last call."""
+    global _STORE_CLOSE_PROVEN
+    proven, _STORE_CLOSE_PROVEN = _STORE_CLOSE_PROVEN, False
+    return proven
+
 
 @contextmanager
 def broker_book(book: Optional[tuple[dict, dict]]):
@@ -218,14 +230,35 @@ def _contract_key(contract: Any) -> Optional[tuple]:
     return None
 
 
-def read_broker_book(client: Any) -> Optional[tuple[dict, dict]]:
+def _con_ids(contract: Any) -> set:
+    if str(getattr(contract, "secType", "") or "") == "BAG":
+        return {getattr(leg, "conId", None) for leg in getattr(contract, "comboLegs", None) or []}
+    return {getattr(contract, "conId", None)}
+
+
+def _same_order(trade: Any, other: Any) -> bool:
+    perm_id = getattr(other.order, "permId", None)
+    if perm_id:
+        return getattr(trade.order, "permId", None) == perm_id
+    return getattr(trade.order, "orderId", None) == getattr(other.order, "orderId", None)
+
+
+def read_broker_book(
+    client: Any, contract: Any = None, exclude: Any = None
+) -> Optional[tuple[dict, dict]]:
     """(held, resting) from the connected broker; None when unreadable.
 
     Same shapes as ``_held_quantities`` / ``_resting_changes``. A combo leg's
     conId resolves through the held positions: a leg on a contract nobody
     holds cannot reserve held size.
+
+    ``contract``: the order's broker contract. Only a position in that
+    contract (or a combo's leg contracts) is held, since the coordinate key
+    drops the trading class (DS-2026-10-25-03). ``exclude``: a working trade
+    whose own remainder reserves nothing, because a modify replaces it.
     """
     try:
+        wanted = None if contract is None else _con_ids(contract)
         held: dict[tuple, float] = {}
         by_con_id: dict[Any, tuple] = {}
         for pos in client.get_positions():
@@ -233,10 +266,15 @@ def read_broker_book(client: Any) -> Optional[tuple[dict, dict]]:
             size = _finite(pos.position)
             if key is None or size is None:
                 continue
+            con_id = getattr(pos.contract, "conId", None)
+            by_con_id[con_id] = key
+            if wanted is not None and con_id not in wanted:
+                continue
             held[key] = held.get(key, 0.0) + size
-            by_con_id[getattr(pos.contract, "conId", None)] = key
         resting: dict[tuple, tuple[float, float]] = {}
         for trade in client.get_open_orders():
+            if exclude is not None and _same_order(trade, exclude):
+                continue
             status = str(trade.orderStatus.status or "").upper().replace(" ", "")
             if status not in _RESTING_STATUSES:
                 continue
@@ -383,6 +421,9 @@ def is_close_out(
             return False
         if abs(change) > abs(position) + 1e-9:
             return False
+    if _BROKER_BOOK is ...:
+        global _STORE_CLOSE_PROVEN
+        _STORE_CLOSE_PROVEN = True
     return True
 
 
@@ -503,13 +544,12 @@ def order_max_loss(params: dict) -> Optional[float]:
 ENFORCE_ALL_PATHS_PREF = "RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS"
 
 
-def check_if_enforced_on_all_paths(params: dict) -> Optional[dict[str, Any]]:
-    """Gate 3 for placers outside ib_place_order (ib_execute, exit service).
+def enforced_on_all_paths() -> bool:
+    """The operator preference, default Off (bypass).
 
-    Operator preference, default Off (bypass). These processes are not
-    spawned by radon-api (no env overlay) and the exit service is long-lived,
-    so re-read the store per placement; a dead store keeps the last known
-    value, else env/default.
+    These processes are not spawned by radon-api (no env overlay) and the
+    exit service is long-lived, so re-read the store per placement; a dead
+    store keeps the last known value, else env/default.
     """
     try:
         import app_preferences
@@ -518,7 +558,12 @@ def check_if_enforced_on_all_paths(params: dict) -> Optional[dict[str, Any]]:
 
     if app_preferences._db_enabled():
         app_preferences.refresh_snapshot()
-    if not app_preferences.get_bool(ENFORCE_ALL_PATHS_PREF):
+    return app_preferences.get_bool(ENFORCE_ALL_PATHS_PREF)
+
+
+def check_if_enforced_on_all_paths(params: dict) -> Optional[dict[str, Any]]:
+    """Gate 3 for placers outside ib_place_order (ib_execute, exit service)."""
+    if not enforced_on_all_paths():
         return None
     return check_bankroll_admission(params)
 
