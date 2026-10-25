@@ -57,6 +57,10 @@ def _arm(monkeypatch: pytest.MonkeyPatch, client_mod, connect_calls: list):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("RADON_DB_USE_REPLICA", raising=False)
     monkeypatch.delenv("RADON_DB_NO_REPLICA", raising=False)
+    # REL-330 refuses get_db on every non-Linux host once the pytest marker
+    # is gone, before libsql.connect. These cases describe the VPS connect
+    # shape. The darwin refusal is test_production_writer_guard.py.
+    monkeypatch.setattr(sys, "platform", "linux")
 
     def fake_connect(*args, **kwargs):
         connect_calls.append((args, kwargs))
