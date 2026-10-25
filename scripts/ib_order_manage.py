@@ -97,13 +97,19 @@ def find_modify_trade(client: IBClient, order_id: int, perm_id: int):
     return trade
 
 
-def _bankroll_modify_violation(client: IBClient, trade, order_type: str) -> Optional[dict]:
+def _bankroll_modify_violation(client: IBClient, trade, order_type: str,
+                               quantity, price) -> Optional[dict]:
     """Gate 3 for a modify, which retransmits, when the all-paths preference is on.
 
     DS-2026-10-25-02: measured at the broker with this order's own resting
     remainder replaced rather than reserved, and priced on the unfilled
     remainder (filled size is already a holding). A combo's legs are resolved
     from the broker; an unresolvable leg leaves the risk unpriceable.
+
+    Run it BEFORE the order's fields change: the broker-book read refreshes
+    open orders, and ib_insync rewrites a known trade's quantity and price
+    from the broker's copy, which would revert the modify before transmit.
+    ``quantity`` / ``price`` are the proposed values.
     """
     from bankroll_guard import (
         broker_book,
@@ -116,14 +122,14 @@ def _bankroll_modify_violation(client: IBClient, trade, order_type: str) -> Opti
     if not enforced_on_all_paths():
         return None
     contract = trade.contract
-    total = _finite(trade.order.totalQuantity) or 0.0
+    total = _finite(quantity) or 0.0
     filled = _finite(getattr(trade.orderStatus, "filled", None)) or 0.0
     params = {
         "symbol": getattr(contract, "symbol", ""),
         "action": trade.order.action,
         "quantity": max(total - filled, 0.0),
         "orderType": order_type,
-        "limitPrice": getattr(trade.order, "lmtPrice", None),
+        "limitPrice": price,
         "stopPrice": getattr(trade.order, "auxPrice", None) if order_type == "STP LMT" else None,
     }
     if contract.secType == "BAG":
@@ -319,6 +325,15 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
         if trade is None:
             output("error", f"{working_order_missing_message()} after reconnect as original clientId")
 
+    bankroll_violation = _bankroll_modify_violation(
+        client, trade, order_type,
+        quantity=new_quantity if new_quantity is not None else trade.order.totalQuantity,
+        price=new_price if new_price is not None else trade.order.lmtPrice,
+    )
+    if bankroll_violation:
+        output("error", f"{bankroll_violation['message']} (order not modified).")
+        return
+
     # Capture IB error events during the modify attempt
     error_msgs = []
     def on_error(reqId, errorCode, errorString, advancedOrderRejectJson=""):
@@ -375,8 +390,6 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
             "symbol": getattr(trade.contract, "symbol", ""),
             "limitPrice": getattr(trade.order, "lmtPrice", None),
         })
-    if violation is None:
-        violation = _bankroll_modify_violation(client, trade, order_type)
     if violation:
         output("error", f"{violation['message']} (order not modified).")
         return
