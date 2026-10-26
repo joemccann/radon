@@ -18,8 +18,10 @@ from clients.model_ladder import (
     ModelLadderExhausted,
     ModelResponseError,
     complete_multimodal_json,
+    complete_text_json,
     safe_error_message,
 )
+from research import humanizer
 
 # Ported verbatim from the voice + humanize prompt (voice rules 1-10, humanize 11-21, format 22-26).
 SYSTEM = """\
@@ -125,6 +127,8 @@ class FeedCopy:
     tags: list[str]
     provider: str
     model: str
+    source_text: str = ""
+    image_ids: tuple[str, ...] = ()
 
 
 class CopyUnavailable(RuntimeError):
@@ -321,4 +325,41 @@ def write_copy(
         tags=list(data["tags"]),
         provider=result.provider,
         model=result.model,
+        source_text=source_text,
+        image_ids=tuple(ids),
     )
+
+
+def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = complete_text_json) -> dict:
+    """Run the shared Humanizer review (``research.publish`` refuses a post without its certificate).
+
+    A rewrite is accepted only when it still passes ``copy_problems`` against the same facts and
+    needs no scrub, so an em dash or an unsupported number can never ride in through the rewrite.
+    Ladder outages stay transient (parked); a failed review spends an attempt.
+    """
+    ids = list(copy.image_ids)
+
+    def ask(instruction: str) -> Any:
+        return complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
+                        log_prefix="marketdesk-humanizer").data
+
+    def verify(revised: dict) -> bool:
+        texts = [revised.get("title"), revised.get("content")]
+        if any(not isinstance(text, str) or scrub(text) != text for text in texts):
+            return False
+        candidate = {"title": texts[0], "content": texts[1], "captions": dict(copy.captions), "tags": list(copy.tags)}
+        return not copy_problems(candidate, source_text=copy.source_text, image_ids=ids)
+
+    statuses: list[str] = []
+    try:
+        reviewed = humanizer.review_post(post, ask=ask, verify=verify,
+                                         record=lambda audit: statuses.append(str(audit.get("status"))))
+    except ModelLadderExhausted as exc:
+        if _every_rung_rejected(str(exc)):
+            raise CopyUnavailable("humanizer: every rung failed") from None
+        raise CopyOutage(safe_error_message(exc)) from None
+    except ModelResponseError as exc:
+        raise CopyUnavailable("humanizer: " + safe_error_message(exc)) from None
+    if reviewed is None:
+        raise CopyUnavailable("humanizer: " + (statuses[-1] if statuses else "failed"))
+    return reviewed

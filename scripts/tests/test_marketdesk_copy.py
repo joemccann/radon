@@ -435,3 +435,93 @@ def test_rejection_classified_even_when_the_message_is_long() -> None:
     with pytest.raises(mc.CopyUnavailable) as info:
         _call(fake)
     assert info.value.transient is False
+
+
+# ---------- certify (Humanizer certificate gate in research.publish) ----------
+
+from research import humanizer  # noqa: E402
+
+CLEAN_REVIEW = {"findings": [], "qualitative": []}
+
+
+def _feed_copy(title: str, content: str) -> mc.FeedCopy:
+    return mc.FeedCopy(title=title, content=content, captions={"i1": "Systematic flows", "i2": "CTA positioning"},
+                       tags=["CTA"], provider="fake", model="fake-1", source_text=SOURCE, image_ids=("i1", "i2"))
+
+
+def _post(copy: mc.FeedCopy) -> dict:
+    return {"id": "research-" + "a" * 32, "title": copy.title, "content": copy.content,
+            "source": {"kind": "marketdesk", "publisher": "Goldman Sachs"}}
+
+
+def _ladder(*replies):
+    calls: list[dict] = []
+    queue = list(replies)
+
+    def complete(instruction, **kwargs):
+        calls.append({"instruction": instruction, **kwargs})
+        reply = queue.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return LadderResult(data=reply, text="{}", provider="fake", model="fake-1")
+
+    return complete, calls
+
+
+def test_write_copy_carries_source_text_and_image_ids() -> None:
+    def fake(instruction, **kwargs):
+        return LadderResult(data=clean(), text="{}", provider="p", model="m")
+
+    out = _call(fake)
+    assert out.image_ids == ("i1", "i2")
+    assert "$12.5bn" in out.source_text and "Goldman flow desk" in out.source_text
+
+
+def test_certify_clean_review_issues_valid_certificate() -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    complete, calls = _ladder(CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete)
+    humanizer.validate_certificate(post)  # what research.publish enforces
+    assert post["source"]["humanizer"]["score"] >= humanizer.MIN_SCORE
+    assert len(calls) == 1 and calls[0]["log_prefix"] == "marketdesk-humanizer"
+    assert calls[0]["instruction"].startswith(humanizer.RUBRIC_INSTRUCTION)
+
+
+def test_certify_accepts_clean_rewrite_after_qualitative_finding() -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    finding = {"field": "content", "text": "That's the largest since March 2020.", "category": "filler"}
+    rewrite = {"title": clean()["title"],
+               "content": "Goldman's flow desk says systematic funds sold $12.5bn of US equities last week. "
+                          "CTA positioning sits at the 15th percentile."}
+    complete, _ = _ladder({"findings": [], "qualitative": [finding]}, rewrite, CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete)
+    humanizer.validate_certificate(post)
+    assert post["content"] == rewrite["content"]
+
+
+@pytest.mark.parametrize("bad", [
+    "Systematic funds sold $99bn of US equities last week.",   # unsupported number
+    "Systematic funds sold $12.5bn — the most since 2020.",    # em dash survives only via scrub
+])
+def test_certify_rejects_rewrite_failing_marketdesk_validator(bad: str) -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    finding = {"field": "content", "text": "That's the largest since March 2020.", "category": "filler"}
+    complete, _ = _ladder({"findings": [], "qualitative": [finding]}, {"title": clean()["title"], "content": bad})
+    with pytest.raises(mc.CopyUnavailable) as info:
+        mc.certify(_post(copy), copy, complete=complete)
+    assert not info.value.transient and "humanizer" in str(info.value)
+
+
+def test_certify_ladder_outage_is_transient() -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    complete, _ = _ladder(ModelLadderExhausted("Model ladder exhausted. tried=anthropic:http_529"))
+    with pytest.raises(mc.CopyOutage):
+        mc.certify(_post(copy), copy, complete=complete)
+
+
+def test_certify_malformed_reply_is_not_transient() -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    complete, _ = _ladder(ModelResponseError("bad json", "unparseable"))
+    with pytest.raises(mc.CopyUnavailable) as info:
+        mc.certify(_post(copy), copy, complete=complete)
+    assert not info.value.transient

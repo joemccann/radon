@@ -67,6 +67,7 @@ class World:
     no_pdf: set = field(default_factory=set)
     copy_fail: set = field(default_factory=set)
     copy_outage: set = field(default_factory=set)
+    review_outage: set = field(default_factory=set)
     killed: set = field(default_factory=set)
     fetch_errors: dict = field(default_factory=dict)
     summary: list | None = None
@@ -202,7 +203,20 @@ def build_deps(world: World):
             raise CopyOutage("Model ladder exhausted after trying every keyed provider. tried=anthropic:http_529")
         return SimpleNamespace(title="Voice " + title, content="Two cuts priced, curve up 12bp.",
                                captions={i: f"caption {i}" for i in image_ids}, tags=["RATES", "MARKETDESK", "FED"],
-                               provider="fake", model="fake-1")
+                               provider="fake", model="fake-1", source_text="Two cuts priced, curve up 12bp.",
+                               image_ids=tuple(image_ids))
+
+    def certify(post, copy):
+        from clients.model_ladder import LadderResult, ModelLadderExhausted
+        from research import marketdesk_copy
+        world.calls.append(("certify", post["id"]))
+
+        def complete(instruction, **kwargs):
+            if post["title"] in world.review_outage:
+                raise ModelLadderExhausted("Model ladder exhausted. tried=anthropic:http_529")
+            return LadderResult(data={"findings": [], "qualitative": []}, text="{}", provider="fake", model="fake-1")
+
+        return marketdesk_copy.certify(post, copy, complete=complete)
 
     def real_publish(post):
         world.published.append(post)
@@ -243,7 +257,7 @@ def build_deps(world: World):
         launch_browser=lambda pw: FakeBrowser(world), open_session=open_session,
         storage_state=storage_state, persist_storage=persist_storage, list_latest=list_latest, fetch_article=fetch_article,
         download_pdf=download_pdf, download_images=download_images, write_copy=write_copy,
-        writer_from_env=writer_from_env,
+        certify=certify, writer_from_env=writer_from_env,
         marketdesk_path=marketdesk_path, service_cycle=service_cycle, record_health=record_health,
         clock=clock,
     )
@@ -551,6 +565,7 @@ def test_default_deps_wire_real_modules():
     assert deps.storage_state is marketdesk_auth.existing_storage_state
     assert deps.list_latest is marketdesk_scrape.list_latest and deps.download_pdf is marketdesk_scrape.download_pdf
     assert deps.write_copy is marketdesk_copy.write_copy
+    assert deps.certify is marketdesk_copy.certify
     assert deps.writer_from_env({}) is None
     assert deps.marketdesk_path is dropbox_writer.marketdesk_path
 
@@ -757,3 +772,26 @@ def test_main_installs_a_sigterm_handler_for_the_cycle(monkeypatch):
     assert job.main() == 0
     assert callable(seen["handler"]) and seen["handler"] is not before
     assert signal.getsignal(signal.SIGTERM) is before
+
+
+# ---- Humanizer certificate (research.publish refuses research posts without one) -------------
+
+def test_published_post_carries_humanizer_certificate_kept_out_of_provenance(world, db):
+    from research import humanizer
+    world.refs = [make_ref("Hhhhhhhh01", title="Certified")]
+    assert run(world)["published"] == 1
+    post = world.published[0]
+    humanizer.validate_certificate(post)
+    assert ("certify", post["id"]) in world.calls
+    source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert "humanizer" not in source
+
+
+def test_humanizer_review_outage_parks_without_spending_attempts(world, db):
+    world.refs = [make_ref("Hhhhhhhh02", title="Reviewless")]
+    world.review_outage = {"Voice Reviewless"}
+    with pytest.raises(job.ArticlesFailed):
+        run(world)
+    saved = ledger(db, "Hhhhhhhh02")
+    assert saved["status"] == "pending" and saved["attempts"] == 0
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0

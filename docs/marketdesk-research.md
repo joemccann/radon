@@ -97,6 +97,14 @@ length limits. The figures are attached to the request
 exhaustion leaves the article unpublished (see the attempt rules above). The
 ladder is `scripts/clients/model_ladder.py`; no provider is hardcoded.
 
+`research.publish` refuses any research post without a valid Humanizer
+certificate (`scripts/research/humanizer.py`), so `marketdesk_copy.certify` runs
+the shared Humanizer review over the accepted title and content through
+`complete_text_json`. A rewrite it requests is accepted only when it still passes
+`copy_problems` against the same source text and needs no em-dash or quote scrub.
+A review the ladder cannot reach parks the article; a failed review spends an
+attempt. The certificate is stripped from `research_post_sources` on publish.
+
 Summary bullets are shown verbatim, so each one is scrubbed (em dashes, curly
 quotes) and dropped when it names Market Ear or ZeroHedge, carries a URL or
 email, or uses a banned phrase. Article text excludes nav, header, footer, aside
