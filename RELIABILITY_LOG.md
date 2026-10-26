@@ -1058,3 +1058,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-331 / R-742 | DONE | RED 3 failed, 6 passed in `test_close_exemption_broker_book.py` (open-order end timeout, position end timeout, and a legless resting bag each transmitted). GREEN 9 passed in that file; 167 passed across broker-book, IB client, event-wait, and bankroll suites. Catalog parity 38 passed. Permanent drills 114 passed. | A close is re-admitted only when `positionEnd` and `openOrderEnd` both arrived. The returned cache is unchanged for other callers. A resting BAG with no legs makes the book unprovable, same as an unreadable snapshot. A finished book that still holds the shares and has nothing resting still transmits. No catch was widened and no wait was lengthened. |
+
+## Nightly remediation 2026-10-26
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-332 / R-743 | DONE | RED 2 failed, 1 passed in `TestAForeignOrderIdStillReserves` (the other client's sell was dropped; the resize exited 0 and transmitted `qty 1 → 100`). GREEN 29 passed, 2 skipped in `test_close_exemption_broker_book.py`; 119 passed, 2 skipped across broker-book, bankroll admission, enforce-all-paths, and order-manage. Catalog parity 38 passed. Permanent drills 114 passed. | A modify with permId 0 excludes only the same clientId and orderId. Another client's order that reused the number still reserves its size, so the resize is not waived as a close. An unacked order is still excluded from its own reservation. No catch was widened and no retry was added. |

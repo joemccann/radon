@@ -3255,3 +3255,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:710-759` and `:871-917`, wire `placeOrder` at `:759` and `:917`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6188` (used at `:6297` and `:6375`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. Catalog parity 38 passed. The range did not add a service_health writer.
 
 Audited through: 3301426796e582e1112305c12ddb263f9acc83f2 on 2026-10-25 — 1 new finding
+
+## Delta audit 2026-10-26
+
+Trusted cursor `3301426796e582e1112305c12ddb263f9acc83f2` (rolling issue #81, 2026-10-25) through `7f6ad940b407dfecee951310aa78c787cc97cb9a`: 48 commits, 94 paths. No open `reliability/` PR. Highest IDs before tonight: R-742 / REL-331. Codemap `generated_at` 2026-10-25T09:00:09Z predates the gateway-rotation files; incoming edges at that generation were `scripts/bankroll_guard.py` 14, `scripts/ib_order_manage.py` 3, `scripts/ib_place_order.py` 20, `scripts/clients/ib_client.py` 38. `rg` confirms `read_broker_book` has two production callers: `ib_place_order._broker_close_violation` and `ib_order_manage._bankroll_modify_violation`.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-743 / REL-332 | P1 | `scripts/bankroll_guard.py` `_same_order`; called from `read_broker_book` for a modify | DONE. A modify excludes its own resting size before Gate 3. The exclude matched on orderId alone when permId was 0. orderId is per placing client, so another client's working sell with the same number was dropped from the reservation. A 1-lot sell resized to 100, against 100 shares another client was already selling, was waived as a close and transmitted (exit 0, `qty 1 → 100`) on a stale book. Acceptance: the other client's sell stays reserved, the unacked order itself is still excluded, and the resize does not transmit. RED 2 failed, 1 passed. GREEN 29 passed, 2 skipped in the fault file; 119 passed, 2 skipped across the broker-book, bankroll, and modify suites. |
+
+Reviewed and not filed: IB Gateway password rotation refuses before a second login when the broker did not receive the request, and a timeout after the request was sent stays an unknown outcome (verified against Python 3.13 urllib: a blackhole connect is `URLError`, a hang after the full POST is `TimeoutError`). The credential Caddy handle is PUT `/api/credentials/*` at 200s, above the 150s broker budget. Discover's short rate-limit shed still writes a warn row and does not replace a hard provider error when any skip is not a short 429. Redaction, the Gateway env split, and the runner loop-env install did not open an order or health-writer path. REL-331's finished-snapshot requirement still holds on this range.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:710-759` and `:871-917`, wire `placeOrder` at `:759` and `:917`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6188` (used at `:6297` and `:6375`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. Catalog parity 38 passed. The range did not add a service_health writer. Permanent drills 114 passed.
+
+Audited through: 7f6ad940b407dfecee951310aa78c787cc97cb9a on 2026-10-26 — 1 new finding
