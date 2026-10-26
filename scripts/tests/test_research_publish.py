@@ -362,14 +362,21 @@ def marketdesk_post(tmp_path, monkeypatch):
 
 def _clean(post):
     post = copy.deepcopy(post); post.pop("_pngs", None)
-    return post
+    return certify(post)
+
+
+def test_marketdesk_post_without_humanizer_certificate_refused(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    post["source"].pop("humanizer")
+    with pytest.raises(ValueError, match="Humanizer certificate"): publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
 
 
 def test_marketdesk_post_publishes_with_provenance(db, marketdesk_post):
     post = _clean(marketdesk_post)
     assert publish.publish(post) == post["id"]
     saved = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
-    assert saved == post["source"]
+    assert saved == {k: v for k, v in post["source"].items() if k != "humanizer"}
     assert json.loads(db.execute("SELECT images FROM posts").fetchone()[0]) == post["images"]
 
 

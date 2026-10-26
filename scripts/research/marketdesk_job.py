@@ -99,6 +99,7 @@ class Deps:
     download_pdf: Callable
     download_images: Callable
     write_copy: Callable
+    certify: Callable
     writer_from_env: Callable
     marketdesk_path: Callable
     service_cycle: Callable
@@ -128,7 +129,7 @@ def default_deps() -> Deps:
         persist_storage=marketdesk_auth.persist_storage_state, list_latest=marketdesk_scrape.list_latest,
         fetch_article=marketdesk_scrape.fetch_article, download_pdf=marketdesk_scrape.download_pdf,
         download_images=marketdesk_scrape.download_images, write_copy=marketdesk_copy.write_copy,
-        writer_from_env=DropboxWriter.from_env, marketdesk_path=marketdesk_path,
+        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
     )
 
@@ -273,6 +274,7 @@ def _process(ref, *, page, context, workdir: Path, deps: Deps, counts: dict) -> 
                            images=[(image_id, path) for image_id, (path, _) in zip(image_ids, figures)])
     post = build_post(ref, summary=summary, publisher=publisher, pdf_url=pdf_url, sha=sha,
                       figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy)
+    post = deps.certify(post, copy)  # research.publish refuses copy without its Humanizer certificate
     deps.publish(post)
     store.record_published(ref.article_id, post["id"], pdf_url, sha)
     counts["published"] += 1
