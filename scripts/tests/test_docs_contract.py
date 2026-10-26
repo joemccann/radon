@@ -2899,3 +2899,14 @@ class TestDocumentation20261026:
         assert "Do not resubmit" in fn
         assert '"GATEWAY_CREDENTIAL_INVALID"' in fn
 
+    def test_partial_redaction_label_does_not_keep_the_line(self):
+        text = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        bullet = text.split("One value tokenizer for credential assignments.", 1)[1]
+        bullet = bullet.split("A redaction opt-out is decided on the WHOLE value.", 1)[0]
+        assert "never the rest of the line" not in bullet
+        assert "partial label" in bullet
+        src = (_ROOT / "scripts/credential_redaction.py").read_text()
+        fn = src.split("def _redact_assignments", 1)[1].split("\ndef ", 1)[0]
+        assert "partial redaction" in fn
+        assert 'while after < len(text) and text[after] in " \\t"' in fn
+
