@@ -531,6 +531,61 @@ class TestFlowClientAdmissionWait:
         MockUWClient.assert_called_once_with(admission_timeout=FLOW_ADMISSION_WAIT_S)
 
 
+class TestDarkpoolDayBoundary:
+    """UW's ``date`` is only an upper bound once ``older_than`` is sent: a
+    cursor inside the day returns prior-day prints to fill the page (probed
+    2026-10-26: date=2026-10-22, older_than=08:30Z gave 400 prints from
+    10-21). SOXL's 10-22 cache held 19,640 prints across three days and cost
+    the full 40-page cap. The walk must stop at the Eastern day start.
+    """
+
+    def _trade(self, i: int, executed_at: str) -> dict:
+        return {"size": 100, "price": 50.0, "executed_at": executed_at, "tracking_id": i}
+
+    def test_walk_stops_when_a_page_crosses_into_the_prior_day(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, walk_darkpool
+
+        mock_client = MagicMock()
+        page1 = [
+            self._trade(i, f"2026-10-22T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        page2 = [self._trade(1000 + i, f"2026-10-22T08:{i // 60:02d}:{i % 60:02d}Z") for i in range(100)]
+        page2 += [self._trade(2000 + i, f"2026-10-21T19:{i // 60:02d}:{i % 60:02d}Z") for i in range(400)]
+        mock_client.get_darkpool_flow.side_effect = [{"data": page1}, {"data": page2}]
+
+        walk = walk_darkpool("SOXL", date="2026-10-22", _client=mock_client)
+
+        assert mock_client.get_darkpool_flow.call_count == 2
+        assert len(walk.trades) == DARKPOOL_PAGE_LIMIT + 100
+        assert all(t["executed_at"].startswith("2026-10-22") for t in walk.trades)
+        assert walk.cacheable is True
+
+    def test_day_boundary_is_eastern_midnight_not_utc(self):
+        from fetch_flow import fetch_darkpool
+
+        mock_client = MagicMock()
+        evening_et = self._trade(1, "2026-01-16T00:30:00Z")   # 19:30 ET on 01-15
+        after_midnight_et = self._trade(2, "2026-01-15T05:30:00Z")  # 00:30 ET on 01-15
+        prior_night_et = self._trade(3, "2026-01-15T04:30:00Z")  # 23:30 ET on 01-14
+        mock_client.get_darkpool_flow.return_value = {
+            "data": [evening_et, after_midnight_et, prior_night_et]
+        }
+
+        result = fetch_darkpool("SOXL", date="2026-01-15", _client=mock_client)
+
+        assert result == [evening_et, after_midnight_et]
+
+    def test_trade_without_a_timestamp_is_kept(self):
+        from fetch_flow import fetch_darkpool
+
+        mock_client = MagicMock()
+        untimed = {"size": 100, "price": 50.0, "tracking_id": 9}
+        mock_client.get_darkpool_flow.return_value = {"data": [untimed]}
+
+        assert fetch_darkpool("SOXL", date="2026-10-22", _client=mock_client) == [untimed]
+
+
 class TestUWRetryPolicy:
     """Regression for the 2026-05-15 EWY incident: a transient UW
     rate-limit on per-day darkpool calls was silently swallowed and

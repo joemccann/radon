@@ -35,7 +35,13 @@ from utils.market_calendar import (
     load_holidays,
     _is_trading_day,
 )
-from utils.darkpool_cache import get_cached_darkpool, is_immutable, set_cached_darkpool
+from utils.darkpool_cache import (
+    day_start_et,
+    get_cached_darkpool,
+    is_immutable,
+    set_cached_darkpool,
+    trade_executed_at,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +321,24 @@ def _flow_client_kwargs(retry_transient: bool) -> Dict:
     return {"max_retries": 0, "backoff_factor": 0}
 
 
+def _trades_within_day(page: List[Dict], day_start: Optional[datetime]) -> List[Dict]:
+    """Drop prints executed before the requested day; keep unstamped ones.
+
+    UW applies ``date`` only as an upper bound once ``older_than`` is sent:
+    a cursor inside the day fills the page with prior-day prints (probed
+    2026-10-26). Without this cut a heavy day walks the full 40-page cap
+    into earlier sessions and caches three days as one.
+    """
+    if day_start is None:
+        return page
+    kept = []
+    for trade in page:
+        executed = trade_executed_at(trade)
+        if executed is None or executed >= day_start:
+            kept.append(trade)
+    return kept
+
+
 def _darkpool_page_cursor(trades: List[Dict]) -> Optional[str]:
     """Oldest executed_at on a desc-ordered page → next older_than cursor.
 
@@ -388,6 +412,7 @@ def walk_darkpool(
         else:
             page_cap = max(1, min(int(max_pages), DARKPOOL_MAX_PAGES))
         hit_page_cap = False
+        day_start = day_start_et(date)
         for _page_idx in range(page_cap):
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
@@ -396,7 +421,9 @@ def walk_darkpool(
             if not isinstance(page, list) or not page:
                 break
 
-            for trade in page:
+            within_day = _trades_within_day(page, day_start)
+            crossed_into_prior_day = len(within_day) < len(page)
+            for trade in within_day:
                 tid = trade.get("tracking_id")
                 if tid is not None:
                     if tid in seen_ids:
@@ -404,7 +431,7 @@ def walk_darkpool(
                     seen_ids.add(tid)
                 all_trades.append(trade)
 
-            if len(page) < DARKPOOL_PAGE_LIMIT:
+            if crossed_into_prior_day or len(page) < DARKPOOL_PAGE_LIMIT:
                 break
 
             next_cursor = _darkpool_page_cursor(page)
