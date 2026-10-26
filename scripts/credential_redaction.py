@@ -271,7 +271,8 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 # before the value (DS-2026-10-25-11); a trailing comment needs the whitespace
 # YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
+    # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
@@ -402,16 +403,21 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
     indent -= line_start
     end = cursor = eol
     while cursor < len(text):
+        # A trailing backslash joins the next line whatever its indentation
+        # (a shell `KEY=\` then the value at column 0).
+        joined = cursor > 0 and text[cursor - 1] == "\\"
         start = cursor + (2 if text.startswith("\r\n", cursor) else 1)
         first = start
         while first < len(text) and text[first] in " \t":
             first += 1
         line_end = _end_of_line(text, first)
         if line_end == first:
+            if joined:
+                break
             # Blank: the next non-blank line decides.
             cursor = line_end
             continue
-        if first - start <= indent:
+        if first - start <= indent and not joined:
             break
         end = cursor = line_end
     return end
@@ -456,7 +462,6 @@ def _iter_assignments(text: str):
 # whose PREFIX is a label publish its remainder verbatim -- the same value-tail
 # survival the tokenizer closed, in the one branch that declines to redact.
 _REDACTION_LABEL = re.compile(r"\[redacted(?:-[a-z-]+)?\]")
-_VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
 # The query-string rule ends a value at the next `&name=` parameter; that
 # parameter is structure, not a continuation of the credential.
 _QUERY_PARAMETER = re.compile(r"&[A-Za-z_][A-Za-z0-9_.-]*=")
@@ -486,10 +491,9 @@ def _is_already_redacted(body: str, *, url_query: bool = False) -> bool:
     tail must survive, so the opt-out cannot simply be "the value is exactly a
     label".
 
-    What must NOT survive is a tail that CONTINUES the value. Two tells, both
-    already defined in this module: a first character from the value alphabet
-    (`[redacted]<secret>`), or an opaque literal anywhere in the remainder (a
-    tail reached past punctuation).
+    Any other tail is part of the value: an opaque-literal test let a short
+    punctuated password (`[redacted]!<v>`) survive whole, so only an exact
+    label or a label then real query structure opts out.
     """
     rest = body.strip()
     label = _REDACTION_LABEL.match(rest)
@@ -502,9 +506,7 @@ def _is_already_redacted(body: str, *, url_query: bool = False) -> bool:
         # URL structure only when the key is itself a query parameter:
         # `PASSWORD=[redacted-key]&note=<v>` is one value, tail included.
         return url_query
-    if _VALUE_CHAR.match(rest):
-        return False
-    return not _quoted_value_is_secret(rest)
+    return False
 
 
 def _redact_assignments(text: str) -> str:
@@ -599,7 +601,7 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*"
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\]?\s*[:=]\s*"
     # A quoted value may open on the key line and start on the next one.
     r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,

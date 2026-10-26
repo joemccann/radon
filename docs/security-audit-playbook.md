@@ -376,8 +376,10 @@ line here whenever you ship a security fix.**
   `Cookie` value goes to the tokenizer, not the line-oriented header rules,
   so its continuation lines are redacted too. Blank lines inside a continued
   value belong to it, adjacent string literals on a line are one value, and
-  a redaction label is read as URL structure only when its key is itself a
-  query parameter.
+  a redaction label opts a value out only when it is the whole value or is
+  followed by query structure whose key is itself a query parameter. A
+  trailing backslash joins the next line, and a subscript target
+  (`os.environ['NAME'] = ...`) is an assignment.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
