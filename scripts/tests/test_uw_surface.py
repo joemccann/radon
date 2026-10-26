@@ -110,6 +110,17 @@ def test_fetch_daily_closes_ib_hit_skips_uw() -> None:
     assert len(ib.calls) == 1
     assert ib.calls[0][1]["duration"] == "1 Y"
     assert ib.calls[0][1]["bar_size"] == "1 day"
+    assert "timeout" not in ib.calls[0][1]
+
+
+def test_fetch_daily_closes_forwards_explicit_ib_timeout() -> None:
+    payloads = _payloads()
+    uw = RecordingClient(**payloads)
+    ib = RecordingIB(bars=_ib_bars(MIN_DAILY_CLOSES))
+
+    fetch_daily_closes("AAPL", ib=ib, uw=uw, ib_timeout=3)
+
+    assert ib.calls[0][1]["timeout"] == 3
 
 
 def test_fetch_daily_closes_ib_miss_calls_uw() -> None:

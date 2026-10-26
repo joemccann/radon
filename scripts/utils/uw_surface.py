@@ -54,22 +54,28 @@ def fetch_daily_closes(
     uw: Any = None,
     *,
     min_bars: int = MIN_DAILY_CLOSES,
+    ib_timeout: float | None = None,
 ) -> Any:
     """IB historical daily closes first, then Robinhood; UW OHLC only when both
     are short/empty/error.
 
     Never raises out of the IB path. UW errors (including daily-cap 429)
-    propagate to the caller.
+    propagate to the caller. ``ib_timeout`` overrides the client default
+    when the caller serializes historical requests across a large universe.
     """
     symbol = ticker.upper()
     if ib is not None:
         try:
+            hist_kwargs: dict[str, Any] = {}
+            if ib_timeout is not None:
+                hist_kwargs["timeout"] = ib_timeout
             bars = ib.get_historical_data(
                 _stock_contract(symbol),
                 duration="1 Y",
                 bar_size="1 day",
                 what_to_show="TRADES",
                 use_rth=True,
+                **hist_kwargs,
             )
             payload = _as_uw_ohlc(bars)
             if len(payload["data"]) >= min_bars:
