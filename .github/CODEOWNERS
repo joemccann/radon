@@ -1,1 +1,4 @@
 * @joemccann
+# Require owner review for CI workflow changes.
+/.github/workflows/ @joemccann
+/.github/actions/ @joemccann
