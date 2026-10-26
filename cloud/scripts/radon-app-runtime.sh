@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-marketdesk.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -129,7 +129,11 @@ in_list() {
 uses_secret_store() { in_list "$1" "$SECRET_STORE_UNITS"; }
 is_store_job() { in_list "$1" "$STORE_JOB_UNITS"; }
 # Units that own the private research bind read-write and nothing else.
-is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" ]]; }
+is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-marketdesk.service" ]]; }
+# Units whose Chromium renders third-party web content. Each gets an isolated
+# bridge network, the vendored seccomp profile, a sized /dev/shm, an env
+# allowlist and no writable host-shared credential grant.
+is_chromium_unit() { [[ "$1" == "radon-newsfeed.service" || "$1" == "radon-marketdesk.service" ]]; }
 
 cleanup_runtime_credential() {
   local unit="$1"
@@ -703,6 +707,17 @@ render_env_file() {
       [[ "$status" -le 1 ]] || exit 71
       mv "${temporary}.filtered" "$temporary" || exit 71
     fi
+    # The marketdesk.ai ingest drives Chromium over third-party pages too.
+    # Turso, the model ladder, the marketdesk session seed and its fallback
+    # login, and the WRITE-scoped Dropbox app only: never the read-only
+    # research reader (DROPBOX_APP_KEY...), B2, IB or Clerk secrets.
+    if [[ "$unit" == "radon-marketdesk.service" ]]; then
+      grep -E '^(#|$|(ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_RESEARCH_MODEL|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+|PLAYWRIGHT_CHROMIUM_EXECUTABLE|PLAYWRIGHT_CHROMIUM_SANDBOX)=)' \
+        "$temporary" > "${temporary}.filtered"
+      status=$?
+      [[ "$status" -le 1 ]] || exit 71
+      mv "${temporary}.filtered" "$temporary" || exit 71
+    fi
   ) || { rm -f "$temporary" "${temporary}.filtered"; return 71; }
   mv "$temporary" "$out" || { rm -f "$temporary"; return 71; }
   printf '%s\n' "$out"
@@ -953,7 +968,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service) image="$(python_image)" ;;
+    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -965,9 +980,9 @@ cmd_run() {
     *) exit 64 ;;
   esac
 
-  # Fail closed: the newsfeed never starts under the engine default filter,
-  # which would kill Chromium's namespace sandbox at launch.
-  if [[ "$unit" == "radon-newsfeed.service" ]]; then
+  # Fail closed: a Chromium unit never starts under the engine default
+  # filter, which would kill Chromium's namespace sandbox at launch.
+  if is_chromium_unit "$unit"; then
     require_trusted_seccomp_profile "$CHROMIUM_SECCOMP_PROFILE" || exit 78
   fi
 
@@ -1033,7 +1048,7 @@ cmd_run() {
   # Newsfeed renders third-party content in Chromium (sandbox fallback possible): it
   # gets an isolated bridge network (egress only), never the host stack.
   local container_network=host
-  [[ "$unit" == "radon-newsfeed.service" ]] && container_network=bridge
+  is_chromium_unit "$unit" && container_network=bridge
 
   rendered_env="$(render_env_file "$unit")" || exit 71
   set -- \
@@ -1110,7 +1125,7 @@ cmd_run() {
   local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
   local cred_dir
   case "$unit" in
-    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
+    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service|radon-marketdesk.service)
       for cred_dir in .grok .codex .claude; do
         if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
           require_bind_source "$ids" "${subscription_home}/${cred_dir}"
@@ -1126,7 +1141,7 @@ cmd_run() {
       # content, so it never gets a writable grant the host and the other
       # units consume; its ladder falls past antigravity.
       for cred_dir in .gemini/antigravity-cli .gemini/config; do
-        [[ "$unit" == "radon-newsfeed.service" ]] && continue
+        is_chromium_unit "$unit" && continue
         if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
           require_bind_source "$ids" "${subscription_home}/${cred_dir}"
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
@@ -1134,7 +1149,7 @@ cmd_run() {
       done
       # Python API and research images carry pinned, image-owned provider CLIs.
       # Provider grants above retain their established HOME and refresh paths.
-      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" ]] \
+      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" && "$unit" != "radon-marketdesk.service" ]] \
         && [[ -L "${subscription_home}/.local/bin" || -d "${subscription_home}/.local/bin" ]]; then
         require_bind_source "$ids" "${subscription_home}/.local/bin"
         set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
@@ -1236,6 +1251,14 @@ cmd_run() {
       --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
       --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"
   fi
+  if [[ "$unit" == "radon-marketdesk.service" ]]; then
+    # Same Chromium isolation as the newsfeed (DS-2026-09-20-04). The Python
+    # image carries its own pinned Playwright headless shell under
+    # PLAYWRIGHT_BROWSERS_PATH, so no host browser cache is bound.
+    set -- "$@" \
+      --security-opt "seccomp=${CHROMIUM_SECCOMP_PROFILE}" \
+      --shm-size 512m
+  fi
 
   set -- "$@" "$image"
   case "$unit" in
@@ -1249,6 +1272,10 @@ cmd_run() {
     # place the private root is readable.
     radon-research-archive.service)
       set -- "$@" python scripts/research/archive.py
+      ;;
+    # Same script as the base unit's host ExecStart.
+    radon-marketdesk.service)
+      set -- "$@" python scripts/research/marketdesk_job.py
       ;;
     # DS-2026-10-05-05: the same module and arguments as each base unit's
     # host ExecStart (pinned by cloud/tests/test_ds_secret_store_key_units.py).

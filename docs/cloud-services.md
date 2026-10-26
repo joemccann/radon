@@ -176,6 +176,9 @@ image's Python Playwright Chromium, without web dependencies or remote assets.
 The Python image build exports a real 2400px PNG as the runtime user, so missing
 D3, fonts, or Chromium fail the image gate before deployment. Chart publication
 and image-review gates are owned by [Dropbox research](dropbox-research.md).
+That worker (`radon-research.service`) is retired: deploys disable it, and the
+research source is now the `radon-marketdesk.timer` oneshot in the same Python
+image ([MarketDesk research](#marketdesk-research)).
 
 ## Trades — single source of truth
 
@@ -322,6 +325,10 @@ Core operation counters (REL-320 / R-027) are separate structured `operation_met
 ### TradingView alerts
 
 TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token in constant time. A body `secret` (`TV_WEBHOOK_SECRET`) is checked the same way when the message carries one; TradingView's default crossing text has none and is still stored. The row is persisted under the [sanitized-body retention and migration contract](tradingview-integration.md#storage). `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
+
+### MarketDesk research
+
+`scripts/research/marketdesk_job.py` runs every 5 minutes via `radon-marketdesk.timer` (`*:04/5:41`, `Persistent=false`). Its `runtime-container.conf` drop-in (control plane, pinned in `config/installed-units.sha256` with the unit and timer) runs it in the Python app image: rw private research bind, bridge network, Chromium seccomp profile, 512m `/dev/shm`, env allowlist, read-only ladder grants. It publishes operator-only research posts (Turso-first, idempotent per article through the `marketdesk_articles` ledger) and uploads each PDF to the operator's own Dropbox under `/Radon/MarketDesk/<YYYY>/<Month>/<Mon> <DD>/`. Absent `DROPBOX_WRITE_*` credentials skip uploads and record `service_health[marketdesk-dropbox]` as `paused`; the cycle itself heartbeats `marketdesk-research` (15-min windows). Spec: [`marketdesk-research.md`](marketdesk-research.md).
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 

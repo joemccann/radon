@@ -141,6 +141,16 @@
       "note": "Shared redaction and publication shapes recur across security reports and incident egress (DOC-145)."
     },
     {
+      "id": "marketdesk-research",
+      "globs": [
+        "scripts/research/marketdesk_*.py",
+        "scripts/research/dropbox_writer.py",
+        "cloud/services/radon-marketdesk.*"
+      ],
+      "owners": ["docs/marketdesk-research.md"],
+      "note": "The 5-minute marketdesk.ai ingest that replaced the shared-folder Dropbox watcher: auth bootstrap, ledger idempotency, copy validator, Dropbox layout, health rows and runbook."
+    },
+    {
       "id": "research-worker",
       "globs": ["scripts/research/worker.py", "scripts/research/identify.py", "scripts/research/clairic.py"],
       "owners": ["docs/dropbox-research.md"],
