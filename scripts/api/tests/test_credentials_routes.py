@@ -649,3 +649,65 @@ class TestIbGatewayRotation:
         assert response.status_code == 200
         assert valid_verdict and broker.calls == []
         assert "rotation" not in response.json()
+
+
+class TestIbGatewayRotationOperatorJwtOnAppRole:
+    """On the app host a trusted-local caller is not enough to rotate the
+    Gateway password: like every other Gateway mutation there, it needs an
+    operator JWT, and a refusal must reach the broker zero times."""
+
+    @pytest.fixture(autouse=True)
+    def app_role(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setenv("CLERK_JWKS_URL", "https://jwks.invalid/.well-known/jwks.json")
+
+    def test_matcher_covers_the_gateway_credential_put_only(self):
+        from types import SimpleNamespace
+
+        from scripts.api import server
+
+        def req(method, path):
+            return SimpleNamespace(method=method, url=SimpleNamespace(path=path))
+
+        assert server._is_app_role_gateway_mutation(req("PUT", "/credentials/ib_gateway")) is True
+        assert server._is_app_role_gateway_mutation(req("PUT", "/credentials/ib_gateway/")) is True
+        assert server._is_app_role_gateway_mutation(req("GET", "/credentials/ib_gateway")) is False
+        assert server._is_app_role_gateway_mutation(req("PUT", "/credentials/exa")) is False
+        assert server._is_app_role_gateway_mutation(req("POST", "/credentials/ib_gateway/validate")) is False
+
+    def test_matcher_is_inert_off_the_app_role(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from scripts.api import server
+
+        monkeypatch.delenv("RADON_HOST_ROLE", raising=False)
+        request = SimpleNamespace(method="PUT", url=SimpleNamespace(path="/credentials/ib_gateway"))
+        assert server._is_app_role_gateway_mutation(request) is False
+
+    def test_trusted_local_put_without_bearer_is_refused_before_the_broker(
+        self, client, broker, no_validator
+    ):
+        response = _put_ib(client, {"TWS_PASSWORD": IB_PASSWORD})
+        assert response.status_code == 401, response.text
+        assert broker.calls == []
+        assert _store().get_secret("TWS_PASSWORD") is None
+
+    def test_operator_bearer_rotates_once(self, client, broker, no_validator, monkeypatch):
+        from scripts.api import server
+
+        seen = []
+
+        async def _bearer(request):
+            seen.append(request.headers.get("Authorization"))
+            return {"sub": "user_operator"}
+
+        monkeypatch.setattr(server, "verify_clerk_bearer", _bearer)
+        response = client.put(
+            "/credentials/ib_gateway",
+            json={"values": {"TWS_PASSWORD": IB_PASSWORD}},
+            headers={"Authorization": "Bearer synthetic-operator-token"},
+        )
+        assert response.status_code == 200, response.text
+        assert seen == ["Bearer synthetic-operator-token"]
+        assert len(broker.calls) == 1
+        assert broker.calls[0][0] == {"TWS_PASSWORD": IB_PASSWORD}
