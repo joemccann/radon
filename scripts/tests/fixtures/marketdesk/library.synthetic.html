@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- SYNTHETIC FIXTURE. Hand-written from the scout's reading of API.js ([time] unix-seconds attribute)
+     and the operator's example URL /library/browse/4AJs5Adl2Yp. NOT a capture of the authed library DOM.
+     Replace with captured authed HTML (and fix SELECTORS) before enabling radon-marketdesk.timer. -->
+<html><head><meta charset="utf-8"><title>MarketDesk: Library</title></head>
+<body><div id="app" data-v-app>
+<nav class="nav"><a href="/">Home</a><a href="/library">Library</a></nav>
+<main class="library">
+  <ul class="items">
+    <li class="item">
+      <a href="/library/browse/4AJs5Adl2Yp" class="item-link">
+        <span class="title">Fed cuts and the curve</span>
+        <span class="time" time="1761480000">Oct 26</span>
+      </a>
+    </li>
+    <li class="item">
+      <span class="time" time="1761566400"></span>
+      <a href="https://marketdesk.ai/library/browse/9QwErTy12Ab" class="item-link"><span class="title">  Credit spreads   widen </span></a>
+    </li>
+    <li class="item">
+      <a href="/library/browse/4AJs5Adl2Yp" class="item-link"><span class="title">Duplicate of first</span><span time="1761480000"></span></a>
+    </li>
+    <li class="item">
+      <a href="/library/browse/Zz9Yy8Xx7Ww6" class="item-link"><span class="title">Oldest note</span><span time="1761300000"></span></a>
+    </li>
+    <li class="item"><a href="/library/browse/bad-id!!" class="item-link"><span class="title">Bad id</span><span time="1761580000"></span></a></li>
+    <li class="item"><a href="/library/browse/short" class="item-link"><span class="title">Too short</span><span time="1761580000"></span></a></li>
+    <li class="item"><a href="https://evil.example/library/browse/EvilHost123" class="item-link"><span class="title">Off host</span><span time="1761590000"></span></a></li>
+    <li class="item"><a href="/library/browse/NoTimeItem1" class="item-link"><span class="title">No time attribute</span></a></li>
+  </ul>
+</main>
+</div></body></html>

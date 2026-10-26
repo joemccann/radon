@@ -26,8 +26,8 @@ import NewsfeedLightbox, {
 // next/image rejects unconfigured hostnames in jsdom — stub it to a plain
 // <img> so the render doesn't crash on the synthetic media.radon.run URL.
 vi.mock("next/image", () => ({
-  default: ({ src, alt }: { src: string; alt: string }) =>
-    React.createElement("img", { src, alt }),
+  default: ({ src, alt, unoptimized }: { src: string; alt: string; unoptimized?: boolean }) =>
+    React.createElement("img", { src, alt, "data-unoptimized": unoptimized ? "true" : "false" }),
 }));
 
 const POST: NewsfeedLightboxFocus["post"] = {
@@ -247,3 +247,33 @@ describe("NewsfeedLightbox", () => {
  expect(getByRole("link", {name:"Source PDF"}).getAttribute("href")).toBe(source.url);
  cleanup();
  });
+
+it("marketdesk thumbnails switch images with page-free captions and stay unoptimized", () => {
+  const base = "/api/newsfeed/research/files/";
+  const first = base + "a".repeat(64) + ".png";
+  const second = base + "b".repeat(64) + ".png";
+  const sha = "c".repeat(64);
+  const source = { kind: "marketdesk" as const, publisher: "MarketDesk", articleId: "4AJs5Adl2Yp",
+    articleUrl: "https://marketdesk.ai/library/browse/4AJs5Adl2Yp", contentHash: sha,
+    documentDate: "2026-10-26", folderDate: "2026-10-26", pages: [1], url: base + sha + ".pdf",
+    figures: [{ url: first, caption: "First chart" }, { url: second, caption: "Second chart" }],
+    summary: ["One bullet"] };
+  const { getByRole, getByText } = render(<NewsfeedLightbox focus={{ post: { ...POST, source, images: [first, second], href: source.url }, imageUrl: first }} onDismiss={vi.fn()} />);
+  const main = () => document.querySelector(".newsfeed-lightbox__media > img")!;
+  expect(main().getAttribute("data-unoptimized")).toBe("true");
+  expect(getByText("MarketDesk · First chart")).not.toBeNull();
+  const thumb = getByRole("button", { name: "View chart 2: Second chart" });
+  expect(thumb.textContent).toBe("2");
+  fireEvent.click(thumb);
+  expect(main().getAttribute("src")).toBe(second);
+  expect(getByText("MarketDesk · Second chart")).not.toBeNull();
+  expect(document.body.textContent).not.toMatch(/\bp\. \d/);
+  expect(getByRole("link", { name: "Source PDF" }).getAttribute("href")).toBe(source.url);
+  cleanup();
+});
+
+it("keeps Market Ear images optimized", () => {
+  render(<NewsfeedLightbox focus={FOCUS} onDismiss={vi.fn()} />);
+  expect(document.querySelector(".newsfeed-lightbox__media > img")?.getAttribute("data-unoptimized")).toBe("false");
+  cleanup();
+});

@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon marketdesk.ai research ingest -- every 5 minutes, 24/7
+
+[Timer]
+# :04, :09, :14 ... at :41s, off the :00 herd and the tv-alerts :02/5:23 slot.
+# AccuracySec=1s pins the offset. Persistent=false: the next cycle picks up
+# whatever a missed one would have (the lookback window and the Turso ledger
+# own catch-up), so replaying it is worthless.
+OnCalendar=*:04/5:41
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

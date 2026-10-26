@@ -205,16 +205,16 @@ export default function NewsfeedLightbox({
               height={900}
               sizes="(max-width: 900px) 100vw, 60vw"
               className="newsfeed-lightbox__image"
-              unoptimized={post.source?.kind === "dropbox"}
+              unoptimized={Boolean(post.source)}
               priority
             />
-            {figure ? <p className={styles.caption}>{post.source?.publisher} · p. {figure.page} · {figure.caption}</p> : imageSource ? <p className={styles.caption}>Source: {imageSource}</p> : null}
+            {figure ? <p className={styles.caption}>{post.source?.publisher}{"page" in figure ? ` · p. ${figure.page}` : ""} · {figure.caption}</p> : imageSource ? <p className={styles.caption}>Source: {imageSource}</p> : null}
             {post.source && post.source.figures.length > 1 ? <div className={styles.thumbnails} aria-label="Article charts">
               {post.source.figures.map((item, index) => <button type="button" key={item.url}
                 aria-label={`View chart ${index + 1}: ${item.caption}`} aria-pressed={imageUrl === item.url}
                 onClick={() => setSelectedImage({ focus, url: item.url })}>
                 <Image src={item.url} alt={item.caption} width={160} height={100} unoptimized />
-                <span>{index + 1} · p. {item.page}</span>
+                <span>{"page" in item ? `${index + 1} · p. ${item.page}` : index + 1}</span>
               </button>)}
             </div> : null}
           </div>

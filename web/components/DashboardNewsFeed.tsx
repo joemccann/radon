@@ -502,7 +502,7 @@ export default function DashboardNewsFeed() {
                           height={675}
                           sizes="(max-width: 1440px) 100vw, 60vw"
                           className={`news-feed-image ${styles.image}`}
-                          unoptimized={post.source?.kind === "dropbox"}
+                          unoptimized={Boolean(post.source)}
                           priority={false}
                         />
                         <span className="news-feed-image-zoom" aria-hidden>
@@ -510,7 +510,7 @@ export default function DashboardNewsFeed() {
                         </span>
                       </button>
                       <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source || imageSource ? ` ${researchStyles.feedCaption}` : ""}`}>
-                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : imageSource ? `Source: ${imageSource}` : `Chart · ${post.title}`}</span>
+                        <span>{post.source ? `${post.source.publisher}${post.source.kind === "dropbox" ? ` · p. ${post.source.figures[0]?.page}` : ""} · ${post.source.figures[0]?.caption}` : imageSource ? `Source: ${imageSource}` : `Chart · ${post.title}`}</span>
                       </figcaption>
                       {post.source && post.source.figures.length > 1 ? (
                         <div className={researchStyles.feedThumbnails} aria-label="Additional charts">
@@ -519,7 +519,7 @@ export default function DashboardNewsFeed() {
                               aria-label={`Open chart ${index + 2}: ${figure.caption}`}
                               onClick={() => setLightboxFocus({ post, imageUrl: figure.url })}>
                               <Image src={figure.url} alt={figure.caption} width={240} height={160} unoptimized />
-                              <span>p. {figure.page}</span>
+                              <span>{"page" in figure ? `p. ${figure.page}` : index + 2}</span>
                             </button>
                           ))}
                         </div>
@@ -531,7 +531,7 @@ export default function DashboardNewsFeed() {
                       <PublisherLogo publisher={post.source.publisher} size={14} aria-hidden />
                       <span>{post.source.publisher} · Source PDF</span>
                     </a>
-                    {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
+                    {` · ${post.source.documentDate}${post.source.kind === "dropbox" ? ` · pp. ${post.source.pages.join(", ")}` : ""}`}
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}
                   {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}

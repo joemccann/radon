@@ -559,10 +559,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // down. 20-min window absorbs a few missed firings. No IB.
   "tv-alerts-drain": { open: 20 * MIN, extended: 20 * MIN, closed: 20 * MIN, category: "scheduled", requires_ib: false },
 
-  // The Dropbox/PDF research worker is a continuous daemon.  A dependency
-  // stall leaves systemd active, so its 15-minute heartbeat is the stale
-  // signal that makes an in-process stop visible (REL-251).
-  "dropbox-research": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+  // ``marketdesk-research`` is the 5-minute marketdesk.ai research ingest
+  // (scripts/research/marketdesk_job.py via radon-marketdesk.timer, 24/7).
+  // service_cycle writes ok every cycle, so 15 minutes is three missed
+  // cycles. It replaced the retired shared-folder watcher
+  // (radon-research.service, formerly ``dropbox-research``). No IB.
+  "marketdesk-research": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+  // ``marketdesk-dropbox`` is the same cycle's Dropbox upload outbox:
+  // ok, paused (write credentials absent, uploads skipped) or error.
+  "marketdesk-dropbox": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
   // ``performance`` is a mirror-fed scan (db.scan_mirror SNAPSHOT_UPSERTS)
   // that only runs when a user hits its FastAPI scan endpoint — on-demand

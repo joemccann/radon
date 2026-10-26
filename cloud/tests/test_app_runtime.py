@@ -2427,3 +2427,189 @@ def test_run_newsfeed_keeps_write_on_the_media_volume_it_fills(tmp_path: Path) -
     assert media, log
     for arg in media:
         assert not arg.endswith(":ro"), arg
+
+
+# -- radon-marketdesk.service (2026-10-26) ------------------------------------
+#
+# The marketdesk.ai ingest drives Chromium over third-party pages AND writes
+# the private research assets. It is a research unit (rw private bind, no
+# data/media/lease binds) with the newsfeed's isolation: bridge network, the
+# vendored Chromium seccomp profile, a sized /dev/shm and an env allowlist.
+
+MARKETDESK = "radon-marketdesk.service"
+
+
+def _marketdesk_args(tmp_path: Path, extra_env: dict[str, str] | None = None) -> list[str]:
+    result = _run(tmp_path, ["run", MARKETDESK], extra_env=extra_env)
+    assert result.returncode == 0, result.stderr
+    return _run_line(result).split()
+
+
+def test_marketdesk_is_an_app_unit_in_the_runtime() -> None:
+    text = RUNTIME.read_text(encoding="utf-8")
+    app_units = re.search(r'^readonly APP_UNITS="([^"]*)"', text, re.M).group(1).split()
+    assert MARKETDESK in app_units
+
+
+def test_marketdesk_runs_the_job_in_the_python_image(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", MARKETDESK])
+    assert result.returncode == 0, result.stderr
+    line = _run_line(result)
+    assert f"{PYTHON_REPO}:{TEST_SHA} python scripts/research/marketdesk_job.py" in line
+    assert "-w /home/radon/radon " in line
+
+
+def test_marketdesk_gets_only_the_private_research_bind_read_write(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", MARKETDESK])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text()
+    assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:rw" in log
+    assert "RADON_RESEARCH_DIR=/var/lib/radon/research" in log
+    assert ":/var/lib/radon/media" not in log
+    assert ":/home/radon/radon/data" not in log
+    assert ":/var/lib/radon/ib-lease" not in log
+    assert "CREDENTIALS_DIRECTORY" not in log
+    assert "/run/radon-control" not in log
+
+
+def test_marketdesk_uses_an_isolated_bridge_network(tmp_path: Path) -> None:
+    args = _marketdesk_args(tmp_path)
+    assert args[args.index("--network") + 1] == "bridge"
+    assert "--ipc" not in args
+
+
+def test_marketdesk_uses_the_chromium_seccomp_profile_and_sized_shm(tmp_path: Path) -> None:
+    args = _marketdesk_args(tmp_path)
+    profile = CLOUD / "config" / "seccomp" / "chromium.json"
+    opts = [args[i + 1] for i, arg in enumerate(args) if arg == "--security-opt"]
+    assert f"seccomp={profile}" in opts, opts
+    assert "no-new-privileges" in opts
+    assert "seccomp=unconfined" not in opts
+    assert args[args.index("--shm-size") + 1] == "512m"
+    # The Python image carries its own pinned headless shell; the newsfeed's
+    # host browser cache and source overlay are not this unit's.
+    assert not any(":/ms-playwright" in arg for arg in args)
+    assert not any(":/home/radon/radon/scripts/newsfeed" in arg for arg in args)
+
+
+def test_marketdesk_refuses_to_start_without_the_seccomp_profile(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["run", MARKETDESK],
+        extra_env={"RADON_TEST_SECCOMP_PROFILE": str(tmp_path / "absent.json")},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "seccomp profile" in result.stderr
+    log = result.docker_log.read_text(encoding="utf-8") if result.docker_log.exists() else ""  # type: ignore[attr-defined]
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
+
+
+def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -> None:
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        + QUOTED_GATEWAY_SECRET_LINE +
+        "TURSO_DB_URL=libsql://example.turso.io\n"
+        "TURSO_AUTH_TOKEN='tok'\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=k-cc\n"
+        "RADON_LADDER_ALLOW_PREPAID=0\n"
+        "XAI_API_KEY=k-xai\n"
+        "OPENAI_API_KEY=k-oai\n"
+        "NVIDIA_API_KEY=k-nv\n"
+        "CEREBRAS_API_KEY=k2\n"
+        "THEMARKETEAR_EMAIL=e@example.com\n"
+        "THEMARKETEAR_PASSWORD='pw'\n"
+        "MARKETDESK_FIREBASE_REFRESH_TOKEN=rt\n"
+        "MARKETDESK_MAX_PER_CYCLE=5\n"
+        "MARKETDESK_LOOKBACK_HOURS=48\n"
+        "MARKETDESK_LIBRARY_URL=https://marketdesk.ai/\n"
+        "MARKETDESK_ASSET_HOSTS=cdn.example.com\n"
+        "PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/chrome\n"
+        "PLAYWRIGHT_CHROMIUM_SANDBOX=1\n"
+        "DROPBOX_WRITE_APP_KEY=wk\n"
+        "DROPBOX_WRITE_REFRESH_TOKEN=wr\n"
+        "DROPBOX_WRITE_ACCOUNT_ID=dbid:x\n"
+        "DROPBOX_WRITE_ROOT_NAMESPACE_ID=910135760\n"
+        "DROPBOX_WRITE_ROOT=/Radon/MarketDesk\n"
+        # Never this unit's: the read-only research reader, B2, IB, Clerk.
+        "DROPBOX_APP_KEY=rk\n"
+        "DROPBOX_REFRESH_TOKEN=rr\n"
+        "RADON_ARCHIVE_S3_SECRET_ACCESS_KEY=b2\n"
+        "RADON_SERVICE_TOKEN=svc\n"
+        "IB_FLEX_TOKEN=flex\n"
+        "CLERK_SECRET_KEY=sk\n"
+        "MENTHORQ_PASS=mq\n"
+        "PUSHOVER_TOKEN=po\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", MARKETDESK],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1)).read_text(encoding="utf-8")
+    keys = {
+        line.split("=", 1)[0]
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    }
+    assert {
+        "TURSO_DB_URL",
+        "TURSO_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "RADON_LADDER_ALLOW_PREPAID",
+        "XAI_API_KEY",
+        "OPENAI_API_KEY",
+        "NVIDIA_API_KEY",
+        "CEREBRAS_API_KEY",
+        "THEMARKETEAR_EMAIL",
+        "THEMARKETEAR_PASSWORD",
+        "MARKETDESK_FIREBASE_REFRESH_TOKEN",
+        "MARKETDESK_MAX_PER_CYCLE",
+        "MARKETDESK_LOOKBACK_HOURS",
+        "MARKETDESK_LIBRARY_URL",
+        "MARKETDESK_ASSET_HOSTS",
+        "PLAYWRIGHT_CHROMIUM_EXECUTABLE",
+        "PLAYWRIGHT_CHROMIUM_SANDBOX",
+        "DROPBOX_WRITE_APP_KEY",
+        "DROPBOX_WRITE_REFRESH_TOKEN",
+        "DROPBOX_WRITE_ACCOUNT_ID",
+        "DROPBOX_WRITE_ROOT_NAMESPACE_ID",
+        "DROPBOX_WRITE_ROOT",
+    } <= keys
+    for forbidden in (
+        GATEWAY_SECRET_KEY,
+        "DROPBOX_APP_KEY",
+        "DROPBOX_REFRESH_TOKEN",
+        "RADON_ARCHIVE_S3_SECRET_ACCESS_KEY",
+        "RADON_SERVICE_TOKEN",
+        "IB_FLEX_TOKEN",
+        "CLERK_SECRET_KEY",
+        "MENTHORQ_PASS",
+        "PUSHOVER_TOKEN",
+    ):
+        assert forbidden not in keys, forbidden
+    assert "TURSO_AUTH_TOKEN=tok" in rendered.splitlines()
+    assert "THEMARKETEAR_PASSWORD=pw" in rendered.splitlines()
+
+
+def test_marketdesk_binds_read_only_ladder_grants_only(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    (home / ".claude").mkdir()
+    result = _run(
+        tmp_path,
+        ["run", MARKETDESK],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    for cred in (".grok", ".codex", ".claude"):
+        assert f"{home}/{cred}:/home/radon/{cred}:ro" in log
+    # Third-party Chromium content: no writable grant the host shares, so the
+    # ladder falls past antigravity here, as on the newsfeed.
+    assert f"{home}/.gemini" not in log
+    # The Python image ships pinned provider CLIs.
+    assert f"{home}/.local/bin:" not in log
+    assert "HOME=/home/radon" in log

@@ -286,16 +286,28 @@ class TestBuckets:
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont
 
-    def test_dropbox_research_is_continuously_staleness_checked(self):
-        """REL-251: an alive worker can stall in-process without systemd noticing."""
+    def test_marketdesk_rows_are_continuously_staleness_checked(self):
+        """The 5-minute marketdesk.ai ingest writes two rows every cycle:
+        marketdesk-research (service_cycle) and marketdesk-dropbox
+        (ok / paused / error). 15m = three missed cycles."""
         from watchdog import services as svc_mod
 
-        assert svc_mod.SCHEDULED_SERVICES["dropbox-research"] == {
-            "open": 15 * 60,
-            "closed": 15 * 60,
-            "requires_ib": False,
-        }
-        assert "dropbox-research" in svc_mod.BUCKETS["continuous"]
+        for name in ("marketdesk-research", "marketdesk-dropbox"):
+            assert svc_mod.SCHEDULED_SERVICES[name] == {
+                "open": 15 * 60,
+                "closed": 15 * 60,
+                "requires_ib": False,
+            }, name
+            assert name in svc_mod.BUCKETS["continuous"], name
+
+    def test_retired_dropbox_watcher_is_unregistered(self):
+        """radon-research.service no longer runs; its row is deleted by
+        migration 0099 and must not be aged."""
+        from watchdog import services as svc_mod
+
+        assert "dropbox-research" not in svc_mod.SCHEDULED_SERVICES
+        for bucket, names in svc_mod.BUCKETS.items():
+            assert "dropbox-research" not in names, bucket
 
     def test_daily_bucket_lists_daily_services(self):
         from watchdog import services as svc_mod
