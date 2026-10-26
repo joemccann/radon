@@ -193,7 +193,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
     # "=" / ":" assignment) and must run before the assignment pattern below,
     # which would otherwise treat the word "Bearer" itself as the value and
     # leave the real token in "authorization: bearer <token>" untouched.
-    (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
+    # The token stops at a quote: eating a closing quote misaligned the
+    # tokenizer, so `"Bearer " "<token>"` kept the token.
+    (re.compile(r"\bbearer\s+[^\s\"']+", re.IGNORECASE), "bearer [redacted]"),
     (
         re.compile(
             r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*)"
@@ -453,7 +455,22 @@ _VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
 _QUERY_PARAMETER = re.compile(r"&[A-Za-z_][A-Za-z0-9_.-]*=")
 
 
-def _is_already_redacted(body: str, *, quoted: bool = False) -> bool:
+_PARAMETER_NAME_CHAR = re.compile(r"[A-Za-z0-9_.-]")
+
+
+def _is_query_parameter(text: str, head_start: int) -> bool:
+    """True when the credential key opens a URL query parameter (``?k=``/``&k=``).
+
+    The key match may start inside a prefixed name (``client_api_key``), so
+    the name run before it is skipped, bounded like every name run here.
+    """
+    cursor = head_start
+    while cursor > 0 and head_start - cursor < 64 and _PARAMETER_NAME_CHAR.match(text[cursor - 1]):
+        cursor -= 1
+    return cursor > 0 and text[cursor - 1] in "?&"
+
+
+def _is_already_redacted(body: str, *, url_query: bool = False) -> bool:
     """True when the value IS redaction output rather than a surviving tail.
 
     A rule that ran earlier may redact only part of a value and leave
@@ -475,9 +492,9 @@ def _is_already_redacted(body: str, *, quoted: bool = False) -> bool:
     if not rest:
         return True
     if _QUERY_PARAMETER.match(rest):
-        # URL structure, which only an unquoted value carries: inside quotes
-        # `[redacted]&note=<v>` is one value and its tail is redacted.
-        return not quoted
+        # URL structure only when the key is itself a query parameter:
+        # `PASSWORD=[redacted-key]&note=<v>` is one value, tail included.
+        return url_query
     if _VALUE_CHAR.match(rest):
         return False
     return not _quoted_value_is_secret(rest)
@@ -500,7 +517,10 @@ def _redact_assignments(text: str) -> str:
         # assignments or prose, and re-reading it per value is quadratic. A
         # label with more words after it on the line is a partial redaction
         # (a provider rule took the first word of a passphrase): redact on.
-        if _is_already_redacted(text[body_start:body_end], quoted=bool(delimiter)):
+        if _is_already_redacted(
+            text[body_start:body_end],
+            url_query=not delimiter and _is_query_parameter(text, head_start),
+        ):
             after = body_end + len(delimiter)
             while after < len(text) and text[after] in " \t":
                 after += 1
