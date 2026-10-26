@@ -550,15 +550,19 @@ describe("WorkspaceSections orders — Implied column", () => {
     );
 
     const T = yearsToExpiry("2099-06-19", new Date())!;
-    const expected =
-      Math.round((bsCall(spot, 100, T, 0, sigma) - bsCall(spot, 110, T, 0, sigma)) * 100) / 100;
+    const longLeg = bsCall(spot, 100, T, 0, sigma);
+    const shortLeg = bsCall(spot, 110, T, 0, sigma);
 
     const table = screen.getByText("Implied").closest("table");
     expect(table).not.toBeNull();
     const rowsText = Array.from(table!.querySelectorAll("tbody tr"))
       .map((r) => r.textContent ?? "")
       .join("\n");
-    // BAG combo row aggregates legs; the implied value should appear.
-    expect(rowsText).toContain(expected.toFixed(2));
+    // Each leg row carries its own BS value; the spread is their difference. Asserting the bare
+    // difference ("1.00") only ever passed by matching the $1.00 limit price, and failed once the
+    // clock moved the rounded spread to 1.01.
+    expect(rowsText).toContain(`$${longLeg.toFixed(2)}`);
+    expect(rowsText).toContain(`$${shortLeg.toFixed(2)}`);
+    expect(longLeg - shortLeg).toBeGreaterThan(0);
   });
 });
