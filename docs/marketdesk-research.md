@@ -2,29 +2,50 @@
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
 (`radon-research.service`, retired 2026-10-26) as the research feed's source.
-Every 5 minutes it reads the marketdesk.ai library, opens each new article,
-downloads the source PDF behind the article's `a.action.preview` link
-(`/standalone/<id>`), stores the PDF and every article image as private research
-assets, writes the post copy in Joe's voice through the shared model ladder, and
-publishes one operator-only research post per article. The PDF is then copied
-into the operator's own Dropbox under `/Radon/MarketDesk`.
+Every 5 minutes it signs in to marketdesk.ai over plain HTTP, lists the latest
+library items, and for each new item reads MarketDesk's bullet summary and chart
+images, downloads the source PDF (the file behind the article's
+`a.action.preview` link, `/standalone/<id>`), stores the PDF and every chart as
+private research assets, writes the post copy in Joe's voice through the shared
+model ladder, and publishes one operator-only research post per item. The PDF is
+then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
+the library's folder layout. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
 watcher stay served. The v2 intake grounding and VERIFY pipeline is bypassed on
-purpose: the copy is a voice rewrite of MarketDesk's own bullet summary and the
-article text, guarded by a numeric firewall (below).
+purpose: the copy is a voice rewrite of MarketDesk's own bullet summary, guarded
+by a numeric firewall (below).
+
+## marketdesk.ai API (captured signed in, 2026-10-26)
+
+The web app is a thin client over a cookie-authenticated JSON API. Real
+responses are the test fixtures in `scripts/tests/fixtures/marketdesk/api_*.json`.
+
+| Call | Returns |
+|---|---|
+| `POST /api/user/login {F: <Firebase ID token>}` | `{success: true}` and the httpOnly session cookie `A` (about 60 days). |
+| `POST /api/mobile/latest/latest {institutions: []}` | The 25 newest item ids, newest first. |
+| `POST /api/mobile/items/provision {pathIds: [...]}` | Per item: `name`, `t` (unix seconds), `type`, `institution`. |
+| `GET /api/mobile/items/<id>/extra` | `summary` (markdown bullets `- **Head**: text`) and `images` (`iid`, `page`). Empty, or a `**Document Missing**` placeholder, until MarketDesk has processed the item. |
+| `GET /api/mobile/items/<id>/path` | Folder chain: `Current / 2026 / October / Oct 26 / <bank> / <desk>...`. |
+| `GET /files/<id>/blob` | The PDF bytes. `/standalone/<id>` is a pdf.js viewer over this URL. |
+
+Signed out, an API call answers HTTP 200 `{"success": false}` and `/files/*`
+answers 302; the session re-logs in once and retries. Chart images are public
+objects at `https://box1.nyc3.cdn.digitaloceanspaces.com/charts/<id>/<iid>`,
+fetched with a cookie-less opener that never follows redirects.
 
 ## Components
 
 | Module | Role |
 |---|---|
 | `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, scrape and publish, Dropbox outbox, health. Timer entry point, run by path. |
-| `scripts/research/marketdesk_auth.py` | Firebase refresh-token exchange, password fallback, `POST /api/user/login`, Playwright storage-state reuse. |
-| `scripts/research/marketdesk_bootstrap.py` | Laptop-only, headed. The operator signs in with Google once; the script captures the Firebase refresh token. Never run in a unit. |
-| `scripts/research/marketdesk_scrape.py` | Chromium launch, library listing, article parse, PDF and image download, PNG re-encode. Every selector lives in one `SELECTORS` constant. |
+| `scripts/research/marketdesk_auth.py` | Firebase refresh-token exchange, password fallback, `POST /api/user/login`, cookie session with one re-login on a signed-out answer. |
+| `scripts/research/marketdesk_bootstrap.py` | Laptop only. `--from-cdp` reads the Firebase refresh token from a signed-in marketdesk.ai tab in Chrome; `--check` exchanges it, logs in and lists. Never run in a unit. |
+| `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
 | `scripts/research/marketdesk_copy.py` | System prompt (voice doc plus humanize rules), em-dash scrub, `copy_problems` validator, model ladder call. |
 | `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, upload outbox). |
-| `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, chronological path. |
+| `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. |
 | `scripts/research/publish.py` | `kind: "marketdesk"` provenance branch beside the unchanged `dropbox` branch. |
 | `scripts/db/migrations/0102_marketdesk_articles.sql` | Ledger table; deletes the retired `dropbox-research` health row. |
 
@@ -32,29 +53,30 @@ article text, guarded by a numeric firewall (below).
 
 1. `publish.expire_stale_held()` runs best effort, so held research outcomes keep
    expiring after the watcher that used to call it was retired.
-2. Open the marketdesk.ai session (warm storage state, else refresh-token
-   exchange, else the THEMARKETEAR password fallback). An auth failure fails the
-   cycle (`marketdesk-research` error).
-3. Drain the Dropbox upload outbox (up to 10 published rows whose upload is
+2. Drain the Dropbox upload outbox (up to 10 published rows whose upload is
    missing, skipped or failed). It runs before the scrape so a slow or killed
    scrape can never starve uploads.
-4. List the library newest first, scrolling until the rendered list stops
-   growing (bounded). Keep articles inside `MARKETDESK_LOOKBACK_HOURS`
-   (default 48) that the ledger has not published or failed out, capped at
-   `MARKETDESK_MAX_PER_CYCLE` (default 5). Anchors with no parseable `[time]`
-   fail the cycle (`library_unparsed`). If the oldest listed item is newer than
-   the newest article the ledger knows, the cycle still publishes and then
-   reports `listing_gap`: items between them may have been missed.
-5. Per article, inside its own try: claim and lease the ledger row, heal a crash
+3. Sign in: refresh-token exchange (else the THEMARKETEAR password fallback),
+   then `POST /api/user/login`. An auth failure fails the cycle
+   (`marketdesk-research` error).
+4. List the 25 newest items. Items whose institution is The Market Ear or
+   ZeroHedge are excluded (radon-newsfeed already carries that feed). Keep items
+   inside `MARKETDESK_LOOKBACK_HOURS` (default 48) that the ledger has not
+   published or failed out. If the oldest listed item is newer than the newest
+   article the ledger knows, the cycle still publishes and then reports
+   `listing_gap`: items between them may have been missed.
+5. Per item, inside its own try: claim and lease the ledger row, heal a crash
    between publish and ledger write (`research_post_sources` already has the
-   post id), fetch the article, require a non-empty summary (`no_summary`),
-   download the PDF, store up to 40 images (12 shown, each attached to the copy
-   request), write the copy, publish, record. One bad article never fails the
-   cycle. No new article starts after 150 seconds of the cycle; the rest wait
+   post id), read the summary, images and folder chain, download the PDF, store
+   up to 40 images (12 shown, each attached to the copy request), write the
+   copy, publish, record. An item MarketDesk has not summarised yet is parked as
+   `summary_pending` (no attempt spent, not a failure, not counted against
+   `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
+   than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). One bad item never fails
+   the cycle. No new item starts after 150 seconds of the cycle; the rest wait
    for the next one.
-6. Drain the outbox again when something was just published, persist the
-   browser storage state and write the `marketdesk-dropbox` row (the worse of
-   the two outbox runs).
+6. Drain the outbox again when something was just published and write the
+   `marketdesk-dropbox` row (the worse of the two outbox runs).
 
 Publication comes before the Dropbox upload: freshness first. The Dropbox status
 lives in the ledger, not in post provenance, because the upload can complete in a
@@ -69,18 +91,19 @@ later cycle.
 - `marketdesk_articles` rows are `pending`, `published` or `failed`. A
   `pending` row is retried until 5 attempts, then flips to `failed` and is
   never retried.
-- Only content verdicts spend an attempt (`no_pdf`, `not_pdf`, `no_summary`,
-  `no_article_body`, every ladder rung rejecting the copy, HTTP 4xx). Outages
-  are parked with no attempt spent: a ladder outage (HTTP, timeout, quota, no
-  keyed rung), HTTP 5xx or 429, a transport error, a page whose title and
-  preview never rendered, and an expired session (which also stops the cycle).
+- Only content verdicts spend an attempt (`not_pdf`, `no_summary`,
+  `bad_response`, every ladder rung rejecting the copy, HTTP 4xx). Outages are
+  parked with no attempt spent: a ladder outage (HTTP, timeout, quota, no keyed
+  rung), HTTP 5xx or 429, a transport error, and a session that stays signed
+  out after one re-login (which also stops the cycle).
   Parked articles retry every cycle until they publish or leave the lookback.
 - `claim` writes a lease before the slow work. A run killed mid-article
   (`TimeoutStartSec`, SIGTERM) leaves it, and the next claim counts that
   attempt, so an article that always overruns retires after 5 kills.
-- Host disk holds only the session (`$RADON_RESEARCH_DIR/marketdesk/storage.json`
-  and `firebase.json`, mode 0600) and a per-cycle temp workdir that is deleted
-  at cycle end. Nothing durable is host-local.
+- Host disk holds only the rotated refresh token
+  (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600) and a per-cycle
+  temp workdir that is deleted at cycle end. The session cookie lives in memory
+  for one cycle. Nothing durable is host-local.
 
 ## Copy rules
 
@@ -107,24 +130,31 @@ attempt. The certificate is stripped from `research_post_sources` on publish.
 
 Summary bullets are shown verbatim, so each one is scrubbed (em dashes, curly
 quotes) and dropped when it names Market Ear or ZeroHedge, carries a URL or
-email, or uses a banned phrase. Article text excludes nav, header, footer, aside
-and account UI, and an article page with no article container is refused rather
-than read whole. The `MARKETDESK` tag is always first.
+email, or uses a banned phrase. Markdown bold markers are stripped from the
+bullets. The publisher is the bank folder of the library chain (`Goldman Sachs`,
+not the `S&T` desk label), else the item's institution. The `MARKETDESK` tag is
+always first.
 
 ## Dropbox layout
 
-Uploads go to the operator's own Dropbox, mirroring the shared folder's
-chronological layout with the America/New_York date:
+Uploads go to the operator's own Dropbox (personal account, home namespace),
+mirroring the marketdesk.ai library chain, which is the shared folder's layout,
+and keeping the library item name:
 
 ```text
-/Radon/MarketDesk/<YYYY>/<Month>/<Mon> <DD>/<slug>-<article_id>.pdf
-/Radon/MarketDesk/2026/October/Oct 02/fed-cuts-and-curve-4AJs5Adl2Yp.pdf
+/Radon/MarketDesk/<YYYY>/<Month>/<Mon> <D>/<bank>[/<desk>...]/<item name>.pdf
+/Radon/MarketDesk/2026/October/Oct 26/Goldman Sachs/S&T/GS Molavi Ruminations Macro, Micro, Markets 26 Oct 2026.pdf
 ```
 
-The day is zero-padded and the short month is the first three letters (`Sep`,
-never `Sept`). Uploads use `mode=add`, `autorename=false`; a 409 conflict whose
-content hash matches is success. The existing `DROPBOX_*` reader credentials are
-read-only by contract and are never used for writes.
+The chain is stored in the post provenance (`folders`, `fileName`) so the outbox
+can upload in a later cycle. Separators, colons and control characters in a name
+become spaces; leading and trailing dots and spaces are trimmed. A post without a
+dated chain falls back to `/<YYYY>/<Month>/<Mon> <DD>/<slug>-<article_id>.pdf` on
+the America/New_York date. Uploads use `mode=add`, `autorename=false`; a 409
+conflict whose content hash matches is success, and a same-name conflict with
+different bytes retries once as `<item name> (<article_id>).pdf`. The existing
+`DROPBOX_*` reader credentials are read-only by contract and are never used for
+writes.
 
 ## Credentials and environment
 
@@ -136,9 +166,8 @@ none in `cloud/config/required-env.txt`.
 | `MARKETDESK_FIREBASE_REFRESH_TOKEN` | No session seed. The rotated token in `firebase.json` wins once present; otherwise the password fallback runs. |
 | `THEMARKETEAR_EMAIL` / `THEMARKETEAR_PASSWORD` | Already required for the newsfeed. Fallback only; the account has no password sign-in method today. |
 | `MARKETDESK_MAX_PER_CYCLE` / `MARKETDESK_LOOKBACK_HOURS` | 5 / 48. |
-| `MARKETDESK_LIBRARY_URL` | `https://marketdesk.ai/`. |
-| `MARKETDESK_ASSET_HOSTS` | Only `marketdesk.ai` serves PDFs and images. |
-| `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | The image-pinned Playwright headless shell. |
+| `MARKETDESK_SUMMARY_WAIT_HOURS` | 6: an unsummarised item fails as `no_summary` after 6 hours. |
+| `MARKETDESK_ASSET_HOSTS` | Only the MarketDesk chart CDN serves images. |
 | `DROPBOX_WRITE_APP_KEY` / `DROPBOX_WRITE_REFRESH_TOKEN` / `DROPBOX_WRITE_ACCOUNT_ID` | Uploads skipped; posts still publish; `marketdesk-dropbox` reads `paused`. |
 | `DROPBOX_WRITE_ROOT_NAMESPACE_ID` | Namespace check skipped. |
 | `DROPBOX_WRITE_ROOT` | `/Radon/MarketDesk`. |
@@ -156,14 +185,15 @@ app image through `radon-app-runtime`:
 
 - the private research bind `/var/lib/radon-private/research` read-write at
   `/var/lib/radon/research`, and no data, media or 2FA lease binds;
-- an isolated bridge network, the vendored Chromium seccomp profile
+- an isolated bridge network, the vendored seccomp profile
   (`/etc/radon/seccomp/chromium.json`, refused if missing or untrusted) and a
-  512m `/dev/shm`, the same isolation as the newsfeed;
+  512m `/dev/shm`, the same isolation as the newsfeed. The job no longer runs a
+  browser; the isolation stays because it still parses third-party content;
 - an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
-  `MARKETDESK_*`, `DROPBOX_WRITE_*` and the Playwright knobs. The read-only
-  `DROPBOX_*` reader, B2, IB and Clerk secrets never enter the container;
+  `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
+  and Clerk secrets never enter the container;
 - read-only `.grok`, `.codex` and `.claude` ladder grants, and no writable
-  Antigravity grant (third-party Chromium content), so its ladder falls past
+  Antigravity grant (third-party content), so its ladder falls past
   antigravity.
 
 The radon-api container keeps its read-only research bind, so existing and new
@@ -173,7 +203,7 @@ research assets are served by the same authenticated route.
 
 | Row | Writer | Window | States |
 |---|---|---|---|
-| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only (Playwright call logs carry cookies). |
+| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. |
 | `marketdesk-dropbox` | `record_service_health`, continuous bucket | 15m | `ok` after a cycle with write credentials and no upload failure; `paused` when all three write credentials are absent (a warning, never the error bucket); `error` when an upload failed (retried next cycle) or when only some write credentials are set. |
 
 Both rows are registered in `scripts/watchdog/services.py` and
@@ -182,18 +212,18 @@ Both rows are registered in `scripts/watchdog/services.py` and
 
 ## Operator steps before enabling in production
 
-1. Run `python scripts/research/marketdesk_bootstrap.py` on the laptop, sign in
-   with Google, and copy the token from the 0600 file it writes (it prints no
-   secret) into `/etc/radon/env` as
-   `MARKETDESK_FIREBASE_REFRESH_TOKEN`. `--check` exchanges it once and reports
-   `ok` or `failed`.
-2. Capture real library, article and standalone HTML with that session, replace
-   the synthetic parser fixtures and `SELECTORS`, and set
-   `MARKETDESK_ASSET_HOSTS`. Every selector is unverified until then.
-3. Create a full Dropbox (not App Folder) app on the operator account with
-   `account_info.read`, `files.metadata.read` and `files.content.write`; mint an
-   offline PKCE refresh token and set `DROPBOX_WRITE_*`.
-4. After a green deploy, confirm the retired watcher is off and the timer is
+1. Sign in to marketdesk.ai with Google in a Chrome started with
+   `--remote-debugging-port=9222`, then run
+   `python scripts/research/marketdesk_bootstrap.py --from-cdp http://127.0.0.1:9222`.
+   Copy the token from the 0600 file it writes (it prints no secret) into
+   `/etc/radon/env` as `MARKETDESK_FIREBASE_REFRESH_TOKEN`. `--check` exchanges
+   it, logs in and lists the latest items, then reports `ok` or `failed`.
+2. Create a full Dropbox (not App Folder) scoped app on the operator's personal
+   account with `account_info.read`, `files.metadata.read` and
+   `files.content.write`; mint an offline PKCE refresh token and set
+   `DROPBOX_WRITE_*`. Done 2026-10-26: app `radon-marketdesk-writer`, personal
+   account; the values are in the laptop `.env`.
+3. After a green deploy, confirm the retired watcher is off and the timer is
    live, then that the first ledger row and post landed in Turso:
 
 ```bash
@@ -206,12 +236,13 @@ journalctl -u radon-marketdesk.service -n 50
 
 - **Symptom:** `marketdesk-research` is `error` or stale.
   - Read `journalctl -u radon-marketdesk.service -n 100`. `MarketDeskAuthError`
-    means the session and the refresh token both failed: rerun the laptop
-    bootstrap and replace `MARKETDESK_FIREBASE_REFRESH_TOKEN`.
+    means the refresh token and the password fallback both failed: rerun the
+    laptop bootstrap and replace `MARKETDESK_FIREBASE_REFRESH_TOKEN`.
   - A unit in `start-limit-hit` is parked by the crash-loop brake:
     `systemctl reset-failed radon-marketdesk.service` after fixing the cause.
-  - A listing failure after a marketdesk.ai redesign is a selector change:
-    update `SELECTORS` and the fixtures.
+  - `bad_response` or HTTP 4xx on every item after a marketdesk.ai change is an
+    API change: recapture the `api_*.json` fixtures signed in and update
+    `marketdesk_scrape.py`.
 - **Symptom:** `marketdesk-dropbox` is `paused`. Write credentials are absent.
   Posts are still publishing; set `DROPBOX_WRITE_*` and the outbox uploads the
   backlog on the next cycles.

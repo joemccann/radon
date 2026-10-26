@@ -1,4 +1,4 @@
-"""One marketdesk cycle end to end: real ledger + publish SQL on sqlite, fakes for browser, scrape, copy, Dropbox."""
+"""One marketdesk cycle end to end: real ledger + publish SQL on sqlite, fakes for session, scrape, copy, Dropbox."""
 from __future__ import annotations
 
 import json
@@ -22,6 +22,7 @@ from research import publish  # noqa: E402
 from research.assets import read_asset, store_asset  # noqa: E402
 
 ROOT = SCRIPTS / "db/migrations"
+CHARTS = "https://box1.nyc3.cdn.digitaloceanspaces.com/charts/"
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
@@ -31,6 +32,7 @@ class Ref:
     url: str
     published_at: datetime
     title: str
+    institution: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,9 +44,9 @@ class Upload:
     already_present: bool = False
 
 
-def make_ref(article_id, hours_ago=1.0, title=None):
+def make_ref(article_id, hours_ago=1.0, title=None, institution="Acme"):
     return Ref(article_id, "https://marketdesk.ai/library/browse/" + article_id,
-               NOW - timedelta(hours=hours_ago), title or f"Title {article_id}")
+               NOW - timedelta(hours=hours_ago), title or f"Title {article_id}", institution)
 
 
 class CopyUnavailable(RuntimeError):
@@ -79,56 +81,15 @@ class World:
     list_error: Exception | None = None
     writer_present: bool = True
     upload_error: Exception | None = None
+    upload_conflicts: int = 0
     connect_error: Exception | None = None
-    persist_error: Exception | None = None
+    folders: list | None = field(default_factory=lambda: ["2026", "October", "Oct 26", "Acme Research"])
     calls: list = field(default_factory=list)
     health: list = field(default_factory=list)
     uploads: list = field(default_factory=list)
     published: list = field(default_factory=list)
     dests: list = field(default_factory=list)
-    contexts: list = field(default_factory=list)
-
-
-class FakeContext:
-    def __init__(self, world, kwargs):
-        self.world, self.kwargs, self.closed = world, kwargs, False
-        world.contexts.append(self)
-
-    def new_page(self):
-        return SimpleNamespace(kind="page")
-
-    def storage_state(self, *, path, indexed_db):
-        assert indexed_db is True
-        Path(path).write_text("{}")
-        self.world.calls.append(("storage_state", path))
-
-    def close(self):
-        self.closed = True
-
-
-class FakeBrowser:
-    def __init__(self, world):
-        self.world, self.closed = world, False
-
-    def new_context(self, **kwargs):
-        return FakeContext(self.world, kwargs)
-
-    def close(self):
-        self.closed = True
-        self.world.calls.append(("browser_close",))
-
-
-class FakePW:
-    def __init__(self, world):
-        self.world = world
-
-    def __enter__(self):
-        self.world.calls.append(("pw_enter",))
-        return SimpleNamespace(kind="pw")
-
-    def __exit__(self, *exc):
-        self.world.calls.append(("pw_exit",))
-        return False
+    sessions: list = field(default_factory=list)
 
 
 class FakeWriter:
@@ -141,46 +102,54 @@ class FakeWriter:
             raise self.world.connect_error
 
     def upload(self, local, remote):
+        from research.dropbox import DropboxError
         data = Path(local).read_bytes()
         assert data.startswith(b"%PDF-")
         self.world.uploads.append((remote, data))
         if self.world.upload_error:
             raise self.world.upload_error
+        if self.world.upload_conflicts:
+            self.world.upload_conflicts -= 1
+            raise DropboxError("Dropbox upload conflict", status=409)
         return Upload(remote.lower(), "id:" + Path(remote).stem, "rev1", "h" * 64)
 
 
 def build_deps(world: World):
-    def open_session(context, page, *, env):
+    def open_session(env):
         world.calls.append(("open_session",))
         if world.auth_error:
             raise world.auth_error
+        session = SimpleNamespace(kind="session")
+        world.sessions.append(session)
+        return session
 
-    def list_latest(page):
+    def list_latest(session):
+        assert session is world.sessions[-1]
         world.calls.append(("list_latest",))
         if world.list_error:
             raise world.list_error
         return list(world.refs)
 
-    def fetch_article(page, ref):
+    def fetch_article(session, ref):
+        assert session is world.sessions[-1]
         world.calls.append(("fetch_article", ref.article_id))
         if ref.article_id in world.fetch_errors:
             raise world.fetch_errors[ref.article_id]
         summary = ["Fed priced two cuts — curve steepened", "x" * 700] if world.summary is None else world.summary
-        return SimpleNamespace(ref=ref, title=ref.title, publisher=world.publisher,
-                               summary=summary,
-                               body_text="Body text with 12bp.", image_urls=["https://marketdesk.ai/a.png"],
-                               pdf_href=None if ref.article_id in world.no_pdf else "/standalone/" + ref.article_id)
+        return SimpleNamespace(ref=ref, title=ref.title, publisher=world.publisher, summary=summary,
+                               image_urls=[CHARTS + "a.png"], folders=world.folders)
 
-    def download_pdf(context, article, dest):
+    def download_pdf(session, article, dest):
+        assert session is world.sessions[-1]
         world.dests.append(Path(dest))
-        if article.pdf_href is None:
+        if article.ref.article_id in world.no_pdf:
             raise RuntimeError("no_pdf")
         Path(dest).mkdir(parents=True, exist_ok=True)
         path = Path(dest) / "source.pdf"
         path.write_bytes(b"%PDF-1.7 " + article.ref.article_id.encode())
         return path
 
-    def download_images(context, article, dest, *, limit=40):
+    def download_images(session, article, dest, *, limit=40):
         Path(dest).mkdir(parents=True, exist_ok=True)
         paths = []
         for index in range(min(world.images, limit)):
@@ -195,6 +164,7 @@ def build_deps(world: World):
         assert all(Path(path).read_bytes().startswith(b"\x89PNG") for _, path in images)
         world.calls.append(("write_copy", title, publisher, tuple(image_ids)))
         world.calls.append(("copy_summary", tuple(summary)))
+        world.calls.append(("copy_body", body_text))
         if title in world.killed:
             raise Killed("SIGTERM")
         if title in world.copy_fail:
@@ -222,22 +192,14 @@ def build_deps(world: World):
         world.published.append(post)
         return publish.publish(post)
 
-    def marketdesk_path(published_at, title, article_id, root="/Radon/MarketDesk"):
+    def marketdesk_path(published_at, title, article_id, root="/Radon/MarketDesk", folders=None, suffix_id=False):
+        name = title + (f" ({article_id})" if suffix_id else "")
+        if folders:
+            return "/".join([root, *folders, name + ".pdf"])
         return f"{root}/{published_at:%Y}/{article_id}.pdf"
 
     def record_health(service, state, *, started_at=None, finished_at=None, error=None):
         world.health.append((service, state, error))
-
-    storage_file = world.tmp / "session" / "storage.json"
-
-    def storage_state(env):
-        return str(storage_file) if storage_file.is_file() else None
-
-    def persist_storage(context, env):
-        storage_file.parent.mkdir(parents=True, exist_ok=True)
-        context.storage_state(path=str(storage_file), indexed_db=True)
-        if world.persist_error:
-            raise world.persist_error
 
     def expire():
         world.calls.append(("expire_stale_held",))
@@ -251,13 +213,16 @@ def build_deps(world: World):
     def clock():
         return world.clock.pop(0) if world.clock else 0.0
 
+    def pdf_text(path):
+        assert Path(path).read_bytes().startswith(b"%PDF-")
+        world.calls.append(("pdf_text", Path(path).name))
+        return "PDF text: EBITDA $13.80B, curve up 12bp."
+
     return job.Deps(
         store=store, publish=real_publish, store_asset=store_asset, read_asset=read_asset,
-        expire_stale_held=expire, sync_playwright=lambda: FakePW(world),
-        launch_browser=lambda pw: FakeBrowser(world), open_session=open_session,
-        storage_state=storage_state, persist_storage=persist_storage, list_latest=list_latest, fetch_article=fetch_article,
+        expire_stale_held=expire, open_session=open_session, list_latest=list_latest, fetch_article=fetch_article,
         download_pdf=download_pdf, download_images=download_images, write_copy=write_copy,
-        certify=certify, writer_from_env=writer_from_env,
+        certify=certify, writer_from_env=writer_from_env, pdf_text=pdf_text,
         marketdesk_path=marketdesk_path, service_cycle=service_cycle, record_health=record_health,
         clock=clock,
     )
@@ -341,7 +306,9 @@ def test_new_article_published_once_with_article_timestamp(world, db):
     assert saved["status"] == "published" and saved["post_id"] == post_id
     assert saved["pdf_asset"] == source["url"] and saved["pdf_sha256"] == source["contentHash"]
     assert saved["dropbox_status"] == "uploaded"
-    assert world.uploads[0][0] == f"/Radon/MarketDesk/{ref.published_at:%Y}/4AJs5Adl2Yp.pdf"
+    assert world.uploads[0][0] == "/Radon/MarketDesk/2026/October/Oct 26/Acme Research/Fed cuts.pdf"
+    assert source["folders"] == ["2026", "October", "Oct 26", "Acme Research"]
+    assert source["fileName"] == "Fed cuts"
     assert ("write_copy", "Fed cuts", "Acme Research", ("i1", "i2")) in world.calls
     assert ("marketdesk-research", "ok", None) in world.health
     assert ("marketdesk-dropbox", "ok", None) in world.health
@@ -482,7 +449,6 @@ def test_auth_failure_error_row_and_reraise_but_outbox_still_runs(world, db):
     assert research[0][1] == "error" and "session expired" in research[0][2]["message"]
     assert len(world.uploads) == 1
     assert health_for(world, "marketdesk-dropbox")[0][1] == "ok"
-    assert ("browser_close",) in world.calls
 
 
 def test_listing_failure_raises(world, db):
@@ -518,18 +484,14 @@ def test_expire_stale_held_failure_is_best_effort(world, db):
     assert counts["published"] == 1
 
 
-def test_workdir_removed_and_session_reused(world, db):
-    world.refs = [make_ref("Qqqqqqqq14")]
+def test_workdir_removed_and_one_session_per_cycle(world, db):
+    world.refs = [make_ref("Qqqqqqqq14"), make_ref("Qqqqqqqq15")]
     run(world)
     assert world.dests and all(not d.exists() for d in world.dests)
-    storage = world.tmp / "session" / "storage.json"
-    assert storage.exists()
+    assert [c for c in world.calls if c[0] == "open_session"] == [("open_session",)]
     world.refs = []
-    world.persist_error = OSError("disk full")
     assert run(world)["published"] == 0
-    assert world.contexts[-1].kwargs == {"storage_state": str(storage)}
-    assert world.contexts[0].kwargs == {}
-    assert all(c.closed for c in world.contexts)
+    assert len(world.sessions) == 2
 
 
 def test_workdir_removed_even_when_cycle_raises(world, db, monkeypatch):
@@ -562,7 +524,9 @@ def test_default_deps_wire_real_modules():
     from research import dropbox_writer, marketdesk_auth, marketdesk_copy, marketdesk_scrape
     assert deps.store is store and deps.publish is publish.publish
     assert deps.open_session is marketdesk_auth.open_session
-    assert deps.storage_state is marketdesk_auth.existing_storage_state
+    assert deps.fetch_article is marketdesk_scrape.fetch_article
+    from research import pipeline
+    assert deps.pdf_text is pipeline.text_isolated
     assert deps.list_latest is marketdesk_scrape.list_latest and deps.download_pdf is marketdesk_scrape.download_pdf
     assert deps.write_copy is marketdesk_copy.write_copy
     assert deps.certify is marketdesk_copy.certify
@@ -614,7 +578,7 @@ def test_model_outage_parks_without_spending_attempts(world, db):
     assert ("marketdesk-research", "ok", None) in world.health
 
 
-@pytest.mark.parametrize("code", ["http_503", "http_429", "http_transport", "article_unrendered"])
+@pytest.mark.parametrize("code", ["http_503", "http_429", "http_transport", "http_500"])
 def test_transient_scrape_errors_park(world, db, code):
     from research.marketdesk_scrape import ScrapeError
     world.refs = [make_ref("Uuuuuuuu01")]
@@ -682,13 +646,73 @@ def test_listing_gap_is_reported_and_self_clears(world, db):
     assert ("marketdesk-research", "ok", None) in world.health
 
 
-def test_empty_summary_fails_article_before_downloads(world, db):
-    world.refs = [make_ref("Zzzzzzzz01")]
+def test_unprocessed_article_waits_for_its_summary_without_spending_attempts(world, db):
+    world.refs = [make_ref("Zzzzzzzz01", hours_ago=0.2)]
+    world.summary = []
+    for _ in range(3):
+        counts = run(world)
+        assert counts["pending"] == 1 and counts["published"] == 0
+    saved = ledger(db, "Zzzzzzzz01")
+    assert saved["status"] == "pending" and saved["attempts"] == 0 and saved["last_error"] == "summary_pending"
+    assert world.dests == [] and not [c for c in world.calls if c[0] == "write_copy"]
+    assert all(h[1] == "ok" for h in health_for(world, "marketdesk-research"))
+    world.summary = None  # MarketDesk finished processing it
+    assert run(world)["published"] == 1
+
+
+def test_summary_that_never_arrives_fails_after_the_wait(world, db):
+    world.refs = [make_ref("Zzzzzzzz07", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     with pytest.raises(job.ArticlesFailed):
         run(world)
-    assert ledger(db, "Zzzzzzzz01")["last_error"] == "no_summary"
-    assert world.dests == [] and not [c for c in world.calls if c[0] == "write_copy"]
+    assert ledger(db, "Zzzzzzzz07")["last_error"] == "no_summary"
+    assert world.dests == []
+
+
+def test_pending_articles_do_not_use_up_the_per_cycle_cap(world, db):
+    world.refs = [make_ref(f"Pend{n:07d}", hours_ago=0.1) for n in range(4)]
+    world.refs += [make_ref("Ready000001", hours_ago=2), make_ref("Ready000002", hours_ago=3)]
+    pending = {r.article_id for r in world.refs[:4]}
+    original = build_deps
+
+    def deps_with_pending(w):
+        deps = original(w)
+        fetch = deps.fetch_article
+
+        def fetch_article(session, ref):
+            article = fetch(session, ref)
+            return SimpleNamespace(**{**vars(article), "summary": [] if ref.article_id in pending else article.summary})
+
+        deps.fetch_article = fetch_article
+        return deps
+
+    counts = job.run_cycle(env={**ENV, "MARKETDESK_MAX_PER_CYCLE": "2"}, deps=deps_with_pending(world))
+    assert counts["pending"] == 4 and counts["published"] == 2
+
+
+def test_market_ear_items_are_excluded_before_any_claim(world, db):
+    world.refs = [make_ref("Earearear01", institution="The Market Ear"), make_ref("Okokokok01")]
+    counts = run(world)
+    assert counts["excluded"] == 1 and counts["published"] == 1
+    assert ledger(db, "Earearear01") is None
+    assert ("fetch_article", "Earearear01") not in world.calls
+
+
+def test_dropbox_name_collision_retries_once_with_the_article_id(world, db):
+    world.refs = [make_ref("Coll000001", title="Tesla Oct 26")]
+    world.upload_conflicts = 1
+    counts = run(world)
+    assert counts["uploaded"] == 1
+    assert [u[0] for u in world.uploads] == [
+        "/Radon/MarketDesk/2026/October/Oct 26/Acme Research/Tesla Oct 26.pdf",
+        "/Radon/MarketDesk/2026/October/Oct 26/Acme Research/Tesla Oct 26 (Coll000001).pdf"]
+
+
+def test_outbox_falls_back_to_the_dated_layout_without_folders(world, db):
+    world.refs = [make_ref("Nofold0001")]
+    world.folders = []
+    run(world)
+    assert world.uploads[0][0].endswith("/Nofold0001.pdf")
 
 
 def test_summary_bullets_are_filtered_before_copy_and_publish(world, db):
@@ -714,6 +738,13 @@ def test_summary_cut_is_utf16_safe(world, db):
     source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
     bullet = source["summary"][0]
     assert len(bullet.encode("utf-16-le")) // 2 <= 500
+
+
+def test_copy_is_grounded_in_the_pdf_text(world, db):
+    world.refs = [make_ref("Pdftext001")]
+    run(world)
+    assert ("pdf_text", "source.pdf") in world.calls
+    assert ("copy_body", "PDF text: EBITDA $13.80B, curve up 12bp.") in world.calls
 
 
 def test_copy_sees_the_figure_images(world, db):

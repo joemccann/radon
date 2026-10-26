@@ -35,6 +35,7 @@ UPLOAD_TIMEOUT = 120
 NEW_YORK = ZoneInfo('America/New_York')
 ARTICLE_ID_RE = re.compile(r'^[A-Za-z0-9]{8,16}$')
 SLUG_MAX = 60
+NAME_MAX = 200
 
 
 @dataclass(frozen=True)
@@ -242,13 +243,30 @@ def _slug(title):
     return slug[:SLUG_MAX].rstrip('-') or 'marketdesk'
 
 
-def marketdesk_path(published_at, title, article_id, root=DEFAULT_ROOT):
-    """Chronological Dropbox path; the day folder follows the America/New_York date.
+def _segment(value, limit=NAME_MAX):
+    """One Dropbox path segment from a library name: no separators, colons or control characters,
+    no leading/trailing dots or spaces (so never '.' or '..'), whitespace collapsed, bounded."""
+    text = re.sub(r'[\x00-\x1f\x7f/\\:]', ' ', str(value or ''))
+    text = re.sub(r'\s+', ' ', text).strip(' .')
+    return text[:limit].rstrip(' .')
 
-    Naive datetimes are treated as UTC (the scraper emits UTC).
+
+def marketdesk_path(published_at, title, article_id, root=DEFAULT_ROOT, folders=None, suffix_id=False):
+    """Dropbox path for one MarketDesk PDF.
+
+    With ``folders`` (the library chain after "Current": year, month, day, bank, desk...) the path
+    mirrors marketdesk.ai's own layout and keeps the item name: <root>/2026/October/Oct 26/<bank>/<name>.pdf.
+    ``suffix_id`` appends " (<article id>)" to the name for a same-name collision. Without a dated chain
+    it falls back to the chronological layout on the America/New_York date (naive datetimes are UTC).
     """
     if not isinstance(article_id, str) or not ARTICLE_ID_RE.match(article_id):
         raise ValueError('invalid MarketDesk article id')
+    chain = [_segment(f) for f in folders or []] if isinstance(folders, (list, tuple)) else []
+    if len(chain) >= 3 and re.fullmatch(r'\d{4}', chain[0]):
+        name = _segment(re.sub(r'(?i)\.pdf$', '', str(title or ''))) or article_id
+        if suffix_id:
+            name = f'{name[:NAME_MAX - len(article_id) - 3]} ({article_id})'
+        return '/'.join([_clean_root(root), *[c for c in chain if c], name + '.pdf'])
     if published_at.tzinfo is None:
         published_at = published_at.replace(tzinfo=timezone.utc)
     day = published_at.astimezone(NEW_YORK).date()

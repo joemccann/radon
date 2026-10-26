@@ -76,3 +76,21 @@ def test_creation_date_isolated_reads_metadata_in_the_child(runs, monkeypatch, t
 def test_creation_date_isolated_is_none_when_the_child_cannot_answer(runs, tmp_path, outcome):
     runs(outcome)
     assert pipeline.creation_date_isolated(tmp_path / "doc.pdf") is None
+
+
+def test_text_isolated_reads_text_in_the_child_without_worker_credentials(runs, monkeypatch, tmp_path):
+    monkeypatch.setenv("UW_TOKEN", "worker-secret")
+    runs(_Done(stdout=json.dumps({"text": "EBITDA $13.80B"}).encode()))
+
+    assert pipeline.text_isolated(tmp_path / "doc.pdf") == "EBITDA $13.80B"
+    (command, kwargs), = runs.calls
+    assert command == [sys.executable, "-m", "research.pdf", str(tmp_path / "doc.pdf"), ".", "--text-only"]
+    assert "UW_TOKEN" not in kwargs["env"]
+    assert kwargs["timeout"] == pipeline.PDF_TEXT_TIMEOUT_SECS
+
+
+@pytest.mark.parametrize("outcome", [_Done(returncode=1), subprocess.TimeoutExpired("research.pdf", 60),
+                                     _Done(stdout=b"not json"), _Done(stdout=b'{"text": 7}')])
+def test_text_isolated_is_empty_when_the_child_cannot_answer(runs, tmp_path, outcome):
+    runs(outcome)
+    assert pipeline.text_isolated(tmp_path / "doc.pdf") == ""

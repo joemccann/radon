@@ -1242,10 +1242,11 @@ The API credential staging/cleanup contract remains in force when research mount
 `Persistent=false`). Its Type=oneshot `runtime-container.conf` drop-in runs
 `scripts/research/marketdesk_job.py` in the Python image through
 `radon-app-runtime` with the read/write private research bind and nothing else
-of the host state (no data, media or lease binds), plus the newsfeed's Chromium
-isolation: bridge network, `/etc/radon/seccomp/chromium.json` (start refused
+of the host state (no data, media or lease binds), plus the newsfeed's
+isolation (the job reads the marketdesk.ai JSON API over plain HTTP, no
+browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
 without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
-`THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`, Playwright knobs).
+`THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
 `TimeoutStartSec=270`, `StartLimitBurst=10` per 1800s. Heartbeats
 `marketdesk-research` (`service_cycle`) and `marketdesk-dropbox` (`ok`, `paused`
 when write credentials are absent, `error`), both 15 minutes. Runbook:

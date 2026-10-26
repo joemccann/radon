@@ -1,21 +1,25 @@
-"""MarketDesk (marketdesk.ai) session: Firebase refresh-token exchange, password fallback, server login.
+"""MarketDesk (marketdesk.ai) session over plain HTTP: Firebase token -> server login -> cookie session.
 
-marketdesk.ai signs users in with FirebaseUI (project zerohedge-prod), then the landing script posts the
-Firebase ID token to POST /api/user/login {F: idToken}; the server answers {success: true} and sets its
-session cookie. This module does the same without a browser sign-in:
+marketdesk.ai signs users in with FirebaseUI (project zerohedge-prod), then posts the Firebase ID token
+to POST /api/user/login {F: idToken}; the server answers {success: true} and sets the httpOnly session
+cookie ``A`` (about 60 days). Every API call and PDF download after that rides on the cookie. Verified
+live 2026-10-26: no browser is needed.
 
-1. warm: the stored Playwright storage state is still signed in -> nothing to do
-2. refresh token (rotated copy in the session dir wins over the MARKETDESK_FIREBASE_REFRESH_TOKEN seed)
-   -> securetoken exchange -> ID token -> /api/user/login through the browser context's request API,
-   so the session cookie lands in that context
-3. THEMARKETEAR_EMAIL / THEMARKETEAR_PASSWORD -> signInWithPassword -> same login POST. The operator's
-   account currently has only the google.com provider, so this path fails until a password is restored.
+ID token sources, in order:
+1. refresh token (rotated copy in the session dir wins over the MARKETDESK_FIREBASE_REFRESH_TOKEN seed)
+   -> securetoken exchange
+2. THEMARKETEAR_EMAIL / THEMARKETEAR_PASSWORD -> signInWithPassword. The operator's account has only
+   the google.com provider, so this path fails until a password is restored.
 
-Errors never carry tokens, emails or passwords: only fixed text and Firebase's upper-case error codes.
+A signed-out API call answers HTTP 200 {"success": false}; a signed-out /files/* download answers 302
+elsewhere. Both trigger one re-login and one retry. A signed-in /files/<id>/blob answers 302 to
+https://tsN.marketdesk.ai/files/<id>/preview (the file servers share the .marketdesk.ai cookie); that
+one hop is followed, nothing else. Errors never carry tokens, cookies, emails or passwords.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from http.cookiejar import CookieJar
 import json
 import os
 from pathlib import Path
@@ -33,17 +37,30 @@ PASSWORD_URL = ("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPa
 LOGIN_URL = BASE_URL + "/api/user/login"
 REFRESH_ENV = "MARKETDESK_FIREBASE_REFRESH_TOKEN"
 TIMEOUT = 20
-LOGIN_TIMEOUT_MS = 30_000
-NAV_TIMEOUT_MS = 30_000
-MAX_RESPONSE = 1024 * 1024
+DOWNLOAD_TIMEOUT = 60
+MAX_RESPONSE = 4 * 1024 * 1024
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0 Safari/537.36"
 # The API key is referrer-restricted to the zerohedge web origins; send what the browser would.
 BROWSER_HEADERS = {"Referer": BASE_URL + "/", "Origin": BASE_URL}
 _CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{2,63}")
 _PASSWORD_DISABLED = {"INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS", "PASSWORD_LOGIN_DISABLED"}
+TRANSIENT_CODES = frozenset({"unauthenticated", "http_transport", "http_429"})
+FILE_SERVER_RE = re.compile(r"ts\d{1,2}\.marketdesk\.ai")
+REDIRECTS = (301, 302, 303, 307, 308)
 
 
 class MarketDeskAuthError(RuntimeError):
-    """Message never contains tokens, emails or passwords."""
+    """Sign-in failed. Message never contains tokens, emails or passwords."""
+
+
+class MarketDeskError(RuntimeError):
+    """Short machine-readable reason ('unauthenticated', 'http_404', 'too_large', ...). Never a URL or body."""
+
+    @property
+    def transient(self) -> bool:
+        """True when a retry can succeed without a code change; such failures spend no attempt."""
+        code = str(self)
+        return code in TRANSIENT_CODES or bool(re.fullmatch(r"http_5\d\d", code))
 
 
 def _research_dir(env) -> Path:
@@ -76,6 +93,8 @@ def _atomic_private_write(path: Path, data: bytes) -> None:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
+
+# ---- Firebase REST -------------------------------------------------------------------------
 
 def _default_post(url: str, body: bytes, headers: dict) -> tuple[int, bytes]:
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -135,6 +154,8 @@ def password_id_token(email: str, password: str, *, post=None) -> str:
     raise MarketDeskAuthError(f"password sign-in failed ({code or f'HTTP {status}'})")
 
 
+# ---- refresh-token storage -----------------------------------------------------------------
+
 def _token_file(env) -> Path:
     return session_dir(env) / "firebase.json"
 
@@ -167,80 +188,11 @@ def save_refresh_token(token: str, env=os.environ) -> None:
     _atomic_private_write(_token_file(env), json.dumps(record).encode())
 
 
-def storage_state_path(env=os.environ) -> Path:
-    return session_dir(env) / "storage.json"
-
-
-def existing_storage_state(env=os.environ) -> str | None:
-    """Path to pass as new_context(storage_state=...), or None. A corrupt file is quarantined."""
-    path = storage_state_path(env)
-    if not path.is_file() or path.is_symlink():
-        return None
-    try:
-        state = json.loads(path.read_text())
-        if not isinstance(state, dict) or not isinstance(state.get("cookies", []), list):
-            raise ValueError("bad storage state")
-    except (ValueError, OSError):
-        try:
-            os.replace(path, path.with_name(f"storage.corrupt-{int(datetime.now().timestamp())}.json"))
-        except OSError:
-            pass
-        return None
-    return str(path)
-
-
-def persist_storage_state(context, env=os.environ) -> Path:
-    path = storage_state_path(env)
-    state = context.storage_state(indexed_db=True)
-    _atomic_private_write(path, json.dumps(state).encode())
-    return path
-
-
-def page_state(html: str) -> str:
-    """'landing' (FirebaseUI sign-in), 'app' (signed-in shell) or 'unknown'."""
-    from research.marketdesk_scrape import SELECTORS, parse_html
-
-    root = parse_html(html)
-    if root.select_one(SELECTORS["landing"]) is not None:
-        return "landing"
-    if root.select_one(SELECTORS["app_shell"]) is not None:
-        return "app"
-    return "unknown"
-
-
-def is_authenticated(page) -> bool:
-    from research.marketdesk_scrape import SELECTORS
-
-    page.goto(BASE_URL + "/", wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-    try:
-        page.wait_for_selector(f"{SELECTORS['landing']}, {SELECTORS['app_shell']}", timeout=NAV_TIMEOUT_MS)
-    except Exception:
-        pass
-    return page_state(page.content()) == "app"
-
-
-def _server_login(context, id_token: str) -> None:
-    try:
-        response = context.request.post(LOGIN_URL, data={"F": id_token}, timeout=LOGIN_TIMEOUT_MS)
-    except Exception:
-        # Playwright's message carries a call log with cookie / set-cookie headers: never keep it.
-        raise MarketDeskAuthError("login_transport") from None
-    try:
-        payload = response.json()
-    except Exception:
-        payload = None
-    if response.status != 200 or not isinstance(payload, dict) or payload.get("success") is not True:
-        raise MarketDeskAuthError(f"login rejected (HTTP {response.status})")
-
-
-def open_session(context, page, *, env=os.environ, post=None) -> None:
-    """Make ``context`` signed in to marketdesk.ai or raise MarketDeskAuthError."""
-    if is_authenticated(page):
-        return
-
+def obtain_id_token(env=os.environ, *, post=None) -> str:
+    """A fresh Firebase ID token: rotated file, then env seed (a stale file must not block a new seed),
+    then the password fallback."""
     failures: list[str] = []
-    id_token = None
-    candidates = []
+    candidates: list[str] = []
     for token in (_stored_refresh_token(env), _env_refresh_token(env)):
         if token and token not in candidates:
             candidates.append(token)
@@ -251,22 +203,154 @@ def open_session(context, page, *, env=os.environ, post=None) -> None:
             failures.append(str(exc))
             continue
         save_refresh_token(rotated, env)
-        break
+        return id_token
 
-    if id_token is None:
-        email = (env.get("THEMARKETEAR_EMAIL") or "").strip()
-        password = (env.get("THEMARKETEAR_PASSWORD") or "").strip()
-        if email and password:
+    email = (env.get("THEMARKETEAR_EMAIL") or "").strip()
+    password = (env.get("THEMARKETEAR_PASSWORD") or "").strip()
+    if email and password:
+        try:
+            return password_id_token(email, password, post=post)
+        except MarketDeskAuthError as exc:
+            failures.append(str(exc))
+    if not failures:
+        raise MarketDeskAuthError("no MarketDesk credentials configured")
+    raise MarketDeskAuthError("MarketDesk sign-in failed: " + "; ".join(failures))
+
+
+# ---- cookie session ------------------------------------------------------------------------
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect surfaces as HTTPError: on marketdesk.ai a 302 means the session is gone."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+def build_opener(jar: CookieJar | None = None):
+    handlers = [_NoRedirect()]
+    if jar is not None:
+        handlers.insert(0, urllib.request.HTTPCookieProcessor(jar))
+    return urllib.request.build_opener(*handlers)
+
+
+class MarketDeskSession:
+    """Cookie session on https://marketdesk.ai. ``opener`` and ``post`` are injectable for tests."""
+
+    def __init__(self, env=os.environ, *, opener=None, post=None):
+        self.env = env
+        self.post = post
+        self.jar = CookieJar()
+        self.opener = opener or build_opener(self.jar)
+
+    def _send(self, method: str, url: str, body: bytes | None, headers: dict, *, limit: int,
+              timeout: int) -> tuple[int, bytes, str, str]:
+        """(status, body, content type, Location). HTTP errors and redirects come back as a status."""
+        request = urllib.request.Request(url, data=body, method=method,
+                                         headers={"User-Agent": USER_AGENT, **BROWSER_HEADERS, **headers})
+        try:
+            with self.opener.open(request, timeout=timeout) as response:
+                declared = str(response.headers.get("Content-Length", "") or "").strip()
+                if declared.isdigit() and int(declared) > limit:
+                    raise MarketDeskError("too_large")
+                data = response.read(limit + 1)
+                content_type = str(response.headers.get("Content-Type", "") or "")
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            location = str((exc.headers or {}).get("Location", "") or "")
+            exc.close()
+            return exc.code, b"", "", location
+        except MarketDeskError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            raise MarketDeskError("http_transport") from None
+        if len(data) > limit:
+            raise MarketDeskError("too_large")
+        return status, data, content_type.split(";")[0].strip().lower(), ""
+
+    @staticmethod
+    def _url(path: str) -> str:
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            raise MarketDeskError("bad_path")
+        return BASE_URL + path
+
+    def login(self, id_token: str | None = None) -> None:
+        token = id_token or obtain_id_token(self.env, post=self.post)
+        try:
+            status, data, _, _ = self._send("POST", LOGIN_URL, json.dumps({"F": token}).encode(),
+                                         {"Content-Type": "application/json"}, limit=MAX_RESPONSE, timeout=TIMEOUT)
+        except MarketDeskError:
+            raise MarketDeskAuthError("login_transport") from None
+        try:
+            payload = json.loads(data or b"null")
+        except ValueError:
+            payload = None
+        if status != 200 or not isinstance(payload, dict) or payload.get("success") is not True:
+            raise MarketDeskAuthError(f"login rejected (HTTP {status})")
+
+    def api(self, method: str, path: str, body=None):
+        """JSON API call. A signed-out answer ({"success": false}) re-logs in once and retries."""
+        url = self._url(path)
+        data = None if body is None else json.dumps(body).encode()
+        headers = {"Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        for attempt in (1, 2):
+            status, raw, _, _ = self._send(method, url, data, headers, limit=MAX_RESPONSE, timeout=TIMEOUT)
+            if status != 200:
+                raise MarketDeskError(f"http_{status}")
             try:
-                id_token = password_id_token(email, password, post=post)
-            except MarketDeskAuthError as exc:
-                failures.append(str(exc))
+                payload = json.loads(raw)
+            except ValueError:
+                raise MarketDeskError("bad_response") from None
+            if isinstance(payload, dict) and payload.get("success") is False:
+                if attempt == 1:
+                    self._relogin()
+                    continue
+                raise MarketDeskError("unauthenticated")
+            return payload
+        raise MarketDeskError("unauthenticated")  # unreachable; keeps type checkers honest
 
-    if id_token is None:
-        if not failures:
-            raise MarketDeskAuthError("no MarketDesk credentials configured")
-        raise MarketDeskAuthError("MarketDesk sign-in failed: " + "; ".join(failures))
+    @staticmethod
+    def _file_server_url(location: str, path: str) -> str | None:
+        """The signed-in hop: https://tsN.marketdesk.ai/files/<same id>/preview, else None."""
+        target = urllib.parse.urlsplit(urllib.parse.urljoin(BASE_URL + path, location))
+        match = re.fullmatch(r"/files/([A-Za-z0-9]{8,16})/blob", path)
+        if (target.scheme != "https" or target.port not in (None, 443) or target.username or target.password
+                or not FILE_SERVER_RE.fullmatch(target.hostname or "") or match is None
+                or target.path != f"/files/{match.group(1)}/preview"):
+            return None
+        return urllib.parse.urlunsplit(target)
 
-    _server_login(context, id_token)
-    if not is_authenticated(page):
-        raise MarketDeskAuthError("not authenticated after login")
+    def blob(self, path: str, *, limit: int) -> tuple[bytes, str]:
+        """Binary GET (PDF): one allowlisted hop to the file server. Any other redirect or a 401/403
+        re-logs in once and retries."""
+        url = self._url(path)
+        for attempt in (1, 2):
+            status, data, content_type, location = self._send("GET", url, None, {}, limit=limit,
+                                                              timeout=DOWNLOAD_TIMEOUT)
+            hop = self._file_server_url(location, path) if status in REDIRECTS else None
+            if hop is not None:
+                status, data, content_type, _ = self._send("GET", hop, None, {}, limit=limit,
+                                                           timeout=DOWNLOAD_TIMEOUT)
+            if status in (*REDIRECTS, 401, 403):
+                if attempt == 1:
+                    self._relogin()
+                    continue
+                raise MarketDeskError("unauthenticated")
+            if status != 200:
+                raise MarketDeskError(f"http_{status}")
+            return data, content_type
+        raise MarketDeskError("unauthenticated")
+
+    def _relogin(self) -> None:
+        try:
+            self.login()
+        except MarketDeskAuthError:
+            raise MarketDeskError("unauthenticated") from None
+
+
+def open_session(env=os.environ, *, opener=None, post=None) -> MarketDeskSession:
+    """A signed-in session or MarketDeskAuthError."""
+    session = MarketDeskSession(env, opener=opener, post=post)
+    session.login()
+    return session
