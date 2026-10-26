@@ -189,6 +189,78 @@ def _bridge(tmp_path, *, github=None, reviewer=None):
     return result
 
 
+_REAL_REQUIRE_PLAIN_COMMIT = bridge_module._require_plain_commit
+_PLAIN_COMMIT = (
+    f"tree {'2' * 40}\nparent {BASE}\n"
+    "author radon bot <bot@example.test> 1793000000 +0000\n"
+    "committer radon bot <bot@example.test> 1793000000 +0000\n\nfix: repair\n"
+).encode()
+
+
+@pytest.fixture(autouse=True)
+def _commit_object_check_stubbed(monkeypatch):
+    # Bridge fakes return no commit object; the check has its own tests below.
+    monkeypatch.setattr(bridge_module, "_require_plain_commit", lambda raw: None)
+
+
+@pytest.mark.parametrize("raw", [
+    _PLAIN_COMMIT,
+    _PLAIN_COMMIT.replace(f"parent {BASE}\n".encode(), b""),
+    _PLAIN_COMMIT.replace(f"parent {BASE}\n".encode(), f"parent {BASE}\nparent {HEAD}\n".encode()),
+], ids=["one-parent", "root", "merge"])
+def test_plain_commit_object_is_accepted(raw):
+    _REAL_REQUIRE_PLAIN_COMMIT(raw)
+
+
+@pytest.mark.parametrize("raw", [
+    _PLAIN_COMMIT.replace(b"\n\n", b"\nx-note unreviewed text\n\n"),
+    _PLAIN_COMMIT.replace(b"\n\n", b"\ngpgsig -----BEGIN-----\n unreviewed\n -----END-----\n\n"),
+    _PLAIN_COMMIT.replace(b"\n\n", b"\nencoding unreviewed\n\n"),
+    _PLAIN_COMMIT.replace(b"committer", b"author", 1),
+    _PLAIN_COMMIT.replace(b"author radon bot <bot@example.test> 1793000000 +0000\n", b""),
+], ids=["extra-header", "continuation", "encoding", "duplicate-author", "missing-author"])
+def test_commit_object_with_unreviewed_headers_is_refused(raw):
+    with pytest.raises(ValueError, match="headers"):
+        _REAL_REQUIRE_PLAIN_COMMIT(raw)
+
+
+def test_publish_refuses_unreviewed_commit_headers_before_push(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge_module, "_require_plain_commit", _REAL_REQUIRE_PLAIN_COMMIT)
+    commands = []
+
+    def fake_run(args, **kwargs):
+        commands.append(args)
+        if "cat-file" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=_PLAIN_COMMIT.replace(b"\n\n", b"\nx-note unreviewed\n\n"))
+        return subprocess.CompletedProcess(args, 0, stdout=b"")
+
+    monkeypatch.setattr(bridge_module.subprocess, "run", fake_run)
+    bridge = _bridge(tmp_path)
+    bridge.directory.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ValueError, match="headers"):
+        bridge._publish(HEAD, f"security-private-release/{HEAD}")
+    assert any("fetch" in args for args in commands)
+    assert not any("push" in args for args in commands)
+
+
+def test_publish_pushes_a_plain_commit(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge_module, "_require_plain_commit", _REAL_REQUIRE_PLAIN_COMMIT)
+    commands = []
+
+    def fake_run(args, **kwargs):
+        commands.append(args)
+        if "cat-file" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=_PLAIN_COMMIT)
+        return subprocess.CompletedProcess(args, 0, stdout=b"")
+
+    monkeypatch.setattr(bridge_module.subprocess, "run", fake_run)
+    bridge = _bridge(tmp_path)
+    bridge.directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(bridge, "_api", lambda path, *args: [{"html_url": "https://github.com/joemccann/radon/pull/1"}])
+    assert bridge._publish(HEAD, f"security-private-release/{HEAD}") == "https://github.com/joemccann/radon/pull/1"
+    assert any(f"{HEAD}:refs/heads/security-private-release/{HEAD}" in args for args in commands if "push" in args)
+
+
 def test_export_candidate_rejects_non_p1_and_invalid_immutable_refs_before_io(monkeypatch, tmp_path):
     called = False
 

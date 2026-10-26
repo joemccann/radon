@@ -170,6 +170,20 @@ def poll_feedback(base, head, *, cwd):
         return value
 
 
+def _require_plain_commit(raw):
+    """Refuse a commit object carrying any header the review never read.
+
+    Review covers the tree diff, message, author and committer; _publish
+    pushes the object byte for byte, so an extra header or a continuation
+    line would reach public history unreviewed (DS-2026-10-26-03).
+    """
+    headers = raw.split(b'\n\n', 1)[0].split(b'\n')
+    keys = [line.split(b' ', 1)[0].decode('ascii', 'replace') for line in headers]
+    allowed = ['tree'] + ['parent'] * (len(keys) - 3) + ['author', 'committer']
+    if keys != allowed or any(b' ' not in line for line in headers):
+        raise ValueError('candidate commit carries headers outside tree/parent/author/committer')
+
+
 def _require_private_archive():
     import urllib.error
     import urllib.request
@@ -963,9 +977,10 @@ class PrivateReleaseBridge:
         env = {'HOME': str(Path.home()), 'PATH': '/opt/homebrew/bin:/usr/bin:/bin', 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
         with tempfile.TemporaryDirectory(prefix='publish-', dir=self.directory) as temporary:
             def git(*args):
-                subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'credential.helper=!/opt/homebrew/bin/gh auth git-credential', *args], cwd=temporary, env=env, check=True, capture_output=True, timeout=180)
+                return subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'credential.helper=!/opt/homebrew/bin/gh auth git-credential', *args], cwd=temporary, env=env, check=True, capture_output=True, timeout=180).stdout
             git('init', '--bare', '.')
             git('fetch', '--no-tags', f'https://github.com/{PRIVATE}.git', head)
+            _require_plain_commit(git('cat-file', 'commit', head))
             git('push', f'https://github.com/{PUBLIC}.git', f'{head}:refs/heads/{branch}')
         existing = self._api(f'repos/{PUBLIC}/pulls?state=all&head=joemccann:{branch}')
         if existing: return existing[0]['html_url']
