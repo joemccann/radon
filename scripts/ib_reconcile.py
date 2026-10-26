@@ -450,11 +450,24 @@ def _record_health(state: str, detail: dict) -> None:
         log(f"service_health write failed: {exc}", "warn")
 
 
+def _position_summary(pos: dict) -> dict:
+    """Enough of a snapshot or IB row to name it on the freshness panel."""
+    return {
+        "ticker": pos.get("ticker") or pos.get("symbol"),
+        "structure": pos.get("structure") or pos.get("sec_type"),
+        "quantity": pos.get("contracts") or pos.get("quantity") or pos.get("shares"),
+    }
+
+
 def _health_detail(report: dict) -> dict:
     return {
         "new_trades_count": len(report.get("new_trades", [])),
         "positions_missing_locally_count": len(report.get("positions_missing_locally", [])),
+        "positions_missing_locally": [
+            _position_summary(p) for p in report.get("positions_missing_locally", [])[:10]
+        ],
         "positions_closed_count": len(report.get("positions_closed", [])),
+        "positions_closed": [_position_summary(p) for p in report.get("positions_closed", [])[:10]],
         "quantity_mismatch_count": len(report.get("quantity_mismatch", [])),
         "quantity_mismatch": report.get("quantity_mismatch", [])[:10],
         "expired_locally_count": len(report.get("expired_locally", [])),
@@ -473,9 +486,16 @@ def _drift_message(detail: dict, *, include_new_trades: bool = True) -> str:
     return (
         head
         + f"{detail['quantity_mismatch_count']} quantity mismatch(es), "
-        f"{detail['positions_missing_locally_count']} missing locally, "
+        f"{detail['positions_missing_locally_count']} missing locally"
+        f"{_named(detail.get('positions_missing_locally'))}, "
         f"{detail['positions_closed_count']} closed locally"
+        f"{_named(detail.get('positions_closed'))}"
     )
+
+
+def _named(summaries) -> str:
+    tickers = [str(p.get("ticker")) for p in summaries or [] if p.get("ticker")]
+    return f" ({', '.join(tickers)})" if tickers else ""
 
 def main():
     """Main reconciliation routine."""

@@ -97,8 +97,8 @@ export async function PUT(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values, updated_by: operatorId }),
       timeout: MUTATE_TIMEOUT_MS,
-      // The app host requires an operator JWT for an ib_gateway rotation
-      // even from loopback; FastAPI ignores it on the other services.
+      // The app host requires an operator JWT on the Gateway password PUT
+      // even from loopback (server._is_app_role_gateway_mutation).
       token: access.principal.token,
     });
     // FastAPI stored and exported the save; mirror the per-request web keys
