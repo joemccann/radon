@@ -436,7 +436,10 @@ def test_same_line_wrappers_do_not_report_expressions(text):
     "password: x\n\n\n",
     "password: x\n\n  y\n",
     "password: !t x\n",
-], ids=["adjacent-literals", "blank-runs", "blank-then-deeper", "node-property"])
+    'password = "" \\\n',
+    "password=[redacted]\n\n\n",
+], ids=["adjacent-literals", "blank-runs", "blank-then-deeper", "node-property",
+        "backslash-continuations", "redacted-then-blank-runs"])
 def test_continuation_and_adjacency_stay_linear(unit):
     import time
 
@@ -463,3 +466,18 @@ def test_prefixed_url_parameter_keeps_its_query_structure():
     text = f"https://h.invalid/v1?client_api_key={OPAQUE}&symbol=SPY\n"
     out = scrub_credential_text(text)
     assert OPAQUE not in out and "&symbol=SPY" in out, out
+
+
+_RESCAN4_SHAPES = {
+    "template-literal": f"const password = `{OPAQUE}{TAIL}`;\n",
+    "backslash-continuation": f'PASSWORD = "" \\\n    "{OPAQUE}{TAIL}"\n',
+    "redacted-header-then-continuation": f"authorization: Basic\n    {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN4_SHAPES.values(), ids=_RESCAN4_SHAPES.keys())
+def test_rescan4_shape_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    if "authorization" not in text:
+        assert find_secret_assignments(text) == ["[redacted-secret]"]
+

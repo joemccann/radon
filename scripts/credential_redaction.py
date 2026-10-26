@@ -296,15 +296,22 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     if prefix is not None:
         index = prefix.end()
 
-    if index < length and text[index] in "\"'":
+    # A JavaScript template literal is quoted too (rescan of DS-2026-10-25-15).
+    if index < length and text[index] in "\"'`":
         body, end, delimiter = _scan_quoted(text, index)
         # Adjacent literals on the line are one Python constant: `"" "<v>"`
         # kept its second literal (rescan of DS-2026-10-25-15). A loop, not
         # recursion, so a long run of literals cannot exhaust the stack.
         while delimiter:
             following = end + len(delimiter)
-            while following < length and text[following] in " \t":
-                following += 1
+            while following < length:
+                if text[following] in " \t":
+                    following += 1
+                elif text.startswith(("\\\n", "\\\r\n"), following):
+                    # A backslash line continuation joins the next line's literal.
+                    following = text.index("\n", following) + 1
+                else:
+                    break
             prefix = _STRING_PREFIX.match(text, following)
             if prefix is not None:
                 following = prefix.end()
@@ -524,8 +531,13 @@ def _redact_assignments(text: str) -> str:
             after = body_end + len(delimiter)
             while after < len(text) and text[after] in " \t":
                 after += 1
-            if delimiter or after >= len(text) or text[after] in "\r\n":
+            if delimiter:
                 continue
+            if after >= len(text) or text[after] in "\r\n":
+                # Unless the value continues on deeper lines an earlier rule
+                # never saw: `authorization: Basic` then the credential.
+                if _continuation_end(text, line_start(head_start), after) == after:
+                    continue
         if not delimiter:
             # DS-2026-10-25-04: an unquoted value is redacted to the end of
             # its line. Stopping at whitespace published every word after
