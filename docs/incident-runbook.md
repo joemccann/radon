@@ -1190,6 +1190,65 @@ Peak: 2026-10-22 14:05:00Z, page `dd71d822b3bc9870a24ec1804a82cea4`.
 
 ---
 
+## leap-preset-timeout-before-cache-write
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when the largecaps child is killed at the FastAPI preset timeout before
+`data/leap.json` is written.** Peak: 2026-10-26 15:00:51Z, page
+`4e016615cccd64a9b515b6e02513cecf`.
+
+- **Mechanism:** the 10:00 ET timer POSTs `/leap/scan?preset=largecaps`.
+  `scan_universe` opens one IB session and `_LockedIB` serializes
+  `get_historical_data` (default timeout 15s, plus up to 5s of cancel
+  grace) across every name before UW. A 518-name run that pays several
+  seconds per name does not finish inside `LEAP_PRESET_TIMEOUT_S` (3600).
+  FastAPI returns HTTP 502 `Script timed out after 3600s`. The wrapper
+  does not treat that body as a capacity shed, logs
+  `LEAP FastAPI outcome indeterminate (curl=0, http=502)`, and exits 1.
+  The cache write in `main()` never runs. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. Sibling GARCH largecaps in the same
+  hour can still finish: it is a smaller critical section, not proof
+  the gateway is down.
+- **Detection:** unit journal is only the POST line at 14:00:51Z and,
+  exactly 3600s later, the indeterminate 502 line. `systemctl show` is
+  `Result=exit-code`, `ExecMainStatus=1`, `NRestarts=0`, and
+  `ExecMainExitTimestamp` minus `ExecMainStartTimestamp` is 3600s.
+  `data/leap.json` `scan_time` stays on the previous success.
+  `/health/lite` stays authenticated. UW cache files keep landing for
+  ohlc, iv-rank, and option-contracts through the hour, so the child
+  was still scanning when it was killed.
+- **Discriminating check:** span is the preset timeout, not an instant
+  502 (`leap-capacity-502`), not a ~60–120s `PermissionError` on
+  `reports` (`leap-reports-permission-502`), and not a ~3 minute run
+  that writes `leap.json` with `status` `degraded`
+  (`leap-admission-busy-exhausted` / `leap-admission-window-exhaustion`).
+  Cache `status` `ok` with exit 1 after `SCAN COMPLETE` is
+  `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down, or the gateway is unauthenticated
+  or unreachable, stand down. Do not raise `LEAP_PRESET_TIMEOUT_S` or
+  `TimeoutStartSec` to hide the serialized history lock.
+- **Remediation (code):** `LEAP_SCAN_BUDGET_S` (3300) stops the pool
+  before the 3600s kill, leaving one in-flight 120s admission wait plus
+  one 70s retry for the cache write. Names still queued are
+  `deferred_tickers`, not provider failures. A nonempty partial result
+  still exits 0. Leap passes `LEAP_IB_HISTORY_TIMEOUT_S` (3) into the
+  serialized historical call so a paced name falls through to
+  Robinhood, then UW, instead of holding the lock for 15s. Do not
+  `reset-failed` as the fix. The next timer after deploy, or one
+  `reset-failed` plus start once the unit is on a newer green deploy
+  (`RERUNNABLE_ONESHOT_UNITS`), reruns the scan.
+- **Regression:**
+  `scripts/tests/test_leap_scanner.py::test_leap_history_bounds_serialized_ib_timeout`,
+  `test_scan_budget_returns_before_the_preset_subprocess_kill`,
+  `test_scan_universe_stops_at_the_wall_clock_budget`,
+  `test_budget_truncated_scan_writes_cache_and_exits_zero`,
+  `scripts/tests/test_uw_surface.py::test_fetch_daily_closes_forwards_explicit_ib_timeout`.
+- **Code:** `scripts/leap_scanner_uw.py` (`LEAP_SCAN_BUDGET_S`,
+  `LEAP_IB_HISTORY_TIMEOUT_S`, `scan_universe`),
+  `scripts/utils/uw_surface.py` (`fetch_daily_closes` `ib_timeout`).
+
+---
+
 ## garch-capacity-502
 
 **`radon-garch.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)

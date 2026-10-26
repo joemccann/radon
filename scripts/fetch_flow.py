@@ -35,7 +35,13 @@ from utils.market_calendar import (
     load_holidays,
     _is_trading_day,
 )
-from utils.darkpool_cache import get_cached_darkpool, is_immutable, set_cached_darkpool
+from utils.darkpool_cache import (
+    day_start_et,
+    get_cached_darkpool,
+    is_immutable,
+    set_cached_darkpool,
+    trade_executed_at,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,16 @@ logger = logging.getLogger(__name__)
 # per-day darkpool calls silently swallowed UWRateLimitError. One bounded
 # retry covers the common transient case without amplifying the throttle.
 _UW_TRANSIENT_RETRY_SLEEP_S = 2.0
+
+# The flow report shares the UW admission governor with the top-of-hour
+# timers (flow-refresh, signals-refresh, garch, catalysts), which saturate the
+# minute window together. UWClient's 5s default admission wait turned that
+# into a 429 that killed the whole report: /flow-analysis/SOXL 502'd on
+# 2026-10-26 15:07 UTC with no cache to fall back on. A 60s Retry-After
+# embargo plus one saturated minute is 120s (uw_governor.MAX_WAIT_SECONDS),
+# inside the 300s flow_report.py subprocess budget. Same shape as
+# fetch_oi_changes.OI_ADMISSION_WAIT_S and leap_scanner_uw's preset client.
+FLOW_ADMISSION_WAIT_S = 120.0
 
 # UW /api/darkpool/{ticker}: limit default 500, max 500. Full days on liquid
 # names (GLD, SPY, …) require older_than cursor walks (default order=desc).
@@ -293,6 +309,36 @@ def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):
         raise
 
 
+def _flow_client_kwargs(retry_transient: bool) -> Dict:
+    """UWClient settings for a self-built flow client.
+
+    Transient-retry callers (the flow report) wait through a saturated UW
+    minute window; fail-fast callers (scanner / discover sampling) keep the
+    interactive default and no client-side retry ladder.
+    """
+    if retry_transient:
+        return {"admission_timeout": FLOW_ADMISSION_WAIT_S}
+    return {"max_retries": 0, "backoff_factor": 0}
+
+
+def _trades_within_day(page: List[Dict], day_start: Optional[datetime]) -> List[Dict]:
+    """Drop prints executed before the requested day; keep unstamped ones.
+
+    UW applies ``date`` only as an upper bound once ``older_than`` is sent:
+    a cursor inside the day fills the page with prior-day prints (probed
+    2026-10-26). Without this cut a heavy day walks the full 40-page cap
+    into earlier sessions and caches three days as one.
+    """
+    if day_start is None:
+        return page
+    kept = []
+    for trade in page:
+        executed = trade_executed_at(trade)
+        if executed is None or executed >= day_start:
+            kept.append(trade)
+    return kept
+
+
 def _darkpool_page_cursor(trades: List[Dict]) -> Optional[str]:
     """Oldest executed_at on a desc-ordered page → next older_than cursor.
 
@@ -366,6 +412,7 @@ def walk_darkpool(
         else:
             page_cap = max(1, min(int(max_pages), DARKPOOL_MAX_PAGES))
         hit_page_cap = False
+        day_start = day_start_et(date)
         for _page_idx in range(page_cap):
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
@@ -374,7 +421,9 @@ def walk_darkpool(
             if not isinstance(page, list) or not page:
                 break
 
-            for trade in page:
+            within_day = _trades_within_day(page, day_start)
+            crossed_into_prior_day = len(within_day) < len(page)
+            for trade in within_day:
                 tid = trade.get("tracking_id")
                 if tid is not None:
                     if tid in seen_ids:
@@ -382,7 +431,7 @@ def walk_darkpool(
                     seen_ids.add(tid)
                 all_trades.append(trade)
 
-            if len(page) < DARKPOOL_PAGE_LIMIT:
+            if crossed_into_prior_day or len(page) < DARKPOOL_PAGE_LIMIT:
                 break
 
             next_cursor = _darkpool_page_cursor(page)
@@ -405,8 +454,7 @@ def walk_darkpool(
 
     if _client is not None:
         return _fetch(_client)
-    client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
-    with UWClient(**client_kwargs) as client:
+    with UWClient(**_flow_client_kwargs(retry_transient)) as client:
         return _fetch(client)
 
 
@@ -525,8 +573,7 @@ def fetch_flow_alerts(
 
     if _client is not None:
         return _fetch(_client)
-    client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
-    with UWClient(**client_kwargs) as client:
+    with UWClient(**_flow_client_kwargs(retry_transient)) as client:
         return _fetch(client)
 
 
@@ -738,8 +785,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
     if _client is not None:
         flow_alerts = _do_fetch(_client)
     else:
-        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
-        with UWClient(**client_kwargs) as client:
+        with UWClient(**_flow_client_kwargs(retry_transient)) as client:
             flow_alerts = _do_fetch(client)
 
     # Aggregate dark pool analysis

@@ -2324,11 +2324,11 @@ async def demo_trial_expiry(request: Request):
 
 
 def _is_app_role_gateway_mutation(request: Request) -> bool:
-    """True for Gateway lifecycle POSTs and the Gateway credential PUT on the app host.
+    """True for Gateway lifecycle POSTs and the Gateway password PUT on the app host.
 
     Loopback trust would let a compromised Next.js on the public terminator
-    restart IBKR, or rewrite its login and restart it, without a Clerk
-    operator JWT. Combined/broker keep the existing local-helper path.
+    restart IBKR or rewrite its login without a Clerk operator JWT.
+    Combined/broker keep the existing local-helper path.
 
     The unit name is canonicalized before the comparison: systemd treats
     ``radon-ib-gateway`` and ``radon-ib-gateway.service`` as the same unit,
