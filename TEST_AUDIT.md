@@ -11880,3 +11880,44 @@ Serial from the repo root, OpenSSL 3 and the 3.13 venv first on `PATH`. Root pyt
 | 3 | 17,577 passed / 10 skipped / 23 subtests (127.30s) | 5 failed / 11,453 passed / 21 skipped / 1,161 files (117.90s) | 42 failed / 3,313 passed / 25 skipped (779.61s) | 0 added / 0 removed |
 
 Base cloud at `33014267` on this Mac (Python 3.13.16, OpenSSL 3.6.5, `/bin/bash` 3.2.57, caddy present): 42 failed / 3,313 passed / 25 skipped (931.54s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 42 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`, plus the control-service, gateway-control, media-publication, and monorepo-cutover cases in that same set.
+
+## Delta audit 2026-10-26
+
+Range `3301426796e582e1112305c12ddb263f9acc83f2..7f6ad940b407dfecee951310aa78c787cc97cb9a`: 48 commits / 94 paths. Newest trusted checkpoint is the 2026-10-25 collaborator comment on issue #83 (`audited-through: 3301426796e582e1112305c12ddb263f9acc83f2`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-568.
+
+Order placement, modify identity, close re-admission, redaction, the Gateway password writer, compact JSON caches, and the shallow-store refspec each ship a test that calls the behavior. `ci.yml` only pins `runs-on: ubuntu-24.04`; coverage thresholds are unchanged. New `pytest.skip` marks in `cloud/tests/test_ib_gateway_credential.py` name a missing docker CLI and still run the writer. The delta Python files passed 888 tests with 2 skipped on each of three runs. The delta Vitest files passed 35 on each of three runs. The delta cloud files outside the bash 3.2 baseline passed 986 with 6 skipped on each of three runs.
+
+Not filed: the five `await import("../next.config.mjs")` Vitest cases still time out at 5000ms and passed 29 tests at a 20s ceiling in 14.94s. The committed ceiling was not raised. `cloud/tests` on this Mac is the same 42 nodes as `7f6ad940` (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56` and `mapfile` missing in `operator-radon.sh`). Caddy 2.11.7 is on PATH. Linux CI is the authority for that suite.
+
+### T-568 — P1 — the every-loop install check searches the script text
+
+`test_install_refreshes_every_loop_env_not_only_the_named_loops` split `install_runner` as raw text, comments included, and required the for-loop and `atomic_install` strings to appear. Commenting out the copy at `scripts/runner/install.sh:356-358` and leaving those strings in the comment kept that test green (1 passed in 0.77s). `install_runner` would again refresh only the files some other call copied, which is how a sibling loop kept an env with no `DEADMAN_LABEL`.
+
+Acceptance: running `install_runner` against a private prefix copies every `scripts/runner/loops/*.env` byte for byte, including a sibling that was pre-seeded with different text. A comment that still contains the for-loop text fails that test.
+
+### T-569 — P1 — the root Gateway path check searches the writer text
+
+`test_test_mode_ignored_as_root` required `os.geteuid() != 0` anywhere in `cloud/scripts/radon-ib-gateway-credential.py`. `_test_mode` is the decision (`cloud/scripts/radon-ib-gateway-credential.py:94-97`): it returns true only when the caller is not root and `RADON_TEST_GATEWAY_DIR` is set. `_paths` then uses that directory (`:100-106`). Dropping the euid conjunct and leaving `os.geteuid() != 0` in a comment, while `_require_root` still contains the same expression, kept the old test green (1 passed in 0.06s). Root would write the Gateway password file wherever the variable pointed.
+
+Acceptance: with `geteuid` forced to 0 and `RADON_TEST_GATEWAY_DIR` set, `_test_mode()` is false and `_paths()["dir"]` is `/etc/radon/ib-gateway`. The planted directory is not the target.
+
+Audited through: 7f6ad940b407dfecee951310aa78c787cc97cb9a on 2026-10-26 — 2 new findings
+
+## Remediation 2026-10-26
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-568 | DONE | With the copy loop commented out, the old text search passed (1 passed, 0.77s) and `test_install_runner_copies_every_loop_env` failed `ci-performance.env` is not a file. Restored `scripts/runner/install.sh`. The new test passed in 1.22s, 1.32s, and 1.32s. `scripts/tests/test_runner_run_loop.py` passed 126 serially in 72.39s. Product source unchanged. |
+| T-569 | DONE | With `_test_mode` returning only the env check, the old source search passed (1 passed, 0.06s) and `test_test_mode_ignored_as_root` failed `assert True is False`. Restored `cloud/scripts/radon-ib-gateway-credential.py`. The new test passed three times. `cloud/tests/test_ib_gateway_credential.py` passed 65 with 6 skipped in 1.81s. Product source unchanged. |
+
+### Closing gates 2026-10-26
+
+Serial from the repo root, OpenSSL 3.6.5 first on `PATH`, Python 3.13.16, `/bin/bash` 3.2.57, caddy 2.11.7. Root pytest exit 0 on each recorded round. The first attempt at round 3 failed `test_flow_analysis_post_writes_nothing_into_the_repo_data_dir` because `data/exit_order_service.log` changed under the full suite; that test passed alone in 0.37s, and the recorded round 3 is the rerun. Vitest exit 1 each round on the same five `next.config.mjs` imports (`Test timed out in 5000ms`). Those five passed 29 tests at a 20s ceiling in 14.94s. Cloud exit 1 each round on the same 42 nodes as each other and as `7f6ad940` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `7f6ad940` |
+|---|---|---|---|---|
+| 1 | 17,767 passed / 12 skipped / 23 subtests (103.76s) | 5 failed / 11,482 passed / 21 skipped / 1,162 files (61.32s) | 42 failed / 3,404 passed / 31 skipped (768.65s) | 0 added / 0 removed |
+| 2 | 17,767 passed / 12 skipped / 23 subtests (114.44s) | 5 failed / 11,482 passed / 21 skipped / 1,162 files (111.89s) | 42 failed / 3,404 passed / 31 skipped (834.47s) | 0 added / 0 removed |
+| 3 | 17,767 passed / 12 skipped / 23 subtests (165.49s) | 5 failed / 11,482 passed / 21 skipped / 1,162 files (123.00s) | 42 failed / 3,404 passed / 31 skipped (876.01s) | 0 added / 0 removed |
+
+Base cloud at `7f6ad940` on this Mac: 42 failed / 3,403 passed / 31 skipped (774.90s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 42 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56` and `mapfile` missing in `cloud/scripts/operator-radon.sh`, plus the gateway-control and media-publication cases in that same set.

@@ -52,7 +52,7 @@ vi.mock("@/lib/useJournal", () => ({
   }),
 }));
 
-const NOW = new Date();
+const NOW = new Date("2026-10-26T16:00:00Z");
 const expiry = "2099-05-01";
 
 function pd(over: Partial<PriceData>): PriceData {
@@ -84,12 +84,15 @@ function pd(over: Partial<PriceData>): PriceData {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   window.localStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function enableAllImpliedOrderColumns() {
@@ -473,7 +476,7 @@ describe("WorkspaceSections orders — Implied column", () => {
     expect(rowText).toContain(expected);
   });
 
-  it("renders signed combo Implied for a BAG (vertical call spread)", () => {
+  it("renders signed combo Implied for explicitly correlated vertical-spread legs", () => {
     enableAllImpliedOrderColumns();
     const sigma = 0.3;
     const expiryV = "20990619";
@@ -488,6 +491,7 @@ describe("WorkspaceSections orders — Implied column", () => {
         {
           orderId: 1,
           permId: 1,
+          orderRef: "amd-call-spread",
           symbol: "AMD",
           contract: {
             conId: 1,
@@ -511,6 +515,7 @@ describe("WorkspaceSections orders — Implied column", () => {
         {
           orderId: 2,
           permId: 2,
+          orderRef: "amd-call-spread",
           symbol: "AMD",
           contract: {
             conId: 2,
@@ -555,10 +560,12 @@ describe("WorkspaceSections orders — Implied column", () => {
 
     const table = screen.getByText("Implied").closest("table");
     expect(table).not.toBeNull();
-    const rowsText = Array.from(table!.querySelectorAll("tbody tr"))
-      .map((r) => r.textContent ?? "")
-      .join("\n");
-    // BAG combo row aggregates legs; the implied value should appear.
-    expect(rowsText).toContain(expected.toFixed(2));
+    const rows = table!.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    const impliedIndex = Array.from(table!.querySelectorAll("thead th"))
+      .findIndex((header) => header.textContent?.trim() === "Implied");
+    expect(impliedIndex).toBeGreaterThanOrEqual(0);
+    expect(rows[0].querySelectorAll("td")[impliedIndex].textContent)
+      .toBe(`$${expected.toFixed(2)}`);
   });
 });
