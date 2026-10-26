@@ -1452,6 +1452,8 @@ def test_install_runner_copies_every_loop_env(tmp_path):
         "set -euo pipefail\n"
         f'export PATH="{bindir}:$PATH"\n'
         f'export RADON_RUNNER_PREFIX="{prefix}"\n'
+        # CI has no Homebrew Python. atomic_replace uses this interpreter.
+        f'export RADON_RUNNER_PYTHON="{sys.executable}"\n'
         f'source "{nofinal}"\n'
         "install_runner\n"
     )
