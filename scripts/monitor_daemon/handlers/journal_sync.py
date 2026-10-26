@@ -33,7 +33,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .base import BaseHandler, et_session_date
+from .base import BaseHandler, et_session_date, connect_ib_with_retry
 from clients.ib_client import IBClient, DEFAULT_HOST
 from clients.journal_basis import normalize_expiry_compact, prior_net_qty_for_contract
 from utils.atomic_io import atomic_save, verified_load
@@ -121,7 +121,9 @@ class JournalSyncHandler(BaseHandler):
 
         client = IBClient()
         try:
-            client.connect(host=DEFAULT_HOST, port=self.ib_port, client_id=self.client_id)
+            connect_ib_with_retry(
+                lambda: client.connect(host=DEFAULT_HOST, port=self.ib_port, client_id=self.client_id)
+            )
             fills = client.get_fills()
         except Exception as exc:  # noqa: BLE001 — surface every failure
             logger.warning("journal_sync: IB fetch failed: %s", exc)
