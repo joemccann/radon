@@ -438,8 +438,9 @@ def test_same_line_wrappers_do_not_report_expressions(text):
     "password: !t x\n",
     'password = "" \\\n',
     "password=[redacted]\n\n\n",
+    "TOKEN=\\\n",
 ], ids=["adjacent-literals", "blank-runs", "blank-then-deeper", "node-property",
-        "backslash-continuations", "redacted-then-blank-runs"])
+        "backslash-continuations", "redacted-then-blank-runs", "shell-continuations"])
 def test_continuation_and_adjacency_stay_linear(unit):
     import time
 
@@ -481,3 +482,25 @@ def test_rescan4_shape_is_scrubbed_and_detected(text):
     if "authorization" not in text:
         assert find_secret_assignments(text) == ["[redacted-secret]"]
 
+
+
+_RESCAN5_SHAPES = {
+    "label-then-short-punctuated-tail": "password = '[redacted]!aB3cD4eF5gH6'\n",
+    "unquoted-label-then-short-punctuated-tail": "password = [redacted]!aB3cD4eF5gH6\n",
+    "shell-backslash-continuation": f"UW_TOKEN=\\\n{OPAQUE}{TAIL}\n",
+    "subscript-target": f"os.environ['UW_TOKEN'] = '{OPAQUE}{TAIL}'\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN5_SHAPES.values(), ids=_RESCAN5_SHAPES.keys())
+def test_rescan5_shape_is_scrubbed(text):
+    out = scrub_credential_text(text)
+    assert _clean(out) and "aB3cD4eF5gH6" not in out, out
+
+
+@pytest.mark.parametrize("text", [
+    f"UW_TOKEN=\\\n{OPAQUE}{TAIL}\n",
+    f"os.environ['UW_TOKEN'] = '{OPAQUE}{TAIL}'\n",
+], ids=["shell-backslash-continuation", "subscript-target"])
+def test_rescan5_shape_is_detected(text):
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
