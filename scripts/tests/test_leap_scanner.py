@@ -813,3 +813,125 @@ class TestNullUwFields:
         )
         assert iv == 0
         assert rank == 0
+
+
+def test_leap_history_bounds_serialized_ib_timeout():
+    """_LockedIB runs historical requests one name at a time.
+
+    2026-10-26 14:00:51Z the largecaps oneshot (518 names) held that lock
+    until FastAPI killed the child at LEAP_PRESET_TIMEOUT_S. The default
+    15s historical timeout cannot fit that universe inside the scan budget.
+    """
+    from types import SimpleNamespace
+
+    class RecordingIB:
+        def __init__(self):
+            self.kwargs = None
+
+        def get_historical_data(self, contract, **kwargs):
+            self.kwargs = kwargs
+            return [SimpleNamespace(date="2026-01-01", close=100.0 + i) for i in range(60)]
+
+    ib = RecordingIB()
+    prices = leap_scanner_uw.get_price_history(
+        "AAPL",
+        uw_client=object(),
+        ib=ib,
+        ib_timeout=leap_scanner_uw.LEAP_IB_HISTORY_TIMEOUT_S,
+    )
+
+    assert len(prices) == 60
+    assert ib.kwargs["timeout"] == leap_scanner_uw.LEAP_IB_HISTORY_TIMEOUT_S
+    # 518 is the largecaps requested_tickers count on the paged run.
+    assert leap_scanner_uw.LEAP_IB_HISTORY_TIMEOUT_S * 518 < leap_scanner_uw.LEAP_SCAN_BUDGET_S
+
+
+def test_scan_budget_returns_before_the_preset_subprocess_kill():
+    """One in-flight admission wait plus one retry must still land before
+    FastAPI's 3600s preset timeout, or the child is SIGKILLed before main()
+    writes data/leap.json.
+    """
+    import re
+    from pathlib import Path
+
+    server = Path("scripts/api/server.py").read_text()
+    match = re.search(r"^LEAP_PRESET_TIMEOUT_S = (\d+)", server, re.M)
+    assert match is not None
+    preset_timeout = int(match.group(1))
+    inflight = 120.0 + leap_scanner_uw.LEAP_ADMISSION_WAIT_S
+    assert leap_scanner_uw.LEAP_SCAN_BUDGET_S + inflight < preset_timeout
+
+
+def test_scan_universe_stops_at_the_wall_clock_budget(monkeypatch):
+    """Slow serialized history must not keep the pool open until every
+    name finishes. Finished names come back; the rest are deferred and
+    are not provider failures.
+    """
+    import threading
+    import time
+
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda **kwargs: nullcontext(object()))
+    release = threading.Event()
+    seen: dict = {}
+
+    def slow(ticker, *args, **kwargs):
+        seen["ib_timeout"] = kwargs.get("ib_timeout")
+        release.wait(2.0)
+        return _one_scan_result(ticker)
+
+    monkeypatch.setattr(leap_scanner_uw, "_scan_ticker_after_admission", slow)
+    failed: list[str] = []
+    providers: list[str] = []
+    deferred: list[str] = []
+    names = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]
+    started = time.monotonic()
+    try:
+        results = leap_scanner_uw.scan_universe(
+            names,
+            10,
+            workers=2,
+            failed_tickers=failed,
+            provider_failures=providers,
+            deferred_tickers=deferred,
+            deadline=started + 0.2,
+        )
+    finally:
+        release.set()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 3.5
+    assert seen["ib_timeout"] == leap_scanner_uw.LEAP_IB_HISTORY_TIMEOUT_S
+    assert len(results) < len(names)
+    assert providers == []
+    assert failed == []
+    assert set(deferred).isdisjoint(r.ticker for r in results)
+    assert set(deferred) | {r.ticker for r in results} == set(names)
+
+
+def test_budget_truncated_scan_writes_cache_and_exits_zero(tmp_path, monkeypatch):
+    """The 2026-10-26 page was the kill before the cache write. A budget
+    stop with at least one result must still write leap.json and exit 0.
+    """
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+
+    def fake_scan(tickers, min_gap, workers=16, failed_tickers=None, provider_failures=None, deferred_tickers=None, deadline=None):
+        assert deferred_tickers is not None
+        deferred_tickers.append("MSFT")
+        return [_one_scan_result("AAPL")]
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_universe", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["leap_scanner_uw.py", "AAPL", "MSFT", "--json", "--output", str(tmp_path / "report.html")],
+    )
+
+    assert leap_scanner_uw.main() == 0
+    payload = json.loads(cache.read_text())
+    assert [row["ticker"] for row in payload["results"]] == ["AAPL"]
+    assert payload["provider_failures"] == []
+    assert payload["status"] == "ok"
+    assert payload["scan_budget_spent"] is True
+    assert payload["deferred_tickers"] == ["MSFT"]
