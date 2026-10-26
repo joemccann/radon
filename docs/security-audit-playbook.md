@@ -374,7 +374,9 @@ line here whenever you ship a security fix.**
   scalar continues there, and a wrapper on the key line (a Python paren, a
   YAML tag or anchor) puts the value there. A quoted `Authorization` or
   `Cookie` value goes to the tokenizer, not the line-oriented header rules,
-  so its continuation lines are redacted too.
+  so its continuation lines are redacted too. Blank lines inside a continued
+  value belong to it, adjacent string literals on a line are one value, and
+  a redaction label inside quotes is never mistaken for URL structure.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines

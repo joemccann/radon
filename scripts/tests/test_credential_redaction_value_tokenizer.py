@@ -391,3 +391,61 @@ def test_unclosed_prefixed_string_is_detected():
 ])
 def test_openers_do_not_report_non_literals(text):
     assert find_secret_assignments(text) == []
+
+
+# Rescan of the continuation fix: adjacent literals, a blank line inside a
+# continued value, a label prefix on a quoted value, same-line wrappers.
+_RESCAN_SHAPES = {
+    "adjacent-literals": f'PASSWORD = "" "{OPAQUE}{TAIL}"\n',
+    "adjacent-literals-prefixed": f"PASSWORD = 'a' r'{OPAQUE}{TAIL}'\n",
+    "blank-line-in-paren": f'PASSWORD = (\n\n    "{OPAQUE}{TAIL}"\n)\n',
+    "blank-line-in-yaml": f"password: first\n\n  {OPAQUE}{TAIL}\n",
+    "label-then-query-suffix": f'password = "[redacted]&note={OPAQUE}{TAIL}"\n',
+    "same-line-paren": f'PASSWORD = ("{OPAQUE}{TAIL}")\n',
+    "same-line-yaml-tag": f"password: !!str {OPAQUE}{TAIL}\n",
+    "same-line-yaml-anchor": f"password: &pw {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN_SHAPES.values(), ids=_RESCAN_SHAPES.keys())
+def test_rescan_shape_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_blank_line_then_shallower_line_ends_the_continuation():
+    text = f"password: first\n\nmode: {OPAQUE}\n"
+    assert scrub_credential_text(text).endswith(f"\n\nmode: {OPAQUE}\n")
+
+
+def test_url_query_label_suffix_still_survives():
+    text = "url = https://h.test/q?api_key=k1&symbol=SPY\n"
+    assert "&symbol=SPY" in scrub_credential_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "token = (compute_token_1234567890abc())\n",
+    "password: !!str changeme-placeholder-1\n",
+])
+def test_same_line_wrappers_do_not_report_expressions(text):
+    assert find_secret_assignments(text) == []
+
+
+@pytest.mark.parametrize("unit", [
+    'password = "" ',
+    "password: x\n\n\n",
+    "password: x\n\n  y\n",
+    "password: !t x\n",
+], ids=["adjacent-literals", "blank-runs", "blank-then-deeper", "node-property"])
+def test_continuation_and_adjacency_stay_linear(unit):
+    import time
+
+    def elapsed(n):
+        payload = unit * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        find_secret_assignments(payload)
+        return time.perf_counter() - start
+
+    small, large = elapsed(500), elapsed(4000)
+    assert large < max(small * 40, 2.0), (small, large)
