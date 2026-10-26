@@ -369,7 +369,12 @@ line here whenever you ship a security fix.**
   Detection keeps the narrower whitespace-bounded span; whether a value is
   already redacted is decided on that token, never the rest of the line,
   which would make the scrubber quadratic. An `Authorization` value is
-  redacted to the end of its line, whatever its scheme.
+  redacted to the end of its line, whatever its scheme. An unquoted value
+  also takes the following lines indented deeper than its key: a YAML plain
+  scalar continues there, and a wrapper on the key line (a Python paren, a
+  YAML tag or anchor) puts the value there. A quoted `Authorization` or
+  `Cookie` value goes to the tokenizer, not the line-oriented header rules,
+  so its continuation lines are redacted too.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines

@@ -350,3 +350,44 @@ def test_any_number_of_comment_lines_before_the_value():
     scrubbed = scrub_credential_text(f"password:\n{comments}  {OPAQUE}\nnext: 1\n")
     assert _clean(scrubbed), scrubbed
     assert "next: 1" in scrubbed
+
+
+# DS-2026-10-25-12 .. -15: value shapes the tokenizer did not open or follow.
+_CONTINUED_VALUES = {
+    # -12 a quoted header value continued on the next line
+    "authorization-quoted-multiline": f'authorization: "Basic {OPAQUE}\n  {TAIL}"\n',
+    "cookie-quoted-multiline": f'Cookie: "a=1;\n  sid={OPAQUE}{TAIL}"\n',
+    # -13 a YAML plain scalar continued on more-indented lines
+    "yaml-plain-continuation": f"db:\n  password: first words\n    {OPAQUE}\n    {TAIL}\nnext: 1\n",
+    # -15 a wrapper on the key line, the value on the next line
+    "python-paren": f'PASSWORD = (\n    "{OPAQUE}"\n    "{TAIL}"\n)\n',
+    "yaml-tag": f"password: !!str\n  {OPAQUE}{TAIL}\n",
+    "yaml-anchor": f"password: &db_pw\n  {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _CONTINUED_VALUES.values(), ids=_CONTINUED_VALUES.keys())
+def test_continued_value_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_yaml_plain_continuation_stops_at_the_next_key():
+    text = f"password: first words\n  {OPAQUE}\nmode: live\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed)
+    assert scrubbed.endswith("mode: live\n")
+
+
+def test_unclosed_prefixed_string_is_detected():
+    # -14 a truncated excerpt: the opening quote is the tell
+    assert find_secret_assignments(f'password = r"{OPAQUE}') == ["[redacted-secret]"]
+
+
+@pytest.mark.parametrize("text", [
+    "password: !!str\n  changeme-placeholder\n",
+    "token = (\n    compute_token()\n)\n",
+    "password: short\nmode: live\n",
+])
+def test_openers_do_not_report_non_literals(text):
+    assert find_secret_assignments(text) == []
