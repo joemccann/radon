@@ -97,6 +97,9 @@ export async function PUT(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values, updated_by: operatorId }),
       timeout: MUTATE_TIMEOUT_MS,
+      // The app host requires an operator JWT on the Gateway password PUT
+      // even from loopback (server._is_app_role_gateway_mutation).
+      token: access.principal.token,
     });
     // FastAPI stored and exported the save; mirror the per-request web keys
     // into this process so Next picks them up without a restart.
