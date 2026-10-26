@@ -350,3 +350,157 @@ def test_any_number_of_comment_lines_before_the_value():
     scrubbed = scrub_credential_text(f"password:\n{comments}  {OPAQUE}\nnext: 1\n")
     assert _clean(scrubbed), scrubbed
     assert "next: 1" in scrubbed
+
+
+# DS-2026-10-25-12 .. -15: value shapes the tokenizer did not open or follow.
+_CONTINUED_VALUES = {
+    # -12 a quoted header value continued on the next line
+    "authorization-quoted-multiline": f'authorization: "Basic {OPAQUE}\n  {TAIL}"\n',
+    "cookie-quoted-multiline": f'Cookie: "a=1;\n  sid={OPAQUE}{TAIL}"\n',
+    # -13 a YAML plain scalar continued on more-indented lines
+    "yaml-plain-continuation": f"db:\n  password: first words\n    {OPAQUE}\n    {TAIL}\nnext: 1\n",
+    # -15 a wrapper on the key line, the value on the next line
+    "python-paren": f'PASSWORD = (\n    "{OPAQUE}"\n    "{TAIL}"\n)\n',
+    "yaml-tag": f"password: !!str\n  {OPAQUE}{TAIL}\n",
+    "yaml-anchor": f"password: &db_pw\n  {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _CONTINUED_VALUES.values(), ids=_CONTINUED_VALUES.keys())
+def test_continued_value_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_yaml_plain_continuation_stops_at_the_next_key():
+    text = f"password: first words\n  {OPAQUE}\nmode: live\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed)
+    assert scrubbed.endswith("mode: live\n")
+
+
+def test_unclosed_prefixed_string_is_detected():
+    # -14 a truncated excerpt: the opening quote is the tell
+    assert find_secret_assignments(f'password = r"{OPAQUE}') == ["[redacted-secret]"]
+
+
+@pytest.mark.parametrize("text", [
+    "password: !!str\n  changeme-placeholder\n",
+    "token = (\n    compute_token()\n)\n",
+    "password: short\nmode: live\n",
+])
+def test_openers_do_not_report_non_literals(text):
+    assert find_secret_assignments(text) == []
+
+
+# Rescan of the continuation fix: adjacent literals, a blank line inside a
+# continued value, a label prefix on a quoted value, same-line wrappers.
+_RESCAN_SHAPES = {
+    "adjacent-literals": f'PASSWORD = "" "{OPAQUE}{TAIL}"\n',
+    "adjacent-literals-prefixed": f"PASSWORD = 'a' r'{OPAQUE}{TAIL}'\n",
+    "blank-line-in-paren": f'PASSWORD = (\n\n    "{OPAQUE}{TAIL}"\n)\n',
+    "blank-line-in-yaml": f"password: first\n\n  {OPAQUE}{TAIL}\n",
+    "label-then-query-suffix": f'password = "[redacted]&note={OPAQUE}{TAIL}"\n',
+    "same-line-paren": f'PASSWORD = ("{OPAQUE}{TAIL}")\n',
+    "same-line-yaml-tag": f"password: !!str {OPAQUE}{TAIL}\n",
+    "same-line-yaml-anchor": f"password: &pw {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN_SHAPES.values(), ids=_RESCAN_SHAPES.keys())
+def test_rescan_shape_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_blank_line_then_shallower_line_ends_the_continuation():
+    text = f"password: first\n\nmode: {OPAQUE}\n"
+    assert scrub_credential_text(text).endswith(f"\n\nmode: {OPAQUE}\n")
+
+
+def test_url_query_label_suffix_still_survives():
+    text = "url = https://h.test/q?api_key=k1&symbol=SPY\n"
+    assert "&symbol=SPY" in scrub_credential_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "token = (compute_token_1234567890abc())\n",
+    "password: !!str changeme-placeholder-1\n",
+])
+def test_same_line_wrappers_do_not_report_expressions(text):
+    assert find_secret_assignments(text) == []
+
+
+@pytest.mark.parametrize("unit", [
+    'password = "" ',
+    "password: x\n\n\n",
+    "password: x\n\n  y\n",
+    "password: !t x\n",
+    'password = "" \\\n',
+    "password=[redacted]\n\n\n",
+    "TOKEN=\\\n",
+], ids=["adjacent-literals", "blank-runs", "blank-then-deeper", "node-property",
+        "backslash-continuations", "redacted-then-blank-runs", "shell-continuations"])
+def test_continuation_and_adjacency_stay_linear(unit):
+    import time
+
+    def elapsed(n):
+        payload = unit * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        find_secret_assignments(payload)
+        return time.perf_counter() - start
+
+    small, large = elapsed(500), elapsed(4000)
+    assert large < max(small * 40, 2.0), (small, large)
+
+
+@pytest.mark.parametrize("text", [
+    f'AUTHORIZATION = "Bearer " "{OPAQUE}{TAIL}"\n',
+    "PASSWORD=" + "sk-ant-" + f"abc123&note={OPAQUE}{TAIL}\n",
+], ids=["bearer-adjacent-literal", "label-query-suffix-without-url"])
+def test_rescan3_shape_is_scrubbed(text):
+    assert _clean(scrub_credential_text(text))
+
+
+def test_prefixed_url_parameter_keeps_its_query_structure():
+    text = f"https://h.invalid/v1?client_api_key={OPAQUE}&symbol=SPY\n"
+    out = scrub_credential_text(text)
+    assert OPAQUE not in out and "&symbol=SPY" in out, out
+
+
+_RESCAN4_SHAPES = {
+    "template-literal": f"const password = `{OPAQUE}{TAIL}`;\n",
+    "backslash-continuation": f'PASSWORD = "" \\\n    "{OPAQUE}{TAIL}"\n',
+    "redacted-header-then-continuation": f"authorization: Basic\n    {OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN4_SHAPES.values(), ids=_RESCAN4_SHAPES.keys())
+def test_rescan4_shape_is_scrubbed_and_detected(text):
+    assert _clean(scrub_credential_text(text))
+    if "authorization" not in text:
+        assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+
+_RESCAN5_SHAPES = {
+    "label-then-short-punctuated-tail": "password = '[redacted]!aB3cD4eF5gH6'\n",
+    "unquoted-label-then-short-punctuated-tail": "password = [redacted]!aB3cD4eF5gH6\n",
+    "shell-backslash-continuation": f"UW_TOKEN=\\\n{OPAQUE}{TAIL}\n",
+    "subscript-target": f"os.environ['UW_TOKEN'] = '{OPAQUE}{TAIL}'\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN5_SHAPES.values(), ids=_RESCAN5_SHAPES.keys())
+def test_rescan5_shape_is_scrubbed(text):
+    out = scrub_credential_text(text)
+    assert _clean(out) and "aB3cD4eF5gH6" not in out, out
+
+
+@pytest.mark.parametrize("text", [
+    f"UW_TOKEN=\\\n{OPAQUE}{TAIL}\n",
+    f"os.environ['UW_TOKEN'] = '{OPAQUE}{TAIL}'\n",
+], ids=["shell-backslash-continuation", "subscript-target"])
+def test_rescan5_shape_is_detected(text):
+    assert find_secret_assignments(text) == ["[redacted-secret]"]

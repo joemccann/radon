@@ -16,6 +16,9 @@ _SECRET_KEY = (
     # assignment rule carried the name at all. Prose needs no guard here; every
     # use of this alternation requires an assignment separator.
     r"|cookie"
+    # DS-2026-10-25-12: the header rules below leave a QUOTED value to the
+    # tokenizer, which follows it across lines, so the names are keys here.
+    r"|authorization|bearer"
     r"|sess(?:ion)?[-_]?id|_session|csrf|xsrf)"
 )
 
@@ -190,14 +193,17 @@ _SPECIFIC_SCRUB_PATTERNS = [
     # "=" / ":" assignment) and must run before the assignment pattern below,
     # which would otherwise treat the word "Bearer" itself as the value and
     # leave the real token in "authorization: bearer <token>" untouched.
-    (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
+    # The token stops at a quote: eating a closing quote misaligned the
+    # tokenizer, so `"Bearer " "<token>"` kept the token.
+    (re.compile(r"\bbearer\s+[^\s\"']+", re.IGNORECASE), "bearer [redacted]"),
     (
         re.compile(
-            r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
+            r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*)"
             # The whole rest of the line: a fixed scheme list redacted
             # `ApiKey` and kept the credential after it, and one token kept
-            # a Digest header's later fields (DS-2026-10-25-08).
-            r"[^\r\n]+",
+            # a Digest header's later fields (DS-2026-10-25-08). A quoted
+            # value may continue on later lines; the tokenizer owns it.
+            r"(?![\"'\s])[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -265,7 +271,8 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 # before the value (DS-2026-10-25-11); a trailing comment needs the whitespace
 # YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?[ \t]*[:=][ \t]*"
+    # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
@@ -290,38 +297,65 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     if prefix is not None:
         index = prefix.end()
 
-    if index < length and text[index] in "\"'":
-        quote = text[index]
-        delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
-        body = index + len(delimiter)
-        close = _find_close(text, body, delimiter, backslash_escapes=True)
-        if len(delimiter) == 1:
-            # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
-            # backslash escape, so `\''` there is a literal backslash then an
-            # embedded quote, not an escaped quote then the close. Which
-            # grammar applies is unknowable here; the later close redacts
-            # the whole value under either.
-            literal = _find_close(text, body, delimiter, backslash_escapes=False)
-            if close is None:
-                # No close under the escaping grammar: the value runs at
-                # least to the end of the line, so an earlier literal close
-                # (an escaped quote in a truncated excerpt) must not end it.
-                eol = _end_of_line(text, body)
-                if literal is None or literal < eol:
-                    return body, eol, ""
-                close = literal
-            elif literal is not None and literal > close:
-                close = literal
-        if close is not None:
-            return body, close, delimiter
-        if len(delimiter) == 1:
-            return body, _end_of_line(text, body), ""
-        return body, length, delimiter
+    # A JavaScript template literal is quoted too (rescan of DS-2026-10-25-15).
+    if index < length and text[index] in "\"'`":
+        body, end, delimiter = _scan_quoted(text, index)
+        # Adjacent literals on the line are one Python constant: `"" "<v>"`
+        # kept its second literal (rescan of DS-2026-10-25-15). A loop, not
+        # recursion, so a long run of literals cannot exhaust the stack.
+        while delimiter:
+            following = end + len(delimiter)
+            while following < length:
+                if text[following] in " \t":
+                    following += 1
+                elif text.startswith(("\\\n", "\\\r\n"), following):
+                    # A backslash line continuation joins the next line's literal.
+                    following = text.index("\n", following) + 1
+                else:
+                    break
+            prefix = _STRING_PREFIX.match(text, following)
+            if prefix is not None:
+                following = prefix.end()
+            if following >= length or text[following] not in "\"'":
+                break
+            _, end, delimiter = _scan_quoted(text, following)
+        return body, end, delimiter
 
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
     return index, cursor, ""
+
+
+def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
+    """``_scan_value`` for the one quoted literal opening at ``index``."""
+    length = len(text)
+    quote = text[index]
+    delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
+    body = index + len(delimiter)
+    close = _find_close(text, body, delimiter, backslash_escapes=True)
+    if len(delimiter) == 1:
+        # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
+        # backslash escape, so `\''` there is a literal backslash then an
+        # embedded quote, not an escaped quote then the close. Which
+        # grammar applies is unknowable here; the later close redacts
+        # the whole value under either.
+        literal = _find_close(text, body, delimiter, backslash_escapes=False)
+        if close is None:
+            # No close under the escaping grammar: the value runs at
+            # least to the end of the line, so an earlier literal close
+            # (an escaped quote in a truncated excerpt) must not end it.
+            eol = _end_of_line(text, body)
+            if literal is None or literal < eol:
+                return body, eol, ""
+            close = literal
+        elif literal is not None and literal > close:
+            close = literal
+    if close is not None:
+        return body, close, delimiter
+    if len(delimiter) == 1:
+        return body, _end_of_line(text, body), ""
+    return body, length, delimiter
 
 
 def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
@@ -354,8 +388,62 @@ def _end_of_line(text: str, pos: int) -> int:
     return len(text) if newline is None else newline.start()
 
 
+def _continuation_end(text: str, line_start: int, eol: int) -> int:
+    """End of the lines after ``eol`` indented deeper than the key line.
+
+    DS-2026-10-25-13 / -15: a YAML plain scalar continues on more-indented
+    lines, and a wrapper on the key line (a Python paren, a YAML tag or
+    anchor) puts the value on the next one. Both kept those lines. Stops at
+    the first non-blank line indented no deeper than the key's; blank lines
+    between deeper ones belong to the value.
+    """
+    indent = line_start
+    while indent < len(text) and text[indent] in " \t":
+        indent += 1
+    indent -= line_start
+    end = cursor = eol
+    while cursor < len(text):
+        # A trailing backslash joins the next line whatever its indentation
+        # (a shell `KEY=\` then the value at column 0).
+        joined = cursor > 0 and text[cursor - 1] == "\\"
+        start = cursor + (2 if text.startswith("\r\n", cursor) else 1)
+        first = start
+        while first < len(text) and text[first] in " \t":
+            first += 1
+        line_end = _end_of_line(text, first)
+        if line_end == first:
+            if joined:
+                break
+            # Blank: the next non-blank line decides.
+            cursor = line_end
+            continue
+        if first - start <= indent and not joined:
+            break
+        end = cursor = line_end
+    return end
+
+
+class _LineStarts:
+    """Start of the line holding each position, for positions in order.
+
+    Searches back only to the previous position, so the total is linear.
+    """
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._seen = 0
+        self._start = 0
+
+    def __call__(self, pos: int) -> int:
+        newline = self._text.rfind("\n", self._seen, pos)
+        if newline != -1:
+            self._start = newline + 1
+        self._seen = max(self._seen, pos)
+        return self._start
+
+
 def _iter_assignments(text: str):
-    """``(head_end, body_start, body_end, delimiter)`` per credential assignment.
+    """``(head_start, head_end, body_start, body_end, delimiter)`` per credential assignment.
 
     Non-overlapping: the scan resumes past each value, so a credential inside
     an already-consumed value is not re-reported.
@@ -366,7 +454,7 @@ def _iter_assignments(text: str):
         if head is None:
             return
         body_start, body_end, delimiter = _scan_value(text, head.end())
-        yield head.end(), body_start, body_end, delimiter
+        yield head.start(), head.end(), body_start, body_end, delimiter
         cursor = max(body_end + len(delimiter), head.end() + 1)
 
 
@@ -374,13 +462,27 @@ def _iter_assignments(text: str):
 # whose PREFIX is a label publish its remainder verbatim -- the same value-tail
 # survival the tokenizer closed, in the one branch that declines to redact.
 _REDACTION_LABEL = re.compile(r"\[redacted(?:-[a-z-]+)?\]")
-_VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
 # The query-string rule ends a value at the next `&name=` parameter; that
 # parameter is structure, not a continuation of the credential.
 _QUERY_PARAMETER = re.compile(r"&[A-Za-z_][A-Za-z0-9_.-]*=")
 
 
-def _is_already_redacted(body: str) -> bool:
+_PARAMETER_NAME_CHAR = re.compile(r"[A-Za-z0-9_.-]")
+
+
+def _is_query_parameter(text: str, head_start: int) -> bool:
+    """True when the credential key opens a URL query parameter (``?k=``/``&k=``).
+
+    The key match may start inside a prefixed name (``client_api_key``), so
+    the name run before it is skipped, bounded like every name run here.
+    """
+    cursor = head_start
+    while cursor > 0 and head_start - cursor < 64 and _PARAMETER_NAME_CHAR.match(text[cursor - 1]):
+        cursor -= 1
+    return cursor > 0 and text[cursor - 1] in "?&"
+
+
+def _is_already_redacted(body: str, *, url_query: bool = False) -> bool:
     """True when the value IS redaction output rather than a surviving tail.
 
     A rule that ran earlier may redact only part of a value and leave
@@ -389,21 +491,22 @@ def _is_already_redacted(body: str) -> bool:
     tail must survive, so the opt-out cannot simply be "the value is exactly a
     label".
 
-    What must NOT survive is a tail that CONTINUES the value. Two tells, both
-    already defined in this module: a first character from the value alphabet
-    (`[redacted]<secret>`), or an opaque literal anywhere in the remainder (a
-    tail reached past punctuation).
+    Any other tail is part of the value: an opaque-literal test let a short
+    punctuated password (`[redacted]!<v>`) survive whole, so only an exact
+    label or a label then real query structure opts out.
     """
     rest = body.strip()
     label = _REDACTION_LABEL.match(rest)
     if label is None:
         return False
     rest = rest[label.end() :]
-    if not rest or _QUERY_PARAMETER.match(rest):
+    if not rest:
         return True
-    if _VALUE_CHAR.match(rest):
-        return False
-    return not _quoted_value_is_secret(rest)
+    if _QUERY_PARAMETER.match(rest):
+        # URL structure only when the key is itself a query parameter:
+        # `PASSWORD=[redacted-key]&note=<v>` is one value, tail included.
+        return url_query
+    return False
 
 
 def _redact_assignments(text: str) -> str:
@@ -415,26 +518,37 @@ def _redact_assignments(text: str) -> str:
     out: list[str] = []
     last = 0
     eol = -1
-    for head_end, body_start, body_end, delimiter in _iter_assignments(text):
+    line_start = _LineStarts(text)
+    for head_start, head_end, body_start, body_end, delimiter in _iter_assignments(text):
         if head_end < last:
             continue
         # Decided on the value token itself: the line's later text is other
         # assignments or prose, and re-reading it per value is quadratic. A
         # label with more words after it on the line is a partial redaction
         # (a provider rule took the first word of a passphrase): redact on.
-        if _is_already_redacted(text[body_start:body_end]):
+        if _is_already_redacted(
+            text[body_start:body_end],
+            url_query=not delimiter and _is_query_parameter(text, head_start),
+        ):
             after = body_end + len(delimiter)
             while after < len(text) and text[after] in " \t":
                 after += 1
-            if delimiter or after >= len(text) or text[after] in "\r\n":
+            if delimiter:
                 continue
+            if after >= len(text) or text[after] in "\r\n":
+                # Unless the value continues on deeper lines an earlier rule
+                # never saw: `authorization: Basic` then the credential.
+                if _continuation_end(text, line_start(head_start), after) == after:
+                    continue
         if not delimiter:
             # DS-2026-10-25-04: an unquoted value is redacted to the end of
             # its line. Stopping at whitespace published every word after
             # the first of a passphrase; detection keeps the narrower span.
             # The line end is reused while it lies ahead, keeping this linear.
             if eol < body_start:
-                eol = _end_of_line(text, body_start)
+                eol = _continuation_end(
+                    text, line_start(head_start), _end_of_line(text, body_start)
+                )
             body_end = eol
         body = text[body_start:body_end]
         if not delimiter and not body:
@@ -467,7 +581,8 @@ def _quoted_value_is_secret(body: str) -> bool:
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
-    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    # A quoted value may continue on later lines; the tokenizer owns it.
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?![\"' \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
 ]
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
@@ -486,7 +601,7 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\s*[:=]\s*"
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\]?\s*[:=]\s*"
     # A quoted value may open on the key line and start on the next one.
     r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
@@ -531,6 +646,32 @@ def _is_opaque(value: str) -> bool:
     )
 
 
+_WRAPPER_PAREN = re.compile(r"\(+(?=(?:[rRbBuUfF]{1,2})?[\"'])")
+_NODE_PROPERTY = re.compile(r"[!&][^\s]*")
+
+
+def _wrapped_value_is_secret(text: str, body_start: int, body_end: int) -> bool:
+    """A literal behind a same-line wrapper: ``("<v>")`` or a YAML tag or
+    anchor then the value. The tokenizer reads the wrapper as an unquoted
+    value, which detection does not inspect for an opaque literal.
+    """
+    paren = _WRAPPER_PAREN.match(text, body_start, body_end)
+    if paren is not None:
+        return _quoted_value_is_secret(text[paren.end() : body_end])
+    if _NODE_PROPERTY.fullmatch(text, body_start, body_end) is None:
+        return False
+    following = body_end
+    while following < len(text) and text[following] in " \t":
+        following += 1
+    if following >= len(text) or text[following] in "\r\n":
+        return False
+    value_start, value_end, delimiter = _scan_value(text, following)
+    value = text[value_start:value_end]
+    if delimiter or (value_start > following):
+        return _quoted_value_is_secret(value)
+    return len(value) >= 16 and bool(_LONG_LITERAL.fullmatch(value)) and _is_opaque(value)
+
+
 def find_secret_assignments(text: str) -> list[str]:
     """``["[redacted-secret]"]`` when ``text`` assigns a literal opaque value
     to a credential-named key, else ``[]``. Never returns the value.
@@ -542,10 +683,24 @@ def find_secret_assignments(text: str) -> list[str]:
     # literal scanner above permits one opening quote and no string prefix,
     # which is how a multi-line, triple-delimited or prefixed value was
     # redacted but published as clean (DS-2026-10-22-10/-11/-12).
-    for _head_end, body_start, body_end, delimiter in _iter_assignments(text or ""):
-        body = (text or "")[body_start:body_end]
-        if delimiter and _quoted_value_is_secret(body):
+    text = text or ""
+    line_start = _LineStarts(text)
+    continued_to = -1
+    for head_start, _head_end, body_start, body_end, delimiter in _iter_assignments(text):
+        body = text[body_start:body_end]
+        # DS-2026-10-25-14: an unclosed quoted value falls back to the line
+        # end with no delimiter; its opening quote still marks it quoted.
+        quoted = delimiter or (body_start > 0 and text[body_start - 1] in "\"'")
+        if quoted and _quoted_value_is_secret(body):
             return ["[redacted-secret]"]
+        if not delimiter and _wrapped_value_is_secret(text, body_start, body_end):
+            return ["[redacted-secret]"]
+        if not delimiter and head_start >= continued_to:
+            # A key inside an earlier continuation was already covered by it.
+            eol = _end_of_line(text, body_start)
+            continued_to = _continuation_end(text, line_start(head_start), eol)
+            if _quoted_value_is_secret(text[eol:continued_to]):
+                return ["[redacted-secret]"]
         # The literal scanner bounds its value run at 1024, so a longer
         # unquoted literal (a session token) matched neither rule.
         if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):

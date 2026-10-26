@@ -312,6 +312,12 @@ class TestCloudDelegate:
         assert server._is_app_role_gateway_mutation(
             _req("POST", "/admin/services/radon-ib-gateway.service/status")
         ) is False
+        assert server._is_app_role_gateway_mutation(_req("PUT", "/credentials/ib_gateway")) is True
+        assert server._is_app_role_gateway_mutation(_req("PUT", "/credentials/ib_gateway/")) is True
+        assert server._is_app_role_gateway_mutation(
+            _req("PUT", "/credentials/unusual_whales")
+        ) is False
+        assert server._is_app_role_gateway_mutation(_req("GET", "/credentials")) is False
         monkeypatch.setenv("RADON_HOST_ROLE", "combined")
         assert server._is_app_role_gateway_mutation(restart) is False
 
@@ -368,6 +374,36 @@ class TestAppRoleGateAtTheWire:
         resp = client.post(path, headers={"Authorization": f"Bearer {_operator_jwt()}"})
         assert resp.status_code == 200, resp.text
         remote.assert_awaited_once_with(verb)
+
+    @pytest.fixture()
+    def rotate(self, monkeypatch):
+        """The broker password write, refused so no store write follows."""
+        from api.routes import credentials as credentials_routes
+
+        call = AsyncMock(return_value=(409, {"code": "LOGIN_BLOCKED", "written": False}))
+        monkeypatch.setattr(admin_services, "rotate_gateway_password", call)
+        monkeypatch.setattr(credentials_routes, "_open_store", lambda: SimpleNamespace())
+        return call
+
+    def test_gateway_credential_put_without_jwt_is_401_and_never_reaches_broker(
+        self, app_host, rotate
+    ):
+        client, _ = app_host
+        resp = client.put("/credentials/ib_gateway", json={"values": {"TWS_PASSWORD": "x" * 12}})
+        assert resp.status_code == 401, resp.text
+        rotate.assert_not_awaited()
+
+    def test_gateway_credential_put_with_operator_jwt_reaches_broker_once(
+        self, app_host, rotate
+    ):
+        client, _ = app_host
+        resp = client.put(
+            "/credentials/ib_gateway",
+            json={"values": {"TWS_PASSWORD": "x" * 12}},
+            headers={"Authorization": f"Bearer {_operator_jwt()}"},
+        )
+        assert resp.status_code == 409, resp.text
+        rotate.assert_awaited_once()
 
     def test_health_keeps_loopback_bypass(self, app_host, monkeypatch):
         client, remote = app_host

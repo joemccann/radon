@@ -2874,3 +2874,39 @@ class TestDocumentation20261025:
         assert "perm_id > 0" in fn
         assert "return None" in fn
 
+
+class TestDocumentation20261026:
+    """Contracts that landed after the 2026-10-25 documentation audit."""
+
+    def test_gateway_store_failure_is_not_an_untouched_save(self):
+        spof = (_ROOT / "docs/spof-host-split.md").read_text()
+        rotate = spof.split("IB Gateway password rotation", 1)[1]
+        rotate = rotate.split("## Gateway env split cutover", 1)[0]
+        assert "CREDENTIAL_STORE_UNAVAILABLE" in rotate
+        assert "GATEWAY_CREDENTIAL_INVALID" in rotate
+        assert "GATEWAY_BROKER_UNREACHABLE" in rotate
+        assert "Do not resubmit until the store is fixed" in rotate
+        ops = (_ROOT / "docs/operations.md").read_text()
+        paragraph = ops.split("The IB Gateway password is a rotation", 1)[1]
+        paragraph = paragraph.split("The Next.js process", 1)[0]
+        assert "keeps the value only when the broker wrote it" not in paragraph
+        assert "CREDENTIAL_STORE_UNAVAILABLE" in paragraph
+        assert "Do not resubmit until the store is fixed" in paragraph
+        src = (_ROOT / "scripts/api/routes/credentials.py").read_text()
+        fn = src.split("async def _put_ib_gateway", 1)[1].split("\n@router.put", 1)[0]
+        assert 'written is True and status in (200, 202, 502)' in fn
+        assert '"CREDENTIAL_STORE_UNAVAILABLE"' in fn
+        assert "Do not resubmit" in fn
+        assert '"GATEWAY_CREDENTIAL_INVALID"' in fn
+
+    def test_partial_redaction_label_does_not_keep_the_line(self):
+        text = (_ROOT / "docs/security-audit-playbook.md").read_text()
+        bullet = text.split("One value tokenizer for credential assignments.", 1)[1]
+        bullet = bullet.split("A redaction opt-out is decided on the WHOLE value.", 1)[0]
+        assert "never the rest of the line" not in bullet
+        assert "partial label" in bullet
+        src = (_ROOT / "scripts/credential_redaction.py").read_text()
+        fn = src.split("def _redact_assignments", 1)[1].split("\ndef ", 1)[0]
+        assert "partial redaction" in fn
+        assert 'while after < len(text) and text[after] in " \\t"' in fn
+
