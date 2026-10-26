@@ -29,6 +29,9 @@ Schema:
     flow reports must miss and re-fetch.
   - v2 + missing complete: legacy. Treat 500..1000 prints as a discover
     2-page scoring walk (SNDK 2026-09-04 froze at 976 prints this way).
+  - any row with a print stamped before its Eastern day start: a miss.
+    UW's ``older_than`` fill walked it into prior sessions (SOXL
+    2026-10-22 held three days and 40 pages); the fixed walk re-fetches.
 """
 
 from __future__ import annotations
@@ -79,6 +82,40 @@ def _path(ticker: str, date: str) -> Path:
     return CACHE_DIR / f"{ticker.upper()}_{date}.json"
 
 
+def day_start_et(date: str) -> Optional[datetime]:
+    """First instant of a UW darkpool ``date`` (an Eastern calendar day)."""
+    if not date:
+        return None
+    return _ET.localize(datetime.strptime(date, "%Y-%m-%d"))
+
+
+def trade_executed_at(trade: dict) -> Optional[datetime]:
+    ts = trade.get("executed_at") or trade.get("trf_executed_at")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _row_stays_within_day(date: str, trades: list) -> bool:
+    """False when any stamped print predates the row's Eastern day start.
+
+    Such a row was walked through UW's ``older_than`` fill into prior
+    sessions (see ``fetch_flow._trades_within_day``) and must miss so the
+    day is re-fetched.
+    """
+    start = day_start_et(date)
+    if start is None:
+        return True
+    for trade in trades:
+        executed = trade_executed_at(trade) if isinstance(trade, dict) else None
+        if executed is not None and executed < start:
+            return False
+    return True
+
+
 def _row_is_complete(payload: dict, trades: list) -> bool:
     """True when the row is a full-day walk, not a capped scoring sample."""
     flag = payload.get("complete")
@@ -121,6 +158,8 @@ def get_cached_darkpool(
     if not isinstance(trades, list):
         return None
     if require_complete and not _row_is_complete(payload, trades):
+        return None
+    if not _row_stays_within_day(date, trades):
         return None
     return trades
 

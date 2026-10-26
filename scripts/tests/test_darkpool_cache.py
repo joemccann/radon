@@ -40,6 +40,39 @@ class TestIsImmutable:
         assert dpc.is_immutable("") is False
 
 
+# ── day boundary ────────────────────────────────────────────────────
+
+class TestRowStaysWithinItsDay:
+    """A cached day whose prints predate its Eastern day start was walked
+    through UW's older_than fill into prior sessions (61 such rows on the
+    VPS on 2026-10-26, SOXL_2026-10-22 held three days). Serve it as a miss
+    so the fixed walk re-fetches the real day; nothing else can repair it.
+    """
+
+    def test_row_with_prior_day_prints_is_a_miss(self):
+        date = _yesterday()
+        prior_night = f"{date}T03:59:00Z" if date else ""
+        dpc.set_cached_darkpool("SOXL", date, [
+            {"price": 1.0, "size": 1, "executed_at": f"{date}T20:00:00Z"},
+            {"price": 1.0, "size": 1, "executed_at": prior_night},
+        ])
+        assert dpc.get_cached_darkpool("SOXL", date) is None
+
+    def test_row_within_its_eastern_day_hits(self):
+        date = _yesterday()
+        trades = [
+            {"price": 1.0, "size": 1, "executed_at": f"{date}T20:00:00Z"},
+            {"price": 1.0, "size": 1, "executed_at": f"{date}T13:00:00Z"},
+        ]
+        dpc.set_cached_darkpool("SOXL", date, trades)
+        assert dpc.get_cached_darkpool("SOXL", date) == trades
+
+    def test_unstamped_prints_still_hit(self):
+        date = _yesterday()
+        dpc.set_cached_darkpool("AAPL", date, SAMPLE_TRADES)
+        assert dpc.get_cached_darkpool("AAPL", date) == SAMPLE_TRADES
+
+
 # ── round-trip (prior day) ──────────────────────────────────────────
 
 class TestPriorDayRoundTrip:
