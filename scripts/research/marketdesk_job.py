@@ -1,4 +1,4 @@
-"""One MarketDesk ingest cycle: poll -> claim -> heal -> PDF/images -> copy -> publish -> Dropbox outbox -> health.
+"""One MarketDesk ingest cycle: sign in -> list -> claim -> heal -> PDF/images -> copy -> publish -> Dropbox outbox.
 
 Timer entry point (radon-marketdesk.timer, every 5 minutes), run by path:
     python scripts/research/marketdesk_job.py
@@ -6,7 +6,12 @@ Timer entry point (radon-marketdesk.timer, every 5 minutes), run by path:
 Idempotency: post id is a pure function of the article id, the post timestamp is the
 article's own publication time, the Turso ledger (marketdesk_articles) is checked before
 publish, and research_post_sources heals a crash between publish and the ledger write.
-Publish happens before the Dropbox upload; the upload is an outbox that never blocks the feed.
+Publish happens before the Dropbox upload; the upload is an outbox that never blocks the feed. The
+Dropbox path mirrors the library folder chain stored in the post provenance.
+
+MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
+placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
+against the per-cycle cap, and fails as ``no_summary`` once it is older than MARKETDESK_SUMMARY_WAIT_HOURS.
 """
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ import time  # noqa: E402
 
 from api.db_http import DbHttpError  # noqa: E402
 from research.assets import URL_PREFIX  # noqa: E402
+from research.dropbox import DropboxError  # noqa: E402
 from research.marketdesk_copy import scrub, summary_problems  # noqa: E402
 from research.publish import stable_post_id  # noqa: E402
 
@@ -42,6 +48,7 @@ SERVICE = "marketdesk-research"
 DROPBOX_SERVICE = "marketdesk-dropbox"
 DEFAULT_MAX_PER_CYCLE = 5
 DEFAULT_LOOKBACK_HOURS = 48
+DEFAULT_SUMMARY_WAIT_HOURS = 6
 # No new article starts after this much of the cycle; TimeoutStartSec=270 bounds the whole run.
 ARTICLE_START_BUDGET_SECONDS = 150
 MAX_IMAGES_STORED = 40
@@ -69,6 +76,10 @@ class ArticleRejected(RuntimeError):
     """The article cannot be published as scraped ('no_summary'). Spends an attempt."""
 
 
+class SummaryPending(RuntimeError):
+    """MarketDesk has not summarised the item yet. Parked; spends no attempt and is not a failure."""
+
+
 class ArticlesFailed(RuntimeError):
     """Raised after a cycle where nothing published but something failed, or an article was retired."""
 
@@ -78,7 +89,7 @@ class ListingGap(RuntimeError):
 
 
 class CycleError(RuntimeError):
-    """A cycle failure whose original message was multi-line or oversized (e.g. a Playwright call log)."""
+    """A cycle failure whose original message was multi-line or oversized."""
 
 
 @dataclass
@@ -89,11 +100,7 @@ class Deps:
     store_asset: Callable
     read_asset: Callable
     expire_stale_held: Callable
-    sync_playwright: Callable
-    launch_browser: Callable
     open_session: Callable
-    storage_state: Callable
-    persist_storage: Callable
     list_latest: Callable
     fetch_article: Callable
     download_pdf: Callable
@@ -101,6 +108,7 @@ class Deps:
     write_copy: Callable
     certify: Callable
     writer_from_env: Callable
+    pdf_text: Callable
     marketdesk_path: Callable
     service_cycle: Callable
     record_health: Callable
@@ -108,10 +116,9 @@ class Deps:
 
 
 def default_deps() -> Deps:
-    from playwright.sync_api import sync_playwright
     from db import writer as db_writer
     from db.service_cycle import service_cycle
-    from research import marketdesk_auth, marketdesk_copy, marketdesk_scrape, marketdesk_store, publish
+    from research import marketdesk_auth, marketdesk_copy, marketdesk_scrape, marketdesk_store, pipeline, publish
     from research.assets import read_asset, store_asset
     from research.dropbox_writer import DropboxWriter, marketdesk_path
 
@@ -123,13 +130,12 @@ def default_deps() -> Deps:
 
     return Deps(
         store=marketdesk_store, publish=publish.publish, store_asset=store_asset, read_asset=read_asset,
-        expire_stale_held=publish.expire_stale_held, sync_playwright=sync_playwright,
-        launch_browser=marketdesk_scrape.launch_browser, open_session=marketdesk_auth.open_session,
-        storage_state=marketdesk_auth.existing_storage_state,
-        persist_storage=marketdesk_auth.persist_storage_state, list_latest=marketdesk_scrape.list_latest,
+        expire_stale_held=publish.expire_stale_held, open_session=marketdesk_auth.open_session,
+        list_latest=marketdesk_scrape.list_latest,
         fetch_article=marketdesk_scrape.fetch_article, download_pdf=marketdesk_scrape.download_pdf,
         download_images=marketdesk_scrape.download_images, write_copy=marketdesk_copy.write_copy,
-        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, marketdesk_path=marketdesk_path,
+        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, pdf_text=pipeline.text_isolated,
+        marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
     )
 
@@ -147,7 +153,7 @@ def _positive_int(env, name: str, default: int) -> int:
 
 
 def _safe_error(exc: BaseException) -> str:
-    """First line only, bounded. Playwright appends a call log (request/response headers, cookies)."""
+    """First line only, bounded: a multi-line message may carry request detail."""
     lines = str(exc).strip().splitlines()
     return ((lines[0].strip() if lines else "") or type(exc).__name__)[:ERROR_MAX_CHARS]
 
@@ -209,8 +215,13 @@ def _tags(copy_tags) -> list[str]:
     return tags[:MAX_TAGS]
 
 
+def _folders(value) -> list[str]:
+    return [f for f in value if isinstance(f, str) and f.strip()][:12] if isinstance(value, (list, tuple)) else []
+
+
 def build_post(ref, *, summary: list[str], publisher: str | None, pdf_url: str, sha: str,
-               figure_urls: list[str], image_ids: list[str], extra_urls: list[str], copy) -> dict:
+               figure_urls: list[str], image_ids: list[str], extra_urls: list[str], copy,
+               folders: list[str] | None = None, file_name: str | None = None) -> dict:
     stamp = _utc(ref.published_at)
     day = stamp.astimezone(NY).date().isoformat()
     captions = getattr(copy, "captions", None) or {}
@@ -236,11 +247,13 @@ def build_post(ref, *, summary: list[str], publisher: str | None, pdf_url: str, 
             "figures": figures,
             "summary": summary,
             "extraImages": extra_urls,
+            "folders": _folders(folders),
+            "fileName": str(file_name or ref.title or "")[:300],
         },
     }
 
 
-def _process(ref, *, page, context, workdir: Path, deps: Deps, counts: dict) -> None:
+def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_wait_hours: int) -> None:
     store = deps.store
     post_id = stable_post_id("marketdesk:" + ref.article_id, "article")
     existing = store.post_source(post_id)
@@ -249,17 +262,20 @@ def _process(ref, *, page, context, workdir: Path, deps: Deps, counts: dict) -> 
                                str(existing.get("contentHash") or ""))
         counts["healed"] += 1
         return
-    article = deps.fetch_article(page, ref)
+    article = deps.fetch_article(session, ref)
     summary = _clean_summary(getattr(article, "summary", None))
-    if not summary:  # summary selector drift: never publish copy written from page text alone
+    if not summary:  # never publish copy without MarketDesk's own summary of the PDF
+        age = datetime.now(timezone.utc) - _utc(ref.published_at)
+        if age.total_seconds() < summary_wait_hours * 3600:
+            raise SummaryPending("summary_pending")
         raise ArticleRejected("no_summary")
     dest = workdir / ref.article_id
     dest.mkdir(parents=True, exist_ok=True)
-    pdf = Path(deps.download_pdf(context, article, dest))
+    pdf = Path(deps.download_pdf(session, article, dest))
     sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
     pdf_url = deps.store_asset(pdf)
     stored: list[tuple[Path, str]] = []
-    for path in deps.download_images(context, article, dest, limit=MAX_IMAGES_STORED):
+    for path in deps.download_images(session, article, dest, limit=MAX_IMAGES_STORED):
         url = deps.store_asset(path)
         if url not in {u for _, u in stored}:
             stored.append((Path(path), url))
@@ -270,10 +286,11 @@ def _process(ref, *, page, context, workdir: Path, deps: Deps, counts: dict) -> 
     image_ids = [f"i{n}" for n in range(1, len(figures) + 1)]
     publisher = _publisher(article)
     copy = deps.write_copy(title=getattr(article, "title", None) or ref.title, publisher=publisher,
-                           summary=summary, body_text=getattr(article, "body_text", "") or "",
+                           summary=summary, body_text=deps.pdf_text(pdf),
                            images=[(image_id, path) for image_id, (path, _) in zip(image_ids, figures)])
     post = build_post(ref, summary=summary, publisher=publisher, pdf_url=pdf_url, sha=sha,
-                      figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy)
+                      figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy,
+                      folders=getattr(article, "folders", None), file_name=getattr(article, "title", None))
     post = deps.certify(post, copy)  # research.publish refuses copy without its Humanizer certificate
     deps.publish(post)
     store.record_published(ref.article_id, post["id"], pdf_url, sha)
@@ -287,58 +304,61 @@ def _listing_gap(refs, newest_known: datetime | None) -> bool:
     return min(_utc(ref.published_at) for ref in refs) > newest_known
 
 
+def _excluded(ref) -> bool:
+    """The Market Ear / ZeroHedge items: radon-newsfeed already carries that feed."""
+    institution = getattr(ref, "institution", None)
+    return isinstance(institution, str) and bool(FORBIDDEN_PUBLISHERS.search(institution))
+
+
 def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> None:
     store = deps.store
     started = deps.clock()
-    storage = deps.storage_state(env)
     max_per_cycle = _positive_int(env, "MARKETDESK_MAX_PER_CYCLE", DEFAULT_MAX_PER_CYCLE)
     lookback = _positive_int(env, "MARKETDESK_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS)
-    with deps.sync_playwright() as pw:
-        browser = deps.launch_browser(pw)
+    summary_wait = _positive_int(env, "MARKETDESK_SUMMARY_WAIT_HOURS", DEFAULT_SUMMARY_WAIT_HOURS)
+    session = deps.open_session(env)
+    refs = deps.list_latest(session)
+    counts["listed"] = len(refs)
+    notes["gap"] = _listing_gap(refs, store.newest_known_published_at())
+    kept = [ref for ref in refs if not _excluded(ref)]
+    counts["excluded"] = len(refs) - len(kept)
+    todo = store.unseen(kept, lookback_hours=lookback)
+    counts["unseen"] = len(todo)
+    attempted = 0
+    for index, ref in enumerate(todo):
+        if attempted >= max_per_cycle:
+            break
+        if deps.clock() - started > ARTICLE_START_BUDGET_SECONDS:
+            counts["deferred"] += len(todo) - index
+            break
+        if not store.claim(ref):
+            counts["skipped"] += 1
+            continue
         try:
-            context = browser.new_context(**({"storage_state": storage} if storage else {}))
-            try:
-                page = context.new_page()
-                deps.open_session(context, page, env=env)
-                refs = deps.list_latest(page)
-                counts["listed"] = len(refs)
-                notes["gap"] = _listing_gap(refs, store.newest_known_published_at())
-                todo = store.unseen(refs, lookback_hours=lookback)[:max_per_cycle]
-                counts["unseen"] = len(todo)
-                for index, ref in enumerate(todo):
-                    if deps.clock() - started > ARTICLE_START_BUDGET_SECONDS:
-                        counts["deferred"] += len(todo) - index
-                        break
-                    if not store.claim(ref):
-                        counts["skipped"] += 1
-                        continue
-                    try:
-                        _process(ref, page=page, context=context, workdir=workdir, deps=deps, counts=counts)
-                    except (DbHttpError, CycleTerminated):
-                        raise  # Turso down / killed: the lease stays and the next claim counts it
-                    except Exception as exc:  # noqa: BLE001 - one bad article never fails the cycle
-                        error = _safe_error(exc)
-                        notes["last_error"] = error
-                        if getattr(exc, "transient", False):
-                            store.park(ref.article_id, error)
-                            counts["parked"] += 1
-                            _log(f"article {ref.article_id} parked: {error}")
-                            if str(exc) == "unauthenticated":
-                                raise  # the session is gone: every later article would fail the same way
-                            continue
-                        attempts = store.record_failure(ref.article_id, error)
-                        counts["failed"] += 1
-                        if attempts >= store.MAX_ATTEMPTS:
-                            counts["retired"] += 1
-                        _log(f"article {ref.article_id} failed (attempt {attempts}): {error}")
-                try:
-                    deps.persist_storage(context, env)
-                except Exception as exc:  # noqa: BLE001 - next cycle re-authenticates
-                    _log(f"session save failed: {type(exc).__name__}")
-            finally:
-                context.close()
-        finally:
-            browser.close()
+            _process(ref, session=session, workdir=workdir, deps=deps, counts=counts,
+                     summary_wait_hours=summary_wait)
+            attempted += 1
+        except SummaryPending as exc:
+            store.park(ref.article_id, str(exc))
+            counts["pending"] += 1
+        except (DbHttpError, CycleTerminated):
+            raise  # Turso down / killed: the lease stays and the next claim counts it
+        except Exception as exc:  # noqa: BLE001 - one bad article never fails the cycle
+            attempted += 1
+            error = _safe_error(exc)
+            notes["last_error"] = error
+            if getattr(exc, "transient", False):
+                store.park(ref.article_id, error)
+                counts["parked"] += 1
+                _log(f"article {ref.article_id} parked: {error}")
+                if str(exc) == "unauthenticated":
+                    raise  # the session is gone: every later article would fail the same way
+                continue
+            attempts = store.record_failure(ref.article_id, error)
+            counts["failed"] += 1
+            if attempts >= store.MAX_ATTEMPTS:
+                counts["retired"] += 1
+            _log(f"article {ref.article_id} failed (attempt {attempts}): {error}")
 
 
 def _upload_outbox(*, env, deps: Deps, workdir: Path, counts: dict) -> tuple[str, dict | None]:
@@ -376,9 +396,18 @@ def _upload_outbox(*, env, deps: Deps, workdir: Path, counts: dict) -> tuple[str
             local = upload_dir / f"{article_id}.pdf"
             local.write_bytes(deps.read_asset(asset[len(URL_PREFIX):].split("#", 1)[0]))
             published_at = datetime.fromisoformat(str(row["published_at"]).replace("Z", "+00:00"))
-            remote = deps.marketdesk_path(published_at, row.get("title") or "", article_id,
-                                          **({"root": root} if root else {}))
-            result = writer.upload(local, remote)
+            source = store.post_source(str(row.get("post_id") or "")) or {}
+            kwargs = {"folders": _folders(source.get("folders")), **({"root": root} if root else {})}
+            name = str(source.get("fileName") or row.get("title") or "")
+            remote = deps.marketdesk_path(published_at, name, article_id, **kwargs)
+            try:
+                result = writer.upload(local, remote)
+            except DropboxError as exc:
+                if getattr(exc, "status", None) != 409:
+                    raise
+                # Same name, different bytes (a re-issued note): keep both, the second carries the id.
+                result = writer.upload(local, deps.marketdesk_path(published_at, name, article_id,
+                                                                   suffix_id=True, **kwargs))
         except (DbHttpError, CycleTerminated):
             raise
         except Exception as exc:  # noqa: BLE001 - retried next cycle
@@ -413,8 +442,8 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     """Outbox first (a slow scrape can never starve uploads), then the scrape, then the outbox again
     for anything just published. Health: marketdesk-dropbox gets the worse of the two outbox runs."""
     deps = deps or default_deps()
-    counts = dict.fromkeys(("listed", "unseen", "published", "healed", "failed", "parked", "retired",
-                            "skipped", "deferred", "uploaded", "upload_skipped", "upload_failed"), 0)
+    counts = dict.fromkeys(("listed", "excluded", "unseen", "pending", "published", "healed", "failed", "parked",
+                            "retired", "skipped", "deferred", "uploaded", "upload_skipped", "upload_failed"), 0)
     notes: dict = {}
     workdir = Path(tempfile.mkdtemp(prefix="marketdesk-"))
     try:

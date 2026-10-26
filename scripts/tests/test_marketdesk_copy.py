@@ -525,3 +525,78 @@ def test_certify_malformed_reply_is_not_transient() -> None:
     with pytest.raises(mc.CopyUnavailable) as info:
         mc.certify(_post(copy), copy, complete=complete)
     assert not info.value.transient
+
+
+def test_build_instruction_states_the_numeric_firewall() -> None:
+    """Numbers that live only inside a chart image are rejected by copy_problems; the model is told so."""
+    text = mc.build_instruction(title="T", publisher="P", summary=["s"], body_text="b", image_ids=["i1"])
+    assert ("Every number in the title, content and captions must appear verbatim in SUMMARY_BULLETS or "
+            "ARTICLE_TEXT. Never take a number from an image alone.") in text
+
+
+# ---------- one repair pass on a draft the firewall rejected ----------
+
+def _bad_number_draft() -> dict:
+    bad = clean()
+    bad["captions"]["i2"] = "CTA positioning percentile, 13.71 on the chart"  # read off the image only
+    return bad
+
+
+def test_rejected_draft_gets_one_repair_pass_with_its_exact_problems() -> None:
+    calls = []
+
+    def fake(instruction, **kwargs):
+        calls.append((instruction, kwargs))
+        if len(calls) == 1:
+            assert kwargs["accept"](_bad_number_draft()) is False
+            raise ModelLadderExhausted("Model ladder exhausted. tried=anthropic:unparseable codex:http_429; skipped=")
+        assert kwargs["accept"](_bad_number_draft()) is False
+        assert kwargs["accept"](clean()) is True
+        return LadderResult(data=clean(), text="{}", provider="anthropic", model="m")
+
+    out = _call(fake)
+    assert out.captions == clean()["captions"]
+    assert len(calls) == 2
+    repair, kwargs = calls[1]
+    assert repair.startswith(calls[0][0])
+    assert "REJECTED_DRAFT:" in repair and '"13.71 on the chart"' not in repair.split("REJECTED_DRAFT:")[0]
+    assert "unsupported_number:13.71" in repair
+    assert kwargs["images"] == IMAGES and kwargs["system"] == mc.SYSTEM
+
+
+def test_failed_repair_keeps_the_original_classification() -> None:
+    def fake(instruction, **kwargs):
+        kwargs["accept"](_bad_number_draft())
+        raise ModelLadderExhausted("Model ladder exhausted. tried=anthropic:unparseable; skipped=")
+
+    with pytest.raises(mc.CopyUnavailable, match="copy_rejected"):
+        _call(fake)
+
+
+def test_no_draft_means_no_repair_call() -> None:
+    calls = []
+
+    def fake(instruction, **kwargs):
+        calls.append(instruction)
+        raise ModelLadderExhausted("Model ladder exhausted. tried=anthropic:http_529; skipped=")
+
+    with pytest.raises(mc.CopyOutage):
+        _call(fake)
+    assert len(calls) == 1
+
+
+def test_repair_starts_from_the_draft_with_the_fewest_problems() -> None:
+    worse = _bad_number_draft()
+    worse["content"] += " Flows hit $99bn and $77bn."
+    calls = []
+
+    def fake(instruction, **kwargs):
+        calls.append(instruction)
+        if len(calls) == 1:
+            kwargs["accept"](worse)
+            kwargs["accept"](_bad_number_draft())
+            raise ModelLadderExhausted("Model ladder exhausted. tried=a:unparseable b:unparseable; skipped=")
+        return LadderResult(data=clean(), text="{}", provider="b", model="m")
+
+    _call(fake)
+    assert "$99bn" not in calls[1].split("REJECTED_DRAFT:")[1]

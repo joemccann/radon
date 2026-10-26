@@ -441,5 +441,47 @@ class MarketdeskPathTests(unittest.TestCase):
         self.assertEqual(writer.check_remote(path), path)
 
 
+class MirroredMarketdeskPathTests(unittest.TestCase):
+    """With the library folder chain, the path mirrors marketdesk.ai's own layout under the root."""
+
+    WHEN = datetime(2026, 10, 26, 17, 0, tzinfo=timezone.utc)
+
+    def test_mirrors_the_library_chain_and_keeps_the_item_name(self):
+        path = dw.marketdesk_path(self.WHEN, 'GS Molavi Ruminations Macro, Micro, Markets 26 Oct 2026', 'eQJttFDd58v',
+                                  folders=['2026', 'October', 'Oct 26', 'Goldman Sachs', 'S&T'])
+        self.assertEqual(path, '/Radon/MarketDesk/2026/October/Oct 26/Goldman Sachs/S&T/'
+                               'GS Molavi Ruminations Macro, Micro, Markets 26 Oct 2026.pdf')
+
+    def test_unsafe_characters_are_neutralised(self):
+        path = dw.marketdesk_path(self.WHEN, 'A/B: C\\D\x07 ..', 'eQJttFDd58v',
+                                  folders=['2026', 'October', 'Oct 26', '../evil', ' . '])
+        self.assertEqual(path, '/Radon/MarketDesk/2026/October/Oct 26/evil/A B C D.pdf')
+        writer = dw.DropboxWriter.from_env(dict(ENV))
+        self.assertEqual(writer.check_remote(path), path)
+
+    def test_name_already_ending_in_pdf_is_not_doubled_and_long_names_are_bounded(self):
+        path = dw.marketdesk_path(self.WHEN, 'Macro_Volatility_Digest_Oct26.pdf', '4AJs5Adl2Yp',
+                                  folders=['2026', 'October', 'Oct 26', 'CBOE'])
+        self.assertTrue(path.endswith('/CBOE/Macro_Volatility_Digest_Oct26.pdf'))
+        name = dw.marketdesk_path(self.WHEN, 'x' * 400, '4AJs5Adl2Yp',
+                                  folders=['2026', 'October', 'Oct 26']).rsplit('/', 1)[1]
+        self.assertLessEqual(len(name), dw.NAME_MAX + len('.pdf'))
+
+    def test_empty_name_falls_back_to_article_id(self):
+        path = dw.marketdesk_path(self.WHEN, ' / ', '4AJs5Adl2Yp', folders=['2026', 'October', 'Oct 26'])
+        self.assertTrue(path.endswith('/Oct 26/4AJs5Adl2Yp.pdf'))
+
+    def test_suffix_disambiguates_a_name_collision(self):
+        path = dw.marketdesk_path(self.WHEN, 'Tesla Oct 26', 'vL1kqHS98R8',
+                                  folders=['2026', 'October', 'Oct 26', 'Deutsche Bank'], suffix_id=True)
+        self.assertTrue(path.endswith('/Deutsche Bank/Tesla Oct 26 (vL1kqHS98R8).pdf'))
+
+    def test_chain_without_a_date_falls_back_to_the_chronological_layout(self):
+        for folders in (None, [], ['Goldman Sachs'], ['26', 'October', 'Oct 26']):
+            with self.subTest(folders=folders):
+                self.assertEqual(dw.marketdesk_path(self.WHEN, 'Fed cuts', '4AJs5Adl2Yp', folders=folders),
+                                 '/Radon/MarketDesk/2026/October/Oct 26/fed-cuts-4AJs5Adl2Yp.pdf')
+
+
 if __name__ == '__main__':
     unittest.main()

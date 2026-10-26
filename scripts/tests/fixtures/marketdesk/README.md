@@ -2,31 +2,30 @@
 
 Used by `scripts/tests/test_marketdesk_auth.py` and `scripts/tests/test_marketdesk_scrape.py`.
 
-## Real, unauthenticated captures (2026-10-26 scout, `curl -4`)
+## Real captures of the signed-in JSON API (2026-10-26)
+
+Response bodies only: no cookies, tokens, request headers or account details. Trimmed where noted.
+
+| File | Call |
+|---|---|
+| `api_latest.json` | `POST /api/mobile/latest/latest {"institutions": []}`: the 25 newest item ids |
+| `api_provision.json` | `POST /api/mobile/items/provision`: four of those 25 items (CBOE, Goldman Sachs desk, an unprocessed UBS item, a Market Ear item) |
+| `api_extra_4AJs5Adl2Yp.json` | `GET /api/mobile/items/4AJs5Adl2Yp/extra`: processed item, markdown bullet summary and 9 chart images |
+| `api_extra_Pd4eYWnz5FH.json` | Same call for an item MarketDesk has not processed: the `**Document Missing**` placeholder, no images |
+| `api_path_4AJs5Adl2Yp.json` | `GET /api/mobile/items/4AJs5Adl2Yp/path`: `Current / 2026 / October / Oct 26 / CBOE` |
+| `api_path_eQJttFDd58v.json` | Same call for a Goldman Sachs desk item: `... / Goldman Sachs / S&T` |
+
+## Unauthenticated captures (2026-10-26)
 
 | File | What it is |
 |---|---|
-| `landing.html` | `GET https://marketdesk.ai/` (and the 302 target of `/library/browse/<id>`) while signed out |
 | `app-landing.js` | Landing script: FirebaseUI, then `POST /api/user/login {F: idToken}` |
-| `API.js` | Client helpers; `[time]` attributes hold unix seconds |
-| `Wire.js` | WebSocket client (`page.reload` event) |
-| `firebase_config.json` | Scout summary of the public `zerohedge-prod` Firebase web config. Drift guard for `FIREBASE_API_KEY` |
+| `firebase_config.json` | Public `zerohedge-prod` Firebase web config. Drift guard for `FIREBASE_API_KEY` |
 
-## SYNTHETIC (hand-written, NOT captured)
+## Generated
 
-The library DOM, article DOM, standalone viewer and asset hosts were not reachable without a signed-in
-session. These files encode assumptions only. Every selector they exercise lives in
-`research.marketdesk_scrape.SELECTORS`.
-
-| File | Assumption it encodes |
+| File | Use |
 |---|---|
-| `library.synthetic.html` | Items are `a[href*='/library/browse/<id>']` with a `[time]` unix-seconds element in or next to them |
-| `article.synthetic.html` | `h1` title, `.publisher`, `.summary li` bullets, `img` charts, `a.action.preview` to `/standalone/<id>` |
-| `standalone_viewer.synthetic.html` | `/standalone/<id>` answers with an HTML viewer embedding the PDF |
-| `sample.pdf` | Tiny generated one-page PDF |
-| `chart.jpg`, `chart.webp` | Tiny generated rasters for the PNG re-encode path |
+| `sample.pdf` | Tiny one-page PDF (the real PDFs are third-party research and are not committed) |
+| `chart.jpg`, `chart.webp` | Tiny rasters for the PNG re-encode path |
 | `logo.svg` | Scriptable SVG that must never be stored |
-
-**Before enabling `radon-marketdesk.timer` in production:** run an authed probe, save the real library,
-article and standalone responses here, delete the `*.synthetic.html` files, update `SELECTORS` and
-`MARKETDESK_ASSET_HOSTS`, and make these tests pass against the captures.

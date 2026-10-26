@@ -198,9 +198,11 @@ def build_instruction(
         lines.append(f"PUBLISHER: {publisher}")
     lines.append("SUMMARY_BULLETS (MarketDesk):")
     lines.extend(f"- {item}" for item in summary)
-    lines.append("ARTICLE_TEXT (may be empty):")
+    lines.append("ARTICLE_TEXT (the source PDF text; may be empty):")
     lines.append((body_text or "")[:BODY_MAX])
     lines.append(f"IMAGES (attached, in this order, labeled by id): {json.dumps(list(image_ids))}")
+    lines.append("Every number in the title, content and captions must appear verbatim in SUMMARY_BULLETS or "
+                 "ARTICLE_TEXT. Never take a number from an image alone.")
     return "\n".join(lines)
 
 
@@ -274,6 +276,27 @@ def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[
     return problems
 
 
+def _repair(ask, instruction: str, rejected: list[tuple[list[str], dict]]):
+    """One more ladder pass over the rejected draft with the fewest problems, naming each problem.
+    The usual case is a number read off a chart image that the text does not carry. None on failure."""
+    if not rejected:
+        return None
+    problems, draft = min(rejected, key=lambda item: len(item[0]))
+    prompt = "\n".join([
+        instruction,
+        "",
+        "REJECTED_DRAFT:",
+        json.dumps(draft, ensure_ascii=False),
+        "REJECTED_FOR: " + ", ".join(problems[:20]),
+        "Return the same JSON object with every listed problem fixed. Remove or rewrite any sentence or caption "
+        "whose number is not verbatim in SUMMARY_BULLETS or ARTICLE_TEXT; keep everything else.",
+    ])
+    try:
+        return ask(prompt)
+    except (ModelLadderExhausted, ModelResponseError):
+        return None
+
+
 def write_copy(
     *,
     title: str,
@@ -292,12 +315,19 @@ def write_copy(
     # The numeric firewall checks against exactly the facts the model was shown.
     source_text = "\n".join([title, publisher or "", *summary, (body_text or "")[:BODY_MAX]])
 
-    def accept(obj: Any) -> bool:
-        return isinstance(obj, dict) and not copy_problems(obj, source_text=source_text, image_ids=ids)
+    rejected: list[tuple[list[str], dict]] = []
 
-    try:
-        result = complete(
-            instruction,
+    def accept(obj: Any) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        problems = copy_problems(obj, source_text=source_text, image_ids=ids)
+        if problems:
+            rejected.append((problems, obj))
+        return not problems
+
+    def ask(prompt: str):
+        return complete(
+            prompt,
             images=images,
             system=SYSTEM,
             max_tokens=3000,
@@ -306,10 +336,15 @@ def write_copy(
             accept=accept,
             log_prefix="marketdesk",
         )
+
+    try:
+        result = ask(instruction)
     except ModelLadderExhausted as exc:
-        if _every_rung_rejected(str(exc)):  # classify on the full text; the safe message is truncated
-            raise CopyUnavailable("copy_rejected: every rung failed validation") from None
-        raise CopyOutage(safe_error_message(exc)) from None
+        result = _repair(ask, instruction, rejected)
+        if result is None:
+            if _every_rung_rejected(str(exc)):  # classify on the full text; the safe message is truncated
+                raise CopyUnavailable("copy_rejected: every rung failed validation") from None
+            raise CopyOutage(safe_error_message(exc)) from None
     except ModelResponseError as exc:
         raise CopyUnavailable(safe_error_message(exc)) from None
 

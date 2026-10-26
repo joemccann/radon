@@ -2522,7 +2522,7 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
         "MARKETDESK_FIREBASE_REFRESH_TOKEN=rt\n"
         "MARKETDESK_MAX_PER_CYCLE=5\n"
         "MARKETDESK_LOOKBACK_HOURS=48\n"
-        "MARKETDESK_LIBRARY_URL=https://marketdesk.ai/\n"
+        "MARKETDESK_SUMMARY_WAIT_HOURS=6\n"
         "MARKETDESK_ASSET_HOSTS=cdn.example.com\n"
         "PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/chrome\n"
         "PLAYWRIGHT_CHROMIUM_SANDBOX=1\n"
@@ -2569,10 +2569,8 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
         "MARKETDESK_FIREBASE_REFRESH_TOKEN",
         "MARKETDESK_MAX_PER_CYCLE",
         "MARKETDESK_LOOKBACK_HOURS",
-        "MARKETDESK_LIBRARY_URL",
+        "MARKETDESK_SUMMARY_WAIT_HOURS",
         "MARKETDESK_ASSET_HOSTS",
-        "PLAYWRIGHT_CHROMIUM_EXECUTABLE",
-        "PLAYWRIGHT_CHROMIUM_SANDBOX",
         "DROPBOX_WRITE_APP_KEY",
         "DROPBOX_WRITE_REFRESH_TOKEN",
         "DROPBOX_WRITE_ACCOUNT_ID",
@@ -2581,6 +2579,8 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
     } <= keys
     for forbidden in (
         GATEWAY_SECRET_KEY,
+        "PLAYWRIGHT_CHROMIUM_EXECUTABLE",  # no browser in this unit since the JSON API rewrite
+        "PLAYWRIGHT_CHROMIUM_SANDBOX",
         "DROPBOX_APP_KEY",
         "DROPBOX_REFRESH_TOKEN",
         "RADON_ARCHIVE_S3_SECRET_ACCESS_KEY",

@@ -167,3 +167,18 @@ def test_isolated_anchor_cli_and_invalid_pages(tmp_path,monkeypatch):
     anchors=Pipeline(tmp_path,None,None).anchors_isolated(source,[1])
     assert anchors[0]["anchors"]
     with pytest.raises(ValueError):text_anchors(source,[0])
+
+
+def test_text_only_child_prints_bounded_plain_text(tmp_path):
+    pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=2)
+    result=subprocess.run([sys.executable,"-m","research.pdf",str(pdf),".","--text-only"],capture_output=True,
+                          env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[1])},timeout=60)
+    assert result.returncode==0,result.stderr
+    text=json.loads(result.stdout)["text"]
+    assert "Research evidence page 1, September 7 2026" in text and "Research evidence page 2" in text
+
+
+def test_plain_text_is_capped(tmp_path):
+    from research.pdf import plain_text
+    pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=3)
+    assert len(plain_text(pdf,max_chars=40))==40
