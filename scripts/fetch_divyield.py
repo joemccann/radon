@@ -34,6 +34,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from bisect import bisect_right
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -114,12 +115,40 @@ def _iso_utc_now() -> str:
 
 # ── constituents (3-tier fallback) ────────────────────────────────
 
-def _http_get(url: str, user_agent: str) -> str:
-    from urllib.request import Request, urlopen
+_THREAD_HTTP = threading.local()
 
-    req = Request(url, headers={"User-Agent": user_agent})
-    with urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
-        return resp.read().decode("utf-8-sig", "replace")
+
+def _http_session():
+    """One requests.Session per thread so sequential Yahoo/GitHub GETs
+    reuse a keep-alive socket (PERF-028). Session is not thread-safe."""
+    import requests
+
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        session = requests.Session()
+        _THREAD_HTTP.session = session
+    return session
+
+
+def close_http_session() -> None:
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        return
+    try:
+        session.close()
+    finally:
+        _THREAD_HTTP.session = None
+
+
+def _http_get(url: str, user_agent: str) -> str:
+    resp = _http_session().get(
+        url,
+        headers={"User-Agent": user_agent},
+        timeout=FETCH_TIMEOUT_S,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+    return resp.content.decode("utf-8-sig", "replace")
 
 
 def parse_constituents_csv(text: str) -> list[str]:
