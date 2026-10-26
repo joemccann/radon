@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
-from .base import BaseHandler
+from .base import BaseHandler, connect_ib_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class PositionReconcileHandler(BaseHandler):
 
         # Raising here is deliberate: BaseHandler records the error state
         # and does not latch last_run, so the next cycle retries.
-        client = self._client_factory()
+        client = connect_ib_with_retry(self._client_factory)
         try:
             ib_positions = self._positions_fetcher(client)
         finally:
