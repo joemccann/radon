@@ -295,37 +295,57 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
         index = prefix.end()
 
     if index < length and text[index] in "\"'":
-        quote = text[index]
-        delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
-        body = index + len(delimiter)
-        close = _find_close(text, body, delimiter, backslash_escapes=True)
-        if len(delimiter) == 1:
-            # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
-            # backslash escape, so `\''` there is a literal backslash then an
-            # embedded quote, not an escaped quote then the close. Which
-            # grammar applies is unknowable here; the later close redacts
-            # the whole value under either.
-            literal = _find_close(text, body, delimiter, backslash_escapes=False)
-            if close is None:
-                # No close under the escaping grammar: the value runs at
-                # least to the end of the line, so an earlier literal close
-                # (an escaped quote in a truncated excerpt) must not end it.
-                eol = _end_of_line(text, body)
-                if literal is None or literal < eol:
-                    return body, eol, ""
-                close = literal
-            elif literal is not None and literal > close:
-                close = literal
-        if close is not None:
-            return body, close, delimiter
-        if len(delimiter) == 1:
-            return body, _end_of_line(text, body), ""
-        return body, length, delimiter
+        body, end, delimiter = _scan_quoted(text, index)
+        # Adjacent literals on the line are one Python constant: `"" "<v>"`
+        # kept its second literal (rescan of DS-2026-10-25-15). A loop, not
+        # recursion, so a long run of literals cannot exhaust the stack.
+        while delimiter:
+            following = end + len(delimiter)
+            while following < length and text[following] in " \t":
+                following += 1
+            prefix = _STRING_PREFIX.match(text, following)
+            if prefix is not None:
+                following = prefix.end()
+            if following >= length or text[following] not in "\"'":
+                break
+            _, end, delimiter = _scan_quoted(text, following)
+        return body, end, delimiter
 
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
     return index, cursor, ""
+
+
+def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
+    """``_scan_value`` for the one quoted literal opening at ``index``."""
+    length = len(text)
+    quote = text[index]
+    delimiter = quote * 3 if text.startswith(quote * 3, index) else quote
+    body = index + len(delimiter)
+    close = _find_close(text, body, delimiter, backslash_escapes=True)
+    if len(delimiter) == 1:
+        # DS-2026-10-24-08: a YAML or SQL single-quoted scalar has no
+        # backslash escape, so `\''` there is a literal backslash then an
+        # embedded quote, not an escaped quote then the close. Which
+        # grammar applies is unknowable here; the later close redacts
+        # the whole value under either.
+        literal = _find_close(text, body, delimiter, backslash_escapes=False)
+        if close is None:
+            # No close under the escaping grammar: the value runs at
+            # least to the end of the line, so an earlier literal close
+            # (an escaped quote in a truncated excerpt) must not end it.
+            eol = _end_of_line(text, body)
+            if literal is None or literal < eol:
+                return body, eol, ""
+            close = literal
+        elif literal is not None and literal > close:
+            close = literal
+    if close is not None:
+        return body, close, delimiter
+    if len(delimiter) == 1:
+        return body, _end_of_line(text, body), ""
+    return body, length, delimiter
 
 
 def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
@@ -363,23 +383,28 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
 
     DS-2026-10-25-13 / -15: a YAML plain scalar continues on more-indented
     lines, and a wrapper on the key line (a Python paren, a YAML tag or
-    anchor) puts the value on the next one. Both kept those lines. Stops at a
-    blank line or one indented no deeper than the key's.
+    anchor) puts the value on the next one. Both kept those lines. Stops at
+    the first non-blank line indented no deeper than the key's; blank lines
+    between deeper ones belong to the value.
     """
     indent = line_start
     while indent < len(text) and text[indent] in " \t":
         indent += 1
     indent -= line_start
-    end = eol
-    while end < len(text):
-        start = end + (2 if text.startswith("\r\n", end) else 1)
+    end = cursor = eol
+    while cursor < len(text):
+        start = cursor + (2 if text.startswith("\r\n", cursor) else 1)
         first = start
         while first < len(text) and text[first] in " \t":
             first += 1
         line_end = _end_of_line(text, first)
-        if first - start <= indent or line_end == first:
+        if line_end == first:
+            # Blank: the next non-blank line decides.
+            cursor = line_end
+            continue
+        if first - start <= indent:
             break
-        end = line_end
+        end = cursor = line_end
     return end
 
 
@@ -428,7 +453,7 @@ _VALUE_CHAR = re.compile(r"[A-Za-z0-9_+/=~-]")
 _QUERY_PARAMETER = re.compile(r"&[A-Za-z_][A-Za-z0-9_.-]*=")
 
 
-def _is_already_redacted(body: str) -> bool:
+def _is_already_redacted(body: str, *, quoted: bool = False) -> bool:
     """True when the value IS redaction output rather than a surviving tail.
 
     A rule that ran earlier may redact only part of a value and leave
@@ -447,8 +472,12 @@ def _is_already_redacted(body: str) -> bool:
     if label is None:
         return False
     rest = rest[label.end() :]
-    if not rest or _QUERY_PARAMETER.match(rest):
+    if not rest:
         return True
+    if _QUERY_PARAMETER.match(rest):
+        # URL structure, which only an unquoted value carries: inside quotes
+        # `[redacted]&note=<v>` is one value and its tail is redacted.
+        return not quoted
     if _VALUE_CHAR.match(rest):
         return False
     return not _quoted_value_is_secret(rest)
@@ -471,7 +500,7 @@ def _redact_assignments(text: str) -> str:
         # assignments or prose, and re-reading it per value is quadratic. A
         # label with more words after it on the line is a partial redaction
         # (a provider rule took the first word of a passphrase): redact on.
-        if _is_already_redacted(text[body_start:body_end]):
+        if _is_already_redacted(text[body_start:body_end], quoted=bool(delimiter)):
             after = body_end + len(delimiter)
             while after < len(text) and text[after] in " \t":
                 after += 1
@@ -583,6 +612,32 @@ def _is_opaque(value: str) -> bool:
     )
 
 
+_WRAPPER_PAREN = re.compile(r"\(+(?=(?:[rRbBuUfF]{1,2})?[\"'])")
+_NODE_PROPERTY = re.compile(r"[!&][^\s]*")
+
+
+def _wrapped_value_is_secret(text: str, body_start: int, body_end: int) -> bool:
+    """A literal behind a same-line wrapper: ``("<v>")`` or a YAML tag or
+    anchor then the value. The tokenizer reads the wrapper as an unquoted
+    value, which detection does not inspect for an opaque literal.
+    """
+    paren = _WRAPPER_PAREN.match(text, body_start, body_end)
+    if paren is not None:
+        return _quoted_value_is_secret(text[paren.end() : body_end])
+    if _NODE_PROPERTY.fullmatch(text, body_start, body_end) is None:
+        return False
+    following = body_end
+    while following < len(text) and text[following] in " \t":
+        following += 1
+    if following >= len(text) or text[following] in "\r\n":
+        return False
+    value_start, value_end, delimiter = _scan_value(text, following)
+    value = text[value_start:value_end]
+    if delimiter or (value_start > following):
+        return _quoted_value_is_secret(value)
+    return len(value) >= 16 and bool(_LONG_LITERAL.fullmatch(value)) and _is_opaque(value)
+
+
 def find_secret_assignments(text: str) -> list[str]:
     """``["[redacted-secret]"]`` when ``text`` assigns a literal opaque value
     to a credential-named key, else ``[]``. Never returns the value.
@@ -603,6 +658,8 @@ def find_secret_assignments(text: str) -> list[str]:
         # end with no delimiter; its opening quote still marks it quoted.
         quoted = delimiter or (body_start > 0 and text[body_start - 1] in "\"'")
         if quoted and _quoted_value_is_secret(body):
+            return ["[redacted-secret]"]
+        if not delimiter and _wrapped_value_is_secret(text, body_start, body_end):
             return ["[redacted-secret]"]
         if not delimiter and head_start >= continued_to:
             # A key inside an earlier continuation was already covered by it.
