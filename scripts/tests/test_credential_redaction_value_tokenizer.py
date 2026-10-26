@@ -449,3 +449,17 @@ def test_continuation_and_adjacency_stay_linear(unit):
 
     small, large = elapsed(500), elapsed(4000)
     assert large < max(small * 40, 2.0), (small, large)
+
+
+@pytest.mark.parametrize("text", [
+    f'AUTHORIZATION = "Bearer " "{OPAQUE}{TAIL}"\n',
+    "PASSWORD=" + "sk-ant-" + f"abc123&note={OPAQUE}{TAIL}\n",
+], ids=["bearer-adjacent-literal", "label-query-suffix-without-url"])
+def test_rescan3_shape_is_scrubbed(text):
+    assert _clean(scrub_credential_text(text))
+
+
+def test_prefixed_url_parameter_keeps_its_query_structure():
+    text = f"https://h.invalid/v1?client_api_key={OPAQUE}&symbol=SPY\n"
+    out = scrub_credential_text(text)
+    assert OPAQUE not in out and "&symbol=SPY" in out, out
