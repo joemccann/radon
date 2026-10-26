@@ -21,6 +21,7 @@ import math
 import os
 import re
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -1098,10 +1099,44 @@ def _fetch_stock_history_ib_only(
     return symbol, {}
 
 
+_THREAD_UW = threading.local()
+
+
+def _thread_uw_client() -> UWClient:
+    """One UWClient (one requests.Session) per thread (PERF-029).
+
+    Rebuild when the UWClient binding changes so a patched test client
+    cannot leak into a later call on the same worker thread.
+    """
+    client = getattr(_THREAD_UW, "client", None)
+    cached_cls = getattr(_THREAD_UW, "cls", None)
+    if client is not None and cached_cls is UWClient:
+        return client
+    if client is not None:
+        closer = getattr(client, "close", None)
+        if callable(closer):
+            closer()
+    client = UWClient()
+    _THREAD_UW.client = client
+    _THREAD_UW.cls = UWClient
+    return client
+
+
+def close_thread_uw_client() -> None:
+    client = getattr(_THREAD_UW, "client", None)
+    if client is None:
+        return
+    try:
+        client.close()
+    finally:
+        _THREAD_UW.client = None
+        _THREAD_UW.cls = None
+
+
 def _fetch_stock_history_fallback(
     symbol: str, start: str, end: str
 ) -> Tuple[str, Dict[str, float], str]:
-    """UW -> Yahoo fallback. Creates own UWClient. Thread-safe.
+    """UW -> Yahoo fallback. Thread-local UWClient. Thread-safe.
 
     Returns (symbol, history, source).
     """
@@ -1113,9 +1148,8 @@ def _fetch_stock_history_fallback(
 
     # Try UW
     try:
-        uw = UWClient()
+        uw = _thread_uw_client()
         data = uw.get_stock_ohlc(symbol, candle_size="1d")
-        uw.close()
         parsed: Dict[str, float] = {}
         for bar in data.get("data", []):
             dt = str(bar.get("date") or "")[:10]
@@ -1148,7 +1182,7 @@ def _fetch_stock_history_fallback(
 def _fetch_option_history_safe(
     option_id: str, start: str, end: str
 ) -> Tuple[str, Dict[str, float], Optional[str]]:
-    """Thread-safe option fetch with own UWClient. Exception -> warning string.
+    """Thread-safe option fetch with a thread-local UWClient.
 
     Returns (option_id, history, warning_or_none).
     """
@@ -1159,9 +1193,8 @@ def _fetch_option_history_safe(
         return option_id, cached, None
 
     try:
-        uw = UWClient()
+        uw = _thread_uw_client()
         data = uw.get_option_contract_historic(option_id)
-        uw.close()
         parsed: Dict[str, float] = {}
         for row in data.get("chains", []):
             dt = str(row.get("date") or "")[:10]

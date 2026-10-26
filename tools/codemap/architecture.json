@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-25T09:00:09Z",
-  "node_count": 4161,
-  "edge_count": 8525,
+  "generated_at": "2026-10-26T09:00:08Z",
+  "node_count": 4167,
+  "edge_count": 8538,
   "areas": {
-    "web": 2368,
+    "web": 2369,
     "site": 159,
-    "scripts": 1465,
-    "cloud": 121,
+    "scripts": 1468,
+    "cloud": 123,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1117
+      "count": 1118
     },
     {
       "id": "site/app",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 770
+      "count": 773
     },
     {
       "id": "scripts/trade_blotter",
@@ -270,12 +270,12 @@
     {
       "id": "cloud/scripts",
       "area": "cloud",
-      "count": 14
+      "count": 15
     },
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 104
+      "count": 105
     },
     {
       "id": "lib/tools",
@@ -340,17 +340,17 @@
       "test": false
     },
     {
+      "id": "scripts/api/__init__.py",
+      "area": "scripts",
+      "in": 105,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
       "in": 61,
       "out": 44,
-      "test": false
-    },
-    {
-      "id": "scripts/api/__init__.py",
-      "area": "scripts",
-      "in": 104,
-      "out": 0,
       "test": false
     },
     {
@@ -517,8 +517,15 @@
     {
       "id": "scripts/utils/__init__.py",
       "area": "scripts",
-      "in": 42,
+      "in": 43,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/clients/ib_client.py",
+      "area": "scripts",
+      "in": 39,
+      "out": 3,
       "test": false
     },
     {
@@ -540,13 +547,6 @@
       "area": "scripts",
       "in": 41,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/ib_client.py",
-      "area": "scripts",
-      "in": 38,
-      "out": 3,
       "test": false
     },
     {

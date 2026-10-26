@@ -64,6 +64,36 @@ def et_session_date(moment: Optional[datetime] = None) -> str:
     return m.strftime("%Y-%m-%d")
 
 
+
+# A gateway restart refuses TCP for a minute or two (the broker's compose
+# cycle on 2026-10-26 refused from 16:52Z to 17:14Z). One attempt per cycle
+# turned that window into ERROR rows on the freshness panel; a few spaced
+# attempts ride out a restart, and a real outage still raises.
+IB_CONNECT_ATTEMPTS = 3
+IB_CONNECT_BACKOFF_SECONDS = (2.0, 4.0)
+_sleep = time.sleep
+
+
+def connect_ib_with_retry(connect, *, attempts: int = IB_CONNECT_ATTEMPTS):
+    """Call ``connect`` until it returns; re-raise its last failure.
+
+    Retries only connection-level failures (``IBConnectionError``,
+    ``ConnectionError``, ``OSError``); anything else propagates at once.
+    """
+    from clients.ib_client import IBConnectionError
+
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return connect()
+        except (IBConnectionError, ConnectionError, OSError) as exc:
+            last = exc
+            if attempt < attempts:
+                _sleep(IB_CONNECT_BACKOFF_SECONDS[min(attempt, len(IB_CONNECT_BACKOFF_SECONDS)) - 1])
+    assert last is not None
+    raise last
+
+
 class HandlerSoftFailure(RuntimeError):
     """A handler reported a soft failure via ``{"status": "error", ...}``.
 
