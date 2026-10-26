@@ -16,6 +16,9 @@ _SECRET_KEY = (
     # assignment rule carried the name at all. Prose needs no guard here; every
     # use of this alternation requires an assignment separator.
     r"|cookie"
+    # DS-2026-10-25-12: the header rules below leave a QUOTED value to the
+    # tokenizer, which follows it across lines, so the names are keys here.
+    r"|authorization|bearer"
     r"|sess(?:ion)?[-_]?id|_session|csrf|xsrf)"
 )
 
@@ -193,11 +196,12 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
     (
         re.compile(
-            r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*[\"']?)"
+            r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*)"
             # The whole rest of the line: a fixed scheme list redacted
             # `ApiKey` and kept the credential after it, and one token kept
-            # a Digest header's later fields (DS-2026-10-25-08).
-            r"[^\r\n]+",
+            # a Digest header's later fields (DS-2026-10-25-08). A quoted
+            # value may continue on later lines; the tokenizer owns it.
+            r"(?![\"'\s])[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -354,8 +358,52 @@ def _end_of_line(text: str, pos: int) -> int:
     return len(text) if newline is None else newline.start()
 
 
+def _continuation_end(text: str, line_start: int, eol: int) -> int:
+    """End of the lines after ``eol`` indented deeper than the key line.
+
+    DS-2026-10-25-13 / -15: a YAML plain scalar continues on more-indented
+    lines, and a wrapper on the key line (a Python paren, a YAML tag or
+    anchor) puts the value on the next one. Both kept those lines. Stops at a
+    blank line or one indented no deeper than the key's.
+    """
+    indent = line_start
+    while indent < len(text) and text[indent] in " \t":
+        indent += 1
+    indent -= line_start
+    end = eol
+    while end < len(text):
+        start = end + (2 if text.startswith("\r\n", end) else 1)
+        first = start
+        while first < len(text) and text[first] in " \t":
+            first += 1
+        line_end = _end_of_line(text, first)
+        if first - start <= indent or line_end == first:
+            break
+        end = line_end
+    return end
+
+
+class _LineStarts:
+    """Start of the line holding each position, for positions in order.
+
+    Searches back only to the previous position, so the total is linear.
+    """
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._seen = 0
+        self._start = 0
+
+    def __call__(self, pos: int) -> int:
+        newline = self._text.rfind("\n", self._seen, pos)
+        if newline != -1:
+            self._start = newline + 1
+        self._seen = max(self._seen, pos)
+        return self._start
+
+
 def _iter_assignments(text: str):
-    """``(head_end, body_start, body_end, delimiter)`` per credential assignment.
+    """``(head_start, head_end, body_start, body_end, delimiter)`` per credential assignment.
 
     Non-overlapping: the scan resumes past each value, so a credential inside
     an already-consumed value is not re-reported.
@@ -366,7 +414,7 @@ def _iter_assignments(text: str):
         if head is None:
             return
         body_start, body_end, delimiter = _scan_value(text, head.end())
-        yield head.end(), body_start, body_end, delimiter
+        yield head.start(), head.end(), body_start, body_end, delimiter
         cursor = max(body_end + len(delimiter), head.end() + 1)
 
 
@@ -415,7 +463,8 @@ def _redact_assignments(text: str) -> str:
     out: list[str] = []
     last = 0
     eol = -1
-    for head_end, body_start, body_end, delimiter in _iter_assignments(text):
+    line_start = _LineStarts(text)
+    for head_start, head_end, body_start, body_end, delimiter in _iter_assignments(text):
         if head_end < last:
             continue
         # Decided on the value token itself: the line's later text is other
@@ -434,7 +483,9 @@ def _redact_assignments(text: str) -> str:
             # the first of a passphrase; detection keeps the narrower span.
             # The line end is reused while it lies ahead, keeping this linear.
             if eol < body_start:
-                eol = _end_of_line(text, body_start)
+                eol = _continuation_end(
+                    text, line_start(head_start), _end_of_line(text, body_start)
+                )
             body_end = eol
         body = text[body_start:body_end]
         if not delimiter and not body:
@@ -467,7 +518,8 @@ def _quoted_value_is_secret(body: str) -> bool:
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
-    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    # A quoted value may continue on later lines; the tokenizer owns it.
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?![\"' \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
 ]
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
@@ -542,10 +594,22 @@ def find_secret_assignments(text: str) -> list[str]:
     # literal scanner above permits one opening quote and no string prefix,
     # which is how a multi-line, triple-delimited or prefixed value was
     # redacted but published as clean (DS-2026-10-22-10/-11/-12).
-    for _head_end, body_start, body_end, delimiter in _iter_assignments(text or ""):
-        body = (text or "")[body_start:body_end]
-        if delimiter and _quoted_value_is_secret(body):
+    text = text or ""
+    line_start = _LineStarts(text)
+    continued_to = -1
+    for head_start, _head_end, body_start, body_end, delimiter in _iter_assignments(text):
+        body = text[body_start:body_end]
+        # DS-2026-10-25-14: an unclosed quoted value falls back to the line
+        # end with no delimiter; its opening quote still marks it quoted.
+        quoted = delimiter or (body_start > 0 and text[body_start - 1] in "\"'")
+        if quoted and _quoted_value_is_secret(body):
             return ["[redacted-secret]"]
+        if not delimiter and head_start >= continued_to:
+            # A key inside an earlier continuation was already covered by it.
+            eol = _end_of_line(text, body_start)
+            continued_to = _continuation_end(text, line_start(head_start), eol)
+            if _quoted_value_is_secret(text[eol:continued_to]):
+                return ["[redacted-secret]"]
         # The literal scanner bounds its value run at 1024, so a longer
         # unquoted literal (a session token) matched neither rule.
         if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):
