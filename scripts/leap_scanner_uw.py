@@ -45,7 +45,12 @@ import json
 import math
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    CancelledError,
+    FIRST_COMPLETED,
+    ThreadPoolExecutor,
+    wait,
+)
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -244,14 +249,20 @@ def get_uw_history(
     ticker: str,
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
+    *,
+    ib_timeout: Optional[float] = None,
 ) -> List[float]:
     """Fetch historical daily closes: IB first, then Robinhood, UW on miss."""
     try:
         if uw_client is None and ib is None:
             with UWClient() as client:
-                data = fetch_daily_closes(ticker, ib=None, uw=client, min_bars=60)
+                data = fetch_daily_closes(
+                    ticker, ib=None, uw=client, min_bars=60, ib_timeout=ib_timeout
+                )
         else:
-            data = fetch_daily_closes(ticker, ib=ib, uw=uw_client, min_bars=60)
+            data = fetch_daily_closes(
+                ticker, ib=ib, uw=uw_client, min_bars=60, ib_timeout=ib_timeout
+            )
         bars = data.get("data", [])
         if bars:
             return [float(b["close"]) for b in bars if b.get("close") is not None]
@@ -289,9 +300,11 @@ def get_price_history(
     ticker: str,
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
+    *,
+    ib_timeout: Optional[float] = None,
 ) -> List[float]:
     """Fetch daily closes: IB first, Robinhood, UW fallback, then Yahoo last resort."""
-    prices = get_uw_history(ticker, uw_client, ib=ib)
+    prices = get_uw_history(ticker, uw_client, ib=ib, ib_timeout=ib_timeout)
     if len(prices) >= 60:
         return prices
     return get_yahoo_history(ticker)
@@ -324,9 +337,10 @@ def get_vol_data(
     *,
     quiet: bool = False,
     ib: Any = None,
+    ib_timeout: Optional[float] = None,
 ) -> Optional[VolData]:
     """Get historical volatility data for a ticker."""
-    prices = get_price_history(ticker, uw_client, ib=ib)
+    prices = get_price_history(ticker, uw_client, ib=ib, ib_timeout=ib_timeout)
     
     if len(prices) < 60:
         if not quiet:
@@ -497,6 +511,7 @@ def scan_ticker(
     *,
     quiet: bool = False,
     ib: Any = None,
+    ib_timeout: Optional[float] = None,
 ) -> Optional[ScanResult]:
     """Scan a single ticker for LEAP IV mispricing."""
     def emit(msg: str = "", *, force: bool = False) -> None:
@@ -508,7 +523,9 @@ def scan_ticker(
     emit(f"{'='*50}")
 
     with (UWClient() if client is None else nullcontext(client)) as uw:
-        vol_data = get_vol_data(ticker, uw_client=uw, quiet=quiet, ib=ib)
+        vol_data = get_vol_data(
+            ticker, uw_client=uw, quiet=quiet, ib=ib, ib_timeout=ib_timeout
+        )
         if not vol_data:
             return None
 
@@ -597,11 +614,22 @@ def scan_is_exhausted(results: int, provider_failures: int) -> bool:
     return (provider_failures / attempted) > MAX_PROVIDER_FAILURE_RATIO
 
 
-# The leap POST budget is 3610s (TimeoutStartSec=3900). 70s covers a 60s
-# Retry-After, the governor default when the header is missing. One wait
-# per ticker overlaps across the worker pool, so a minute-scale embargo on
-# a 518-name largecaps scan stays inside that budget. A longer embargo is
-# the daily reset and must still fail the oneshot.
+# The leap POST budget is 3610s (TimeoutStartSec=3900). FastAPI kills the
+# preset child at LEAP_PRESET_TIMEOUT_S=3600, before main() writes
+# data/leap.json. 2026-10-26 14:00:51Z a 518-name largecaps run held the
+# serialized IB history lock for that whole window and the wrapper exited
+# 1 on an indeterminate HTTP 502. Stop the pool early enough that one
+# in-flight admission wait (120s) plus one 70s retry still returns, writes
+# the cache, and exits before that kill.
+LEAP_SCAN_BUDGET_S = 3300.0
+# IBClient.get_historical_data defaults to 15s, and _LockedIB runs those
+# requests one name at a time. 15s times a largecaps universe does not fit
+# in LEAP_SCAN_BUDGET_S. A short miss falls through to Robinhood, then UW.
+LEAP_IB_HISTORY_TIMEOUT_S = 3.0
+# 70s covers a 60s Retry-After, the governor default when the header is
+# missing. One wait per ticker overlaps across the worker pool, so a
+# minute-scale embargo on a 518-name largecaps scan stays inside the curl
+# budget. A longer embargo is the daily reset and must still fail the oneshot.
 LEAP_ADMISSION_WAIT_S = 70.0
 _LEAP_ADMISSION_POLL_S = 8.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
@@ -650,6 +678,10 @@ def _admission_retry_delay(exc: BaseException) -> Optional[float]:
     return remaining
 
 
+class _BudgetDeferred(Exception):
+    """This name was not started because the scan wall clock was spent."""
+
+
 def _scan_ticker_after_admission(
     ticker: str,
     min_gap: float,
@@ -657,6 +689,8 @@ def _scan_ticker_after_admission(
     *,
     quiet: bool,
     ib: Any,
+    ib_timeout: Optional[float] = None,
+    deadline: Optional[float] = None,
 ) -> Optional[ScanResult]:
     """Scan one ticker, waiting once for a short admission embargo.
 
@@ -668,8 +702,12 @@ def _scan_ticker_after_admission(
     """
     waited = False
     while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise _BudgetDeferred()
         try:
-            return scan_ticker(ticker, min_gap, client, quiet=quiet, ib=ib)
+            return scan_ticker(
+                ticker, min_gap, client, quiet=quiet, ib=ib, ib_timeout=ib_timeout
+            )
         except UWRateLimitError as exc:
             if waited:
                 raise
@@ -677,6 +715,8 @@ def _scan_ticker_after_admission(
             if delay is None:
                 raise
             waited = True
+            if deadline is not None:
+                delay = min(delay, max(0.0, deadline - time.monotonic()))
             if delay > 0:
                 print(
                     f"  {ticker}: UW admission busy; retrying in {delay:.0f}s",
@@ -691,56 +731,103 @@ def scan_universe(
     workers: int = 16,
     failed_tickers: Optional[List[str]] = None,
     provider_failures: Optional[List[str]] = None,
+    deferred_tickers: Optional[List[str]] = None,
+    deadline: Optional[float] = None,
 ) -> List[ScanResult]:
     """Scan tickers in parallel with one shared UWClient.
 
     ``failed_tickers`` keeps its original meaning (anything that produced no
     ScanResult) for the payload. ``provider_failures`` is the strict subset
-    that is the PROVIDER's fault — a rate limit or an exception — which is
-    what decides whether the run was exhausted (R-095).
+    that is the PROVIDER's fault (a rate limit or an exception), which is
+    what decides whether the run was exhausted (R-095). Names still queued
+    when ``LEAP_SCAN_BUDGET_S`` is spent go to ``deferred_tickers`` and are
+    not provider failures: the caller writes the names that did finish.
     """
     workers = max(1, workers)
     quiet = workers > 1
     results: List[ScanResult] = []
+    stop_at = time.monotonic() + LEAP_SCAN_BUDGET_S if deadline is None else deadline
+
+    def _record(future, ticker: str) -> None:
+        try:
+            result = future.result()
+        except _BudgetDeferred:
+            if deferred_tickers is not None:
+                deferred_tickers.append(ticker)
+            return
+        except CancelledError:
+            if deferred_tickers is not None:
+                deferred_tickers.append(ticker)
+            return
+        except UWRateLimitError:
+            print(f"  ✗ {ticker}: rate limited, skip")
+            if failed_tickers is not None:
+                failed_tickers.append(ticker)
+            if provider_failures is not None:
+                provider_failures.append(ticker)
+            return
+        except Exception as exc:
+            print(f"  ✗ Error scanning {ticker}: {exc}")
+            if failed_tickers is not None:
+                failed_tickers.append(ticker)
+            if provider_failures is not None:
+                provider_failures.append(ticker)
+            return
+        if result is not None:
+            results.append(result)
+        elif failed_tickers is not None:
+            failed_tickers.append(ticker)
+
     with scan_ib_session() as ib:
         # A preset spans many account minute windows. The interactive 5s
         # deadline otherwise turns a transient shared 429 embargo into hundreds
         # of skipped tickers. Daily/provider caps still refuse before HTTP.
         with UWClient(admission_timeout=120) as uw:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(
-                        _scan_ticker_after_admission,
-                        ticker,
-                        min_gap,
-                        uw,
-                        quiet=quiet,
-                        ib=ib,
-                    ): ticker
-                    for ticker in tickers
+            def _run(ticker: str) -> Optional[ScanResult]:
+                if time.monotonic() >= stop_at:
+                    raise _BudgetDeferred()
+                return _scan_ticker_after_admission(
+                    ticker,
+                    min_gap,
+                    uw,
+                    quiet=quiet,
+                    ib=ib,
+                    ib_timeout=LEAP_IB_HISTORY_TIMEOUT_S,
+                    deadline=stop_at,
+                )
+
+            pool = ThreadPoolExecutor(max_workers=workers)
+            pending: Dict[Any, str] = {}
+            try:
+                pending = {
+                    pool.submit(_run, ticker): ticker for ticker in tickers
                 }
-                for future in as_completed(futures):
-                    ticker = futures[future]
-                    try:
-                        result = future.result()
-                    except UWRateLimitError:
-                        print(f"  ✗ {ticker}: rate limited, skip")
-                        if failed_tickers is not None:
-                            failed_tickers.append(ticker)
-                        if provider_failures is not None:
-                            provider_failures.append(ticker)
-                        continue
-                    except Exception as exc:
-                        print(f"  ✗ Error scanning {ticker}: {exc}")
-                        if failed_tickers is not None:
-                            failed_tickers.append(ticker)
-                        if provider_failures is not None:
-                            provider_failures.append(ticker)
-                        continue
-                    if result:
-                        results.append(result)
-                    elif failed_tickers is not None:
-                        failed_tickers.append(ticker)
+                while pending:
+                    remaining = stop_at - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    finished, _still = wait(
+                        set(pending),
+                        timeout=remaining,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    if not finished:
+                        break
+                    for future in finished:
+                        _record(future, pending.pop(future))
+            finally:
+                pool.shutdown(wait=True, cancel_futures=True)
+            if pending:
+                for future, ticker in pending.items():
+                    _record(future, ticker)
+                deferred_n = len(deferred_tickers or [])
+                if deferred_n:
+                    print(
+                        f"  LEAP scan budget spent ({len(results)}/{len(tickers)} "
+                        f"finished, {deferred_n} deferred)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
     return results
 
 
@@ -1036,12 +1123,14 @@ def main():
     
     failed_tickers = []
     provider_failures: List[str] = []
+    deferred_tickers: List[str] = []
     results = scan_universe(
         tickers,
         args.min_gap,
         workers=args.workers,
         failed_tickers=failed_tickers,
         provider_failures=provider_failures,
+        deferred_tickers=deferred_tickers,
     )
     exhausted = scan_is_exhausted(len(results), len(provider_failures))
     
@@ -1073,6 +1162,9 @@ def main():
         json_data["failed_tickers"] = failed_tickers
         json_data["provider_failures"] = provider_failures
         json_data["status"] = "degraded" if exhausted else "ok"
+        if deferred_tickers:
+            json_data["scan_budget_spent"] = True
+            json_data["deferred_tickers"] = deferred_tickers
 
         # Canonical path first. The radon-api image ships /home/radon/radon as
         # root-owned with no reports/ dir; mkdir(reports) raised PermissionError
