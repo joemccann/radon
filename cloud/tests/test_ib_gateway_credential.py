@@ -626,17 +626,33 @@ def test_rollback_without_prev_is_78(box: Box) -> None:
 # --- static contract --------------------------------------------------------
 
 
-def test_test_mode_ignored_as_root() -> None:
+def test_writer_stays_stdlib_and_isolated() -> None:
     source = WRITER.read_text(encoding="utf-8")
     assert source.startswith("#!/usr/bin/python3 -I\n")
-    assert re.search(r"os\.geteuid\(\)\s*!=\s*0", source)
-    code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
-    assert "RADON_TEST_GATEWAY_DIR" in code
     # stdlib only: root runs it under the system interpreter.
     imports = set(re.findall(r"^(?:import|from)\s+([a-zA-Z_]+)", source, re.MULTILINE))
     assert imports <= {
         "__future__", "errno", "fcntl", "json", "os", "re", "stat", "sys", "tempfile",
     }, imports
+
+
+def test_test_mode_ignored_as_root(monkeypatch, tmp_path: Path) -> None:
+    """Root must ignore RADON_TEST_GATEWAY_DIR even when the variable is set.
+
+    A comment or the `_require_root` euid check still matches a source search
+    after `_test_mode` drops its own euid conjunct. Root would then write the
+    Gateway password wherever that variable points.
+    """
+    module = _load_module()
+    planted = tmp_path / "not-the-broker"
+    monkeypatch.setenv("RADON_TEST_GATEWAY_DIR", str(planted))
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    assert module._test_mode() is False
+    paths = module._paths()
+    assert paths["dir"] == "/etc/radon/ib-gateway"
+    assert paths["target"] == "/etc/radon/ib-gateway/gateway.env"
+    assert str(planted) not in paths["target"]
+    assert str(planted) not in paths["root_env"]
 
 
 def test_sudoers_writer_line_exact_no_wildcard() -> None:
