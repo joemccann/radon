@@ -1375,11 +1375,98 @@ def test_without_a_token_the_runner_says_so_and_claude_falls_back_to_its_login(r
 # The runner files are shared; the loop envs must refresh with them.
 
 
-def test_install_refreshes_every_loop_env_not_only_the_named_loops():
-    src = (REPO / "scripts" / "runner" / "install.sh").read_text()
-    runner = src.split("install_runner() {", 1)[1].split("\n}\n", 1)[0]
-    assert 'for file in "$SRC/loops/"*.env; do' in runner
-    assert 'atomic_install -o root -g wheel -m 644 "$file" "$PREFIX/loops/$(basename "$file")"' in runner
+_INSTALL_STUB = r"""#!/bin/bash
+# Stand-in for /usr/bin/install. Honours -d and -m, ignores -o/-g, so
+# install_runner can be driven without root.
+set -e
+mode=644
+make_dirs=0
+n=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -d) make_dirs=1; shift ;;
+    -o|-g) shift; shift ;;
+    -m) mode="$2"; shift; shift ;;
+    --) shift; break ;;
+    -*) echo "unhandled install flag: $1" >&2; exit 2 ;;
+    *) eval "f_$n=\$1"; n=$((n + 1)); shift ;;
+  esac
+done
+if [ "$make_dirs" -eq 1 ]; then
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    eval "mkdir -p \"\$f_$i\""
+    i=$((i + 1))
+  done
+  exit 0
+fi
+if [ "$n" -lt 2 ]; then
+  echo "install needs a source and a destination" >&2
+  exit 2
+fi
+last=$((n - 1))
+eval "dest=\$f_$last"
+mkdir -p "$(dirname "$dest")"
+i=0
+while [ "$i" -lt "$last" ]; do
+  eval "src=\$f_$i"
+  if [ "$src" = /dev/null ]; then
+    : > "$dest"
+  else
+    cp "$src" "$dest"
+  fi
+  chmod "$mode" "$dest"
+  i=$((i + 1))
+done
+"""
+
+
+def test_install_runner_copies_every_loop_env(tmp_path):
+    """One loop install refreshes every sibling env, not only the named loop.
+
+    A comment that still contains the for-loop text is not the copy. A stale
+    sibling left behind is the 2026-10-19 failure: the harness moved and the
+    other loops kept an env with no DEADMAN_LABEL.
+    """
+    root = _source_tree(tmp_path)
+    runner = root / "scripts" / "runner"
+    prefix = tmp_path / "prefix"
+    stale = prefix / "loops" / "reliability.env"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("STALE=1\n")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    install_bin = bindir / "install"
+    install_bin.write_text(_INSTALL_STUB)
+    chown_bin = bindir / "chown"
+    chown_bin.write_text("#!/bin/bash\nexit 0\n")
+    install_bin.chmod(0o755)
+    chown_bin.chmod(0o755)
+    body = (runner / "install.sh").read_text()
+    assert body.endswith('main "$@"\n')
+    nofinal = runner / "install-body.sh"
+    nofinal.write_text(body[: body.rfind('main "$@"\n')])
+    driver = tmp_path / "drive.sh"
+    driver.write_text(
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        f'export PATH="{bindir}:$PATH"\n'
+        f'export RADON_RUNNER_PREFIX="{prefix}"\n'
+        # CI has no Homebrew Python. atomic_replace uses this interpreter.
+        f'export RADON_RUNNER_PYTHON="{sys.executable}"\n'
+        f'source "{nofinal}"\n'
+        "install_runner\n"
+    )
+    driver.chmod(0o755)
+    out = subprocess.run([BASH, str(driver)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr or out.stdout
+    source_loops = sorted((runner / "loops").glob("*.env"))
+    assert len(source_loops) >= 2
+    for src in source_loops:
+        copied = prefix / "loops" / src.name
+        assert copied.is_file(), src.name
+        assert copied.read_bytes() == src.read_bytes(), src.name
+    assert (prefix / "loops" / "reliability.env").read_text() != "STALE=1\n"
 
 
 def test_a_missing_dead_man_label_is_logged_not_silent(rig):
