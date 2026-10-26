@@ -366,9 +366,11 @@ line here whenever you ship a security fix.**
   because the publication gate runs it over text an outside contributor shapes.
   The scrubber redacts an unquoted value to the end of its line: a passphrase
   holds spaces, and stopping at the first one published every later word.
-  Detection keeps the narrower whitespace-bounded span; whether a value is
-  already redacted is decided on that token, never the rest of the line,
-  which would make the scrubber quadratic. An `Authorization` value is
+  Detection keeps the narrower whitespace-bounded span. A token that is already
+  a complete redaction label stops the scrubber only when the line ends after
+  it. More words on that line are a partial label (an earlier rule took the
+  first word of a passphrase) and are still redacted. The scrubber does not
+  re-tokenize that remainder. An `Authorization` value is
   redacted to the end of its line, whatever its scheme.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
