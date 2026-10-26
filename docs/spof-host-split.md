@@ -258,10 +258,12 @@ Operator commands after the cut:
 
   | Broker reply | Meaning | App store | App reply |
   |---|---|---|---|
-  | 409 `ROTATION_IN_PROGRESS` / `LOGIN_BLOCKED` (`cooldown`, `lease`) | refused before any write | untouched | 409, nothing saved |
+  | 409 `ROTATION_IN_PROGRESS` / `LOGIN_BLOCKED` (`cooldown`, `lease`) | refused before any write | untouched | 409 `GATEWAY_LOGIN_BLOCKED`, nothing saved. A second save already running in this process is 409 `GATEWAY_ROTATION_IN_PROGRESS` and also writes nothing |
+  | 400 `INVALID_VALUE`, or the app rejects the value before the POST | refused before any write | untouched | 422 `GATEWAY_CREDENTIAL_INVALID`, nothing saved |
   | 202 `RESTART_DEFERRED` | written; operator hold, IBKR login throttle, or helper rc 73/74/75 deferred the restart | written | 200 `deferred` |
   | 200 | written, Gateway recreated once (one push) | written | 200 `applied` |
   | 502 `RESTART_FAILED` | written, helper restart failed (not retried) | written | 200 `restart_failed` |
+  | 200, 202, or 502 with `written: true`, then the app store raises | Gateway file already has the new password | not updated | 503 `CREDENTIAL_STORE_UNAVAILABLE`. Do not resubmit until the store is fixed. The next successful save restarts the Gateway again |
   | 502 `WRITE_FAILED` | writer refused | untouched | 502, nothing saved |
   | 401/403/405/413 with no `written` | daemon refused before any write (peer or cert-CN allowlist, method, size) | untouched | 502 `GATEWAY_WRITE_FAILED`, nothing saved |
   | none: connect or TLS handshake failed | the broker never got the request | untouched | 503 `GATEWAY_BROKER_UNREACHABLE`, nothing saved |
@@ -366,7 +368,9 @@ is a manual step. Run as root on the broker, in this order, in a quiet window
    `PUSHOVER_*`, `MENTHORQ_*`, `B2_*` or `ANTHROPIC_*`.
 8. Only after the Gateway logged in on the new file (API port up on
    `/admin`): `/usr/local/sbin/radon-ib-gateway-credential prune-root-env`.
-   It removes `TWS_PASSWORD` / `TWS_USERID` from `/etc/radon/env` and keeps
+   It removes every `TWS_PASSWORD` / `TWS_USERID` assignment from
+   `/etc/radon/env`, indented ones included (systemd strips the
+   indentation, so they still load), and keeps
    a root-only backup of the previous file beside it,
    `env.pre-ib-gateway-split`. From then on a missing
    `gateway.env` makes `compose-up` exit 78 instead of falling back.

@@ -222,6 +222,67 @@ class TestAModifyDoesNotReserveAgainstItself:
         assert resting == {}
 
 
+def _acked(quantity, *, perm_id, order_id, client_id):
+    trade = _resting_sell(quantity)
+    trade.order.permId = perm_id
+    trade.order.orderId = order_id
+    trade.order.clientId = client_id
+    trade.order.orderType = "LMT"
+    trade.order.lmtPrice = 60.0
+    trade.order.totalQuantity = quantity
+    trade.orderStatus.filled = 0.0
+    return trade
+
+
+class TestAForeignOrderIdStillReserves:
+    """REL-332 / R-743. orderId is per placing client. A modify whose permId is
+    still 0 must not treat another client's order with that number as itself.
+    Dropping it frees the shares it already reserved, and the resize is waived
+    as a close on a stale book."""
+
+    def test_the_other_clients_sell_stays_reserved(self):
+        own = _acked(1, perm_id=0, order_id=7, client_id=26)
+        foreign = _acked(100, perm_id=999, order_id=7, client_id=49)
+        client = MagicMock()
+        client.get_positions.return_value = [SimpleNamespace(contract=STOCK, position=100.0)]
+        client.get_open_orders.return_value = [own, foreign]
+
+        _, resting = bankroll_guard.read_broker_book(client, contract=STOCK, exclude=own)
+
+        assert resting == {("TQQQ", "STK", None, ""): (-100.0, 0.0)}
+
+    def test_the_unacked_order_itself_is_still_excluded(self):
+        own = _acked(100, perm_id=0, order_id=7, client_id=26)
+        client = MagicMock()
+        client.get_positions.return_value = [SimpleNamespace(contract=STOCK, position=100.0)]
+        client.get_open_orders.return_value = [own]
+
+        _, resting = bankroll_guard.read_broker_book(client, contract=STOCK, exclude=own)
+
+        assert resting == {}
+
+    def test_the_resize_does_not_transmit(self, monkeypatch, capsys):
+        own = _acked(1, perm_id=0, order_id=7, client_id=26)
+        foreign = _acked(100, perm_id=999, order_id=7, client_id=49)
+        client = MagicMock(name="IBClient")
+        client.get_open_orders.return_value = [own, foreign]
+        client.get_positions.return_value = [SimpleNamespace(contract=STOCK, position=100.0)]
+        client.ib.client.clientId = 26
+        monkeypatch.setitem(
+            sys.modules, "trading_halt",
+            type("T", (), {"is_trading_halted": staticmethod(lambda: False),
+                           "get_halt_state": staticmethod(lambda: {"reason": "test"})}),
+        )
+        from ib_order_manage import modify_order
+
+        with pytest.raises(SystemExit) as exc:
+            modify_order(client, 7, 0, None, "127.0.0.1", 4001, new_quantity=100)
+
+        assert exc.value.code == 1
+        client.place_order.assert_not_called()
+        assert "not modified" in capsys.readouterr().out
+
+
 class TestAModifyMeetsTheBankrollCap:
     """DS-2026-10-25-02: a modify retransmits, so with the all-paths
     preference on it is held under the same 2.5% cap as a placement."""

@@ -334,7 +334,10 @@ for sizing/eval is unchanged.
   sibling trading class with the same coordinates. With the all-placer gate
   on, a modify in `ib_order_manage.py` (single-leg or combo, legs resolved
   from the broker) is held under the same cap on its unfilled remainder,
-  against the broker book with its own resting remainder replaced.
+  against the broker book with its own resting remainder replaced. When that
+  modify has no permanent id yet, only the same account and order number is
+  replaced; another account's working order that reused the number still
+  counts against the size (REL-332).
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.

@@ -14,7 +14,7 @@ import path from "node:path";
 const radonFetch = vi.fn();
 
 vi.mock("@/lib/routeAccess", () => ({
-  requireRouteAccess: vi.fn(async () => ({ ok: true, principal: { userId: "user_op" } })),
+  requireRouteAccess: vi.fn(async () => ({ ok: true, principal: { userId: "user_op", token: "operator-session-jwt" } })),
 }));
 
 vi.mock("@/lib/radonApi", async (importOriginal) => ({
@@ -106,6 +106,9 @@ describe("PUT /api/credentials/[service] live web env", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values: { TWS_PASSWORD: " N3w$pa ss " }, updated_by: "user_op" }),
       timeout: 165_000,
+      // The app host requires an operator JWT for a Gateway rotation even
+      // from loopback, so the proxy forwards the caller's session token.
+      token: "operator-session-jwt",
     });
   });
 

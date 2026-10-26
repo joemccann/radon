@@ -52,7 +52,7 @@ vi.mock("@/lib/useJournal", () => ({
   }),
 }));
 
-const NOW = new Date();
+const NOW = new Date("2026-10-26T16:00:00Z");
 const expiry = "2099-05-01";
 
 function pd(over: Partial<PriceData>): PriceData {
@@ -84,12 +84,15 @@ function pd(over: Partial<PriceData>): PriceData {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   window.localStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function enableAllImpliedOrderColumns() {
@@ -473,7 +476,7 @@ describe("WorkspaceSections orders — Implied column", () => {
     expect(rowText).toContain(expected);
   });
 
-  it("renders signed combo Implied for a BAG (vertical call spread)", () => {
+  it("renders signed combo Implied for explicitly correlated vertical-spread legs", () => {
     enableAllImpliedOrderColumns();
     const sigma = 0.3;
     const expiryV = "20990619";
@@ -488,6 +491,7 @@ describe("WorkspaceSections orders — Implied column", () => {
         {
           orderId: 1,
           permId: 1,
+          orderRef: "amd-call-spread",
           symbol: "AMD",
           contract: {
             conId: 1,
@@ -511,6 +515,7 @@ describe("WorkspaceSections orders — Implied column", () => {
         {
           orderId: 2,
           permId: 2,
+          orderRef: "amd-call-spread",
           symbol: "AMD",
           contract: {
             conId: 2,
@@ -550,19 +555,17 @@ describe("WorkspaceSections orders — Implied column", () => {
     );
 
     const T = yearsToExpiry("2099-06-19", new Date())!;
-    const longLeg = bsCall(spot, 100, T, 0, sigma);
-    const shortLeg = bsCall(spot, 110, T, 0, sigma);
+    const expected =
+      Math.round((bsCall(spot, 100, T, 0, sigma) - bsCall(spot, 110, T, 0, sigma)) * 100) / 100;
 
     const table = screen.getByText("Implied").closest("table");
     expect(table).not.toBeNull();
-    const rowsText = Array.from(table!.querySelectorAll("tbody tr"))
-      .map((r) => r.textContent ?? "")
-      .join("\n");
-    // Each leg row carries its own BS value; the spread is their difference. Asserting the bare
-    // difference ("1.00") only ever passed by matching the $1.00 limit price, and failed once the
-    // clock moved the rounded spread to 1.01.
-    expect(rowsText).toContain(`$${longLeg.toFixed(2)}`);
-    expect(rowsText).toContain(`$${shortLeg.toFixed(2)}`);
-    expect(longLeg - shortLeg).toBeGreaterThan(0);
+    const rows = table!.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    const impliedIndex = Array.from(table!.querySelectorAll("thead th"))
+      .findIndex((header) => header.textContent?.trim() === "Implied");
+    expect(impliedIndex).toBeGreaterThanOrEqual(0);
+    expect(rows[0].querySelectorAll("td")[impliedIndex].textContent)
+      .toBe(`$${expected.toFixed(2)}`);
   });
 });
