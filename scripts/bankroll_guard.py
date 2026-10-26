@@ -237,10 +237,19 @@ def _con_ids(contract: Any) -> set:
 
 
 def _same_order(trade: Any, other: Any) -> bool:
+    """Whether ``trade`` is the working order a modify is replacing.
+
+    permId is global. orderId is scoped to the placing client: a permId of 0
+    must not drop another client's order that reused the number, or that
+    order's size stops reserving the position and the resize is waived as a
+    close (REL-332 / R-743).
+    """
     perm_id = getattr(other.order, "permId", None)
     if perm_id:
         return getattr(trade.order, "permId", None) == perm_id
-    return getattr(trade.order, "orderId", None) == getattr(other.order, "orderId", None)
+    if getattr(trade.order, "orderId", None) != getattr(other.order, "orderId", None):
+        return False
+    return getattr(trade.order, "clientId", None) == getattr(other.order, "clientId", None)
 
 
 def _broker_snapshot_proved(client: Any, attr: str) -> bool:
