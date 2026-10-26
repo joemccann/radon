@@ -496,6 +496,41 @@ class TestDarkpoolPagination:
         assert walk.cacheable is True
 
 
+class TestFlowClientAdmissionWait:
+    """Regression for /flow-analysis/SOXL 502 (2026-10-26 15:07 UTC): the
+    top-of-hour timers saturate the shared UW minute window, and the
+    client's 5s default admission wait turned that into a 429 that killed
+    the whole flow report for a ticker with no cache to fall back on.
+    The self-built flow client must wait through the window instead, like
+    fetch_oi_changes.py and leap_scanner_uw.py already do.
+    """
+
+    def test_transient_retry_client_waits_through_a_minute_window(self):
+        from fetch_flow import FLOW_ADMISSION_WAIT_S, _flow_client_kwargs
+        from utils.uw_governor import MAX_WAIT_SECONDS
+
+        assert FLOW_ADMISSION_WAIT_S == MAX_WAIT_SECONDS
+        assert _flow_client_kwargs(True) == {"admission_timeout": FLOW_ADMISSION_WAIT_S}
+
+    def test_fail_fast_client_keeps_the_interactive_default(self):
+        from fetch_flow import _flow_client_kwargs
+
+        assert _flow_client_kwargs(False) == {"max_retries": 0, "backoff_factor": 0}
+
+    @patch("fetch_flow.UWClient")
+    @patch("fetch_flow.fetch_flow_alerts", return_value=[])
+    @patch("fetch_flow.fetch_darkpool", return_value=[])
+    @patch("fetch_flow.get_last_n_trading_days", return_value=["2026-10-26"])
+    def test_fetch_flow_builds_the_waiting_client(self, mock_days, mock_dp, mock_flow, MockUWClient):
+        MockUWClient.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        MockUWClient.return_value.__exit__ = MagicMock(return_value=False)
+        from fetch_flow import FLOW_ADMISSION_WAIT_S, fetch_flow
+
+        fetch_flow("SOXL", lookback_days=1)
+
+        MockUWClient.assert_called_once_with(admission_timeout=FLOW_ADMISSION_WAIT_S)
+
+
 class TestUWRetryPolicy:
     """Regression for the 2026-05-15 EWY incident: a transient UW
     rate-limit on per-day darkpool calls was silently swallowed and
