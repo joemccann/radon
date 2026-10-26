@@ -86,7 +86,11 @@ change it on the IBKR website first, then save it in the tab. FastAPI sends
 it once over mTLS to the broker daemon (`POST /rotate-password`), which
 writes `/etc/radon/ib-gateway/gateway.env` through the root writer
 `radon-ib-gateway-credential` and restarts the Gateway once (one IBKR Mobile
-push). The app store keeps the value only when the broker wrote it. A 409
+push). The app store is updated only after the broker replies that it
+wrote the file. If that store write then fails, the reply is 503
+`CREDENTIAL_STORE_UNAVAILABLE`: the Gateway file already has the new
+password and the store does not. Do not resubmit until the store is fixed.
+A 409
 (cooldown, 2FA lease, rotation running) saves nothing; an operator hold or
 IBKR login throttle writes the file and defers the restart. Runbook:
 `docs/spof-host-split.md` (rotate-password); the one-time broker cutover
