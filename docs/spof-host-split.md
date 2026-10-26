@@ -368,7 +368,9 @@ is a manual step. Run as root on the broker, in this order, in a quiet window
    `PUSHOVER_*`, `MENTHORQ_*`, `B2_*` or `ANTHROPIC_*`.
 8. Only after the Gateway logged in on the new file (API port up on
    `/admin`): `/usr/local/sbin/radon-ib-gateway-credential prune-root-env`.
-   It removes `TWS_PASSWORD` / `TWS_USERID` from `/etc/radon/env` and keeps
+   It removes every `TWS_PASSWORD` / `TWS_USERID` assignment from
+   `/etc/radon/env`, indented ones included (systemd strips the
+   indentation, so they still load), and keeps
    a root-only backup of the previous file beside it,
    `env.pre-ib-gateway-split`. From then on a missing
    `gateway.env` makes `compose-up` exit 78 instead of falling back.

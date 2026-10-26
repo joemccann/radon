@@ -587,6 +587,17 @@ def test_prune_splits_lines_on_newline_only(box: Box) -> None:
     )
 
 
+def test_prune_removes_indented_credential_lines(box: Box) -> None:
+    # systemd EnvironmentFile strips leading whitespace, so an indented
+    # assignment still reaches every app unit and must be pruned too.
+    body = f"  {PW}='{OLD_PASSWORD}'\n\t{USER}=olduser\nTRADING_MODE=live\n"
+    box.seed_root_env(body, mode=0o640)
+    assert box.run("migrate").returncode == 0
+    result = box.run("prune-root-env")
+    assert result.returncode == 0, _output(result)
+    assert box.root_env.read_text(encoding="utf-8") == "TRADING_MODE=live\n"
+
+
 def test_prune_refuses_without_gateway_password(box: Box) -> None:
     body = _root_env_body()
     box.seed_root_env(body)

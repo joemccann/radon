@@ -368,10 +368,20 @@ line here whenever you ship a security fix.**
   holds spaces, and stopping at the first one published every later word.
   Detection keeps the narrower whitespace-bounded span. A token that is already
   a complete redaction label stops the scrubber only when the line ends after
-  it. More words on that line are a partial label (an earlier rule took the
-  first word of a passphrase) and are still redacted. The scrubber does not
-  re-tokenize that remainder. An `Authorization` value is
-  redacted to the end of its line, whatever its scheme.
+  it and the value has no continuation. More words on that line are a
+  partial label (an earlier rule took the first word of a passphrase) and are still
+  redacted. The scrubber does not re-tokenize that remainder. An `Authorization`
+  value is redacted to the end of its line, whatever its scheme. An unquoted
+  value also takes the following lines indented deeper than its key: a YAML
+  plain scalar continues there, and a wrapper on the key line (a Python paren,
+  a YAML tag or anchor) puts the value there. A quoted `Authorization` or
+  `Cookie` value goes to the tokenizer, not the line-oriented header rules,
+  so its continuation lines are redacted too. Blank lines inside a continued
+  value belong to it, adjacent string literals on a line are one value, and
+  a redaction label opts a value out only when it is the whole value or is
+  followed by query structure whose key is itself a query parameter. A
+  trailing backslash joins the next line, and a subscript target
+  (`os.environ['NAME'] = ...`) is an assignment.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines

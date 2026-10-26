@@ -375,6 +375,13 @@ def cmd_migrate() -> str:
     return message
 
 
+def _is_credential_line(line: str) -> bool:
+    """Matched the way _read_env_file reads it: systemd strips leading
+    whitespace, so an indented TWS_* assignment still reaches every unit."""
+    match = _ASSIGNMENT.match(line.strip())
+    return bool(match) and match.group(1) in CREDENTIAL_KEYS
+
+
 def cmd_prune_root_env() -> str:
     _require_root()
     os.umask(0o077)
@@ -388,7 +395,7 @@ def cmd_prune_root_env() -> str:
     with open(paths["root_env"], "rb") as handle:
         old = handle.read()
     lines = _split_lines(old.decode("utf-8"))
-    kept = [line for line in lines if not line.startswith(("TWS_PASSWORD=", "TWS_USERID="))]
+    kept = [line for line in lines if not _is_credential_line(line)]
     if len(kept) == len(lines):
         return "nothing to prune"
     uid, gid = _owner()
