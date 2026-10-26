@@ -17,6 +17,7 @@ The canonical developer runbook is `CLAUDE.md`. Read it before making changes. F
 ## CI and deploy
 
 - The CI gate is `.github/workflows/ci.yml` (Vitest + pytest). It must be green before the deploy job runs.
+- `.github/CODEOWNERS` is how we require owner review for CI workflow changes. `/.github/workflows/` and `/.github/actions/` are owned by `@joemccann`, and the existing `* @joemccann` default stays. The repository ruleset's "require code owner review" setting is what turns that file into an enforced check. Editing CODEOWNERS does not change the setting.
 - Run tests per the README "Tests" section before pushing.
 
 ## Operations

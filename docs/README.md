@@ -12,7 +12,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 |-------|-----|
 | Developer runbook, gates, calculations | [`CLAUDE.md`](../CLAUDE.md) |
 | Authoring toolchain (agents, verification) | [`DEVELOPMENT.md`](../DEVELOPMENT.md) |
-| Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| Operator contributing rules: require owner review for CI workflow changes | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support policy (unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
 | External service prerequisites, with links to topology and credential recovery owners. Production secrets load only from `/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired | [`docs/external-services.md`](external-services.md) |

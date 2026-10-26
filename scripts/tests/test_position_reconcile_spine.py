@@ -507,3 +507,70 @@ class TestTheDaemonDoesNotClaimItCheckedForNewTrades:
             l for l in src.splitlines() if not l.lstrip().startswith("#")
         )
         assert "include_new_trades=False" in body
+
+
+class TestDriftNamesThePosition(unittest.TestCase):
+    """2026-10-26: the panel read '1 closed locally' with no ticker, so the
+    operator could not tell which snapshot row IB no longer held."""
+
+    def test_health_detail_names_closed_and_missing_positions(self):
+        report = {
+            "positions_closed": [_local_position("SPCX", 2, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)],
+            "positions_missing_locally": [_ib_opt("AAOI", 5, 10.0, "C", LIVE_EXPIRY_IB)],
+        }
+        detail = ib_reconcile._health_detail(report)
+        self.assertEqual(detail["positions_closed"][0]["ticker"], "SPCX")
+        self.assertEqual(detail["positions_missing_locally"][0]["ticker"], "AAOI")
+        message = ib_reconcile._drift_message(detail, include_new_trades=False)
+        self.assertIn("1 closed locally (SPCX)", message)
+        self.assertIn("1 missing locally (AAOI)", message)
+
+    def test_handler_error_blob_names_the_closed_position(self):
+        from monitor_daemon.handlers.position_reconcile import PositionReconcileHandler
+
+        client = MagicMock()
+        handler = PositionReconcileHandler(
+            client_factory=MagicMock(return_value=client),
+            snapshot_loader=lambda: {"positions": [
+                _local_position("SPCX", 2, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)]},
+            positions_fetcher=lambda c: [],
+        )
+        handler.record_cycle_health = MagicMock()
+        result = handler.execute()
+        error = handler.record_cycle_health.call_args[1]["error"]
+        self.assertEqual([p["ticker"] for p in error["positions_closed"]], ["SPCX"])
+        self.assertIn("(SPCX)", result["error"])
+
+
+class TestConnectSurvivesAGatewayRestartWindow(unittest.TestCase):
+    """2026-10-26 16:52-17:14Z: the broker's compose-down refused every
+    connect; one attempt per cycle turned a restart window into ERROR rows."""
+
+    def test_two_refusals_then_a_connection_still_reconciles(self):
+        from clients.ib_client import IBConnectionError
+        from monitor_daemon.handlers import base
+        from monitor_daemon.handlers.position_reconcile import PositionReconcileHandler
+
+        client = MagicMock()
+        factory = MagicMock(side_effect=[IBConnectionError("refused"), IBConnectionError("refused"), client])
+        handler = PositionReconcileHandler(
+            client_factory=factory, snapshot_loader=lambda: {"positions": []}, positions_fetcher=lambda c: [])
+        handler.record_cycle_health = MagicMock()
+        with patch.object(base, "_sleep") as sleep:
+            result = handler.execute()
+        self.assertEqual(factory.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertNotIn("error", result)
+        self.assertEqual(handler.record_cycle_health.call_args[0][0], "ok")
+
+    def test_three_refusals_still_raise(self):
+        from clients.ib_client import IBConnectionError
+        from monitor_daemon.handlers import base
+        from monitor_daemon.handlers.position_reconcile import PositionReconcileHandler
+
+        factory = MagicMock(side_effect=IBConnectionError("refused"))
+        handler = PositionReconcileHandler(
+            client_factory=factory, snapshot_loader=lambda: {"positions": []}, positions_fetcher=lambda c: [])
+        with patch.object(base, "_sleep"), self.assertRaises(IBConnectionError):
+            handler.execute()
+        self.assertEqual(factory.call_count, base.IB_CONNECT_ATTEMPTS)

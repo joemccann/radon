@@ -203,7 +203,9 @@ class TestJournalSyncHandlerExecute:
         )
         before = verified_load(str(trade_log_path))
 
-        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls:
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, patch(
+            "monitor_daemon.handlers.base._sleep"
+        ):
             mock_client = MagicMock()
             mock_client.connect.side_effect = ConnectionError("Gateway down")
             mock_cls.return_value = mock_client
@@ -214,6 +216,26 @@ class TestJournalSyncHandlerExecute:
         assert "error" in result
         after = verified_load(str(trade_log_path))
         assert before == after
+
+    def test_a_refused_connect_is_retried_across_a_gateway_restart(self, trade_log_path):
+        # 2026-10-26: the broker's 22-minute compose-down refused one attempt
+        # per cycle; a restart window must not cost the cycle by itself.
+        from clients.ib_client import IBConnectionError
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, patch(
+            "monitor_daemon.handlers.base._sleep"
+        ) as sleep:
+            mock_client = MagicMock()
+            mock_client.connect.side_effect = [IBConnectionError("refused"), None]
+            mock_client.get_fills.return_value = []
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()
+
+        assert "error" not in result
+        assert mock_client.connect.call_count == 2
+        assert sleep.call_count == 1
 
     def test_disconnects_after_execution(self, trade_log_path):
         with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls:
