@@ -30,8 +30,14 @@ The `UW_TOKEN` environment variable should contain your API key.
 - `order`: `desc` (default) or `asc`; `order_by` defaults to `executed_at`
 
 **Pagination:** one request never returns more than 500 prints. Radon
-`fetch_flow.fetch_darkpool` walks `older_than` (desc) until a short page.
-Liquid names (GLD, SPY) routinely need multiple pages per session day.
+`fetch_flow.fetch_darkpool` walks `older_than` (desc) until a short page,
+an empty page, or the first page with a print before that date's Eastern midnight.
+Once `older_than` is set, the provider applies `date` only as an
+upper bound, so a cursor inside the day is filled with prior-session prints.
+Those prints are dropped and that page ends the walk, which is a complete
+day. A cached row that still holds a print before its Eastern day start is
+a miss and is walked again. Liquid names (GLD, SPY) routinely need multiple
+pages per session day.
 
 **Response Fields:**
 ```json
