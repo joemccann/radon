@@ -169,3 +169,33 @@ describe("Dropbox research rich text", () => {
     expect(body.textContent).toContain("Remote chart");
   });
 });
+
+describe("MarketDesk research rich text", () => {
+  const sha = "d".repeat(64);
+  const mdSource = {
+    kind: "marketdesk" as const, publisher: "MarketDesk", articleId: "4AJs5Adl2Yp",
+    articleUrl: "https://marketdesk.ai/library/browse/4AJs5Adl2Yp", contentHash: sha,
+    documentDate: "2026-10-26", folderDate: "2026-10-26", pages: [1], url: `${base}${sha}.pdf`,
+    figures: [{ url: chart, caption: "Investor flows" }],
+  };
+  it("renders the same formatted Markdown in the feed and lightbox", async () => {
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => [{ ...post, id: "research-md", source: JSON.stringify(mdSource) }] });
+    render(<DashboardNewsFeed />);
+    const item = await screen.findByTestId("news-feed-item");
+    const feedBody = item.querySelector<HTMLElement>(".news-feed-summary")!;
+    expectFormattedResearch(feedBody);
+    expect(within(item).getByRole("link", { name: "MarketDesk · Source PDF" }).getAttribute("href")).toBe(mdSource.url);
+    fireEvent.click(within(item).getByRole("button", { name: `Open lightbox for: ${post.title}` }));
+    const dialog = await screen.findByRole("dialog");
+    const lightboxBody = dialog.querySelector<HTMLElement>(".newsfeed-lightbox__body")!;
+    expectFormattedResearch(lightboxBody);
+    expect(lightboxBody.textContent).toBe(feedBody.textContent);
+  });
+  it("renders summary bullets even without body content", async () => {
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => [{ ...post, id: "research-md", content: "", source: { ...mdSource, summary: ["Only **bullet**"] } }] });
+    render(<DashboardNewsFeed />);
+    const item = await screen.findByTestId("news-feed-item");
+    const list = within(item).getByRole("list", { name: "Summary" });
+    expect(within(list).getAllByRole("listitem").map(li => li.textContent)).toEqual(["Only **bullet**"]);
+  });
+});

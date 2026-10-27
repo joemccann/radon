@@ -149,20 +149,8 @@ def _asset_url(value: str, extension: str | None = None) -> str:
     return value
 
 
-def publish(post: dict) -> str:
-    """Validate and commit one normalized post. Outbox owns retries."""
-    post_id = post.get("id", "")
-    if not re.fullmatch(r"research-[a-f0-9]{32,64}", post_id):
-        raise ValueError("research post ID must use the reserved stable namespace")
-    title, content = post.get("title"), post.get("content")
-    if not isinstance(title, str) or not title.strip():
-        raise ValueError("research title required")
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("research body required")
-    stamp = datetime.fromisoformat(post["timestamp"].replace("Z", "+00:00"))
-    if stamp.tzinfo is None:
-        raise ValueError("publication timestamp must include timezone")
-    source = post.get("source", {})
+def _validate_dropbox(source, post: dict) -> list:
+    """Shared-folder Dropbox provenance (unchanged contract)."""
     if not isinstance(source, dict) or source.get("kind") != "dropbox":
         raise ValueError("Dropbox provenance required")
     for key in ("publisher", "fileId", "revision", "contentHash", "documentDate", "folderDate"):
@@ -197,6 +185,75 @@ def publish(post: dict) -> str:
         _asset_url(figure.get("url"), "png")
     if images != [figure["url"] for figure in figures]:
         raise ValueError("images must match ordered source figures")
+    return images
+
+
+MARKETDESK_ARTICLE_URL = "https://marketdesk.ai/library/browse/"
+MARKETDESK_ARTICLE_ID = re.compile(r"[A-Za-z0-9]{8,16}")
+MARKETDESK_MAX_FIGURES = 12
+MARKETDESK_MAX_EXTRA_IMAGES = 40
+MARKETDESK_MAX_SUMMARY = 20
+MARKETDESK_MAX_SUMMARY_CHARS = 500
+
+
+def _validate_marketdesk(source: dict, images) -> list:
+    """MarketDesk article provenance (SPEC 4.6): the stored PDF is the article's own source document."""
+    for key in ("publisher", "articleId", "articleUrl", "contentHash", "documentDate", "folderDate"):
+        if not isinstance(source.get(key), str) or not source[key].strip():
+            raise ValueError(f"source {key} required")
+    if not MARKETDESK_ARTICLE_ID.fullmatch(source["articleId"]):
+        raise ValueError("invalid MarketDesk article ID")
+    if source["articleUrl"] != MARKETDESK_ARTICLE_URL + source["articleId"]:
+        raise ValueError("MarketDesk article URL must match the article ID")
+    for key in ("documentDate", "folderDate"):
+        datetime.strptime(source[key], "%Y-%m-%d")
+    if not re.fullmatch(r"[a-f0-9]{64}", source["contentHash"]):
+        raise ValueError("source content hash must be SHA-256")
+    pages = source.get("pages")
+    if not isinstance(pages, list) or len(pages) != 1 or type(pages[0]) is not int or pages[0] != 1:
+        raise ValueError("MarketDesk source pages must be [1]")
+    _asset_url(source.get("url"), "pdf")
+    if source["url"][len(URL_PREFIX):].split("#", 1)[0] != source["contentHash"] + ".pdf":
+        raise ValueError("content hash must name the stored source PDF")
+    figures = source.get("figures", [])
+    if not isinstance(images, list) or not isinstance(figures, list) or len(figures) > MARKETDESK_MAX_FIGURES:
+        raise ValueError("invalid images or figures")
+    for figure in figures:
+        if not isinstance(figure, dict) or not isinstance(figure.get("caption"), str):
+            raise ValueError("every figure needs a caption")
+        _asset_url(figure.get("url"), "png")
+    if images != [figure["url"] for figure in figures]:
+        raise ValueError("images must match ordered source figures")
+    summary = source.get("summary", [])
+    if (not isinstance(summary, list) or len(summary) > MARKETDESK_MAX_SUMMARY
+            or any(not isinstance(item, str) or len(item) > MARKETDESK_MAX_SUMMARY_CHARS for item in summary)):
+        raise ValueError("invalid MarketDesk summary")
+    extra = source.get("extraImages", [])
+    if not isinstance(extra, list) or len(extra) > MARKETDESK_MAX_EXTRA_IMAGES:
+        raise ValueError("invalid MarketDesk extra images")
+    for url in extra:
+        _asset_url(url, "png")
+    return images
+
+
+def publish(post: dict) -> str:
+    """Validate and commit one normalized post. Outbox owns retries."""
+    post_id = post.get("id", "")
+    if not re.fullmatch(r"research-[a-f0-9]{32,64}", post_id):
+        raise ValueError("research post ID must use the reserved stable namespace")
+    title, content = post.get("title"), post.get("content")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("research title required")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("research body required")
+    stamp = datetime.fromisoformat(post["timestamp"].replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        raise ValueError("publication timestamp must include timezone")
+    source = post.get("source", {})
+    if isinstance(source, dict) and source.get("kind") == "marketdesk":
+        images = _validate_marketdesk(source, post.get("images", []))
+    else:
+        images = _validate_dropbox(source, post)
     tags = post.get("tags", [])
     if not isinstance(tags, list) or not tags or len(tags) > 12 or any(not isinstance(tag, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9&-]{0,63}", tag) for tag in tags):
         raise ValueError("normalized research tags required")

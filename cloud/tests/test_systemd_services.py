@@ -50,6 +50,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-portfolio-archive.timer",
     "radon-research-archive.service",
     "radon-research-archive.timer",
+    "radon-marketdesk.service",
+    "radon-marketdesk.timer",
     "radon-media-publish.service",
     "radon-media-publish.path",
     "radon-media-publish.timer",
@@ -666,6 +668,59 @@ class TestResearchArchive:
         dropin = (services_dir / "radon-research-archive.service.d" / "runtime-container.conf").read_text()
         assert "Type=oneshot" in dropin.splitlines()
         assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in dropin.splitlines()
+
+
+class TestMarketDeskResearch:
+    """5-minute marketdesk.ai research ingest that replaced the shared-folder
+    Dropbox watcher (docs/marketdesk-research.md)."""
+
+    def test_oneshot_runs_the_job_by_path_inside_the_cadence(self, unit):
+        u = unit("radon-marketdesk.service")
+        svc = u["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon"
+        assert svc["umask"] == "0077"
+        assert svc["environmentfile"] == "/etc/radon/env"
+        # By path, so the env-parity and catalog-parity walkers resolve it.
+        assert svc["execstart"] == (
+            "/home/radon/radon/.venv/bin/python "
+            "/home/radon/radon/scripts/research/marketdesk_job.py"
+        )
+        # Bounded under the 300s cadence so a hung cycle cannot freeze its timer.
+        assert int(svc["timeoutstartsec"]) == 270
+
+    def test_unit_declares_research_env(self, services_dir):
+        lines = (services_dir / "radon-marketdesk.service").read_text().splitlines()
+        assert "Environment=PYTHONPATH=/home/radon/radon/scripts" in lines
+        assert "Environment=RADON_RESEARCH_DIR=/var/lib/radon/research" in lines
+        assert "Environment=RADON_DB_NO_REPLICA=1" in lines
+
+    def test_start_limit_counts_healthy_five_minute_starts(self, unit):
+        u = unit("radon-marketdesk.service")["Unit"]
+        assert int(u["startlimitintervalsec"]) == 1800
+        assert int(u["startlimitburst"]) == 10
+
+    def test_timer_fires_every_five_minutes_off_the_herd(self, unit):
+        timer = unit("radon-marketdesk.timer")["Timer"]
+        assert timer["oncalendar"] == "*:04/5:41"
+        assert timer["accuracysec"] == "1s"
+        assert timer["persistent"] == "false"
+        assert timer.get("unit", "radon-marketdesk.service") == "radon-marketdesk.service"
+
+    def test_runs_in_the_container_that_owns_the_private_bind(self, services_dir):
+        dropin = (services_dir / "radon-marketdesk.service.d" / "runtime-container.conf").read_text()
+        lines = dropin.splitlines()
+        assert "Type=oneshot" in lines
+        assert "User=root" in lines
+        assert "Environment=RADON_RUNTIME=container" in lines
+        assert "ExecStart=" in lines
+        assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in lines
+        assert "ExecStop=/usr/local/sbin/radon-app-runtime halt %n 30" in lines
+        assert "ExecStopPost=/usr/local/sbin/radon-app-runtime stop %n" in lines
+
+    def test_retired_watcher_unit_file_is_kept(self, services_dir):
+        # Kept on disk so the deploy can disable it; never re-enabled.
+        assert (services_dir / "radon-research.service").is_file()
 
 
 class TestDbRetention:
