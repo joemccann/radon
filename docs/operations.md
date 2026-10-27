@@ -1387,3 +1387,18 @@ it contains, and review grants before activation.
 The internal REST proxy invokes `scripts/uw_admitted_request.py` in a child
 process with a hard deadline and a four MiB response ceiling. It shares admission
 with scheduled collectors; it does not expose arbitrary provider URLs.
+
+### Public share preview request limits
+
+The six explicit `PUBLIC_SHARE_API_ROUTES` remain public for X, Slack and
+iMessage link previews. Their GET and HEAD requests share a 60-request,
+60-second budget per client IP in Next middleware. This runs before preview
+rendering or the API bridge; changing card type or spoofing the left side of
+`X-Forwarded-For` does not obtain a new bucket. Excess requests receive 429,
+`Retry-After` and no-store headers. Generator writes remain authenticated.
+
+This uses the existing bounded in-memory limiter (4,000 keys) and the rightmost
+peer appended by the single trusted Caddy proxy. It is a per-instance bound,
+not a distributed or network-layer DDoS limit; restart resets the window.
+Revisit shared edge storage before adding independently scaled Next instances.
+No Caddy plugin, Redis credential or new paid service is required.

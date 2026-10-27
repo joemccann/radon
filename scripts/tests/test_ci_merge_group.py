@@ -4,7 +4,7 @@ A merge queue builds a temporary `gh-readonly-queue/main/*` branch and fires
 `merge_group`, not `pull_request`; a required check whose workflow never runs
 on that event parks the queue entry until `check_response_timeout_minutes`
 expires. GitHub offers the queue only to organization-owned repositories, so
-`main` runs with `required_status_checks.strict=false` instead (2026-10-19);
+`main` uses strict required checks for the unattended coordinator (2026-10-27);
 the wiring is kept so a move to an organization needs no workflow change.
 These tests pin it so a future edit cannot silently drop it.
 """

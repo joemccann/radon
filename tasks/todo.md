@@ -10300,3 +10300,48 @@ L3 broader importers: cloud health wiring exposed one legacy zero-argument clien
 
 - User preference: removed the toolbar label and its unused CSS. Focused cloud: 35 passed; all eight responsive gallery cases passed after removal.
 - CI compatibility: TesterArmy image-name assertion now includes the gallery ordinal. Previously failed in run 40518150058; focused isolated browser journey passed (1/1), including bookmark request and Escape dismissal.
+
+## Repeat last-100 PR operator audit repairs (2026-10-27)
+
+- [x] T1 depends_on: [] Freeze PRs #1205-#1304; checkpoint 100 bodies and discussions, no retrieval failures.
+- [x] T2 depends_on: [T1] Reproduce demo dependency build failure; confirm vendor wheel is generated, intentionally untracked.
+- [x] T3 depends_on: [T2] Install the verified materializer step in the demo VM build recipe and verify automatic deployment (30d8fdc6a472, all revision/isolation/auth gates green).
+- [ ] T4 depends_on: [T1] Complete safe operator actions and publish all outstanding items with receipts.
+
+Review: source archive changes rejected: the wheel is deliberately generated from a hash-verified upstream artifact. The VM recipe needs the same prerequisite as production.
+
+## Event-odds ownership correction from operator audit (2026-10-27)
+
+- [x] E1 depends_on: [] Add failing contracts for on-demand event-odds ownership and watchdog exclusion.
+- [x] E2 depends_on: [E1] Align Python/TypeScript catalogs with the existing GET-triggered producer; preserve freshness windows and manual refresh.
+- [ ] E3 depends_on: [E2] Focused/full verification, green CI, notification, merge and production verification.
+
+Review: Python catalog 34 passed; focused web perimeter/auth/health 176 passed. Full Python 18,338 passed / 12 skipped; full web 11,549 passed / 21 skipped; cloud 3,505 passed / 24 skipped. Deployment verification remains pending. No event-odds timer exists on either online Mac or production.
+
+## Mac mTLS fixture compatibility (operator audit #1263)
+
+- [x] C1 depends_on: [] Reproduce strict OpenSSL certificate rejection on unchanged fixture: Missing Authority Key Identifier; 84 affected mTLS tests.
+- [x] C2 depends_on: [C1] Add explicit CA/leaf key identifiers to generated test PKI, retaining strict verification and negative identity tests.
+- [x] C3 depends_on: [C2] Focused mTLS 129 passed; full Python 18,338 passed / 12 skipped.
+
+Review: strict verification and all negative protocol tests remain enabled. Replaced only local dependency symlinks with ordinary APFS-cloned directories. Full web used the actual computed RADON_RELEASE_VERSION=0.47.7 build input; unchanged history derivation exceeded five-second config-import budgets otherwise. No test timeouts or assertions were relaxed.
+
+## Public preview policy chosen by operator (2026-10-27)
+
+- [x] P1 depends_on: [] Operator chose public previews with request limits; preserve authenticated generators.
+- [x] P2 depends_on: [P1] RED: shared 61st request was 200; add central GET/HEAD budget before rendering.
+- [ ] P3 depends_on: [P2] Verify spoofed hops, route switching, reset, normal unfurls and deployment.
+
+Review: unit tests cover GET/HEAD, route switching, spoofed left hops, reset and independent clients. Real Next HTTP integration: 1 passed, 61st request 429 before handler; other peer 400 for missing card parameters. Existing bounded per-instance limiter only; no distributed-limit claim or new billing credential.
+
+## Release-controller policy reconciliation (2026-10-27)
+
+- [x] R1 depends_on: [] Verify controller requires strict checks while live protection had strict=false.
+- [x] R2 depends_on: [R1] Restore strict=true through the narrow status-checks API; verify all 28 names/app IDs, admin enforcement and every other protection field are unchanged.
+- [x] R3 depends_on: [R2] Verify the existing serial release controller resumes (#1298 merged); align root guidance with its strict-checks contract. Subsequent main CI green.
+
+## Claude bundled Bun follow-up (#1239)
+
+- [x] B1 depends_on: [] Production native binary fails the 1.4.4 floor: embedded Bun v1.4.3 despite the host upgrade.
+- [x] B2 depends_on: [B1] Verify the replacement native package's registry SHA-512 and embedded Bun 1.4.4; update exact 2.1.311 pin/lock and real image smoke.
+- [ ] B3 depends_on: [B2] Green image CI, deploy, verify binary floor and keeper health.

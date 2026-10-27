@@ -665,12 +665,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "equibles-ats-venue-share": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-cot-positioning": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
 
-  // ``event-odds`` — run_event_odds.sh three times per weekday (scheduler:
-  // see scripts/watchdog/services.py event-odds note), holiday-aware.
-  // Three weekday fires like
-  // catalysts: 7h spans the active-day gaps; 4d bridges a long weekend.
-  // Polymarket only — no IB.
-  "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // Event odds refreshes when GET /event-odds/{ticker} is requested. There is
+  // no VPS timer; retained observations become dormant between requests.
+  "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "on-demand", requires_ib: false },
 
   // ``disk-cleanup`` is the WEEKLY root-filesystem reclaim on the VPS
   // (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
