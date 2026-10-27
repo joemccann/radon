@@ -682,3 +682,12 @@ def test_long_literal_before_shell_punctuation_is_detected():
 def test_userinfo_is_masked_through_the_last_at_sign():
     out = scrub_credential_text(f"see https://svc:{OPAQUE}@{TAIL}@h.invalid/path\n")
     assert _clean(out) and "@h.invalid/path" in out, out
+
+
+@pytest.mark.parametrize("text", [
+    f'PASSWORD: str | None = "{OPAQUE}{TAIL}"\n',
+    f'PASSWORD: Optional[str] | "Secret" = "{OPAQUE}{TAIL}"\n',
+], ids=["union", "union-subscript"])
+def test_union_annotation_is_skipped_to_the_initializer(text):
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+    assert _clean(scrub_credential_text(text))

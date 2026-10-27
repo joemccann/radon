@@ -298,8 +298,11 @@ _ASSIGNMENT_HEAD = re.compile(
     # A type annotation before the initializer, `NAME: str = ...`
     # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
     # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
+    # A union (`str | None`, DS-2026-10-27-17) is up to four more members.
     r"(?::[ \t]*(?P<annotation_quote>[\"']?)[A-Za-z_][A-Za-z0-9_.]{0,64}"
-    r"(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?(?P=annotation_quote)[ \t]*(?==))?"
+    r"(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?"
+    r"(?:[ \t]*\|[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?){0,4}"
+    r"(?P=annotation_quote)[ \t]*(?==))?"
     r"[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
