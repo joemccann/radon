@@ -2026,6 +2026,7 @@ def test_run_newsfeed_env_file_carries_the_themarketear_login(
         "NODE_ENV=production\n"
         "THEMARKETEAR_EMAIL=reader@example.invalid\n"
         "THEMARKETEAR_PASSWORD='pw-with-$dollar'\n"
+        "MARKETDESK_FIREBASE_REFRESH_TOKEN=same-account-grant\n"
         "CLERK_SECRET_KEY=sk\n",
         encoding="utf-8",
     )
@@ -2041,6 +2042,7 @@ def test_run_newsfeed_env_file_carries_the_themarketear_login(
     # Quote stripping applies here too, or the password reaches the browser
     # wrapped in the quotes /etc/radon/env needs for its `$`.
     assert "THEMARKETEAR_PASSWORD=pw-with-$dollar" in lines, lines
+    assert "MARKETDESK_FIREBASE_REFRESH_TOKEN=same-account-grant" in lines
     keys = {line.split("=", 1)[0] for line in lines if "=" in line}
     assert "CLERK_SECRET_KEY" not in keys
 
