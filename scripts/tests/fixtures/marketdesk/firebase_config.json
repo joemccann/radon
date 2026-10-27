@@ -1,0 +1,10 @@
+{
+  "note": "zerohedge-prod Firebase client config shared by themarketear.com AND marketdesk.ai (identical apiKey). Public web client key.",
+  "apiKey": "AIzaSyCf8fXJkGM9Jgtzl6sdaMLe_ipwtmWdvNc", "_scan": "public web key, gitleaks:allow",
+  "authDomain": "zerohedge-prod.firebaseapp.com",
+  "projectId": "zerohedge-prod",
+  "loginApi": {"method":"POST","url":"https://marketdesk.ai/api/user/login","body":{"F":"<firebase_idToken>"},"success":{"success":true},"onSuccess":"server sets session cookie, client redirects to /"},
+  "backend":"Fastify (404 body shape 'Route GET:/... not found')",
+  "sign_in_methods_for_account":["google.com"],
+  "observed_account_token_claims":["name","picture","subscriptionName(null)","isPremium","user_id","email","email_verified","firebase.sign_in_provider"]
+}

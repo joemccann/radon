@@ -1,0 +1,51 @@
+{
+ "summary": "- **Tech Risk Premium Surge**: QQQ-SPX 1M vol spread widens to 10% (2\u03c3 above avg), retail call demand in Tech falls to 6-mo low while put demand hits 1-y high ahead of earnings.\n- **Cross-Asset Volatility Divergence**: Implied volatility exceeds realized volatility across all assets (equity, rates, credit, oil, gold, USDJPY), with oil volatility (OVX) showing z-scores >2 due to geopolitical risks.\n- **Risk Concentration**: Oil volatility (OVX) dominates cross-asset snapshot with z-scores >2 for 10Y lookback, indicating energy markets pricing in significant uncertainty requiring hedging adjustments.\n- **Macro Equity Volatility**: SPX at 72% percentile and TLT/IEF at 96/98% percentile signal elevated volatility expectations; SPX in \"Cheap\" zone implies potential upside if realized volatility rises.\n- **US Equity Volatility Imbalance**: SPX ATM volatility (1M) exceeds RTY and QQQ, with RTY showing elevated relative volatility vs. SPX signaling heightened small-cap risk.",
+ "pages": [],
+ "images": [
+  {
+   "iid": "i-334c01fa33e8ae69a93c7817b993c7418b6449164807014db062a64d6511c7d1.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 0
+  },
+  {
+   "iid": "i-3a6e7b0900f882d3d756e27a24bf1009208c06eca0ff350b69d481c85ae7debc.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 0
+  },
+  {
+   "iid": "i-b235e345382d89e0e7191783634cbf89639e3c662aea006f75750c7a9759fe43.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 0
+  },
+  {
+   "iid": "i-6b76d5e7f8823366e52636ba560c36f616d2e73d3dd12a538cb338adfc78b707.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 1
+  },
+  {
+   "iid": "i-abb748eeffa7bb1d0a2c87dee647afcb7bfda3a08205c39845042394a41bbf12.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 1
+  },
+  {
+   "iid": "i-378a7aa564790634bfce22b7ffec48f28ea43fef63d7756df76b906867f5bdfa.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 2
+  },
+  {
+   "iid": "i-9d1f3f647a011939b6b453f6ac5acdb79b1b964a6fb67b2c0bfe744257a52acc.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 2
+  },
+  {
+   "iid": "i-0315d59ae9df73f5001f7e738276cd8af0a10247036525f9b0ab3e27e0d609ce.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 3
+  },
+  {
+   "iid": "i-22c5920c8c7627e409b50e1a3faa3ee25b80f206d6b1de2f24084f43a64cbbd4.png",
+   "pathId": "4AJs5Adl2Yp",
+   "page": 4
+  }
+ ]
+}

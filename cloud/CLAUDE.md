@@ -417,7 +417,8 @@ manufacture a healthy heartbeat.
 **Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: its three host jobs join Tailscale as ephemeral `tag:ci` nodes before key-authenticated SSH to the app tailnet address (public app SSH is closed; [network trust](../docs/operations.md#ci-deploy-over-the-tailnet) owns enrollment and recovery). The final deploy job materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets remain outside the checkout; [Environment Handling](#environment-handling) owns canonical and compatibility paths. After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. The SSH script first waits a bounded time (`RADON_DEPLOY_LOCK_WAIT_SECS`, default 480s) for a still-finishing previous release to free `/var/lib/radon-lock/deploy.lock` and the retained compatibility inode `~/.radon-deploy.lock`, so back-to-back green merges queue instead of failing on the lock (2026-09-19, run 35463319654); `deploy.sh` itself stays non-blocking and still refuses with exit 75 if the lock is held after the wait. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). Checked-in Caddy configuration provides HTTPS with an HTTP redirect for the dedicated MCP host; follow the [hosted-MCP owner](../docs/cloud-services.md#hosted-mcp-radon-mcpservice-issue-232-chunk-1) for operator TLS verification before changing the published consumer URL. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
 
 The root helper normally polls service state for 60 seconds. Production stops
-of `radon-research.service` instead allow 150 seconds: its canonical unit has
+of the retired `radon-research.service` (now only ever stopped, by
+`retire_research_watcher`) instead allow 150 seconds: its canonical unit has
 `TimeoutStopSec=120`, followed by container cleanup in `ExecStopPost`. Research
 startup and all other state waits keep their original bounds. The root mutation
 supervisor still caps the complete action at 180 seconds and fails closed into
@@ -720,6 +721,21 @@ plane) runs it in the Python image with only the private research bind,
 since host radon cannot traverse `/var/lib/radon-private`. Heartbeat
 `research-archive` (9d). Runbook: `docs/operations.md` "Research evidence
 archive".
+
+`setup-vps.sh` inventories `radon-marketdesk.{service,timer}` and
+`enable_services` enables the timer: every 5 minutes (`*:04/5:41`), the
+marketdesk.ai research ingest that replaced the shared-folder watcher. Its
+Type=oneshot `runtime-container.conf` drop-in (control plane, in the
+bootstrap, helper and manifest lists) runs `scripts/research/marketdesk_job.py`
+in the Python image as a research unit (rw private research bind, no data,
+media or lease binds) with the newsfeed's Chromium isolation: bridge network,
+the seccomp profile (start refused without it), 512m `/dev/shm`, an env
+allowlist and read-only ladder grants. Heartbeats `marketdesk-research` and
+`marketdesk-dropbox` (15m). `radon-research.service` is retired:
+`restart-managed` and `recover` run `retire_research_watcher` (disable --now an
+enabled watcher, stop a hand-started one, never fatal) in place of the old
+`start_optional_research`; the unit file stays installed. Spec:
+[`docs/marketdesk-research.md`](../docs/marketdesk-research.md).
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 16:40 ET, twenty minutes
