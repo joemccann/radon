@@ -308,3 +308,37 @@ describe("ensureAuthenticated — failure capture", () => {
     expect(files.some((name) => name.startsWith("newsfeed-debug-") && name.endsWith(".png"))).toBe(true);
   });
 });
+
+
+describe("ensureAuthenticated — proactive Firebase renewal", () => {
+  it("renews an otherwise warm premium cookie without using the password flow", async () => {
+    const { ensureAuthenticated } = await import("../../scripts/newsfeed/auth.js");
+    const { page, calls } = createFakePage();
+    let renewed = false;
+    const result = await ensureAuthenticated({ context: {}, page, env: {},
+      renewSession: async () => { renewed = true; return true; },
+      persistStorageState: async () => { expect(renewed).toBe(true); },
+    });
+    expect(result).toEqual({ authenticated: true, reusedSession: true, renewedSession: true });
+    expect(calls.some(c => c.method === "fill")).toBe(false);
+  });
+  it("requires premium content after renewal and never accepts paywall stubs", async () => {
+    const { ensureAuthenticated } = await import("../../scripts/newsfeed/auth.js");
+    const { page, calls } = createFakePage({ premiumContentPresent: false });
+    await expect(ensureAuthenticated({ context: {}, page, env: {}, renewSession: async () => true })).rejects.toThrow(/premium/);
+    expect(calls.some(c => c.method === "fill")).toBe(false);
+  });
+  it("retains a currently valid cookie if the renewal provider is temporarily unavailable", async () => {
+    const { ensureAuthenticated } = await import("../../scripts/newsfeed/auth.js");
+    const { page } = createFakePage();
+    await expect(ensureAuthenticated({ context: {}, page, env: {}, renewSession: async () => { throw new Error("unavailable"); } })).resolves.toEqual({ authenticated: true, reusedSession: true });
+  });
+});
+
+it.each(["missing", "throwing"])("requires a working premium DOM probe after renewal: %s", async (probe) => {
+  const { ensureAuthenticated } = await import("../../scripts/newsfeed/auth.js");
+  const { page } = createFakePage();
+  if (probe === "missing") delete (page as { evaluate?: unknown }).evaluate;
+  else page.evaluate = async () => { throw new Error("probe unavailable"); };
+  await expect(ensureAuthenticated({ context: {}, page, env: {}, renewSession: async () => true })).rejects.toThrow(/premium/);
+});

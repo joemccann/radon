@@ -148,7 +148,16 @@ def run_analysis():
         print(f"  [{i}/{len(positions)}] {ticker}...", file=sys.stderr, end=" ")
 
         try:
-            flow_data = fetch_flow_module(ticker, fetch_missing_history=False)
+            # Fail fast. FLOW_ADMISSION_WAIT_S (120s) belongs to the single
+            # ticker flow report, whose subprocess budget is 300s. This
+            # hourly book shares the wrapper's 180s curl deadline. One
+            # report-sized wait on the first name holds the POST until
+            # curl exits 28 with 0 bytes and the oneshot pages P1.
+            flow_data = fetch_flow_module(
+                ticker,
+                fetch_missing_history=False,
+                retry_transient=False,
+            )
             analysis = analyze_signal(flow_data)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)

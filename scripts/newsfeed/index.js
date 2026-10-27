@@ -34,7 +34,7 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../web/.env") });
 
 const INTERVAL_MS = 2 * 60 * 1000;
-const REAUTH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h — refresh storage state before cookies expire
+const REAUTH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h — renew the product cookie using the Firebase grant
 const PERSIST_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h — periodic persist gate, fires inside re-auth window
 const COOKIE_URLS = ["https://themarketear.com"];
 
