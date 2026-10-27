@@ -77,18 +77,18 @@ const PAYLOAD: CredentialsPayload = {
       ],
     },
     {
-      id: "anthropic",
-      label: "Anthropic",
+      id: "cerebras",
+      label: "Cerebras",
       group: "AI Providers",
       validator: true,
       slow: false,
       note: "",
       fields: [
         {
-          name: "ANTHROPIC_API_KEY",
+          name: "CEREBRAS_API_KEY",
           label: "API key",
           secret: true,
-          placeholder: "sk-ant-...",
+          placeholder: "csk-...",
           configured: false,
           hint: "",
           version: 0,
@@ -145,7 +145,7 @@ afterEach(() => {
 async function renderPanel() {
   render(<CredentialsPanel />);
   await waitFor(() =>
-    expect(screen.getByTestId("credential-service-anthropic")).toBeTruthy(),
+    expect(screen.getByTestId("credential-service-cerebras")).toBeTruthy(),
   );
 }
 
@@ -186,7 +186,7 @@ describe("credentials panel wire contract", () => {
 
   it("closed gate: save disabled with no draft, click fires nothing", async () => {
     await renderPanel();
-    const save = screen.getByTestId("credential-save-anthropic") as HTMLButtonElement;
+    const save = screen.getByTestId("credential-save-cerebras") as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.click(save);
     expect(calls.filter((c) => c.method !== "GET")).toHaveLength(0);
@@ -194,32 +194,32 @@ describe("credentials panel wire contract", () => {
 
   it("reveals only the secret draft on explicit request", async () => {
     await renderPanel();
-    const input = document.getElementById("cred-ANTHROPIC_API_KEY") as HTMLInputElement;
+    const input = document.getElementById("cred-CEREBRAS_API_KEY") as HTMLInputElement;
     expect(input.type).toBe("password");
-    expect(input.getAttribute("aria-describedby")).toBe("credential-status-ANTHROPIC_API_KEY");
-    expect(document.getElementById("credential-status-ANTHROPIC_API_KEY")).not.toBeNull();
-    fireEvent.change(input, { target: { value: "sk-ant-draft" } });
+    expect(input.getAttribute("aria-describedby")).toBe("credential-status-CEREBRAS_API_KEY");
+    expect(document.getElementById("credential-status-CEREBRAS_API_KEY")).not.toBeNull();
+    fireEvent.change(input, { target: { value: "csk-draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Show API key" }));
     expect(input.type).toBe("text");
-    expect(input.value).toBe("sk-ant-draft");
+    expect(input.value).toBe("csk-draft");
     fireEvent.click(screen.getByRole("button", { name: "Hide API key" }));
     expect(input.type).toBe("password");
   });
 
   it("armed submit fires exactly one PUT with full path and payload", async () => {
     await renderPanel();
-    fireEvent.change(screen.getByLabelText(/API key/, { selector: "#cred-ANTHROPIC_API_KEY" }), {
-      target: { value: "sk-ant-brand-new" },
+    fireEvent.change(screen.getByLabelText(/API key/, { selector: "#cred-CEREBRAS_API_KEY" }), {
+      target: { value: "csk-brand-new" },
     });
-    const save = screen.getByTestId("credential-save-anthropic") as HTMLButtonElement;
+    const save = screen.getByTestId("credential-save-cerebras") as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() =>
       expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1),
     );
     const put = calls.find((c) => c.method === "PUT")!;
-    expect(put.url).toBe("/api/credentials/anthropic");
-    expect(put.body).toEqual({ values: { ANTHROPIC_API_KEY: "sk-ant-brand-new" } });
+    expect(put.url).toBe("/api/credentials/cerebras");
+    expect(put.body).toEqual({ values: { CEREBRAS_API_KEY: "csk-brand-new" } });
   });
 
   it("multi-field service submits only non-empty drafts", async () => {
@@ -276,27 +276,27 @@ describe("credentials panel wire contract", () => {
         {
           detail: {
             code: "CREDENTIAL_REJECTED",
-            service: "anthropic",
+            service: "cerebras",
             status: "invalid",
-            message: "Anthropic rejected the credential (HTTP 401)",
+            message: "Cerebras rejected the credential (HTTP 401)",
           },
         },
         422,
       );
     await renderPanel();
-    fireEvent.change(document.getElementById("cred-ANTHROPIC_API_KEY")!, {
-      target: { value: "sk-ant-bad" },
+    fireEvent.change(document.getElementById("cred-CEREBRAS_API_KEY")!, {
+      target: { value: "csk-bad" },
     });
-    fireEvent.click(screen.getByTestId("credential-save-anthropic"));
+    fireEvent.click(screen.getByTestId("credential-save-cerebras"));
     await waitFor(() =>
-      expect(screen.getByTestId("credential-notice-anthropic").textContent).toMatch(
+      expect(screen.getByTestId("credential-notice-cerebras").textContent).toMatch(
         /absolutely not/i,
       ),
     );
     // The rejected draft stays in the input for a retry; nothing was applied.
     expect(
-      (document.getElementById("cred-ANTHROPIC_API_KEY") as HTMLInputElement).value,
-    ).toBe("sk-ant-bad");
+      (document.getElementById("cred-CEREBRAS_API_KEY") as HTMLInputElement).value,
+    ).toBe("csk-bad");
   });
 
   it("clear fires DELETE on the full path with the field name", async () => {
@@ -312,16 +312,16 @@ describe("credentials panel wire contract", () => {
 
   it("a submitted secret never renders back into the DOM after success", async () => {
     await renderPanel();
-    fireEvent.change(document.getElementById("cred-ANTHROPIC_API_KEY")!, {
-      target: { value: "sk-ant-super-secret" },
+    fireEvent.change(document.getElementById("cred-CEREBRAS_API_KEY")!, {
+      target: { value: "csk-super-secret" },
     });
-    fireEvent.click(screen.getByTestId("credential-save-anthropic"));
+    fireEvent.click(screen.getByTestId("credential-save-cerebras"));
     await waitFor(() =>
       expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1),
     );
     await waitFor(() =>
-      expect(screen.getByTestId("credential-notice-anthropic")).toBeTruthy(),
+      expect(screen.getByTestId("credential-notice-cerebras")).toBeTruthy(),
     );
-    expect(document.body.innerHTML).not.toContain("sk-ant-super-secret");
+    expect(document.body.innerHTML).not.toContain("csk-super-secret");
   });
 });

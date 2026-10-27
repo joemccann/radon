@@ -8,10 +8,10 @@ Order (do not leave a band early):
 Cursor has no vision HTTP path in Radon; it is skipped as unavailable,
 not treated as a reason to leave the subscription band.
 
-Subscription-tier rungs require subscription credentials by default
+Subscription-tier rungs require subscription credentials
 (CLAUDE_CODE_OAUTH_TOKEN, ~/.grok/auth.json, CODEX_HOME/auth.json, the
-Antigravity CLI). Prepaid console wallets do not wire those rungs
-unless RADON_LADDER_ALLOW_PREPAID=1. NVIDIA / Cerebras API keys remain OK.
+Antigravity CLI). Prepaid console wallets never wire those rungs, under any
+flag (operator policy 2026-10-26). NVIDIA / Cerebras API keys remain OK.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]
 PROMPT = "extract"
 PNG = b"\x89PNG-fake"
 
-# Prepaid wallets alone — must NOT wire subscription rungs by default.
+# Prepaid wallets alone — must never wire subscription rungs.
 PREPAID_KEYS = {
     "ANTHROPIC_API_KEY": "sk-ant-test",
     "XAI_API_KEY": "xai-test",
@@ -225,7 +225,7 @@ class TestCascadeContract:
         assert "cursor" not in wired_vision_providers(PREPAID_KEYS)
 
     def test_wired_follows_env_keys(self, tmp_path):
-        # Prepaid console wallets do not wire subscription rungs by default.
+        # Prepaid console wallets never wire subscription rungs.
         assert wired_vision_providers({"XAI_API_KEY": "x"}) == ()
         assert wired_vision_providers({"GROK_API_KEY": "g"}) == ()
         assert wired_vision_providers({"OPENAI_API_KEY": "o"}) == ()
@@ -254,10 +254,10 @@ class TestCascadeContract:
             encoding="utf-8",
         )
         assert wired_vision_providers({"CODEX_HOME": str(codex_home)}) == ("codex",)
-        # Escape hatch restores prepaid wiring when explicitly opted in.
+        # The retired escape-hatch flag wires nothing.
         assert wired_vision_providers(
             {"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}
-        ) == ("grok",)
+        ) == ()
 
 
 class TestCreditFallthrough:

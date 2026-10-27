@@ -229,13 +229,12 @@ describe("llm provider", () => {
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 
-  it("targets an OpenAI-compatible endpoint with chat/completions shape", async () => {
-    process.env.LLM_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+  it("targets the OpenAI-compatible xAI endpoint with chat/completions shape", async () => {
+    process.env.LLM_PROVIDER = "xai";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
     const { calls } = captureFetch(() =>
       jsonResponse({
-        model: "gpt-4o",
+        model: "grok-4.6",
         choices: [{ message: { role: "assistant", content: "Flow is order flow." }, finish_reason: "stop" }],
         usage: { prompt_tokens: 7, completion_tokens: 3 },
       }),
@@ -247,24 +246,23 @@ describe("llm provider", () => {
     const call = calls[0];
     expect(call.url).toContain("/chat/completions");
     expect(call.init.signal).toBeInstanceOf(AbortSignal);
-    expect((call.init.headers as Record<string, string>)["authorization"] ?? (call.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer sk-openai-test");
+    expect((call.init.headers as Record<string, string>)["authorization"] ?? (call.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer xai-grant");
 
     const payload = bodyOf(call);
-    expect(payload.model).toBe("gpt-5.5");
+    expect(payload.model).toBe("grok-4.6");
     const messages = payload.messages as Array<{ role: string; content: string }>;
     expect(messages[0]).toEqual({ role: "system", content: "You are Radon." });
     expect(messages[1]).toEqual({ role: "user", content: "What is flow?" });
 
-    expect(result.provider).toBe("openai");
+    expect(result.provider).toBe("xai");
     expect(result.text).toBe("Flow is order flow.");
     expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 3 });
   });
 
-  it("honors a custom OpenAI-compatible base URL (Groq/DeepSeek/Ollama)", async () => {
-    process.env.LLM_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "sk-local";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
-    process.env.OPENAI_BASE_URL = "http://localhost:11434/v1";
+  it("honors a custom xAI base URL", async () => {
+    process.env.LLM_PROVIDER = "xai";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
+    process.env.XAI_BASE_URL = "http://localhost:11434/v1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { content: "ok" } }] }),
     );
@@ -276,8 +274,7 @@ describe("llm provider", () => {
 
   it("never forwards a gemini-* model: Google is Antigravity-only on the server ladder", async () => {
     process.env.LLM_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "sk-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.CODEX_OAUTH_TOKEN = "codex-grant";
     const { calls } = captureFetch(() => jsonResponse({}));
     expect(resolveProvider({ model: "gemini-2.5-pro" })).toBe("openai");
     await expect(chat({ ...SAMPLE_REQUEST, model: "gemini-2.5-pro" })).rejects.toThrow(/Antigravity/);
@@ -291,9 +288,9 @@ describe("llm provider", () => {
   });
 
   it("a gemini-* tool request falls back to the configured provider with its own model", async () => {
-    process.env.LLM_FALLBACK_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "sk-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.LLM_PROVIDER = "anthropic";
+    process.env.LLM_FALLBACK_PROVIDER = "xai";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { content: "fallback" } }] }),
     );
@@ -302,18 +299,17 @@ describe("llm provider", () => {
       model: "gemini-2.5-pro",
       tools: [{ name: "get_flow", input_schema: {} }],
     });
-    expect(result.provider).toBe("openai");
+    expect(result.provider).toBe("xai");
     expect(result.usedFallback).toBe(true);
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(calls[0].url).toBe("https://api.x.ai/v1/chat/completions");
     expect(bodyOf(calls[0]).model).not.toMatch(/^gemini-/);
   });
 
   it("falls back to the configured provider when the primary errors", async () => {
-    process.env.LLM_PROVIDER = "openai";
+    process.env.LLM_PROVIDER = "xai";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";
-    process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
 
     const { calls } = captureFetch((call) => {
@@ -364,8 +360,7 @@ describe("llm provider", () => {
   });
 
   it("does not let an explicit request.provider pin the fallback back onto the failed provider", async () => {
-    process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";
 
@@ -374,7 +369,7 @@ describe("llm provider", () => {
       return jsonResponse({ content: [{ type: "text", text: "Rescued." }], stop_reason: "end_turn" });
     });
 
-    const result = await chat({ ...SAMPLE_REQUEST, provider: "openai", model: "gpt-5.5" });
+    const result = await chat({ ...SAMPLE_REQUEST, provider: "xai", model: "grok-4.6" });
 
     expect(calls).toHaveLength(2);
     expect(calls[1].url).toContain("api.anthropic.com");
@@ -503,7 +498,7 @@ describe("llm provider", () => {
     expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer grok-subscription-token");
   });
 
-  it("ignores an expired subscription entry and, only under RADON_LADDER_ALLOW_PREPAID, uses the prepaid key", async () => {
+  it("ignores an expired subscription entry and never falls back to a prepaid key, even with the retired flag", async () => {
     const authFile = path.join(os.tmpdir(), `grok-auth-expired-${process.pid}-${Date.now()}.json`);
     fs.writeFileSync(authFile, JSON.stringify({
       "https://auth.x.ai::client": {
@@ -515,12 +510,13 @@ describe("llm provider", () => {
     process.env.GROK_AUTH_FILE = authFile;
     process.env.XAI_API_KEY = "prepaid-key";
     process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.LLM_PROVIDER = "xai";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
     );
     try {
-      await chat(SAMPLE_REQUEST);
-      expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer prepaid-key");
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Missing xAI subscription/);
+      expect(calls).toHaveLength(0);
     } finally {
       fs.rmSync(authFile, { force: true });
     }
@@ -553,7 +549,7 @@ describe("llm provider", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("never serves a gemini-* model, even under the prepaid escape hatch", async () => {
+    it("never serves a gemini-* model, even with the retired prepaid flag set", async () => {
       process.env.RADON_LADDER_ALLOW_PREPAID = "1";
       process.env.ANTHROPIC_API_KEY = "sk-ant-prepaid";
       const { calls } = captureFetch(() => jsonResponse({}));
@@ -635,9 +631,8 @@ describe("llm provider", () => {
   });
 
   it("throws when the primary errors and no fallback is configured", async () => {
-    process.env.LLM_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.LLM_PROVIDER = "xai";
+    process.env.XAI_OAUTH_TOKEN = "xai-grant";
     captureFetch(() => jsonResponse({ error: "boom" }, 500));
 
     await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();

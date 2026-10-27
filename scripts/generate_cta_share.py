@@ -14,11 +14,12 @@ it instead, OFF by default and opt-in per run:
 
   RADON_CTA_LLM_COPY=1 python3 scripts/generate_cta_share.py
 
-That path needs `pip install anthropic` and ANTHROPIC_API_KEY (web/.env);
+That path uses the Claude Max subscription grant (~/.claude/.credentials.json or
+CLAUDE_CODE_OAUTH_TOKEN) through utils/cta_llm.py; no API key is read.
 RADON_CTA_LLM_MODEL overrides the model (default claude-opus-5). Every figure
 in the generated copy is checked back against the payload facts, and anything
-that fails to verify falls back to the template. Missing key, missing SDK,
-timeout, or API error all fall back too: the share is never blocked.
+that fails to verify falls back to the template. Missing grant, timeout, or
+API error all fall back too: the share is never blocked.
 """
 
 from __future__ import annotations

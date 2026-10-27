@@ -683,10 +683,27 @@ def test_discover_gap_is_loud_when_eligible_pdfs_have_no_work(tmp_path, monkeypa
 
 # A Reviewer is reused by the daemon. Timeout learning belongs to one document,
 # and a text-model timeout says nothing about an untried image-model request.
+# Subscriptions only (2026-10-26): Grok is wired by a synthetic SuperGrok grant
+# file in this test's HOME (conftest lets the ladder read only under tmp_path),
+# never by a prepaid key.
+_GRANT_HOME: "Path | None" = None
+
+
+@pytest.fixture(autouse=True)
+def _grok_grant_home(tmp_path):
+    global _GRANT_HOME
+    home = tmp_path / "grant-home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text(json.dumps({"access_token": "synthetic-grok-grant"}))
+    _GRANT_HOME = home
+    yield
+    _GRANT_HOME = None
+
+
 def _budget_env(**extra):
+    assert _GRANT_HOME is not None
     return {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-subscription",
-            "XAI_API_KEY": "synthetic-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1",
-            "RADON_LADDER_NO_AUTH_FILES": "1", **extra}
+            "HOME": str(_GRANT_HOME), "CODEX_HOME": str(_GRANT_HOME / ".codex"), **extra}
 
 
 def _budget_response(provider, data=None, status=200):
@@ -796,15 +813,17 @@ def test_document_timeout_filter_preserves_cerebras_last_and_other_failures():
     assert calls == ["anthropic", "grok", "cerebras", "grok", "cerebras"]
 
 
-def test_document_timeout_filter_does_not_enable_prepaid_fallback():
+def test_document_timeout_filter_never_enables_a_prepaid_fallback():
     calls = []
 
     def post(url, **kwargs):
         calls.append(_budget_provider(url))
         raise requests.ReadTimeout("synthetic timeout")
 
-    env = _budget_env()
-    env.pop("RADON_LADDER_ALLOW_PREPAID")
+    # A prepaid key and the retired flag are ignored; no grant file is readable.
+    env = {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-subscription",
+           "XAI_API_KEY": "synthetic-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1",
+           "RADON_LADDER_NO_AUTH_FILES": "1"}
     reviewer = model.Reviewer(env=env, session=SimpleNamespace(post=post))
     with pytest.raises(model.ModelError, match="ladder exhausted"):
         reviewer.ask_text("select")
@@ -823,7 +842,7 @@ def test_document_timeout_filter_does_not_restart_full_ladder_when_no_eligible_c
 
     reviewer = model.Reviewer(env=_budget_env(), session=SimpleNamespace(post=post))
     assert reviewer.ask_text("select") == {"candidates": []}
-    reviewer.env.pop("XAI_API_KEY")
+    reviewer.env["RADON_LADDER_NO_AUTH_FILES"] = "1"  # the Grok grant goes away
     with pytest.raises(model.ModelError) as error:
         reviewer.ask_text("verify")
     assert model.is_provider_outage(error.value)
@@ -945,7 +964,7 @@ def test_reviewer_text_incomplete_response_preserves_safe_terminal_diagnostic():
     }
     session, closed, calls = session_response(payload)
     reviewer = model.Reviewer(
-        env={"ANTHROPIC_API_KEY": "test", "RADON_LADDER_ALLOW_PREPAID": "1"},
+        env={"CLAUDE_CODE_OAUTH_TOKEN": "test"},
         session=session,
     )
     with pytest.raises(model.ModelError) as caught:

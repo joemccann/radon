@@ -32,18 +32,14 @@ XAI_BASE_URL = "https://api.x.ai/v1"
 def _xai_token() -> str:
     """SuperGrok subscription grant (subscriptions only, 2026-09-18).
 
-    Resolved through the shared ladder: ~/.grok/auth.json, or a prepaid
-    XAI_API_KEY only under RADON_LADDER_ALLOW_PREPAID=1.
+    Resolved through the shared ladder: ~/.grok/auth.json only. A prepaid
+    xAI key is never read.
     """
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from clients import model_ladder
 
     auth = model_ladder.subscription_auth("grok")
     return auth.token if auth is not None else ""
-
-
-# Resolved lazily at call time so an import never reads a credential.
-XAI_API_KEY = None
 
 # Known ticker patterns
 COMMON_TICKERS = {

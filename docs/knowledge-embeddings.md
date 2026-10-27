@@ -33,7 +33,9 @@ After fusion, `hybrid_search` attaches adjacent chunks (`±NEIGHBOR_SPAN`) for t
 
 `scripts/knowledge/distill.py:run_distill_batch` runs each optional summary wave
 in its own process group. A timeout sends SIGKILL to that group and preserves
-completed summaries from stdout. Once that group kill succeeds and the worker
+completed summaries from stdout. Summaries come from the shared model ladder,
+which uses subscription grants only for Anthropic, Grok, Codex and Antigravity
+and never reads a prepaid key. Once that group kill succeeds and the worker
 is reaped, final cleanup does not signal the same group ID again. Final cleanup
 still kills CLI descendants after normal worker exit and retries the group
 kill when timeout cleanup has not reaped the worker. Signaling permission

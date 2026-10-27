@@ -260,6 +260,25 @@ describe("createVisionTagger.tagPost", () => {
     ).toThrow(/no Anthropic subscription/);
   });
 
+  it("never reads a prepaid key, even with the retired flag, and warns naming it once", async () => {
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    vi.resetModules(); // the warn-once set is per module instance (per process)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { resolveAnthropicAuth } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const env = {
+      ANTHROPIC_API_KEY: "sk-ant-prepaid-value",
+      RADON_LADDER_ALLOW_PREPAID: "1",
+      CLAUDE_CONFIG_DIR: "/nonexistent/radon-no-claude-config",
+    };
+    expect(resolveAnthropicAuth(env)).toBeNull();
+    expect(resolveAnthropicAuth(env)).toBeNull();
+    const lines = warn.mock.calls.map((args) => args.map(String).join(" "));
+    expect(lines.filter((line) => line.includes("ANTHROPIC_API_KEY:"))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes("RADON_LADDER_ALLOW_PREPAID:"))).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain("sk-ant-prepaid-value");
+    warn.mockRestore();
+  });
+
   it("throws when mediaDir is missing", async () => {
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     expect(() =>

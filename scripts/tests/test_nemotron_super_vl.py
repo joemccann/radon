@@ -139,11 +139,14 @@ def test_existing_defaults_do_not_receive_super_vl_controls(kind):
     assert_legacy_call(post.calls[0])
 
 
-def test_other_provider_does_not_receive_controls_even_with_super_vl_model_pin():
+def test_other_provider_does_not_receive_controls_even_with_super_vl_model_pin(tmp_path):
+    home = tmp_path / "home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text(json.dumps({"access_token": "grok-grant"}))
     post = Capture(completion(OBJECT))
     result = complete_text_json(
-        "tag", env={"XAI_API_KEY": "x-test", "RADON_LADDER_ALLOW_PREPAID": "1",
-                    "RADON_LADDER_NO_AUTH_FILES": "1", "XAI_MODEL": SUPER_VL}, post=post,
+        "tag", env={"HOME": str(home), "CODEX_HOME": str(tmp_path / "no-codex"),
+                    "XAI_MODEL": SUPER_VL}, post=post,
     )
     assert result.provider == "grok"
     assert "api.x.ai" in post.calls[0]["url"]

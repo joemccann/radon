@@ -975,8 +975,8 @@ Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
 chat model per LLM provider whose subscription grant is present on the host
 (the Claude Max grant in `~/.claude/.credentials.json` and the SuperGrok grant
 in `~/.grok/auth.json`, both kept live by `radon-subscription-tokens`; OpenAI
-only under `RADON_LADDER_ALLOW_PREPAID=1` with `OPENAI_API_KEY`, because the
-ChatGPT grant cannot list models) by listing that
+is never polled, because the ChatGPT grant cannot list models and prepaid keys
+are never read) by listing that
 provider's own models endpoint and applying a deterministic filter, sort, head:
 dated snapshots lose to the undated alias they pin, cheap and preview tiers and
 non-chat modalities are dropped, and versions are compared as floats so
