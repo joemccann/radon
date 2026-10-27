@@ -917,3 +917,135 @@ def test_certify_without_audit_root_keeps_pure_unit_test_seam(monkeypatch) -> No
     copy = _feed_copy(clean()["title"], clean()["content"])
     complete, _ = _ladder(CLEAN_REVIEW)
     humanizer.validate_certificate(mc.certify(_post(copy), copy, complete=complete))
+
+
+def test_source_grounded_overlapping_ticker_uses_stock_context_not_acronym_replacement() -> None:
+    def complete(instruction, **kwargs):
+        draft = {"title": "AI shares rose 2%", "content": "NYSE:AI stock rose 2%.\n\nAI spending and AI capex were unchanged.",
+                 "captions": {"i1": "AI share price versus AI spending"}, "tags": ["EQUITIES"], "tickers": ["AI"]}
+        assert kwargs["accept"](draft)
+        return LadderResult(data=draft, text="{}", provider="fake", model="fake")
+    out = mc.write_copy(title="C3.ai (NYSE:AI)", publisher=None,
+                        summary=["AI shares rose 2%. AI spending and AI capex were unchanged."],
+                        body_text="", images=[("i1", b"chart")], complete=complete)
+    assert out.title == "$AI shares rose 2%"
+    assert out.content == "NYSE:$AI stock rose 2%.\n\nAI spending and AI capex were unchanged."
+    assert out.captions == {"i1": "$AI share price versus AI spending"}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("AI stock and shares of AI", "$AI stock and shares of $AI"),
+    ("AI's shares and NYSE:AI", "$AI's shares and NYSE:$AI"),
+    ("AI spending; AI capex; generative AI; use of AI", "AI spending; AI capex; generative AI; use of AI"),
+    ("https://example.com/NYSE:AI/AI-stock?symbol=AI and AI@example.com", "https://example.com/NYSE:AI/AI-stock?symbol=AI and AI@example.com"),
+    ("HTTPS://example.com/NYSE:AI/AI-stock and ftp://example.com/NYSE:AI/AI-stock", "HTTPS://example.com/NYSE:AI/AI-stock and ftp://example.com/NYSE:AI/AI-stock"),
+    ("US stocks, CPI index, USD strength and MSCI World index", "US stocks, CPI index, USD strength and MSCI World index"),
+])
+def test_contextual_ambiguous_cashtags_are_grounded_idempotent_and_preserve_nonstocks(text, expected) -> None:
+    symbols = ("AI", "US", "CPI", "USD", "MSCI")
+    source = "C3.ai (NYSE:AI); AI shares; AI spending; MSCI World index; US stocks; CPI index; USD strength."
+    normalized = mc.normalize_tickers(text, symbols, source_text=source)
+    assert normalized == expected
+    assert mc.normalize_tickers(normalized, symbols, source_text=source) == expected
+
+
+@pytest.mark.parametrize("field,text", [
+    ("title", "AI rose 2%"),
+    ("content", "The market favored AI."),
+    ("caption", "AI versus the market"),
+])
+def test_unresolved_bare_overlapping_security_mentions_fail_closed(field, text) -> None:
+    draft = {"title": "$AI stock rose 2%", "content": "AI spending is unchanged.",
+             "captions": {"i1": "$AI shares"}, "tags": ["EQUITIES"], "tickers": ["AI"]}
+    if field == "caption":
+        draft["captions"]["i1"] = text
+    else:
+        draft[field] = text
+    assert "ticker_ambiguous:AI" in mc.copy_problems(
+        draft, source_text="C3.ai (NYSE:AI) shares rose 2%. AI spending is unchanged.", image_ids=["i1"])
+
+
+def test_overlapping_ticker_is_not_inferred_from_ordinary_ai_shares_without_source_security_marker() -> None:
+    text = "AI stock and AI shares"
+    assert mc.normalize_tickers(text, ("AI",), source_text="AI spending increased") == text
+
+
+def test_contextual_stock_cashtag_is_saved_and_reviewed_before_final_certificate(tmp_path) -> None:
+    copy = mc.FeedCopy(title="AI shares rose 2%", content="AI stock rose 2%. AI spending is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="C3.ai (NYSE:AI). AI shares rose 2%. AI spending is unchanged.", tickers=("AI",))
+    complete, calls = _ladder(CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete, audit_root=tmp_path)
+    humanizer.validate_certificate(post)
+    assert post["title"] == "$AI shares rose 2%"
+    assert post["content"] == "$AI stock rose 2%. AI spending is unchanged."
+    assert '"title": "$AI shares rose 2%"' in calls[0]["instruction"]
+    _, saved = _private_audits(tmp_path, post["id"])[0]
+    assert saved["humanizer"]["attempts"][-1]["title"] == post["title"]
+    assert saved["humanizer"]["final"]["copy_sha256"] == humanizer.copy_digest(post)
+
+
+def test_humanizer_cannot_certify_unresolved_ambiguous_stock_copy() -> None:
+    copy = mc.FeedCopy(title="AI rose 2%", content="AI spending is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="C3.ai (NYSE:AI). AI shares rose 2%. AI spending is unchanged.", tickers=("AI",))
+    complete, calls = _ladder(CLEAN_REVIEW)
+    with pytest.raises(mc.CopyUnavailable, match="ticker_ambiguous"):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert calls == []
+
+
+def test_overlapping_msci_security_does_not_rewrite_the_index_provider() -> None:
+    source = "MSCI Inc. (NYSE:MSCI) stock and the MSCI World index"
+    draft = {"title": "MSCI shares rose 2%", "content": "MSCI stock rose 2%. The MSCI World index was unchanged.",
+             "captions": {}, "tags": ["EQUITIES"], "tickers": ["MSCI"]}
+    assert mc.copy_problems(draft, source_text=source + " rose 2%", image_ids=[]) == []
+    text = mc.normalize_tickers(draft["content"], ("MSCI",), source_text=source)
+    assert text == "$MSCI stock rose 2%. The MSCI World index was unchanged."
+
+
+def test_humanizer_rewrite_normalizes_stock_context_before_its_new_final_review(tmp_path) -> None:
+    copy = mc.FeedCopy(title="$AI shares rose 2%", content="$AI stock rose 2%. Worth noting, AI capex is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="C3.ai (NYSE:AI). AI shares rose 2%. AI capex is unchanged.", tickers=("AI",))
+    review = {"findings": [], "qualitative": [{"field": "content", "text": "Worth noting,", "category": "filler"}]}
+    complete, calls = _ladder(review, {"title": "AI shares rose 2%", "content": "AI stock rose 2%. AI capex is unchanged."}, CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete, audit_root=tmp_path)
+    humanizer.validate_certificate(post)
+    assert post["title"] == "$AI shares rose 2%"
+    assert post["content"] == "$AI stock rose 2%. AI capex is unchanged."
+    assert '"content": "$AI stock rose 2%. AI capex is unchanged."' in calls[-1]["instruction"]
+    _, saved = _private_audits(tmp_path, post["id"])[0]
+    assert saved["humanizer"]["attempts"][-1]["content"] == post["content"]
+    assert saved["humanizer"]["final"]["copy_sha256"] == humanizer.copy_digest(post)
+
+
+def test_humanizer_rewrite_cannot_leave_a_bare_ambiguous_stock_mention() -> None:
+    copy = mc.FeedCopy(title="$AI shares rose 2%", content="$AI stock rose 2%. Worth noting, AI capex is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="C3.ai (NYSE:AI). AI shares rose 2%. AI capex is unchanged.", tickers=("AI",))
+    review = {"findings": [], "qualitative": [{"field": "content", "text": "Worth noting,", "category": "filler"}]}
+    complete, calls = _ladder(review, {"title": "AI rose 2%", "content": "AI capex is unchanged."})
+    with pytest.raises(mc.CopyUnavailable, match="factual_verification_failed"):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("symbol", ["US", "USD"])
+def test_explicit_source_security_does_not_cashtag_country_or_currency_market_labels(symbol) -> None:
+    source = f"NYSE:{symbol} shares and {symbol} equity markets"
+    text = f"{symbol} equity markets and NYSE:{symbol} shares"
+    expected = f"{symbol} equity markets and NYSE:${symbol} shares"
+    assert mc.normalize_tickers(text, (symbol,), source_text=source) == expected
+
+
+@pytest.mark.parametrize("symbol", ["AI", "MSCI"])
+@pytest.mark.parametrize("label", ["stock index", "stock indices", "equity index", "equity indexes"])
+def test_overlapping_security_preserves_compound_index_labels(symbol, label) -> None:
+    source = f"NYSE:{symbol} shares and the {symbol} {label}"
+    text = f"{symbol} shares rose. The {symbol} {label} was unchanged."
+    expected = f"${symbol} shares rose. The {symbol} {label} was unchanged."
+    assert mc.normalize_tickers(text, (symbol,), source_text=source) == expected
+    draft = {"title": f"{symbol} shares", "content": text, "captions": {},
+             "tags": ["EQUITIES"], "tickers": [symbol]}
+    assert mc.copy_problems(draft, source_text=source, image_ids=[]) == []

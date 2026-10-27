@@ -10372,7 +10372,7 @@ Review: Sol found no actionable regression; Luna independently passed 292 focuse
 - [x] TME1: Verify same-account Firebase refresh and provider token endpoint; depends_on: []
 - [x] TME2: Red/green renewal and grant persistence tests; depends_on: [TME1]
 - [x] TME3: Wire proactive renewal and narrow runtime seed allowlist; depends_on: [TME2]
-- [ ] TME4: Full suites, exact-head CI, production renewal proof; depends_on: [TME3]
+- [x] TME4: PR #1312 merged f4bd3a8d9; run 40553429761 green. Stored-grant-only fresh browser verified 29 premium bodies and renewal through 2026-11-10; depends_on: [TME3]
 
 ### Review
 - Renewal/auth/browser coverage: 70 passed. Full Vitest: 11,576 passed, 21 skipped.
@@ -10391,7 +10391,20 @@ Dependency graph: M1 -> [M2, C1, D1] -> U1 -> M4 -> M5.
 - [x] C1 depends_on: [M1] Parallel voice-copy lane: input-only bullets, connected prose, grounded $tickers, final Humanizer score/certificate after normalization. Slash-separated ticker red/green covered; private per-run editorial audits retain every scored draft and park on storage outage.
 - [x] D1 depends_on: [M1] Parallel durable PDF archive with isolated credentials, global throttling, atomic backoff, attachment CAS and same-post provenance healing; three kill/recovery boundaries.
 - [x] U1 depends_on: [M2, C1, D1] Article-only provenance, no raw source bullet lists for legacy/new posts, accurate article/PDF links; 48 component tests and two desktop/mobile browser cases green and screenshots inspected.
-- [ ] M4 depends_on: [U1] Full suites, PR exact-head CI, accepted notification, admin merge and production deploy.
+- [x] M4 depends_on: [U1] Full suites, PR #1314 exact-head 45 green checks, accepted notification, admin merge 6fda0d80b and production deploy run 40560029613 succeeded.
 - [ ] M5 depends_on: [M4] Drain backlog through managed job and verify named reports in Turso and live feed, recording held/dropped/provider-blocked outcomes honestly.
 
-Review: source facts and qualifications remain intact; full web 11,587 passed, final full Python 18,202 passed, 12 skipped after owner-document repairs. PDF store/job 36 passed after independent P2 repairs; full cloud 3,525 passed, 24 skipped. Existing relevance/fidelity/Humanizer gates remain; request-limit refusals never bypassed. No working standalone download endpoint claimed.
+Review: source facts and qualifications remain intact; full web 11,587 passed, full default Python collection 18,583 passed, 12 skipped after owner-document repairs. PDF store/job 36 passed after independent P2 repairs; full cloud 3,525 passed, 24 skipped. First two live articles scored 100/100, matched saved audits and source facts; 46 private PNGs verified. Existing relevance/fidelity/Humanizer gates remain; request-limit refusals never bypassed. No working standalone download endpoint claimed.
+
+
+## MarketDesk publication follow-up verification (2026-10-27)
+
+Dependency graph: F1 -> [F2, F3] -> F4 -> F5.
+
+- [x] F1 depends_on: [] Verify real interrupted transport and independent Luna ticker finding against the source; preserve provider limits and source facts.
+- [x] F2 depends_on: [F1] Actual SIGTERM regressions fail before cancellation repair; retain 143, lease, cleanup and service-health evidence. Agent focused 251 passed.
+- [x] F3 depends_on: [F1] Ambiguous stock/acronym, rewrite and URI regressions; retain ordinary AI spending, indices and country/currency labels. Root integrated focused 366 passed.
+- [x] F4 depends_on: [F2, F3] Sol reviewed the repaired index case with no remaining findings; full Python 18,622 passed / 12 skipped, cloud 3,525 passed / 24 skipped, web 11,595 passed / 21 skipped. Suites ran sequentially; independent Luna verification passed 565 focused tests with no remaining review findings.
+- [ ] F5 depends_on: [F4] Exact-head green CI, one accepted PR notification, admin merge, deploy and live backlog/copy receipts.
+
+Review: article publication stays independent of the PDF provider embargo. Prior article-first PR #1314 and renewal PR #1312 are deployed; follow-up deployment and complete backlog verification remain pending.
