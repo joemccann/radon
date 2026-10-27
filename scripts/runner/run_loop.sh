@@ -753,6 +753,32 @@ finish_phase() {
   post_phase_marker "$PHASE" "$status"
 }
 
+# requirements.txt installs fastembed from a gitignored wheel. A fresh clone
+# does not contain it, and the security pre-run git clean removes vendor/.
+# Build the wheel after that hook and before the agent so the first
+# uv/pip install resolves the file. A failure is logged; the agent still starts.
+materialize_fastembed_wheel() {
+  local req="$WORK/requirements.txt"
+  local script="$WORK/scripts/deps/materialize_fastembed_pillow13.py"
+  local wheel="$WORK/vendor/fastembed-0.8.0-py3-none-any.whl"
+  [[ -f "$req" && ! -L "$req" && -f "$script" && ! -L "$script" ]] || return 0
+  grep -qF 'file:./vendor/fastembed-0.8.0-py3-none-any.whl' "$req" || return 0
+  if [[ -L "$WORK/vendor" ]]; then
+    rm -f -- "$WORK/vendor"
+  elif [[ -L "$wheel" ]]; then
+    rm -f -- "$wheel"
+  fi
+  [[ -f "$wheel" && ! -L "$wheel" ]] && return 0
+  log "materializing fastembed wheel before the package install"
+  if ! "$TIMEOUT_BIN" 120 "$RUNNER_PYTHON" -I "$script" >>"$LOG" 2>&1; then
+    log "fastembed wheel materialize failed"
+    return 0
+  fi
+  if [[ ! -f "$wheel" || -L "$wheel" ]]; then
+    log "fastembed wheel materialize failed"
+  fi
+}
+
 # PHASES="name:secs ...": one agent session per phase, each with its own
 # header and timeout. Every phase runs whatever the earlier rc.
 run_phases() {
@@ -789,6 +815,7 @@ run_phases() {
     capture_audited_sha
     offset="$(wc -c < "$LOG" | tr -d ' ')"
     if [[ -z "$PHASE_REFUSED" ]]; then
+      materialize_fastembed_wheel
       build_prompt
       run_agents_in_order
       PHASE_RC=$AGENT_RC
@@ -847,6 +874,7 @@ main() {
     run_phases
     return
   fi
+  materialize_fastembed_wheel
   build_prompt
   PHASE_STARTED_AT="$(date +%s)"
   rm -f "$RADON_RUNNER_PIDFILE"

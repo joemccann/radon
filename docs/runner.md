@@ -448,6 +448,7 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 | Log stops at `starting agy`, then the next agent | Keychain locked after a reboot | Unlock it (Operate) |
 | A security loop's log shows claude `not logged in` on every rung, every phase `FAILED` | Keychain locked after a reboot, so the claude.ai session is unreadable | Unlock it, then `~/.local/bin/claude auth status` (Operate); re-sign with step 8b.4 if still logged out |
 | `no timeout or gtimeout in /opt/homebrew/bin:/usr/bin:/bin` | coreutils missing | `brew install coreutils` |
+| First `uv pip install` fails on `file:./vendor/fastembed-0.8.0-py3-none-any.whl` | `vendor/` is gitignored, and the security pre-run `git clean` deletes it | `run_loop.sh` writes the wheel after `PRE_RUN` and before the agent. The installed copy refreshes from CI-green main |
 | Log shows `NVIDIA is paused ... skipping fx:nvidia` or `stopping fx:nvidia` | NVIDIA answered persistent 429s or a 401/403, so the key is tripped | Nothing for 429s: it clears itself. For `NVIDIA AUTHORIZATION FAILED` in the proxy log, check the key (Credentials tab or `/v1/models`) |
 | Every `fx:nvidia` rung exits 75 at once, log `not calling NVIDIA unpaced` | The proxy could not start (lib missing: reinstall, step 2) | Reinstall; check `nvidia-proxy.log` |
 | fx:nvidia fails with an unknown provider | The bot's `~/.fx/settings.json` predates `nvidia-paced` | Rerun the bootstrap in the bot shell (step 6) |
