@@ -1,3 +1,9 @@
+# Backlog replay must yield to deployment (2026-10-27)
+
+- Before each manual managed-job start, atomically check the production deploy lock and refuse admission while a transition journal exists. Never queue starts during teardown or recovery. Release the admission lock immediately after the nonblocking start; do not hold up deployment for an article cycle.
+- Successful oneshot starts count toward systemd StartLimit too. Bound an accelerated replay, stop on start-limit-hit and retain the normal service limit; do not spin on refused starts or loosen the timer's crash-loop protection.
+- Managed cancellation is control flow. Provider error handling must not convert it into a fallback request. Verify actual SIGTERM during request setup and streaming, exit 143, cleanup and the error heartbeat.
+
 # The portfolio flow book must not inherit the report admission wait (2026-10-27)
 
 - `FLOW_ADMISSION_WAIT_S` (120s) is the single-ticker `flow_report.py` path. Its subprocess budget is 300s. `flow_analysis.py` is the hourly book inside `radon-flow-refresh.service`, and the wrapper curl deadline is 180s. `fetch_flow` defaults `retry_transient=True`, so the book used to open `UWClient(admission_timeout=120)` per name. One saturated top-of-hour wait holds `POST /flow-analysis` until `curl: (28)` / `http=000` / 0 bytes, and the oneshot exits 1.

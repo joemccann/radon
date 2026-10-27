@@ -237,20 +237,78 @@ def _source_tickers(source_text: str, declared: object = ()) -> tuple[str, ...]:
                         if _security_symbol(symbol, source_text=source_text) and _source_has_symbol(source_text, symbol)))
 
 
-def normalize_tickers(text: str, symbols: Sequence[str]) -> str:
-    """Prefix identified symbols once; leave URLs and ambiguous acronyms intact.
+def _ticker_pattern(symbols: Sequence[str]) -> re.Pattern:
+    return re.compile(r"(?i:[a-z][a-z0-9+.-]*://|www\.)\S+|[\w.+-]+@[\w.-]+|(?<![\w$.])(?:"
+                      + "|".join(re.escape(symbol) for symbol in sorted(symbols, key=len, reverse=True))
+                      + r")(?!\w|\.[A-Z])")
 
-    An explicitly identified overlapping ticker such as NYSE:AI must already
-    carry its model-written $ where it denotes the stock. A global replacement
-    would incorrectly turn ordinary "AI spending" into "$AI spending".
+
+_INDEX_LABEL_RE = re.compile(r"^\s+(?:stock|equity|shares?)\s+(?:index|indices|indexes)\b", re.I)
+
+
+def _stock_context(text: str, start: int, end: int) -> bool:
+    before, after = text[:start], text[end:]
+    if _INDEX_LABEL_RE.match(after):
+        return False
+    return bool(re.search(r"\b(?:NASDAQ|NYSE|AMEX|ticker|symbol)\s*[:=]\s*$|"
+                          r"\b(?:shares|stock|equity)\s+(?:of|in)\s+$", before, re.I)
+                or re.match(r"^(?:'s)?\s+(?:shares\b|share\s+price\b|stock\b|equity\b|ADRs?\b)", after, re.I))
+
+
+def _ordinary_acronym_context(text: str, symbol: str, start: int, end: int) -> bool:
+    before, after = text[:start], text[end:]
+    if _INDEX_LABEL_RE.match(after):
+        return True
+    if symbol in _CURRENCIES or symbol in {"US", "USA", "UK", "EU"}:
+        return True  # bare currency/country codes do not denote securities
+    if symbol == "AI":
+        return bool(re.search(r"\b(?:generative|agentic|applied|artificial)\s+$|"
+                              r"\b(?:use|adoption|application|deployment|benefits|risks)\s+of\s+$", before, re.I)
+                    or re.match(r"^\s+(?:spending|capex|adoption|investment|investments|demand|boom|cycle|"
+                                r"infrastructure|models?|workloads?|software|hardware|technology|tools?|agents?|"
+                                r"systems?|applications?|training|inference|compute|computing|power|chips?|"
+                                r"data|research|sector|stocks|share\s+of)\b", after, re.I))
+    return bool(re.search(r"\b(?:according\s+to|reported\s+by|published\s+by)\s+$", before, re.I)
+                or re.match(r"^\s+(?:index|indices|indexes|World|US|Europe|Asia|Emerging|growth|inflation|"
+                            r"estimates?|forecasts?|report|release|data|spending|capex)\b", after, re.I))
+
+
+def normalize_tickers(text: str, symbols: Sequence[str], *, source_text: str = "") -> str:
+    """Prefix identified securities once without rewriting ordinary acronyms.
+
+    Overlapping symbols require an explicit source security marker AND stock
+    context at that occurrence. Unclear bare mentions are rejected separately.
+    URLs, email, ordinary AI spending and currency/index labels stay untouched.
     """
-    allowed = [symbol for symbol in symbols if _security_symbol(symbol)]
+    allowed = [symbol for symbol in symbols if _security_symbol(symbol, source_text=source_text)]
     if not allowed:
         return text
-    pattern = re.compile(r"https?://\S+|[\w.+-]+@[\w.-]+|(?<![\w$.])(?:"
-                         + "|".join(re.escape(symbol) for symbol in sorted(allowed, key=len, reverse=True))
-                         + r")(?!\w|\.[A-Z])")
-    return pattern.sub(lambda match: "$" + match.group() if match.group() in allowed else match.group(), text)
+
+    def replace(match: re.Match) -> str:
+        symbol = match.group()
+        if symbol not in allowed:
+            return symbol
+        if (symbol in _CURRENCIES or symbol in {"US", "USA", "UK", "EU"}) and not re.search(
+                r"\b(?:NASDAQ|NYSE|AMEX|ticker|symbol)\s*[:=]\s*$", text[:match.start()], re.I):
+            return symbol
+        if symbol in _NOT_SECURITIES and not _stock_context(text, match.start(), match.end()):
+            return symbol
+        return "$" + symbol
+
+    return _ticker_pattern(allowed).sub(replace, text)
+
+
+def _ambiguous_ticker_problems(texts: Sequence[str], *, source_text: str, declared=()) -> list[str]:
+    ambiguous = [symbol for symbol in _source_tickers(source_text, declared) if symbol in _NOT_SECURITIES]
+    if not ambiguous:
+        return []
+    unresolved = set()
+    for text in texts:
+        for match in _ticker_pattern(ambiguous).finditer(text):
+            symbol = match.group()
+            if symbol in ambiguous and not _ordinary_acronym_context(text, symbol, match.start(), match.end()):
+                unresolved.add(symbol)
+    return [f"ticker_ambiguous:{symbol}" for symbol in sorted(unresolved)]
 
 
 def _normalize_obj(obj: Any, *, source_text: str) -> Any:
@@ -260,9 +318,9 @@ def _normalize_obj(obj: Any, *, source_text: str) -> Any:
     symbols = _source_tickers(source_text, out.get("tickers", ()))
     for key in ("title", "content"):
         if isinstance(out.get(key), str):
-            out[key] = normalize_tickers(out[key], symbols)
+            out[key] = normalize_tickers(out[key], symbols, source_text=source_text)
     if isinstance(out.get("captions"), dict):
-        out["captions"] = {key: normalize_tickers(value, symbols) if isinstance(value, str) else value
+        out["captions"] = {key: normalize_tickers(value, symbols, source_text=source_text) if isinstance(value, str) else value
                            for key, value in out["captions"].items()}
     return out
 
@@ -356,6 +414,7 @@ def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[
                 tag_texts.append(tag)
 
     prose = [t for t in (title, content) if isinstance(t, str)] + caption_texts
+    problems.extend(_ambiguous_ticker_problems(prose, source_text=source_text, declared=declared))
     everything = "\n".join(prose + tag_texts)
     prose_text = "\n".join(prose)
     for symbol in sorted(_COMMON_SYMBOLS):
@@ -407,6 +466,9 @@ def _repair(ask, instruction: str, rejected: list[tuple[list[str], dict]]):
         "REJECTED_FOR: " + ", ".join(problems[:20]),
         "Return the same JSON object with every listed problem fixed. Remove or rewrite any sentence or caption "
         "whose number is not verbatim in SUMMARY_BULLETS or ARTICLE_TEXT; keep everything else.",
+        "For ticker_ambiguous, clarify the mention using the source: a security needs its cashtag or explicit stock "
+        "context. Ordinary AI spending, AI capex, currency codes and index labels must stay ordinary words. "
+        "Never guess a security or turn an unclear acronym into a cashtag.",
     ])
     try:
         return ask(prompt)
@@ -520,7 +582,12 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
     post = copy_module.deepcopy(post)
     for field in ("title", "content"):
         if isinstance(post.get(field), str):
-            post[field] = normalize_tickers(post[field], symbols)
+            post[field] = normalize_tickers(post[field], symbols, source_text=copy.source_text)
+    ambiguity = _ambiguous_ticker_problems(
+        [post[field] for field in ("title", "content") if isinstance(post.get(field), str)],
+        source_text=copy.source_text, declared=getattr(copy, "tickers", ()))
+    if ambiguity:
+        raise CopyUnavailable("copy_rejected: " + ", ".join(ambiguity))
     path = _audit_path(audit_root, post.get("id"))
     entry = {"post_id": post.get("id"), "humanizer": {"attempts": []}}
 
@@ -550,7 +617,7 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
         if isinstance(reply, dict) and set(reply) == {"title", "content"}:
             # The next Humanizer pass reviews and hashes these exact normalized
             # strings. Never change copy after the final review certificate.
-            return {field: normalize_tickers(value, symbols) if isinstance(value, str) else value
+            return {field: normalize_tickers(value, symbols, source_text=copy.source_text) if isinstance(value, str) else value
                     for field, value in reply.items()}
         return reply
 
