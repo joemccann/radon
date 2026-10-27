@@ -2910,3 +2910,20 @@ class TestDocumentation20261026:
         assert "partial redaction" in fn
         assert 'while after < len(text) and text[after] in " \\t"' in fn
 
+
+class TestDocumentation20261027:
+    """Contracts that landed after the 2026-10-26 documentation audit."""
+
+    def test_darkpool_day_ends_at_eastern_midnight(self):
+        text = (_ROOT / "docs/unusual_whales_api.md").read_text()
+        section = text.split("### Dark Pool", 1)[1].split("### Options Flow", 1)[0]
+        assert "Eastern midnight" in section
+        assert "upper bound" in section
+        assert "until a short page.\n" not in section
+        src = (_ROOT / "scripts/fetch_flow.py").read_text()
+        fn = src.split("def walk_darkpool", 1)[1].split("\ndef fetch_darkpool", 1)[0]
+        assert "crossed_into_prior_day" in fn
+        assert "day_start_et" in fn
+        cache = (_ROOT / "scripts/utils/darkpool_cache.py").read_text()
+        assert "def day_start_et" in cache
+        assert "before its Eastern day start" in cache
