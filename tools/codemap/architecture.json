@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-10-26T09:00:08Z",
-  "node_count": 4167,
-  "edge_count": 8538,
+  "generated_at": "2026-10-27T09:00:09Z",
+  "node_count": 4189,
+  "edge_count": 8593,
   "areas": {
-    "web": 2369,
+    "web": 2371,
     "site": 159,
-    "scripts": 1468,
+    "scripts": 1488,
     "cloud": 123,
     "lib": 28,
     "tests": 17,
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1118
+      "count": 1120
     },
     {
       "id": "site/app",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 34
+      "count": 42
     },
     {
       "id": "scripts/runner",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 773
+      "count": 785
     },
     {
       "id": "scripts/trade_blotter",
@@ -342,8 +342,15 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 105,
+      "in": 106,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/db/writer.py",
+      "area": "scripts",
+      "in": 100,
+      "out": 5,
       "test": false
     },
     {
@@ -361,16 +368,9 @@
       "test": false
     },
     {
-      "id": "scripts/db/writer.py",
-      "area": "scripts",
-      "in": 98,
-      "out": 5,
-      "test": false
-    },
-    {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 101,
+      "in": 103,
       "out": 1,
       "test": false
     },
@@ -501,6 +501,13 @@
       "test": false
     },
     {
+      "id": "scripts/clients/ib_client.py",
+      "area": "scripts",
+      "in": 42,
+      "out": 3,
+      "test": false
+    },
+    {
       "id": "web/e2e/clear-fixtures.ts",
       "area": "web",
       "in": 34,
@@ -519,13 +526,6 @@
       "area": "scripts",
       "in": 43,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/ib_client.py",
-      "area": "scripts",
-      "in": 39,
-      "out": 3,
       "test": false
     },
     {
@@ -578,10 +578,10 @@
       "test": false
     },
     {
-      "id": "web/components/mobile/MetricCell.tsx",
+      "id": "web/components/DashboardNewsFeed.tsx",
       "area": "web",
-      "in": 37,
-      "out": 0,
+      "in": 18,
+      "out": 20,
       "test": false
     }
   ],
