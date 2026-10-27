@@ -78,7 +78,8 @@ class TestEmptyAggregateGate:
             return _result_with(num_prints=0)
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
@@ -104,7 +105,8 @@ class TestEmptyAggregateGate:
             return _result_with(num_prints=2500)
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
@@ -132,7 +134,8 @@ class TestEmptyAggregateGate:
             )
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
@@ -171,7 +174,8 @@ class TestPerDayBlankGate:
             return _result_with(num_prints=1499, daily=daily)
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
@@ -198,7 +202,8 @@ class TestPerDayBlankGate:
             return _result_with(num_prints=2139, daily=daily)
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
@@ -231,7 +236,8 @@ class TestPerDayBlankGate:
             return _result_with(num_prints=1639, daily=daily)
 
         def _fake_write_cache(path, data):
-            cache_writes.append(path)
+            if not path.name.endswith(".scan.json"):  # scan status, not the report
+                cache_writes.append(path)
 
         with patch.object(server, "run_script", _fake_run_script), \
              patch.object(server, "_write_cache", _fake_write_cache), \
