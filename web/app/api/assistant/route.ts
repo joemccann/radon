@@ -7,6 +7,7 @@ import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
 import { textPayloadViolation } from "@/lib/assistant/requestBudget";
 import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant/telemetry";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { buildDemoAssistantReply, DEMO_ASSISTANT_MODEL } from "@/lib/demo/fixtures/assistant";
 import { etCalendarDateString } from "@/lib/journal/rangePnl";
 import { validateModelId } from "@/lib/llm/catalog";
 
@@ -312,6 +313,25 @@ export async function POST(request: NextRequest): Promise<Response> {
   const lastMessage = messages[messages.length - 1];
   if (!mock && lastMessage.role !== "user") {
     return NextResponse.json({ error: "The last message must be from user." }, { status: 400 });
+  }
+
+  // The demo deployment holds no LLM subscription grant and the operator's
+  // grants never serve trial users: demo principals get a sample reply in the
+  // same stream shape. No model, no quota charge, no telemetry row.
+  if (access.principal.kind === "demo") {
+    const frames =
+      sseFrame("start", { ts: new Date().toISOString() }) +
+      sseFrame("done", {
+        content: buildDemoAssistantReply(lastUserContent(messages)),
+        model: DEMO_ASSISTANT_MODEL,
+        toolEvents: [],
+        proposal: null,
+        rounds: 0,
+      });
+    return new Response(frames, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform" },
+    });
   }
 
   // Demo AI quota (Phase 4) — no-op for non-demo users; 429 once a trial user
