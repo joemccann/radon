@@ -545,6 +545,15 @@ def test_main_returns_nonzero_on_failure_and_zero_on_success(monkeypatch, capsys
     assert job.main() == 1
 
 
+def test_main_exits_tempfail_when_sigterm_stops_the_cycle(monkeypatch, capsys):
+    # A deploy's stop-clean SIGTERMs an in-flight oneshot (2026-10-27 14:14 UTC). Exit 1 latched the
+    # unit failed and paged. 143 (128+SIGTERM) + SuccessExitStatus=143 keeps a stop out of `failed`; a
+    # TimeoutStartSec kill is still Result=timeout in systemd whatever the exit code.
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: job._terminate(15, None))
+    assert job.main() == 143
+    assert "cycle stopped: terminated by SIGTERM" in capsys.readouterr().err
+
+
 def test_runnable_by_path_imports_without_side_effects():
     code = ("import runpy, sys; sys.argv=['marketdesk_job.py','--help'];"
             f"runpy.run_path({str(SCRIPTS / 'research/marketdesk_job.py')!r}, run_name='not_main')")

@@ -29,6 +29,11 @@ StandardError=journal
 # Type=oneshot ignores RuntimeMaxSec; TimeoutStartSec is the bound, under the
 # 300s cadence so a hung cycle cannot freeze its timer.
 TimeoutStartSec=270
+# marketdesk_job.py exits 143 when SIGTERM stops a cycle (a deploy's stop-clean
+# lands on this 5-minute oneshot often). A routine stop must not latch failed and
+# page; a hung cycle still fails as Result=timeout. Not 75: radon-app-runtime run
+# exits 75 for a surviving orphan container, which must stay a failure.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
