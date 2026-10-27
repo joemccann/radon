@@ -223,7 +223,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\b(?:D?U|F)\d{6,}\b"), "[redacted-account]"),
     # The username run is optional: password-only userinfo (`://:secret@`)
     # is valid and used to escape this rule entirely (DS-2026-10-22-13).
-    (re.compile(r"(://[^\s/:@]*:)[^\s/@]+@"), r"\1[redacted]@"),
+    # Through the LAST `@` of the authority, where a URL parser splits the
+    # host off: a password may itself hold `@` (DS-2026-10-27-15).
+    (re.compile(r"(://[^\s/:@]*:)[^\s/]+@"), r"\1[redacted]@"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"), "[redacted-key]"),
@@ -280,7 +282,9 @@ _UNQUOTED_SEGMENT = re.compile(r"[^\s\"'`;&|()<>,\]}]+")
 # the following lines. The window to the operator is bounded, so a long line
 # of `$(` values costs at most that much each.
 _HEREDOC_OPERATOR = re.compile(
-    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*(?P<quote>[\"']?)(?P<word>[A-Za-z_][A-Za-z0-9_]{0,63})(?P=quote)"
+    # A quoted word may hold any character but its quote (DS-2026-10-27-16).
+    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*"
+    r"(?:(?P<quote>[\"'])(?P<quoted>[^\"'\r\n]{1,64})(?P=quote)|(?P<word>[A-Za-z0-9_.@%+-]{1,64}))"
 )
 
 # One line break plus indentation may sit between the key and its value: a
@@ -347,6 +351,10 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
                     # Explicit concatenation, `"" + "<v>"`; one per gap.
                     joined = True
                     following += 1
+                elif joined and text[following] in "\r\n":
+                    # A `+` carries the expression onto the next line
+                    # (DS-2026-10-27-13).
+                    following += 1
                 elif text.startswith(("\\\n", "\\\r\n"), following):
                     # A backslash line continuation joins the next line's literal.
                     following = text.index("\n", following) + 1
@@ -384,7 +392,8 @@ def _heredoc_end(text: str, operators: "list[re.Match[str]]") -> int:
     end = _end_of_line(text, operators[-1].end())
     for operator in operators:
         indent = "\t*" if operator.group("dash") else ""
-        terminator = re.compile(rf"^{indent}{re.escape(operator.group('word'))}\r?$", re.M)
+        word = operator.group("quoted") or operator.group("word")
+        terminator = re.compile(rf"^{indent}{re.escape(word)}\r?$", re.M)
         found = terminator.search(text, end)
         if found is None:
             return len(text)
@@ -788,7 +797,9 @@ def find_secret_assignments(text: str) -> list[str]:
                 return ["[redacted-secret]"]
         # The literal scanner bounds its value run at 1024, so a longer
         # unquoted literal (a session token) matched neither rule.
-        if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):
+        # Its leading run only: shell punctuation may follow it (DS-2026-10-27-14).
+        literal = _LONG_LITERAL.match(body) if not delimiter else None
+        if literal is not None and len(literal.group(0)) > 1024 and _is_opaque(literal.group(0)):
             return ["[redacted-secret]"]
     for match in _COOKIE_HEADER.finditer(text or ""):
         for pair in match.group("pairs").split(";"):

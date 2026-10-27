@@ -659,3 +659,26 @@ def test_wrapped_unterminated_heredocs_stay_linear():
     # 16x the input: linear stays near 16x, quadratic is near 256x.
     small, large = elapsed(500), elapsed(8000)
     assert large < max(small * 40, 1.0), (small, large)
+
+
+_RESCAN11_SHAPES = {
+    "concatenation-across-lines": f'const password = "" +\n  "{OPAQUE}{TAIL}";\n',
+    "quoted-heredoc-word-with-dash": f"UW_TOKEN=$(cat <<'END-TOKEN'\n{OPAQUE}{TAIL}\nEND-TOKEN\n)\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN11_SHAPES.values(), ids=_RESCAN11_SHAPES.keys())
+def test_rescan11_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_long_literal_before_shell_punctuation_is_detected():
+    value = (OPAQUE + TAIL) * 60
+    assert find_secret_assignments(f"SESSION_ID={value};\n") == ["[redacted-secret]"]
+
+
+def test_userinfo_is_masked_through_the_last_at_sign():
+    out = scrub_credential_text(f"see https://svc:{OPAQUE}@{TAIL}@h.invalid/path\n")
+    assert _clean(out) and "@h.invalid/path" in out, out
