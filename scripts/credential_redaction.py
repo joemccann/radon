@@ -76,7 +76,8 @@ def build_triple_quoted_assignment_re(key_pattern: str) -> "re.Pattern[str]":
     delimiter pair as an empty value, so the credential survived both.
     """
     return re.compile(
-        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')"
+        # A string prefix may open the value (`r"""`, DS-2026-10-26-19).
+        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*(?:[rRbBuUfF]{{1,2}})?)(\"\"\"|''')"
         # A backslash escape consumes the next character, so an escaped first
         # quote of the closer does not end the value and leave the rest
         # published (DS-2026-10-22-11). Each position takes exactly one branch
@@ -262,8 +263,21 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # gate runs over text an outside contributor shapes.
 
 # Only a prefix that is actually followed by a quote is a string prefix; `rb`
-# at the start of an unquoted value is part of the value.
-_STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
+# at the start of an unquoted value is part of the value. `$` opens shell
+# ANSI-C (`$'...'`) and locale (`$"..."`) quoting (DS-2026-10-27-01).
+_STRING_PREFIX = re.compile(r"(?:[rRbBuUfF]{1,2}|\$)(?=[\"'])")
+
+# DS-2026-10-26-18: an unquoted run touching a closed literal is the same
+# shell word (`'abc'<v>`). No `.`, `,` or brackets, so `"v".encode()` and
+# JSON separators stay outside the value.
+_UNQUOTED_SEGMENT = re.compile(r"[A-Za-z0-9_+/=~%@-]+")
+
+# DS-2026-10-27-01: a command substitution whose heredoc carries the value on
+# the following lines. The window to the operator is bounded, so a long line
+# of `$(` values costs at most that much each.
+_HEREDOC_OPERATOR = re.compile(
+    r"[^\r\n]{0,256}?<<-?[ \t]*([\"']?)([A-Za-z_][A-Za-z0-9_]{0,63})\1[^\r\n]*"
+)
 
 # One line break plus indentation may sit between the key and its value: a
 # YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
@@ -272,7 +286,11 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 # YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
     # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?[ \t]*[:=][ \t]*"
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
+    # A type annotation before the initializer, `NAME: str = ...`
+    # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
+    r"(?::[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?[ \t]*(?==))?"
+    r"[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
@@ -305,6 +323,16 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
         # recursion, so a long run of literals cannot exhaust the stack.
         while delimiter:
             following = end + len(delimiter)
+            segment = _UNQUOTED_SEGMENT.match(text, following)
+            if segment is not None:
+                following = segment.end()
+                prefix = _STRING_PREFIX.match(text, following)
+                if prefix is not None:
+                    following = prefix.end()
+                if following < length and text[following] in "\"'":
+                    _, end, delimiter = _scan_quoted(text, following)
+                    continue
+                return body, following, ""
             while following < length:
                 if text[following] in " \t":
                     following += 1
@@ -324,7 +352,18 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
+    if text.startswith(("$(", "`"), index):
+        heredoc = _HEREDOC_OPERATOR.match(text, index)
+        if heredoc is not None:
+            return index, _heredoc_end(text, heredoc), ""
     return index, cursor, ""
+
+
+def _heredoc_end(text: str, operator: "re.Match[str]") -> int:
+    """End of the terminator line of the heredoc ``operator`` opens, or of the text."""
+    terminator = re.compile(rf"^[ \t]*{re.escape(operator.group(2))}[ \t]*\r?$", re.M)
+    found = terminator.search(text, operator.end())
+    return len(text) if found is None else found.end()
 
 
 def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
@@ -348,7 +387,9 @@ def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
             eol = _end_of_line(text, body)
             if literal is None or literal < eol:
                 return body, eol, ""
-            close = literal
+            # A later-line literal close is not a close both grammars agree
+            # on (DS-2026-10-26-16): unterminated, through that line's end.
+            return body, _end_of_line(text, literal + 1), ""
         elif literal is not None and literal > close:
             close = literal
     if close is not None:
@@ -549,7 +590,8 @@ def _redact_assignments(text: str) -> str:
                 eol = _continuation_end(
                     text, line_start(head_start), _end_of_line(text, body_start)
                 )
-            body_end = eol
+            # The tokenizer may already run past the line (a heredoc).
+            body_end = max(body_end, eol)
         body = text[body_start:body_end]
         if not delimiter and not body:
             # An EMPTY quoted value still gets the label (the key is the tell);
@@ -638,11 +680,21 @@ _COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
 _QUOTE_SPLIT = re.compile(r"[\"']")
 
 
+def _has_letter_and_digit(value: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", value) and re.search(r"\d", value))
+
+
 def _is_opaque(value: str) -> bool:
-    return bool(
-        re.search(r"[A-Za-z]", value)
-        and re.search(r"\d", value)
-        and not _PLACEHOLDER.search(value)
+    if not _has_letter_and_digit(value):
+        return False
+    if not _PLACEHOLDER.search(value):
+        return True
+    # DS-2026-10-26-17: a placeholder WORD inside a value does not make the
+    # value a placeholder. Only one whose remainder has no opaque segment is.
+    rest = _PLACEHOLDER.sub(" ", value)
+    return any(
+        len(part) >= 16 and _has_letter_and_digit(part)
+        for part in re.split(r"[^A-Za-z0-9]+", rest)
     )
 
 
@@ -692,6 +744,9 @@ def find_secret_assignments(text: str) -> list[str]:
         # end with no delimiter; its opening quote still marks it quoted.
         quoted = delimiter or (body_start > 0 and text[body_start - 1] in "\"'")
         if quoted and _quoted_value_is_secret(body):
+            return ["[redacted-secret]"]
+        # An unquoted value spans lines only through a heredoc.
+        if not delimiter and "\n" in body and _quoted_value_is_secret(body):
             return ["[redacted-secret]"]
         if not delimiter and _wrapped_value_is_secret(text, body_start, body_end):
             return ["[redacted-secret]"]

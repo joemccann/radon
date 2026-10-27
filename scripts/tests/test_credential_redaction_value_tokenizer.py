@@ -504,3 +504,74 @@ def test_rescan5_shape_is_scrubbed(text):
 ], ids=["shell-backslash-continuation", "subscript-target"])
 def test_rescan5_shape_is_detected(text):
     assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+# DS-2026-10-26-16 .. -20, DS-2026-10-27-01: shell and annotation shapes.
+_RESCAN6_SCRUB_SHAPES = {
+    "ansi-c-quoting": f"export UW_TOKEN=$'head\\\\n\n{OPAQUE}{TAIL}'\nnext=1\n",
+    "heredoc-substitution": f"UW_TOKEN=$(cat <<EOF\n{OPAQUE}{TAIL}\nEOF\n)\nnext=1\n",
+    "dash-heredoc-quoted-word": f"UW_TOKEN=$(cat <<-'END'\n\t{OPAQUE}{TAIL}\n\tEND\n)\n",
+    "later-line-literal-close": f'password = "head\n{OPAQUE}\\" {TAIL}\n',
+    "shell-word-concatenation": f"UW_TOKEN='abc'{OPAQUE}{TAIL}\n",
+    "shell-word-concatenation-requoted": f'UW_TOKEN="a"{OPAQUE}"b"{TAIL} more\n',
+    "prefixed-triple-quote": f'signing_key = r"""\n{OPAQUE}{TAIL}\n"""\n',
+    "bytes-triple-quote": f"credential = b'''\n{OPAQUE}{TAIL}\n'''\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN6_SCRUB_SHAPES.values(), ids=_RESCAN6_SCRUB_SHAPES.keys())
+def test_rescan6_shape_is_scrubbed(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+
+
+_RESCAN6_DETECT_SHAPES = {
+    "ansi-c-quoting": f"export UW_TOKEN=$'head\\\\n\n{OPAQUE}{TAIL}'\n",
+    "heredoc-substitution": f"UW_TOKEN=$(cat <<EOF\n{OPAQUE}{TAIL}\nEOF\n)\n",
+    "shell-word-concatenation": f"UW_TOKEN='abc'{OPAQUE}{TAIL}\n",
+    "placeholder-substring": f'password = "{OPAQUE}testy"\n',
+    "annotated-assignment": f'UW_TOKEN: str = "{OPAQUE}{TAIL}"\n',
+    "annotated-subscript-type": f'password: Final[str] = "{OPAQUE}{TAIL}"\n',
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN6_DETECT_SHAPES.values(), ids=_RESCAN6_DETECT_SHAPES.keys())
+def test_rescan6_shape_is_detected(text):
+    assert find_secret_assignments(text) or find_credential_shapes(text), text
+
+
+@pytest.mark.parametrize("text", [
+    'password = "your-api-key-here"\n',
+    'UW_TOKEN = "fake-token-0123456789"\n',
+    'API_TOKEN=test_token_1234567890\n',
+    'secret: "changeme-placeholder-1"\n',
+])
+def test_whole_value_placeholders_stay_clean(text):
+    assert find_secret_assignments(text) == []
+
+
+def test_shell_shapes_keep_the_following_line():
+    out = scrub_credential_text(f"UW_TOKEN=$(cat <<EOF\n{OPAQUE}\nEOF\n)\nSYMBOL=SPY\n")
+    assert OPAQUE not in out and "SYMBOL=SPY" in out, out
+    out = scrub_credential_text(f'{{"token": "{OPAQUE}", "symbol": "SPY"}}\n')
+    assert OPAQUE not in out and '"symbol": "SPY"' in out, out
+
+
+@pytest.mark.parametrize("unit", [
+    "UW_TOKEN=$(cat <<EOF\n",
+    "UW_TOKEN=$'a\n",
+    "UW_TOKEN='a'b'c'd",
+    "UW_TOKEN: str = 'a'\n",
+], ids=["heredoc-unterminated", "ansi-c-unterminated", "word-concatenation", "annotation"])
+def test_rescan6_shapes_stay_linear(unit):
+    import time
+
+    def elapsed(n):
+        payload = unit * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        find_secret_assignments(payload)
+        return time.perf_counter() - start
+
+    small, large = elapsed(500), elapsed(4000)
+    assert large < max(small * 40, 2.0), (small, large)
