@@ -171,10 +171,8 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   // ── LLM ──────────────────────────────────────────────────────────────────
   "/api/assistant": {
     POST: {
-      mode: "ai",
-      tables: ["demo_ai_usage"],
-      writes: ["demo_ai_usage", "assistant_turns"],
-      note: "Tool calls run inside runWithDemoDbPrincipal.",
+      mode: "fixture",
+      note: "Sample reply: the demo holds no LLM subscription grant (lib/demo/fixtures/assistant.ts).",
     },
   },
   "/api/newsfeed/explain": {

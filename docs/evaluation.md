@@ -69,7 +69,7 @@ UW → EquityClock Vision (Claude Haiku) → Cache (`data/seasonality_cache/{TIC
 
 Route: `web/app/api/ticker/seasonality/route.ts`.
 
-Required API keys (any one): `ANTHROPIC_API_KEY`, `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`.
+Required credential: the Claude Max subscription grant (`~/.claude/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`). Prepaid Anthropic keys are never read.
 
 ---
 

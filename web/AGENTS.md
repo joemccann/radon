@@ -116,3 +116,7 @@ and every order owner requires relay, broker and non-degraded market data
 before its existing quote-age and risk gates. Missing fields support older
 relays during rolling updates; no instantaneous individual-farm verdict is
 claimed. Do not add another recovery action or relax the quote-age gate.
+
+## News article reader
+
+`NewsfeedLightbox` uses a centered viewport-bounded frame and persistent Close/article controls. `NewsfeedGallery` owns image navigation, source captions, thumbnails, swipe and enlarge/zoom. Gallery keyboard navigation must never advance articles; text inputs retain arrow keys. Escape exits enlargement before dismissing. Desktop copy scrolls independently; mobile uses one scroll document under the toolbar. Preserve source, bookmark, Explain and Share. Regression: `newsfeed-gallery.test.tsx`, `newsfeed-research-media.spec.ts`.

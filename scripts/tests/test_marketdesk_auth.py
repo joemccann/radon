@@ -436,3 +436,32 @@ def test_bootstrap_check_reports_failed(tmp_path, capsys):
     assert bootstrap.check(out, post=post, opener=FakeOpener()) == 1
     printed = capsys.readouterr().out
     assert "failed" in printed and "BOOT-REFRESH" not in printed
+
+
+LIMITS_URL = "https://marketdesk.ai/api/user/limits"
+
+
+def test_blob_redirect_with_previews_spent_is_preview_quota(env):
+    """marketdesk.ai bounces /files/<id>/blob to /files/<id> (then /library/browse) once the account's
+    preview allowance is spent, while /api/user/limits says previews:false. That is not a lost session."""
+    url = "https://marketdesk.ai/files/4AJs5Adl2Yp/blob"
+    opener = FakeOpener({("POST", LOGIN_URL): [login_ok()],
+                         ("GET", url): [(302, b"", {"Location": "/files/4AJs5Adl2Yp"})],
+                         ("GET", LIMITS_URL): [(200, {"previews": False, "downloads": True}, {})]})
+    session, _ = _session(env, opener)
+    session.login()
+    with pytest.raises(auth.MarketDeskError) as info:
+        session.blob("/files/4AJs5Adl2Yp/blob", limit=1024)
+    assert str(info.value) == "preview_quota" and info.value.transient
+    assert [r["url"] for r in opener.requests] == [LOGIN_URL, url, LOGIN_URL, url, LIMITS_URL]
+
+
+def test_blob_redirect_with_previews_left_is_still_unauthenticated(env):
+    url = "https://marketdesk.ai/files/4AJs5Adl2Yp/blob"
+    opener = FakeOpener({("POST", LOGIN_URL): [login_ok()],
+                         ("GET", url): [(302, b"", {"Location": "/files/4AJs5Adl2Yp"})],
+                         ("GET", LIMITS_URL): [(200, {"previews": True, "downloads": True}, {})]})
+    session, _ = _session(env, opener)
+    session.login()
+    with pytest.raises(auth.MarketDeskError, match="unauthenticated"):
+        session.blob("/files/4AJs5Adl2Yp/blob", limit=1024)

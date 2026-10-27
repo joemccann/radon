@@ -237,6 +237,15 @@ CROSS_TREE_CONTRACTS = (
         tests=("scripts/tests/test_setup_service_id_parity.py",),
     ),
     CrossTreeContract(
+        # Subscriptions only (2026-10-26): no tracked web source, config or doc
+        # may name a prepaid provider key, so those changes run the guard.
+        patterns=tuple(
+            f"web/*.{ext}"
+            for ext in ("ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "md", "example", "sh", "toml", "yml", "yaml")
+        ) + ("web/.env*",),
+        tests=("scripts/tests/test_subscriptions_only_policy.py",),
+    ),
+    CrossTreeContract(
         patterns=("web/lib/setup/envFiles.ts",),
         tests=(
             "scripts/tests/test_credentials_registry.py::TestExpectedSurface::test_setup_wizard_web_env_keys_are_a_subset_of_the_registry",

@@ -56,7 +56,10 @@ P1 fixes are exported to `validation/fix/<base>/<head>` in the existing private
 security-report repository. The controller verifies that repository remains
 private, opens private CI validation, and obtains both independent reviews.
 Only after rechecking CI and refs does it publish the identical Git objects as
-a public maintenance PR. Public CI and the ordinary release sequence still
+a public maintenance PR. The published commit object's headers must be
+`tree`, then any number of `parent` lines, then `author` and `committer`.
+Any other header, or a line with no space, is refused before the push.
+Public CI and the ordinary release sequence still
 apply. P0 findings remain under explicit incident coordination. Source contents
 and raw findings never belong in public controller status or notifications.
 

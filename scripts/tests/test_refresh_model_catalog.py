@@ -250,6 +250,26 @@ class TestProviderKeys:
         clean_env.setenv("CODEX_HOME", str(codex_home))
         assert provider_key("openai") is None
 
+    def test_retired_prepaid_flag_lights_nothing(self, clean_env):
+        for name in ("ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"):
+            clean_env.setenv(name, f"{name}-prepaid")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        assert [p for p in PROVIDERS if provider_key(p)] == []
+
+    def test_anthropic_model_list_sends_the_grant_as_bearer(self, clean_env):
+        import refresh_model_catalog as mod
+
+        seen = []
+
+        def fake_get(url, headers):
+            seen.append(headers)
+            return {"data": [], "has_more": False}
+
+        clean_env.setattr(mod, "_http_get_json", fake_get)
+        mod.fetch_anthropic_models("oauth-grant")
+        assert seen[0]["authorization"] == "Bearer oauth-grant"
+        assert "x-api-key" not in seen[0]
+
 
 class TestOverrides:
     def test_override_env_var_beats_discovery(self, clean_env):
@@ -394,7 +414,6 @@ class TestRun:
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         monkey = clean_env
         monkey.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
-        monkey.setattr(mod, "fetch_openai_models", lambda key: OPENAI)
         monkey.setattr(mod, "fetch_xai_models", lambda key: XAI)
 
         payload = mod.run()
@@ -407,18 +426,15 @@ class TestRun:
         import refresh_model_catalog as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
         clean_env.grok_grant("xai-test")
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
-        clean_env.setattr(mod, "fetch_openai_models", lambda key: OPENAI)
         clean_env.setattr(mod, "fetch_xai_models", lambda key: XAI)
 
         payload = mod.run()
 
-        assert {m["model_id"] for m in payload["models"]} == {
-            "claude-opus-5", "gpt-5.6-sol", "grok-4.6"
-        }
+        # OpenAI is never polled: the ChatGPT grant cannot list models and
+        # prepaid keys are never read (subscriptions only, 2026-10-26).
+        assert {m["model_id"] for m in payload["models"]} == {"claude-opus-5", "grok-4.6"}
         # resolveProvider() prefers xAI whenever its key is present.
         assert payload["defaultId"] == "grok-4.6"
 
@@ -428,27 +444,26 @@ class TestRun:
         stale = (date.today() - timedelta(days=3)).isoformat()
         mod.LLM_MODELS_JSON.write_text(json.dumps({
             "models": [
-                {"provider": "openai", "model_id": "gpt-5.5", "display_name": "GPT 5.5",
+                {"provider": "xai", "model_id": "grok-4.5", "display_name": "GROK 4.5",
                  "refreshed_at": stale},
             ],
-            "defaultId": "gpt-5.5",
+            "defaultId": "grok-4.5",
         }))
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
 
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
-        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+        clean_env.setattr(mod, "fetch_xai_models", rate_limited)
 
         payload = mod.run()
 
         by_provider = {m["provider"]: m for m in payload["models"]}
-        assert by_provider["openai"] == {
-            "provider": "openai", "model_id": "gpt-5.5", "display_name": "GPT 5.5",
+        assert by_provider["xai"] == {
+            "provider": "xai", "model_id": "grok-4.5", "display_name": "GROK 4.5",
             "refreshed_at": stale,
         }
         assert by_provider["anthropic"]["model_id"] == "claude-opus-5"
@@ -491,14 +506,13 @@ class TestRun:
         import refresh_model_catalog as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def unauthorized(key):
             raise RuntimeError("HTTP Error 401: Unauthorized")
 
         clean_env.setattr(mod, "fetch_anthropic_models", unauthorized)
-        clean_env.setattr(mod, "fetch_openai_models", unauthorized)
+        clean_env.setattr(mod, "fetch_xai_models", unauthorized)
 
         payload = mod.run()
 
@@ -508,7 +522,7 @@ class TestRun:
         assert service == "model-catalog"
         assert state == "error"
         assert error is not None
-        assert error["providers"] == ["anthropic", "openai"]
+        assert error["providers"] == ["anthropic", "xai"]
         assert "401" in error["message"]
 
     def test_a_carried_forward_provider_is_reported_by_run(self, persist_calls, clean_env):
@@ -516,26 +530,25 @@ class TestRun:
 
         stale = (date.today() - timedelta(days=3)).isoformat()
         mod.LLM_MODELS_JSON.write_text(json.dumps({
-            "models": [{"provider": "openai", "model_id": "gpt-5.5",
-                        "display_name": "GPT 5.5", "refreshed_at": stale}],
-            "defaultId": "gpt-5.5",
+            "models": [{"provider": "xai", "model_id": "grok-4.5",
+                        "display_name": "GROK 4.5", "refreshed_at": stale}],
+            "defaultId": "grok-4.5",
         }))
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
 
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
-        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+        clean_env.setattr(mod, "fetch_xai_models", rate_limited)
 
         payload = mod.run()
 
-        assert {m["provider"] for m in payload["models"]} == {"anthropic", "openai"}
+        assert {m["provider"] for m in payload["models"]} == {"anthropic", "xai"}
         [(_, _, state, error)] = _health_rows(persist_calls)
         assert state == "error"
-        assert error["providers"] == ["openai"]
+        assert error["providers"] == ["xai"]
 
     def test_a_writer_failure_leaves_an_error_row_not_a_traceback(
         self, persist_calls, clean_env, capsys
@@ -568,24 +581,23 @@ class TestRun:
         import refresh_model_catalog as mod
 
         stale = (date.today() - timedelta(days=5)).isoformat()
-        turso_catalog.append({"provider": "openai", "model_id": "gpt-5.5",
-                              "display_name": "GPT 5.5", "refreshed_at": stale})
+        turso_catalog.append({"provider": "xai", "model_id": "grok-4.5",
+                              "display_name": "GROK 4.5", "refreshed_at": stale})
         assert not mod.LLM_MODELS_JSON.exists()
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
 
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
-        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+        clean_env.setattr(mod, "fetch_xai_models", rate_limited)
 
         payload = mod.run()
 
         by_provider = {m["provider"]: m for m in payload["models"]}
-        assert by_provider["openai"] == {
-            "provider": "openai", "model_id": "gpt-5.5", "display_name": "GPT 5.5",
+        assert by_provider["xai"] == {
+            "provider": "xai", "model_id": "grok-4.5", "display_name": "GROK 4.5",
             "refreshed_at": stale,
         }
         assert ("rows", 2) in persist_calls
@@ -593,24 +605,23 @@ class TestRun:
     def test_turso_rows_win_over_a_lagging_json(self, persist_calls, clean_env, turso_catalog):
         import refresh_model_catalog as mod
 
-        turso_catalog.append({"provider": "openai", "model_id": "gpt-5.5",
-                              "display_name": "GPT 5.5", "refreshed_at": "turso-stamp"})
+        turso_catalog.append({"provider": "xai", "model_id": "grok-4.5",
+                              "display_name": "GROK 4.5", "refreshed_at": "turso-stamp"})
         mod.LLM_MODELS_JSON.write_text(json.dumps({
-            "models": [{"provider": "openai", "model_id": "gpt-5.4",
-                        "display_name": "GPT 5.4", "refreshed_at": "json-stamp"}],
-            "defaultId": "gpt-5.4",
+            "models": [{"provider": "xai", "model_id": "grok-4.4",
+                        "display_name": "GROK 4.4", "refreshed_at": "json-stamp"}],
+            "defaultId": "grok-4.4",
         }))
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
 
-        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+        clean_env.setattr(mod, "fetch_xai_models", rate_limited)
 
         payload = mod.run()
 
-        assert payload["models"][0]["model_id"] == "gpt-5.5"
+        assert payload["models"][0]["model_id"] == "grok-4.5"
         assert payload["models"][0]["refreshed_at"] == "turso-stamp"
 
     def test_json_still_seeds_previous_when_turso_is_unreachable(self, persist_calls, clean_env):
@@ -621,17 +632,16 @@ class TestRun:
 
         clean_env.setattr(mod.writer, "get_llm_model_catalog_rows", turso_down)
         mod.LLM_MODELS_JSON.write_text(json.dumps({
-            "models": [{"provider": "openai", "model_id": "gpt-5.5",
-                        "display_name": "GPT 5.5", "refreshed_at": "json-stamp"}],
-            "defaultId": "gpt-5.5",
+            "models": [{"provider": "xai", "model_id": "grok-4.5",
+                        "display_name": "GROK 4.5", "refreshed_at": "json-stamp"}],
+            "defaultId": "grok-4.5",
         }))
-        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
 
-        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+        clean_env.setattr(mod, "fetch_xai_models", rate_limited)
 
         payload = mod.run()
 
@@ -766,15 +776,15 @@ class TestStorage:
         today = date.today().isoformat()
         writer.upsert_llm_model_catalog_rows(
             [
-                {"provider": "openai", "model_id": "gpt-5.5",
-                 "display_name": "GPT 5.5", "refreshed_at": stale},
+                {"provider": "xai", "model_id": "grok-4.5",
+                 "display_name": "GROK 4.5", "refreshed_at": stale},
                 {"provider": "anthropic", "model_id": "claude-opus-5",
                  "display_name": "CLAUDE OPUS 5", "refreshed_at": today},
             ],
             refreshed_at=today,
         )
         stamps = dict(db.execute("SELECT provider, refreshed_at FROM llm_model_catalog"))
-        assert stamps == {"openai": stale, "anthropic": today}
+        assert stamps == {"xai": stale, "anthropic": today}
 
     def test_a_row_without_its_own_stamp_takes_the_batch_stamp(self, db, monkeypatch):
         from db import writer
@@ -804,11 +814,11 @@ class TestStorage:
         monkeypatch.setattr(writer, "get_db", lambda: db)
         assert writer.get_llm_model_catalog_rows() == []
         writer.upsert_llm_model_catalog_rows(
-            [{"provider": "openai", "model_id": "gpt-5.5",
-              "display_name": "GPT 5.5", "refreshed_at": "r1"}],
+            [{"provider": "xai", "model_id": "grok-4.5",
+              "display_name": "GROK 4.5", "refreshed_at": "r1"}],
             refreshed_at="batch",
         )
         assert writer.get_llm_model_catalog_rows() == [
-            {"provider": "openai", "model_id": "gpt-5.5",
-             "display_name": "GPT 5.5", "refreshed_at": "r1"},
+            {"provider": "xai", "model_id": "grok-4.5",
+             "display_name": "GROK 4.5", "refreshed_at": "r1"},
         ]

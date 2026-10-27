@@ -90,6 +90,24 @@ def gateway_contract_errors(assignments: dict[str, str]) -> list[str]:
     return []
 
 
+# Keys that belong to the DEMO deployment only and must never be set on a
+# production host. RADON_SERVICE_TOKEN is the demo frontend's shared machine
+# credential: it authenticates without a per-user identity, so it also skips
+# the operator allowlist. Prod gates on loopback trust plus a Clerk JWT and
+# leaves it unset; this refuses the env drift that would quietly widen that.
+# Same interlock shape as the web side's RADON_AUTHLESS_TEST assertion (R-666).
+# An explicitly blank value leaves the lane inert and is not a failure.
+FORBIDDEN_PRODUCTION_KEYS = ("RADON_SERVICE_TOKEN",)
+
+
+def forbidden_key_errors(assignments: dict[str, str]) -> list[str]:
+    return [
+        f"{key} is demo-only and must not be set on a production host"
+        for key in FORBIDDEN_PRODUCTION_KEYS
+        if key in assignments and literal_value(assignments[key]) != ""
+    ]
+
+
 def _literal_host_role(assignments: dict[str, str]) -> str:
     raw = assignments.get("RADON_HOST_ROLE")
     if raw is None or literal_value(raw) == "":
@@ -116,6 +134,7 @@ def production_invariant_errors(assignments: dict[str, str]) -> list[str]:
         for key, expected in PRODUCTION_INVARIANTS.items()
         if key not in assignments or literal_value(assignments[key]) != expected
     ]
+    errors.extend(forbidden_key_errors(assignments))
     role = _literal_host_role(assignments)
     if role not in HOST_ROLES:
         errors.append("RADON_HOST_ROLE must be combined, app, or broker")

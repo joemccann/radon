@@ -1575,7 +1575,7 @@ describe("POST /api/assistant — extended", () => {
 
   it("returns 400 when last message is not from user (non-mock)", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-grant";
 
     const { POST } = await import("../app/api/assistant/route");
     const res = await POST(
@@ -1633,7 +1633,7 @@ describe("POST /api/assistant — extended", () => {
 
   it("returns 502 when Anthropic API fails", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-grant";
 
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -1668,7 +1668,7 @@ describe("POST /api/assistant — extended", () => {
 
   it("returns 400 for invalid JSON payload (non-mock)", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-grant";
 
     const { POST } = await import("../app/api/assistant/route");
     const res = await POST(

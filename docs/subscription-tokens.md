@@ -104,8 +104,9 @@ is needed. The forty-minute lead remains unchanged for raw-bearer providers.
 
 ### The CLI environment is an allowlist
 
-`/etc/radon/env` carries `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
-`XAI_API_KEY`. Each one **outranks** the subscription login inside its CLI, so a
+`/etc/radon/env` may still carry prepaid `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or
+`XAI_API_KEY` (Radon never reads them since 2026-10-26; remove them). Each one
+**outranks** the subscription login inside its CLI, so a
 probe that inherited them would bill the metered key and prove nothing about the
 login. It also carries every other Radon secret. A provider CLI therefore runs
 with `HOME`, a `PATH`, locale, proxy and XDG variables plus that provider's own

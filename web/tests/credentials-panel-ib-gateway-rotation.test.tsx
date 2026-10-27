@@ -44,19 +44,19 @@ const IB_SERVICE: CredentialServiceEntry = {
   fields: [field("TWS_USERID", "IBKR username", false), field("TWS_PASSWORD", "IBKR password", true)],
 };
 
-const ANTHROPIC: CredentialServiceEntry = {
-  id: "anthropic",
-  label: "Anthropic",
+const CEREBRAS: CredentialServiceEntry = {
+  id: "cerebras",
+  label: "Cerebras",
   group: "AI Providers",
   validator: true,
   slow: false,
   note: "",
-  fields: [{ ...field("ANTHROPIC_API_KEY", "API key", true), configured: false, hint: "" }],
+  fields: [{ ...field("CEREBRAS_API_KEY", "API key", true), configured: false, hint: "" }],
 };
 
 const PAYLOAD: CredentialsPayload = {
   groups: ["AI Providers", "Infrastructure"],
-  services: [ANTHROPIC, IB_SERVICE],
+  services: [CEREBRAS, IB_SERVICE],
   generated_at: "2026-09-01T00:00:00Z",
 };
 
@@ -93,8 +93,8 @@ beforeEach(() => {
       calls.push({ url, method, body });
       if (method === "GET") return jsonResponse(PAYLOAD);
       if (method === "PUT") {
-        if (url === "/api/credentials/anthropic") {
-          return jsonResponse({ service: ANTHROPIC, validation: { status: "valid", message: "" } });
+        if (url === "/api/credentials/cerebras") {
+          return jsonResponse({ service: CEREBRAS, validation: { status: "valid", message: "" } });
         }
         return putResponse();
       }
@@ -379,18 +379,18 @@ describe("IB Gateway rotation outcomes", () => {
 });
 
 describe("other services keep the single-click save", () => {
-  it("anthropic saves with one click and no confirm step", async () => {
+  it("cerebras saves with one click and no confirm step", async () => {
     await renderPanel();
-    fireEvent.change(document.getElementById("cred-ANTHROPIC_API_KEY")!, {
-      target: { value: "sk-ant-new" },
+    fireEvent.change(document.getElementById("cred-CEREBRAS_API_KEY")!, {
+      target: { value: "csk-new" },
     });
-    fireEvent.click(screen.getByTestId("credential-save-anthropic"));
+    fireEvent.click(screen.getByTestId("credential-save-cerebras"));
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0]).toMatchObject({
-      url: "/api/credentials/anthropic",
+      url: "/api/credentials/cerebras",
       method: "PUT",
-      body: { values: { ANTHROPIC_API_KEY: "sk-ant-new" } },
+      body: { values: { CEREBRAS_API_KEY: "csk-new" } },
     });
-    expect(screen.queryByTestId("credential-confirm-anthropic")).toBeNull();
+    expect(screen.queryByTestId("credential-confirm-cerebras")).toBeNull();
   });
 });

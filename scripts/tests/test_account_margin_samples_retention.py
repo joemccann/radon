@@ -246,3 +246,29 @@ def test_http_path_batches_over_hrana_query(monkeypatch):
     assert len(calls) == 3
     assert all(isinstance(args, tuple) and timeout == 7.0 for _, args, timeout in calls)
     assert _sample_ids(db) == set()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_http_margin_delete_refuses_developer_before_credentials_or_transport(monkeypatch, platform):
+    from db import hrana_http
+    from utils.production_writer_guard import ProductionWriterRefused
+
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("RADON_MODE", raising=False)
+    monkeypatch.setattr(hrana_http, "read_env", lambda: pytest.fail("must refuse before credentials"))
+    monkeypatch.setattr(hrana_http, "_post_pipeline", lambda *a, **k: pytest.fail("must not send DELETE"))
+    with pytest.raises(ProductionWriterRefused):
+        retention.apply_policy_http(_policy())
+
+
+def test_http_margin_delete_is_allowed_on_linux_outside_pytest(monkeypatch):
+    from db import hrana_http
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    calls = []
+    monkeypatch.setattr(hrana_http, "hrana_query", lambda sql, args, **kw: calls.append(sql) or [])
+    assert retention.apply_policy_http(_policy()) == 0
+    assert len(calls) == 1
+    assert calls[0].startswith('DELETE FROM account_margin_samples')

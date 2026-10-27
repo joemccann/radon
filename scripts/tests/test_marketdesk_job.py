@@ -545,6 +545,15 @@ def test_main_returns_nonzero_on_failure_and_zero_on_success(monkeypatch, capsys
     assert job.main() == 1
 
 
+def test_main_exits_tempfail_when_sigterm_stops_the_cycle(monkeypatch, capsys):
+    # A deploy's stop-clean SIGTERMs an in-flight oneshot (2026-10-27 14:14 UTC). Exit 1 latched the
+    # unit failed and paged. 143 (128+SIGTERM) + SuccessExitStatus=143 keeps a stop out of `failed`; a
+    # TimeoutStartSec kill is still Result=timeout in systemd whatever the exit code.
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: job._terminate(15, None))
+    assert job.main() == 143
+    assert "cycle stopped: terminated by SIGTERM" in capsys.readouterr().err
+
+
 def test_runnable_by_path_imports_without_side_effects():
     code = ("import runpy, sys; sys.argv=['marketdesk_job.py','--help'];"
             f"runpy.run_path({str(SCRIPTS / 'research/marketdesk_job.py')!r}, run_name='not_main')")
@@ -1002,3 +1011,19 @@ def test_feedback_fetch_failure_never_fails_the_cycle(world, db):
     deps.feedback_rows = boom
     counts = job.run_cycle(env=dict(ENV), deps=deps)
     assert counts["published"] == 1
+
+
+def test_spent_preview_quota_defers_without_failing_the_cycle(world, db):
+    """marketdesk.ai's PDF preview allowance ran out (2026-10-27): wait for the reset, never fail the unit."""
+    from research.marketdesk_scrape import ScrapeError
+    world.refs = [make_ref("Qqqqqqqq01", hours_ago=1), make_ref("Qqqqqqqq02", hours_ago=2)]
+    world.fetch_errors = {"Qqqqqqqq01": ScrapeError("preview_quota")}
+    for _ in range(3):
+        counts = run(world)
+        assert counts["quota_deferred"] == 2 and counts["parked"] == 0 and counts["failed"] == 0
+    saved = ledger(db, "Qqqqqqqq01")
+    assert saved["status"] == "pending" and saved["attempts"] == 0 and saved["last_error"] == "preview_quota"
+    assert ledger(db, "Qqqqqqqq02") is None  # nothing else claimed while the allowance is spent
+    assert ("marketdesk-research", "ok", None) in world.health
+    world.fetch_errors = {}
+    assert run(world)["published"] == 2

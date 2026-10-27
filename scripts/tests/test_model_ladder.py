@@ -92,15 +92,39 @@ def _credit_low():
     )
 
 
-ALL_KEYS = {
-    "ANTHROPIC_API_KEY": "sk-ant-test",
-    "XAI_API_KEY": "xai-test",
-    "OPENAI_API_KEY": "sk-openai-test",
-    "NVIDIA_API_KEY": "nvapi-test",
-    "CEREBRAS_API_KEY": "csk-test",
-    # Explicit escape hatch so prepaid-path failover tests keep exercising HTTP.
-    "RADON_LADDER_ALLOW_PREPAID": "1",
-}
+# Subscriptions only (2026-10-26): every subscription rung is wired by a
+# synthetic grant, never a prepaid key. Grok and Codex grants are files that
+# conftest only lets the ladder read under this test's tmp_path, so the
+# autouse fixture below fills these dicts in place per test (parametrize
+# arguments hold the same objects).
+ALL_KEYS: dict[str, str] = {}
+GROK_ENV: dict[str, str] = {}
+CODEX_ENV: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _subscription_grants(tmp_path):
+    home = tmp_path / "grant-home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text(json.dumps({"access_token": "grok-grant"}))
+    (home / ".codex").mkdir()
+    (home / ".codex" / "auth.json").write_text(json.dumps(
+        {"auth_mode": "chatgpt", "tokens": {"access_token": "codex-grant", "account_id": "acct"}}
+    ))
+    no_files = tmp_path / "no-grants"
+    ALL_KEYS.clear()
+    ALL_KEYS.update({
+        "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat-test",
+        "HOME": str(home),
+        "CODEX_HOME": str(home / ".codex"),
+        "NVIDIA_API_KEY": "nvapi-test",
+        "CEREBRAS_API_KEY": "csk-test",
+    })
+    GROK_ENV.clear()
+    GROK_ENV.update({"HOME": str(home), "CODEX_HOME": str(no_files)})
+    CODEX_ENV.clear()
+    CODEX_ENV.update({"HOME": str(no_files), "CODEX_HOME": str(home / ".codex")})
+    yield
 
 
 class _Router:
@@ -168,9 +192,8 @@ class TestVisionPath:
     @pytest.mark.parametrize(
         ("env", "needle", "payload"),
         [
-            ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"content": [{"type": "text", "text": json.dumps(ROWS)}]}),
-            ({"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
-            ({"OPENAI_API_KEY": "o", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
+            ({"CLAUDE_CODE_OAUTH_TOKEN": "a"}, "api.anthropic.com", {"content": [{"type": "text", "text": json.dumps(ROWS)}]}),
+            (GROK_ENV, "api.x.ai", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
             ({"NVIDIA_API_KEY": "n"}, "integrate.api.nvidia.com", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
             ({"CEREBRAS_API_KEY": "c"}, "api.cerebras.ai", {"choices": [{"message": {"content": json.dumps(ROWS)}}]}),
         ],
@@ -196,7 +219,7 @@ class TestVisionPath:
         with pytest.raises(ModelResponseError, match="exceeds limit"):
             extract_via_vision(
                 PNG, PROMPT,
-                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=lambda *_args, **_kwargs: response,
                 max_response_bytes=32,
             )
@@ -242,7 +265,7 @@ class TestTextJsonPath:
         router = _Router({"api.x.ai": _openai_obj_ok(obj)})
         result = complete_multimodal_json(
             "evaluate",
-            env={"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            env=GROK_ENV,
             post=router,
             stream_anthropic=False,
         )
@@ -275,7 +298,7 @@ class TestTextJsonPath:
         with pytest.raises(ModelResponseError, match="complete"):
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=router,
                 stream_anthropic=False,
             )
@@ -305,7 +328,7 @@ class TestTextJsonPath:
         router = _Router({"api.anthropic.com": _Resp(200, payload)})
         with pytest.raises(ModelResponseError) as caught:
             complete_multimodal_json(
-                "private-prompt", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                "private-prompt", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=router, stream_anthropic=False,
             )
         assert caught.value.code == "incomplete"
@@ -321,7 +344,7 @@ class TestTextJsonPath:
         payload = {"content": [{"type": "text", "text": "{}"}]}
         with pytest.raises(ModelResponseError) as caught:
             complete_multimodal_json(
-                "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                "evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=_Router({"api.anthropic.com": _Resp(200, payload)}), stream_anthropic=False,
             )
         assert str(caught.value) == (
@@ -350,7 +373,7 @@ class TestTextJsonPath:
         }
         with pytest.raises(ModelResponseError) as caught:
             complete_multimodal_json(
-                "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                "evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=_Router({"api.anthropic.com": _Resp(200, payload)}), stream_anthropic=False,
             )
         assert str(caught.value) == (
@@ -366,7 +389,7 @@ class TestTextJsonPath:
         payload = {"stop_reason": stop_reason, "usage": {"input_tokens": 123, "output_tokens": 6000},
                    "content": [{"type": "text", "text": json.dumps(OBJ)}]}
         result = complete_multimodal_json(
-            "evaluate", env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            "evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
             post=_Router({"api.anthropic.com": _Resp(200, payload)}),
             stream_anthropic=False, require_end_turn=require_end_turn,
         )
@@ -376,9 +399,8 @@ class TestTextJsonPath:
     @pytest.mark.parametrize(
         ("env", "needle", "payload"),
         [
-            ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
-            ({"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
-            ({"OPENAI_API_KEY": "o", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
+            ({"CLAUDE_CODE_OAUTH_TOKEN": "a"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
+            (GROK_ENV, "api.x.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
             ({"NVIDIA_API_KEY": "n"}, "integrate.api.nvidia.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
             ({"CEREBRAS_API_KEY": "c"}, "api.cerebras.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
         ],
@@ -404,7 +426,7 @@ class TestTextJsonPath:
         with pytest.raises(ModelResponseError, match="exceeds limit"):
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=lambda *_args, **_kwargs: response,
                 max_response_bytes=32,
             )
@@ -421,7 +443,7 @@ class TestResearchReviewerFailover:
         from types import SimpleNamespace
 
         reviewer = Reviewer(
-            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV},
             session=SimpleNamespace(post=router),
         )
         assert reviewer.ask("evaluate") == OBJ
@@ -431,7 +453,7 @@ class TestResearchReviewerFailover:
         with pytest.raises(ModelLadderExhausted) as exc:
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                env={"CLAUDE_CODE_OAUTH_TOKEN": "a"},
                 post=router,
                 stream_anthropic=False,
             )
@@ -493,46 +515,13 @@ class TestAnthropicHttpxStream:
 
         monkeypatch.setattr(httpx, "post", guarded_post)
         monkeypatch.setattr(httpx, "Client", Client)
-        reviewer = Reviewer(env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"})
+        reviewer = Reviewer(env={"CLAUDE_CODE_OAUTH_TOKEN": "a"})
         assert reviewer.ask("evaluate") == OBJ
         assert post_calls == []
         assert closed == ["response", "client"]
 
 
 class TestCodexTokenParam:
-    def test_gpt55_chat_uses_max_completion_tokens(self):
-        captured: list[dict] = []
-
-        def post(url, *, headers=None, json=None, timeout=None, stream=False):
-            captured.append(json)
-            return _openai_obj_ok()
-
-        result = complete_multimodal_json(
-            "evaluate",
-            env={"OPENAI_API_KEY": "sk-openai-test", "RADON_LADDER_ALLOW_PREPAID": "1"},
-            post=post,
-            stream_anthropic=False,
-        )
-        assert result.provider == "codex"
-        assert captured[0]["model"] == "gpt-5.5"
-        assert captured[0]["max_completion_tokens"] == 6000
-        assert "max_tokens" not in captured[0]
-
-    def test_gpt55_vision_uses_max_completion_tokens(self):
-        captured: list[dict] = []
-
-        def post(url, *, headers=None, json=None, timeout=None, stream=False):
-            captured.append(json)
-            return _openai_ok()
-
-        result = extract_via_vision(
-            PNG, PROMPT, env={"OPENAI_API_KEY": "sk-openai-test", "RADON_LADDER_ALLOW_PREPAID": "1"}, post=post
-        )
-        assert result.provider == "codex"
-        assert captured[0]["model"] == "gpt-5.5"
-        assert captured[0]["max_completion_tokens"] == 4096
-        assert "max_tokens" not in captured[0]
-
     def test_grok_compat_path_keeps_max_tokens(self):
         captured: list[dict] = []
 
@@ -542,7 +531,7 @@ class TestCodexTokenParam:
 
         result = complete_multimodal_json(
             "evaluate",
-            env={"XAI_API_KEY": "xai-test", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            env=GROK_ENV,
             post=post,
             stream_anthropic=False,
         )
@@ -610,11 +599,7 @@ class TestCompleteTextJson:
         )
         result = complete_text_json(
             "tag this",
-            env={
-                "ANTHROPIC_API_KEY": "a",
-                "XAI_API_KEY": "x",
-                "RADON_LADDER_ALLOW_PREPAID": "1",
-            },
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV},
             post=router,
             accept=accept_tags_payload,
         )
@@ -756,24 +741,21 @@ class TestSubscriptionAuthPreference:
         assert system[0]["text"].startswith("You are Claude Code, Anthropic's official CLI for Claude.")
         assert system[1] == {"type": "text", "text": "You are Radon."}
 
-    def test_prepaid_anthropic_keeps_x_api_key_and_plain_system(self):
-        captured: list[tuple[dict, dict]] = []
+    def test_prepaid_anthropic_key_is_never_sent_even_with_the_retired_flag(self):
+        # Subscriptions only (2026-10-26): no x-api-key path exists.
+        with pytest.raises(ModelLadderExhausted):
+            complete_multimodal_json(
+                "evaluate",
+                system="You are Radon.",
+                env={"ANTHROPIC_API_KEY": "sk-ant", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=lambda *a, **k: pytest.fail("a prepaid Anthropic key was sent"),
+                stream_anthropic=False,
+                providers=("anthropic",),
+            )
 
-        def post(url, *, headers=None, json=None, timeout=None, stream=False):
-            captured.append((headers or {}, json or {}))
-            return _anthropic_obj_ok()
-
-        complete_multimodal_json(
-            "evaluate",
-            system="You are Radon.",
-            env={"ANTHROPIC_API_KEY": "sk-ant", "RADON_LADDER_ALLOW_PREPAID": "1"},
-            post=post,
-            stream_anthropic=False,
-        )
-        headers, body = captured[0]
-        assert headers.get("x-api-key") == "sk-ant"
-        assert "authorization" not in headers
-        assert body["system"] == "You are Radon."
+    def test_anthropic_headers_refuse_a_non_subscription_credential(self):
+        with pytest.raises(ValueError):
+            model_ladder._anthropic_headers("sk-ant", subscription=False)
 
 
 class TestGrokGrantLiveShape:
@@ -864,17 +846,17 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         assert body["instructions"] == "You are Radon."
         assert body["input"][0]["content"][-1] == {"type": "input_text", "text": "evaluate"}
 
-    def test_prepaid_openai_still_uses_api_openai_com(self):
+    def test_prepaid_openai_key_never_reaches_api_openai_com(self):
         router = _Router({"api.openai.com": _openai_obj_ok()})
-        result = complete_text_json(
-            "evaluate",
-            env={"OPENAI_API_KEY": "sk-openai", "RADON_LADDER_ALLOW_PREPAID": "1"},
-            post=router,
-        )
-        assert result.provider == "codex"
-        assert any("api.openai.com" in u for u in router.calls)
+        with pytest.raises(ModelLadderExhausted):
+            complete_text_json(
+                "evaluate",
+                env={"OPENAI_API_KEY": "sk-openai", "RADON_LADDER_ALLOW_PREPAID": "1"},
+                post=router,
+                providers=("codex",),
+            )
+        assert router.calls == []
 
-    @pytest.mark.parametrize('auth_kind', ['subscription', 'api_key'])
     @pytest.mark.parametrize('call_kind', ['text', 'research_image', 'vision_extract'])
     @pytest.mark.parametrize('overrides', [
         {},
@@ -882,16 +864,11 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         {'OPENAI_VISION_MODEL': 'operator-vision-model'},
         {'OPENAI_MODEL': 'operator-general-model', 'OPENAI_VISION_MODEL': 'operator-vision-model'},
     ])
-    def test_auth_kind_defaults_and_explicit_model_precedence(self, tmp_path, auth_kind, call_kind, overrides):
-        if auth_kind == 'subscription':
-            env = {'CODEX_HOME': str(self._codex_home(tmp_path)), 'RADON_LADDER_NO_AUTH_FILES': '0',
-                   'OPENAI_API_KEY': 'sk-wallet-must-not-be-used'}
-            expected_model = 'gpt-6.1-sol'
-            endpoint = 'https://chatgpt.com/backend-api/codex/responses'
-        else:
-            env = {'OPENAI_API_KEY': 'sk-openai-test', 'RADON_LADDER_ALLOW_PREPAID': '1'}
-            expected_model = 'gpt-5.5'
-            endpoint = 'https://api.openai.com/v1/chat/completions'
+    def test_subscription_defaults_and_explicit_model_precedence(self, tmp_path, call_kind, overrides):
+        env = {'CODEX_HOME': str(self._codex_home(tmp_path)), 'RADON_LADDER_NO_AUTH_FILES': '0',
+               'OPENAI_API_KEY': 'sk-wallet-must-not-be-used', 'RADON_LADDER_ALLOW_PREPAID': '1'}
+        expected_model = 'gpt-6.1-sol'
+        endpoint = 'https://chatgpt.com/backend-api/codex/responses'
         env.update(overrides)
         if call_kind != 'text' and overrides.get('OPENAI_VISION_MODEL'):
             expected_model = overrides['OPENAI_VISION_MODEL']
@@ -902,9 +879,7 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
             seen.append((url, headers or {}, json or {}))
             assert url == endpoint, 'model resolution must not change the authentication route'
-            if auth_kind == 'subscription':
-                return self._completed_response(value)
-            return _openai_ok() if call_kind == 'vision_extract' else _openai_obj_ok()
+            return self._completed_response(value)
         if call_kind == 'text':
             result = complete_text_json('evaluate', env=env, post=post, providers=('codex',))
             assert result.data == OBJ
@@ -917,13 +892,13 @@ class TestCodexSubscriptionGoesThroughChatGpt:
             assert result.rows == ROWS
         assert result.provider == 'codex' and result.model == expected_model
         assert len(seen) == 1 and seen[0][2]['model'] == expected_model
-        if auth_kind == 'subscription':
-            _, headers, body = seen[0]
-            assert headers['authorization'] == 'Bearer codex-grant'
-            assert headers['chatgpt-account-id'] == 'acct-1'
-            assert body['stream'] is True and body['store'] is False
-            images = [item for item in body['input'][0]['content'] if item['type'] == 'input_image']
-            assert len(images) == (0 if call_kind == 'text' else 1)
+        _, headers, body = seen[0]
+        assert headers['authorization'] == 'Bearer codex-grant'
+        assert headers['chatgpt-account-id'] == 'acct-1'
+        assert 'sk-wallet-must-not-be-used' not in json.dumps([headers, body])
+        assert body['stream'] is True and body['store'] is False
+        images = [item for item in body['input'][0]['content'] if item['type'] == 'input_image']
+        assert len(images) == (0 if call_kind == 'text' else 1)
 
     def test_subscription_failure_does_not_fall_back_to_prepaid_openai(self, tmp_path):
         seen = []
@@ -939,12 +914,16 @@ class TestCodexSubscriptionGoesThroughChatGpt:
                                           providers=('codex', 'nvidia'))
         assert result.provider == 'nvidia' and len(seen) == 2
 
-    def test_api_key_without_prepaid_opt_in_never_sends_request(self):
+    @pytest.mark.parametrize('flag', [None, '1'])
+    def test_api_key_never_sends_request_with_or_without_the_retired_flag(self, flag):
+        env = {'OPENAI_API_KEY': 'sk-wallet-must-not-be-used'}
+        if flag is not None:
+            env['RADON_LADDER_ALLOW_PREPAID'] = flag
         with pytest.raises(ModelLadderExhausted):
             complete_multimodal_json('evaluate', images=[('PDF chart', PNG)],
-                                      env={'OPENAI_API_KEY': 'sk-wallet-must-not-be-used'},
+                                      env=env,
                                       providers=('codex',),
-                                      post=lambda *args, **kwargs: pytest.fail('prepaid opt-in is required'))
+                                      post=lambda *args, **kwargs: pytest.fail('prepaid keys are never sent'))
 
 
 class TestAntigravityRungRunsThroughTheCli:
@@ -1056,7 +1035,7 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
         assert result.provider == "nvidia"
         assert not any("api.anthropic.com" in url for url in router.calls)
 
-    def test_allow_prepaid_credit_falls_to_nvidia_when_keyed(self):
+    def test_subscription_credit_falls_to_nvidia_when_keyed(self):
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
@@ -1066,9 +1045,8 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
         result = complete_multimodal_json(
             "evaluate",
             env={
-                "ANTHROPIC_API_KEY": "sk-ant-empty",
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub",
                 "NVIDIA_API_KEY": "nvapi-test",
-                "RADON_LADDER_ALLOW_PREPAID": "1",
             },
             post=router,
             stream_anthropic=False,
@@ -1162,7 +1140,7 @@ class TestNvidiaVisionDefaultAndFallback:
 
 
 class TestNoPrepaidByDefault:
-    """Subscription rungs must not meter prepaid wallets unless opted in."""
+    """Subscription rungs never meter prepaid wallets (no opt-in exists)."""
 
     PREPAID_ONLY = {
         "ANTHROPIC_API_KEY": "sk-ant-prepaid",
@@ -1204,13 +1182,14 @@ class TestNoPrepaidByDefault:
         assert result.model == "nvidia/nemotron-3-super-120b-a12b"
         assert any("integrate.api.nvidia.com" in url for url in router.calls)
 
-    def test_allow_prepaid_restores_prepaid_wiring(self):
+    def test_retired_allow_prepaid_flag_wires_nothing(self):
         env = {**self.PREPAID_ONLY, "RADON_LADDER_ALLOW_PREPAID": "1"}
         wired = wired_providers(env)
-        assert "anthropic" in wired
-        assert "grok" in wired
-        assert "codex" in wired
-        assert "antigravity" not in wired  # CLI only; no prepaid Google path exists
+        assert "anthropic" not in wired
+        assert "grok" not in wired
+        assert "codex" not in wired
+        assert "antigravity" not in wired
+        assert "nvidia" in wired
 
     def test_subscription_still_preferred_when_present_with_allow_prepaid(self):
         from clients.model_ladder import _auth_for
@@ -1348,8 +1327,7 @@ class TestSlmTaggerRung:
             "RADON_SLM_TAGGER_URL": "http://127.0.0.1:8331",
             "RADON_SLM_TAGGER_MODE": "primary",
             "RADON_SLM_TAXONOMY_JSON": json.dumps(self.TAXONOMY),
-            "ANTHROPIC_API_KEY": "a",
-            "RADON_LADDER_ALLOW_PREPAID": "1",
+            "CLAUDE_CODE_OAUTH_TOKEN": "a",
             **extra,
         }
 

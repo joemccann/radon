@@ -1,18 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import Image from "next/image";
-import { ChevronLeft, ChevronRight, Link as LinkIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Link as LinkIcon } from "lucide-react";
 import type { MarketEarPost } from "@/components/DashboardNewsFeed";
 import { formatAbsolute, formatRelative, formatTime } from "@/lib/newsfeedTime";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
-import styles from "./NewsfeedResearchMedia.module.css";
+import NewsfeedGallery from "./NewsfeedGallery";
 import NewsfeedShare from "./NewsfeedShare";
 import NewsfeedExplain from "./NewsfeedExplain";
 import feedStyles from "./DashboardNewsFeed.module.css";
-import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import { ResearchCharts } from "./PlannedCharts";
 import StarToggle from "@/components/StarToggle";
@@ -38,20 +36,7 @@ type NewsfeedLightboxProps = {
   canNavigateNext?: boolean;
 };
 
-/**
- * NewsfeedLightbox — opens when a user clicks an image in the dashboard
- * news rail. Renders the image at full size on the left and the article
- * copy (title, body, tags, timestamp, source link) on the right so the
- * user can read the context without leaving the workspace.
- *
- * Keyboard:
- *   Esc       dismiss
- *   ←  / →    cycle to the previous / next post with an image
- *
- * Mouse: scrim click dismisses (there's no close X — tapping outside the
- * panel closes it); on-screen chevrons trigger the same prev/next as the
- * arrow keys.
- */
+/** Centered article reader with independent image and article navigation. */
 export default function NewsfeedLightbox({
   focus,
   onDismiss,
@@ -60,8 +45,8 @@ export default function NewsfeedLightbox({
   canNavigateNext = false,
 }: NewsfeedLightboxProps) {
   const [selectedImage, setSelectedImage] = useState<{ focus: NewsfeedLightboxFocus; url: string } | null>(null);
-  const touchStartX = useRef<number | null>(null);
-  const touchStartY = useRef<number | null>(null);
+  const [expandedFocus, setExpandedFocus] = useState<NewsfeedLightboxFocus | null>(null);
+  const expanded = focus != null && expandedFocus === focus;
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
 
@@ -74,14 +59,27 @@ export default function NewsfeedLightbox({
     closeOnEscape: false,
   });
 
+  const focusedPostId = focus?.post.id;
+  useEffect(() => {
+    // On mobile the panel owns scrolling, so a new article starts at its top.
+    panelRef.current?.querySelector(".newsfeed-lightbox__panel")?.scrollTo?.(0, 0);
+  }, [focusedPostId, portalTarget, panelRef]);
+
   useEffect(() => {
     if (!focus) return;
     function onKey(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        onDismiss();
+        if (expanded) {
+          panelRef.current?.querySelector<HTMLButtonElement>('[aria-label="Back to article"]')?.focus();
+          setExpandedFocus(null);
+        }
+        else onDismiss();
         return;
       }
+      const target = event.target;
+      if (expanded || event.altKey || event.ctrlKey || event.metaKey || (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"], [aria-label="Article images"]'))) return;
       if (event.key === "ArrowLeft" && canNavigatePrev && onNavigate) {
         event.preventDefault();
         onNavigate(-1);
@@ -96,7 +94,7 @@ export default function NewsfeedLightbox({
     return () => {
       document.removeEventListener("keydown", onKey);
     };
-  }, [focus, onDismiss, onNavigate, canNavigatePrev, canNavigateNext]);
+  }, [focus, expanded, onDismiss, onNavigate, canNavigatePrev, canNavigateNext, panelRef]);
 
   const handleToggleBookmark = useCallback(async () => {
     if (!focus) return;
@@ -122,33 +120,10 @@ export default function NewsfeedLightbox({
 
   const { post } = focus;
   const imageUrl = selectedImage?.focus === focus ? selectedImage.url : focus.imageUrl;
-  const figure = post.source?.figures.find(item => item.url === imageUrl);
-  const imageSource = getImageSource(post, imageUrl);
   const tags = Array.isArray(post.tags) ? post.tags : [];
   const relative = formatRelative(post.isoTimestamp);
   const time = formatTime(post.isoTimestamp);
   const absolute = formatAbsolute(post.isoTimestamp);
-
-  function handleTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    const touch = event.touches[0];
-    touchStartX.current = touch.clientX;
-    touchStartY.current = touch.clientY;
-  }
-
-  function handleTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
-    if (!onNavigate || touchStartX.current == null || touchStartY.current == null) return;
-    const touch = event.changedTouches[0];
-    const dx = touch.clientX - touchStartX.current;
-    const dy = touch.clientY - touchStartY.current;
-    touchStartX.current = null;
-    touchStartY.current = null;
-    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
-    if (dx > 0 && canNavigatePrev) {
-      onNavigate(-1);
-    } else if (dx < 0 && canNavigateNext) {
-      onNavigate(1);
-    }
-  }
 
   // Portal to body so the lightbox escapes the right-rail's stacking context
   // cleanly. Without this the dashboard's grid layers + scroll containers
@@ -162,72 +137,34 @@ export default function NewsfeedLightbox({
       aria-modal="true"
       aria-label={post.title}
     >
-      <button
-        type="button"
+      <div
+        aria-hidden="true"
         className="newsfeed-lightbox__scrim"
         onClick={onDismiss}
-        aria-label="Dismiss lightbox"
         data-testid="newsfeed-lightbox-scrim"
       />
-      {onNavigate && canNavigatePrev ? (
-        <button
-          type="button"
-          className="newsfeed-lightbox__nav newsfeed-lightbox__nav--prev"
-          onClick={() => onNavigate(-1)}
-          aria-label="Previous post"
-          data-testid="newsfeed-lightbox-prev"
-        >
-          <ChevronLeft size={20} />
-        </button>
-      ) : null}
-      {onNavigate && canNavigateNext ? (
-        <button
-          type="button"
-          className="newsfeed-lightbox__nav newsfeed-lightbox__nav--next"
-          onClick={() => onNavigate(1)}
-          aria-label="Next post"
-          data-testid="newsfeed-lightbox-next"
-        >
-          <ChevronRight size={20} />
-        </button>
-      ) : null}
-      <div className="newsfeed-lightbox__frame">
-        <div
-          className="newsfeed-lightbox__panel"
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          <div className={`newsfeed-lightbox__media ${post.source || imageSource ? styles.media : ""}`}>
-            <Image
-              src={imageUrl}
-              alt={post.title}
-              width={1600}
-              height={900}
-              sizes="(max-width: 900px) 100vw, 60vw"
-              className="newsfeed-lightbox__image"
-              unoptimized={Boolean(post.source)}
-              priority
-            />
-            {figure ? <p className={styles.caption}>{post.source?.publisher}{"page" in figure ? ` · p. ${figure.page}` : ""} · {figure.caption}</p> : imageSource ? <p className={styles.caption}>Source: {imageSource}</p> : null}
-            {post.source && post.source.figures.length > 1 ? <div className={styles.thumbnails} aria-label="Article charts">
-              {post.source.figures.map((item, index) => <button type="button" key={item.url}
-                aria-label={`View chart ${index + 1}: ${item.caption}`} aria-pressed={imageUrl === item.url}
-                onClick={() => setSelectedImage({ focus, url: item.url })}>
-                <Image src={item.url} alt={item.caption} width={160} height={100} unoptimized />
-                <span>{"page" in item ? `${index + 1} · p. ${item.page}` : index + 1}</span>
-              </button>)}
-            </div> : null}
-          </div>
+      <div className={`newsfeed-lightbox__frame${expanded ? " newsfeed-lightbox__frame--expanded" : ""}`}>
+        <header className="newsfeed-lightbox__toolbar">
+          <nav className="newsfeed-lightbox__controls" aria-label="Article navigation">
+            {onNavigate && canNavigatePrev ? <button type="button" className="newsfeed-lightbox__control" onClick={() => onNavigate(-1)} aria-label="Previous article" data-testid="newsfeed-lightbox-prev"><ChevronLeft size={18} /><span>Previous article</span></button> : null}
+            {onNavigate && canNavigateNext ? <button type="button" className="newsfeed-lightbox__control" onClick={() => onNavigate(1)} aria-label="Next article" data-testid="newsfeed-lightbox-next"><span>Next article</span><ChevronRight size={18} /></button> : null}
+          </nav>
+          <button type="button" className="newsfeed-lightbox__control newsfeed-lightbox__close" onClick={onDismiss} aria-label="Close article"><X size={20} /></button>
+        </header>
+        <div className="newsfeed-lightbox__panel">
+          <NewsfeedGallery key={`${post.id}:${focus.imageUrl}`} post={post} imageUrl={imageUrl}
+            onSelect={url => setSelectedImage({ focus, url })} expanded={expanded}
+            onToggleExpanded={() => setExpandedFocus(expanded ? null : focus)} />
 
-          <article className="newsfeed-lightbox__copy">
+          <article key={post.id} className="newsfeed-lightbox__copy" hidden={expanded}>
             <header className="newsfeed-lightbox__head">
               {post.source ? (
                 <div style={{ marginBottom: "8px" }} data-testid="lightbox-publisher-badge">
                   <PublisherLogo publisher={post.source.publisher} showLabel showType size={16} />
                 </div>
               ) : null}
-              <p className="newsfeed-lightbox__kicker">
-                Live Market Analysis · {relative}
+              <p className="newsfeed-lightbox__kicker" title={absolute}>
+                {relative}
                 {time ? ` at ${time}` : ""}
               </p>
               <h2 className="newsfeed-lightbox__title">{post.title}</h2>
@@ -266,22 +203,14 @@ export default function NewsfeedLightbox({
                 onToggle={handleToggleBookmark}
                 label="Save"
               />
-              <span className="newsfeed-lightbox__timestamp" title={absolute}>
-                {absolute}
-              </span>
             </footer>
-            <div className={feedStyles.postActions}>
-              <NewsfeedExplain
-                post={post}
+            <div className={`${feedStyles.postActions} newsfeed-lightbox__actions`}>
+              <NewsfeedExplain key={`explain:${post.id}`}
+                post={{ ...post, content: post.content ?? "" }}
                 imageUrls={imageUrl ? [imageUrl] : (post.images ?? [])}
               />
-              <NewsfeedShare key={post.id} post={post} imageUrl={imageUrl} />
+              <NewsfeedShare key={`share:${post.id}`} post={post} imageUrl={imageUrl} />
             </div>
-            {onNavigate && (canNavigatePrev || canNavigateNext) ? (
-              <p className="newsfeed-lightbox__hint" aria-hidden>
-                ← / → to cycle posts · Esc to close
-              </p>
-            ) : null}
           </article>
         </div>
       </div>
