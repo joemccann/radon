@@ -1,6 +1,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs-extra";
+import { renewFirebaseSession } from "./firebaseSession.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,9 +164,17 @@ export async function ensureAuthenticated({
   debugDir = DEFAULT_DEBUG_DIR,
   timeouts = DEFAULT_TIMEOUTS,
   env = process.env,
+  renewSession = renewFirebaseSession,
 } = {}) {
   if (!page || typeof page.goto !== "function") {
     throw new NewsfeedAuthError("ensureAuthenticated requires a Playwright page object.");
+  }
+
+  let renewedSession = false;
+  try {
+    renewedSession = await renewSession({ context, env });
+  } catch {
+    console.warn("[newsfeed] Firebase session renewal unavailable; checking existing session.");
   }
 
   const reuseable = await tryReachNewsfeed(page, { timeout: timeouts.navigation }).catch(() => false);
@@ -175,9 +184,12 @@ export async function ensureAuthenticated({
     // persistence trigger is the cold-login path — which the 6h re-auth gate
     // skips entirely once a session is established.
     await tryPersistStorageState(persistStorageState);
-    return { authenticated: true, reusedSession: true };
+    return { authenticated: true, reusedSession: true, ...(renewedSession ? { renewedSession: true } : {}) };
   }
 
+  if (renewedSession) {
+    throw new NewsfeedAuthError("Renewed session did not provide premium newsfeed content.");
+  }
   const creds = credentials || readCredentialsFromEnv(env);
 
   try {

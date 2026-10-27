@@ -10355,3 +10355,16 @@ Audit release review: CI scripts-df rejected the new HTTP-only spec because it w
 - [ ] S3 depends_on: [S2] Focused/full tests, exact-head CI, notification, merge and installed controller feedback receipt.
 
 Review: Sol found no actionable regression; Luna independently passed 292 focused tests. Added their suggested explicit API allowlist/no-workflow-push and published-marker preservation assertions; 293 focused now pass. The regression asserts no model review or release receipt, schema-valid diagnostics and stable repeat ticks. Fresh-base source review, exact-head CI and publication gates remain required. Deployment/installed feedback verification pending.
+
+## TheMarketEar unattended renewal (2026-10-27)
+- [x] TME1: Verify same-account Firebase refresh and provider token endpoint; depends_on: []
+- [x] TME2: Red/green renewal and grant persistence tests; depends_on: [TME1]
+- [x] TME3: Wire proactive renewal and narrow runtime seed allowlist; depends_on: [TME2]
+- [ ] TME4: Full suites, exact-head CI, production renewal proof; depends_on: [TME3]
+
+### Review
+- Renewal/auth/browser focused: 68 passed. Full Vitest: 11,574 passed, 21 skipped.
+- Renewal module coverage: 100% statements/lines/functions, 97.95% branches.
+- Full cloud: 3,511 passed, 24 skipped. Full Python: 18,460 passed, 12 skipped; two local setup/docs failures repaired and their focused regressions pass.
+- Four pre-existing TypeScript errors are in files identical to origin/main; no new errors.
+- Latest-head CI and installed fresh-browser renewal remain pending in the PR.

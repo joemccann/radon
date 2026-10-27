@@ -460,6 +460,13 @@ container on an isolated bridge network (egress only) instead of the host
 stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
 `cloud/tests/test_app_runtime.py` pin both behaviors.
+The exact `MARKETDESK_FIREBASE_REFRESH_TOKEN` seed also enters this unit for
+TheMarketEar renewal, bound to `THEMARKETEAR_EMAIL` and the shared Firebase
+project. The newsfeed owns a separate 0600 rotated grant in
+`data/newsfeed-firebase.json`; no research-private mount is added. Chromium
+receives none of these credentials in its environment. The six-hour renewal
+requires an advanced product-cookie expiry and real premium content; see
+[the authentication owner](cloud-services.md#newsfeed-themarketearcom--self-contained-headless-flow).
 
 **App startup and rollback images.** The nextjs container starts through
 `next-clerk-guard`, which requires the runtime Clerk publishable key to match
