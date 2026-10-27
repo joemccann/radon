@@ -82,8 +82,8 @@ const CATALOG_PATH = join(process.cwd(), "..", "data", "llm_models.json");
 /**
  * Which providers this deployment can serve. Returns presence only — no key
  * material crosses this boundary, so nothing downstream can leak one.
- * Presence means a subscription grant (or a prepaid key under
- * RADON_LADDER_ALLOW_PREPAID); see lib/llm/subscriptionAuth.ts.
+ * Presence means a subscription grant; prepaid keys are never read. See
+ * lib/llm/subscriptionAuth.ts.
  */
 export function availableProviders(): LlmModelProvider[] {
   const available: LlmModelProvider[] = [];

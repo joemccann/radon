@@ -2,9 +2,9 @@
  * Provider-agnostic LLM layer.
  *
  * One async `chat()` entrypoint targets:
- *   - xAI Grok (OpenAI-compatible; preferred when XAI_API_KEY is set)
+ *   - xAI Grok (OpenAI-compatible; preferred when a SuperGrok grant is present)
  *   - Anthropic (native Messages API; historical default)
- *   - OpenAI-compatible bases (OpenAI / Groq / DeepSeek / Ollama)
+ *   - OpenAI (ChatGPT subscription via chatgpt.com/backend-api/codex/responses)
  *
  * Request and response are normalized so call sites never see provider-specific
  * shapes. A configurable fallback provider is tried when the primary fails.
@@ -12,15 +12,14 @@
  *
  * SUBSCRIPTIONS ONLY (operator mandate 2026-09-18): Anthropic, xAI and
  * OpenAI calls authenticate with the operator's Claude Max, SuperGrok and
- * ChatGPT grants (lib/llm/subscriptionAuth.ts). A prepaid console key is
- * never a fallback; RADON_LADDER_ALLOW_PREPAID=1 is the only way one is read,
- * matching scripts/clients/model_ladder.py. Google runs only through the
- * Antigravity CLI on the server ladder and is never served here.
+ * ChatGPT grants (lib/llm/subscriptionAuth.ts). Prepaid console keys are
+ * never read or sent, under any flag (operator policy 2026-10-26), matching
+ * scripts/clients/model_ladder.py. Google runs only through the Antigravity
+ * CLI on the server ladder and is never served here.
  */
 
 import { DEFAULT_MODELS } from "./frontier";
 import {
-  allowPrepaid,
   resolveAnthropicSubscription,
   resolveCodexSubscription,
   resolveXaiSubscription,
@@ -111,8 +110,6 @@ const UNSERVED_MODEL_PREFIXES = ["gemini-"];
 const UNSERVED_MODEL_MESSAGE =
   "Google is served only through the Antigravity CLI on the server ladder; not available in the web layer.";
 
-const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
-const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
 /** Claude Code OAuth grants need this beta and the Claude Code identity on Messages. */
 const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -137,23 +134,11 @@ function envValue(key: string): string | undefined {
   return value ? value : undefined;
 }
 
-/** Prepaid Anthropic console key: read only under RADON_LADDER_ALLOW_PREPAID. */
-function resolveAnthropicApiKey(): string | undefined {
-  if (!allowPrepaid()) return undefined;
-  for (const key of ANTHROPIC_ENV_KEYS) {
-    const value = envValue(key);
-    if (value) return value;
-  }
-  return undefined;
-}
-
-type AnthropicAuth = { kind: "subscription" | "prepaid"; token: string };
+type AnthropicAuth = { kind: "subscription"; token: string };
 
 function resolveAnthropicAuth(): AnthropicAuth | undefined {
   const grant = resolveAnthropicSubscription();
-  if (grant) return { kind: "subscription", token: grant.token };
-  const prepaid = resolveAnthropicApiKey();
-  return prepaid ? { kind: "prepaid", token: prepaid } : undefined;
+  return grant ? { kind: "subscription", token: grant.token } : undefined;
 }
 
 /** Presence only: can this deployment serve Anthropic at all? */
@@ -161,34 +146,19 @@ export function hasAnthropicAuth(): boolean {
   return Boolean(resolveAnthropicAuth());
 }
 
-/** Prepaid xAI console key: read only under RADON_LADDER_ALLOW_PREPAID. */
-export function resolveXaiApiKey(): string | undefined {
-  if (!allowPrepaid()) return undefined;
-  for (const key of XAI_ENV_KEYS) {
-    const value = envValue(key);
-    if (value) return value;
-  }
-  return undefined;
-}
-
 /** SuperGrok subscription grant: env override first, then ~/.grok/auth.json. */
 export function resolveXaiSubscriptionToken(): string | undefined {
   return resolveXaiSubscription()?.token;
 }
 
-/** The subscription grant; a prepaid key only under RADON_LADDER_ALLOW_PREPAID. */
+/** The SuperGrok subscription grant; prepaid keys are never read. */
 export function resolveXaiAuth(): string | undefined {
-  return resolveXaiSubscriptionToken() ?? resolveXaiApiKey();
+  return resolveXaiSubscriptionToken();
 }
 
-/** Prepaid OpenAI console key: read only under RADON_LADDER_ALLOW_PREPAID. */
-function resolveOpenAiApiKey(): string | undefined {
-  return allowPrepaid() ? envValue("OPENAI_API_KEY") : undefined;
-}
-
-/** Presence only: can this deployment serve OpenAI at all? */
+/** Presence only: can this deployment serve OpenAI (ChatGPT grant) at all? */
 export function hasOpenAiAuth(): boolean {
-  return Boolean(resolveCodexSubscription() || resolveOpenAiApiKey());
+  return Boolean(resolveCodexSubscription());
 }
 
 function isKnownProvider(value: string | undefined): value is LlmProviderName {
@@ -224,7 +194,7 @@ function isUnservedModel(model: string | undefined): boolean {
  * 1. Explicit request.provider
  * 2. The provider that owns request.model (a per-turn selection outranks host env)
  * 3. LLM_PROVIDER env
- * 4. Auto-prefer xAI when a Grok subscription grant or XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
+ * 4. Auto-prefer xAI when a Grok subscription grant is present (CMD+J → Grok)
  * 5. Anthropic fallback
  */
 export function resolveProvider(
@@ -342,23 +312,18 @@ type AnthropicResponse = {
 };
 
 /**
- * Headers for the Anthropic Messages API. A Claude Max OAuth grant is sent as
- * a Bearer with the oauth beta; the prepaid path keeps x-api-key.
+ * Headers for the Anthropic Messages API. The Claude Max OAuth grant is sent
+ * as a Bearer with the oauth beta; there is no x-api-key path.
  */
 export function anthropicHeaders(auth: AnthropicAuth): Record<string, string> {
-  const headers: Record<string, string> = {
+  return {
     "anthropic-version": "2023-06-01",
     "content-type": "application/json",
     accept: "application/json",
+    authorization: `Bearer ${auth.token}`,
+    "anthropic-beta": ANTHROPIC_OAUTH_BETA,
+    "user-agent": CLAUDE_CODE_USER_AGENT,
   };
-  if (auth.kind === "subscription") {
-    headers.authorization = `Bearer ${auth.token}`;
-    headers["anthropic-beta"] = ANTHROPIC_OAUTH_BETA;
-    headers["user-agent"] = CLAUDE_CODE_USER_AGENT;
-  } else {
-    headers["x-api-key"] = auth.token;
-  }
-  return headers;
 }
 
 /**
@@ -371,7 +336,6 @@ export function anthropicSystem(
   auth: AnthropicAuth,
   system: string | undefined,
 ): string | Array<{ type: "text"; text: string }> | undefined {
-  if (auth.kind !== "subscription") return system;
   const blocks: Array<{ type: "text"; text: string }> = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }];
   if (system) blocks.push({ type: "text", text: system });
   return blocks;
@@ -466,20 +430,11 @@ type OpenAiOutboundMessage =
   | { role: string; content: string | OpenAiContentPart[] | null; tool_calls?: OpenAiToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
-function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic">) {
-  if (provider === "xai") {
-    return {
-      apiKey: resolveXaiAuth(),
-      baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
-      model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
-      label: "xAI Grok",
-    };
-  }
+function xaiConfig() {
   return {
-    apiKey: resolveOpenAiApiKey(),
-    baseUrl: envValue("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-    model: envValue("OPENAI_MODEL") || DEFAULT_MODELS.openai,
-    label: "OpenAI",
+    apiKey: resolveXaiAuth(),
+    baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
+    model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
   };
 }
 
@@ -656,21 +611,18 @@ async function callOpenAiCompatible(
   request: LlmChatRequest,
   provider: "xai" | "openai",
 ): Promise<LlmChatResponse> {
-  if (provider === "openai" && !allowPrepaid()) {
+  if (provider === "openai") {
     const grant = resolveCodexSubscription();
     if (!grant) {
       throw new Error("Missing ChatGPT subscription. Log the codex CLI in (~/.codex/auth.json) or set CODEX_OAUTH_TOKEN.");
     }
     return callChatGptSubscription(request, grant);
   }
-  const config = openAiConfig(provider);
+  const config = xaiConfig();
   if (!config.apiKey) {
-    if (provider === "xai") {
-      throw new Error(
-        "Missing xAI subscription. Log the grok CLI in (~/.grok/auth.json) or set XAI_OAUTH_TOKEN.",
-      );
-    }
-    throw new Error(`Missing ${config.label} API key.`);
+    throw new Error(
+      "Missing xAI subscription. Log the grok CLI in (~/.grok/auth.json) or set XAI_OAUTH_TOKEN.",
+    );
   }
 
   const url = `${config.baseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -700,7 +652,7 @@ async function callOpenAiCompatible(
   });
 
   if (!response.ok) {
-    throw new Error(`${config.label} request failed (${response.status}): ${await readErrorDetail(response)}`);
+    throw new Error(`xAI Grok request failed (${response.status}): ${await readErrorDetail(response)}`);
   }
 
   const data = (await response.json()) as OpenAiResponse;

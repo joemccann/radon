@@ -2,22 +2,20 @@
 """LLM model catalog - one frontier chat model per provider, daily.
 
 Keeps the chat model picker honest: it lists exactly the providers whose
-API key is present in this deployment's environment, at whatever model
-each provider is currently shipping as its frontier. A provider with no
-key is skipped silently - absence is a supported state, not a
-misconfiguration - so GPT and Grok light up on their own the day their
-key lands in ``/etc/radon/env`` (and ``systemctl restart radon-nextjs``
-makes it visible to the picker).
+subscription grant is present in this deployment, at whatever model each
+provider is currently shipping as its frontier. A provider with no grant
+is skipped silently - absence is a supported state, not a
+misconfiguration. Prepaid console keys are never read (subscriptions only,
+operator policy 2026-10-26).
 
-Sources, each gated by its own key:
+Sources, each gated by its own subscription grant (clients/model_ladder.py):
   anthropic  GET https://api.anthropic.com/v1/models?limit=100
-             headers: x-api-key, anthropic-version: 2023-06-01
-             keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY
-  openai     GET https://api.openai.com/v1/models   (Bearer)
-             key: OPENAI_API_KEY
+             Claude Max grant: Bearer + oauth beta
   xai        GET https://api.x.ai/v1/language-models (Bearer), falling
              back to /v1/models - only the former carries modalities.
-             keys: XAI_API_KEY / GROK_API_KEY
+             SuperGrok grant (~/.grok/auth.json)
+  openai     never polled: the ChatGPT grant cannot list models
+             (api.openai.com answers 403 "Missing scopes: api.model.read")
 
 Operator overrides (each wins over discovery, so a bad heuristic is
 recoverable without a deploy): ANTHROPIC_MODEL, OPENAI_MODEL,
@@ -82,13 +80,6 @@ LLM_MODELS_JSON = _PROJECT_DIR / "data" / "llm_models.json"
 
 PROVIDERS = ("anthropic", "openai", "xai")
 
-# Mirrors web/lib/llm/provider.ts exactly - the picker and the chat call
-# must agree on what "this provider is configured" means.
-PROVIDER_KEY_ENV: dict[str, tuple[str, ...]] = {
-    "anthropic": ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"),
-    "openai": ("OPENAI_API_KEY",),
-    "xai": ("XAI_API_KEY", "GROK_API_KEY"),
-}
 PROVIDER_OVERRIDE_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_MODEL",),
     "openai": ("OPENAI_MODEL",),
@@ -96,8 +87,6 @@ PROVIDER_OVERRIDE_ENV: dict[str, tuple[str, ...]] = {
 }
 
 ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
-ANTHROPIC_VERSION = "2023-06-01"
-OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
 XAI_LANGUAGE_MODELS_URL = "https://api.x.ai/v1/language-models"
 XAI_MODELS_URL = "https://api.x.ai/v1/models"
 
@@ -151,15 +140,11 @@ def provider_auth(provider: str):
     """Resolved subscription credential for ``provider`` (subscriptions only).
 
     The ChatGPT grant cannot list models (api.openai.com answers 403 "Missing
-    scopes: api.model.read"), so OpenAI only lights up on a prepaid key under
-    RADON_LADDER_ALLOW_PREPAID=1.
+    scopes: api.model.read"), so OpenAI never lights up here.
     """
-    auth = _ladder().subscription_auth(_LADDER_PROVIDER[provider])
-    if auth is None:
+    if provider == "openai":
         return None
-    if provider == "openai" and auth.kind == "subscription":
-        return None
-    return auth
+    return _ladder().subscription_auth(_LADDER_PROVIDER[provider])
 
 
 def provider_key(provider: str) -> Optional[str]:
@@ -215,11 +200,10 @@ def _provider_budget() -> Iterator[None]:
 
 def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
     """Every page of GET /v1/models - the list is cursor-paginated."""
-    auth = provider_auth("anthropic")
-    if auth is not None and auth.token == api_key:
-        headers = _ladder().anthropic_request_headers(auth)
-    else:
-        headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
+    ladder = _ladder()
+    headers = ladder.anthropic_request_headers(
+        ladder.AuthMaterial(api_key, "subscription", "catalog")
+    )
     models: list[dict[str, Any]] = []
     url = f"{ANTHROPIC_MODELS_URL}?limit=100"
     for _ in range(ANTHROPIC_MAX_PAGES):
@@ -229,11 +213,6 @@ def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
             return models
         url = f"{ANTHROPIC_MODELS_URL}?limit=100&after_id={payload['last_id']}"
     raise RuntimeError(f"still has_more after {ANTHROPIC_MAX_PAGES} pages; cursor not advancing")
-
-
-def fetch_openai_models(api_key: str) -> list[dict[str, Any]]:
-    payload = _http_get_json(OPENAI_MODELS_URL, {"Authorization": f"Bearer {api_key}"})
-    return list(payload.get("data") or [])
 
 
 def fetch_xai_models(api_key: str) -> list[dict[str, Any]]:
@@ -512,7 +491,6 @@ def _record_cycle_failure(scan_time: str, exc: BaseException) -> None:
 # global at call time, so the tests can monkeypatch a single fetcher.
 FETCHERS: dict[str, Callable[[str], list[dict[str, Any]]]] = {
     "anthropic": lambda key: fetch_anthropic_models(key),
-    "openai": lambda key: fetch_openai_models(key),
     "xai": lambda key: fetch_xai_models(key),
 }
 

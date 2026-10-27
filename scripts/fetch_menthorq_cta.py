@@ -10,9 +10,8 @@ Credentials (project root .env, loaded via a local fallback loader):
 
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
   anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity -> nvidia -> cerebras
-  Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
-  XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY,
-  NVIDIA_API_KEY, CEREBRAS_API_KEY.
+  Subscription grants only for the first band (see clients/model_ladder.py);
+  NVIDIA_API_KEY, CEREBRAS_API_KEY for the last two.
 
 Usage:
     python3 scripts/fetch_menthorq_cta.py              # Fetch + cache + print summary

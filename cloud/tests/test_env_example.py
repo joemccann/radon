@@ -116,9 +116,9 @@ class TestCTAVisionModelLadder:
         source_owned = {
             key
             for group in (
+                # Subscriptions only (2026-10-26): Grok and Codex have no env
+                # credential; their grants are CLI auth files.
                 model_ladder._ANTHROPIC_KEYS,
-                model_ladder._GROK_KEYS,
-                model_ladder._CODEX_KEYS,
                 model_ladder._NVIDIA_KEYS,
                 model_ladder._CEREBRAS_KEYS,
                 getattr(model_ladder, "_OPTIONAL_LADDER_ENV", ()),
