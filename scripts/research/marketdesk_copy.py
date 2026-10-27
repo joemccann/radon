@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from clients.model_ladder import (
+    MODEL_LADDER_ORDER,
     ModelLadderExhausted,
     ModelResponseError,
     complete_multimodal_json,
@@ -59,7 +60,7 @@ Format
 23. Plain text. No markdown, no bold, no headings, no bullet glyphs, no numbered lists, no emoji, straight quotes only.
 24. Title at most 180 characters. Content is 2 to 5 short paragraphs separated by a blank line (real newline characters), at most 2500 characters; prefer 400 to 1200. Do not pad a short source.
 25. Never name The Market Ear or ZeroHedge (any spacing or case), their handles, domains, links or source credits. Retain legitimate underlying researchers.
-26. Captions: one per attached image, keyed by its image id, at most 180 characters: instrument, metric, period, read from that image. If an image does not show them, describe only what it visibly shows. No source credit, no restated title.
+26. Captions: one per attached image, keyed by its image id, at most 180 characters: instrument, metric, period, read from that image, in words. Rule 8 covers captions too: a number (level, year, date, percent) goes in a caption only if it appears verbatim in SUMMARY_BULLETS or ARTICLE_TEXT; otherwise leave it out ("S&P 500 forward P/E since the GFC", not "since 2010"). If an image does not show them, describe only what it visibly shows. No source credit, no restated title.
 
 Before answering, silently ask "what makes this obviously AI generated?" and fix it. Do not output that audit.
 
@@ -108,6 +109,9 @@ HUMANIZE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 TITLE_MAX = 180
 CONTENT_MAX = 2500
 CAPTION_MAX = 180
+# grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27), which spends most of
+# the cycle's 270s budget before codex answers. It still answers text-only calls (the humanizer) in 30-45s.
+IMAGE_PROVIDERS = tuple(name for name in MODEL_LADDER_ORDER if name != "grok")
 TAGS_MAX = 10
 BODY_MAX = 12000
 _TAG_RE = re.compile(r"^[A-Z0-9][A-Z0-9&-]{0,63}$")
@@ -343,6 +347,7 @@ def write_copy(
             require_end_turn=True,
             accept=accept,
             log_prefix="marketdesk",
+            providers=IMAGE_PROVIDERS if images else None,
         )
 
     try:
@@ -384,6 +389,7 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
 
     def ask(instruction: str) -> Any:
         return complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
+                        accept=lambda reply: humanizer.reply_ok(instruction, reply),
                         log_prefix="marketdesk-humanizer").data
 
     def verify(revised: dict) -> bool:
