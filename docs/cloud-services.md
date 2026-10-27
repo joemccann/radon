@@ -14,25 +14,44 @@ The laptop runs only Next.js ([attach contract](#mode-switch)).
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
 
-The newsfeed used to be the only part of Radon that fundamentally required the laptop. The scraper drives Playwright's bundled Chromium, logs in with email + password, and persists the FirebaseUI session to `data/newsfeed-storage.json` (gitignored). Production runs it on Hetzner inside `radon-newsfeed.service`.
+The production scraper runs in `radon-newsfeed.service`. Every six hours it renews
+TheMarketEar's product cookie through the provider's Firebase token exchange,
+including while the current cookie still works. This supports the configured
+Google-only account without automating Google sign-in.
 
-**Required env (root `.env` — do NOT commit):**
+**Renewal credentials and private state:**
 
-```
-THEMARKETEAR_EMAIL=ops@example.com
-THEMARKETEAR_PASSWORD=<…>
-# Optional: RADON_NEWSFEED_HEADLESS=0   # to launch a visible browser for debugging
-```
+- `THEMARKETEAR_EMAIL` binds the refresh grant to the configured account.
+- `MARKETDESK_FIREBASE_REFRESH_TOKEN` is the existing same-account seed. Both
+  products publish the same `zerohedge-prod` Firebase project configuration.
+  Only this exact additional key enters the newsfeed container; the research
+  private directory is not mounted there.
+- The newsfeed owns its rotated grant in `data/newsfeed-firebase.json` (0600),
+  separate from MarketDesk's rotated grant file. Storage state remains
+  `data/newsfeed-storage.json` (0600), containing cookies and localStorage.
+- `THEMARKETEAR_PASSWORD` remains an optional legacy fallback for accounts that
+  support password sign-in; routine renewal does not require it.
 
-In production both keys must also survive `render_env_file`'s newsfeed allowlist in `cloud/scripts/radon-app-runtime.sh`: the container is handed only the keys the scraper's own code reads. Without them the cycle runs on whatever cookie the container started with and dies in pre-cycle with `Missing THEMARKETEAR_EMAIL or THEMARKETEAR_PASSWORD environment variable.` the moment the ~6h re-auth or a paywall-stub detection fires (2026-09-20: the dashboard feed stopped publishing at 14:00 UTC). Pinned by `cloud/tests/test_app_runtime.py::test_run_newsfeed_env_file_carries_the_themarketear_login`.
+**Renewal verification and recovery:**
 
-**Operating procedure:**
+1. Exchange the stored grant, then a replacement seed if rejected, using the
+   fixed Google HTTPS endpoint with redirects disabled and a 20-second timeout.
+2. Require the returned token's account email, project audience, issuer and expiry
+   to match the configured identity. Persist rotation before requesting a product
+   cookie, so a transient product failure cannot discard a rotated grant.
+3. POST the token to TheMarketEar's observed `/api/token` route. Require the `U`
+   cookie's expiry to advance and remain more than six hours away. Navigate to
+   `/newsfeed` and require actual premium article bodies before persisting state.
+4. A temporary renewal failure preserves an already-valid premium session. A
+   revoked grant or withdrawn entitlement still requires provider-authorized
+   recovery; the pipeline does not bypass Google MFA or premium access checks.
 
-1. **Laptop**: the scraper never runs on the laptop; `scripts/cloud.sh` starts Next.js only ([attach contract](#mode-switch)).
-2. **On the VPS.** `node scripts/newsfeed/index.js` is the long-running process; `node scripts/newsfeed/index.js --once` runs a single cycle. Do not start either command on the laptop.
-3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
-4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
-5. **Cookie rotation** — themarketear can rotate FirebaseUI cookies on its own; just delete `data/newsfeed-storage.json` and the next cycle will re-authenticate from scratch.
+The normal green deploy supplies the already-configured seed and activates this
+path. No scheduled browser sign-in, laptop keeper, manual cookie copying, or
+November 1 renewal appointment is required for normal token expiry. The scraper
+never runs on the laptop. A one-shot production diagnostic remains
+`node scripts/newsfeed/index.js --once`; do not run a concurrent collector beside
+its managed unit. Login failures save a gitignored debug screenshot under `data/`.
 
 **Chromium sandbox (production container).** The newsfeed container runs under the root-owned seccomp profile `/etc/radon/seccomp/chromium.json` (source `cloud/config/seccomp/chromium.json`), without host IPC, with a 512m `/dev/shm`, and Chromium launches with its own sandbox. The config-drift audit compares the installed profile against the GitHub main-tip blob (drift id `file-mismatch:chromium-seccomp`). Check after a deploy: `journalctl -u radon-newsfeed --since -1h | grep 'chromium sandbox unavailable'` should print nothing; a hit means the host refused the sandbox and the scraper is on the `--no-sandbox` fallback. Full contract: `docs/operations.md` "Newsfeed least privilege".
 
