@@ -160,7 +160,9 @@ def _redact_triple_quoted(text: str) -> str:
     Ahead of the specific shapes too: `authorization = \"\"\"` would otherwise
     have its own rule treat the opening delimiter as the whole value.
     """
-    return _TRIPLE_QUOTED_ASSIGNMENT_RE.sub(r"\1[redacted-secret]", text)
+    # The delimiters stay, so the tokenizer still reads a literal concatenated
+    # after this one as part of the same value.
+    return _TRIPLE_QUOTED_ASSIGNMENT_RE.sub(r"\1\2[redacted-secret]\2", text)
 
 
 def _redact_block_scalar(text: str) -> str:
@@ -329,7 +331,7 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
                 prefix = _STRING_PREFIX.match(text, following)
                 if prefix is not None:
                     following = prefix.end()
-                if following < length and text[following] in "\"'":
+                if following < length and text[following] in "\"'`":
                     _, end, delimiter = _scan_quoted(text, following)
                     continue
                 return body, following, ""
@@ -349,7 +351,7 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
             prefix = _STRING_PREFIX.match(text, following)
             if prefix is not None:
                 following = prefix.end()
-            if following >= length or text[following] not in "\"'":
+            if following >= length or text[following] not in "\"'`":
                 break
             _, end, delimiter = _scan_quoted(text, following)
         return body, end, delimiter

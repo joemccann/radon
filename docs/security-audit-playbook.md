@@ -385,7 +385,8 @@ line here whenever you ship a security fix.**
   too: `$'...'` and `$"..."` are quoted values, an unquoted run touching a
   closed literal belongs to the same word, and a `$(...)` value with a heredoc
   runs through its exact terminator line (`<<-` strips leading tabs only).
-  Explicit `+` concatenation joins literals like adjacency does. A type annotation (`NAME: str = ...`) is
+  Explicit `+` concatenation joins literals like adjacency does, template and
+  triple-quoted literals included. A type annotation (`NAME: str = ...`) is
   skipped to the initializer, and a string prefix may open a triple-quoted
   value. A later-line literal close that the escaping grammar rejects is not a
   close: the value is unterminated through that line. A placeholder word

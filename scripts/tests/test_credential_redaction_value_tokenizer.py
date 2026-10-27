@@ -600,3 +600,18 @@ def test_undelimited_placeholder_word_does_not_exempt_a_value():
 def test_concatenation_keeps_the_following_statement():
     out = scrub_credential_text(f'PASSWORD = "" + "{OPAQUE}"\nSYMBOL = "SPY" + suffix\n')
     assert OPAQUE not in out and 'SYMBOL = "SPY" + suffix' in out, out
+
+
+_RESCAN8_SHAPES = {
+    "concatenated-template-literal": f"const password = '' + `{OPAQUE}{TAIL}`;\n",
+    "adjacent-segment-then-template": f"const password = ''x`{OPAQUE}{TAIL}`;\n",
+    "concatenated-triple-quotes": f'PASSWORD = """a""" + """\n{OPAQUE}{TAIL}\n"""\n',
+    "adjacent-triple-quotes": f'PASSWORD = """a""" """\n{OPAQUE}{TAIL}\n"""\n',
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN8_SHAPES.values(), ids=_RESCAN8_SHAPES.keys())
+def test_rescan8_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) or find_credential_shapes(text), text
