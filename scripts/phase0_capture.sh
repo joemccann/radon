@@ -102,13 +102,14 @@ echo "--- also dumping repo docker/caddy/Caddyfile for diff ---"
 cat /home/radon/radon-cloud/docker/caddy/Caddyfile 2>/dev/null
 
 sec "ENV FILES — surface (values redacted for secrets)"
-for f in /home/radon/radon-cloud/.env /home/radon/radon-cloud/web/.env; do
+ENV_FILES=(/etc/radon/env /home/radon/radon-cloud/.env /home/radon/radon-cloud/web/.env)
+for f in "${ENV_FILES[@]}"; do
   echo "----- $f -----"
   [ -f "$f" ] && redact < "$f" || echo "(absent)"
 done
 
 sec "TURSO / DB references in env (keys only)"
-grep -rhiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON' /home/radon/radon-cloud/.env /home/radon/radon-cloud/web/.env 2>/dev/null | redact
+grep -rhiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON' "${ENV_FILES[@]}" 2>/dev/null | redact
 
 sec "DOCKER (ib-gateway etc.)"
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "docker n/a / no perm"
@@ -119,7 +120,7 @@ echo "media.radon.run -> $(getent hosts media.radon.run 2>/dev/null | awk '{prin
 echo "beta.radon.run -> $(getent hosts beta.radon.run 2>/dev/null | awk '{print $1}' || echo 'NXDOMAIN (expected)')"
 
 sec "CLIENT-ID usage hints (grep configs)"
-grep -rhniE 'client_id|clientId|CLIENT_ID' /home/radon/radon-cloud/.env 2>/dev/null | redact | head
+grep -rhniE 'client_id|clientId|CLIENT_ID' "${ENV_FILES[@]}" 2>/dev/null | redact | head
 
 sec "CAPTURE COMPLETE"
 date -u +"%Y-%m-%dT%H:%M:%SZ"

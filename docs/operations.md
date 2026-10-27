@@ -56,6 +56,18 @@ write. `setup-vps.sh` prints the staged form when the file is missing.
 
 **Service token.** `RADON_SERVICE_TOKEN` is the shared Next.js to FastAPI bearer. When set, `radonFetch` (`web/lib/radonApi.ts`) sends it as `X-Radon-Service-Token` and `is_trusted_service_request` (`scripts/api/auth.py`) admits the caller as a trusted service. It is set only on the demo deployment (Vercel `radon-demo` project plus the demo VM `.env`, same value in both; see `docs/demo-environment.md`). Leave it unset on prod: there the header is never sent and the API stays loopback/Clerk JWT gated.
 
+### Read-only env capture and retention writes
+
+`scripts/phase0_capture.sh` inspects `/etc/radon/env` before the retired
+home env files in its env, database and client-ID sections. Secret-pattern
+values remain redacted. Run the capture on the host through the operator
+channel; do not publish unreviewed diagnostic output.
+
+`db.retention.apply_policy_http` refuses non-Linux production writes before
+credential lookup or HTTP, including margin-sample `DELETE ... RETURNING`
+batches. The daily VPS timer remains the retention owner. Do not run a
+production retention sweep from a laptop.
+
 ### Encrypted credential store (profile Credentials tab)
 
 **The store wins over `.env`.** Keys entered in the profile Credentials tab
