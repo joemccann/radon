@@ -374,11 +374,11 @@ class TestSweepBudget:
         monkeypatch.setattr(bpi, "YAHOO_COURTESY_SLEEP_S", 0.0)
         monkeypatch.setattr(bpi, "SPARK_BATCH_SIZE", 2)
 
-        def hang(_req, timeout=None):
+        def hang(_url):
             time.sleep(0.4)
             raise TimeoutError("yahoo tarpit")
 
-        monkeypatch.setattr("urllib.request.urlopen", hang)
+        monkeypatch.setattr(bpi, "_yahoo_get_json", hang)
         members = [f"T{i:02d}" for i in range(16)]
         started = time.monotonic()
         fetched = bpi._fetch_members_spark(members)
