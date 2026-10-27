@@ -206,7 +206,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
             # `ApiKey` and kept the credential after it, and one token kept
             # a Digest header's later fields (DS-2026-10-25-08). A quoted
             # value may continue on later lines; the tokenizer owns it.
-            r"(?![\"'\s])[^\r\n]+",
+            # Prefixed (`b"`, `$'`) and template literals too (DS-2026-10-27-07).
+            r"(?!(?:[rRbBuUfF]{1,2}|\$)?[\"'`]|\s)[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -270,9 +271,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
 _STRING_PREFIX = re.compile(r"(?:[rRbBuUfF]{1,2}|\$)(?=[\"'])")
 
 # DS-2026-10-26-18: an unquoted run touching a closed literal is the same
-# shell word (`'abc'<v>`). No `.`, `,` or brackets, so `"v".encode()` and
-# JSON separators stay outside the value.
-_UNQUOTED_SEGMENT = re.compile(r"[A-Za-z0-9_+/=~%@-]+")
+# shell word (`'abc'<v>`), `.` and `:` included (DS-2026-10-27-08). No `,`
+# or brackets, so JSON separators stay outside the value.
+_UNQUOTED_SEGMENT = re.compile(r"[A-Za-z0-9_+/=~%@.:-]+")
 
 # DS-2026-10-27-01: a command substitution whose heredoc carries the value on
 # the following lines. The window to the operator is bounded, so a long line
@@ -636,7 +637,7 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
     # A quoted value may continue on later lines; the tokenizer owns it.
-    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?![\"' \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?!(?:[rRbBuUfF]{1,2}|\$)?[\"'`]|[ \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
 ]
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS

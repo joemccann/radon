@@ -615,3 +615,18 @@ def test_rescan8_shape_is_scrubbed_and_detected(text):
     out = scrub_credential_text(text)
     assert _clean(out), out
     assert find_secret_assignments(text) or find_credential_shapes(text), text
+
+
+_RESCAN9_SHAPES = {
+    "prefixed-auth-token-continuation": f'AUTH_TOKEN = b"head\\\n{OPAQUE}{TAIL}"\n',
+    "prefixed-cookie-continuation": f'COOKIE = r"sid=\\\n{OPAQUE}{TAIL}"\n',
+    "shell-word-period": f"PASSWORD='x'.{OPAQUE}{TAIL}\n",
+    "shell-word-colon": f"PASSWORD='x':{OPAQUE}{TAIL}\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN9_SHAPES.values(), ids=_RESCAN9_SHAPES.keys())
+def test_rescan9_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
