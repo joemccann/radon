@@ -2718,6 +2718,8 @@ class TestDocumentation20261023:
         )
         assert "/home/radon/radon-cloud" in inaccessible
         assert "-/etc/radon/env" in inaccessible
+        assert "/home/radon/radon-cloud/.env is 0600 radon-owned" not in unit
+        assert "/etc/radon/env is root-owned" in unit
 
 
 class TestDocumentation20261024:
