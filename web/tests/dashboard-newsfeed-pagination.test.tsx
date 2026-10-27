@@ -170,8 +170,8 @@ describe("DashboardNewsFeed pagination", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Open lightbox for: Headline 8" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next post" }));
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss lightbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next article" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close article" }));
 
     await waitFor(() => {
       expect(
