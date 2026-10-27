@@ -76,3 +76,22 @@ def test_creation_date_isolated_reads_metadata_in_the_child(runs, monkeypatch, t
 def test_creation_date_isolated_is_none_when_the_child_cannot_answer(runs, tmp_path, outcome):
     runs(outcome)
     assert pipeline.creation_date_isolated(tmp_path / "doc.pdf") is None
+
+
+def test_pages_isolated_reads_page_text_and_created_in_the_child(runs, monkeypatch, tmp_path):
+    monkeypatch.setenv("UW_TOKEN", "worker-secret")
+    runs(_Done(stdout=json.dumps({"pages": {"1": "Cboe digest", "2": "page two"}, "created": "D:2026"}).encode()))
+
+    assert pipeline.pages_isolated(tmp_path / "doc.pdf") == ({1: "Cboe digest", 2: "page two"}, "D:2026")
+    (command, kwargs), = runs.calls
+    assert command == [sys.executable, "-m", "research.pdf", str(tmp_path / "doc.pdf"), ".", "--pages-text"]
+    assert "UW_TOKEN" not in kwargs["env"]
+    assert kwargs["timeout"] == pipeline.PDF_TEXT_TIMEOUT_SECS
+
+
+@pytest.mark.parametrize("outcome", [_Done(returncode=1), subprocess.TimeoutExpired("research.pdf", 60),
+                                     _Done(stdout=b"not json"), _Done(stdout=b'{"pages": 7}'),
+                                     _Done(stdout=b'{"pages": {"x": "a"}}')])
+def test_pages_isolated_is_empty_when_the_child_cannot_answer(runs, tmp_path, outcome):
+    runs(outcome)
+    assert pipeline.pages_isolated(tmp_path / "doc.pdf") == ({}, None)

@@ -104,6 +104,7 @@ def extract_failure_message(returncode=None, stderr=None, *, timeout=None):
 
 PDF_CHILD_TIMEOUT_SECS = 180
 PDF_METADATA_TIMEOUT_SECS = 30
+PDF_TEXT_TIMEOUT_SECS = 60
 
 
 def _run_pdf_child(pdf, output, flags, *, stdin=None, timeout=PDF_CHILD_TIMEOUT_SECS):
@@ -129,6 +130,18 @@ def creation_date_isolated(pdf):
         return json.loads(result.stdout)['created'] if result.returncode == 0 else None
     except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
         return None
+
+
+def pages_isolated(pdf):
+    """({page_number: text}, CreationDate) read in the bounded child, or ({}, None) when the child cannot read it."""
+    try:
+        result = _run_pdf_child(pdf, '.', ['--pages-text'], timeout=PDF_TEXT_TIMEOUT_SECS)
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+        pages = {int(number): text for number, text in data['pages'].items() if isinstance(text, str)}
+        created = data.get('created')
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError, AttributeError):
+        return {}, None
+    return pages, created if isinstance(created, str) else None
 
 
 # Each reviewer request has a 120-second read bound (research.model.Reviewer).

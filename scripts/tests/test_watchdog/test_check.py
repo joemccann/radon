@@ -35,25 +35,51 @@ def _seed_service_health(db_conn, service: str, state: str, updated_at: datetime
 
 
 class TestCheckOutcomes:
-    def test_dropbox_research_error_and_stale_rows_are_actionable(self, db_conn):
-        """REL-251: a live process that is stuck or errored must be visible."""
+    def test_marketdesk_research_error_and_stale_rows_are_actionable(self, db_conn):
+        """A failed or silent 5-minute marketdesk cycle must be visible."""
         from watchdog import check
 
-        now = datetime(2026, 9, 7, 14, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
         _seed_service_health(
-            db_conn, "dropbox-research", "error", now - timedelta(minutes=1),
-            error={"message": "ModelError"},
+            db_conn, "marketdesk-research", "error", now - timedelta(minutes=1),
+            error={"message": "MarketDeskAuthError"},
         )
         error = check.check_service(
-            service="dropbox-research", kind="error", now=now, market_state="closed",
+            service="marketdesk-research", kind="error", now=now, market_state="closed",
         )
         assert error.status == "error"
 
-        _seed_service_health(db_conn, "dropbox-research", "running", now - timedelta(minutes=16))
+        _seed_service_health(db_conn, "marketdesk-research", "ok", now - timedelta(minutes=16))
         stale = check.check_service(
-            service="dropbox-research", kind="stale", now=now, market_state="closed",
+            service="marketdesk-research", kind="stale", now=now, market_state="closed",
         )
         assert stale.status == "stale"
+
+    def test_marketdesk_dropbox_paused_is_a_warning_not_a_page(self, db_conn):
+        """Missing write creds record a fresh `paused` row: never the error
+        bucket, and fresh, so not stale either."""
+        from watchdog import check
+
+        now = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
+        _seed_service_health(
+            db_conn, "marketdesk-dropbox", "paused", now - timedelta(minutes=2),
+            error={"message": "Dropbox write credentials absent; uploads skipped"},
+        )
+        for kind in ("error", "stale"):
+            outcome = check.check_service(
+                service="marketdesk-dropbox", kind=kind, now=now, market_state="closed",
+            )
+            assert outcome.status == "healthy", (kind, outcome)
+            assert outcome.fired is False
+
+        _seed_service_health(
+            db_conn, "marketdesk-dropbox", "error", now - timedelta(minutes=1),
+            error={"message": "DropboxError: conflict"},
+        )
+        failed = check.check_service(
+            service="marketdesk-dropbox", kind="error", now=now, market_state="closed",
+        )
+        assert failed.status == "error"
 
     def test_fresh_ok_row_is_healthy(self, db_conn):
         from watchdog import check

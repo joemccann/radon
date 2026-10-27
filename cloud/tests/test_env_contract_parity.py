@@ -78,6 +78,18 @@ EXEMPT: dict[str, str] = {
     "RADON_GROK_LKG_PATH": "optional override; unset is /var/lib/radon/grok_lkg.json",
     "RADON_GROK_RUNTIME_LOCK": "optional override; unset is /var/lib/radon/grok-runtime/grok-runtime.lock",
     "IB_FLEX_FLOWS_QUERY_ID": "deliberately unset; _flows_query_id() falls back to the NAV id",
+    # radon-marketdesk.service (docs/marketdesk-research.md). Each degrades in
+    # a defined way, so requiring it would fail preflight on a value the job
+    # does not need to run.
+    "MARKETDESK_FIREBASE_REFRESH_TOKEN": "seed only; the rotated token in $RADON_RESEARCH_DIR/marketdesk/firebase.json wins, and THEMARKETEAR_* is the fallback",
+    "PLAYWRIGHT_CHROMIUM_SANDBOX": "escape hatch; unset launches Chromium sandbox-first and falls back only on a sandbox-start failure",
+    "MARKETDESK_SUMMARY_WAIT_HOURS": "optional; unset waits 6 hours for MarketDesk's summary before failing the item",
+    "MARKETDESK_ASSET_HOSTS": "optional extra chart-image hosts; unset allows the MarketDesk CDN only",
+    "DROPBOX_WRITE_APP_KEY": "optional write-scoped Dropbox app; unset skips uploads and records marketdesk-dropbox paused",
+    "DROPBOX_WRITE_REFRESH_TOKEN": "optional write-scoped Dropbox app; unset skips uploads and records marketdesk-dropbox paused",
+    "DROPBOX_WRITE_ACCOUNT_ID": "optional write-scoped Dropbox app; unset skips uploads and records marketdesk-dropbox paused",
+    "DROPBOX_WRITE_ROOT_NAMESPACE_ID": "optional namespace pin; unset skips the namespace check",
+    "DROPBOX_WRITE_ROOT": "optional; unset uploads under /Radon/MarketDesk",
 }
 
 
@@ -227,6 +239,15 @@ class TestTheEnumerationWorks:
     def test_it_reaches_a_wrapper_backed_unit(self):
         assert _job_modules(SERVICES_DIR / "radon-flow-refresh.service"), (
             "a `.sh` ExecStart resolved to no python job; the wrapper hop broke"
+        )
+
+
+class TestMarketDeskUnitIsWalked:
+    def test_the_marketdesk_unit_resolves_to_its_job(self):
+        modules = _job_modules(SERVICES_DIR / "radon-marketdesk.service")
+        assert SCRIPTS_DIR / "research" / "marketdesk_job.py" in modules, (
+            "radon-marketdesk.service ExecStart no longer names the job by "
+            "path, so this parity test cannot see what it reads"
         )
 
 

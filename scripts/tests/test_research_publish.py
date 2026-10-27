@@ -336,3 +336,128 @@ def test_scoring_audit_is_not_exposed_in_feed_provenance(db, post):
     source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
     assert "humanizer" not in source
     assert "humanizer" in post["source"], "publication must not mutate durable outbox payload"
+
+
+@pytest.fixture
+def marketdesk_post(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADON_RESEARCH_DIR", str(tmp_path / "private"))
+    pdf = tmp_path / "marketdesk.pdf"; pdf.write_bytes(b"%PDF-1.7 marketdesk article")
+    pngs = []
+    for index in range(14):
+        png = tmp_path / f"img{index}.png"; png.write_bytes(b"\x89PNG\r\n\x1a\n image %d" % index)
+        pngs.append(publish.store_asset(png))
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    return {"id": publish.stable_post_id("marketdesk:4AJs5Adl2Yp", "article"), "title": "Curve steepens",
+            "content": "Two cuts priced.", "timestamp": "2026-10-26T13:00:00+00:00", "images": pngs[:2],
+            "tags": ["RATES", "MARKETDESK"],
+            "source": {"kind": "marketdesk", "publisher": "MarketDesk", "articleId": "4AJs5Adl2Yp",
+                       "articleUrl": "https://marketdesk.ai/library/browse/4AJs5Adl2Yp", "contentHash": sha,
+                       "documentDate": "2026-10-26", "folderDate": "2026-10-26", "pages": [1],
+                       "url": publish.store_asset(pdf),
+                       "figures": [{"url": pngs[0], "caption": "2s10s spread"}, {"url": pngs[1], "caption": ""}],
+                       "summary": ["Fed priced for two cuts", "Curve steepened 12bp"],
+                       "extraImages": pngs[2:]},
+            "_pngs": pngs}
+
+
+def _clean(post):
+    post = copy.deepcopy(post); post.pop("_pngs", None)
+    return certify(post)
+
+
+def test_marketdesk_post_without_humanizer_certificate_refused(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    post["source"].pop("humanizer")
+    with pytest.raises(ValueError, match="Humanizer certificate"): publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+def test_marketdesk_post_publishes_with_provenance(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    assert publish.publish(post) == post["id"]
+    saved = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert saved == {k: v for k, v in post["source"].items() if k != "humanizer"}
+    assert json.loads(db.execute("SELECT images FROM posts").fetchone()[0]) == post["images"]
+
+
+def test_marketdesk_minimal_without_figures_summary_or_extras(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    post["images"] = []
+    post["source"].update(figures=[], summary=[], extraImages=[])
+    publish.publish(post)
+    del post["source"]["summary"], post["source"]["extraImages"]
+    publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda s, p: s.update(articleId="bad-id!"),
+    lambda s, p: s.update(articleId="short"),
+    lambda s, p: s.update(articleId="A" * 17, articleUrl="https://marketdesk.ai/library/browse/" + "A" * 17),
+    lambda s, p: s.update(articleUrl="https://marketdesk.ai/library/browse/OTHER12345"),
+    lambda s, p: s.update(articleUrl="http://marketdesk.ai/library/browse/4AJs5Adl2Yp"),
+    lambda s, p: s.update(contentHash="a" * 64),
+    lambda s, p: s.update(contentHash="bad"),
+    lambda s, p: s.update(publisher=""),
+    lambda s, p: s.update(documentDate="2026/10/26"),
+    lambda s, p: s.update(folderDate=""),
+    lambda s, p: s.update(pages=[2]),
+    lambda s, p: s.update(pages=[True]),
+    lambda s, p: s.update(pages=[1, 2]),
+    lambda s, p: s.update(url=p["images"][0]),
+    lambda s, p: s.update(url="https://marketdesk.ai/standalone/abc.pdf"),
+    lambda s, p: s["figures"][0].update(url=s["url"]),
+    lambda s, p: s["figures"][0].update(caption=None),
+    lambda s, p: s["figures"].append("not a figure"),
+    lambda s, p: s.update(summary="not a list"),
+    lambda s, p: s.update(summary=["x" * 501]),
+    lambda s, p: s.update(summary=["ok"] * 21),
+    lambda s, p: s.update(summary=[3]),
+    lambda s, p: s.update(extraImages=[s["url"]]),
+    lambda s, p: s.update(extraImages=["https://media.radon.run/x.png"]),
+    lambda s, p: s.update(extraImages=s["extraImages"] * 4),
+    lambda s, p: s.update(kind="MarketDesk"),
+])
+def test_invalid_marketdesk_provenance(db, marketdesk_post, mutate):
+    post = _clean(marketdesk_post)
+    mutate(post["source"], post)
+    with pytest.raises(ValueError): publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+def test_marketdesk_images_must_equal_figures(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    post["images"] = list(reversed(post["images"]))
+    with pytest.raises(ValueError, match="figures"): publish.publish(post)
+    post = _clean(marketdesk_post)
+    post["images"] = post["images"][:1]
+    with pytest.raises(ValueError): publish.publish(post)
+
+
+def test_marketdesk_rejects_more_than_twelve_figures(db, marketdesk_post):
+    pngs = marketdesk_post["_pngs"]
+    post = _clean(marketdesk_post)
+    post["source"]["figures"] = [{"url": u, "caption": ""} for u in pngs[:13]]
+    post["images"] = pngs[:13]
+    with pytest.raises(ValueError): publish.publish(post)
+    post["source"]["figures"] = post["source"]["figures"][:12]
+    post["images"] = pngs[:12]
+    publish.publish(post)
+
+
+def test_marketdesk_rejects_tampered_asset(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    name = post["source"]["extraImages"][0].rsplit("/", 1)[1]
+    (assets.assets_dir() / name).write_bytes(b"\x89PNG\r\n\x1a\n tampered")
+    with pytest.raises(ValueError): publish.publish(post)
+
+
+def test_dropbox_fields_do_not_satisfy_marketdesk(db, post):
+    post["source"]["kind"] = "marketdesk"
+    with pytest.raises(ValueError): publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+def test_dropbox_figure_without_page_still_rejected(db, post):
+    del post["source"]["figures"][0]["page"]
+    with pytest.raises(ValueError, match="cited"): publish.publish(post)

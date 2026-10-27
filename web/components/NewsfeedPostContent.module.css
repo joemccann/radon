@@ -38,3 +38,9 @@
 .research :global(.chat-markdown) code {
   font-size: var(--text-meta);
 }
+
+.summary {
+  list-style: disc;
+  padding-inline-start: 1.25em;
+  margin: 0.75em 0 0;
+}

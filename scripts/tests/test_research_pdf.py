@@ -167,3 +167,21 @@ def test_isolated_anchor_cli_and_invalid_pages(tmp_path,monkeypatch):
     anchors=Pipeline(tmp_path,None,None).anchors_isolated(source,[1])
     assert anchors[0]["anchors"]
     with pytest.raises(ValueError):text_anchors(source,[0])
+
+
+def test_pages_text_child_prints_text_per_page_and_creation_date(tmp_path):
+    pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=2)
+    result=subprocess.run([sys.executable,"-m","research.pdf",str(pdf),".","--pages-text"],capture_output=True,
+                          env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[1])},timeout=60)
+    assert result.returncode==0,result.stderr
+    out=json.loads(result.stdout)
+    assert sorted(out["pages"])==["1","2"]
+    assert "Research evidence page 1" in out["pages"]["1"] and "Research evidence page 2" in out["pages"]["2"]
+    assert "created" in out
+
+
+def test_page_texts_are_capped_per_page(tmp_path):
+    from research.pdf import page_texts
+    pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=3)
+    pages=page_texts(pdf,per_page=10)
+    assert set(pages)=={1,2,3} and all(len(text)<=10 for text in pages.values())
