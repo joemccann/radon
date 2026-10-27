@@ -2915,3 +2915,47 @@ class TestDocumentation20261026:
         assert "partial redaction" in fn
         assert 'while after < len(text) and text[after] in " \\t"' in fn
 
+
+class TestDocumentation20261027:
+    """Contracts that landed after the 2026-10-26 documentation audit."""
+
+    def test_darkpool_day_ends_at_eastern_midnight(self):
+        text = (_ROOT / "docs/unusual_whales_api.md").read_text()
+        section = text.split("### Dark Pool", 1)[1].split("### Options Flow", 1)[0]
+        assert "Eastern midnight" in section
+        assert "upper bound" in section
+        assert "until a short page.\n" not in section
+        src = (_ROOT / "scripts/fetch_flow.py").read_text()
+        fn = src.split("def walk_darkpool", 1)[1].split("\ndef fetch_darkpool", 1)[0]
+        assert "crossed_into_prior_day" in fn
+        assert "day_start_et" in fn
+        cache = (_ROOT / "scripts/utils/darkpool_cache.py").read_text()
+        assert "def day_start_et" in cache
+        assert "before its Eastern day start" in cache
+
+    def test_marketdesk_pdf_is_the_json_blob(self):
+        intro = (_ROOT / "docs/marketdesk-research.md").read_text()
+        intro = intro.split("## Relevance filter", 1)[0]
+        assert "a.action.preview" not in intro
+        assert "GET /files/<id>/blob" in intro
+        assert "https://marketdesk.ai" in intro
+        ops = (_ROOT / "docs/operations.md").read_text()
+        block = ops.split("### MarketDesk research ingest", 1)[1]
+        block = block.split("### Research evidence archive", 1)[0]
+        assert "plain HTTP" not in block
+        assert "HTTPS" in block
+        assert 'BASE_URL = "https://marketdesk.ai"' in (
+            _ROOT / "scripts/research/marketdesk_auth.py"
+        ).read_text()
+        scrape = (_ROOT / "scripts/research/marketdesk_scrape.py").read_text()
+        assert "/files/<id>/blob" in scrape
+
+    def test_release_publish_refuses_extra_commit_headers(self):
+        text = (_ROOT / "docs/unattended-releases.md").read_text()
+        section = text.split("## Private validation feedback", 1)[0]
+        publish = section.split("identical Git objects", 1)[1][:600]
+        assert "committer" in publish
+        assert "refused before the push" in publish
+        src = (_ROOT / "scripts/private_security_release.py").read_text()
+        fn = src.split("def _require_plain_commit", 1)[1].split("\ndef ", 1)[0]
+        assert "tree/parent/author/committer" in fn
