@@ -15,7 +15,8 @@ MIGRATION = ROOT / "0102_marketdesk_articles.sql"
 COLUMNS = {
     "article_id", "post_id", "status", "title", "article_url", "published_at", "pdf_asset", "pdf_sha256",
     "dropbox_status", "dropbox_path", "dropbox_id", "dropbox_rev", "dropbox_content_hash", "attempts",
-    "last_error", "first_seen_at", "updated_at",
+    "last_error", "first_seen_at", "updated_at", "reason_code", "fingerprint", "publisher", "folders_json",
+    "file_name", "note",
 }
 
 
@@ -97,3 +98,20 @@ def test_article_id_is_primary_key(connection):
 
 def test_reapply_is_idempotent(connection):
     connection.executescript(MIGRATION.read_text())
+
+
+@pytest.mark.parametrize("status", ["held", "dropped"])
+def test_relevance_statuses_are_allowed(connection, status):
+    _insert(connection, status=status, reason_code="NO_CANDIDATES")
+    assert connection.execute("SELECT status, reason_code FROM marketdesk_articles").fetchone() == (status, "NO_CANDIDATES")
+
+
+def test_unknown_status_is_refused(connection):
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert(connection, status="skipped")
+
+
+def test_feedback_handled_table(connection):
+    connection.execute("INSERT INTO marketdesk_feedback_handled VALUES ('f1','2026-10-26T00:00:00+00:00')")
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute("INSERT INTO marketdesk_feedback_handled VALUES ('f1','2026-10-26T00:00:01+00:00')")

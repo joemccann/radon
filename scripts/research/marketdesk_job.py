@@ -1,4 +1,5 @@
-"""One MarketDesk ingest cycle: sign in -> list -> claim -> heal -> PDF/images -> copy -> publish -> Dropbox outbox.
+"""One MarketDesk ingest cycle: sign in -> feedback -> list -> claim -> heal -> PDF -> relevance -> images -> copy ->
+publish -> Dropbox outbox.
 
 Timer entry point (radon-marketdesk.timer, every 5 minutes), run by path:
     python scripts/research/marketdesk_job.py
@@ -8,6 +9,12 @@ article's own publication time, the Turso ledger (marketdesk_articles) is checke
 publish, and research_post_sources heals a crash between publish and the ledger write.
 Publish happens before the Dropbox upload; the upload is an outbox that never blocks the feed. The
 Dropbox path mirrors the library folder chain stored in the post provenance.
+
+Relevance (research.marketdesk_filter) applies the old Dropbox PDF pipeline's gates (research.intake v2) before any
+copy call: identity, force-included desks, triage (approved operator rules, the operator book), publisher 'unknown',
+near-duplicates, then one SELECT under intake's policy. Held and dropped articles are terminal with a reason code,
+mirrored to research_outcomes for the Held tab, and their PDF still goes to the Dropbox outbox. An operator
+"should have published" vote re-queues the article with its note (research.feedback protocol, Turso state).
 
 MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
@@ -42,6 +49,7 @@ from api.db_http import DbHttpError  # noqa: E402
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox import DropboxError  # noqa: E402
 from research.marketdesk_copy import scrub, summary_problems  # noqa: E402
+from research.marketdesk_filter import decide as relevance, fingerprint_index  # noqa: E402
 from research.publish import stable_post_id  # noqa: E402
 
 SERVICE = "marketdesk-research"
@@ -58,6 +66,9 @@ ATTACH_MAX_BYTES = 3_750_000
 MAX_SUMMARY = 20
 MAX_SUMMARY_CHARS = 500  # UTF-16 code units: the web parser measures String.length
 MAX_TAGS = 12
+BODY_MAX = 12_000
+REQUEUE_BATCH = 5
+RECENT_TITLES = 30
 UPLOAD_BATCH = 10
 ERROR_MAX_CHARS = 300
 DEFAULT_PUBLISHER = "MarketDesk"
@@ -108,17 +119,25 @@ class Deps:
     write_copy: Callable
     certify: Callable
     writer_from_env: Callable
-    pdf_text: Callable
+    pdf_pages: Callable
     marketdesk_path: Callable
     service_cycle: Callable
     record_health: Callable
+    select: Callable
+    book_tickers: Callable
+    recent_titles: Callable
+    record_outcome: Callable
+    feedback_rows: Callable
+    research_root: Callable
     clock: Callable = field(default=time.monotonic)
 
 
 def default_deps() -> Deps:
     from db import writer as db_writer
     from db.service_cycle import service_cycle
-    from research import marketdesk_auth, marketdesk_copy, marketdesk_scrape, marketdesk_store, pipeline, publish
+    from api.db_http import hrana_execute
+    from research import book, feedback, marketdesk_auth, marketdesk_copy, marketdesk_filter, marketdesk_scrape
+    from research import marketdesk_store, pipeline, publish
     from research.assets import read_asset, store_asset
     from research.dropbox_writer import DropboxWriter, marketdesk_path
 
@@ -128,15 +147,24 @@ def default_deps() -> Deps:
             ensure()
         db_writer.record_service_health(service, state, started_at=started_at, finished_at=finished_at, error=error)
 
+    def recent_titles():
+        rows = hrana_execute("SELECT title, timestamp FROM posts ORDER BY timestamp DESC LIMIT ?", (RECENT_TITLES,))
+        return [{"title": r[0], "timestamp": r[1]} for r in rows]
+
+    def research_root():
+        return Path(os.environ.get("RADON_RESEARCH_DIR", "/var/lib/radon/research"))
+
     return Deps(
         store=marketdesk_store, publish=publish.publish, store_asset=store_asset, read_asset=read_asset,
         expire_stale_held=publish.expire_stale_held, open_session=marketdesk_auth.open_session,
         list_latest=marketdesk_scrape.list_latest,
         fetch_article=marketdesk_scrape.fetch_article, download_pdf=marketdesk_scrape.download_pdf,
         download_images=marketdesk_scrape.download_images, write_copy=marketdesk_copy.write_copy,
-        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, pdf_text=pipeline.text_isolated,
+        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, pdf_pages=pipeline.pages_isolated,
         marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
+        select=marketdesk_filter.ladder_select, book_tickers=book.tickers, recent_titles=recent_titles,
+        record_outcome=publish.record_outcome, feedback_rows=feedback.fetch_rows, research_root=research_root,
     )
 
 
@@ -253,6 +281,15 @@ def build_post(ref, *, summary: list[str], publisher: str | None, pdf_url: str, 
     }
 
 
+def _record_outcome(deps: Deps, work: dict, review: dict) -> None:
+    try:
+        deps.record_outcome(work, review)
+    except CycleTerminated:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the Held-tab mirror never fails an article (intake does the same)
+        _log(f"outcome mirror for {work['key']} failed: {type(exc).__name__}")
+
+
 def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_wait_hours: int) -> None:
     store = deps.store
     post_id = stable_post_id("marketdesk:" + ref.article_id, "article")
@@ -274,6 +311,32 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     pdf = Path(deps.download_pdf(session, article, dest))
     sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
     pdf_url = deps.store_asset(pdf)
+    pages, created = deps.pdf_pages(pdf)
+    if not pages:
+        raise ArticleRejected("pdf_unreadable")
+    title = getattr(article, "title", None) or ref.title
+    folders = _folders(getattr(article, "folders", None))
+    folder_date = _utc(ref.published_at).astimezone(NY).date().isoformat()
+    root = Path(deps.research_root())
+    decision = relevance(
+        article_id=ref.article_id, title=title, folders=folders, folder_date=folder_date, pages=pages,
+        created=created, summary=summary, root=root, select=deps.select, book_tickers=deps.book_tickers,
+        recent=deps.recent_titles(), index=fingerprint_index(root, store.published_fingerprints()),
+        note=store.note_for(ref.article_id))
+    review = decision.review
+    review["document"]["source_url"] = pdf_url
+    work = {"key": "marketdesk:" + ref.article_id, "folder_date": folder_date,
+            "metadata": {"id": ref.article_id, "name": f"{title}.pdf"}}
+    publisher = _publisher(article)
+    if decision.outcome != "publish":
+        store.record_decision(ref.article_id, decision.outcome, decision.reason_code, pdf_asset=pdf_url,
+                              pdf_sha256=sha, fingerprint=decision.fingerprint, publisher=decision.identity.publisher,
+                              folders=folders, file_name=title)
+        review["outcome"] = decision.outcome
+        _record_outcome(deps, work, review)
+        counts[decision.outcome] += 1
+        _log(f"article {ref.article_id} {decision.outcome}: {decision.reason_code}")
+        return
     stored: list[tuple[Path, str]] = []
     for path in deps.download_images(session, article, dest, limit=MAX_IMAGES_STORED):
         url = deps.store_asset(path)
@@ -284,17 +347,39 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     figure_urls = [url for _, url in figures]
     extra_urls = [url for _, url in stored if url not in figure_urls]
     image_ids = [f"i{n}" for n in range(1, len(figures) + 1)]
-    publisher = _publisher(article)
-    copy = deps.write_copy(title=getattr(article, "title", None) or ref.title, publisher=publisher,
-                           summary=summary, body_text=deps.pdf_text(pdf),
-                           images=[(image_id, path) for image_id, (path, _) in zip(image_ids, figures)])
+    body_text = "\n\n".join(pages[number] for number in sorted(pages))[:BODY_MAX]
+    copy = deps.write_copy(title=title, publisher=publisher, summary=summary, body_text=body_text,
+                           images=[(image_id, path) for image_id, (path, _) in zip(image_ids, figures)],
+                           finding=decision.candidate)
     post = build_post(ref, summary=summary, publisher=publisher, pdf_url=pdf_url, sha=sha,
                       figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy,
-                      folders=getattr(article, "folders", None), file_name=getattr(article, "title", None))
+                      folders=folders, file_name=getattr(article, "title", None))
     post = deps.certify(post, copy)  # research.publish refuses copy without its Humanizer certificate
     deps.publish(post)
-    store.record_published(ref.article_id, post["id"], pdf_url, sha)
+    store.record_published(ref.article_id, post["id"], pdf_url, sha, fingerprint=decision.fingerprint,
+                           publisher=decision.identity.publisher, folders=folders, file_name=title)
+    review["posts"] = [post["id"]]
+    _record_outcome(deps, work, review)
     counts["published"] += 1
+
+
+def _apply_feedback(*, deps: Deps, counts: dict) -> None:
+    """Operator votes: refresh SELECT examples and approved rules, then re-queue "should have published" items."""
+    from research import feedback, learn
+    try:
+        rows = deps.feedback_rows()
+    except CycleTerminated:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a fetch failure changes nothing (research.feedback contract)
+        _log(f"feedback skipped: {type(exc).__name__}")
+        return
+    try:
+        learn.sync(deps.research_root(), rows)
+    except CycleTerminated:
+        raise
+    except Exception as exc:  # noqa: BLE001 - examples and proposals are best effort; re-queue still runs
+        _log(f"learn sync skipped: {type(exc).__name__}")
+    counts["requeued"] += feedback.apply(deps.store, fetch=lambda: rows)
 
 
 def _listing_gap(refs, newest_known: datetime | None) -> bool:
@@ -316,13 +401,16 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
     max_per_cycle = _positive_int(env, "MARKETDESK_MAX_PER_CYCLE", DEFAULT_MAX_PER_CYCLE)
     lookback = _positive_int(env, "MARKETDESK_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS)
     summary_wait = _positive_int(env, "MARKETDESK_SUMMARY_WAIT_HOURS", DEFAULT_SUMMARY_WAIT_HOURS)
+    _apply_feedback(deps=deps, counts=counts)
     session = deps.open_session(env)
     refs = deps.list_latest(session)
     counts["listed"] = len(refs)
     notes["gap"] = _listing_gap(refs, store.newest_known_published_at())
     kept = [ref for ref in refs if not _excluded(ref)]
     counts["excluded"] = len(refs) - len(kept)
-    todo = store.unseen(kept, lookback_hours=lookback)
+    requeued = store.requeued(limit=REQUEUE_BATCH)
+    todo = requeued + [ref for ref in store.unseen(kept, lookback_hours=lookback)
+                       if ref.article_id not in {r.article_id for r in requeued}]
     counts["unseen"] = len(todo)
     attempted = 0
     for index, ref in enumerate(todo):
@@ -396,9 +484,14 @@ def _upload_outbox(*, env, deps: Deps, workdir: Path, counts: dict) -> tuple[str
             local = upload_dir / f"{article_id}.pdf"
             local.write_bytes(deps.read_asset(asset[len(URL_PREFIX):].split("#", 1)[0]))
             published_at = datetime.fromisoformat(str(row["published_at"]).replace("Z", "+00:00"))
-            source = store.post_source(str(row.get("post_id") or "")) or {}
-            kwargs = {"folders": _folders(source.get("folders")), **({"root": root} if root else {})}
-            name = str(source.get("fileName") or row.get("title") or "")
+            source = store.post_source(str(row.get("post_id") or "")) if row.get("post_id") else None
+            source = source or {}
+            try:
+                ledger_folders = json.loads(row.get("folders_json") or "[]")
+            except (TypeError, ValueError):
+                ledger_folders = []
+            kwargs = {"folders": _folders(source.get("folders") or ledger_folders), **({"root": root} if root else {})}
+            name = str(source.get("fileName") or row.get("file_name") or row.get("title") or "")
             remote = deps.marketdesk_path(published_at, name, article_id, **kwargs)
             try:
                 result = writer.upload(local, remote)
@@ -442,8 +535,9 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     """Outbox first (a slow scrape can never starve uploads), then the scrape, then the outbox again
     for anything just published. Health: marketdesk-dropbox gets the worse of the two outbox runs."""
     deps = deps or default_deps()
-    counts = dict.fromkeys(("listed", "excluded", "unseen", "pending", "published", "healed", "failed", "parked",
-                            "retired", "skipped", "deferred", "uploaded", "upload_skipped", "upload_failed"), 0)
+    counts = dict.fromkeys(("listed", "excluded", "unseen", "pending", "published", "held", "dropped", "requeued",
+                            "healed", "failed", "parked", "retired", "skipped", "deferred", "uploaded",
+                            "upload_skipped", "upload_failed"), 0)
     notes: dict = {}
     workdir = Path(tempfile.mkdtemp(prefix="marketdesk-"))
     try:
@@ -474,7 +568,8 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
                         _scrape(env=env, deps=deps, workdir=workdir, counts=counts, notes=notes)
                     except Exception as exc:  # noqa: BLE001 - re-raised after the outbox health row
                         failure = failure or exc
-                    if not isinstance(failure, CycleTerminated) and counts["published"] + counts["healed"]:
+                    if (not isinstance(failure, CycleTerminated)
+                            and counts["published"] + counts["healed"] + counts["held"] + counts["dropped"]):
                         drain()
             finally:
                 state, error = max(outbox, key=lambda row: _HEALTH_RANK[row[0]]) if outbox else (

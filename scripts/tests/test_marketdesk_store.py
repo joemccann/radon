@@ -237,3 +237,100 @@ def test_newest_known_published_at(db):
     store.claim(ref("Aaaaaaaa1", hours_ago=5))
     store.claim(ref("Bbbbbbbb2", hours_ago=2))
     assert store.newest_known_published_at() == NOW - timedelta(hours=2)
+
+
+ASSET = "/api/newsfeed/research/files/" + "c" * 64 + ".pdf"
+
+
+def _decided(db, article_id, status, code, hours_ago=2):
+    store.claim(ref(article_id, hours_ago=hours_ago, title="T " + article_id))
+    store.record_decision(article_id, status, code, pdf_asset=ASSET, pdf_sha256="c" * 64, fingerprint=0xabc,
+                          publisher="Cboe", folders=["2026", "October", "Oct 26", "CBOE"], file_name="Digest " + article_id)
+
+
+@pytest.mark.parametrize("status", ["held", "dropped"])
+def test_record_decision_is_terminal_and_keeps_the_pdf_for_dropbox(db, status):
+    _decided(db, "Aaaaaaaa1", status, "NO_CANDIDATES")
+    saved = row(db, "Aaaaaaaa1")
+    assert saved["status"] == status and saved["reason_code"] == "NO_CANDIDATES"
+    assert saved["pdf_asset"] == ASSET and saved["fingerprint"] == "0000000000000abc"
+    assert json.loads(saved["folders_json"]) == ["2026", "October", "Oct 26", "CBOE"]
+    assert saved["file_name"] == "Digest Aaaaaaaa1" and saved["publisher"] == "Cboe"
+    assert saved["last_error"] is None and saved["note"] is None
+    assert store.unseen([ref("Aaaaaaaa1")], lookback_hours=48, now=NOW) == []
+    assert store.claim(ref("Aaaaaaaa1")) is False
+
+
+def test_record_decision_rejects_unknown_status(db):
+    store.claim(ref())
+    with pytest.raises(ValueError):
+        store.record_decision("4AJs5Adl2Yp", "published", None, pdf_asset=ASSET, pdf_sha256="c" * 64, fingerprint=0,
+                              publisher=None, folders=[], file_name="x")
+
+
+def test_record_published_keeps_fingerprint_publisher_and_folders(db):
+    store.claim(ref())
+    store.record_published("4AJs5Adl2Yp", "research-" + "a" * 32, ASSET, "c" * 64, fingerprint=0xff, publisher="Cboe",
+                           folders=["2026", "CBOE"], file_name="Digest")
+    saved = row(db)
+    assert saved["fingerprint"] == "00000000000000ff" and saved["publisher"] == "Cboe"
+    assert json.loads(saved["folders_json"]) == ["2026", "CBOE"] and saved["file_name"] == "Digest"
+
+
+def test_published_fingerprints_lists_published_rows_only(db):
+    store.claim(ref("Aaaaaaaa1"))
+    store.record_published("Aaaaaaaa1", "research-" + "a" * 32, ASSET, "c" * 64, fingerprint=0xff, publisher="Cboe")
+    _decided(db, "Bbbbbbbb2", "dropped", "DUPLICATE_OF_PUBLISHED")
+    store.claim(ref("Cccccccc3"))
+    store.record_published("Cccccccc3", "research-" + "b" * 32, ASSET, "c" * 64)
+    assert store.published_fingerprints() == [("Aaaaaaaa1", "00000000000000ff", "Cboe")]
+
+
+def test_pending_uploads_include_held_and_dropped_pdfs_with_their_folders(db):
+    _decided(db, "Aaaaaaaa1", "dropped", "SERIES_DENYLIST")
+    _decided(db, "Bbbbbbbb2", "held", "NO_CANDIDATES", hours_ago=3)
+    store.claim(ref("Cccccccc3"))  # pending: never uploaded
+    rows = store.pending_uploads(limit=10)
+    assert [r["article_id"] for r in rows] == ["Bbbbbbbb2", "Aaaaaaaa1"]
+    assert json.loads(rows[0]["folders_json"]) == ["2026", "October", "Oct 26", "CBOE"]
+    assert rows[0]["file_name"] == "Digest Bbbbbbbb2"
+
+
+def test_requeue_with_note_reopens_a_held_item_once(db):
+    _decided(db, "Aaaaaaaa1", "held", "NO_CANDIDATES", hours_ago=100)
+    note = json.dumps({"kind": "publish", "comment": "wanted", "feedback_id": "f1"})
+    assert store.requeue_with_note("marketdesk:Aaaaaaaa1", note, feedback_id="f1") is True
+    saved = row(db, "Aaaaaaaa1")
+    assert saved["status"] == "pending" and saved["attempts"] == 0 and saved["note"] == note
+    assert store.feedback_handled() == {"f1"}
+    assert store.has_live_work("marketdesk:Aaaaaaaa1") is True
+    assert store.requeue_with_note("marketdesk:Aaaaaaaa1", note, feedback_id="f2") is False  # already pending
+    requeued = store.requeued()
+    assert [(r.article_id, r.note) for r in requeued] == [("Aaaaaaaa1", note)]
+    assert requeued[0].published_at == NOW - timedelta(hours=100) and requeued[0].title == "T Aaaaaaaa1"
+    assert store.note_for("Aaaaaaaa1") == {"kind": "publish", "comment": "wanted", "feedback_id": "f1"}
+
+
+def test_requeue_refuses_published_unknown_and_foreign_keys(db):
+    _published(db, "Aaaaaaaa1", 3)
+    assert store.requeue_with_note("marketdesk:Aaaaaaaa1", "{}", feedback_id="f1") is False
+    assert store.requeue_with_note("marketdesk:Zzzzzzzz9", "{}", feedback_id="f2") is False
+    assert store.requeue_with_note("dropbox:abc", "{}", feedback_id="f3") is False
+    assert store.has_live_work("dropbox:abc") is False
+    assert store.feedback_handled() == set()
+
+
+def test_feedback_state_maps_file_ids_and_marks_handled(db):
+    _decided(db, "Aaaaaaaa1", "held", "NO_CANDIDATES")
+    assert store.work_key_for_file("Aaaaaaaa1") == "marketdesk:Aaaaaaaa1"
+    assert store.work_key_for_file("nope") is None and store.work_key_for_file("") is None
+    store.mark_feedback_handled("f9")
+    store.mark_feedback_handled("f9")
+    assert store.feedback_handled() == {"f9"}
+
+
+def test_published_clears_the_operator_note(db):
+    _decided(db, "Aaaaaaaa1", "held", "NO_CANDIDATES")
+    store.requeue_with_note("marketdesk:Aaaaaaaa1", '{"kind": "publish"}', feedback_id="f1")
+    store.record_published("Aaaaaaaa1", "research-" + "a" * 32, ASSET, "c" * 64)
+    assert row(db, "Aaaaaaaa1")["note"] is None and store.requeued() == []

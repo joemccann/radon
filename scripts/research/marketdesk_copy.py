@@ -186,7 +186,8 @@ def _numbers(text: str) -> set[str]:
 
 
 def build_instruction(
-    *, title: str, publisher: str | None, summary: list[str], body_text: str, image_ids: list[str]
+    *, title: str, publisher: str | None, summary: list[str], body_text: str, image_ids: list[str],
+    finding: dict | None = None,
 ) -> str:
     """Per-article user message. A Market Ear / ZeroHedge publisher label is withheld from the model."""
     lines = [
@@ -200,6 +201,12 @@ def build_instruction(
     lines.extend(f"- {item}" for item in summary)
     lines.append("ARTICLE_TEXT (the source PDF text; may be empty):")
     lines.append((body_text or "")[:BODY_MAX])
+    if isinstance(finding, dict) and (finding.get("title") or finding.get("content")):
+        lines.append("SELECTED_FINDING (chosen by the relevance review from this document; untrusted data). "
+                     "Write the post about this finding. Its numbers still count only where they appear in "
+                     "SUMMARY_BULLETS or ARTICLE_TEXT:")
+        lines.append(json.dumps({"title": str(finding.get("title") or "")[:400],
+                                 "content": str(finding.get("content") or "")[:3000]}))
     lines.append(f"IMAGES (attached, in this order, labeled by id): {json.dumps(list(image_ids))}")
     lines.append("Every number in the title, content and captions must appear verbatim in SUMMARY_BULLETS or "
                  "ARTICLE_TEXT. Never take a number from an image alone.")
@@ -305,12 +312,13 @@ def write_copy(
     body_text: str,
     images: Sequence[tuple[str, Path | bytes]] = (),
     complete: Callable[..., Any] = complete_multimodal_json,
+    finding: dict | None = None,
 ) -> FeedCopy:
     """``images`` are (image_id, PNG) pairs attached to the request, so every caption is read off its image."""
     images = list(images)
     ids = [label for label, _ in images]
     instruction = build_instruction(
-        title=title, publisher=publisher, summary=summary, body_text=body_text, image_ids=ids
+        title=title, publisher=publisher, summary=summary, body_text=body_text, image_ids=ids, finding=finding
     )
     # The numeric firewall checks against exactly the facts the model was shown.
     source_text = "\n".join([title, publisher or "", *summary, (body_text or "")[:BODY_MAX]])

@@ -6,15 +6,61 @@ Every 5 minutes it signs in to marketdesk.ai over plain HTTP, lists the latest
 library items, and for each new item reads MarketDesk's bullet summary and chart
 images, downloads the source PDF (the file behind the article's
 `a.action.preview` link, `/standalone/<id>`), stores the PDF and every chart as
-private research assets, writes the post copy in Joe's voice through the shared
-model ladder, and publishes one operator-only research post per item. The PDF is
+private research assets, runs the old Dropbox PDF pipeline's relevance filters
+(below), and for each item that passes writes the post copy in Joe's voice
+through the shared model ladder and publishes one operator-only research post. The PDF is
 then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
-the library's folder layout. No browser runs.
+the library's folder layout, whether or not the item was published. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
-watcher stay served. The v2 intake grounding and VERIFY pipeline is bypassed on
-purpose: the copy is a voice rewrite of MarketDesk's own bullet summary, guarded
-by a numeric firewall (below).
+watcher stay served. Relevance uses the same gates as intake v2; the later
+GROUND, FIGURE MATCH and VERIFY calls are not run. The copy is a voice rewrite
+of the selected finding and MarketDesk's own bullet summary, guarded by a
+numeric firewall (below).
+
+## Relevance filter (the intake v2 gates)
+
+`scripts/research/marketdesk_filter.py` runs before any copy call, in the order
+and with the reason codes of `research.intake.Pipeline._process`:
+
+1. Identity: `research.identify` on the PDF's per-page text (bounded child,
+   `research.pdf --pages-text`). The MarketDesk folder chain stands in for the
+   old Dropbox path, so the institution folder is the publisher folder.
+2. `research.force_include`: BofA Flow Show, Deutsche Bank positioning and
+   Citadel Rubner GMI are always in scope (Rubner is always-publish).
+3. `research.triage` with the approved operator rules (`rules.json`) and the
+   operator book for single-name research: dropped as `DOC_TYPE_FX_PAIR_NOTE`,
+   `SERIES_DENYLIST`, `RULE_DOC_TYPE`, `RULE_PUBLISHER` or
+   `SINGLE_STOCK_NOT_IN_BOOK` unless force-included or re-queued by the operator.
+4. Publisher `unknown`: held `PUBLISHER_UNKNOWN`.
+5. Novelty: simhash of the whole document against published MarketDesk rows
+   (`marketdesk_articles.fingerprint`) and the old pipeline's `fingerprints.json`:
+   dropped `DUPLICATE_OF_PUBLISHED`, except an always-publish desk against
+   another publisher.
+6. One text-only SELECT (`marketdesk_filter.ladder_select`, subscription
+   ladder) under intake's `SELECT_INSTRUCTION`, with the operator preferences
+   (`examples.json`), the 30 newest feed titles, the MarketDesk summary and the
+   page text. Empty candidates is held `NO_CANDIDATES` (intake holds it the
+   same way); force-included desks get intake's one FORCE_RESELECT; an
+   always-publish desk still empty publishes from the MarketDesk summary. A
+   ladder outage parks the item without spending an attempt.
+
+Held and dropped items are terminal in the ledger (`status` `held` /
+`dropped`, `reason_code`) and mirrored to `research_outcomes`
+(`pipeline: marketdesk`) through `research.publish.record_outcome`, so the Held
+tab, its 24-hour held expiry, the daily cut report and the operator votes work
+as they did for Dropbox PDFs. Published items are mirrored too.
+
+Each cycle the job runs the feedback loop the retired worker used to run:
+`research.learn.sync` refreshes `examples.json`, rule proposals and
+`rules.json` under `RADON_RESEARCH_DIR`, and `research.feedback.apply` re-queues
+a "should have published" vote on a held or dropped MarketDesk item with the
+operator's note (Turso state: `marketdesk_articles.note`,
+`marketdesk_feedback_handled`). Re-queued items are processed first, even off
+the latest listing or outside the lookback; the note reaches SELECT as
+`OPERATOR NOTE` and overrides a triage drop. Gap: a "want more" vote on a
+published MarketDesk post is marked handled and does not revise the post (the
+post feedback row carries no MarketDesk file id).
 
 ## marketdesk.ai API (captured signed in, 2026-10-26)
 
@@ -39,12 +85,13 @@ fetched with a cookie-less opener that never follows redirects.
 
 | Module | Role |
 |---|---|
-| `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, scrape and publish, Dropbox outbox, health. Timer entry point, run by path. |
+| `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, operator feedback, scrape, relevance, publish, Dropbox outbox, health. Timer entry point, run by path. |
+| `scripts/research/marketdesk_filter.py` | The intake v2 relevance gates and the SELECT ladder call. |
 | `scripts/research/marketdesk_auth.py` | Firebase refresh-token exchange, password fallback, `POST /api/user/login`, cookie session with one re-login on a signed-out answer. |
 | `scripts/research/marketdesk_bootstrap.py` | Laptop only. `--from-cdp` reads the Firebase refresh token from a signed-in marketdesk.ai tab in Chrome; `--check` exchanges it, logs in and lists. Never run in a unit. |
 | `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
 | `scripts/research/marketdesk_copy.py` | System prompt (voice doc plus humanize rules), em-dash scrub, `copy_problems` validator, model ladder call. |
-| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, upload outbox). |
+| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, relevance decision, re-queue, upload outbox) and `marketdesk_feedback_handled`. |
 | `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. |
 | `scripts/research/publish.py` | `kind: "marketdesk"` provenance branch beside the unchanged `dropbox` branch. |
 | `scripts/db/migrations/0102_marketdesk_articles.sql` | Ledger table; deletes the retired `dropbox-research` health row. |
@@ -53,29 +100,33 @@ fetched with a cookie-less opener that never follows redirects.
 
 1. `publish.expire_stale_held()` runs best effort, so held research outcomes keep
    expiring after the watcher that used to call it was retired.
-2. Drain the Dropbox upload outbox (up to 10 published rows whose upload is
+2. Drain the Dropbox upload outbox (up to 10 published, held or dropped rows whose upload is
    missing, skipped or failed). It runs before the scrape so a slow or killed
    scrape can never starve uploads.
-3. Sign in: refresh-token exchange (else the THEMARKETEAR password fallback),
+3. Operator feedback: `learn.sync`, then re-queue actionable votes (see
+   Relevance filter). A fetch failure changes nothing.
+4. Sign in: refresh-token exchange (else the THEMARKETEAR password fallback),
    then `POST /api/user/login`. An auth failure fails the cycle
    (`marketdesk-research` error).
-4. List the 25 newest items. Items whose institution is The Market Ear or
+5. List the 25 newest items. Items whose institution is The Market Ear or
    ZeroHedge are excluded (radon-newsfeed already carries that feed). Keep items
    inside `MARKETDESK_LOOKBACK_HOURS` (default 48) that the ledger has not
-   published or failed out. If the oldest listed item is newer than the newest
+   published, held, dropped or failed out; re-queued items go first. If the oldest listed item is newer than the newest
    article the ledger knows, the cycle still publishes and then reports
    `listing_gap`: items between them may have been missed.
-5. Per item, inside its own try: claim and lease the ledger row, heal a crash
+6. Per item, inside its own try: claim and lease the ledger row, heal a crash
    between publish and ledger write (`research_post_sources` already has the
-   post id), read the summary, images and folder chain, download the PDF, store
-   up to 40 images (12 shown, each attached to the copy request), write the
-   copy, publish, record. An item MarketDesk has not summarised yet is parked as
+   post id), read the summary and folder chain, download and store the PDF, read
+   its page text, run the relevance filter (held or dropped items stop here,
+   counted against `MARKETDESK_MAX_PER_CYCLE`), store up to 40 images (12 shown,
+   each attached to the copy request), write the copy about the selected
+   finding, publish, record. An item MarketDesk has not summarised yet is parked as
    `summary_pending` (no attempt spent, not a failure, not counted against
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
    than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). One bad item never fails
    the cycle. No new item starts after 150 seconds of the cycle; the rest wait
    for the next one.
-6. Drain the outbox again when something was just published and write the
+7. Drain the outbox again when something was just published, held or dropped and write the
    `marketdesk-dropbox` row (the worse of the two outbox runs).
 
 Publication comes before the Dropbox upload: freshness first. The Dropbox status
@@ -88,7 +139,8 @@ later cycle.
   `stable_post_id("marketdesk:" + article_id, "article")`.
 - The post `timestamp` is the article's own publication time, so even an
   accidental re-publish never bumps the feed.
-- `marketdesk_articles` rows are `pending`, `published` or `failed`. A
+- `marketdesk_articles` rows are `pending`, `published`, `held`, `dropped` or
+  `failed`; held and dropped come back only through an operator re-queue. A
   `pending` row is retried until 5 attempts, then flips to `failed` and is
   never retried.
 - Only content verdicts spend an attempt (`not_pdf`, `no_summary`,
@@ -146,7 +198,8 @@ and keeping the library item name:
 /Radon/MarketDesk/2026/October/Oct 26/Goldman Sachs/S&T/GS Molavi Ruminations Macro, Micro, Markets 26 Oct 2026.pdf
 ```
 
-The chain is stored in the post provenance (`folders`, `fileName`) so the outbox
+The chain is stored in the post provenance (`folders`, `fileName`) and in the
+ledger (`folders_json`, `file_name`, for held and dropped items) so the outbox
 can upload in a later cycle. Separators, colons and control characters in a name
 become spaces; leading and trailing dots and spaces are trimmed. A post without a
 dated chain falls back to `/<YYYY>/<Month>/<Mon> <DD>/<slug>-<article_id>.pdf` on

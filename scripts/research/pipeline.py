@@ -132,14 +132,16 @@ def creation_date_isolated(pdf):
         return None
 
 
-def text_isolated(pdf):
-    """Plain PDFium page text read in the bounded child, or '' when the child cannot read it."""
+def pages_isolated(pdf):
+    """({page_number: text}, CreationDate) read in the bounded child, or ({}, None) when the child cannot read it."""
     try:
-        result = _run_pdf_child(pdf, '.', ['--text-only'], timeout=PDF_TEXT_TIMEOUT_SECS)
-        text = json.loads(result.stdout)['text'] if result.returncode == 0 else ''
-    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
-        return ''
-    return text if isinstance(text, str) else ''
+        result = _run_pdf_child(pdf, '.', ['--pages-text'], timeout=PDF_TEXT_TIMEOUT_SECS)
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+        pages = {int(number): text for number, text in data['pages'].items() if isinstance(text, str)}
+        created = data.get('created')
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError, AttributeError):
+        return {}, None
+    return pages, created if isinstance(created, str) else None
 
 
 # Each reviewer request has a 120-second read bound (research.model.Reviewer).
