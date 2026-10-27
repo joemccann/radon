@@ -1,3 +1,15 @@
+# MarketDesk managed-stop cancellation (2026-10-27)
+
+Dependency graph: MC1 -> MC2 -> MC3.
+
+- [x] MC1 depends_on: [] Reproduce SIGTERM swallowed by actual model HTTP/stream transport; pin lease, cleanup, heartbeat and exit143 contracts.
+- [x] MC2 depends_on: [MC1] Propagate cancellation outside ordinary provider failures while retaining service-cycle error telemetry.
+- [x] MC3 depends_on: [MC2] Focused regressions and parent integration review; parent owns full suites and PR/release.
+
+## Review
+
+Four red cases reproduced cancellation relabeled as network failure and missing control-flow telemetry. Focused job, service-cycle, model-ladder and PDF suites passed 251 tests, including actual SIGTERM during HTTP setup and streamed reads. Original pending lease/attempt budget, response cleanup, error heartbeat, temporary cleanup, handler restoration and exit143 are retained. No runtime policy or timeout changes. Parent reviewed the exact runtime edits and regressions; integrated full gates remain parent-owned.
+
 # Bun 1.4.4 security pin (2026-10-22)
 
 Dependency graph: B1 -> B2 -> B3.
