@@ -2944,3 +2944,13 @@ class TestDocumentation20261027:
         ).read_text()
         scrape = (_ROOT / "scripts/research/marketdesk_scrape.py").read_text()
         assert "/files/<id>/blob" in scrape
+
+    def test_release_publish_refuses_extra_commit_headers(self):
+        text = (_ROOT / "docs/unattended-releases.md").read_text()
+        section = text.split("## Private validation feedback", 1)[0]
+        publish = section.split("identical Git objects", 1)[1][:600]
+        assert "committer" in publish
+        assert "refused before the push" in publish
+        src = (_ROOT / "scripts/private_security_release.py").read_text()
+        fn = src.split("def _require_plain_commit", 1)[1].split("\ndef ", 1)[0]
+        assert "tree/parent/author/committer" in fn
