@@ -134,6 +134,8 @@ readonly SERVICE_FILES=(
   radon-portfolio-archive.timer
   radon-research-archive.service
   radon-research-archive.timer
+  radon-marketdesk.service
+  radon-marketdesk.timer
   radon-media-publish.service
   radon-media-publish.path
   radon-media-publish.timer
@@ -1397,7 +1399,8 @@ enable_services() {
   local timer_owned_services=()
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
-    # Research requires private runtime credentials and explicit activation.
+    # Retired shared-folder watcher: installed so deploys can disable it,
+    # never enabled. radon-marketdesk.timer is the research source.
     [[ "$svc" == "radon-research.service" ]] && continue
     # UW requires explicit entitlement/channel admission before activation.
     [[ "$svc" == radon-uw-stream.service || "$svc" == radon-uw-research.service || "$svc" == radon-uw-research.timer ]] && continue

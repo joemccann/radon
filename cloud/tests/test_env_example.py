@@ -147,6 +147,43 @@ class TestDropboxResearchVariables:
             assert var in env_vars, f"Missing Dropbox research variable: {var}"
 
 
+class TestMarketDeskResearchVariables:
+    """radon-marketdesk.service reads these with a default; the job degrades
+    (no session seed, no Dropbox upload) instead of failing preflight."""
+
+    OPTIONAL = [
+        "MARKETDESK_FIREBASE_REFRESH_TOKEN",
+        "MARKETDESK_MAX_PER_CYCLE",
+        "MARKETDESK_LOOKBACK_HOURS",
+        "MARKETDESK_SUMMARY_WAIT_HOURS",
+        "MARKETDESK_ASSET_HOSTS",
+        "DROPBOX_WRITE_APP_KEY",
+        "DROPBOX_WRITE_REFRESH_TOKEN",
+        "DROPBOX_WRITE_ACCOUNT_ID",
+        "DROPBOX_WRITE_ROOT_NAMESPACE_ID",
+        "DROPBOX_WRITE_ROOT",
+    ]
+
+    def test_documents_the_optional_marketdesk_variables(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        for var in self.OPTIONAL:
+            assert var in env_vars, f"Missing MarketDesk research variable: {var}"
+
+    def test_optional_marketdesk_variables_are_not_deploy_required(self, root):
+        required = {
+            line.strip()
+            for line in (root / "config" / "required-env.txt").read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        assert not set(self.OPTIONAL) & required
+        # The fallback login pair was already required for the newsfeed.
+        assert {"THEMARKETEAR_EMAIL", "THEMARKETEAR_PASSWORD"} <= required
+
+    def test_write_credentials_are_distinct_from_the_read_only_reader(self, root):
+        content = read_env_example(root)
+        assert "files.content.write" in content
+
+
 class TestIBSessionVariables:
     def test_contains_vnc_server_password(self, root):
         env_vars = parse_env_vars(read_env_example(root))

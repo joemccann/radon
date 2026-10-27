@@ -68,6 +68,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  services/radon-marketdesk.service.d/runtime-container.conf
   scripts/subscription_service_env.py
   scripts/media_publish.py
   services/radon-media-publish.service
@@ -132,6 +133,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /etc/systemd/system/radon-marketdesk.service.d/runtime-container.conf
   /usr/local/lib/radon/subscription_service_env.py
   /usr/local/lib/radon/media_publish.py
   /etc/systemd/system/radon-media-publish.service
@@ -155,6 +157,7 @@ readonly -a CONTROL_PLANE_MODES=(
   440
   440
   440
+  644
   644
   644
   644
@@ -898,15 +901,43 @@ is_core_service() {
   return 1
 }
 
-start_optional_research() {
-  # Installation is inert; only explicit operator enablement joins deploys.
-  local enabled_state
-  enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || return 0
+# Retired units are never replayed from the active snapshot and never required
+# to be restored by it. The first retiring deploy snapshots a still-running
+# radon-research.service; replaying it would let its heartbeat recreate the
+# dropbox-research service_health row that migration 0102 deleted (the
+# migration never runs again), and verify-restored would then fail the release
+# once retire_research_watcher stops it. stop-clean already stopped it under its
+# stop-only budget, so retire below only has to disable an inactive unit.
+is_retired_unit() {
+  [[ "$1" == radon-research.service ]]
+}
+
+# The shared-folder Dropbox watcher is retired: radon-marketdesk.timer is the
+# research source now (docs/marketdesk-research.md). The unit file stays
+# installed so this can turn it off; a deploy disables an enabled watcher
+# and stops one that was started by hand or replayed from the active
+# snapshot. Idempotent and never fatal: a refusal here must not roll back a
+# release that is otherwise green.
+retire_research_watcher() {
+  local enabled_state="" state=""
+  enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || true
+  state="$(active_state radon-research.service)" || true
   if [[ "$enabled_state" == "enabled" || "$enabled_state" == "enabled-runtime" ]]; then
-    systemctl_bounded reset-failed radon-research.service
-    systemctl_bounded --no-block start radon-research.service
-    wait_for_unit_state radon-research.service active
+    systemctl_bounded --no-block disable --now radon-research.service || {
+      echo "warning: could not disable retired radon-research.service" >&2
+      return 0
+    }
+  elif [[ "$state" == "active" || "$state" == "activating" || "$state" == "reloading" ]]; then
+    systemctl_bounded --no-block stop radon-research.service || {
+      echo "warning: could not stop retired radon-research.service" >&2
+      return 0
+    }
+  else
+    return 0
   fi
+  wait_for_unit_state radon-research.service inactive || \
+    echo "warning: retired radon-research.service is still stopping" >&2
+  return 0
 }
 
 reset_core_failures() {
@@ -920,6 +951,7 @@ verify_restored_state() {
   [[ -f "$RESTORED_STATE_FILE" ]] || return 1
   while IFS=$'\t' read -r unit type extra; do
     [[ "$type" == oneshot ]] && continue
+    is_retired_unit "$unit" && continue
     state="$(active_state "$unit")" || return 69
     [[ "$state" == active ]] || {
       echo "snapshotted unit is not restored: ${unit} (${state:-unknown})" >&2
@@ -940,6 +972,7 @@ resume_active_snapshot() {
   [[ -f "$RESTORED_STATE_FILE" ]] && already_resumed=1
   while IFS=$'\t' read -r unit type extra; do
     is_core_service "$unit" && continue
+    is_retired_unit "$unit" && continue
     if [[ "$type" == oneshot ]]; then
       if [[ "$unit" == radon-db-backup.service ]]; then
         if [[ "$already_resumed" == 0 ]]; then
@@ -2846,7 +2879,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
-    start_optional_research
+    retire_research_watcher
     ;;
   recover)
     reset_core_failures
@@ -2855,7 +2888,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
-    start_optional_research
+    retire_research_watcher
     ;;
   verify-restored)
     verify_restored_state

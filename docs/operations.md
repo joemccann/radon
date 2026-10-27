@@ -230,7 +230,9 @@ token and writes logs and project state on every run, so
 fixed paths) are bound read-write into `radon-api`, `radon-research` and
 `radon-nextjs` and shared with the host, keeping one rotating
 token store. Newsfeed renders third-party content and gets no antigravity bind
-(its ladder falls past that rung). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
+(its ladder falls past that rung). `radon-marketdesk` renders third-party
+content too: it gets the read-only `.grok`, `.codex` and `.claude` grants, no
+antigravity bind and no `~/.local/bin` (the Python image ships pinned CLIs). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
 The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
 Those tiers never fall back to a prepaid key: the opt-in flag was removed
@@ -665,6 +667,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | varies | Service-health alerting (Pushover) |
 | `radon-host-metrics.timer` | every 1 min | Host CPU, memory, loop lag. Details: [`cloud-services.md`](cloud-services.md#host-metrics-dur-12) |
 | `radon-tv-alerts.timer` | every 5 min | TradingView alert digest (one Pushover per cycle), 180-day prune. Details: [`cloud-services.md`](cloud-services.md#tradingview-alerts) |
+| `radon-marketdesk.timer` | every 5 min (`*:04/5:41`) | marketdesk.ai research ingest: new articles to operator-only research posts, PDF copied to `/Radon/MarketDesk` in the operator's Dropbox. Heartbeats `marketdesk-research` and `marketdesk-dropbox` (15m). Spec: [`marketdesk-research.md`](marketdesk-research.md) |
 | `radon-equibles-{13f,ats,cot,filings,short-crowding}.timer` | daily / weekly | 13F, ATS, COT, filings, short crowding. Spec: [`equibles-api.md`](equibles-api.md) |
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
@@ -1214,6 +1217,15 @@ than duplicating commands in this runbook.
 
 ## Private Dropbox research runtime
 
+**Retired 2026-10-26.** `radon-research.service` (the shared-folder watcher)
+is replaced by `radon-marketdesk.timer`
+([MarketDesk research](marketdesk-research.md)). `radon-deploy-root
+restart-managed` and `recover` now run `retire_research_watcher`: an enabled
+watcher is `disable --now`ed, a hand-started one is stopped, and either
+outcome is non-fatal. The unit file, its drop-in, the 150s research stop wait
+and the read-only API research bind stay. The text below is the historical
+activation contract for the retired unit; do not re-enable it.
+
 The research worker executes the Python image's pinned `claude`, `codex`,
 `grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
 directories, `HOME=/home/radon`, and Antigravity refresh/state mounts retain
@@ -1229,6 +1241,27 @@ together; do not add an unreviewed host executable mount.
 `radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
 
 The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials, the model provider key, and the optional Cloudflare Workers AI keys (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) remain in `/etc/radon/env`. Clairic report dates stay off until `CLAIRIC_DATES_ENABLED=1`. Provisioning and rotation: [Environment handling](../cloud/CLAUDE.md#environment-handling). Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
+
+### MarketDesk research ingest
+
+`radon-marketdesk.timer` fires every 5 minutes (`*:04/5:41`, `AccuracySec=1s`,
+`Persistent=false`). Its Type=oneshot `runtime-container.conf` drop-in runs
+`scripts/research/marketdesk_job.py` in the Python image through
+`radon-app-runtime` with the read/write private research bind and nothing else
+of the host state (no data, media or lease binds), plus the newsfeed's
+isolation (the job reads the marketdesk.ai JSON API over plain HTTP, no
+browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
+without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
+`THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
+`TimeoutStartSec=270`, `StartLimitBurst=10` per 1800s. Heartbeats
+`marketdesk-research` (`service_cycle`) and `marketdesk-dropbox` (`ok`, `paused`
+when write credentials are absent, `error`), both 15 minutes. Runbook:
+[MarketDesk research](marketdesk-research.md#runbook).
+
+```bash
+systemctl start radon-marketdesk.service        # run one cycle now
+journalctl -u radon-marketdesk.service -n 50
+```
 
 ### Research evidence archive
 

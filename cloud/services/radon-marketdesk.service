@@ -1,0 +1,34 @@
+[Unit]
+Description=Radon marketdesk.ai research ingest (PDF, images, voice post) every 5 minutes
+After=network-online.target
+Wants=network-online.target
+# DUR-02 pattern: brake crash loops. systemd StartLimit counts successful
+# oneshot starts, so Burst must exceed the 5-minute cadence inside the window
+# (6 starts / 1800s). Burst=5 parked a healthy 5-minute drain as
+# start-limit-hit (2026-09-19 page 8750de94).
+StartLimitIntervalSec=1800
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+Environment=RADON_RESEARCH_DIR=/var/lib/radon/research
+Environment=RADON_DB_NO_REPLICA=1
+# The private research root is readable only inside a research container, so
+# the runtime-container.conf drop-in replaces this ExecStart with
+# radon-app-runtime (rw bind of /var/lib/radon-private/research, bridge
+# network, Chromium seccomp profile, env allowlist). Named by path so the
+# env-contract and watchdog catalog parity walkers resolve the job.
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/research/marketdesk_job.py
+StandardOutput=journal
+StandardError=journal
+# Type=oneshot ignores RuntimeMaxSec; TimeoutStartSec is the bound, under the
+# 300s cadence so a hung cycle cannot freeze its timer.
+TimeoutStartSec=270
+
+[Install]
+WantedBy=multi-user.target

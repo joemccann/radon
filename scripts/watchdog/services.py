@@ -415,10 +415,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # the drain's, not the receiver's: a webhook with no fires is dormant,
     # not down. 20-min window mirrors web/lib/serviceHealthWindows.ts. No IB.
     "tv-alerts-drain":  {"open": 20 * _MIN, "closed": 20 * _MIN, "requires_ib": False},
-    # radon-research.service is a continuous Dropbox/PDF reviewer.  Systemd
-    # remains active while a dependency stalls inside the worker, so its own
-    # heartbeat must be checked independently of unit state (REL-251).
-    "dropbox-research": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
+    # marketdesk-research: 5-minute marketdesk.ai research ingest
+    # (scripts/research/marketdesk_job.py via radon-marketdesk.timer, 24/7).
+    # service_cycle writes ok every cycle, including one with no new
+    # articles; 15m = three missed cycles. It replaced the retired
+    # shared-folder watcher (radon-research.service, "dropbox-research").
+    # Turso + marketdesk.ai + model ladder, no IB.
+    "marketdesk-research": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
+    # marketdesk-dropbox: the same cycle's upload outbox to the operator's
+    # Dropbox: ok / paused (write creds absent, uploads skipped) / error.
+    # paused never reaches the error bucket; the window still ages it.
+    "marketdesk-dropbox": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # preset-rebalance — WEEKLY index-constituent refresh inside the
     # monitor daemon (Sundays). Heartbeats via the DUR-14 structural
     # BaseHandler.run() write. 8-day window = weekly cadence + one day of
@@ -569,7 +576,9 @@ BUCKETS: dict[str, list[str]] = {
         "host-metrics",
         # 5-minute TradingView alert digest heartbeat (20-min window).
         "tv-alerts-drain",
-        "dropbox-research",
+        # 5-minute marketdesk.ai ingest + its Dropbox outbox (15-min window).
+        "marketdesk-research",
+        "marketdesk-dropbox",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",
         # 30s P1 auto-fix poller on the VPS. A stalled auto-fixer is silent

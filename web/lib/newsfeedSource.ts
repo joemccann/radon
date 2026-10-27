@@ -2,7 +2,25 @@ import { withoutEmDashes } from "./copyPunctuation";
 import { parseChartPlans, type ChartPlan } from "./planCharts";
 
 /** Research media stays on the authenticated same-origin path. */
-export type ResearchSource = {
+export type ResearchSource = DropboxResearchSource | MarketDeskResearchSource;
+
+/** MarketDesk article provenance (SPEC 4.6). Figures carry no page number. */
+export type MarketDeskResearchSource = {
+  kind: "marketdesk";
+  publisher: string;
+  articleId: string;
+  articleUrl: string;
+  contentHash: string;
+  documentDate: string;
+  folderDate: string;
+  pages: number[];
+  url: string;
+  figures: { url: string; caption: string }[];
+  summary?: string[];
+  extraImages?: string[];
+};
+
+export type DropboxResearchSource = {
   kind: "dropbox";
   publisher: string;
   url: string;
@@ -32,7 +50,8 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
     try { candidate = JSON.parse(candidate); } catch { return undefined; }
   }
   if (!candidate || typeof candidate !== "object") return undefined;
-  const s = candidate as ResearchSource;
+  if ((candidate as { kind?: unknown }).kind === "marketdesk") return parseMarketDeskSource(candidate as MarketDeskResearchSource);
+  const s = candidate as DropboxResearchSource;
   if (s.kind !== "dropbox" || typeof s.publisher !== "string" || !s.publisher.trim()
     || typeof s.url !== "string" || !PRIVATE_RESEARCH_ASSET.test(s.url)
     || !s.url.includes(".pdf") || typeof s.documentDate !== "string"
@@ -53,6 +72,44 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
     publisher: withoutEmDashes(s.publisher),
     figures: s.figures.map(figure => ({ ...figure, caption: withoutEmDashes(figure.caption) })),
     ...(charts ? { charts } : {}),
+  };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const isPrivatePng = (url: unknown): url is string =>
+  typeof url === "string" && PRIVATE_RESEARCH_ASSET.test(url) && url.endsWith(".png");
+
+/** Python's len(): the publisher validates bullets in code points, so astral characters count once. */
+const codePoints = (text: string): number => Array.from(text).length;
+
+function parseMarketDeskSource(s: MarketDeskResearchSource): MarketDeskResearchSource | undefined {
+  if (typeof s.publisher !== "string" || !s.publisher.trim()
+    || typeof s.articleId !== "string" || !/^[A-Za-z0-9]{8,16}$/.test(s.articleId)
+    || s.articleUrl !== `https://marketdesk.ai/library/browse/${s.articleId}`
+    || typeof s.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(s.contentHash)
+    || typeof s.documentDate !== "string" || !ISO_DATE.test(s.documentDate)
+    || typeof s.folderDate !== "string" || !ISO_DATE.test(s.folderDate)
+    || !Array.isArray(s.pages) || !s.pages.every(p => Number.isInteger(p) && p > 0)
+    || typeof s.url !== "string" || !PRIVATE_RESEARCH_ASSET.test(s.url) || !s.url.includes(".pdf")
+    || !Array.isArray(s.figures) || s.figures.length > 12
+    || !s.figures.every(f => f && isPrivatePng(f.url) && typeof f.caption === "string")
+    || (s.summary !== undefined && (!Array.isArray(s.summary) || s.summary.length > 20
+      || !s.summary.every(b => typeof b === "string" && codePoints(b) <= 500)))
+    || (s.extraImages !== undefined && (!Array.isArray(s.extraImages) || s.extraImages.length > 40
+      || !s.extraImages.every(isPrivatePng)))) return undefined;
+  return {
+    kind: "marketdesk",
+    publisher: withoutEmDashes(s.publisher),
+    articleId: s.articleId,
+    articleUrl: s.articleUrl,
+    contentHash: s.contentHash,
+    documentDate: s.documentDate,
+    folderDate: s.folderDate,
+    pages: s.pages,
+    url: s.url,
+    figures: s.figures.map(f => ({ url: f.url, caption: withoutEmDashes(f.caption) })),
+    ...(s.summary ? { summary: s.summary.map(b => withoutEmDashes(b)) } : {}),
+    ...(s.extraImages ? { extraImages: s.extraImages } : {}),
   };
 }
 
