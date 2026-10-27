@@ -381,12 +381,11 @@ def test_private_workflow_bootstrap_rejects_urls_with_query_or_fragment_secrets(
     "github",
     [
         FakeGitHub(refs=[{"ref": _ref(head="e" * 40)["ref"], "object": {"sha": "f" * 40}}]),
-        FakeGitHub(refs=[_ref(base="e" * 40)]),
         FakeGitHub(refs=[{"ref": "refs/heads/validation/fix/notsha/" + HEAD, "object": {"sha": HEAD}}]),
     ],
-    ids=("ref-object-mismatch", "stale-base", "malformed-ref"),
+    ids=("ref-object-mismatch", "malformed-ref"),
 )
-def test_bridge_ignores_stale_or_malformed_private_refs(tmp_path, github):
+def test_bridge_ignores_mismatched_or_malformed_private_refs(tmp_path, github):
     reviewer = FakeReviewer()
 
     assert _bridge(tmp_path, github=github, reviewer=reviewer).run_once() == "waiting"
@@ -1238,3 +1237,42 @@ def test_validation_workflow_rejects_incompatible_ci_event_contract(tmp_path, on
 def test_validation_copy_is_not_a_public_ci_event_contract():
     with pytest.raises(RuntimeError, match="unrecognized public CI event contract"):
         bridge_module._ci_workflow_for_validation(_VALIDATION_ON)
+
+
+def test_stale_unpublished_candidate_gets_private_revalidation_feedback(tmp_path):
+    stale = "e" * 40
+    github = FakeGitHub(refs=[_ref(base=stale)])
+    reviewer = FakeReviewer()
+    bridge = _bridge(tmp_path, github=github, reviewer=reviewer)
+
+    assert bridge.run_once() == "private-validation-failed"
+    marker = bridge.directory / f"{HEAD}.json"
+    saved = json.loads(marker.read_text())
+    assert saved["base_sha"] == stale and saved["head_sha"] == HEAD
+    feedback = saved["feedback"]
+    assert feedback["status"] == "private-review-invalid"
+    assert feedback["release"] is None
+    assert feedback["checks"] == [] and feedback["review_input_digests"] == []
+    assert "revalidate" in feedback["findings"][0]["message"].lower()
+    assert BASE in feedback["findings"][0]["message"]
+    bridge_module._validate_feedback(feedback, stale, HEAD)
+    assert reviewer.calls == []
+    assert github.calls == [(f"repos/{PRIVATE}", ()), (f"repos/{PRIVATE}/git/matching-refs/heads/validation/fix/", ())]
+    assert github.workflow_pushes == []
+    assert bridge.run_once() == "waiting"
+    assert json.loads(marker.read_text()) == saved
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_stale_candidate_preserves_existing_feedback_marker(tmp_path, published):
+    stale = "e" * 40
+    github = FakeGitHub(refs=[_ref(base=stale)])
+    bridge = _bridge(tmp_path, github=github)
+    marker = bridge.directory / f"{HEAD}.json"
+    if published:
+        bridge._save_marker(marker, {"base_sha": stale, "head_sha": HEAD, "status": "public-ci-pending", "public_pr": f"https://github.com/{PUBLIC}/pull/17"})
+    else:
+        bridge._terminal_marker(marker, stale, HEAD, "private-checks-failed", diagnostics=("Original immutable feedback",))
+    before = marker.read_bytes()
+    assert bridge.run_once() == "waiting"
+    assert marker.read_bytes() == before
