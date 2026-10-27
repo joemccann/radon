@@ -334,3 +334,11 @@ describe("ensureAuthenticated — proactive Firebase renewal", () => {
     await expect(ensureAuthenticated({ context: {}, page, env: {}, renewSession: async () => { throw new Error("unavailable"); } })).resolves.toEqual({ authenticated: true, reusedSession: true });
   });
 });
+
+it.each(["missing", "throwing"])("requires a working premium DOM probe after renewal: %s", async (probe) => {
+  const { ensureAuthenticated } = await import("../../scripts/newsfeed/auth.js");
+  const { page } = createFakePage();
+  if (probe === "missing") delete (page as { evaluate?: unknown }).evaluate;
+  else page.evaluate = async () => { throw new Error("probe unavailable"); };
+  await expect(ensureAuthenticated({ context: {}, page, env: {}, renewSession: async () => true })).rejects.toThrow(/premium/);
+});

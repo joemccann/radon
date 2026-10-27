@@ -10363,8 +10363,9 @@ Review: Sol found no actionable regression; Luna independently passed 292 focuse
 - [ ] TME4: Full suites, exact-head CI, production renewal proof; depends_on: [TME3]
 
 ### Review
-- Renewal/auth/browser focused: 68 passed. Full Vitest: 11,574 passed, 21 skipped.
+- Renewal/auth/browser coverage: 70 passed. Full Vitest: 11,576 passed, 21 skipped.
 - Renewal module coverage: 100% statements/lines/functions, 97.95% branches.
 - Full cloud: 3,511 passed, 24 skipped. Full Python: 18,460 passed, 12 skipped; two local setup/docs failures repaired and their focused regressions pass.
 - Four pre-existing TypeScript errors are in files identical to origin/main; no new errors.
+- Strict renewal proof rejects absent/throwing DOM probes: 2 native Node regressions failed first, then passed; full Vitest confirms both.
 - Latest-head CI and installed fresh-browser renewal remain pending in the PR.
