@@ -35,6 +35,7 @@ REFRESH_URL = "https://securetoken.googleapis.com/v1/token?key=" + FIREBASE_API_
 PASSWORD_URL = ("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="
                 + FIREBASE_API_KEY)
 LOGIN_URL = BASE_URL + "/api/user/login"
+LIMITS_PATH = "/api/user/limits"
 REFRESH_ENV = "MARKETDESK_FIREBASE_REFRESH_TOKEN"
 TIMEOUT = 20
 DOWNLOAD_TIMEOUT = 60
@@ -44,7 +45,9 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 BROWSER_HEADERS = {"Referer": BASE_URL + "/", "Origin": BASE_URL}
 _CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{2,63}")
 _PASSWORD_DISABLED = {"INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS", "PASSWORD_LOGIN_DISABLED"}
-TRANSIENT_CODES = frozenset({"unauthenticated", "http_transport", "http_429"})
+# The account's PDF preview allowance is spent; marketdesk.ai resets it on its own schedule.
+PREVIEW_QUOTA = "preview_quota"
+TRANSIENT_CODES = frozenset({"unauthenticated", "http_transport", "http_429", PREVIEW_QUOTA})
 FILE_SERVER_RE = re.compile(r"ts\d{1,2}\.marketdesk\.ai")
 REDIRECTS = (301, 302, 303, 307, 308)
 
@@ -336,11 +339,24 @@ class MarketDeskSession:
                 if attempt == 1:
                     self._relogin()
                     continue
+                if self._same_site(location, path) and not self.previews_available():
+                    raise MarketDeskError(PREVIEW_QUOTA)
                 raise MarketDeskError("unauthenticated")
             if status != 200:
                 raise MarketDeskError(f"http_{status}")
             return data, content_type
         raise MarketDeskError("unauthenticated")
+
+    @staticmethod
+    def _same_site(location: str, path: str) -> bool:
+        """A bounce back into marketdesk.ai itself (a spent allowance sends /blob to /files/<id>)."""
+        target = urllib.parse.urlsplit(urllib.parse.urljoin(BASE_URL + path, location))
+        return bool(location) and target.scheme == "https" and target.hostname == "marketdesk.ai"
+
+    def previews_available(self) -> bool:
+        """False only when /api/user/limits says the account's PDF preview allowance is spent."""
+        limits = self.api("GET", LIMITS_PATH)
+        return not (isinstance(limits, dict) and limits.get("previews") is False)
 
     def _relogin(self) -> None:
         try:

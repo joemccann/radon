@@ -1002,3 +1002,19 @@ def test_feedback_fetch_failure_never_fails_the_cycle(world, db):
     deps.feedback_rows = boom
     counts = job.run_cycle(env=dict(ENV), deps=deps)
     assert counts["published"] == 1
+
+
+def test_spent_preview_quota_defers_without_failing_the_cycle(world, db):
+    """marketdesk.ai's PDF preview allowance ran out (2026-10-27): wait for the reset, never fail the unit."""
+    from research.marketdesk_scrape import ScrapeError
+    world.refs = [make_ref("Qqqqqqqq01", hours_ago=1), make_ref("Qqqqqqqq02", hours_ago=2)]
+    world.fetch_errors = {"Qqqqqqqq01": ScrapeError("preview_quota")}
+    for _ in range(3):
+        counts = run(world)
+        assert counts["quota_deferred"] == 2 and counts["parked"] == 0 and counts["failed"] == 0
+    saved = ledger(db, "Qqqqqqqq01")
+    assert saved["status"] == "pending" and saved["attempts"] == 0 and saved["last_error"] == "preview_quota"
+    assert ledger(db, "Qqqqqqqq02") is None  # nothing else claimed while the allowance is spent
+    assert ("marketdesk-research", "ok", None) in world.health
+    world.fetch_errors = {}
+    assert run(world)["published"] == 2
