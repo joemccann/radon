@@ -10284,3 +10284,16 @@ L3 broader importers: cloud health wiring exposed one legacy zero-argument clien
 
 ### LEAP review before release
 - Preserved shared reservations, 80% background allowance, quotas, cache identity, exhaustion status and duplicate-scan refusal. Only LEAP opts into longer waits; cache lock and governor each retain a 120-second ceiling. Original per-ticker exception details are unknown; runbook states that evidence limit. Full exact-head CI and live scan remain release conditions.
+
+## News article reader and gallery redesign (2026-10-27)
+- [x] T1 (depends_on: []): inspect current reader, capture regression, define responsive interaction contract.
+- [x] T2 (depends_on: [T1]): failing component/browser coverage for centered bounds and independent image navigation.
+- [x] T3 (depends_on: [T2]): implement bounded reader and accessible image gallery with zoom, source and article controls.
+- [x] T4 (depends_on: [T3]): focused/cloud suites, desktop/mobile light/dark screenshots, review.
+- [ ] T5 (depends_on: [T4]): PR with exact-head CI green and required notification.
+
+### Article reader review
+- Cloud Vitest: 11,542 passed / 21 skipped before the final accessible-name correction; final focused run: 104 passed, 98.88% reader/gallery line coverage. Component lint passed.
+- Browser: all eight final gallery width/theme cases passed in isolated batches, including 600px desktop height, touch, focus wrapping, Escape, zoom and reset-on-next-article. Existing source context and sharing/export checks passed. Both PDF-tab compatibility cases passed after awaiting URL-owned tag filter transitions.
+- Private 2x before/after captures inspected for the exact JP Morgan article at 393px and 1440px, dark/light. Original images and article copy preserved; no new dependencies or production changes. Exact-head PR CI and notification remain T5.
+- Standalone typecheck remains red on four pre-existing diagnostics in unchanged `DashboardNewsFeed.tsx` and `lib/sameOrigin.ts`; neither reader component has a diagnostic.

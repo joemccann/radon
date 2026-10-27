@@ -5084,374 +5084,167 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   isolation: isolate;
-  animation: newsfeed-lightbox-fade 180ms ease-out both;
 }
-
 .newsfeed-lightbox__scrim {
   position: absolute;
   inset: 0;
-  /* Single near-opaque canvas scrim at the composite alpha the old two-layer
-     stack produced (0.60 over 0.97 = 0.988). No blur, no layering. */
-  background: color-mix(in srgb, var(--bg-canvas) 98%, transparent);
   border: 0;
-  cursor: zoom-out;
-  padding: 0;
+  background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  cursor: pointer;
 }
-
 .newsfeed-lightbox__frame {
   position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: min(1280px, 100%);
-  max-height: min(820px, 100%);
-}
-
-.newsfeed-lightbox__panel {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 0;
-  background: var(--bg-panel);
-  border: 1px solid color-mix(in srgb, var(--signal-core) 22%, var(--line-grid));
-  border-radius: 4px;
-  width: 100%;
-  max-height: inherit;
-  overflow: hidden;
-  /* Single hairline bezel. The 98% scrim does the separation work. */
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
-  animation: newsfeed-lightbox-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-/* Spectral-bar grammar — a thin signal arc on the top edge of the panel
-   echoes the scientific-instrument motif without adding visual chrome. */
-.newsfeed-lightbox__panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--signal-core) 55%, transparent) 18%,
-    color-mix(in srgb, var(--signal-core) 90%, transparent) 50%,
-    color-mix(in srgb, var(--signal-core) 55%, transparent) 82%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 3;
-}
-
-@keyframes newsfeed-lightbox-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes newsfeed-lightbox-rise {
-  from {
-    opacity: 0;
-    transform: scale(0.97) translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .newsfeed-lightbox,
-  .newsfeed-lightbox__panel {
-    animation: none;
-  }
-}
-
-/* Prev / next chevrons. Float outside the panel so they don't compete
-   with the image; they're the only on-scrim interactive elements. The
-   arrow-key shortcuts do the same job; the chevrons are the
-   discoverable affordance for users who don't try the keyboard. */
-.newsfeed-lightbox__nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 3;
-  width: 44px;
-  height: 44px;
-  background: var(--bg-panel-raised);
-  border: 1px solid color-mix(in srgb, var(--signal-core) 22%, var(--line-grid));
-  border-radius: 4px;
-  color: var(--text-primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
-}
-
-.newsfeed-lightbox__nav--prev { left: 24px; }
-.newsfeed-lightbox__nav--next { right: 24px; }
-
-.newsfeed-lightbox__nav:hover {
-  border-color: var(--signal-core-text);
-  background: color-mix(in srgb, var(--signal-core) 14%, var(--bg-canvas));
-  color: var(--signal-core-text);
-}
-
-.newsfeed-lightbox__nav--prev:hover { transform: translateY(-50%) translateX(-2px); }
-.newsfeed-lightbox__nav--next:hover { transform: translateY(-50%) translateX(2px); }
-
-@media (max-width: 900px) {
-  .newsfeed-lightbox__nav { width: 36px; height: 36px; }
-  .newsfeed-lightbox__nav {
-    top: auto;
-    bottom: 18px;
-    transform: none;
-  }
-  .newsfeed-lightbox__nav--prev { left: auto; right: 62px; }
-  .newsfeed-lightbox__nav--next { right: 18px; }
-  .newsfeed-lightbox__nav--prev:hover,
-  .newsfeed-lightbox__nav--next:hover { transform: none; }
-}
-
-/* Footer hint surfaces the keyboard shortcuts so users discover the
-   arrow-key cycling without trial-and-error. Quiet treatment so it
-   doesn't compete with the source link or absolute timestamp. */
-.newsfeed-lightbox__hint {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-top: 8px;
-  text-align: right;
-}
-
-.newsfeed-lightbox__media {
-  /* Deeper-than-canvas radial wash so the image reads as the focal anchor,
-     floating above the panel surface rather than embedded in it. */
-  background:
-    radial-gradient(
-      ellipse at center,
-      color-mix(in srgb, var(--bg-canvas) 92%, transparent) 0%,
-      var(--bg-canvas) 100%
-    );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  width: min(1400px, 100%);
+  height: min(880px, calc(100dvh - 48px));
+  max-height: 100%;
   min-height: 0;
-  padding: 16px;
-  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
-
-/* Corner reticles — scientific-instrument motif, signal that this region
-   is the "scope" without painting decorative chrome onto the image. */
-.newsfeed-lightbox__media::before,
-.newsfeed-lightbox__media::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border: 1px solid color-mix(in srgb, var(--signal-core) 32%, transparent);
-  pointer-events: none;
-}
-
-.newsfeed-lightbox__media::before {
-  top: 10px;
-  left: 10px;
-  border-right: 0;
-  border-bottom: 0;
-}
-
-.newsfeed-lightbox__media::after {
-  bottom: 10px;
-  right: 10px;
-  border-left: 0;
-  border-top: 0;
-}
-
-.newsfeed-lightbox__image {
-  display: block;
-  width: 100%;
-  height: auto;
-  /* Cap BOTH dimensions so portrait images (e.g. tall research charts whose real
-     aspect ratio differs from the declared 16:9) scale to fit instead of
-     overflowing the panel and getting clipped top/bottom. The previous
-     `max-height: 100%` was a no-op: it resolves against the flex parent's
-     INDEFINITE height. Viewport-relative cap holds regardless; object-fit keeps
-     the aspect ratio (letterboxed within the media column when narrower). 780px
-     stays under the 820px frame minus the media's 16px padding. */
-  max-width: 100%;
-  max-height: min(82vh, 780px);
-  object-fit: contain;
-  outline: 1px solid var(--img-outline);
-  outline-offset: -1px;
-}
-
-.newsfeed-lightbox__copy {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 32px 36px;
-  overflow-y: auto;
-  border-left: 1px solid var(--line-grid);
-}
-
-.newsfeed-lightbox__head { display: flex; flex-direction: column; gap: 8px; }
-
-.newsfeed-lightbox__kicker {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.newsfeed-lightbox__title {
-  font-family: var(--font-sans);
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  text-wrap: balance;
-  line-height: 1.2;
-  color: var(--text-primary);
-}
-
-.newsfeed-lightbox__body {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-}
-
-.newsfeed-lightbox__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.newsfeed-lightbox__tag {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--signal-core-text);
-  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--signal-core) 30%, var(--line-grid));
-  border-radius: 999px;
-  padding: 3px 9px;
-}
-
-.newsfeed-lightbox__footer {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--line-grid);
+.newsfeed-lightbox__toolbar,
+.newsfeed-lightbox__gallery-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-grid);
+  background: var(--bg-panel);
+  font-size: 13px;
+  color: var(--text-secondary);
 }
-
-.newsfeed-lightbox__source {
+.newsfeed-lightbox__reader-label { flex: 1; font-weight: 600; }
+.newsfeed-lightbox__controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.newsfeed-lightbox__control {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--signal-core-text);
-  text-decoration: none;
-  border: 1px solid color-mix(in srgb, var(--signal-core) 35%, var(--line-grid));
-  padding: 6px 10px;
-  border-radius: 4px;
-  transition: background 150ms ease;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-grid);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
 }
-
-.newsfeed-lightbox__source:hover {
-  background: color-mix(in srgb, var(--signal-core) 10%, transparent);
+.newsfeed-lightbox__control:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--bg-panel-raised); border-color: var(--signal-core-text); }
+.newsfeed-lightbox__control:is(:disabled, [aria-disabled="true"]) { opacity: 0.4; cursor: default; }
+.newsfeed-lightbox :is(button, a, [tabindex]):focus-visible { outline: 2px solid var(--border-focus); outline-offset: -3px; }
+.newsfeed-lightbox__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 1fr);
+  min-height: 0;
+  overflow: hidden;
 }
-
-.newsfeed-lightbox__timestamp {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+.newsfeed-lightbox__media {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-canvas);
 }
-
+.newsfeed-lightbox__gallery-toolbar { border-bottom: 0; background: transparent; }
+.newsfeed-lightbox__gallery-toolbar [role="status"] { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.newsfeed-lightbox__stage {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 16px;
+  touch-action: pan-y pinch-zoom;
+}
+.newsfeed-lightbox__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+.newsfeed-lightbox__gallery-footer { min-width: 0; padding: 12px 16px 16px; }
+.newsfeed-lightbox__gallery-caption-row { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.newsfeed-lightbox__caption { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; max-height: 6em; overflow-y: auto; }
+.newsfeed-lightbox__thumbnails { display: flex; gap: 8px; overflow-x: auto; padding: 12px 2px 2px; overscroll-behavior-x: contain; }
+.newsfeed-lightbox__thumbnails button {
+  flex: 0 0 88px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.newsfeed-lightbox__thumbnails button[aria-pressed="true"] { border-color: var(--signal-core-text); color: var(--text-primary); }
+.newsfeed-lightbox__thumbnails button:hover { background: var(--bg-panel-raised); }
+.newsfeed-lightbox__thumbnails img { width: 100%; height: 48px; object-fit: contain; }
+.newsfeed-lightbox__copy {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 28px 32px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-left: 1px solid var(--line-grid);
+  overflow-wrap: anywhere;
+}
+.newsfeed-lightbox__copy[hidden] { display: none; }
+.newsfeed-lightbox__head { display: flex; flex-direction: column; gap: 12px; }
+.newsfeed-lightbox__kicker { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.newsfeed-lightbox__title { font-size: clamp(22px, 2vw, 28px); font-weight: 600; line-height: 1.25; letter-spacing: -0.02em; color: var(--text-primary); text-wrap: balance; }
+.newsfeed-lightbox__body { max-width: 68ch; font-size: 16px; line-height: 1.7; color: var(--text-primary); white-space: pre-wrap; text-wrap: pretty; }
+.newsfeed-lightbox__tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.newsfeed-lightbox__tag { font-size: 12px; color: var(--text-secondary); border: 1px solid var(--line-grid); border-radius: var(--radius-capsule); padding: 4px 8px; }
+.newsfeed-lightbox__footer { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--line-grid); padding-top: 16px; margin-top: auto; }
+.newsfeed-lightbox__source { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: var(--radius-sm); font-size: 13px; color: var(--signal-core-text); text-decoration: none; }
+.newsfeed-lightbox__source:hover { background: var(--bg-panel-raised); }
+.newsfeed-lightbox__footer button,
+.newsfeed-lightbox__actions button { min-height: 44px; min-width: 44px; }
+.newsfeed-lightbox__frame--expanded .newsfeed-lightbox__panel { grid-template-columns: minmax(0, 1fr); }
+.newsfeed-lightbox__stage--zoomed { display: block; overflow: auto; touch-action: pan-x pan-y pinch-zoom; }
+.newsfeed-lightbox__stage--zoomed .newsfeed-lightbox__image { width: max(100%, 1600px); height: auto; max-width: none; object-fit: contain; }
+.newsfeed-lightbox__image-unavailable { padding: 24px; font-size: 16px; color: var(--text-secondary); }
+.newsfeed-lightbox__image-unavailable a { color: var(--signal-core-text); text-decoration: underline; }
 @media (max-width: 900px) {
-  .newsfeed-lightbox { padding: 16px; }
-  /* On phones the two-track grid (image / copy) starved the copy: a 1fr row
-     is minmax(auto, 1fr), so it never shrinks below the full text height and
-     the panel's overflow:hidden clipped the overspill instead of scrolling.
-     Collapse the panel into a single vertical scroll document — image, head,
-     body, tags and footer all scroll together as one sheet so every line of
-     copy is reachable. The frame needs a definite height (height:100%) so the
-     panel's percentage cap resolves; without it the percentage falls back to
-     none and the panel grows past the viewport unscrolled. */
-  .newsfeed-lightbox__frame {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 0;
-  }
-  .newsfeed-lightbox__panel {
-    display: flex;
-    flex-direction: column;
-    flex: 0 1 auto;
-    min-height: 0;
-    max-height: 100%;
-    overflow-y: auto;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
-  }
-  .newsfeed-lightbox__media {
-    flex: 0 0 auto;
-    /* Cap the image so a tall hero never pushes the copy below the fold. */
-    max-height: 46vh;
-  }
-  .newsfeed-lightbox__copy {
-    flex: 0 0 auto;
-    /* The panel owns scrolling now; the copy flows at natural height. */
-    overflow-y: visible;
-    border-left: 0;
-    border-top: 1px solid var(--line-grid);
-    padding: 20px 22px;
-  }
-  .newsfeed-lightbox__title { font-size: 18px; }
-  .newsfeed-lightbox__footer {
-    padding-right: 94px;
-  }
-  .newsfeed-lightbox__hint {
-    display: none;
-  }
+  .newsfeed-lightbox { padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .newsfeed-lightbox__frame { height: calc(100dvh - 24px); max-height: 100%; }
+  .newsfeed-lightbox__panel { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .newsfeed-lightbox__media { height: min(480px, 52dvh); }
+  .newsfeed-lightbox__copy { overflow: visible; border-left: 0; border-top: 1px solid var(--line-grid); padding: 24px; }
+  .newsfeed-lightbox__frame--expanded .newsfeed-lightbox__panel { display: grid; overflow: hidden; }
+  .newsfeed-lightbox__frame--expanded .newsfeed-lightbox__media { height: 100%; }
 }
-
-@media (max-width: 900px) and (pointer: coarse) {
-  .newsfeed-lightbox {
-    padding:
-      max(16px, env(safe-area-inset-top))
-      max(16px, env(safe-area-inset-right))
-      max(16px, env(safe-area-inset-bottom))
-      max(16px, env(safe-area-inset-left));
-  }
-
-  .newsfeed-lightbox__nav {
-    display: none;
-  }
-
-  .newsfeed-lightbox__footer {
-    padding-right: 0;
-  }
+@media (max-width: 600px) {
+  .newsfeed-lightbox { padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  .newsfeed-lightbox__frame { height: 100%; }
+  .newsfeed-lightbox__toolbar { padding: 6px 10px; gap: 8px; }
+  .newsfeed-lightbox__toolbar nav span { display: none; }
+  .newsfeed-lightbox__gallery-toolbar { padding: 8px 12px; gap: 6px; }
+  .newsfeed-lightbox__gallery-toolbar .newsfeed-lightbox__control { padding-inline: 8px; gap: 6px; }
+  .newsfeed-lightbox__stage { padding-inline: 12px; }
+  .newsfeed-lightbox__gallery-footer { padding: 8px 12px 12px; }
+  .newsfeed-lightbox__copy { padding: 24px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .newsfeed-lightbox__control { transition: none; }
 }
 
 .news-feed-footer {
