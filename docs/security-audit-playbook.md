@@ -381,7 +381,14 @@ line here whenever you ship a security fix.**
   a redaction label opts a value out only when it is the whole value or is
   followed by query structure whose key is itself a query parameter. A
   trailing backslash joins the next line, and a subscript target
-  (`os.environ['NAME'] = ...`) is an assignment.
+  (`os.environ['NAME'] = ...`) is an assignment. Shell quoting is tokenized
+  too: `$'...'` and `$"..."` are quoted values, an unquoted run touching a
+  closed literal belongs to the same word, and a `$(...)` value with a heredoc
+  runs through its terminator line. A type annotation (`NAME: str = ...`) is
+  skipped to the initializer, and a string prefix may open a triple-quoted
+  value. A later-line literal close that the escaping grammar rejects is not a
+  close: the value is unterminated through that line. A placeholder word
+  inside a value exempts it only when the rest carries no opaque segment.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
