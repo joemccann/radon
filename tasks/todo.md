@@ -10345,3 +10345,5 @@ Review: unit tests cover GET/HEAD, route switching, spoofed left hops, reset and
 - [x] B1 depends_on: [] Production native binary fails the 1.4.4 floor: embedded Bun v1.4.3 despite the host upgrade.
 - [x] B2 depends_on: [B1] Verify the replacement native package's registry SHA-512 and embedded Bun 1.4.4; update exact 2.1.311 pin/lock and real image smoke.
 - [ ] B3 depends_on: [B2] Green image CI, deploy, verify binary floor and keeper health.
+
+Audit release review: CI scripts-df rejected the new HTTP-only spec because it was unclassified. Added its dated local verification and explicit hold-out reason to the existing curation ledger; retained required unit coverage and all workflow gates.
