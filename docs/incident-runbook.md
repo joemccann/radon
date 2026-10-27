@@ -2758,7 +2758,8 @@ Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
   shed; radon-api `Script flow_analysis.py timed out after 120s`; not
   `Subprocess capacity exhausted` on the final attempt. Deploy
   stop-clean is `Result=signal`. Pure capacity shed is
-  `flow-refresh-capacity-502`.
+  `flow-refresh-capacity-502`. `curl: (28)` with `http=000` and 0 bytes
+  at the 180s curl deadline is `flow-refresh-analysis-admission-wait`.
 - **Remediation (code):** raise `/flow-analysis` `run_script` timeout to
   180 so it matches the wrapper SCAN_TIMEOUT default and `/discover`.
   Keep capacity-shed classification on the body marker; a real timeout
@@ -2766,6 +2767,63 @@ Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
 - **Regression:**
   `scripts/api/tests/test_flow_tab_cooldown.py::test_flow_analysis_timeout_matches_wrapper_scan_budget`.
 - **Code:** `scripts/api/server.py` (`flow_analysis`).
+
+---
+
+## flow-refresh-analysis-admission-wait
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when portfolio `flow_analysis.py` borrows the
+single-ticker report's 120s UW admission wait and the wrapper curl
+deadline fires first.** Peak: 2026-10-27 14:03:20Z, page
+`b4b738d721319188c666ece444eed378`. Scanner in the same fire exited OK
+after one curl-7 retry. Discover then shed a short UW rate limit.
+
+- **Mechanism:** `fetch_flow` defaults `retry_transient=True`, which
+  builds `UWClient(admission_timeout=FLOW_ADMISSION_WAIT_S)` (120s).
+  That wait is for `flow_report.py` behind `POST /flow-analysis/{ticker}`
+  (300s subprocess budget). The hourly book calls the same function
+  for every open position and only opts out of history backfill.
+  At the top of the hour the shared governor is saturated. The first
+  name can sit in admission for up to 120s. Two such waits are 240s.
+  The wrapper `SCAN_TIMEOUT` is 180s and `/flow-analysis` uses the same
+  180s `run_script` timeout, so curl `-m` expires first:
+  `curl: (28) Operation timed out after 180002 milliseconds with 0
+  bytes received`, then
+  `flow-analysis FastAPI outcome indeterminate (curl=28, http=000)`.
+  The disconnect cancels the in-flight script (BUG-013: no direct
+  fallback). The oneshot exits 1. Later hours in the same session can
+  still finish (about 125s to 132s) while one wait still fits, which
+  leaves `Result=success` on the unit by the time the page is read.
+  `/health/lite` stayed authenticated.
+- **Detection:** unit journal scanner OK, then one flow-analysis POST,
+  then `curl: (28)` at about 180s with `http=000`, then discover may
+  shed or succeed, then `Flow refresh finished with 1 failed scan(s)`.
+  `systemctl show` on the failed invocation is `exit-code` /
+  `ExecMainStatus=1` / `NRestarts=0`. The next timer can already be
+  `Result=success`. Read the journal at `paged_at`.
+- **Discriminating check:** `curl=28` and `http=000` with 0 bytes at
+  the wrapper curl deadline, not `curl=0` and `http=502`. A body of
+  `Script flow_analysis.py timed out after 120s` is
+  `flow-refresh-analysis-timeout`. Instant
+  `Subprocess capacity exhausted` is `flow-refresh-capacity-502`.
+  `curl: (7)` then fallback is `flow-refresh-connect-refused`.
+  Discover HTTP 400 `discover rate limit shed` is
+  `flow-refresh-discover-rate-limit-shed` and is not this page when
+  flow-analysis already returned OK. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
+  in the same minute, stand down.
+- **Remediation (code):** the portfolio scan passes
+  `retry_transient=False`, the same fail-fast client scanner and
+  discover use (5s default admission, no client retry ladder). A
+  rate-limited name is caught per ticker and the book still prints
+  JSON inside the 180s budget. The single-ticker report keeps the
+  120s wait. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
+  shorten `FLOW_ADMISSION_WAIT_S`. Do not `reset-failed`. The next
+  timer after deploy is enough.
+- **Regression:**
+  `scripts/tests/test_flow_analysis.py::test_portfolio_scan_does_not_use_the_report_admission_wait`.
+- **Code:** `scripts/flow_analysis.py` (`run_analysis`).
 
 ---
 
