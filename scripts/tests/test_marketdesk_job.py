@@ -922,7 +922,7 @@ def test_copy_is_grounded_in_the_source_summary_without_pdf_claims(world, db):
     run(world)
     assert not [c for c in world.calls if c[0] in ("pdf_pages", "download_pdf")]
     assert ("copy_body", "Title Pdftext001\nEBITDA $13.80B, curve up 12bp.") in world.calls
-    assert "SOURCE ARTICLE TEXT" in world.prompts[0] and "No PDF was read" in world.prompts[0]
+    assert world.prompts == []  # no preliminary relevance model; full source goes to copy
 
 
 def test_copy_sees_the_figure_images(world, db):
@@ -1060,21 +1060,21 @@ def outcome_row(db, article_id):
     return dict(zip([c[0] for c in cur.description], values)) if values else None
 
 
-def test_empty_selection_is_held_never_copied_and_independently_stored_pdf_uploads(world, db):
+def test_unknown_identity_is_held_never_copied_and_independently_stored_pdf_uploads(world, db):
     world.refs = [make_ref("Held000001", title="Routine recap")]
     pdf_url, _ = preseed_stored_pdf(world, db, world.refs[0])
-    world.selections = {"Routine recap": {"candidates": [], "reason": "no new measured evidence"}}
+    world.folders = ["2026", "October", "Oct 26"]
     counts = run(world)
     assert counts["held"] == 1 and counts["published"] == 0
     assert not [c for c in world.calls if c[0] in ("write_copy", "download_images")]
     assert world.published == []
     saved = ledger(db, "Held000001")
-    assert saved["status"] == "held" and saved["reason_code"] == "NO_CANDIDATES"
+    assert saved["status"] == "held" and saved["reason_code"] == "PUBLISHER_UNKNOWN"
     assert saved["dropbox_status"] == "uploaded"
-    assert world.uploads[0][0] == "/Radon/MarketDesk/2026/October/Oct 26/Acme Research/Routine recap.pdf"
+    assert world.uploads[0][0] == "/Radon/MarketDesk/2026/October/Oct 26/Routine recap.pdf"
     out = outcome_row(db, "Held000001")
-    assert out["outcome"] == "held" and json.loads(out["reason_codes"]) == ["NO_CANDIDATES"]
-    assert out["pipeline"] == "marketdesk" and out["publisher"] == "Acme Research"
+    assert out["outcome"] == "held" and json.loads(out["reason_codes"]) == ["PUBLISHER_UNKNOWN"]
+    assert out["pipeline"] == "marketdesk" and out["publisher"] == "unknown"
     assert out["file_id"] == "Held000001" and out["file_name"] == "Routine recap.pdf"
     context = json.loads(out["context_json"])
     assert context["sourceUrl"] == world.refs[0].url and saved["pdf_asset"] == pdf_url
@@ -1084,7 +1084,7 @@ def test_empty_selection_is_held_never_copied_and_independently_stored_pdf_uploa
 
 def test_held_article_without_stored_pdf_does_not_download_or_wait_for_one(world, db):
     world.refs = [make_ref("HeldNoPDF1", title="Routine recap")]
-    world.selections = {"Routine recap": {"candidates": [], "reason": "no new measured evidence"}}
+    world.folders = ["2026", "October", "Oct 26"]
     counts = run(world)
     saved = ledger(db, "HeldNoPDF1")
     assert counts["held"] == 1 and counts["uploaded"] == 0
@@ -1095,16 +1095,13 @@ def test_held_article_without_stored_pdf_does_not_download_or_wait_for_one(world
     assert context["sourceUrl"] == world.refs[0].url
 
 
-def test_triage_drop_skips_the_model_entirely(world, db):
-    world.refs = [make_ref("Drop000001", title="EURUSD note")]
-    world.summary = ["# EURUSD: Range trade into the ECB"]
+def test_fx_report_enters_grounded_copy_without_relevance_selection(world, db):
+    world.refs = [make_ref('Drop000001', title='EURUSD note')]
+    world.summary = ['# EURUSD: Range trade into the ECB']
     counts = run(world)
-    assert counts["dropped"] == 1
-    assert world.prompts == [] and not [c for c in world.calls if c[0] == "write_copy"]
-    assert ledger(db, "Drop000001")["reason_code"] == "DOC_TYPE_FX_PAIR_NOTE"
-    out = outcome_row(db, "Drop000001")
-    assert out["outcome"] == "dropped" and json.loads(out["reason_codes"]) == ["DOC_TYPE_FX_PAIR_NOTE"]
-
+    assert counts['published'] == 1 and counts['dropped'] == 0
+    assert world.prompts == [] and ('copy_finding', None) in world.calls
+    assert ledger(db, 'Drop000001')['status'] == 'published'
 
 def test_unknown_publisher_is_held(world, db):
     world.refs = [make_ref("Unkn000001", title="Anon note")]
@@ -1124,12 +1121,12 @@ def test_duplicate_of_a_published_article_is_dropped(world, db):
     assert ledger(db, "Dupe000001")["fingerprint"]
 
 
-def test_selected_finding_reaches_the_copy_and_the_published_outcome_is_recorded(world, db):
+def test_full_source_reaches_copy_without_model_filter_and_published_outcome_is_recorded(world, db):
     world.refs = [make_ref("Pub0000001", title="Vol digest")]
     world.selections = {"Vol digest": {"candidates": [{"title": "Tech vol premium", "content": "Spread widened."}]}}
     counts = run(world)
     assert counts["published"] == 1
-    assert ("copy_finding", "Tech vol premium") in world.calls
+    assert ("copy_finding", None) in world.calls and world.prompts == []
     calls = [c[0] for c in world.calls]
     assert "pdf_pages" not in calls and "download_pdf" not in calls
     assert calls.index("fetch_article") < calls.index("download_images") < calls.index("write_copy")
@@ -1139,25 +1136,20 @@ def test_selected_finding_reaches_the_copy_and_the_published_outcome_is_recorded
     assert saved["status"] == "published" and json.loads(saved["folders_json"])[-1] == "Acme Research"
 
 
-def test_select_prompt_carries_recent_feed_titles(world, db):
-    world.refs = [make_ref("Rcnt000001", title="Vol digest")]
-    world.recent = [{"title": "Yesterday's CTA post", "timestamp": "2026-10-25T10:00:00+00:00"}]
-    run(world)
-    assert "Yesterday's CTA post" in world.prompts[0]
+def test_recent_titles_do_not_trigger_a_preliminary_relevance_model(world, db):
+    world.refs = [make_ref('Rcnt000001', title='Vol digest')]
+    world.recent = [{'title': "Yesterday's CTA post", 'timestamp': '2026-10-25T10:00:00+00:00'}]
+    assert run(world)['published'] == 1 and world.prompts == []
 
-
-def test_select_outage_parks_without_spending_an_attempt(world, db):
-    world.refs = [make_ref("Outg000001", title="Vol digest")]
-    world.select_outage = {"Vol digest"}
-    with pytest.raises(job.ArticlesFailed):  # health turns red, as for a copy-step outage
-        run(world)
-    saved = ledger(db, "Outg000001")
-    assert saved["status"] == "pending" and saved["attempts"] == 0
-
+def test_unused_relevance_model_outage_cannot_block_article_generation(world, db):
+    world.refs = [make_ref('Outg000001', title='Vol digest')]
+    world.select_outage = {'Vol digest'}
+    assert run(world)['published'] == 1
+    assert ledger(db, 'Outg000001')['status'] == 'published' and world.prompts == []
 
 def test_filtered_articles_count_against_the_per_cycle_cap(world, db):
     world.refs = [make_ref(f"Capd00000{n}", title=f"Recap {n}", hours_ago=n) for n in range(1, 5)]
-    world.selections = {f"Recap {n}": {"candidates": []} for n in range(1, 5)}
+    world.folders = ["2026", "October", "Oct 26"]
     counts = run(world, env={"MARKETDESK_MAX_PER_CYCLE": "2"})
     assert counts["held"] == 2
 
@@ -1170,16 +1162,17 @@ def held_vote(article_id, vote_id="v1", comment="should be in the feed"):
 def test_should_have_published_vote_requeues_with_the_operator_note(world, db):
     old = make_ref("Vote000001", title="Routine recap", hours_ago=72)  # outside the lookback and off the listing
     world.refs = [make_ref("Vote000001", title="Routine recap", hours_ago=1)]
-    world.selections = {"Routine recap": {"candidates": []}}
+    world.folders = ["2026", "October", "Oct 26"]
     run(world)
     assert ledger(db, "Vote000001")["status"] == "held"
     world.refs = []
     world.feedback = [held_vote("Vote000001")]
-    world.selections = {"Routine recap": {"candidates": [{"title": "It matters", "content": "Measured."}]}}
+    world.folders = ["2026", "October", "Oct 26", "Acme Research"]
     world.prompts.clear()
     counts = run(world)
     assert counts["requeued"] == 1 and counts["published"] == 1
-    assert "OPERATOR NOTE" in world.prompts[0] and "should be in the feed" in world.prompts[0]
+    assert world.prompts == []
+    assert world.outcomes[-1][1]["operator_note"]["comment"] == "should be in the feed"
     assert ledger(db, "Vote000001")["status"] == "published" and ledger(db, "Vote000001")["note"] is None
     assert store.feedback_handled() == {"v1"}
     world.prompts.clear()
@@ -1187,7 +1180,7 @@ def test_should_have_published_vote_requeues_with_the_operator_note(world, db):
     assert old.article_id == "Vote000001"
 
 
-def test_feedback_sync_refreshes_operator_examples_for_select(world, db, tmp_path):
+def test_feedback_sync_preserves_examples_without_relevance_veto(world, db, tmp_path):
     world.root = tmp_path / "root"
     world.root.mkdir()
     world.feedback = [("v9", "post", "research-" + "a" * 32, None, "", "down", '["not_relevant"]', "too routine",
@@ -1195,7 +1188,9 @@ def test_feedback_sync_refreshes_operator_examples_for_select(world, db, tmp_pat
                        "2026-10-26T15:00:00+00:00")]
     world.refs = [make_ref("Lern000001", title="Vol digest")]
     run(world)
-    assert "OPERATOR PREFERENCES" in world.prompts[0] and "too routine" in world.prompts[0]
+    from research import learn
+    assert "too routine" in (world.root / learn.EXAMPLES).read_text()
+    assert world.prompts == [] and len(world.published) == 1
 
 
 def test_feedback_fetch_failure_never_fails_the_cycle(world, db):
@@ -1263,3 +1258,67 @@ def test_pending_backlog_runs_after_it_leaves_latest_listing(world, db):
     counts = run(world)
     assert counts["published"] == 1
     assert ledger(db, old.article_id)["status"] == "published"
+
+
+def test_off_book_single_name_is_published_without_book_or_selector_io(world, db):
+    world.refs = [make_ref('Offbook001', title='Acme Corp (ACME) initiation')]
+    world.summary = ['Acme Corp (ACME) Rating: BUY Price Target $50']
+    deps = build_deps(world)
+    def forbidden():
+        raise AssertionError('Portfolio lookup cannot gate all-suitable MarketDesk admission')
+    deps.book_tickers = forbidden
+    deps.recent_titles = forbidden
+    deps.select = lambda _: forbidden()
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts['published'] == 1 and ledger(db, 'Offbook001')['status'] == 'published'
+    assert ('copy_finding', None) in world.calls
+    assert ('copy_summary', tuple(world.summary)) in world.calls
+    assert any(c[0] == 'certify' for c in world.calls)
+
+
+def test_retired_relevance_holds_replay_automatically_outside_listing_once(world, db):
+    old = make_ref('Replay0001', title='FX source report', hours_ago=100)
+    store.discover([old])
+    db.execute("UPDATE marketdesk_articles SET status='held',reason_code='NO_CANDIDATES',attempts=3 WHERE article_id=?", (old.article_id,))
+    world.refs = []
+    counts = run(world)
+    assert counts['requeued'] == 1 and counts['published'] == 1
+    assert ledger(db, old.article_id)['status'] == 'published'
+    assert run(world)['requeued'] == 0 and len(world.published) == 1
+
+
+def test_all_suitable_policy_still_blocks_unsupported_generated_numbers(world, db):
+    from research import marketdesk_copy
+    world.refs = [make_ref('Factual001', title='EURUSD source report')]
+    deps = build_deps(world)
+    from clients.model_ladder import LadderResult
+    def unsupported(**kwargs):
+        def complete(prompt, **options):
+            draft = {'title': 'Rates source', 'content': 'The curve moved 999bp.\n\nThat is the measured change.',
+                     'captions': {key: 'Curve positioning' for key, _ in kwargs['images']},
+                     'tags': ['RATES'], 'tickers': []}
+            return LadderResult(data=draft, text='{}', provider='fake', model='fake')
+        return marketdesk_copy.write_copy(**kwargs, complete=complete)
+    deps.write_copy = unsupported
+    with pytest.raises(job.ArticlesFailed):
+        job.run_cycle(env=dict(ENV), deps=deps)
+    saved = ledger(db, 'Factual001')
+    assert saved['status'] == 'pending' and saved['attempts'] == 1
+    assert world.published == []
+    assert 'numeric' in saved['last_error'] or 'number' in saved['last_error']
+
+
+def test_same_cycle_operator_vote_retains_note_before_automatic_policy_replay(world, db):
+    ref = make_ref('VoteReplay1', title='FX source report', hours_ago=100)
+    store.discover([ref])
+    db.execute("UPDATE marketdesk_articles SET status='held',reason_code='NO_CANDIDATES',attempts=3 WHERE article_id=?", (ref.article_id,))
+    world.refs = []
+    world.feedback = [held_vote(ref.article_id, vote_id='same-cycle-vote', comment='Keep the hedge explicit')]
+    counts = run(world)
+    assert counts['requeued'] == 1 and counts['published'] == 1
+    review = world.outcomes[-1][1]
+    assert review['operator_note'] == {'kind': 'publish', 'comment': 'Keep the hedge explicit', 'feedback_id': 'same-cycle-vote'}
+    assert store.feedback_handled() == {'same-cycle-vote'}
+    assert ledger(db, ref.article_id)['status'] == 'published'
+    assert len([c for c in world.calls if c[0] == 'fetch_article']) == 1
+    assert run(world)['requeued'] == 0 and len(world.published) == 1

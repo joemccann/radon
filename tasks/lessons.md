@@ -1,3 +1,8 @@
+# A broad newsfeed is not the trading book (2026-10-27)
+
+- The user chose "Publish all suitable reports" for MarketDesk. Do not infer portfolio relevance from the trading workflow: FX and off-book single-name source reports belong in this newsfeed. Keep the separate Dropbox intake policy scoped to that intake.
+- Admission still requires usable source material, known identity, deduplication and source-grounded final copy/Humanizer certification. Replay only the retired relevance reason codes in bounded idempotent batches; never reset every held, failed or published item.
+
 # Backlog replay must yield to deployment (2026-10-27)
 
 - Before each manual managed-job start, atomically check the production deploy lock and refuse admission while a transition journal exists. Never queue starts during teardown or recovery. Release the admission lock immediately after the nonblocking start; do not hold up deployment for an article cycle.
