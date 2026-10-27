@@ -149,6 +149,11 @@ later cycle.
   rung), HTTP 5xx or 429, a transport error, and a session that stays signed
   out after one re-login (which also stops the cycle).
   Parked articles retry every cycle until they publish or leave the lookback.
+- The account has a PDF preview allowance. Once it is spent, `/files/<id>/blob`
+  bounces back to `/files/<id>` and `/api/user/limits` answers
+  `{"previews": false}`. The article is parked as `preview_quota`, the rest of
+  the cycle is deferred (`quota_deferred`), and the cycle exits clean: the unit
+  does not fail while marketdesk.ai resets the allowance.
 - `claim` writes a lease before the slow work. A run killed mid-article
   (`TimeoutStartSec`, SIGTERM) leaves it, and the next claim counts that
   attempt, so an article that always overruns retires after 5 kills.
