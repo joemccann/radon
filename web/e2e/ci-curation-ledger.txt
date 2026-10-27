@@ -540,3 +540,6 @@ mobile-risk-reversal-quote-sign.spec.ts
 #   next dev :3000 with the recorded SSE fixture. Explained cards end on the
 #   capacity-charges sentence and do not contain investment or financial advice.
 newsfeed-explain.spec.ts
+
+# REVIEWED 2026-10-27 public-share-preview-limit.spec.ts - HTTP-only middleware integration passed locally against real Next (1/1); not a P0 financial browser journey. Required Vitest covers its GET/HEAD, route/IP identity and window-reset contracts. Held out of the financial-browser CI list; no CI browser pass claimed.
+public-share-preview-limit.spec.ts

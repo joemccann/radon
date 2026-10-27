@@ -383,3 +383,10 @@ class TestWindowValuesMatchAcrossTsAndPython:
         ts = _ts_windows_secs()
         assert len(ts) >= 20, f"TS window parser found only {len(ts)} entries"
         assert ts.get("vol-cone") == (26 * 3600, 4 * 86400)
+
+
+def test_event_odds_has_no_scheduler_and_is_not_polled_for_staleness():
+    from watchdog import services
+
+    assert "event-odds" not in services.SCHEDULED_SERVICES
+    assert all("event-odds" not in names for names in services.BUCKETS.values())

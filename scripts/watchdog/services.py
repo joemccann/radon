@@ -485,10 +485,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "equibles-13f": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-ats-venue-share": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-cot-positioning": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
-    # event-odds — fetch_event_odds.py via run_event_odds.sh (no in-repo VPS
-    # timer as of 2026-10-23; see open question on its scheduler), holiday-aware.
-    # Windows match catalysts (7h open / 4d closed). Polymarket only — no IB.
-    "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # event-odds is request-driven (GET /event-odds/{ticker}), with no VPS timer.
+    # Its retained health row is on-demand in the web catalog.
     # subscription-tokens — agent-CLI subscription credential vault + refresh
     # (scripts/subscription_tokens via radon-subscription-tokens.timer, every
     # 30 min, 24/7). Heartbeats ok/error every run with the worst provider
@@ -752,7 +750,7 @@ BUCKETS: dict[str, list[str]] = {
         # Weekly weekend disk cleanup on the VPS — hourly check surfaces a
         # missed sweep within 1h of the 8-day window expiring.
         "disk-cleanup",
-        # Equibles daily + weekly + event-odds. Hourly check surfaces a
+        # Equibles daily + weekly. Hourly check surfaces a
         # missed fire within 1h of the window expiring (preset-rebalance
         # weekly precedent).
         "equibles-short-crowding",
@@ -760,7 +758,6 @@ BUCKETS: dict[str, list[str]] = {
         "equibles-13f",
         "equibles-ats-venue-share",
         "equibles-cot-positioning",
-        "event-odds",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

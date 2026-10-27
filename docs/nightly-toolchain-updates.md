@@ -149,3 +149,12 @@ exclusive gate while updating only that account's native CLIs. It never
 invokes Homebrew or changes the operator's installations. Each busy bot CLI
 is deferred independently; a managed Codex app-server does not block this
 maintenance action. The bot's release state is private and retained.
+
+### Immutable Claude runtime floor
+
+Host Bun updates do not alter Claude's bundled runtime. The app image pins
+Claude Code 2.1.311, whose integrity-verified Linux payload contains Bun 1.4.4.
+Its existing unprivileged image smoke now checks the embedded Bun version as
+well as the CLI version and root ownership, and rejects a missing or older
+runtime marker. Promote a new exact native package through the normal image
+CI/deploy; never mutate the running container or enable its self-updater.

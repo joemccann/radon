@@ -324,3 +324,22 @@ mode — a disabled endpoint means the handler never runs. The durable signal is
 the provisioning RATE: alert when `user.created` signups occur with no
 corresponding `demo_users` row, or poll the Svix endpoint's enabled/error-rate
 state. Neither exists yet.
+
+### VM dependency-build prerequisite
+
+The demo VM Dockerfile is maintained on the VM at `/opt/radon-demo/Dockerfile`.
+Before its requirements install, it must run the same hash-verified FastEmbed
+wheel materializer as production. The wheel is generated and gitignored, so
+adding `vendor/` to a Git archive cannot supply it. The build stages are:
+
+```dockerfile
+COPY app/requirements.txt ./requirements.txt
+COPY app/scripts/deps/materialize_fastembed_pillow13.py ./scripts/deps/materialize_fastembed_pillow13.py
+RUN python scripts/deps/materialize_fastembed_pillow13.py
+RUN pip install --no-cache-dir -r requirements.txt
+```
+
+This prerequisite was installed and the automatic deployment verified on
+2026-10-27. Keep the materializer inside the image build; never execute incoming
+application code as root on the VM host. The existing revision, demo-database
+isolation and unauthenticated/authenticated health gates remain required.

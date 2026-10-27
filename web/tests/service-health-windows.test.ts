@@ -884,9 +884,9 @@ describe("unregistered-writer regression — equibles + event-odds", () => {
     expect(isStale("equibles-cot-positioning", recent, "open", NOW)).toBe(false);
   });
 
-  it("event-odds matches catalysts (7h open, 4d closed), requires_ib false", () => {
+  it("event-odds is on-demand with retained 7h/4d windows, requires_ib false", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["event-odds"]).toBeDefined();
-    expect(getServiceCategory("event-odds")).toBe("scheduled");
+    expect(getServiceCategory("event-odds")).toBe("on-demand");
     expect(getFreshnessWindowMs("event-odds", "open")).toBe(7 * HOUR);
     expect(getFreshnessWindowMs("event-odds", "extended")).toBe(7 * HOUR);
     expect(getFreshnessWindowMs("event-odds", "closed")).toBe(4 * DAY);

@@ -73,6 +73,8 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - Do not call the PR complete while any applicable check on the latest head is queued, in progress, or failing. Superseded runs do not count.
 - After the latest head is fully green, send exactly one normal-priority Pushover notification titled `radon PR green`. Its message must briefly describe the PR and include the clickable GitHub PR URL (`url` plus `url_title`). Load only `PUSHOVER_USER` and `PUSHOVER_TOKEN`; never expose credentials. Confirm Pushover accepted the request. Missing credentials or delivery failure must be reported and retried, never silently skipped or described as complete.
 
+The unattended release coordinator requires strict up-to-date checks, all existing app-bound checks, and administrator enforcement. Preserve this protection; let eligible maintenance branches update and rerun exact-head CI before release. See `docs/unattended-releases.md`.
+
 ## Verification
 
 - Bug fixes use red/green TDD: failing test, minimal fix, green test.
