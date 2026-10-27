@@ -25,6 +25,7 @@ Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and 
 
 - Stale `scheduled` services produce red banners.
 - Stale `on-demand` services become `state="dormant"` with amber chip.
+- `event-odds` is request-driven by `GET /event-odds/{ticker}`; no VPS timer owns it. Keep it out of scheduled watchdog buckets.
 - Applicable event-driven writers use 24h windows; a missing replica file disables `replica-watchdog` evaluation before historical health rows are read.
 - `service_health` row state reflects the writer's health, not the content or severity of the last event it dispatched.
 - Do not mirror dispatched alert severity into the writer's own row.

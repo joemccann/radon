@@ -90,6 +90,8 @@ def mint_mtls(tmp_path: Path) -> dict[str, Path]:
     ext.write_text(
         "subjectAltName=IP:127.0.0.1,IP:10.0.0.4\n"
         "extendedKeyUsage=serverAuth,clientAuth\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid:always\n"
         "keyUsage=digitalSignature,keyEncipherment\n"
     )
     _openssl(
@@ -98,6 +100,7 @@ def mint_mtls(tmp_path: Path) -> dict[str, Path]:
         "-keyout", str(ca_key), "-out", str(ca_pem),
         "-addext", "basicConstraints=critical,CA:TRUE",
         "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+        "-addext", "subjectKeyIdentifier=hash",
     )
     for key, csr, pem, cn in (
         (server_key, server_csr, server_pem, "server"),
@@ -118,6 +121,7 @@ def mint_mtls(tmp_path: Path) -> dict[str, Path]:
         "-subj", "/CN=rogue-ca",
         "-addext", "basicConstraints=critical,CA:TRUE",
         "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+        "-addext", "subjectKeyIdentifier=hash",
         "-keyout", str(rogue_ca_key), "-out", str(rogue_ca),
     )
     _openssl(
@@ -451,3 +455,13 @@ class TestHelperArgv:
         assert serve.peer_allowed("127.0.0.1", allow)
         assert serve.peer_allowed("::ffff:127.0.0.1", allow)
         assert not serve.peer_allowed("10.0.0.4", allow)
+
+
+def test_generated_mtls_certificates_identify_the_issuing_key(certs):
+    """Strict Python/OpenSSL verification must test the protocol, not fail on the fixture PKI."""
+    for name in ("cert", "client_cert", "rogue_cert"):
+        result = subprocess.run(
+            ["openssl", "x509", "-in", str(certs[name]), "-text", "-noout"],
+            capture_output=True, text=True, check=True,
+        )
+        assert "X509v3 Authority Key Identifier" in result.stdout, name
