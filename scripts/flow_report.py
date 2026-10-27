@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -140,17 +141,28 @@ def main() -> None:
         "--history-budget-secs",
         type=float,
         default=None,
-        help="Seconds to spend walking uncached prior days; the rest backfill next scan",
+        help="Seconds of UW paging this run may spend; skipped closed days backfill next scan",
+    )
+    parser.add_argument(
+        "--deadline-epoch",
+        type=float,
+        default=None,
+        help="Unix time paging must stop by; FastAPI sets it from its scan deadline",
     )
     args = parser.parse_args()
 
+    # An absolute deadline survives FastAPI's capacity-shed retries, which
+    # re-run this script later with the same argv: a relative budget would
+    # overrun the scan window by however long the retries waited.
+    budget = args.history_budget_secs
+    if args.deadline_epoch is not None:
+        budget = max(0.0, args.deadline_epoch - time.time())
+
     try:
-        if args.history_budget_secs is None:
+        if budget is None:
             report = build_report(args.ticker, lookback_days=args.days)
         else:
-            report = build_report(
-                args.ticker, lookback_days=args.days, history_budget_s=args.history_budget_secs,
-            )
+            report = build_report(args.ticker, lookback_days=args.days, history_budget_s=budget)
     except Exception as exc:  # noqa: BLE001 - surface root cause to caller
         print(json.dumps({"error": str(exc), "ticker": args.ticker.upper()}))
         sys.exit(1)
