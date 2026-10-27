@@ -16,6 +16,7 @@ import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 import { isSetupMode, isSetupPath, isAuthMisconfigured, SETUP_PAGE_PATH } from "@/lib/setup/setupMode";
 import { sameOriginMutationResponse } from "@/lib/sameOrigin";
+import { clientIp, rateLimit, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
 
 // ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
 //
@@ -517,6 +518,25 @@ export default async function middleware(
 
     const misconfiguredGate = handleAuthMisconfiguredGate(request);
     if (misconfiguredGate) return misconfiguredGate;
+  }
+
+  // Preview reads stay public, but all six share one per-peer request budget.
+  // Use the existing bounded, per-instance limiter; clientIp uses Caddy's
+  // appended rightmost peer, not an attacker-supplied leftmost hop.
+  if ((PUBLIC_SHARE_API_ROUTES as readonly string[]).includes(request.nextUrl.pathname)
+      && PREVIEW_SAFE_METHODS.has(request.method.toUpperCase())) {
+    const budget = rateLimit(`share-preview:${clientIp(request)}`, {
+      limit: SHARE_PNL_LIMIT, windowMs: SHARE_WINDOW_MS,
+    });
+    if (!budget.ok) {
+      const requestId = getRequestId();
+      const response = jsonApiError({
+        message: "Too many preview requests. Try again shortly.",
+        status: 429, code: "RATE_LIMITED", requestId,
+      });
+      response.headers.set("Retry-After", String(budget.retryAfterSec));
+      return setNoStoreResponseHeaders(response, requestId);
+    }
   }
 
   // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
