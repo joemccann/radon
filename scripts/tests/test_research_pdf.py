@@ -169,16 +169,19 @@ def test_isolated_anchor_cli_and_invalid_pages(tmp_path,monkeypatch):
     with pytest.raises(ValueError):text_anchors(source,[0])
 
 
-def test_text_only_child_prints_bounded_plain_text(tmp_path):
+def test_pages_text_child_prints_text_per_page_and_creation_date(tmp_path):
     pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=2)
-    result=subprocess.run([sys.executable,"-m","research.pdf",str(pdf),".","--text-only"],capture_output=True,
+    result=subprocess.run([sys.executable,"-m","research.pdf",str(pdf),".","--pages-text"],capture_output=True,
                           env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[1])},timeout=60)
     assert result.returncode==0,result.stderr
-    text=json.loads(result.stdout)["text"]
-    assert "Research evidence page 1, September 7 2026" in text and "Research evidence page 2" in text
+    out=json.loads(result.stdout)
+    assert sorted(out["pages"])==["1","2"]
+    assert "Research evidence page 1" in out["pages"]["1"] and "Research evidence page 2" in out["pages"]["2"]
+    assert "created" in out
 
 
-def test_plain_text_is_capped(tmp_path):
-    from research.pdf import plain_text
+def test_page_texts_are_capped_per_page(tmp_path):
+    from research.pdf import page_texts
     pdf=tmp_path/"doc.pdf";make_pdf(pdf,pages=3)
-    assert len(plain_text(pdf,max_chars=40))==40
+    pages=page_texts(pdf,per_page=10)
+    assert set(pages)=={1,2,3} and all(len(text)<=10 for text in pages.values())

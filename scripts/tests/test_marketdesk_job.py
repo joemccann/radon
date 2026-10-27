@@ -90,6 +90,14 @@ class World:
     published: list = field(default_factory=list)
     dests: list = field(default_factory=list)
     sessions: list = field(default_factory=list)
+    selections: dict = field(default_factory=dict)       # article title -> SELECT reply
+    select_outage: set = field(default_factory=set)
+    pages: dict = field(default_factory=dict)            # article id -> {page: text}
+    prompts: list = field(default_factory=list)
+    outcomes: list = field(default_factory=list)
+    feedback: list = field(default_factory=list)
+    recent: list = field(default_factory=list)
+    root: Path | None = None
 
 
 class FakeWriter:
@@ -159,8 +167,9 @@ def build_deps(world: World):
         world.calls.append(("download_images", limit))
         return paths
 
-    def write_copy(*, title, publisher, summary, body_text, images):
+    def write_copy(*, title, publisher, summary, body_text, images, finding=None):
         image_ids = [label for label, _ in images]
+        world.calls.append(("copy_finding", (finding or {}).get("title")))
         assert all(Path(path).read_bytes().startswith(b"\x89PNG") for _, path in images)
         world.calls.append(("write_copy", title, publisher, tuple(image_ids)))
         world.calls.append(("copy_summary", tuple(summary)))
@@ -213,16 +222,35 @@ def build_deps(world: World):
     def clock():
         return world.clock.pop(0) if world.clock else 0.0
 
-    def pdf_text(path):
-        assert Path(path).read_bytes().startswith(b"%PDF-")
-        world.calls.append(("pdf_text", Path(path).name))
-        return "PDF text: EBITDA $13.80B, curve up 12bp."
+    def pdf_pages(path):
+        data = Path(path).read_bytes()
+        assert data.startswith(b"%PDF-")
+        world.calls.append(("pdf_pages", Path(path).name))
+        article_id = data[len(b"%PDF-1.7 "):].decode()
+        return world.pages.get(article_id, {1: "PDF text: EBITDA $13.80B, curve up 12bp."}), None
+
+    def select(prompt):
+        world.prompts.append(prompt)
+        title = next((t for t in world.selections if json.dumps(t + ".pdf") in prompt), None)
+        if any(json.dumps(t + ".pdf") in prompt for t in world.select_outage):
+            from research.marketdesk_filter import SelectUnavailable
+            raise SelectUnavailable("Model ladder exhausted. tried=codex:http_529")
+        if title is not None:
+            return world.selections[title]
+        return {"candidates": [{"title": "Finding", "content": "Two cuts priced.", "claim_key": "k", "pages": [1],
+                                "figure_ids": [], "captions": {}, "tags": ["RATES"], "text_only": True}]}
+
+    def record_outcome(work, review):
+        world.outcomes.append((work, review))
+        return publish.record_outcome(work, review)
 
     return job.Deps(
         store=store, publish=real_publish, store_asset=store_asset, read_asset=read_asset,
         expire_stale_held=expire, open_session=open_session, list_latest=list_latest, fetch_article=fetch_article,
         download_pdf=download_pdf, download_images=download_images, write_copy=write_copy,
-        certify=certify, writer_from_env=writer_from_env, pdf_text=pdf_text,
+        certify=certify, writer_from_env=writer_from_env, pdf_pages=pdf_pages, select=select,
+        book_tickers=lambda: None, recent_titles=lambda: list(world.recent), record_outcome=record_outcome,
+        feedback_rows=lambda: list(world.feedback), research_root=lambda: world.root or world.tmp / "research",
         marketdesk_path=marketdesk_path, service_cycle=service_cycle, record_health=record_health,
         clock=clock,
     )
@@ -232,7 +260,9 @@ def build_deps(world: World):
 def db(monkeypatch, tmp_path):
     monkeypatch.setenv("RADON_RESEARCH_DIR", str(tmp_path / "research"))
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql"):
+    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0078_research_feedback.sql",
+                 "0079_research_outcomes.sql", "0080_research_rule_proposals.sql", "0082_research_outcomes_context.sql",
+                 "0091_research_outcomes_hold_times.sql", "0102_marketdesk_articles.sql"):
         conn.executescript((ROOT / name).read_text())
 
     def execute(sql, args=(), timeout=4.0):
@@ -250,6 +280,9 @@ def db(monkeypatch, tmp_path):
 
     monkeypatch.setattr(store, "hrana_execute", execute)
     monkeypatch.setattr(publish, "hrana_transaction", transaction)
+    monkeypatch.setattr(publish, "hrana_execute", execute)
+    from api import db_http
+    monkeypatch.setattr(db_http, "hrana_execute", execute)  # research.learn.sync resolves it at call time
     yield conn
     conn.close()
 
@@ -525,8 +558,10 @@ def test_default_deps_wire_real_modules():
     assert deps.store is store and deps.publish is publish.publish
     assert deps.open_session is marketdesk_auth.open_session
     assert deps.fetch_article is marketdesk_scrape.fetch_article
-    from research import pipeline
-    assert deps.pdf_text is pipeline.text_isolated
+    from research import book, marketdesk_filter, pipeline
+    assert deps.pdf_pages is pipeline.pages_isolated
+    assert deps.select is marketdesk_filter.ladder_select
+    assert deps.book_tickers is book.tickers and deps.record_outcome is publish.record_outcome
     assert deps.list_latest is marketdesk_scrape.list_latest and deps.download_pdf is marketdesk_scrape.download_pdf
     assert deps.write_copy is marketdesk_copy.write_copy
     assert deps.certify is marketdesk_copy.certify
@@ -743,7 +778,7 @@ def test_summary_cut_is_utf16_safe(world, db):
 def test_copy_is_grounded_in_the_pdf_text(world, db):
     world.refs = [make_ref("Pdftext001")]
     run(world)
-    assert ("pdf_text", "source.pdf") in world.calls
+    assert ("pdf_pages", "source.pdf") in world.calls
     assert ("copy_body", "PDF text: EBITDA $13.80B, curve up 12bp.") in world.calls
 
 
@@ -826,3 +861,144 @@ def test_humanizer_review_outage_parks_without_spending_attempts(world, db):
     saved = ledger(db, "Hhhhhhhh02")
     assert saved["status"] == "pending" and saved["attempts"] == 0
     assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+# ---- relevance filter: the intake v2 gates before any copy call ------------------------------------------
+
+def outcome_row(db, article_id):
+    cur = db.execute("SELECT * FROM research_outcomes WHERE work_key=?", ("marketdesk:" + article_id,))
+    values = cur.fetchone()
+    return dict(zip([c[0] for c in cur.description], values)) if values else None
+
+
+def test_empty_selection_is_held_never_copied_and_still_saved_to_dropbox(world, db):
+    world.refs = [make_ref("Held000001", title="Routine recap")]
+    world.selections = {"Routine recap": {"candidates": [], "reason": "no new measured evidence"}}
+    counts = run(world)
+    assert counts["held"] == 1 and counts["published"] == 0
+    assert not [c for c in world.calls if c[0] in ("write_copy", "download_images")]
+    assert world.published == []
+    saved = ledger(db, "Held000001")
+    assert saved["status"] == "held" and saved["reason_code"] == "NO_CANDIDATES"
+    assert saved["dropbox_status"] == "uploaded"
+    assert world.uploads[0][0] == "/Radon/MarketDesk/2026/October/Oct 26/Acme Research/Routine recap.pdf"
+    out = outcome_row(db, "Held000001")
+    assert out["outcome"] == "held" and json.loads(out["reason_codes"]) == ["NO_CANDIDATES"]
+    assert out["pipeline"] == "marketdesk" and out["publisher"] == "Acme Research"
+    assert out["file_id"] == "Held000001" and out["file_name"] == "Routine recap.pdf"
+    assert json.loads(out["context_json"])["sourceUrl"] == saved["pdf_asset"]
+    assert ("marketdesk-research", "ok", None) in world.health
+    assert run(world)["held"] == 0  # terminal: never re-reviewed from the listing
+
+
+def test_triage_drop_skips_the_model_entirely(world, db):
+    world.refs = [make_ref("Drop000001", title="EURUSD note")]
+    world.pages = {"Drop000001": {1: "# EURUSD: Range trade into the ECB"}}
+    counts = run(world)
+    assert counts["dropped"] == 1
+    assert world.prompts == [] and not [c for c in world.calls if c[0] == "write_copy"]
+    assert ledger(db, "Drop000001")["reason_code"] == "DOC_TYPE_FX_PAIR_NOTE"
+    out = outcome_row(db, "Drop000001")
+    assert out["outcome"] == "dropped" and json.loads(out["reason_codes"]) == ["DOC_TYPE_FX_PAIR_NOTE"]
+
+
+def test_unknown_publisher_is_held(world, db):
+    world.refs = [make_ref("Unkn000001", title="Anon note")]
+    world.folders = ["2026", "October", "Oct 26"]
+    counts = run(world)
+    assert counts["held"] == 1 and world.prompts == []
+    assert ledger(db, "Unkn000001")["reason_code"] == "PUBLISHER_UNKNOWN"
+
+
+def test_duplicate_of_a_published_article_is_dropped(world, db):
+    text = {1: " ".join(f"word{n} flows positioning" for n in range(60))}
+    world.refs = [make_ref("Dupe000001", title="First", hours_ago=2), make_ref("Dupe000002", title="Second", hours_ago=1)]
+    world.pages = {"Dupe000001": text, "Dupe000002": text}
+    counts = run(world)
+    assert counts["published"] == 1 and counts["dropped"] == 1
+    assert ledger(db, "Dupe000002")["reason_code"] == "DUPLICATE_OF_PUBLISHED"
+    assert ledger(db, "Dupe000001")["fingerprint"]
+
+
+def test_selected_finding_reaches_the_copy_and_the_published_outcome_is_recorded(world, db):
+    world.refs = [make_ref("Pub0000001", title="Vol digest")]
+    world.selections = {"Vol digest": {"candidates": [{"title": "Tech vol premium", "content": "Spread widened."}]}}
+    counts = run(world)
+    assert counts["published"] == 1
+    assert ("copy_finding", "Tech vol premium") in world.calls
+    calls = [c[0] for c in world.calls]
+    assert calls.index("pdf_pages") < calls.index("download_images") < calls.index("write_copy")
+    out = outcome_row(db, "Pub0000001")
+    assert out["outcome"] == "published" and out["posts"] == 1
+    saved = ledger(db, "Pub0000001")
+    assert saved["status"] == "published" and json.loads(saved["folders_json"])[-1] == "Acme Research"
+
+
+def test_select_prompt_carries_recent_feed_titles(world, db):
+    world.refs = [make_ref("Rcnt000001", title="Vol digest")]
+    world.recent = [{"title": "Yesterday's CTA post", "timestamp": "2026-10-25T10:00:00+00:00"}]
+    run(world)
+    assert "Yesterday's CTA post" in world.prompts[0]
+
+
+def test_select_outage_parks_without_spending_an_attempt(world, db):
+    world.refs = [make_ref("Outg000001", title="Vol digest")]
+    world.select_outage = {"Vol digest"}
+    with pytest.raises(job.ArticlesFailed):  # health turns red, as for a copy-step outage
+        run(world)
+    saved = ledger(db, "Outg000001")
+    assert saved["status"] == "pending" and saved["attempts"] == 0
+
+
+def test_filtered_articles_count_against_the_per_cycle_cap(world, db):
+    world.refs = [make_ref(f"Capd00000{n}", title=f"Recap {n}", hours_ago=n) for n in range(1, 5)]
+    world.selections = {f"Recap {n}": {"candidates": []} for n in range(1, 5)}
+    counts = run(world, env={"MARKETDESK_MAX_PER_CYCLE": "2"})
+    assert counts["held"] == 2
+
+
+def held_vote(article_id, vote_id="v1", comment="should be in the feed"):
+    return (vote_id, "held", None, "marketdesk:" + article_id, article_id, "up", "[]", comment,
+            json.dumps({"title": "Routine recap", "publisher": "Acme Research"}), "2026-10-26T15:00:00+00:00")
+
+
+def test_should_have_published_vote_requeues_with_the_operator_note(world, db):
+    old = make_ref("Vote000001", title="Routine recap", hours_ago=72)  # outside the lookback and off the listing
+    world.refs = [make_ref("Vote000001", title="Routine recap", hours_ago=1)]
+    world.selections = {"Routine recap": {"candidates": []}}
+    run(world)
+    assert ledger(db, "Vote000001")["status"] == "held"
+    world.refs = []
+    world.feedback = [held_vote("Vote000001")]
+    world.selections = {"Routine recap": {"candidates": [{"title": "It matters", "content": "Measured."}]}}
+    world.prompts.clear()
+    counts = run(world)
+    assert counts["requeued"] == 1 and counts["published"] == 1
+    assert "OPERATOR NOTE" in world.prompts[0] and "should be in the feed" in world.prompts[0]
+    assert ledger(db, "Vote000001")["status"] == "published" and ledger(db, "Vote000001")["note"] is None
+    assert store.feedback_handled() == {"v1"}
+    world.prompts.clear()
+    assert run(world)["requeued"] == 0 and world.prompts == []  # handled once
+    assert old.article_id == "Vote000001"
+
+
+def test_feedback_sync_refreshes_operator_examples_for_select(world, db, tmp_path):
+    world.root = tmp_path / "root"
+    world.root.mkdir()
+    world.feedback = [("v9", "post", "research-" + "a" * 32, None, "", "down", '["not_relevant"]', "too routine",
+                       json.dumps({"title": "Acme recap", "publisher": "Acme Research", "series": "vol digest"}),
+                       "2026-10-26T15:00:00+00:00")]
+    world.refs = [make_ref("Lern000001", title="Vol digest")]
+    run(world)
+    assert "OPERATOR PREFERENCES" in world.prompts[0] and "too routine" in world.prompts[0]
+
+
+def test_feedback_fetch_failure_never_fails_the_cycle(world, db):
+    def boom():
+        raise RuntimeError("turso down")
+
+    world.refs = [make_ref("Fbck000001", title="Vol digest")]
+    deps = build_deps(world)
+    deps.feedback_rows = boom
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts["published"] == 1

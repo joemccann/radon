@@ -600,3 +600,29 @@ def test_repair_starts_from_the_draft_with_the_fewest_problems() -> None:
 
     _call(fake)
     assert "$99bn" not in calls[1].split("REJECTED_DRAFT:")[1]
+
+
+# ---------- selected finding (marketdesk_filter SELECT) ----------
+
+def test_build_instruction_centres_the_post_on_the_selected_finding() -> None:
+    finding = {"title": "Tech vol premium at 2 sigma", "content": "QQQ-SPX spread widened.", "claim_key": "qqq-spx"}
+    text = mc.build_instruction(title="Flows", publisher="Cboe", summary=["one"], body_text="B", image_ids=[],
+                                finding=finding)
+    assert "SELECTED_FINDING" in text and "Tech vol premium at 2 sigma" in text and "QQQ-SPX spread widened." in text
+    assert "Write the post about this finding" in text
+    assert "SELECTED_FINDING" not in mc.build_instruction(title="Flows", publisher="Cboe", summary=["one"],
+                                                          body_text="B", image_ids=[])
+
+
+def test_selected_finding_numbers_do_not_widen_the_numeric_firewall() -> None:
+    seen: dict = {}
+
+    def fake(instruction, **kwargs):
+        seen["instruction"] = instruction
+        return LadderResult(data=clean(), text="{}", provider="fake", model="m")
+
+    copy = mc.write_copy(title="Goldman flow desk", publisher="Goldman Sachs",
+                         summary=["systematic funds sold $12.5bn of US equities last week"], body_text=SOURCE,
+                         images=IMAGES, complete=fake, finding={"title": "Sold $99.9bn", "content": "x"})
+    assert "Sold $99.9bn" in seen["instruction"]
+    assert "99.9" not in copy.source_text

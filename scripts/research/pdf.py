@@ -149,24 +149,19 @@ def text_anchors(pdf_path, pages):
     return records
 
 
-def plain_text(pdf_path, max_chars=12000):
-    """PDFium page text in page order, joined by blank lines, at most ``max_chars`` characters."""
-    parts, used = [], 0
+def page_texts(pdf_path, per_page=10_000):
+    """{page_number: PDFium text} for every page, each at most ``per_page`` characters."""
+    pages = {}
     with pypdfium2.PdfDocument(str(Path(pdf_path).resolve(strict=True))) as document:
         if not 0 < len(document) <= 100:
             raise ValueError('Research PDF must contain 1..100 pages')
         for index in range(len(document)):
-            if used >= max_chars:
-                break
             page = document[index]
             textpage = page.get_textpage()
-            text = (textpage.get_text_range() or '').replace('\r\n', '\n').strip()
+            pages[index + 1] = (textpage.get_text_range() or '').replace('\r\n', '\n').strip()[:per_page]
             textpage.close()
             page.close()
-            if text:
-                parts.append(text[:max_chars - used])
-                used += len(parts[-1]) + 2
-    return '\n\n'.join(parts)[:max_chars]
+    return pages
 
 
 def creation_date(pdf_path):
@@ -194,15 +189,15 @@ def main():
     parser.add_argument('--anchors-only', action='store_true')
     parser.add_argument('--figures-only', action='store_true', help='figure catalogue; extras JSON on stdin')
     parser.add_argument('--metadata-only', action='store_true')
-    parser.add_argument('--text-only', action='store_true', help='plain page text as JSON')
+    parser.add_argument('--pages-text', action='store_true', help='per-page text and CreationDate as JSON')
     args = parser.parse_args()
     if (args.render_only or args.anchors_only or args.figures_only) and not args.pages:
         parser.error('--render-only / --anchors-only / --figures-only requires --pages')
     if args.metadata_only:
         print(json.dumps({'created': creation_date(args.pdf)}))
         return
-    if args.text_only:
-        print(json.dumps({'text': plain_text(args.pdf)}))
+    if args.pages_text:
+        print(json.dumps({'pages': page_texts(args.pdf), 'created': creation_date(args.pdf)}))
         return
     if args.figures_only:
         extras = json.loads(sys.stdin.read() or 'null')
