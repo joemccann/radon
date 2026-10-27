@@ -52,20 +52,26 @@ def _status(reports: Path) -> dict:
     return json.loads((reports / "QQQ.scan.json").read_text())
 
 
-def test_the_scan_passes_a_history_budget_that_fits_the_shortest_seated_run(reports, monkeypatch):
+def test_the_scan_passes_an_absolute_paging_deadline_inside_the_scan_window(reports, monkeypatch):
+    import fetch_flow
+
     seen: list = []
+    monkeypatch.setattr(server.time, "time", lambda: 1_000_000.0)
     monkeypatch.setattr(
         server, "_run_script_retrying_capacity",
         _fake_runner(server.ScriptResult(ok=True, data=GOOD, error=None), seen),
     )
     asyncio.run(server._scan_and_cache("QQQ"))
-    script, args, _ = seen[0]
+    script, args, kwargs = seen[0]
     assert script == "flow_report.py"
-    i = args.index("--history-budget-secs")
-    budget = float(args[i + 1])
-    # Today's walk, options alerts, skew and analysis still run after the
-    # budget; the run must end inside the shortest attempt the chain seats.
-    assert 0 < budget <= server.FLOW_REPORT_MIN_RUN_SECS - 30
+    deadline = float(args[args.index("--deadline-epoch") + 1])
+    # Paging ends FLOW_REPORT_FINISH_MARGIN_SECS before the scan window closes.
+    assert deadline == 1_000_000.0 + server.FLOW_REPORT_TOTAL_DEADLINE_SECS - server.FLOW_REPORT_FINISH_MARGIN_SECS
+    assert kwargs["deadline_s"] == server.FLOW_REPORT_TOTAL_DEADLINE_SECS
+    # The margin covers the last page's governor wait plus skew + analysis
+    # (~15s on prod), and a late-seated attempt can still finish inside it.
+    assert server.FLOW_REPORT_FINISH_MARGIN_SECS >= fetch_flow.FLOW_BUDGETED_ADMISSION_WAIT_S + 20
+    assert server.FLOW_REPORT_MIN_RUN_SECS >= server.FLOW_REPORT_FINISH_MARGIN_SECS
 
 
 def test_success_writes_the_report_and_an_ok_status(reports, monkeypatch):

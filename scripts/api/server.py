@@ -544,14 +544,17 @@ FLOW_REPORT_MIN_RUN_SECS = 90.0
 # `_scan_once_per_ticker` detaches the scan and this budget bounds the CACHE
 # WRITE, not a response anyone is still waiting on.
 FLOW_REPORT_TOTAL_DEADLINE_SECS = 225.0
-# Seconds flow_report.py may spend walking UNCACHED prior sessions. QQQ prior
-# days walk the 40-page cap (~13s each), so 20 uncached days outlived the
-# deadline on every scan from 2026-08-07 and no report was ever written. The
-# script now stops walking at this budget and returns a partial window; the
-# walked days land in the per-day cache, so the next scan starts further back.
-# Today's walk, options alerts, skew and analysis run after it, so it leaves
-# 30s of the shortest run the capacity chain will seat.
-FLOW_REPORT_HISTORY_BUDGET_SECS = FLOW_REPORT_MIN_RUN_SECS - 30.0
+# flow_report.py stops UW paging FLOW_REPORT_FINISH_MARGIN_SECS before the
+# scan window closes (--deadline-epoch, absolute so capacity-shed retries that
+# re-run the script later cannot overrun it). QQQ prior days walk the 40-page
+# cap (~13s each), so 20 uncached days outlived the deadline on every scan
+# from 2026-08-07 and no report was ever written; with the account-wide
+# governor saturated, today's walk plus the alerts walk alone spent 70s in
+# admission waits (2026-10-27 profile). The report now lands with a partial
+# window and walked closed days land in the per-day cache, so the next scan
+# starts further back. The margin is one governor minute for the page in
+# flight (fetch_flow.FLOW_BUDGETED_ADMISSION_WAIT_S) plus skew + analysis.
+FLOW_REPORT_FINISH_MARGIN_SECS = 85.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
 
 # One in-flight scan per ticker. Nothing deduped concurrent requests, so N
@@ -2995,7 +2998,11 @@ async def _scan_and_cache_inner(upper: str) -> dict:
     # because GET /informed-flow/{ticker} and hourly scans share it.
     result = await _run_script_retrying_capacity(
         "flow_report.py",
-        [upper, "--days", "20", "--history-budget-secs", f"{FLOW_REPORT_HISTORY_BUDGET_SECS:.0f}"],
+        [
+            upper, "--days", "20",
+            "--deadline-epoch",
+            f"{time.time() + FLOW_REPORT_TOTAL_DEADLINE_SECS - FLOW_REPORT_FINISH_MARGIN_SECS:.0f}",
+        ],
         timeout=300,
         retries=FLOW_REPORT_SHED_RETRIES,
         delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
