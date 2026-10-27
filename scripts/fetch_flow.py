@@ -77,6 +77,9 @@ FLOW_ALERTS_MAX_PAGES = 25
 # yet a US session day and breaks the darkpool cache immutability contract.
 _ET = pytz.timezone("America/New_York")
 
+# Injected by tests; the history budget is measured on this clock.
+_monotonic = time_module.monotonic
+
 
 def _session_now_et() -> datetime:
     """Current instant in America/New_York for trading-day membership."""
@@ -709,9 +712,10 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
     }
 
 
-def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] = None, 
+def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] = None,
                skip_options_flow: bool = False, fetch_missing_history: bool = True,
-               retry_transient: bool = True) -> Dict:
+               retry_transient: bool = True,
+               history_budget_s: Optional[float] = None) -> Dict:
     """Full flow analysis: dark pool prints + options flow alerts.
 
     Fetches dark pool data for each of the last N TRADING days and aggregates,
@@ -737,6 +741,13 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         retry_transient: Retry UW 429/5xx responses with backoff. Disable for
             interactive scanners so rate-limited names fail fast and the batch
             can keep moving.
+        history_budget_s: Seconds this call may spend walking UNCACHED prior
+            days. Once spent, the remaining uncached closed days are skipped
+            (listed in ``history_backfill_skipped``); today and cache hits are
+            always served. Each walked day is cached, so the next call resumes
+            further back. QQQ prior days walk the 40-page cap (~13s each), and
+            an unbounded 20-day walk outlived FastAPI's deadline on every scan
+            from 2026-08-07, so no report was ever written. None = unbounded.
     """
     ticker = ticker.upper()
 
@@ -757,6 +768,11 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
     # Get trading day progress for interpolation
     trading_day_progress, is_market_hours, market_status = get_trading_day_progress()
 
+    budget_started = _monotonic()
+
+    def _history_budget_spent() -> bool:
+        return history_budget_s is not None and _monotonic() - budget_started >= history_budget_s
+
     def _do_fetch(client):
         nonlocal all_dp_trades, daily_signals
         for date in trading_days:
@@ -766,7 +782,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
             # no-ops in set_cached_darkpool. This is the P0 UW-load reduction.
             trades = get_cached_darkpool(ticker, date)
             if trades is None:
-                if not fetch_missing_history and is_immutable(date):
+                if is_immutable(date) and (not fetch_missing_history or _history_budget_spent()):
                     skipped_history_dates.append(date)
                     continue
                 trades = fetch_darkpool(ticker, date, _client=client, retry_transient=retry_transient)
