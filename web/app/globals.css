@@ -9376,6 +9376,57 @@ body[data-mobile="true"] .columns-toggle {
   border-radius: 0 0 2px 2px;
 }
 .columns-toggle-reset:hover { color: var(--signal-core-text); }
+/* Grouped menu (options chain): two columns of labelled sections so fifteen
+   columns fit without a tall scroll. */
+.columns-toggle-menu--grouped {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(176px, 1fr));
+  align-items: start;
+  gap: 4px 8px;
+  min-width: 368px;
+}
+.columns-toggle-menu--grouped .columns-toggle-reset { grid-column: 1 / -1; }
+.columns-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.columns-toggle-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--border-dim);
+  margin-bottom: 2px;
+}
+.columns-toggle-group-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.columns-toggle-group-action {
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.columns-toggle-group-action:hover:not(:disabled) {
+  border-color: var(--border-dim);
+  color: var(--signal-core-text);
+}
+.columns-toggle-group-action:focus-visible {
+  outline: 2px solid var(--signal-core);
+  outline-offset: 1px;
+}
+.columns-toggle-group-action:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Table Search / Filter ── */
 .table-search {
@@ -12733,6 +12784,13 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   margin-bottom: 8px;
 }
 
+/* The COLUMNS menu drops over the chain; lift the toolbar above the sticky
+   column header (thead z-index 10, strike header 11). */
+.chain-first-toolbar {
+  position: relative;
+  z-index: 20;
+}
+
 .chain-expiry-select {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -12899,16 +12957,14 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   outline-offset: -2px;
 }
 
+/* --chain-data-cols is the visible non-strike column count (column toggle +
+   side filter); each data column keeps a 65px floor so toggled-on greeks
+   scroll horizontally instead of truncating. */
 .chain-anchor-panes .chain-grid {
   table-layout: fixed;
-  min-width: 1156px;
+  min-width: calc(var(--chain-data-cols, 16) * 65px + 7.5rem);
   font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
-}
-
-.chain-anchor-panes[data-side="calls"] .chain-grid,
-.chain-anchor-panes[data-side="puts"] .chain-grid {
-  min-width: 680px;
 }
 
 .chain-anchor-strike-col {
