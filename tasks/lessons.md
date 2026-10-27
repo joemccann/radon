@@ -1320,3 +1320,6 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-09-08 - Research rejection counts need source-level verification
 - Do not describe zero publication as normal quality filtering until representative failures are replayed against actual source evidence. Distinguish pipeline defects from unsupported claims, and report candidate-level rejection counts separately from individual numerical assertions.
 - Text grounding must account for extraction formatting without weakening numeric/sign/unit checks. Preserve range context when generating checks: extracting the endpoint of 2-3% as -3% creates a false negative.
+
+## 2026-10-27: Article lightbox toolbar
+- Do not display an "Article reader" label in the lightbox toolbar. Keep navigation and Close; the article title already names the dialog.
