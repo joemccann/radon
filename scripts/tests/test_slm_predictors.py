@@ -7,7 +7,6 @@ from newsfeed.slm import predict_ladder, predict_slm
 
 @pytest.mark.parametrize("override", [None, "override taxonomy"])
 def test_prompt_parity_and_row_identity(tmp_path, monkeypatch, override):
-    monkeypatch.delenv("RADON_LADDER_ALLOW_PREPAID", raising=False)
     rows = [{"id": str(i), "messages": [
         {"role": "system", "content": f"taxonomy {i}"},
         {"role": "user", "content": f"post {i}"},
@@ -38,19 +37,8 @@ def test_prompt_parity_and_row_identity(tmp_path, monkeypatch, override):
     assert a_calls == c_calls == expected
 
 
-def test_ladder_prepaid_refusal_never_invokes_inference(tmp_path, monkeypatch):
-    monkeypatch.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
-    def forbidden(*args, **kwargs):
-        pytest.fail("prepaid arm A must refuse before inference")
-    monkeypatch.setattr(predict_ladder, "complete_text_json", forbidden)
-    out = tmp_path / "out.jsonl"
-    assert predict_ladder.main(["--gold", str(tmp_path / "missing"), "--out", str(out)]) == 2
-    assert not out.exists()
-
-
 @pytest.mark.parametrize("module,error,status", [(predict_ladder, RuntimeError, "unparseable"), (predict_slm, TimeoutError, "unavailable")])
 def test_predictor_error_records_preserve_identity(tmp_path, monkeypatch, module, error, status):
-    monkeypatch.delenv("RADON_LADDER_ALLOW_PREPAID", raising=False)
     def fail(*args, **kwargs):
         raise error("fake")
     monkeypatch.setattr(module, "complete_text_json" if module is predict_ladder else "predict_one", fail)

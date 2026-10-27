@@ -41,7 +41,6 @@ const SERVICE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
  * Drift is caught by scripts/tests/test_setup_service_id_parity.py.
  */
 const KNOWN_SERVICE_IDS = new Set([
-  "anthropic",
   "artificial_analysis",
   "backblaze",
   "cerebras",
@@ -62,7 +61,6 @@ const KNOWN_SERVICE_IDS = new Set([
   "turso",
   "unusual_whales",
   "vast",
-  "xai",
 ]);
 const FIELD_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;

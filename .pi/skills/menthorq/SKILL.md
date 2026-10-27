@@ -24,7 +24,7 @@ MenthorQ has no public API. All data is behind WordPress auth, rendered as HTML 
 |------|----------|---------|
 | `.env` (project root) | `MENTHORQ_USER` | MenthorQ login email |
 | `.env` (project root) | `MENTHORQ_PASS` | MenthorQ login password |
-| `web/.env` | `ANTHROPIC_API_KEY` | Vision extraction for chart images |
+| `~/.claude/.credentials.json` | Claude Max grant (`claude` login) | Vision extraction for chart images (subscription only) |
 
 ## Dashboard Commands
 

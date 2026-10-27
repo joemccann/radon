@@ -1171,10 +1171,12 @@ class TestOperatorSafetyOwners:
         ops = (_ROOT / "docs/operations.md").read_text()
         binds = ops.split("**Subscription credential binds")[1].split("The staged copy")[0]
         assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in binds
-        assert "RADON_LADDER_ALLOW_PREPAID" in binds
+        # Subscriptions only (2026-10-26): the prepaid opt-in flag is gone.
+        assert "never fall back to a prepaid key" in binds
         assert "as the fallback" not in binds
         for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
-            assert "RADON_LADDER_ALLOW_PREPAID" in (_ROOT / path).read_text()
+            assert "prepaid" in (_ROOT / path).read_text()
+            assert "ALLOW_PREPAID" not in (_ROOT / path).read_text()
 
     def test_tradingview_retention_owner_and_migration(self):
         import sqlite3
@@ -1390,7 +1392,8 @@ class TestModelLadderByteCapOwner:
         vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
         assert "max_response_bytes: int = 2_000_000" in vision
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
-        assert call.count("max_bytes=max_response_bytes") == 6
+        # Five HTTP rungs (codex has no prepaid api.openai.com path since 2026-10-26).
+        assert call.count("max_bytes=max_response_bytes") == 5
         assert "_antigravity_complete" in call
 
 

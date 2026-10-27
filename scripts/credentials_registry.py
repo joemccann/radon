@@ -11,16 +11,15 @@ field is stored encrypted in the secret store regardless.
 
 Deliberately NOT registered (decisions, not oversights; audited 2026-09-17):
 
-* Provider aliases resolved inside ``scripts/clients/model_ladder.py`` and
-  ``web/lib/llm/provider.ts`` (``CLAUDE_CODE_API_KEY`` / ``CLAUDE_API_KEY`` for
-  Anthropic, ``GROK_API_KEY`` for xAI, ``FRED_KEY`` for FRED). Only the
-  canonical name is manageable here; a stale alias in ``/etc/radon/env`` still
-  wins inside those consumers, so rotate the alias too or remove it.
+* Anthropic, OpenAI, xAI and Google keys (subscriptions only, operator policy
+  2026-10-26): those providers run on the operator's CLI subscription grants,
+  which ``radon-subscription-tokens`` keeps live; no prepaid console key is
+  stored, exported into ``os.environ``, validated or read anywhere.
+* ``FRED_KEY``: legacy alias resolved by the FRED consumers. Only the
+  canonical ``FRED_API_KEY`` is manageable here; a stale alias in
+  ``/etc/radon/env`` still wins, so rotate it too or remove it.
 * ``ROBINHOOD_MCP_*``: a 0600 token FILE the client rewrites on refresh, not a
   static value the store can own.
-* ``OPENAI_API_KEY``: an optional model-ladder fallback with no Radon feature
-  that requires it. Google has no key at all: it runs only through the
-  Antigravity CLI's own sign-in.
 * Deployment / perimeter tokens (``RADON_SERVICE_TOKEN``,
   ``RADON_PROBE_FRESHNESS_TOKEN``, ``RADON_SETUP_TOKEN``,
   ``RADON_HEALTH_STATUS_TOKEN``, ``CLERK_WEBHOOK_SECRET``, ``ALLOWED_USER_IDS``,
@@ -125,25 +124,11 @@ SERVICES: Tuple[CredentialService, ...] = (
     ),
     # -- AI Providers --------------------------------------------------------
     CredentialService(
-        id="anthropic",
-        label="Anthropic",
-        group="AI Providers",
-        fields=(CredentialField("ANTHROPIC_API_KEY", "API key", placeholder="sk-ant-..."),),
-        validator="anthropic",
-    ),
-    CredentialService(
         id="cerebras",
         label="Cerebras",
         group="AI Providers",
         fields=(CredentialField("CEREBRAS_API_KEY", "API key", placeholder="csk-..."),),
         validator="cerebras",
-    ),
-    CredentialService(
-        id="xai",
-        label="xAI",
-        group="AI Providers",
-        fields=(CredentialField("XAI_API_KEY", "API key", placeholder="xai-..."),),
-        validator="xai",
     ),
     CredentialService(
         id="nvidia",

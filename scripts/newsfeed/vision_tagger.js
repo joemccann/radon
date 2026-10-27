@@ -28,18 +28,29 @@ const ANTHROPIC_VERSION = "2023-06-01";
 // ~/.claude/.credentials.json (or CLAUDE_CODE_OAUTH_TOKEN). It is sent as a
 // Bearer with the oauth beta and the Claude Code identity block leading
 // `system`; the Messages API answers a bare 429 without that block and a 401
-// when the grant is sent as x-api-key. A prepaid ANTHROPIC_API_KEY is read
-// only under RADON_LADDER_ALLOW_PREPAID=1, never as a fallback.
+// when the grant is sent as x-api-key. Prepaid console keys are never read or
+// sent (operator policy 2026-10-26); a set one is ignored with one warning
+// naming it. The deny list is shared with the Python ladder.
 const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
 const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140";
 
-function allowPrepaid() {
-  return ["1", "true", "yes", "on"].includes(String(process.env.RADON_LADDER_ALLOW_PREPAID ?? "").trim().toLowerCase());
+const IGNORED_PREPAID_ENV = JSON.parse(
+  fs.readFileSync(new URL("../clients/prepaid_denylist.json", import.meta.url), "utf8"),
+);
+const warnedPrepaid = new Set();
+
+function warnIgnoredPrepaid(env) {
+  for (const name of IGNORED_PREPAID_ENV) {
+    if (warnedPrepaid.has(name) || !String(env[name] ?? "").trim()) continue;
+    warnedPrepaid.add(name);
+    console.warn(`[radon] ignoring ${name}: prepaid keys are never used (subscriptions only)`);
+  }
 }
 
-/** { token, kind: "subscription" | "prepaid" } or null. */
+/** { token, kind: "subscription" } or null. Subscription grants only. */
 export function resolveAnthropicAuth(env = process.env) {
+  warnIgnoredPrepaid(env);
   const fromEnv = (env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim();
   if (fromEnv) return { token: fromEnv, kind: "subscription" };
   const dir = (env.CLAUDE_CONFIG_DIR ?? "").trim() || (env.HOME ? path.join(env.HOME, ".claude") : "");
@@ -54,27 +65,20 @@ export function resolveAnthropicAuth(env = process.env) {
       // missing, unreadable or malformed: no grant
     }
   }
-  if (allowPrepaid()) {
-    const prepaid = (env.ANTHROPIC_API_KEY ?? "").trim();
-    if (prepaid) return { token: prepaid, kind: "prepaid" };
-  }
   return null;
 }
 
 function anthropicHeaders(auth) {
-  const headers = { "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" };
-  if (auth.kind === "subscription") {
-    headers.authorization = `Bearer ${auth.token}`;
-    headers["anthropic-beta"] = ANTHROPIC_OAUTH_BETA;
-    headers["user-agent"] = CLAUDE_CODE_USER_AGENT;
-  } else {
-    headers["x-api-key"] = auth.token;
-  }
-  return headers;
+  return {
+    "anthropic-version": ANTHROPIC_VERSION,
+    "content-type": "application/json",
+    authorization: `Bearer ${auth.token}`,
+    "anthropic-beta": ANTHROPIC_OAUTH_BETA,
+    "user-agent": CLAUDE_CODE_USER_AGENT,
+  };
 }
 
-function anthropicSystem(auth, systemPrompt) {
-  if (auth.kind !== "subscription") return systemPrompt;
+function anthropicSystem(_auth, systemPrompt) {
   return [
     { type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX },
     { type: "text", text: systemPrompt },

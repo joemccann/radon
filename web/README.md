@@ -116,14 +116,14 @@ cp .env.example .env
 ```
 
 **Required:**
-- `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_API_KEY` or `CLAUDE_API_KEY`)
 - `UW_TOKEN` - Unusual Whales API key
+- Anthropic / OpenAI / xAI run on CLI subscription grants only (`claude`, `codex`, `grok` logins); prepaid API keys are never read
 
 **Optional:**
 - `ANTHROPIC_MODEL` - Model override
 - `ANTHROPIC_API_URL` - API endpoint override
 - `CEREBRAS_API_KEY` - Last rung of the shared model ladder for Market Ear **text** tagging (subscription providers and NVIDIA are tried first).
-- `ANTHROPIC_API_KEY` - Anthropic key for the Market Ear **vision** tagger (`claude-haiku-4-5`, ~$0.003/post). Used for posts with images (chart-heavy Market Ear posts where the image carries more signal than the caption). Either key alone is sufficient — the scraper routes per-post and falls back to whichever tagger is configured. Without both, tag hydration is skipped (scraping continues; posts just stay untagged).
+- The Market Ear **vision** tagger (`claude-haiku-4-5`) uses the Claude Max grant (`~/.claude/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`) for posts with images. Without a grant, vision tagging is skipped (scraping continues).
 - `IB_REALTIME_WS_URL` - Server-side websocket URL used by `/api/prices` for one-time snapshots (default: `ws://localhost:8765`)
 - `NEXT_PUBLIC_IB_REALTIME_WS_URL` - Browser websocket URL for direct realtime subscriptions (default: `ws://localhost:8765`)
 

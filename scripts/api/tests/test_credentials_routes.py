@@ -103,7 +103,8 @@ class TestList:
         assert response.status_code == 200
         payload = response.json()
         ids = {service["id"] for service in payload["services"]}
-        assert {"anthropic", "unusual_whales", "turso", "menthorq"} <= ids
+        assert {"cerebras", "unusual_whales", "turso", "menthorq"} <= ids
+        assert not {"anthropic", "xai"} & ids  # subscriptions only, 2026-10-26
         assert payload["groups"]
         assert payload["generated_at"]
 
@@ -210,7 +211,7 @@ class TestPut:
     def test_field_not_in_service_400(self, client, valid_verdict):
         response = client.put(
             "/credentials/unusual_whales",
-            json={"values": {"ANTHROPIC_API_KEY": "sk-x"}},
+            json={"values": {"CEREBRAS_API_KEY": "csk-x"}},
         )
         assert response.status_code == 400
 
@@ -320,7 +321,7 @@ class TestValidatorThrottle:
 
     def test_cooldown_is_per_service_and_expires(self, client, valid_verdict):
         assert client.post("/credentials/unusual_whales/validate", json={}).status_code == 200
-        assert client.post("/credentials/anthropic/validate", json={}).status_code == 200
+        assert client.post("/credentials/cerebras/validate", json={}).status_code == 200
         for module in _route_module_instances():
             for service_id in module._validator_last_run:
                 module._validator_last_run[service_id] -= module.VALIDATOR_COOLDOWN_S
@@ -347,7 +348,7 @@ class TestValidatorThrottle:
         async def _drive():
             tasks = [
                 asyncio.create_task(credentials_module._run_validator(service_id, {}))
-                for service_id in ("unusual_whales", "anthropic", "cerebras")
+                for service_id in ("unusual_whales", "nvidia", "cerebras")
             ]
             await asyncio.sleep(0.3)
             in_flight = list(started)
@@ -369,7 +370,7 @@ class TestDelete:
         assert _store().get_secret("UW_TOKEN") is None
 
     def test_delete_field_not_in_service_400(self, client):
-        response = client.delete("/credentials/unusual_whales/ANTHROPIC_API_KEY")
+        response = client.delete("/credentials/unusual_whales/CEREBRAS_API_KEY")
         assert response.status_code == 400
 
 

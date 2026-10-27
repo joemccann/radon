@@ -82,7 +82,8 @@ The demo reads the vars below. They live in **two places**: `web/.env` (local de
 |---|---|---|
 | `TURSO_DEMO_DB_URL` · `TURSO_DEMO_AUTH_TOKEN` | demo Turso DB `radon-demo` (aws-us-west-2, isolated from `radon-joemccann`) | ✅ provisioned + staged |
 | `UPSTASH_REDIS_REST_URL` · `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis `radon-demo-ratelimit` (us-east-1, co-located with Vercel `iad1`) | ✅ provisioned + staged |
-| `ANTHROPIC_API_KEY` · `CEREBRAS_API_KEY` · `EXA_API_KEY` | **reused from prod `web/.env`** (decision 6 revised) | ✅ staged to Vercel |
+| `CEREBRAS_API_KEY` · `EXA_API_KEY` | **reused from prod `web/.env`** (decision 6 revised) | ✅ staged to Vercel |
+| `ANTHROPIC_API_KEY` | staged earlier; **never read** since 2026-10-26 (subscriptions only). Remove from Vercel | ⚠️ remove |
 | `CLERK_WEBHOOK_SECRET` | Clerk `user.created` webhook signing secret (`whsec_…`) | ⏳ pending (Clerk step) |
 | `RADON_API_URL` | demo VM FastAPI over TLS (e.g. `demo-api.radon.run`) | ⏳ pending (VM) |
 | Clerk publishable / secret keys | same instance (decision 1) | ⏳ to stage |

@@ -12,12 +12,15 @@
  *   xai        ~/.grok/auth.json             <issuer>::<client>.key
  *   openai     ~/.codex/auth.json            tokens.access_token (+ account_id)
  *
- * Prepaid keys are honoured only under RADON_LADDER_ALLOW_PREPAID=1, the same
- * escape hatch scripts/clients/model_ladder.py uses, and never as a fallback.
+ * Prepaid console keys are never read or sent, under any flag (operator
+ * policy 2026-10-26). A set deny-listed variable (lib/llm/prepaidDenylist.ts)
+ * is ignored with one warning naming it.
  *
  * Node-only: reads files lazily through require("node:fs") so the module stays
  * importable where node:fs is absent (no HOME, no override: no read).
  */
+
+import { warnIgnoredPrepaidEnv } from "./prepaidDenylist";
 
 const FILE_TTL_MS = 30_000;
 
@@ -30,12 +33,6 @@ export type SubscriptionGrant = {
 function envValue(key: string): string | undefined {
   const value = process.env[key]?.trim();
   return value ? value : undefined;
-}
-
-/** `RADON_LADDER_ALLOW_PREPAID=1|true|yes|on` re-enables prepaid console keys. */
-export function allowPrepaid(): boolean {
-  const raw = (process.env.RADON_LADDER_ALLOW_PREPAID ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 const fileCache = new Map<string, { readAt: number; doc: unknown }>();
@@ -86,6 +83,7 @@ function expired(value: unknown): boolean {
 
 /** Claude Code OAuth: CLAUDE_CODE_OAUTH_TOKEN, else the credentials file. */
 export function resolveAnthropicSubscription(): SubscriptionGrant | undefined {
+  warnIgnoredPrepaidEnv();
   const fromEnv = envValue("CLAUDE_CODE_OAUTH_TOKEN");
   if (fromEnv) return { token: fromEnv };
   const dir = envValue("CLAUDE_CONFIG_DIR") ?? (homeDir() ? `${homeDir()}/.claude` : undefined);
@@ -102,6 +100,7 @@ export function resolveAnthropicSubscription(): SubscriptionGrant | undefined {
 
 /** SuperGrok OIDC grant: XAI_OAUTH_TOKEN / GROK_OAUTH_TOKEN, else ~/.grok/auth.json. */
 export function resolveXaiSubscription(): SubscriptionGrant | undefined {
+  warnIgnoredPrepaidEnv();
   const fromEnv = envValue("XAI_OAUTH_TOKEN") ?? envValue("GROK_OAUTH_TOKEN");
   if (fromEnv) return { token: fromEnv };
   const filePath = envValue("GROK_AUTH_FILE") ?? (homeDir() ? `${homeDir()}/.grok/auth.json` : undefined);
@@ -125,6 +124,7 @@ export function resolveXaiSubscription(): SubscriptionGrant | undefined {
  * accepted by chatgpt.com/backend-api/codex/responses with the account id.
  */
 export function resolveCodexSubscription(): SubscriptionGrant | undefined {
+  warnIgnoredPrepaidEnv();
   const fromEnv = envValue("CODEX_OAUTH_TOKEN");
   if (fromEnv) return { token: fromEnv, accountId: envValue("CODEX_ACCOUNT_ID") };
   const dir = envValue("CODEX_HOME") ?? (homeDir() ? `${homeDir()}/.codex` : undefined);

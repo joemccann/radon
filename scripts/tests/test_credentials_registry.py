@@ -78,10 +78,8 @@ class TestExpectedSurface:
         names = fields_by_name()
         for expected in (
             "UW_TOKEN",
-            "ANTHROPIC_API_KEY",
             "EXA_API_KEY",
             "CEREBRAS_API_KEY",
-            "XAI_API_KEY",
             "MENTHORQ_USER",
             "MENTHORQ_PASS",
             "THEMARKETEAR_EMAIL",
@@ -130,8 +128,11 @@ class TestExpectedSurface:
         assert service_ids == {"openrouter", "artificial_analysis", "vast", "eia", "sec"}
 
     def test_lookup_helpers(self):
-        service = service_by_id("anthropic")
-        assert service.id == "anthropic"
+        service = service_by_id("cerebras")
+        assert service.id == "cerebras"
+        # Subscriptions only (2026-10-26): no prepaid AI-provider key is stored.
+        for service_id in ("anthropic", "xai", "openai"):
+            assert service_by_id(service_id) is None
         assert service_by_id("nope") is None
         assert fields_by_name()["UW_TOKEN"].secret is True
 

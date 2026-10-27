@@ -8,18 +8,15 @@ unavailable:
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
 Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
-**subscription credentials only** by default — Claude Max OAuth, Grok
-device-auth, ChatGPT+Codex OAuth, the Antigravity CLI's own Google sign-in.
-Prepaid console wallets (``ANTHROPIC_API_KEY``, ``XAI_API_KEY``,
-``OPENAI_API_KEY`` and aliases) are **not** used on the shared ladder unless
-``RADON_LADDER_ALLOW_PREPAID=1``. Without subscription material the rung is
-skipped and the ladder continues to NVIDIA then Cerebras. Knowledge distill
-(``scripts/knowledge/distill.py`` → ``complete_text_json``) and the newsfeed
-tagger (``model_ladder_cli.py``) share this helper — Hetzner hosts that only
-mount prepaid keys will otherwise burn those wallets then fall through to
-Cerebras. Weekend CLI pattern (unset prepaid, bill claude.ai) remains the
-sibling for Claude Code subprocesses; see ``docs/oauth-subscription-auth.md``
-and ``docs/dropbox-research.md``.
+**subscription credentials only**: Claude Max OAuth, Grok device-auth,
+ChatGPT+Codex OAuth, the Antigravity CLI's own Google sign-in. Prepaid console
+keys for those providers are never read or sent, under any flag (operator
+policy 2026-10-26; the deny list is ``clients/prepaid_denylist.json``). A set
+deny-listed variable is ignored with one stderr warning naming it. Without
+subscription material the rung is skipped and the ladder continues to NVIDIA
+then Cerebras. Knowledge distill (``scripts/knowledge/distill.py`` ->
+``complete_text_json``) and the newsfeed tagger (``model_ladder_cli.py``)
+share this helper. See ``docs/oauth-subscription-auth.md``.
 
 Cursor has no vision HTTP path in Radon; it is recorded as unwired and the rest
 of the subscription band still runs. Only a full-cascade miss is an ops_only /
@@ -45,6 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from . import prepaid_denylist
+
 logger = logging.getLogger(__name__)
 
 MODEL_LADDER_ORDER = (
@@ -68,11 +67,6 @@ MODEL_LADDER_TIERS = {
     "slm-tagger": "local",
 }
 
-# Prepaid / console API wallets — wrong meter for subscription-tier rungs.
-# Off by default on the shared ladder; opt in with RADON_LADDER_ALLOW_PREPAID=1.
-_ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
-_GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
-_CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
 
@@ -113,15 +107,12 @@ _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
 _NVIDIA_TEXT_DEFAULT = "nvidia/nemotron-3-super-120b-a12b"
 _NVIDIA_SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 
-# Back-compat aliases for cloud/.env.example inventory tests and callers.
-_ANTHROPIC_KEYS = _ANTHROPIC_PREPAID_KEYS + _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
-_GROK_KEYS = _GROK_PREPAID_KEYS
-_CODEX_KEYS = _CODEX_PREPAID_KEYS
+# Env inventory for cloud/.env.example tests: subscription material only.
+_ANTHROPIC_KEYS = _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
 _OPTIONAL_LADDER_ENV = (
     "NVIDIA_VISION_MODEL",
     "NVIDIA_TEXT_MODEL",
     "NVIDIA_MODEL",
-    "RADON_LADDER_ALLOW_PREPAID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "RADON_LADDER_NO_AUTH_FILES",
@@ -342,9 +333,8 @@ def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     data = _json_load_object(auth_path)
     if not data:
         return None
-    prepaid = _auth_file_api_key(data, env, ("OPENAI_API_KEY",), mechanism="codex_auth.json")
     if str(data.get("auth_mode", "")).lower() in {"apikey", "api_key"}:
-        return prepaid
+        return None  # a prepaid API-key login, not a ChatGPT subscription
     token = _token_from_mapping(
         data,
         ("tokens", "access_token"),
@@ -355,7 +345,7 @@ def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     if token:
         account_id = _token_from_mapping(data, ("tokens", "account_id"), ("account_id",))
         return AuthMaterial(token, "subscription", "codex_auth.json", account_id)
-    return prepaid
+    return None
 
 
 def _rfc3339_expired(value: str) -> bool:
@@ -401,20 +391,7 @@ def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
             break
     if token:
         return AuthMaterial(token, "subscription", "grok_auth.json")
-    return _auth_file_api_key(
-        data, env, ("api_key",), ("apiKey",), ("credentials", "api_key"),
-        mechanism="grok_auth.json",
-    )
-
-
-def _auth_file_api_key(
-    data: Mapping[str, Any], env: Mapping[str, str], *paths: tuple[str, ...],
-    mechanism: str,
-) -> AuthMaterial | None:
-    if not _allow_prepaid(env):
-        return None
-    token = _token_from_mapping(data, *paths)
-    return AuthMaterial(token, "api_key", mechanism) if token else None
+    return None  # an api_key in auth.json is a prepaid key: never read
 
 
 def _antigravity_cli(env: Mapping[str, str]) -> str:
@@ -444,54 +421,20 @@ def _antigravity_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | Non
     return None
 
 
-def _allow_prepaid(env: Mapping[str, str]) -> bool:
-    """Prepaid wallets for subscription-tier rungs; default OFF.
-
-    Set ``RADON_LADDER_ALLOW_PREPAID=1`` (also ``true`` / ``yes`` / ``on``) to
-    restore the pre-2026-09-18 escape hatch that meters console API credit.
-    """
-    raw = (env.get("RADON_LADDER_ALLOW_PREPAID") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _prepaid_auth(
-    env: Mapping[str, str],
-    *key_names: str,
-    mechanism: str,
-) -> AuthMaterial | None:
-    if not _allow_prepaid(env):
-        return None
-    prepaid = _env_get(env, *key_names)
-    if not prepaid:
-        return None
-    mech = mechanism
-    for candidate in key_names:
-        if (env.get(candidate) or "").strip():
-            mech = candidate
-            break
-    return AuthMaterial(prepaid, "api_key", mech)
+_SUBSCRIPTION_AUTH: dict[str, Callable[[Mapping[str, str]], "AuthMaterial | None"]] = {
+    "anthropic": _anthropic_subscription_auth,
+    "grok": _grok_subscription_auth,
+    "codex": _codex_subscription_auth,
+    # Google: the Antigravity CLI only, no key and no OAuth token path.
+    "antigravity": _antigravity_subscription_auth,
+}
 
 
 def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
-    """Subscription credentials only for sub-tier rungs unless allow-prepaid."""
-    if name == "anthropic":
-        sub = _anthropic_subscription_auth(env)
-        if sub is not None:
-            return sub
-        return _prepaid_auth(env, *_ANTHROPIC_PREPAID_KEYS, mechanism="ANTHROPIC_API_KEY")
-    if name == "grok":
-        sub = _grok_subscription_auth(env)
-        if sub is not None:
-            return sub
-        return _prepaid_auth(env, *_GROK_PREPAID_KEYS, mechanism="XAI_API_KEY")
-    if name == "codex":
-        sub = _codex_subscription_auth(env)
-        if sub is not None:
-            return sub
-        return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
-    if name == "antigravity":
-        # CLI only: no prepaid Google key, even under allow-prepaid.
-        return _antigravity_subscription_auth(env)
+    """Subscription credentials only for sub-tier rungs; prepaid keys never."""
+    if name in _SUBSCRIPTION_AUTH:
+        prepaid_denylist.warn_ignored(env)
+        return _SUBSCRIPTION_AUTH[name](env)
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -579,14 +522,14 @@ def _anthropic_headers(api_key: str, *, subscription: bool) -> dict[str, str]:
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
-    if subscription:
-        # Claude Max OAuth grant: Bearer plus the oauth beta and the Claude Code
-        # user agent. As an x-api-key the same grant is a 401.
-        headers["authorization"] = f"Bearer {api_key}"
-        headers["anthropic-beta"] = _ANTHROPIC_OAUTH_BETA
-        headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
-    else:
-        headers["x-api-key"] = api_key
+    if not subscription:
+        # Subscriptions only (2026-10-26): no x-api-key path exists.
+        raise ValueError("Anthropic requests require a Claude subscription grant")
+    # Claude Max OAuth grant: Bearer plus the oauth beta and the Claude Code
+    # user agent. As an x-api-key the same grant is a 401.
+    headers["authorization"] = f"Bearer {api_key}"
+    headers["anthropic-beta"] = _ANTHROPIC_OAUTH_BETA
+    headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
     return headers
 
 
@@ -1207,18 +1150,7 @@ def _call_vision_provider(
                 timeout=60.0,
                 max_bytes=max_response_bytes,
             )
-        return _request(
-            post,
-            "https://api.openai.com/v1/chat/completions",
-            {
-                "authorization": f"Bearer {api_key}",
-                "content-type": "application/json",
-            },
-            _openai_vision_body(model, b64, prompt),
-            timeout=120.0,
-            stream=True,
-            max_bytes=max_response_bytes,
-        )
+        raise ValueError("Codex requests require a ChatGPT subscription grant")
     if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
@@ -1412,20 +1344,7 @@ def _call_text_provider(
                 timeout=(10.0, read_timeout),
                 max_bytes=max_response_bytes,
             )
-        return _request(
-            post,
-            "https://api.openai.com/v1/chat/completions",
-            {
-                "authorization": f"Bearer {api_key}",
-                "content-type": "application/json",
-            },
-            _openai_multimodal_body(
-                model, system, instruction, labeled_b64, max_tokens=max_tokens
-            ),
-            timeout=read_timeout,
-            stream=True,
-            max_bytes=max_response_bytes,
-        )
+        raise ValueError("Codex requests require a ChatGPT subscription grant")
     if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
@@ -1923,7 +1842,7 @@ def subscription_auth(name: str, env: Mapping[str, str] | None = None) -> AuthMa
 
     The public seam for scripts that call a provider directly instead of
     running the whole ladder (CTA share copy, X search, catalog refresh): the
-    subscription grant, or a prepaid key only under RADON_LADDER_ALLOW_PREPAID.
+    subscription grant or None. Prepaid keys are never returned.
     """
     return _auth_for(name, os.environ if env is None else env)
 

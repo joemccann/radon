@@ -1,4 +1,4 @@
-"""Auth-file API keys obey the same explicit prepaid gate as env keys."""
+"""Auth-file API keys are never read, with or without the retired prepaid flag."""
 import json
 
 import pytest
@@ -14,7 +14,7 @@ from clients.model_ladder import _auth_for, wired_providers
     ("grok", ".grok/auth.json", {"credentials": {"api_key": "fake-prepaid"}}),
 ])
 @pytest.mark.parametrize("allow", [None, "0", "1"])
-def test_auth_file_key_requires_explicit_prepaid_opt_in(tmp_path, provider, relative, payload, allow):
+def test_auth_file_key_is_never_read(tmp_path, provider, relative, payload, allow):
     path = tmp_path / relative
     path.parent.mkdir()
     path.write_text(json.dumps(payload))
@@ -22,13 +22,8 @@ def test_auth_file_key_requires_explicit_prepaid_opt_in(tmp_path, provider, rela
     if allow is not None:
         env["RADON_LADDER_ALLOW_PREPAID"] = allow
     auth = _auth_for(provider, env)
-    if allow == "1":
-        assert auth is not None
-        assert auth.kind == "api_key"
-        assert auth.token == "fake-prepaid"
-    else:
-        assert auth is None
-        assert provider not in wired_providers(env)
+    assert auth is None
+    assert provider not in wired_providers(env)
 
 
 @pytest.mark.parametrize("provider,relative,payload", [
