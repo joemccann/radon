@@ -17,6 +17,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
+try:
+    from utils.production_writer_guard import refuse_developer_host_in_cloud_mode
+except ImportError:
+    from scripts.utils.production_writer_guard import refuse_developer_host_in_cloud_mode
+
 # Default keep counts: enough history for short diagnostics, not months of
 # superseded JSON. Tune per table if a consumer starts reading deeper history.
 DEFAULT_KEEP = 30
@@ -311,8 +316,10 @@ def apply_policy_http(policy: Policy, *, timeout: float = RETENTION_HTTP_TIMEOUT
     """Apply one policy over the bounded Hrana HTTP pipeline.
 
     Rowcount is unavailable on this transport (returns 0); success is the
-    absence of an exception.
+    absence of an exception. All DELETEs, including row-returning batches,
+    refuse developer hosts before reading credentials or making a request.
     """
+    refuse_developer_host_in_cloud_mode()
     if isinstance(policy, MarginSampleRetentionPolicy):
         try:
             from .hrana_http import hrana_query
