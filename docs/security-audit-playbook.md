@@ -391,7 +391,9 @@ line here whenever you ship a security fix.**
   value. A later-line literal close that the escaping grammar rejects is not a
   close: the value is unterminated through that line. A placeholder word
   inside a value exempts it only when no long component stays opaque
-  without that word.
+  without that word. A line-oriented header rule (`Authorization`, auth
+  token, `Cookie`) leaves every quoted value to the tokenizer, prefixed and
+  template literals included.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
