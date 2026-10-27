@@ -630,3 +630,32 @@ def test_rescan9_shape_is_scrubbed_and_detected(text):
     out = scrub_credential_text(text)
     assert _clean(out), out
     assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+_RESCAN10_SHAPES = {
+    "second-heredoc": f"UW_TOKEN=$(cat <<A <<B\nfirst\nA\n{OPAQUE}{TAIL}\nB\n)\n",
+    "shell-word-bang": f"PASSWORD=''!{OPAQUE}{TAIL}\n",
+    "quoted-annotation": f'PASSWORD: "str" = "{OPAQUE}{TAIL}"\n',
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN10_SHAPES.values(), ids=_RESCAN10_SHAPES.keys())
+def test_rescan10_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_wrapped_unterminated_heredocs_stay_linear():
+    import time
+
+    def elapsed(n):
+        payload = "# password: &a $(cat <<END\n" * n
+        start = time.perf_counter()
+        scrub_credential_text(payload)
+        find_secret_assignments(payload)
+        return time.perf_counter() - start
+
+    # 16x the input: linear stays near 16x, quadratic is near 256x.
+    small, large = elapsed(500), elapsed(8000)
+    assert large < max(small * 40, 1.0), (small, large)

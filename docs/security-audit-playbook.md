@@ -383,11 +383,14 @@ line here whenever you ship a security fix.**
   trailing backslash joins the next line, and a subscript target
   (`os.environ['NAME'] = ...`) is an assignment. Shell quoting is tokenized
   too: `$'...'` and `$"..."` are quoted values, an unquoted run touching a
-  closed literal belongs to the same word, and a `$(...)` value with a heredoc
-  runs through its exact terminator line (`<<-` strips leading tabs only).
+  closed literal belongs to the same word up to whitespace or a shell
+  metacharacter, and a `$(...)` value with heredocs runs through the exact
+  terminator line of the last one (`<<-` strips leading tabs only). Only the
+  assignment scan follows a heredoc; a helper that rescans from every wrapper
+  must not, or one unterminated heredoc per line costs quadratic time.
   Explicit `+` concatenation joins literals like adjacency does, template and
   triple-quoted literals included. A type annotation (`NAME: str = ...`) is
-  skipped to the initializer, and a string prefix may open a triple-quoted
+  skipped to the initializer, a quoted one too, and a string prefix may open a triple-quoted
   value. A later-line literal close that the escaping grammar rejects is not a
   close: the value is unterminated through that line. A placeholder word
   inside a value exempts it only when no long component stays opaque
