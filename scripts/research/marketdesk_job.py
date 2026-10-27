@@ -49,7 +49,7 @@ from api.db_http import DbHttpError  # noqa: E402
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox import DropboxError  # noqa: E402
 from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
-from research.marketdesk_copy import scrub, summary_problems  # noqa: E402
+from research.marketdesk_copy import scrub  # noqa: E402
 from research.marketdesk_filter import decide as relevance, fingerprint_index  # noqa: E402
 from research.publish import stable_post_id  # noqa: E402
 
@@ -65,7 +65,7 @@ MAX_FIGURES = 12
 # Figures are attached to the copy request (captions are read off them); larger PNGs stay extra images.
 ATTACH_MAX_BYTES = 3_750_000
 MAX_SUMMARY = 20
-MAX_SUMMARY_CHARS = 500  # UTF-16 code units: the web parser measures String.length
+MAX_SUMMARY_CHARS = 3000  # Input-only facts; never silently trim away a trailing hedge.
 MAX_TAGS = 12
 BODY_MAX = 12_000
 REQUEUE_BATCH = 5
@@ -117,12 +117,10 @@ class Deps:
     open_session: Callable
     list_latest: Callable
     fetch_article: Callable
-    download_pdf: Callable
     download_images: Callable
     write_copy: Callable
     certify: Callable
     writer_from_env: Callable
-    pdf_pages: Callable
     marketdesk_path: Callable
     service_cycle: Callable
     record_health: Callable
@@ -132,6 +130,7 @@ class Deps:
     record_outcome: Callable
     feedback_rows: Callable
     research_root: Callable
+    enqueue_pdf: Callable = field(default=lambda ref: None)
     clock: Callable = field(default=time.monotonic)
 
 
@@ -140,7 +139,7 @@ def default_deps() -> Deps:
     from db.service_cycle import service_cycle
     from api.db_http import hrana_execute
     from research import book, feedback, marketdesk_auth, marketdesk_copy, marketdesk_filter, marketdesk_scrape
-    from research import marketdesk_store, pipeline, publish
+    from research import marketdesk_store, marketdesk_pdf_store, publish
     from research.assets import read_asset, store_asset
     from research.dropbox_writer import DropboxWriter, marketdesk_path
 
@@ -157,17 +156,21 @@ def default_deps() -> Deps:
     def research_root():
         return Path(os.environ.get("RADON_RESEARCH_DIR", "/var/lib/radon/research"))
 
+    def certify(post, copy):
+        return marketdesk_copy.certify(post, copy, audit_root=research_root())
+
     return Deps(
         store=marketdesk_store, publish=publish.publish, store_asset=store_asset, read_asset=read_asset,
         expire_stale_held=publish.expire_stale_held, open_session=marketdesk_auth.open_session,
         list_latest=marketdesk_scrape.list_latest,
-        fetch_article=marketdesk_scrape.fetch_article, download_pdf=marketdesk_scrape.download_pdf,
+        fetch_article=marketdesk_scrape.fetch_article,
         download_images=marketdesk_scrape.download_images, write_copy=marketdesk_copy.write_copy,
-        certify=marketdesk_copy.certify, writer_from_env=DropboxWriter.from_env, pdf_pages=pipeline.pages_isolated,
+        certify=certify, writer_from_env=DropboxWriter.from_env,
         marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
         select=marketdesk_filter.ladder_select, book_tickers=book.tickers, recent_titles=recent_titles,
         record_outcome=publish.record_outcome, feedback_rows=feedback.fetch_rows, research_root=research_root,
+        enqueue_pdf=marketdesk_pdf_store.enqueue,
     )
 
 
@@ -202,30 +205,20 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-def _utf16_cut(text: str, limit: int) -> str:
-    """Longest prefix of at most ``limit`` UTF-16 code units, never splitting a surrogate pair."""
-    out, used = [], 0
-    for char in text:
-        width = 2 if ord(char) > 0xFFFF else 1
-        if used + width > limit:
-            break
-        out.append(char)
-        used += width
-    return "".join(out)
-
-
 def _clean_summary(items) -> list[str]:
-    """Summary bullets reach the feed verbatim, so they get the copy path's publisher/URL/phrase filter."""
+    """Bounded source facts for the rewrite; they are never rendered as a second bullet list."""
     cleaned = []
     for item in items or []:
         if not isinstance(item, str):
             continue
         text = re.sub(r"\s+", " ", scrub(item)).strip()
-        if not text or summary_problems(text):
+        if not text:
             continue
-        cleaned.append(_utf16_cut(text, MAX_SUMMARY_CHARS))
-        if len(cleaned) == MAX_SUMMARY:
-            break
+        if len(text) > MAX_SUMMARY_CHARS:
+            raise ArticleRejected("summary_too_large")
+        cleaned.append(text)
+        if len(cleaned) > MAX_SUMMARY:
+            raise ArticleRejected("summary_too_large")
     return cleaned
 
 
@@ -250,7 +243,7 @@ def _folders(value) -> list[str]:
     return [f for f in value if isinstance(f, str) and f.strip()][:12] if isinstance(value, (list, tuple)) else []
 
 
-def build_post(ref, *, summary: list[str], publisher: str | None, pdf_url: str, sha: str,
+def build_post(ref, *, publisher: str | None, sha: str,
                figure_urls: list[str], image_ids: list[str], extra_urls: list[str], copy,
                folders: list[str] | None = None, file_name: str | None = None) -> dict:
     stamp = _utc(ref.published_at)
@@ -270,13 +263,13 @@ def build_post(ref, *, summary: list[str], publisher: str | None, pdf_url: str, 
             "publisher": publisher or DEFAULT_PUBLISHER,
             "articleId": ref.article_id,
             "articleUrl": ARTICLE_URL + ref.article_id,
+            "evidenceKind": "article",
             "contentHash": sha,
             "documentDate": day,
             "folderDate": day,
-            "pages": [1],
-            "url": pdf_url,
+            "pages": [],
+            "url": ARTICLE_URL + ref.article_id,
             "figures": figures,
-            "summary": summary,
             "extraImages": extra_urls,
             "folders": _folders(folders),
             "fileName": str(file_name or ref.title or "")[:300],
@@ -298,8 +291,9 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     post_id = stable_post_id("marketdesk:" + ref.article_id, "article")
     existing = store.post_source(post_id)
     if existing is not None:  # crash between publish and ledger write: record, never re-publish
-        store.record_published(ref.article_id, post_id, str(existing.get("url") or ""),
-                               str(existing.get("contentHash") or ""))
+        legacy = existing.get("evidenceKind") != "article"
+        store.record_published(ref.article_id, post_id, existing.get("url") if legacy else None,
+                               existing.get("contentHash") if legacy else None)
         counts["healed"] += 1
         return
     article = deps.fetch_article(session, ref)
@@ -311,12 +305,14 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
         raise ArticleRejected("no_summary")
     dest = workdir / ref.article_id
     dest.mkdir(parents=True, exist_ok=True)
-    pdf = Path(deps.download_pdf(session, article, dest))
-    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
-    pdf_url = deps.store_asset(pdf)
-    pages, created = deps.pdf_pages(pdf)
-    if not pages:
-        raise ArticleRejected("pdf_unreadable")
+    # Summary text is a logical source block, never a claim that a PDF page was read.
+    pages = {1: "\n".join([str(getattr(article, "title", None) or ref.title), *summary])}
+    created = None
+    evidence = {"articleId": ref.article_id, "publishedAt": _utc(ref.published_at).isoformat(),
+                "title": getattr(article, "title", None) or ref.title, "publisher": _publisher(article),
+                "summary": summary, "images": list(getattr(article, "image_urls", []) or [])}
+    sha = hashlib.sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False,
+                                   separators=(",", ":")).encode()).hexdigest()
     title = getattr(article, "title", None) or ref.title
     folders = _folders(getattr(article, "folders", None))
     folder_date = _utc(ref.published_at).astimezone(NY).date().isoformat()
@@ -325,15 +321,15 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
         article_id=ref.article_id, title=title, folders=folders, folder_date=folder_date, pages=pages,
         created=created, summary=summary, root=root, select=deps.select, book_tickers=deps.book_tickers,
         recent=deps.recent_titles(), index=fingerprint_index(root, store.published_fingerprints()),
-        note=store.note_for(ref.article_id))
+        note=store.note_for(ref.article_id), evidence_kind="article")
     review = decision.review
-    review["document"]["source_url"] = pdf_url
+    review["document"].update(source_url=ref.url, evidence_kind="article", page_count=0)
     work = {"key": "marketdesk:" + ref.article_id, "folder_date": folder_date,
             "metadata": {"id": ref.article_id, "name": f"{title}.pdf"}}
     publisher = _publisher(article)
     if decision.outcome != "publish":
-        store.record_decision(ref.article_id, decision.outcome, decision.reason_code, pdf_asset=pdf_url,
-                              pdf_sha256=sha, fingerprint=decision.fingerprint, publisher=decision.identity.publisher,
+        store.record_decision(ref.article_id, decision.outcome, decision.reason_code, pdf_asset=None,
+                              pdf_sha256=None, fingerprint=decision.fingerprint, publisher=decision.identity.publisher,
                               folders=folders, file_name=title)
         review["outcome"] = decision.outcome
         _record_outcome(deps, work, review)
@@ -354,12 +350,12 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     copy = deps.write_copy(title=title, publisher=publisher, summary=summary, body_text=body_text,
                            images=[(image_id, path) for image_id, (path, _) in zip(image_ids, figures)],
                            finding=decision.candidate)
-    post = build_post(ref, summary=summary, publisher=publisher, pdf_url=pdf_url, sha=sha,
+    post = build_post(ref, publisher=publisher, sha=sha,
                       figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy,
                       folders=folders, file_name=getattr(article, "title", None))
     post = deps.certify(post, copy)  # research.publish refuses copy without its Humanizer certificate
     deps.publish(post)
-    store.record_published(ref.article_id, post["id"], pdf_url, sha, fingerprint=decision.fingerprint,
+    store.record_published(ref.article_id, post["id"], None, None, fingerprint=decision.fingerprint,
                            publisher=decision.identity.publisher, folders=folders, file_name=title)
     review["posts"] = [post["id"]]
     _record_outcome(deps, work, review)
@@ -411,9 +407,11 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
     notes["gap"] = _listing_gap(refs, store.newest_known_published_at())
     kept = [ref for ref in refs if not _excluded(ref)]
     counts["excluded"] = len(refs) - len(kept)
-    requeued = store.requeued(limit=REQUEUE_BATCH)
-    todo = requeued + [ref for ref in store.unseen(kept, lookback_hours=lookback)
-                       if ref.article_id not in {r.article_id for r in requeued}]
+    discovered = store.unseen(kept, lookback_hours=lookback)
+    store.discover(discovered)
+    for ref in discovered:
+        deps.enqueue_pdf(ref)
+    todo = store.pending(limit=max(100, max_per_cycle))
     counts["unseen"] = len(todo)
     attempted = 0
     for index, ref in enumerate(todo):

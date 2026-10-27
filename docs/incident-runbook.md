@@ -4856,3 +4856,10 @@ Observed 2026-10-21 18:18:13Z for page `72cdada6f65595cfd32c1885c614ed75`.
   Restore that ignore rule so generated dependencies cannot hold clone sync
   in `dirty` forever. Preserve actual untracked work and incident branches.
   Rollback reverts this code change; no runtime pin or credential changes.
+
+
+## MarketDesk articles blocked behind PDF preview access
+
+Signal: MarketDesk has new article summaries/images while the feed's PDF research timestamps stop; `marketdesk_articles` has pending `preview_quota` rows. Check the canonical ledger, provider article metadata and `/api/user/limits` separately from the Commentary scraper. A green process exit is not evidence of new publication.
+
+The article path must not request a PDF. It persists every discovered reference and replays pending rows outside the latest-25 listing, then uses summary facts and source images under the existing selection/copy/Humanizer gates. Original bullets stay input-only. Article evidence is labeled with its source URL, not fabricated PDF pages. The separate `radon-marketdesk-pdf.timer` archives one authorized PDF per persisted admission interval; denied PDF access backs off independently. Verify both live stored provenance and the rendered feed before closing. Regression files: `test_marketdesk_job.py`, `test_marketdesk_pdf_job.py`, `test_marketdesk_copy.py`, and `newsfeed-research-media.spec.ts`.

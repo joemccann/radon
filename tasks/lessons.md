@@ -1328,3 +1328,9 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 ## 2026-10-27: Article lightbox toolbar
 - Do not display an "Article reader" label in the lightbox toolbar. Keep navigation and Close; the article title already names the dialog.
+
+
+## 2026-10-27: Article publication must not wait for source PDF access
+- Treat source summaries and charts as independently available inputs. Keep PDF archive throttling and provider denials outside the publication transaction.
+- Use source bullets to write reviewed prose; never append their unreviewed list. Normalize grounded security tickers before the final Humanizer score and certificate.
+- Discover durably before slow work; a provider's latest-25 page is not a backlog. Preserve full bounded input qualifications and reject oversized facts explicitly instead of silently cutting them.
