@@ -36,6 +36,37 @@ export type UseTickerFlowReportOptions = {
   pendingPollLimit?: number;
 };
 
+export type FlowScanStatus = {
+  state: "running" | "ok" | "refused" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+};
+
+/** Server and browser clocks drift; a status this close before the POST is ours. */
+const SCAN_STATUS_CLOCK_SKEW_MS = 60_000;
+
+/** The failure of the scan this client started, or null. */
+function failedScanReason(payload: FlowReportData | null, scanStartedMs: number): string | null {
+  const status = payload?.scan_status;
+  if (!status || (status.state !== "failed" && status.state !== "refused")) return null;
+  const finished = status.finished_at ? Date.parse(status.finished_at) : NaN;
+  if (!Number.isFinite(finished) || finished < scanStartedMs - SCAN_STATUS_CLOCK_SKEW_MS) return null;
+  return status.error || "The scan did not produce a report.";
+}
+
+/** Operator copy for a scan FastAPI recorded as failed; raw script text stays server-side. */
+export function scanFailureCopy(reason: string): string {
+  if (/timed?\s*out|deadline/i.test(reason)) {
+    return "Scan ran out of time on the server. Showing the last cached report.";
+  }
+  if (/empty trading days|partial UW outage/i.test(reason)) {
+    return "Scan returned incomplete dark pool days and was not saved. Showing the last cached report.";
+  }
+  if (/capacity/i.test(reason)) return flowReportErrorCopy(reason);
+  return "Scan failed on the server. Showing the last cached report.";
+}
+
 export type FlowReportData = {
   ticker: string;
   /** When true the cache is empty — no scan has run yet for this ticker. */
@@ -90,6 +121,12 @@ export type FlowReportData = {
   combined_signal?: string;
   market_status?: string;
   trading_days_checked?: string[];
+  /** Closed sessions the scan's time budget skipped; they backfill next scan. */
+  history_backfill_skipped?: string[];
+  /** Dark-pool sessions actually in this report. */
+  sessions_covered?: number;
+  /** FastAPI's record of the most recent scan (`<TICKER>.scan.json`). */
+  scan_status?: FlowScanStatus;
   cache_meta?: {
     last_refresh?: string | null;
     age_seconds?: number | null;
@@ -135,7 +172,7 @@ export function useTickerFlowReport(
   // second POST — that would only join the same in-flight task and wait
   // another 25s for the same 202.
   const awaitLanding = useCallback(
-    async (sym: string, baseline: string | null, signal: AbortSignal) => {
+    async (sym: string, baseline: string | null, scanStartedMs: number, signal: AbortSignal) => {
       for (let poll = 0; poll < pendingPollLimit; poll += 1) {
         await sleep(pendingPollMs, signal);
         if (signal.aborted) return;
@@ -153,6 +190,14 @@ export function useTickerFlowReport(
           setStatus("fresh");
           return;
         }
+        // FastAPI recorded that the scan we started ended without a report.
+        // Waiting out the poll bound would only repeat "scan running".
+        const failure = failedScanReason(payload, scanStartedMs);
+        if (failure) {
+          setError(scanFailureCopy(failure));
+          setStatus("stale");
+          return;
+        }
       }
       setError(flowReportErrorCopy("Scan is still running; showing the last cached report."));
       setStatus("stale");
@@ -163,6 +208,7 @@ export function useTickerFlowReport(
   const triggerScan = useCallback(async (sym: string, signal: AbortSignal) => {
     setStatus("scanning");
     setError(null);
+    const scanStartedMs = Date.now();
     try {
       const res = await fetch(`/api/flow-analysis/${sym}`, {
         method: "POST",
@@ -178,7 +224,7 @@ export function useTickerFlowReport(
       if (res.status === 202 || payload?.scan_pending === true) {
         if (hasReport(payload)) setData(payload);
         setStatus("pending");
-        await awaitLanding(sym, payload?.cache_meta?.last_refresh ?? null, signal);
+        await awaitLanding(sym, payload?.cache_meta?.last_refresh ?? null, scanStartedMs, signal);
         return;
       }
       setData(payload);

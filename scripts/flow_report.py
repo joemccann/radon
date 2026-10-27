@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from clients.uw_client import UWClient
 from fetch_flow import fetch_flow
@@ -93,10 +93,18 @@ def fetch_ticker_skew(ticker: str) -> Dict[str, Any]:
         return unavailable_skew([f"skew:{exc}"])
 
 
-def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dict[str, Any]:
+def build_report(
+    ticker: str,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    history_budget_s: Optional[float] = None,
+) -> Dict[str, Any]:
     """Run the flow fetch + analysis pipeline for a single ticker."""
     ticker = ticker.upper()
-    flow = fetch_flow(ticker, lookback_days=lookback_days)
+    if history_budget_s is None:
+        flow = fetch_flow(ticker, lookback_days=lookback_days)
+    else:
+        flow = fetch_flow(ticker, lookback_days=lookback_days, history_budget_s=history_budget_s)
+    daily = (flow.get("dark_pool") or {}).get("daily") or []
     analysis = analyze_signal(flow)
     verdict = _classify_direction(flow, analysis)
 
@@ -113,6 +121,9 @@ def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dic
         "market_status": flow.get("market_status"),
         "trading_day_progress": flow.get("trading_day_progress"),
         "trading_days_checked": flow.get("trading_days_checked", []),
+        # Sessions the budget skipped; they backfill on the next scan.
+        "history_backfill_skipped": flow.get("history_backfill_skipped", []),
+        "sessions_covered": len(daily),
     }
 
 
@@ -125,10 +136,21 @@ def main() -> None:
         default=DEFAULT_LOOKBACK_DAYS,
         help=f"Lookback trading days (default {DEFAULT_LOOKBACK_DAYS})",
     )
+    parser.add_argument(
+        "--history-budget-secs",
+        type=float,
+        default=None,
+        help="Seconds to spend walking uncached prior days; the rest backfill next scan",
+    )
     args = parser.parse_args()
 
     try:
-        report = build_report(args.ticker, lookback_days=args.days)
+        if args.history_budget_secs is None:
+            report = build_report(args.ticker, lookback_days=args.days)
+        else:
+            report = build_report(
+                args.ticker, lookback_days=args.days, history_budget_s=args.history_budget_secs,
+            )
     except Exception as exc:  # noqa: BLE001 - surface root cause to caller
         print(json.dumps({"error": str(exc), "ticker": args.ticker.upper()}))
         sys.exit(1)

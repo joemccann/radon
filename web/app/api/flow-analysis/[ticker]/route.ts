@@ -59,6 +59,16 @@ function isClientTimeout(error: unknown): boolean {
   return error instanceof DOMException && error.name === "TimeoutError";
 }
 
+/** FastAPI's `<TICKER>.scan.json`: running / ok / refused / failed for the last scan. */
+async function readScanStatus(ticker: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(join(FLOW_REPORTS_DIR, `${ticker}.scan.json`), "utf-8"));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function readCachedReport(ticker: string): Promise<Record<string, unknown> | null> {
   try {
     return JSON.parse(await readFile(cachePathFor(ticker), "utf-8")) as Record<string, unknown>;
@@ -92,12 +102,13 @@ export async function GET(_req: Request, ctx: Params): Promise<Response> {
   }
 
   const cachePath = cachePathFor(ticker);
+  const scan_status = await readScanStatus(ticker);
   try {
     const raw = await readFile(cachePath, "utf-8");
     const data = JSON.parse(raw);
     const cache_meta = buildCacheMeta(cachePath);
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...data, cache_meta }),
+      NextResponse.json({ ...data, cache_meta, ...(scan_status ? { scan_status } : {}) }),
       requestId,
     );
   } catch {
@@ -106,7 +117,7 @@ export async function GET(_req: Request, ctx: Params): Promise<Response> {
     // a noisy 404 in the browser console / Next.js logs.
     const cache_meta = buildCacheMeta(cachePath);
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ticker, cache_meta, missing: true }),
+      NextResponse.json({ ticker, cache_meta, missing: true, ...(scan_status ? { scan_status } : {}) }),
       requestId,
     );
   }
