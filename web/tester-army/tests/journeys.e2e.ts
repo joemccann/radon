@@ -188,7 +188,7 @@ test('newsfeed filters posts, bookmarks with payload, opens media and dismisses 
   expect(writes).toEqual([{ url: new URL('/api/bookmarks', app.baseUrl!).href, method: 'POST', body: { post_id: posts[0].id, snapshot: { title: posts[0].title, source: 'https://themarketear.com/posts/fixture-news-1', timestamp: '2026-09-04T16:00:00.000Z', image, thumbnail: image } } }]);
   await screen.getByRole('button', { name: 'Open lightbox for: Synthetic hedge demand' }).click();
   await expect(screen.getByRole('dialog', { name: 'Synthetic hedge demand' })).toBeVisible();
-  await expect(screen.getByRole('dialog', { name: 'Synthetic hedge demand' }).getByRole('image', { name: 'Synthetic hedge demand' })).toBeVisible();
+  await expect(screen.getByRole('dialog', { name: 'Synthetic hedge demand' }).getByRole('image', { name: 'Synthetic hedge demand, image 1' })).toBeVisible();
   await expect.poll(() => browser.evaluate(() => [...document.querySelectorAll<HTMLImageElement>('[role=dialog] img')].every(image => image.complete && image.naturalWidth > 0))).toBe(true);
   await expect.poll(() => browser.evaluate(() => getComputedStyle(document.querySelector('.newsfeed-lightbox')!).opacity)).toBe('1');
   await app.screenshot('news-media-bookmark');
