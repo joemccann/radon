@@ -61,6 +61,10 @@ _UW_TRANSIENT_RETRY_SLEEP_S = 2.0
 # inside the 300s flow_report.py subprocess budget. Same shape as
 # fetch_oi_changes.OI_ADMISSION_WAIT_S and leap_scanner_uw's preset client.
 FLOW_ADMISSION_WAIT_S = 120.0
+# A budgeted run (fetch_flow history_budget_s) waits one governor minute per
+# page. A shorter cap made reserve() refuse at once whenever the minute window
+# needed ~60s (prod host, 2026-10-27); the caller's finish margin covers it.
+FLOW_BUDGETED_ADMISSION_WAIT_S = 60.0
 
 # UW /api/darkpool/{ticker}: limit default 500, max 500. Full days on liquid
 # names (GLD, SPY, …) require older_than cursor walks (default order=desc).
@@ -312,14 +316,17 @@ def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):
         raise
 
 
-def _flow_client_kwargs(retry_transient: bool) -> Dict:
+def _flow_client_kwargs(retry_transient: bool, history_budget_s: Optional[float] = None) -> Dict:
     """UWClient settings for a self-built flow client.
 
     Transient-retry callers (the flow report) wait through a saturated UW
     minute window; fail-fast callers (scanner / discover sampling) keep the
-    interactive default and no client-side retry ladder.
+    interactive default and no client-side retry ladder. A budgeted run waits
+    one governor minute per page.
     """
     if retry_transient:
+        if history_budget_s is not None:
+            return {"admission_timeout": FLOW_BUDGETED_ADMISSION_WAIT_S}
         return {"admission_timeout": FLOW_ADMISSION_WAIT_S}
     return {"max_retries": 0, "backoff_factor": 0}
 
@@ -378,8 +385,12 @@ def walk_darkpool(
     *,
     retry_transient: bool = True,
     max_pages: Optional[int] = None,
+    deadline: Optional[float] = None,
 ) -> DarkpoolWalk:
     """Fetch dark pool trade prints for a ticker (full day, multi-page).
+
+    ``deadline`` (a ``_monotonic()`` instant) stops paging once passed; the
+    first page is always fetched, and a walk cut short is not cacheable.
 
     UW hard-caps each response at ``DARKPOOL_PAGE_LIMIT`` (500). Walks
     older pages with ``older_than`` until a short page or empty page.
@@ -416,7 +427,11 @@ def walk_darkpool(
             page_cap = max(1, min(int(max_pages), DARKPOOL_MAX_PAGES))
         hit_page_cap = False
         day_start = day_start_et(date)
+        stopped_at_deadline = False
         for _page_idx in range(page_cap):
+            if _page_idx > 0 and deadline is not None and _monotonic() >= deadline:
+                stopped_at_deadline = True
+                break
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
                 break
@@ -452,7 +467,7 @@ def walk_darkpool(
                 "darkpool(%s, date=%s): hit page cap=%d (%d prints)",
                 ticker, date, page_cap, len(all_trades),
             )
-        cacheable = (not hit_page_cap) or (page_cap >= DARKPOOL_MAX_PAGES)
+        cacheable = not stopped_at_deadline and ((not hit_page_cap) or (page_cap >= DARKPOOL_MAX_PAGES))
         return DarkpoolWalk(all_trades, cacheable)
 
     if _client is not None:
@@ -510,6 +525,7 @@ def fetch_flow_alerts(
     *,
     retry_transient: bool = True,
     limit: int = FLOW_ALERTS_PAGE_LIMIT,
+    deadline: Optional[float] = None,
 ) -> List[Dict]:
     """Fetch options flow alerts (full multi-page walk).
 
@@ -541,6 +557,10 @@ def fetch_flow_alerts(
         older_than: Optional[str] = None
         seen: set = set()
         for _page_idx in range(FLOW_ALERTS_MAX_PAGES):
+            # The run's UW budget (fetch_flow history_budget_s) ends paging;
+            # the first page always runs so the options summary has a sample.
+            if _page_idx > 0 and deadline is not None and _monotonic() >= deadline:
+                break
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
                 break
@@ -768,10 +788,13 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
     # Get trading day progress for interpolation
     trading_day_progress, is_market_hours, market_status = get_trading_day_progress()
 
-    budget_started = _monotonic()
+    # One deadline for every UW page this run makes: day walks and the alerts
+    # walk all stop paging at it (a 2026-10-27 QQQ profile spent 70 of 83s in
+    # governor admission waits, page by page, after the day loop had started).
+    deadline = None if history_budget_s is None else _monotonic() + history_budget_s
 
     def _history_budget_spent() -> bool:
-        return history_budget_s is not None and _monotonic() - budget_started >= history_budget_s
+        return deadline is not None and _monotonic() >= deadline
 
     def _do_fetch(client):
         nonlocal all_dp_trades, daily_signals
@@ -785,8 +808,30 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
                 if is_immutable(date) and (not fetch_missing_history or _history_budget_spent()):
                     skipped_history_dates.append(date)
                     continue
-                trades = fetch_darkpool(ticker, date, _client=client, retry_transient=retry_transient)
-                set_cached_darkpool(ticker, date, trades, complete=True)
+                if deadline is None:
+                    trades = fetch_darkpool(ticker, date, _client=client, retry_transient=retry_transient)
+                    set_cached_darkpool(ticker, date, trades, complete=True)
+                else:
+                    try:
+                        walk = walk_darkpool(
+                            ticker, date, _client=client, retry_transient=retry_transient, deadline=deadline,
+                        )
+                    except UWRateLimitError:
+                        # The governor or UW refused a closed day: it is not
+                        # needed for this report and backfills next scan.
+                        # Today still raises; a report without it is wrong.
+                        if not is_immutable(date):
+                            raise
+                        skipped_history_dates.append(date)
+                        continue
+                    trades = walk.trades
+                    if not walk.cacheable and is_immutable(date):
+                        # A closed day cut off by the deadline is a sample, not
+                        # the day: leave it out and let the next scan walk it.
+                        skipped_history_dates.append(date)
+                        continue
+                    if walk.cacheable:
+                        set_cached_darkpool(ticker, date, trades, complete=True)
             if isinstance(trades, list):
                 day_analysis = analyze_darkpool(trades)
                 day_analysis["date"] = date
@@ -795,13 +840,15 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         # Skip flow_alerts if not needed (saves API call for scanning)
         if skip_options_flow:
             return []
-        return fetch_flow_alerts(ticker, _client=client, retry_transient=retry_transient)
+        if deadline is None:
+            return fetch_flow_alerts(ticker, _client=client, retry_transient=retry_transient)
+        return fetch_flow_alerts(ticker, _client=client, retry_transient=retry_transient, deadline=deadline)
 
     # Use provided client or create new one
     if _client is not None:
         flow_alerts = _do_fetch(_client)
     else:
-        with UWClient(**_flow_client_kwargs(retry_transient)) as client:
+        with UWClient(**_flow_client_kwargs(retry_transient, history_budget_s)) as client:
             flow_alerts = _do_fetch(client)
 
     # Aggregate dark pool analysis

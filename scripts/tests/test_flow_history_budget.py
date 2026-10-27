@@ -37,6 +37,9 @@ def _run(cached: set[str], *, budget, per_fetch_s: float):
         clock.now += per_fetch_s
         return [dict(TRADE)]
 
+    def fake_walk(ticker, date, **kw):
+        return fetch_flow.DarkpoolWalk(fake_fetch(ticker, date, **kw), True)
+
     def fake_cached(ticker, date):
         return [dict(TRADE)] if date in cached else None
 
@@ -48,6 +51,7 @@ def _run(cached: set[str], *, budget, per_fetch_s: float):
          patch.object(fetch_flow, "get_cached_darkpool", side_effect=fake_cached), \
          patch.object(fetch_flow, "set_cached_darkpool") as set_cached, \
          patch.object(fetch_flow, "fetch_darkpool", side_effect=fake_fetch), \
+         patch.object(fetch_flow, "walk_darkpool", side_effect=fake_walk), \
          patch.object(fetch_flow, "fetch_flow_alerts", return_value=[]), \
          patch.object(fetch_flow, "is_immutable", side_effect=lambda d: d < "2026-10-27"), \
          patch.object(fetch_flow, "_monotonic", clock):
