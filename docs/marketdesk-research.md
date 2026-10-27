@@ -2,10 +2,10 @@
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
 (`radon-research.service`, retired 2026-10-26) as the research feed's source.
-Every 5 minutes it signs in to marketdesk.ai over plain HTTP, lists the latest
+Every 5 minutes it signs in to https://marketdesk.ai, lists the latest
 library items, and for each new item reads MarketDesk's bullet summary and chart
-images, downloads the source PDF (the file behind the article's
-`a.action.preview` link, `/standalone/<id>`), stores the PDF and every chart as
+images, downloads the source PDF (`GET /files/<id>/blob`, following one
+redirect to the file host; `/standalone/<id>` is only the viewer), stores the PDF and every chart as
 private research assets, runs the old Dropbox PDF pipeline's relevance filters
 (below), and for each item that passes writes the post copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. The PDF is

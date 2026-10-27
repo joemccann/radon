@@ -2927,3 +2927,20 @@ class TestDocumentation20261027:
         cache = (_ROOT / "scripts/utils/darkpool_cache.py").read_text()
         assert "def day_start_et" in cache
         assert "before its Eastern day start" in cache
+
+    def test_marketdesk_pdf_is_the_json_blob(self):
+        intro = (_ROOT / "docs/marketdesk-research.md").read_text()
+        intro = intro.split("## Relevance filter", 1)[0]
+        assert "a.action.preview" not in intro
+        assert "GET /files/<id>/blob" in intro
+        assert "https://marketdesk.ai" in intro
+        ops = (_ROOT / "docs/operations.md").read_text()
+        block = ops.split("### MarketDesk research ingest", 1)[1]
+        block = block.split("### Research evidence archive", 1)[0]
+        assert "plain HTTP" not in block
+        assert "HTTPS" in block
+        assert 'BASE_URL = "https://marketdesk.ai"' in (
+            _ROOT / "scripts/research/marketdesk_auth.py"
+        ).read_text()
+        scrape = (_ROOT / "scripts/research/marketdesk_scrape.py").read_text()
+        assert "/files/<id>/blob" in scrape
