@@ -5,8 +5,8 @@ Applies under `scripts/newsfeed/`. Mirrors `scripts/newsfeed/CLAUDE.md`.
 ## Runtime
 
 - Scraper uses headless Playwright for themarketear.com. `cdp.js` is a compatibility shim.
-- Required env: `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD`.
-- Session storage: `data/newsfeed-storage.json` (gitignored), reused for about 30 days with full re-auth about every 6h.
+- Renewal env: `THEMARKETEAR_EMAIL`, `MARKETDESK_FIREBASE_REFRESH_TOKEN` (existing same-account Firebase seed). `THEMARKETEAR_PASSWORD` is an optional legacy fallback.
+- Session storage: `data/newsfeed-storage.json` (0600, cookies and localStorage); own rotated grant `data/newsfeed-firebase.json` (0600). Proactively renew the product cookie every 6h, require the configured identity and premium content.
 - Force IPv4 for `themarketear.com` CDN (and vision-tagger Anthropic calls).
 - Local one-shot debug: `node scripts/newsfeed/index.js --once`.
 - Service is Hetzner-resident as `radon-newsfeed.service`.

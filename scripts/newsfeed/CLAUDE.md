@@ -8,7 +8,7 @@ Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `t
 
 ## Key Behaviors
 
-- **Headless Playwright** replaces chrome-cdp. Env: `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD`. Session stored at `data/newsfeed-storage.json` (gitignored, ~30d), reuses across runs; full re-auth ~6h. `cdp.js` is a back-compat shim.
+- **Headless Playwright** replaces chrome-cdp. Every 6h renew the product cookie through the same-account Firebase seed `MARKETDESK_FIREBASE_REFRESH_TOKEN`, bound to `THEMARKETEAR_EMAIL`; `THEMARKETEAR_PASSWORD` is optional legacy fallback. Cookie/localStorage state is `data/newsfeed-storage.json`; own rotated grant is `data/newsfeed-firebase.json` (both 0600). Require advanced expiry and real premium content. `cdp.js` is a back-compat shim.
 - **IPv4 forced** for `themarketear.com` CDN and `api.anthropic.com` (vision tagger) — AAAA-unreachable from residential IPv6.
 - **Cookie-gated images:** `media.js` accepts a `getCookieHeader` callback; Playwright `context.cookies()` follows `/images/<hash>.png` 301 → digitaloceanspaces.
 - **Rollover** at 500 KB → archive + keep ⌈N × 0.2⌉. `mergePosts` preserves `tags`.

@@ -1,6 +1,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs-extra";
+import { renewFirebaseSession } from "./firebaseSession.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,8 +73,8 @@ export const PAYWALL_STUB_MARKER = "part of our Premium coverage";
 export const PAYWALL_FULL_MESSAGE =
   "This article is part of our Premium coverage, please click here to login and access it or sign up for a Premium account.";
 
-async function pageHasPremiumContent(page) {
-  if (typeof page.evaluate !== "function") return true; // can't tell → trust
+async function pageHasPremiumContent(page, { strict = false } = {}) {
+  if (typeof page.evaluate !== "function") return !strict;
   try {
     return await page.evaluate((marker) => {
       const bodies = document.querySelectorAll("article.post .body .content");
@@ -88,18 +89,18 @@ async function pageHasPremiumContent(page) {
       return false;
     }, PAYWALL_STUB_MARKER);
   } catch {
-    return true; // probe failure → don't force re-login on every cycle
+    return !strict; // Warm reuse retains its legacy tolerance; renewal requires proof.
   }
 }
 
-async function tryReachNewsfeed(page, { timeout }) {
+async function tryReachNewsfeed(page, { timeout, requirePremiumProof = false }) {
   await page.goto(NEWSFEED_URL, { waitUntil: "domcontentloaded", timeout });
   if (typeof page.waitForLoadState === "function") {
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   }
   const url = typeof page.url === "function" ? page.url() : "";
   if (!isAuthenticatedNewsfeedUrl(url)) return false;
-  return await pageHasPremiumContent(page);
+  return await pageHasPremiumContent(page, { strict: requirePremiumProof });
 }
 
 async function runLoginFlow(page, { email, password, timeouts }) {
@@ -163,21 +164,34 @@ export async function ensureAuthenticated({
   debugDir = DEFAULT_DEBUG_DIR,
   timeouts = DEFAULT_TIMEOUTS,
   env = process.env,
+  renewSession = renewFirebaseSession,
 } = {}) {
   if (!page || typeof page.goto !== "function") {
     throw new NewsfeedAuthError("ensureAuthenticated requires a Playwright page object.");
   }
 
-  const reuseable = await tryReachNewsfeed(page, { timeout: timeouts.navigation }).catch(() => false);
+  let renewedSession = false;
+  try {
+    renewedSession = await renewSession({ context, env });
+  } catch {
+    console.warn("[newsfeed] Firebase session renewal unavailable; checking existing session.");
+  }
+
+  const reuseable = await tryReachNewsfeed(page, {
+    timeout: timeouts.navigation, requirePremiumProof: renewedSession,
+  }).catch(() => false);
   if (reuseable) {
     // Refresh disk-side cookies on the warm-reuse path so a process restart
     // doesn't fall back onto stale storage state. Without this, the only
     // persistence trigger is the cold-login path — which the 6h re-auth gate
     // skips entirely once a session is established.
     await tryPersistStorageState(persistStorageState);
-    return { authenticated: true, reusedSession: true };
+    return { authenticated: true, reusedSession: true, ...(renewedSession ? { renewedSession: true } : {}) };
   }
 
+  if (renewedSession) {
+    throw new NewsfeedAuthError("Renewed session did not provide premium newsfeed content.");
+  }
   const creds = credentials || readCredentialsFromEnv(env);
 
   try {
