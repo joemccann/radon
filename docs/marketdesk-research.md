@@ -2,7 +2,7 @@
 
 ## Article-first publication and deferred PDF archive (2026-10-27)
 
-The newsfeed publishes from the accessible MarketDesk article summary and chart images. Source bullets are input facts, never an appended list in the feed or reader. The model writes connected prose in Joe's voice, preserves source qualifications, and prefixes grounded security tickers with `$` before the final Humanizer review. The existing fidelity, relevance, novelty and >=90 Humanizer gates remain mandatory.
+The newsfeed publishes from the accessible MarketDesk article summary and chart images. Source bullets are input facts, never an appended list in the feed or reader. The model writes connected prose in Joe's voice, preserves source qualifications, and prefixes grounded security tickers with `$` before the final Humanizer review. Source identity, fidelity, novelty and >=90 Humanizer gates remain mandatory; every suitable MarketDesk topic is in scope.
 
 PDF retrieval is not a publication dependency. New provenance uses `evidenceKind: article`, the exact MarketDesk article URL, no PDF page numbers, and a SHA-256 digest of the canonical article inputs. A later archived PDF adds a separate `pdfUrl`/`pdfHash` pair without changing article copy or its identity. Legacy PDF-backed posts remain supported; their raw summary lists no longer render.
 
@@ -19,62 +19,63 @@ The independent [PDF archive service](marketdesk-pdf-archive.md) persists its ow
 (`radon-research.service`, retired 2026-10-26) as the research feed's source.
 Every 5 minutes it signs in to https://marketdesk.ai, lists the latest
 library items, and for each new item reads MarketDesk's bullet summary and chart
-images, stores charts as private research assets, and runs the old Dropbox
-pipeline's relevance filters over article facts
-(below), and for each item that passes writes the post copy in Joe's voice
+images, stores charts as private research assets, and applies source, identity
+and duplicate safety. Every suitable report proceeds to copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. Independently archived PDFs are
 then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
 the library's folder layout, whether or not the item was published. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
-watcher stay served. Relevance uses the same gates as intake v2; the later
-GROUND, FIGURE MATCH and VERIFY calls are not run. The copy is a voice rewrite
-of the selected finding and MarketDesk's own bullet summary, guarded by a
+watcher stay served. MarketDesk admission is separate from the unchanged
+Dropbox intake v2 relevance policy. GROUND, FIGURE MATCH and VERIFY calls are
+not run. The copy is a voice rewrite
+from MarketDesk's source title, bullet-summary facts and images, guarded by a
 numeric firewall (below).
 
-## Relevance filter (the intake v2 gates)
+## Admission: all suitable MarketDesk reports
 
-`scripts/research/marketdesk_filter.py` runs before any copy call, in the order
-and with the reason codes of `research.intake.Pipeline._process`:
+The operator selected "Publish all suitable reports" on 2026-10-27.
+`scripts/research/marketdesk_filter.py` admits every MarketDesk report with
+usable source facts, known publisher identity and nonduplicate content. FX
+and single-name reports outside the portfolio/watchlist are in scope. The
+separate Dropbox intake retains its existing triage and selector policy.
 
-1. Identity: `research.identify` on the source article title and summary. No PDF
-   is read by the publication job. The MarketDesk folder chain stands in for the
-   old Dropbox path, so the institution folder is the publisher folder.
-2. `research.force_include`: BofA Flow Show, Deutsche Bank positioning and
-   Citadel Rubner GMI are always in scope (Rubner is always-publish).
-3. `research.triage` with the approved operator rules (`rules.json`) and the
-   operator book for single-name research: dropped as `DOC_TYPE_FX_PAIR_NOTE`,
-   `SERIES_DENYLIST`, `RULE_DOC_TYPE`, `RULE_PUBLISHER` or
-   `SINGLE_STOCK_NOT_IN_BOOK` unless force-included or re-queued by the operator.
-4. Publisher `unknown`: held `PUBLISHER_UNKNOWN`.
-5. Novelty: simhash of the article facts against published MarketDesk rows
-   (`marketdesk_articles.fingerprint`) and the old pipeline's `fingerprints.json`:
-   dropped `DUPLICATE_OF_PUBLISHED`, except an always-publish desk against
-   another publisher.
-6. One text-only SELECT (`marketdesk_filter.ladder_select`, subscription
-   ladder) under intake's `SELECT_INSTRUCTION`, with the operator preferences
-   (`examples.json`), the 30 newest feed titles, the MarketDesk summary and the
-   article facts. Empty candidates is held `NO_CANDIDATES` (intake holds it the
-   same way); force-included desks get intake's one FORCE_RESELECT; an
-   always-publish desk still empty publishes from the MarketDesk summary. A
-   ladder outage parks the item without spending an attempt.
+1. Identity: `research.identify` on the article title and source summary. The
+   institution folder identifies the publisher; no PDF is read by publication.
+2. Source facts must be present (`SOURCE_MATERIAL_MISSING` otherwise), and an
+   unknown publisher remains held (`PUBLISHER_UNKNOWN`). The normal scraper
+   parks not-yet-summarised articles before admission and eventually records
+   `no_summary` after the existing wait/attempt limits.
+3. Novelty: simhash against published MarketDesk rows and the legacy
+   `fingerprints.json` drops `DUPLICATE_OF_PUBLISHED`. The existing
+   always-publish desk exception across different publishers is unchanged.
+4. Source summary and images go directly to copy generation. There is no
+   preliminary relevance SELECT, portfolio lookup or preference/triage veto.
+   Existing numerical/ticker/source validation and the final exact-copy
+   Humanizer certificate remain required before publication. Source bullet
+   lists are input only and are never displayed below the article.
 
-Held and dropped items are terminal in the ledger (`status` `held` /
-`dropped`, `reason_code`) and mirrored to `research_outcomes`
-(`pipeline: marketdesk`) through `research.publish.record_outcome`, so the Held
-tab, its 24-hour held expiry, the daily cut report and the operator votes work
-as they did for Dropbox PDFs. Published items are mirrored too.
+Each cycle applies operator feedback first, preserving an actionable vote's
+note before automatic replay can move that item to pending. Then
+`marketdesk_store.requeue_suitable(limit=5)` atomically reopens
+at most five held/dropped ledger rows carrying only retired relevance codes:
+`DOC_TYPE_FX_PAIR_NOTE`, `SINGLE_STOCK_NOT_IN_BOOK`, `SERIES_DENYLIST`,
+`RULE_DOC_TYPE`, `RULE_PUBLISHER`, `NO_CANDIDATES`, `INVALID_CANDIDATE`.
+The last code referred to an invalid preliminary SELECT candidate, not a
+failed copy certificate. Source/identity/duplicate decisions and all failed,
+published or already-pending rows are excluded. Each reopened row leaves the
+eligible set, so retries never reset a live lease or its attempt budget.
+Metadata, stored assets, Dropbox outbox state and operator notes survive.
+The durable pending queue processes these references even outside the latest
+listing/lookback, applying all current source and editorial gates again.
+No global status reset or manual replay command is needed after deployment.
 
-Each cycle the job runs the feedback loop the retired worker used to run:
-`research.learn.sync` refreshes `examples.json`, rule proposals and
-`rules.json` under `RADON_RESEARCH_DIR`, and `research.feedback.apply` re-queues
-a "should have published" vote on a held or dropped MarketDesk item with the
-operator's note (Turso state: `marketdesk_articles.note`,
-`marketdesk_feedback_handled`). Re-queued items are processed first, even off
-the latest listing or outside the lookback; the note reaches SELECT as
-`OPERATOR NOTE` and overrides a triage drop. Gap: a "want more" vote on a
-published MarketDesk post is marked handled and does not revise the post (the
-post feedback row carries no MarketDesk file id).
+Outcomes remain mirrored to `research_outcomes` for Held-tab/history support.
+Feedback sync still records preferences for the separate intake, and an
+explicit "should have published" vote can reopen held/dropped MarketDesk work.
+Its note is retained in the private review, but cannot override source,
+identity or duplicate safety. A "want more" vote on a published MarketDesk
+post remains handled without revising the existing article.
 
 ## marketdesk.ai API (captured signed in, 2026-10-26)
 
@@ -99,13 +100,13 @@ fetched with a cookie-less opener that never follows redirects.
 
 | Module | Role |
 |---|---|
-| `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, operator feedback, scrape, relevance, publish, Dropbox outbox, health. Timer entry point, run by path. |
-| `scripts/research/marketdesk_filter.py` | The intake v2 relevance gates and the SELECT ladder call. |
+| `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, operator feedback, policy replay, scrape, admission, publish, Dropbox outbox, health. Timer entry point, run by path. |
+| `scripts/research/marketdesk_filter.py` | MarketDesk-only source/identity/novelty admission; all suitable reports go to grounded copy. |
 | `scripts/research/marketdesk_auth.py` | Firebase refresh-token exchange, password fallback, `POST /api/user/login`, cookie session with one re-login on a signed-out answer. |
 | `scripts/research/marketdesk_bootstrap.py` | Laptop only. `--from-cdp` reads the Firebase refresh token from a signed-in marketdesk.ai tab in Chrome; `--check` exchanges it, logs in and lists. Never run in a unit. |
 | `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
 | `scripts/research/marketdesk_copy.py` | System prompt (voice doc plus humanize rules), em-dash scrub, `copy_problems` validator, model ladder call. |
-| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, relevance decision, re-queue, upload outbox) and `marketdesk_feedback_handled`. |
+| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, admission decision, bounded policy replay, re-queue, upload outbox) and `marketdesk_feedback_handled`. |
 | `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. |
 | `scripts/research/publish.py` | `kind: "marketdesk"` provenance branch beside the unchanged `dropbox` branch. |
 | `scripts/db/migrations/0102_marketdesk_articles.sql` | Ledger table; deletes the retired `dropbox-research` health row. |
@@ -117,8 +118,9 @@ fetched with a cookie-less opener that never follows redirects.
 2. Drain the Dropbox upload outbox (up to 10 published, held or dropped rows whose upload is
    missing, skipped or failed). It runs before the scrape so a slow or killed
    scrape can never starve uploads.
-3. Operator feedback: `learn.sync`, then re-queue actionable votes (see
-   Relevance filter). A fetch failure changes nothing.
+3. Sync feedback and re-queue actionable votes, retaining their notes first.
+   Then reopen up to five retired relevance decisions (see Admission).
+   A feedback fetch failure changes no vote state; automatic replay still runs.
 4. Sign in: refresh-token exchange (else the THEMARKETEAR password fallback),
    then `POST /api/user/login`. An auth failure fails the cycle
    (`marketdesk-research` error).
@@ -132,10 +134,10 @@ fetched with a cookie-less opener that never follows redirects.
    `listing_gap`: items between them may have been missed.
 6. Per item, inside its own try: claim and lease the ledger row, heal a crash
    between publish and ledger write (`research_post_sources` already has the
-   post id), read the summary and folder chain, run the relevance filter (held or dropped items stop here,
+   post id), read the summary and folder chain, run source/identity/novelty admission (held or dropped items stop here,
    counted against `MARKETDESK_MAX_PER_CYCLE`), store up to 40 images (12 shown,
-   each attached to the copy request), write the copy about the selected
-   finding, publish, record. An item MarketDesk has not summarised yet is parked as
+   each attached to the copy request), write grounded prose from the original
+   source facts, certify the exact final copy, publish, record. An item MarketDesk has not summarised yet is parked as
    `summary_pending` (no attempt spent, not a failure, not counted against
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
    than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). One bad item never fails

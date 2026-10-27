@@ -25,7 +25,7 @@ ERROR_MAX_CHARS = 300
 DROPBOX_STATUSES = frozenset({"uploaded", "skipped_no_creds", "failed"})
 DECISION_STATUSES = frozenset({"held", "dropped"})
 WORK_PREFIX = "marketdesk:"
-# Terminal for the listing: a held or dropped article comes back only through an operator re-queue.
+# Terminal for the listing; retired relevance decisions are replayed by a bounded policy migration.
 _DONE = "('published','failed','held','dropped')"
 _IN_CHUNK = 200
 
@@ -162,6 +162,33 @@ def record_decision(article_id: str, status: str, reason_code: str | None, *, pd
         "folders_json=?, file_name=?, note=NULL, last_error=NULL, updated_at=? WHERE article_id=?",
         (status, str(reason_code or "")[:64] or None, pdf_asset, pdf_sha256, _hex(fingerprint), publisher,
          _folders_json(folders), (str(file_name)[:300] if file_name else None), _now(), article_id))
+
+
+# Only the removed MarketDesk relevance/selector gates, never source identity,
+# duplicates, failed copy certification, or another pipeline's decisions.
+RETIRED_RELEVANCE_CODES = (
+    "DOC_TYPE_FX_PAIR_NOTE", "SINGLE_STOCK_NOT_IN_BOOK", "SERIES_DENYLIST",
+    "RULE_DOC_TYPE", "RULE_PUBLISHER", "NO_CANDIDATES", "INVALID_CANDIDATE",
+)
+
+
+def requeue_suitable(limit: int = 5) -> int:
+    """Replay a bounded batch of retired relevance decisions exactly once.
+
+    Moving each row to pending atomically removes it from this migration's
+    eligible set. Retries cannot reset a live lease/attempt budget; subsequent
+    source/identity/duplicate failures have different reason codes and remain
+    terminal. Preserve source metadata, stored assets, outbox state and notes.
+    """
+    placeholders = ",".join("?" for _ in RETIRED_RELEVANCE_CODES)
+    rows = hrana_execute(
+        "UPDATE marketdesk_articles SET status='pending', attempts=0, reason_code=NULL, last_error=NULL, updated_at=? "
+        "WHERE article_id IN (SELECT article_id FROM marketdesk_articles "
+        f"WHERE status IN ('held','dropped') AND reason_code IN ({placeholders}) "
+        "ORDER BY updated_at,article_id LIMIT ?) "
+        f"AND status IN ('held','dropped') AND reason_code IN ({placeholders}) RETURNING article_id",
+        (_now(), *RETIRED_RELEVANCE_CODES, max(1, min(int(limit), 100)), *RETIRED_RELEVANCE_CODES))
+    return len(rows)
 
 
 def published_fingerprints() -> list[tuple]:
