@@ -242,7 +242,7 @@ describe("NewsfeedLightbox", () => {
  const source = {kind: "dropbox" as const, publisher: "Synthetic Bank", url: base + "c".repeat(64) + ".pdf", documentDate: "2026-09-07", folderDate: "2026-09-07", pages: [2,3], figures: [{url:first,page:2,caption:"First chart"},{url:second,page:3,caption:"Second chart"}], fileId:"fixture",revision:"r1",contentHash:"c".repeat(64)};
  const {getByRole, getByText} = render(<NewsfeedLightbox focus={{post:{...POST, source, images:[first,second], href:source.url}, imageUrl:first}} onDismiss={vi.fn()} />);
  fireEvent.click(getByRole("button", {name:"View chart 2: Second chart"}));
- expect(document.querySelector(".newsfeed-lightbox__media > img")?.getAttribute("src")).toBe(second);
+ expect(document.querySelector(".newsfeed-lightbox__stage > img")?.getAttribute("src")).toBe(second);
  expect(getByText("Synthetic Bank · p. 3 · Second chart")).not.toBeNull();
  expect(getByRole("link", {name:"Source PDF"}).getAttribute("href")).toBe(source.url);
  cleanup();
@@ -259,7 +259,7 @@ it("marketdesk thumbnails switch images with page-free captions and stay unoptim
     figures: [{ url: first, caption: "First chart" }, { url: second, caption: "Second chart" }],
     summary: ["One bullet"] };
   const { getByRole, getByText } = render(<NewsfeedLightbox focus={{ post: { ...POST, source, images: [first, second], href: source.url }, imageUrl: first }} onDismiss={vi.fn()} />);
-  const main = () => document.querySelector(".newsfeed-lightbox__media > img")!;
+  const main = () => document.querySelector(".newsfeed-lightbox__stage > img")!;
   expect(main().getAttribute("data-unoptimized")).toBe("true");
   expect(getByText("MarketDesk · First chart")).not.toBeNull();
   const thumb = getByRole("button", { name: "View chart 2: Second chart" });
@@ -274,6 +274,6 @@ it("marketdesk thumbnails switch images with page-free captions and stay unoptim
 
 it("keeps Market Ear images optimized", () => {
   render(<NewsfeedLightbox focus={FOCUS} onDismiss={vi.fn()} />);
-  expect(document.querySelector(".newsfeed-lightbox__media > img")?.getAttribute("data-unoptimized")).toBe("false");
+  expect(document.querySelector(".newsfeed-lightbox__stage > img")?.getAttribute("data-unoptimized")).toBe("false");
   cleanup();
 });

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { installClearFixtures } from "./clear-fixtures";
+import { installClearRealtimeFixtures } from "./clear-realtime-fixtures";
 
 const pdfUrl = `/api/newsfeed/research/files/${"a".repeat(64)}.pdf`;
 const chartUrl = `/api/newsfeed/research/files/${"b".repeat(64)}.png`;
@@ -26,6 +27,7 @@ for (const width of [1440, 393]) {
   test(`PDF tab preserves the mixed feed and article controls at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await installClearFixtures(page);
+    await installClearRealtimeFixtures(page);
     let postsRequests = 0;
     await page.route("**/api/newsfeed/posts**", route => {
       postsRequests++;
@@ -65,11 +67,14 @@ for (const width of [1440, 393]) {
     await first.getByRole("button", { name: "Open lightbox for: PDF research article 0" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByRole("dialog").getByRole("link", { name: "Source PDF", exact: true })).toHaveAttribute("href", pdfUrl);
-    await expect(page.getByRole("button", { name: "Previous post" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Previous article" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await first.getByRole("button", { name: "MACRO", exact: true }).click();
     await expect(panel.getByTestId("news-feed-item")).toHaveCount(10);
+    await expect.poll(() => new URL(page.url()).searchParams.get("tags")).toBe("MACRO");
+    // Wait for the URL-owned filter to settle before paging or refreshing.
     await panel.getByRole("button", { name: "Clear all", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("tags")).toBeNull();
     await expect(panel.getByTestId("news-feed-item")).toHaveCount(18);
     await panel.getByRole("button", { name: "Next page" }).click();
     await expect(panel.getByTestId("news-feed-item")).toHaveCount(2);
@@ -85,6 +90,7 @@ for (const width of [1440, 393]) {
   test(`PDF empty state leaves Commentary available at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await installClearFixtures(page);
+    await installClearRealtimeFixtures(page);
     await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [ordinary] }));
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     await expect(page.getByText(ordinary.title, { exact: true })).toBeVisible();
