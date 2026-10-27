@@ -568,6 +568,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``marketdesk-dropbox`` is the same cycle's Dropbox upload outbox:
   // ok, paused (write credentials absent, uploads skipped) or error.
   "marketdesk-dropbox": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+  "marketdesk-pdf": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
   // ``performance`` is a mirror-fed scan (db.scan_mirror SNAPSHOT_UPSERTS)
   // that only runs when a user hits its FastAPI scan endpoint — on-demand

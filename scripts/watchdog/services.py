@@ -426,6 +426,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Dropbox: ok / paused (write creds absent, uploads skipped) / error.
     # paused never reaches the error bucket; the window still ages it.
     "marketdesk-dropbox": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
+    "marketdesk-pdf": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # preset-rebalance — WEEKLY index-constituent refresh inside the
     # monitor daemon (Sundays). Heartbeats via the DUR-14 structural
     # BaseHandler.run() write. 8-day window = weekly cadence + one day of
@@ -577,6 +578,7 @@ BUCKETS: dict[str, list[str]] = {
         # 5-minute marketdesk.ai ingest + its Dropbox outbox (15-min window).
         "marketdesk-research",
         "marketdesk-dropbox",
+        "marketdesk-pdf",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",
         # 30s P1 auto-fix poller on the VPS. A stalled auto-fixer is silent

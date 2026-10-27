@@ -1,0 +1,25 @@
+[Unit]
+Description=Radon throttled MarketDesk PDF archive
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+Environment=RADON_RESEARCH_DIR=/var/lib/radon/research
+Environment=RADON_DB_NO_REPLICA=1
+# Runtime drop-in runs immutable app code as the container UID, not as host root.
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/research/marketdesk_pdf_job.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=240
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

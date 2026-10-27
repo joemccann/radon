@@ -334,3 +334,26 @@ def test_published_clears_the_operator_note(db):
     store.requeue_with_note("marketdesk:Aaaaaaaa1", '{"kind": "publish"}', feedback_id="f1")
     store.record_published("Aaaaaaaa1", "research-" + "a" * 32, ASSET, "c" * 64)
     assert row(db, "Aaaaaaaa1")["note"] is None and store.requeued() == []
+
+
+def test_discover_is_idempotent_without_claiming_attempts(db):
+    refs = [ref("DISCOVER001"), ref("DISCOVER002")]
+    store.discover(refs)
+    store.discover(refs)
+    assert db.execute("SELECT count(*) FROM marketdesk_articles").fetchone()[0] == 2
+    assert db.execute("SELECT count(*) FROM marketdesk_articles WHERE last_error IS NOT NULL OR attempts != 0").fetchone()[0] == 0
+
+
+def test_pending_replays_off_listing_fairly_without_lookback(db):
+    store.discover([ref("PENDING0001", hours_ago=200), ref("PENDING0002")])
+    db.execute("UPDATE marketdesk_articles SET updated_at='2026-10-25T00:00:00Z' WHERE article_id='PENDING0002'")
+    assert [r.article_id for r in store.pending(limit=1)] == ["PENDING0002"]
+    assert len(store.pending(limit=5)) == 2
+
+
+def test_article_publication_never_clears_an_already_downloaded_pdf(db):
+    store.claim(ref())
+    url = "/api/newsfeed/research/files/" + "b" * 64 + ".pdf"
+    store.record_published("4AJs5Adl2Yp", "research-" + "a" * 32, url, "b" * 64)
+    store.record_published("4AJs5Adl2Yp", "research-" + "a" * 32, None, None)
+    assert row(db)["pdf_asset"] == url and row(db)["pdf_sha256"] == "b" * 64
