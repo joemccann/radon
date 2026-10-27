@@ -271,15 +271,16 @@ _SPECIFIC_SCRUB_PATTERNS = [
 _STRING_PREFIX = re.compile(r"(?:[rRbBuUfF]{1,2}|\$)(?=[\"'])")
 
 # DS-2026-10-26-18: an unquoted run touching a closed literal is the same
-# shell word (`'abc'<v>`), `.` and `:` included (DS-2026-10-27-08). No `,`
-# or brackets, so JSON separators stay outside the value.
-_UNQUOTED_SEGMENT = re.compile(r"[A-Za-z0-9_+/=~%@.:-]+")
+# shell word (`'abc'<v>`): it runs to whitespace or a shell metacharacter
+# (DS-2026-10-27-08/-10). `,`, `]` and `}` end it too, so a JSON separator
+# after a quoted value is not read as part of it.
+_UNQUOTED_SEGMENT = re.compile(r"[^\s\"'`;&|()<>,\]}]+")
 
 # DS-2026-10-27-01: a command substitution whose heredoc carries the value on
 # the following lines. The window to the operator is bounded, so a long line
 # of `$(` values costs at most that much each.
 _HEREDOC_OPERATOR = re.compile(
-    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*(?P<quote>[\"']?)(?P<word>[A-Za-z_][A-Za-z0-9_]{0,63})(?P=quote)[^\r\n]*"
+    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*(?P<quote>[\"']?)(?P<word>[A-Za-z_][A-Za-z0-9_]{0,63})(?P=quote)"
 )
 
 # One line break plus indentation may sit between the key and its value: a
@@ -292,14 +293,16 @@ _ASSIGNMENT_HEAD = re.compile(
     rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
     # A type annotation before the initializer, `NAME: str = ...`
     # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
-    r"(?::[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?[ \t]*(?==))?"
+    # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
+    r"(?::[ \t]*(?P<annotation_quote>[\"']?)[A-Za-z_][A-Za-z0-9_.]{0,64}"
+    r"(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?(?P=annotation_quote)[ \t]*(?==))?"
     r"[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
 
 
-def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
+def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int, str]:
     """``(body_start, body_end, delimiter)`` of the value starting at ``pos``.
 
     The delimiter is ``""`` for an unquoted value, which runs to the next
@@ -360,23 +363,33 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
-    if text.startswith(("$(", "`"), index):
-        heredoc = _HEREDOC_OPERATOR.match(text, index)
-        if heredoc is not None:
-            return index, _heredoc_end(text, heredoc), ""
+    if heredoc and text.startswith("$(", index):
+        operators = []
+        operator = _HEREDOC_OPERATOR.match(text, index)
+        while operator is not None:
+            operators.append(operator)
+            operator = _HEREDOC_OPERATOR.match(text, operator.end())
+        if operators:
+            return index, _heredoc_end(text, operators), ""
     return index, cursor, ""
 
 
-def _heredoc_end(text: str, operator: "re.Match[str]") -> int:
-    """End of the terminator line of the heredoc ``operator`` opens, or of the text.
+def _heredoc_end(text: str, operators: "list[re.Match[str]]") -> int:
+    """End of the last terminator line of the heredocs on one line, or of the text.
 
-    The terminator is exact, as the shell reads it: `<<-` strips leading tabs
-    only, and a padded line is body, not the end of it.
+    Every heredoc on the line is read in order, its body after the previous
+    one's terminator (DS-2026-10-27-09). The terminator is exact, as the shell
+    reads it: `<<-` strips leading tabs only, and a padded line is body.
     """
-    indent = "\t*" if operator.group("dash") else ""
-    terminator = re.compile(rf"^{indent}{re.escape(operator.group('word'))}\r?$", re.M)
-    found = terminator.search(text, operator.end())
-    return len(text) if found is None else found.end()
+    end = _end_of_line(text, operators[-1].end())
+    for operator in operators:
+        indent = "\t*" if operator.group("dash") else ""
+        terminator = re.compile(rf"^{indent}{re.escape(operator.group('word'))}\r?$", re.M)
+        found = terminator.search(text, end)
+        if found is None:
+            return len(text)
+        end = found.end()
+    return end
 
 
 def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
@@ -732,7 +745,9 @@ def _wrapped_value_is_secret(text: str, body_start: int, body_end: int) -> bool:
         following += 1
     if following >= len(text) or text[following] in "\r\n":
         return False
-    value_start, value_end, delimiter = _scan_value(text, following)
+    # No heredoc: only a literal matters here, and following one from every
+    # wrapper re-scanned the rest of the text each time (DS-2026-10-27-12).
+    value_start, value_end, delimiter = _scan_value(text, following, heredoc=False)
     value = text[value_start:value_end]
     if delimiter or (value_start > following):
         return _quoted_value_is_secret(value)
