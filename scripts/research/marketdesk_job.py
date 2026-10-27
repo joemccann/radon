@@ -78,6 +78,8 @@ NY = ZoneInfo("America/New_York")
 NO_CREDS_MESSAGE = "Dropbox write credentials absent; uploads skipped"
 FORBIDDEN_PUBLISHERS = re.compile(r"market\s*ear|zero\s*hedge|zerohedge|themarketear|tyler\s+durden", re.I)
 _HEALTH_RANK = {"ok": 0, "paused": 1, "error": 2}
+EXIT_STOPPED = 143  # 128+SIGTERM; the unit maps it with SuccessExitStatus=143. Not 75: radon-app-runtime run
+# exits 75 itself when an orphan container survives, and that must stay a failure.
 
 
 class CycleTerminated(Exception):
@@ -608,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     previous = signal.signal(signal.SIGTERM, _terminate)
     try:
         counts = run_cycle()
+    except CycleTerminated as exc:  # a stop (deploy stop-clean): 143 + SuccessExitStatus=143 keeps it out of `failed`
+        _log(f"cycle stopped: {_safe_error(exc)}")
+        return EXIT_STOPPED
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
         _log(f"cycle failed: {_safe_error(exc)}")
         return 1
