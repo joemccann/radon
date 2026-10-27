@@ -391,7 +391,7 @@ line here whenever you ship a security fix.**
   Explicit `+` concatenation joins literals like adjacency does, across a
   line break too, template and triple-quoted literals included. A quoted
   heredoc word may hold any character but its quote. A type annotation (`NAME: str = ...`) is
-  skipped to the initializer, a quoted one too, and a string prefix may open a triple-quoted
+  skipped to the initializer, a quoted or union one too, and a string prefix may open a triple-quoted
   value. A later-line literal close that the escaping grammar rejects is not a
   close: the value is unterminated through that line. A placeholder word
   inside a value exempts it only when no long component stays opaque
