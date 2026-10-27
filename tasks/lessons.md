@@ -1,3 +1,8 @@
+# The portfolio flow book must not inherit the report admission wait (2026-10-27)
+
+- `FLOW_ADMISSION_WAIT_S` (120s) is the single-ticker `flow_report.py` path. Its subprocess budget is 300s. `flow_analysis.py` is the hourly book inside `radon-flow-refresh.service`, and the wrapper curl deadline is 180s. `fetch_flow` defaults `retry_transient=True`, so the book used to open `UWClient(admission_timeout=120)` per name. One saturated top-of-hour wait holds `POST /flow-analysis` until `curl: (28)` / `http=000` / 0 bytes, and the oneshot exits 1.
+- Pass `retry_transient=False` on that book (scanner and discover already do). Do not raise `SCAN_TIMEOUT` to cover the report wait, and do not shorten `FLOW_ADMISSION_WAIT_S`. The live unit `Result` is the latest run. A later hour can be `success` while the page is the 180s curl abort. Read the journal at `paged_at`.
+
 # A second short UW rate limit is a shed, not a provider outage (2026-10-22)
 
 - `flow-refresh-discover-admission-busy` waits once. If that retry is still inside a short embargo, or every darkpool ticker raises a transient 429, discover used to set `required provider data unavailable`. The wrapper treated HTTP 400 as exit 1 and `radon-flow-refresh.service` paged with `NRestarts=0`. Shed that body (`discover rate limit shed`, exit 75). Quota text and an embargo longer than 70s stay a hard 400.
