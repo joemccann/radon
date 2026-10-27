@@ -10347,3 +10347,11 @@ Review: unit tests cover GET/HEAD, route switching, spoofed left hops, reset and
 - [ ] B3 depends_on: [B2] Green image CI, deploy, verify binary floor and keeper health.
 
 Audit release review: CI scripts-df rejected the new HTTP-only spec because it was unclassified. Added its dated local verification and explicit hold-out reason to the existing curation ledger; retained required unit coverage and all workflow gates.
+
+## Private candidate freshness feedback from operator audit (2026-10-27)
+
+- [x] S1 depends_on: [] RED: unpublished stale candidate returned waiting with no private feedback.
+- [x] S2 depends_on: [S1] Return existing invalid-candidate feedback without fetching source, creating validation workflows or publishing; preserve prior markers. Focused 293 passed; full Python 18,461 passed / 12 skipped; full cloud 3,511 passed / 24 skipped.
+- [ ] S3 depends_on: [S2] Focused/full tests, exact-head CI, notification, merge and installed controller feedback receipt.
+
+Review: Sol found no actionable regression; Luna independently passed 292 focused tests. Added their suggested explicit API allowlist/no-workflow-push and published-marker preservation assertions; 293 focused now pass. The regression asserts no model review or release receipt, schema-valid diagnostics and stable repeat ticks. Fresh-base source review, exact-head CI and publication gates remain required. Deployment/installed feedback verification pending.

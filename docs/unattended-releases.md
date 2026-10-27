@@ -86,8 +86,13 @@ size before returning JSON. It never checks out or executes the feedback.
 The nightly prompts checkpoint the result, independently reproduce concerns,
 repair and retest a new immutable head, and resume pending work next fire.
 Feedback is diagnostic data, never approval authority; missing or invalid data
-cannot close an incomplete run. Review receipts bind the complete immutable
-review input, including bounded source context, rather than a bot verdict.
+cannot close an incomplete run. An unpublished candidate whose immutable base is no
+longer current main receives private invalid-candidate feedback naming the
+current public main. The security loop must independently revalidate the repair
+and export a new single-commit candidate with that base. The controller does not
+fetch its source, rebase it, create workflows, or publish it. Existing feedback
+and publication receipts are preserved unchanged. Review receipts bind the
+complete immutable review input, including bounded source context, rather than a bot verdict.
 Reviews include complete current runtime, configuration and prompt source,
 complete baseline source for deleted files, and an untruncated local diff derived
 from both SHA-verified blobs. Both sides retain blob SHA, mode and size metadata.

@@ -892,9 +892,21 @@ class PrivateReleaseBridge:
             match = re.fullmatch(r'refs/heads/validation/fix/([0-9a-f]{40})/([0-9a-f]{40})', ref['ref'])
             if not match: continue
             base, head = match.groups()
-            if ref['object']['sha'] != head or base != main: continue
-            self.ensure_validation_workflows(base)
+            if ref['object']['sha'] != head: continue
             marker = self.directory / f'{head}.json'
+            if base != main:
+                # Never rebase, review or publish stale private source. Return
+                # bounded diagnostics so its owner can validate a new candidate.
+                # Prior feedback/publication receipts remain immutable.
+                if not marker.exists():
+                    self._terminal_marker(marker, base, head, 'private-review-invalid', diagnostics=(
+                        f'Candidate base is no longer current main ({main}). '
+                        'Independently revalidate the repair against current main and export a new '
+                        'single-commit candidate with that base. Preserve the original immutable refs; '
+                        'this feedback grants no publication or release approval.',))
+                    terminal_failure = True
+                continue
+            self.ensure_validation_workflows(base)
             if marker.exists():
                 marker_status = json.loads(marker.read_text()).get('status')
                 if marker_status in {'private-checks-failed', 'private-review-rejected', 'private-review-invalid',
