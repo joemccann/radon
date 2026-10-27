@@ -113,14 +113,23 @@ describe("assistant call_api bounds", () => {
     return parseSseFrames(await res.text());
   }
 
+  // Demo principals no longer reach the loop through the route (they get the
+  // sample reply), so the loop's own demo gating is driven directly.
+  async function runLoop(principal: Principal, input: Record<string, unknown>) {
+    const chat = vi.fn().mockResolvedValueOnce(toolUse("tu_1", input)).mockResolvedValue(FINAL);
+    vi.doMock("@/lib/llm/provider", () => ({ chat }));
+    const { runAssistantLoop } = await import("@/lib/assistant/loop");
+    return runAssistantLoop([{ role: "user", content: "sync my portfolio" }], "system", principal as never);
+  }
+
   it("demo principal: call_api {POST /portfolio/sync} sends NOTHING to FastAPI", async () => {
-    const frames = await runTurn(
+    const result = await runLoop(
       { userId: "user_demo", kind: "demo", token: "jwt-demo" },
       { method: "POST", path: "/portfolio/sync" },
     );
 
     expect(fetchCalls(fetchSpy)).toEqual([]);
-    const tool = frames.find((frame) => frame.event === "tool")!.data as { ok: boolean; error?: string };
+    const tool = result.toolEvents[0] as unknown as { ok: boolean; error?: string };
     expect(tool.ok).toBe(false);
     expect(tool.error).toMatch(/operator/i);
   });
@@ -135,7 +144,7 @@ describe("assistant call_api bounds", () => {
   });
 
   it("demo principal: read.spawn scans that have no operatorOnly twin still run", async () => {
-    await runTurn(
+    await runLoop(
       { userId: "user_demo", kind: "demo", token: "jwt-demo" },
       { method: "POST", path: "/gex/scan" },
     );
