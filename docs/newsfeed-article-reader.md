@@ -1,6 +1,6 @@
 # News article reader
 
-The article reader is a centered, viewport-bounded dialog. Its toolbar always exposes Close and available previous/next articles. Desktop places an image gallery beside independently scrollable copy. At 900px and below, images and copy share one scrolling document beneath the toolbar. Safe-area padding protects phone controls.
+The article reader is a centered, viewport-bounded dialog. Its unlabeled toolbar always exposes Close and available previous/next articles; the article title names the dialog. Desktop places an image gallery beside independently scrollable copy. At 900px and below, images and copy share one scrolling document beneath the toolbar. Safe-area padding protects phone controls.
 
 The gallery contains all source figures and post images, deduplicated by URL. Previous/next image buttons, thumbnails, left/right keys, Home/End and horizontal swipes change only the image. They never advance the article. Image controls remain focusable at gallery boundaries with `aria-disabled`; selection refuses out-of-range indices. Article navigation retains its separate toolbar controls and outside-gallery arrow shortcuts. Inputs retain their editing shortcuts.
 
