@@ -10299,3 +10299,4 @@ L3 broader importers: cloud health wiring exposed one legacy zero-argument clien
 - Standalone typecheck remains red on four pre-existing diagnostics in unchanged `DashboardNewsFeed.tsx` and `lib/sameOrigin.ts`; neither reader component has a diagnostic.
 
 - User preference: removed the toolbar label and its unused CSS. Focused cloud: 35 passed; all eight responsive gallery cases passed after removal.
+- CI compatibility: TesterArmy image-name assertion now includes the gallery ordinal. Previously failed in run 40518150058; focused isolated browser journey passed (1/1), including bookmark request and Escape dismissal.
