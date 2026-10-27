@@ -1,4 +1,4 @@
-"""One MarketDesk ingest cycle: sign in -> feedback -> list -> claim -> heal -> PDF -> relevance -> images -> copy ->
+"""One MarketDesk ingest cycle: sign in -> feedback -> list -> claim -> heal -> source admission -> images -> copy ->
 publish -> Dropbox outbox.
 
 Timer entry point (radon-marketdesk.timer, every 5 minutes), run by path:
@@ -10,11 +10,11 @@ publish, and research_post_sources heals a crash between publish and the ledger 
 Publish happens before the Dropbox upload; the upload is an outbox that never blocks the feed. The
 Dropbox path mirrors the library folder chain stored in the post provenance.
 
-Relevance (research.marketdesk_filter) applies the old Dropbox PDF pipeline's gates (research.intake v2) before any
-copy call: identity, force-included desks, triage (approved operator rules, the operator book), publisher 'unknown',
-near-duplicates, then one SELECT under intake's policy. Held and dropped articles are terminal with a reason code,
-mirrored to research_outcomes for the Held tab, and their PDF still goes to the Dropbox outbox. An operator
-"should have published" vote re-queues the article with its note (research.feedback protocol, Turso state).
+Admission (research.marketdesk_filter) requires usable source facts, a known publisher and
+nonduplicate content. All suitable MarketDesk topics, including FX and off-book single names,
+proceed directly to grounded copy and final Humanizer certification. Retired relevance-only
+holds/drops replay automatically in bounded batches, even off the latest listing. The separate
+Dropbox intake policy is unchanged.
 
 MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
@@ -320,7 +320,7 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     decision = relevance(
         article_id=ref.article_id, title=title, folders=folders, folder_date=folder_date, pages=pages,
         created=created, summary=summary, root=root, select=deps.select, book_tickers=deps.book_tickers,
-        recent=deps.recent_titles(), index=fingerprint_index(root, store.published_fingerprints()),
+        recent=[], index=fingerprint_index(root, store.published_fingerprints()),
         note=store.note_for(ref.article_id), evidence_kind="article")
     review = decision.review
     review["document"].update(source_url=ref.url, evidence_kind="article", page_count=0)
@@ -401,6 +401,7 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
     lookback = _positive_int(env, "MARKETDESK_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS)
     summary_wait = _positive_int(env, "MARKETDESK_SUMMARY_WAIT_HOURS", DEFAULT_SUMMARY_WAIT_HOURS)
     _apply_feedback(deps=deps, counts=counts)
+    counts["requeued"] += store.requeue_suitable(limit=REQUEUE_BATCH)
     session = deps.open_session(env)
     refs = deps.list_latest(session)
     counts["listed"] = len(refs)

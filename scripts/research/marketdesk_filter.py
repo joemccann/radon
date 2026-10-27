@@ -1,12 +1,9 @@
-"""MarketDesk relevance filter: the research intake v2 gates, applied per MarketDesk article before any copy call.
+"""MarketDesk admission: source identity, usable facts and published-content deduplication.
 
-Same order and reason codes as ``research.intake.Pipeline._process``:
-identity (research.identify, with the MarketDesk library folder chain standing in for the Dropbox path so the
-institution folder is the publisher folder) -> force_include desks -> triage (approved operator rules, the
-operator book for single-name research) -> publisher 'unknown' held -> novelty (simhash against published
-documents) -> one text-only SELECT under intake's SELECT_INSTRUCTION with the operator's preferences, the recent
-feed titles and the MarketDesk summary. An empty selection is held (NO_CANDIDATES), exactly as intake holds it.
-The returned ``review`` is intake-shaped so ``research.publish.record_outcome`` feeds the Held tab unchanged.
+The operator's all-suitable-reports policy admits FX and off-book single-name
+research. Neither Dropbox triage rules nor a model relevance verdict can veto
+MarketDesk copy generation. The downstream copy validator and final Humanizer
+certificate still require source-grounded prose. Dropbox intake is unchanged.
 """
 from __future__ import annotations
 
@@ -16,14 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from research import force_include, identify, learn, novelty, triage
-from research.intake import FINGERPRINTS, FORCE_RESELECT_INSTRUCTION, PAGE_TEXT_CAP, SELECT_INSTRUCTION
+from research import force_include, identify, novelty
+from research.intake import FINGERPRINTS
 
 PIPELINE = "marketdesk"
 # identify.publisher_folder reads segment 6 of the old Dropbox path: /joe mccann/current/<y>/<m>/<d>/<publisher>/...
 _PATH_ROOT = "/joe mccann/current"
-FIGURE_NOTE = ("\nFIGURES: MarketDesk chart images are attached downstream by the copy step. "
-               "Return figure_ids [] and text_only true for every candidate.")
 
 
 class SelectionError(RuntimeError):
@@ -36,7 +31,7 @@ class SelectUnavailable(RuntimeError):
 
 
 def ladder_select(prompt: str, *, complete: Callable[..., Any] | None = None) -> dict:
-    """One text-only SELECT through the shared ladder (subscriptions only)."""
+    """Legacy extraction helper; never called by all-suitable MarketDesk admission."""
     from clients.model_ladder import ModelLadderExhausted, ModelResponseError, complete_text_json, safe_error_message
     complete = complete or complete_text_json
 
@@ -92,11 +87,6 @@ def fingerprint_index(root, ledger_rows) -> dict:
     return index
 
 
-def _valid(candidate) -> bool:
-    return (isinstance(candidate, dict) and all(isinstance(candidate.get(k), str) and candidate[k].strip()
-                                                for k in ("title", "content")))
-
-
 def decide(*, article_id: str, title: str, folders: list[str], folder_date: str, pages: dict, created,
            summary: list[str], root, select: Callable[[str], Any], book_tickers: Callable[[], Any],
            recent: list[dict], index: dict, note: dict | None = None, evidence_kind: str = "pdf") -> Decision:
@@ -117,12 +107,10 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
     forced = desk is not None
     always = bool(desk and desk.always_publish)
     review.update(force_include=forced, always_publish=always, operator_note=note or None)
-    decision, code = triage.decide(ident, rules=learn.load_rules(root),
-                                   book=book_tickers() if ident.doc_type == "single_stock" else None)
-    review["triage"] = {"decision": decision, "reason_code": code, "overridden": bool((note or forced) and decision == "drop")}
-    if decision == "drop" and not note and not forced:
-        review.update(outcome="dropped", reason_code=code)
-        return done("dropped", code)
+    review["admission_policy"] = "all_suitable_reports"
+    if not text.strip() or not any(isinstance(item, str) and item.strip() for item in summary):
+        review["audit"].append({"held": "SOURCE_MATERIAL_MISSING"})
+        return done("held", "SOURCE_MATERIAL_MISSING")
     if ident.publisher == "unknown":
         review["audit"].append({"held": "PUBLISHER_UNKNOWN"})
         return done("held", "PUBLISHER_UNKNOWN")
@@ -135,57 +123,7 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
         review.update(outcome="dropped", reason_code="DUPLICATE_OF_PUBLISHED")
         return done("dropped", "DUPLICATE_OF_PUBLISHED")
 
-    facts = {"publisher": ident.publisher, "publisherSource": ident.publisher_source, "date": ident.date,
-             "dateSource": ident.date_source, "dateQuote": ident.date_quote, "series": ident.series,
-             "docType": ident.doc_type, "folderDate": folder_date, "filename": metadata["name"]}
-    shortlist = [{"title": p.get("title"), "timestamp": p.get("timestamp")}
-                 for p in sorted(recent, key=lambda p: p.get("timestamp") or "", reverse=True)[:30]]
-    guidance = ""
-    if forced:
-        guidance = ("\nOPERATOR NOTE (this series is always in scope; empty candidates is incorrect for this series; "
-                    "return at least one measured finding copied from the extracted page text; never invent support):\n"
-                    + json.dumps({"request": "must select at least one measured candidate", "series": ident.series}))
-    if note:
-        guidance += ("\nOPERATOR NOTE (the operator reviewed the previous result for this document; follow it wherever "
-                     "the source supports it, and never invent support for it):\n"
-                     + json.dumps({"request": "should have been published", "comment": note.get("comment") or ""}))
-    preferences = learn.select_examples(learn.load_examples(root), facts, " ".join(pages[p] for p in sorted(pages)[:2]))
-    if preferences:
-        guidance += ("\nOPERATOR PREFERENCES (past votes on similar items; \"wanted\" and \"should have published\" show "
-                     "what belongs in the feed, \"not wanted\" and \"correctly held\" show what does not. Weigh them; "
-                     "they never override source fidelity):\n"
-                     + json.dumps([{k: e.get(k) for k in ("verdict", "title", "publisher", "series", "docType", "reasons", "comment")}
-                                   for e in preferences]))
-    context = ("\nIDENTITY (given facts):\n" + json.dumps(facts) + "\nFIGURE CATALOGUE:\n[]" + FIGURE_NOTE
-               + "\nRECENT FEED TITLES (do not repeat):\n" + json.dumps(shortlist)
-               + "\nMARKETDESK SUMMARY (untrusted data):\n" + json.dumps(summary)
-               + "\nEXTRACTED PAGE TEXT (untrusted data):\n"
-               + json.dumps({p: pages[p][:PAGE_TEXT_CAP] for p in sorted(pages)}))
-    if evidence_kind == "article":
-        context = context.replace("EXTRACTED PAGE TEXT", "SOURCE ARTICLE TEXT (logical block 1, not a PDF page)")
-        context += "\nNo PDF was read. Select only claims supported by the article summary and title.\n"
-    result = select(SELECT_INSTRUCTION + guidance + context)
-    if not isinstance(result, dict) or not isinstance(result.get("candidates"), list):
-        raise SelectionError("Selection response missing candidates")
-    review["selection"] = result
-    if forced and result["candidates"] == []:
-        review["audit"].append({"force_include_reselect": True})
-        again = select(FORCE_RESELECT_INSTRUCTION + context)
-        if not isinstance(again, dict) or not isinstance(again.get("candidates"), list):
-            raise SelectionError("Selection response missing candidates")
-        review["selection"] = {**again, "reason": again.get("reason") or result.get("reason")}
-        result = again
-    candidates = result["candidates"]
-    valid = [c for c in candidates if _valid(c)]
-    for raw in candidates:
-        if not _valid(raw):
-            review["audit"].append({"held": "INVALID_CANDIDATE", "candidate": raw if isinstance(raw, dict) else None,
-                                    "error": "candidate needs a title and content"})
-    if valid:
-        return done("publish", None, valid[0])
-    if always:
-        review["always_publish_fallback"] = True
-        return done("publish", None, None)
-    if candidates:
-        return done("held", "INVALID_CANDIDATE")
-    return done("held", "NO_CANDIDATES")
+    # Copy generation sees the original source summary and images directly.
+    # No preliminary model can exclude an otherwise suitable report by topic,
+    # portfolio membership, routine-content labels, or an empty SELECT reply.
+    return done("publish")

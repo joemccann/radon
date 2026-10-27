@@ -1,3 +1,17 @@
+# MarketDesk all suitable reports (2026-10-27)
+
+Dependency graph: MS1 -> MS2 -> MS3 -> MS4 -> MS5.
+
+- [x] MS1 depends_on: [] Pin FX/off-book admission and no model relevance veto; retain publisher/source/duplicate safety with red tests.
+- [x] MS2 depends_on: [MS1] Apply MarketDesk-only all-suitable admission before existing grounded copy and final Humanizer certification.
+- [x] MS3 depends_on: [MS2] Replay only retired relevance reasons with bounded idempotent ledger updates; preserve unrelated holds/failures and Dropbox policy.
+- [x] MS4 depends_on: [MS3] Focused 830 passed; feedback-order regression red/green 130 passed. Sol repaired-case re-review clean; Luna reviewed admission/replay. Final full suites: Python 18,626 passed / 12 skipped / 63 subtests; cloud 3,525 passed / 24 skipped; Vitest 11,595 passed / 21 skipped.
+- [ ] MS5 depends_on: [MS4] Exact-head CI, accepted green-PR notification, admin merge, production deployment and bounded replay/feed receipts.
+
+## Review
+
+Four initial red regressions reproduced the old FX/off-book veto, missing source guard and absent replay. Affected runner: 129 passed. Broader verification: 830 passed across all MarketDesk tests and unchanged Dropbox intake/triage, Humanizer, feedback and publication contracts. Live pending attempts, failed/published rows, identity/duplicate/source holds, metadata, PDFs/outbox and operator notes are preserved. All-suitable reports enter the existing grounded copy and exact-final-copy certification; model relevance is no longer consulted. Sol identified a same-cycle upvote ordering issue; feedback now runs before automatic replay, with exact-note and repeat-cycle coverage. Final full suites and independent reviews are green; release and live replay remain MS5.
+
 # MarketDesk managed-stop cancellation (2026-10-27)
 
 Dependency graph: MC1 -> MC2 -> MC3.
@@ -10392,7 +10406,7 @@ Dependency graph: M1 -> [M2, C1, D1] -> U1 -> M4 -> M5.
 - [x] D1 depends_on: [M1] Parallel durable PDF archive with isolated credentials, global throttling, atomic backoff, attachment CAS and same-post provenance healing; three kill/recovery boundaries.
 - [x] U1 depends_on: [M2, C1, D1] Article-only provenance, no raw source bullet lists for legacy/new posts, accurate article/PDF links; 48 component tests and two desktop/mobile browser cases green and screenshots inspected.
 - [x] M4 depends_on: [U1] Full suites, PR #1314 exact-head 45 green checks, accepted notification, admin merge 6fda0d80b and production deploy run 40560029613 succeeded.
-- [ ] M5 depends_on: [M4] Drain backlog through managed job and verify named reports in Turso and live feed, recording held/dropped/provider-blocked outcomes honestly.
+- [x] M5 depends_on: [M4] Managed replay recovered 34 articles: 92 published total, zero pending, 18 relevance holds, five drops and two missing-summary failures. All six named reports are published and visible in the live feed; 80 source PNGs and six matching final editorial audits verified. The broader-policy replay is tracked in MS5.
 
 Review: source facts and qualifications remain intact; full web 11,587 passed, full default Python collection 18,583 passed, 12 skipped after owner-document repairs. PDF store/job 36 passed after independent P2 repairs; full cloud 3,525 passed, 24 skipped. First two live articles scored 100/100, matched saved audits and source facts; 46 private PNGs verified. Existing relevance/fidelity/Humanizer gates remain; request-limit refusals never bypassed. No working standalone download endpoint claimed.
 
@@ -10405,6 +10419,6 @@ Dependency graph: F1 -> [F2, F3] -> F4 -> F5.
 - [x] F2 depends_on: [F1] Actual SIGTERM regressions fail before cancellation repair; retain 143, lease, cleanup and service-health evidence. Agent focused 251 passed.
 - [x] F3 depends_on: [F1] Ambiguous stock/acronym, rewrite and URI regressions; retain ordinary AI spending, indices and country/currency labels. Root integrated focused 366 passed.
 - [x] F4 depends_on: [F2, F3] Sol reviewed the repaired index case with no remaining findings; full Python 18,622 passed / 12 skipped, cloud 3,525 passed / 24 skipped, web 11,595 passed / 21 skipped. Suites ran sequentially; independent Luna verification passed 565 focused tests with no remaining review findings.
-- [ ] F5 depends_on: [F4] Exact-head green CI, one accepted PR notification, admin merge, deploy and live backlog/copy receipts.
+- [x] F5 depends_on: [F4] PR #1316 passed 43 current checks, one accepted notification, admin merge 0e3572cc1 and successful production deployment at 19:32 UTC. Installed job/copy/cycle hashes match the merge; named live feed and private source/audit receipts verified.
 
-Review: article publication stays independent of the PDF provider embargo. Prior article-first PR #1314 and renewal PR #1312 are deployed; follow-up deployment and complete backlog verification remain pending.
+Review: article-first PR #1314, renewal PR #1312 and follow-up #1316 are deployed. All six originally missing reports are live with source-grounded prose and preserved images. PDF archival remains provider-blocked with persisted backoff; it does not block publication. The newly chosen all-suitable policy and its replay are tracked in MS1–MS5.
