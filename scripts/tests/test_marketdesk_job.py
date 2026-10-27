@@ -589,6 +589,56 @@ def test_main_exits_tempfail_when_sigterm_stops_the_cycle(monkeypatch, capsys):
     assert "cycle stopped: terminated by SIGTERM" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("phase", ["request", "stream"])
+def test_sigterm_during_real_model_transport_never_advances_ladder(world, db, monkeypatch, phase):
+    """Production stop: the HTTP catch must not relabel cancellation as a network error."""
+    import signal
+    from clients import model_ladder
+
+    world.refs = [make_ref("StopHttp001", title="Stop during model I/O")]
+    deps = build_deps(world)
+    calls, closed = [], []
+    monkeypatch.setattr(model_ladder, "_auth_for", lambda *args: model_ladder.AuthMaterial(
+        token="fake-unit-grant", kind="subscription", mechanism="unit-test"))
+
+    class Stream:
+        status_code = 200
+        def iter_content(self, size):
+            signal.raise_signal(signal.SIGTERM)
+            yield b"unreachable"
+        def close(self):
+            closed.append(True)
+
+    def transport(url, **kwargs):
+        calls.append(url)
+        if "anthropic" in url:
+            if phase == "request":
+                signal.raise_signal(signal.SIGTERM)
+            return Stream()
+        payload = {"choices": [{"message": {"content": '{"done":true}'}}]}
+        return SimpleNamespace(status_code=200, text=json.dumps(payload), json=lambda: payload)
+
+    def generate(**kwargs):
+        model_ladder.complete_multimodal_json(
+            "fake unit prompt", env={}, post=transport, providers=("anthropic", "grok"))
+        raise RuntimeError("a stopped cycle resumed model work")
+
+    deps.write_copy = generate
+    real_cycle = job.run_cycle
+    monkeypatch.setattr(job, "run_cycle", lambda **kwargs: real_cycle(env=ENV, deps=deps))
+    previous = signal.getsignal(signal.SIGTERM)
+    assert job.main() == 143
+    assert signal.getsignal(signal.SIGTERM) is previous
+    assert len(calls) == 1 and "anthropic" in calls[0]
+    assert closed == ([True] if phase == "stream" else [])
+    saved = ledger(db, "StopHttp001")
+    assert saved["status"] == "pending" and saved["attempts"] == 0 and saved["last_error"] == store.LEASE
+    assert world.published == []
+    assert world.dests and all(not path.exists() for path in world.dests)
+    assert any("terminated by SIGTERM" in error for error in research_errors(world))
+    assert any(service == job.DROPBOX_SERVICE for service, *_ in world.health)
+
+
 def test_runnable_by_path_imports_without_side_effects():
     code = ("import runpy, sys; sys.argv=['marketdesk_job.py','--help'];"
             f"runpy.run_path({str(SCRIPTS / 'research/marketdesk_job.py')!r}, run_name='not_main')")

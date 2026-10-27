@@ -82,8 +82,8 @@ EXIT_STOPPED = 143  # 128+SIGTERM; the unit maps it with SuccessExitStatus=143. 
 # exits 75 itself when an orphan container survives, and that must stay a failure.
 
 
-class CycleTerminated(Exception):
-    """SIGTERM (systemd TimeoutStartSec or a stop). Never swallowed per article: the lease stays and counts."""
+class CycleTerminated(BaseException):
+    """SIGTERM control flow, outside provider-error catches. Preserve the pending lease on stop."""
 
 
 class ArticleRejected(RuntimeError):

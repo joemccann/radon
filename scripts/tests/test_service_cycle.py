@@ -70,6 +70,17 @@ class TestSuccessPath:
         assert kwargs["finished_at"] == "2026-06-12T14:00:00Z"
         assert kwargs["started_at"]  # stamped on entry
 
+    @pytest.mark.parametrize("failure", [KeyboardInterrupt("stopped"), SystemExit(143)])
+    def test_control_flow_cancellation_records_error_and_reraises_original(self, health_calls, failure):
+        from db.service_cycle import service_cycle
+        with pytest.raises(type(failure)) as caught:
+            with service_cycle("marketdesk-research", market_hours_class="continuous"):
+                raise failure
+        assert caught.value is failure
+        [(service, state, kwargs)] = health_calls
+        assert (service, state) == ("marketdesk-research", "error")
+        assert kwargs["error"]["message"] == str(failure)
+
     def test_ok_row_on_no_change_short_circuit(self, health_calls):
         """An early return inside the with-block is still a successful
         exit — the heartbeat must fire (feedback_service_health_heartbeat)."""

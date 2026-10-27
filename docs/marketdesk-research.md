@@ -177,10 +177,14 @@ later cycle.
   it `failed`. A hung cycle still fails as `Result=timeout`, and the
   `marketdesk-research` health row still records the SIGTERM as `error`. Not
   75: `radon-app-runtime run` exits 75 for a surviving orphan container.
-- Host disk holds only the rotated refresh token
-  (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600) and a per-cycle
-  temp workdir that is deleted at cycle end. The session cookie lives in memory
-  for one cycle. Nothing durable is host-local.
+  Managed cancellation bypasses provider exception handlers, so interrupted
+  requests do not advance the model ladder; cleanup and the error heartbeat
+  still run before exit 143.
+- The private research store holds the rotated refresh token
+  (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600), image/PDF assets
+  and editorial audits. The per-cycle temp workdir is deleted at cycle end;
+  the session cookie lives in memory for one cycle. Article status, archive
+  admission and published provenance remain canonical in Turso.
 
 ## Copy rules
 
@@ -216,7 +220,10 @@ per item. Oversized input is rejected explicitly rather than silently losing
 a trailing qualification. Markdown bold markers are stripped during parsing.
 Source bullets are never appended to the article or reader. Actual security
 ticker symbols receive `$` before the final Humanizer score and certificate;
-ordinary acronyms, currencies and metrics are not blindly cashtagged. The publisher is the bank folder of the library chain (`Goldman Sachs`,
+an overlapping symbol needs an explicit source security marker and stock
+context at that occurrence. Ordinary AI spending, country/currency labels
+and compound index labels stay plain. Unclear bare security mentions fail
+validation and must be clarified before certification. The publisher is the bank folder of the library chain (`Goldman Sachs`,
 not the `S&T` desk label), else the item's institution. The `MARKETDESK` tag is
 always first.
 
