@@ -157,6 +157,11 @@ later cycle.
 - `claim` writes a lease before the slow work. A run killed mid-article
   (`TimeoutStartSec`, SIGTERM) leaves it, and the next claim counts that
   attempt, so an article that always overruns retires after 5 kills.
+- A SIGTERM exits 143 and the unit maps it with `SuccessExitStatus=143`: a
+  deploy's `stop-clean` lands on this 5-minute oneshot often and must not leave
+  it `failed`. A hung cycle still fails as `Result=timeout`, and the
+  `marketdesk-research` health row still records the SIGTERM as `error`. Not
+  75: `radon-app-runtime run` exits 75 for a surviving orphan container.
 - Host disk holds only the rotated refresh token
   (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600) and a per-cycle
   temp workdir that is deleted at cycle end. The session cookie lives in memory
