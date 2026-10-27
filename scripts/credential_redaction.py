@@ -276,7 +276,7 @@ _UNQUOTED_SEGMENT = re.compile(r"[A-Za-z0-9_+/=~%@-]+")
 # the following lines. The window to the operator is bounded, so a long line
 # of `$(` values costs at most that much each.
 _HEREDOC_OPERATOR = re.compile(
-    r"[^\r\n]{0,256}?<<-?[ \t]*([\"']?)([A-Za-z_][A-Za-z0-9_]{0,63})\1[^\r\n]*"
+    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*(?P<quote>[\"']?)(?P<word>[A-Za-z_][A-Za-z0-9_]{0,63})(?P=quote)[^\r\n]*"
 )
 
 # One line break plus indentation may sit between the key and its value: a
@@ -333,8 +333,13 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
                     _, end, delimiter = _scan_quoted(text, following)
                     continue
                 return body, following, ""
+            joined = False
             while following < length:
                 if text[following] in " \t":
+                    following += 1
+                elif text[following] == "+" and not joined:
+                    # Explicit concatenation, `"" + "<v>"`; one per gap.
+                    joined = True
                     following += 1
                 elif text.startswith(("\\\n", "\\\r\n"), following):
                     # A backslash line continuation joins the next line's literal.
@@ -360,8 +365,13 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
 
 
 def _heredoc_end(text: str, operator: "re.Match[str]") -> int:
-    """End of the terminator line of the heredoc ``operator`` opens, or of the text."""
-    terminator = re.compile(rf"^[ \t]*{re.escape(operator.group(2))}[ \t]*\r?$", re.M)
+    """End of the terminator line of the heredoc ``operator`` opens, or of the text.
+
+    The terminator is exact, as the shell reads it: `<<-` strips leading tabs
+    only, and a padded line is body, not the end of it.
+    """
+    indent = "\t*" if operator.group("dash") else ""
+    terminator = re.compile(rf"^{indent}{re.escape(operator.group('word'))}\r?$", re.M)
     found = terminator.search(text, operator.end())
     return len(text) if found is None else found.end()
 
@@ -690,12 +700,14 @@ def _is_opaque(value: str) -> bool:
     if not _PLACEHOLDER.search(value):
         return True
     # DS-2026-10-26-17: a placeholder WORD inside a value does not make the
-    # value a placeholder. Only one whose remainder has no opaque segment is.
-    rest = _PLACEHOLDER.sub(" ", value)
-    return any(
-        len(part) >= 16 and _has_letter_and_digit(part)
-        for part in re.split(r"[^A-Za-z0-9]+", rest)
-    )
+    # value a placeholder. Only one with no long opaque component is: a
+    # component counts when what is left of it without the word is still
+    # opaque, so `<8>test<8>` is a secret and `changeme<digits>` is not.
+    for part in re.split(r"[^A-Za-z0-9]+", value):
+        rest = _PLACEHOLDER.sub("", part)
+        if len(part) >= 16 and len(rest) >= 12 and _has_letter_and_digit(rest):
+            return True
+    return False
 
 
 _WRAPPER_PAREN = re.compile(r"\(+(?=(?:[rRbBuUfF]{1,2})?[\"'])")

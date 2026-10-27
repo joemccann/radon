@@ -575,3 +575,28 @@ def test_rescan6_shapes_stay_linear(unit):
 
     small, large = elapsed(500), elapsed(4000)
     assert large < max(small * 40, 2.0), (small, large)
+
+
+_RESCAN7_SHAPES = {
+    "explicit-concatenation": f'PASSWORD = "" + "{OPAQUE}{TAIL}"\n',
+    "concatenation-without-spaces": f"PASSWORD='a'+'{OPAQUE}{TAIL}'\n",
+    "padded-terminator-is-body": f"UW_TOKEN=$(cat <<EOF\nEOF \n{OPAQUE}{TAIL}\nEOF\n)\n",
+    "dash-heredoc-space-indent-is-body": f"UW_TOKEN=$(cat <<-EOF\n  EOF\n{OPAQUE}{TAIL}\n\tEOF\n)\n",
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN7_SHAPES.values(), ids=_RESCAN7_SHAPES.keys())
+def test_rescan7_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) == ["[redacted-secret]"]
+
+
+def test_undelimited_placeholder_word_does_not_exempt_a_value():
+    value = "aB3cD4eF" + "test" + "gH6iJ7kL"
+    assert find_secret_assignments(f'password = "{value}"\n') == ["[redacted-secret]"]
+
+
+def test_concatenation_keeps_the_following_statement():
+    out = scrub_credential_text(f'PASSWORD = "" + "{OPAQUE}"\nSYMBOL = "SPY" + suffix\n')
+    assert OPAQUE not in out and 'SYMBOL = "SPY" + suffix' in out, out
