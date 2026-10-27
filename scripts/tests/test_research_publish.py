@@ -461,3 +461,30 @@ def test_dropbox_fields_do_not_satisfy_marketdesk(db, post):
 def test_dropbox_figure_without_page_still_rejected(db, post):
     del post["source"]["figures"][0]["page"]
     with pytest.raises(ValueError, match="cited"): publish.publish(post)
+
+
+def test_marketdesk_article_evidence_publishes_without_fabricated_pdf(db, marketdesk_post):
+    post = _clean(marketdesk_post)
+    source = post["source"]
+    source.update(evidenceKind="article", url=source["articleUrl"], pages=[])
+    source.pop("summary", None)
+    assert publish.publish(post) == post["id"]
+    saved = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert saved["evidenceKind"] == "article" and "summary" not in saved
+
+
+@pytest.mark.parametrize("change", [
+    {"url": "https://evil.example/report"}, {"pages": [1]}, {"summary": ["raw source bullet"]},
+    {"pdfUrl": "/api/newsfeed/research/files/" + "a" * 64 + ".pdf"},
+    {"pdfHash": "a" * 64},
+    {"pdfUrl": "/api/newsfeed/research/files/" + "a" * 64 + ".pdf", "pdfHash": "b" * 64},
+])
+def test_marketdesk_article_rejects_unbound_source_or_download(db, marketdesk_post, change):
+    post = _clean(marketdesk_post)
+    source = post["source"]
+    source.update(evidenceKind="article", url=source["articleUrl"], pages=[])
+    source.pop("summary", None)
+    source.update(change)
+    with pytest.raises(ValueError):
+        publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0

@@ -99,7 +99,7 @@ def _valid(candidate) -> bool:
 
 def decide(*, article_id: str, title: str, folders: list[str], folder_date: str, pages: dict, created,
            summary: list[str], root, select: Callable[[str], Any], book_tickers: Callable[[], Any],
-           recent: list[dict], index: dict, note: dict | None = None) -> Decision:
+           recent: list[dict], index: dict, note: dict | None = None, evidence_kind: str = "pdf") -> Decision:
     root = Path(root)
     note = note if isinstance(note, dict) else {}
     metadata = _metadata(article_id, title, folders)
@@ -161,6 +161,9 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
                + "\nMARKETDESK SUMMARY (untrusted data):\n" + json.dumps(summary)
                + "\nEXTRACTED PAGE TEXT (untrusted data):\n"
                + json.dumps({p: pages[p][:PAGE_TEXT_CAP] for p in sorted(pages)}))
+    if evidence_kind == "article":
+        context = context.replace("EXTRACTED PAGE TEXT", "SOURCE ARTICLE TEXT (logical block 1, not a PDF page)")
+        context += "\nNo PDF was read. Select only claims supported by the article summary and title.\n"
     result = select(SELECT_INSTRUCTION + guidance + context)
     if not isinstance(result, dict) or not isinstance(result.get("candidates"), list):
         raise SelectionError("Selection response missing candidates")

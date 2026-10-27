@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon MarketDesk PDF archive admission every five minutes
+
+[Timer]
+# Separate from article publication at :04/5:41. Turso owns catch-up and throttle.
+OnCalendar=*:02/5:17
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -654,3 +654,266 @@ def test_copy_with_images_skips_grok() -> None:
 
 def test_captions_follow_the_numeric_firewall() -> None:
     assert "Rule 8 covers captions too" in mc.SYSTEM
+
+# ---------- article prose and source-grounded cashtags ----------
+
+
+def _ticker_draft() -> dict:
+    return {
+        "title": "AAPL and BRK.B lead US equities",
+        "content": "AAPL rose 2%. BRK.B held steady.\n\nCPI is the next US catalyst. The source PDF covers AI spending.",
+        "captions": {"i1": "AAPL and BRK.B, relative performance"},
+        "tags": ["US-EQUITIES"],
+        "tickers": ["AAPL", "BRK.B"],
+    }
+
+
+def _ticker_call(complete) -> mc.FeedCopy:
+    return mc.write_copy(
+        title="Apple (AAPL) and Berkshire Hathaway (BRK.B)", publisher="Goldman Sachs",
+        summary=["AAPL rose 2%. BRK.B held steady.", "CPI is the next US catalyst. The source PDF covers AI spending."],
+        body_text="", images=[("i1", b"chart")], complete=complete,
+    )
+
+
+def test_write_copy_normalizes_source_grounded_tickers_before_accept() -> None:
+    def fake(instruction, **kwargs):
+        draft = _ticker_draft()
+        assert kwargs["accept"](draft)
+        return LadderResult(data=draft, text="{}", provider="fake", model="fake")
+
+    out = _ticker_call(fake)
+    assert out.title == "$AAPL and $BRK.B lead US equities"
+    assert out.content.startswith("$AAPL rose 2%. $BRK.B held steady.")
+    assert out.captions == {"i1": "$AAPL and $BRK.B, relative performance"}
+    assert out.tickers == ("AAPL", "BRK.B")
+    assert "CPI" in out.content and "$CPI" not in out.content
+    assert "$US" not in out.content and "$PDF" not in out.content and "$AI" not in out.content
+    assert out.tags == ["US-EQUITIES"]
+
+
+def test_existing_cashtags_are_idempotent_and_preserve_boundaries() -> None:
+    text = "$AAPL AAPL AAPL's AAPLx BRK.B BRK.B1 https://example.com/AAPL"
+    expected = "$AAPL $AAPL $AAPL's AAPLx $BRK.B BRK.B1 https://example.com/AAPL"
+    assert mc.normalize_tickers(text, ("AAPL", "BRK.B")) == expected
+    assert mc.normalize_tickers(expected, ("AAPL", "BRK.B")) == expected
+
+
+@pytest.mark.parametrize("symbol", ["CPI", "US", "PDF", "AI", "USD", "EURUSD", "GDP", "EPS", "NYSE", "MSCI", "2026"])
+def test_ticker_claim_cannot_cashtag_metrics_fx_or_ordinary_acronyms(symbol: str) -> None:
+    obj = clean()
+    obj["tickers"] = [symbol]
+    assert any(p.startswith("ticker_invalid:") for p in mc.copy_problems(
+        obj, source_text=SOURCE + " " + symbol, image_ids=IDS))
+
+
+def test_ticker_claim_must_occur_in_source_not_only_generated_copy() -> None:
+    obj = _ticker_draft()
+    obj["tickers"] = ["NVDA"]
+    assert "ticker_unsupported:NVDA" in mc.copy_problems(
+        obj, source_text="Apple (AAPL) rose 2%", image_ids=["i1"])
+
+
+def test_explicit_source_cashtags_and_exchange_labels_need_no_model_ticker_list() -> None:
+    def fake(instruction, **kwargs):
+        obj = {"title": "AAPL rose 2%", "content": "BRK.B held steady.", "captions": {}, "tags": ["EQUITIES"]}
+        return LadderResult(data=obj, text="{}", provider="fake", model="fake")
+    out = mc.write_copy(title="NASDAQ:AAPL", publisher=None, summary=["$BRK.B held steady. AAPL rose 2%"],
+                        body_text="", complete=fake)
+    assert out.title == "$AAPL rose 2%" and out.content == "$BRK.B held steady."
+
+
+@pytest.mark.parametrize("content", ["Evidence. • AAPL rose 2%", "<ul><li>AAPL rose 2%</li></ul>", "Evidence.\n◦ AAPL rose 2%"])
+def test_source_bullet_list_cannot_leak_into_article(content: str) -> None:
+    obj = _ticker_draft()
+    obj["content"] = content
+    assert "source_bullets" in mc.copy_problems(obj, source_text="AAPL BRK.B rose 2%", image_ids=["i1"])
+
+
+def test_prompt_treats_bullets_as_input_not_an_output_section() -> None:
+    assert "source bullet points are input only" in mc.SYSTEM.lower()
+    assert "do not reproduce" in mc.SYSTEM.lower()
+    assert '"tickers"' in mc.SYSTEM
+
+
+def test_humanizer_certifies_the_final_cashtagged_copy() -> None:
+    copy = mc.FeedCopy(title="AAPL rose 2%", content="AAPL rose 2%. CPI is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="Apple (AAPL) rose 2%. CPI is unchanged.", tickers=("AAPL",))
+    complete, calls = _ladder(CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete)
+    humanizer.validate_certificate(post)
+    assert post["title"] == "$AAPL rose 2%"
+    assert post["content"] == "$AAPL rose 2%. CPI is unchanged."
+    assert '"title": "$AAPL rose 2%"' in calls[0]["instruction"]
+
+
+def test_humanizer_rewrite_is_cashtagged_before_its_final_review() -> None:
+    copy = mc.FeedCopy(title="$AAPL rose 2%", content="$AAPL rose 2%. Worth noting, CPI is unchanged.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="Apple (AAPL) rose 2%. CPI is unchanged.", tickers=("AAPL",))
+    review = {"findings": [], "qualitative": [{"field": "content", "text": "Worth noting,", "category": "filler"}]}
+    complete, calls = _ladder(review, {"title": "AAPL rose 2%", "content": "AAPL rose 2%. CPI is unchanged."}, CLEAN_REVIEW)
+    post = mc.certify(_post(copy), copy, complete=complete)
+    humanizer.validate_certificate(post)
+    assert post["title"] == "$AAPL rose 2%"
+    assert '"content": "$AAPL rose 2%. CPI is unchanged."' in calls[-1]["instruction"]
+
+
+def test_common_unambiguous_source_tickers_are_normalized_if_model_omits_array() -> None:
+    def fake(instruction, **kwargs):
+        obj = {"title": "AAPL and NVDA", "content": "AAPL rose 2%. NVDA held steady.",
+               "captions": {}, "tags": ["EQUITIES"]}
+        return LadderResult(data=obj, text="{}", provider="fake", model="fake")
+    out = mc.write_copy(title="AAPL and NVDA", publisher=None,
+                        summary=["AAPL rose 2%. NVDA held steady."], body_text="", complete=fake)
+    assert out.title == "$AAPL and $NVDA"
+    assert out.content == "$AAPL rose 2%. $NVDA held steady."
+
+
+@pytest.mark.parametrize("tickers", ["AAPL", [None], ["aapl"], ["AAPL;DROP"], ["AAPL"] * 33])
+def test_invalid_ticker_metadata_is_rejected(tickers) -> None:
+    obj = _ticker_draft()
+    obj["tickers"] = tickers
+    assert any(p.startswith("ticker_") for p in mc.copy_problems(
+        obj, source_text="AAPL BRK.B rose 2%", image_ids=["i1"]))
+
+
+def test_explicit_security_marker_disambiguates_an_acronym_ticker() -> None:
+    def fake(instruction, **kwargs):
+        obj = {"title": "$AI rose 2%", "content": "$AI rose 2%. AI spending is unchanged.",
+               "captions": {}, "tags": ["EQUITIES"], "tickers": ["AI"]}
+        assert kwargs["accept"](obj)
+        return LadderResult(data=obj, text="{}", provider="fake", model="fake")
+    out = mc.write_copy(title="C3.ai (NYSE:AI)", publisher=None,
+                        summary=["AI rose 2%. AI spending is unchanged."], body_text="", complete=fake)
+    assert out.title == "$AI rose 2%"
+    assert out.content == "$AI rose 2%. AI spending is unchanged."
+
+
+def test_output_cashtag_cannot_introduce_a_symbol_absent_from_source() -> None:
+    obj = clean()
+    obj["title"] = "$NVDA leads the market"
+    assert "ticker_unsupported:NVDA" in problems(obj)
+
+
+def test_existing_cashtag_cannot_turn_a_metric_into_a_security() -> None:
+    obj = clean()
+    obj["title"] = "$CPI is unchanged"
+    assert "ticker_invalid:CPI" in mc.copy_problems(obj, source_text=SOURCE + " CPI", image_ids=IDS)
+
+
+def test_bare_common_ticker_cannot_evade_source_grounding_by_omitting_metadata() -> None:
+    obj = clean()
+    obj["title"] = "NVDA leads the market"
+    assert "ticker_unsupported:NVDA" in problems(obj)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("AAPL/NVDA led the tape.", "$AAPL/$NVDA led the tape."),
+    ("AAPL/BRK.B", "$AAPL/$BRK.B"),
+    ("US/CPI and AI/PDF", "US/CPI and AI/PDF"),
+    ("https://example.com/AAPL/NVDA?pair=AAPL/BRK.B", "https://example.com/AAPL/NVDA?pair=AAPL/BRK.B"),
+])
+def test_slash_separated_tickers_preserve_urls_and_ordinary_acronyms(text, expected) -> None:
+    symbols = ("AAPL", "NVDA", "BRK.B", "US", "CPI", "AI", "PDF")
+    assert mc.normalize_tickers(text, symbols) == expected
+
+
+def _private_audits(root, post_id):
+    from utils.atomic_io import verified_load
+    return [(path, verified_load(str(path)))
+            for path in sorted((root / "marketdesk" / "humanizer" / post_id).glob("*.json"))]
+
+
+def test_certify_persists_every_attempt_before_model_io_and_final_normalized_score(tmp_path) -> None:
+    copy = mc.FeedCopy(title="AAPL rose 2%", content="AAPL rose 2%. Robust seamless innovative.",
+                       captions={}, tags=["EQUITIES"], provider="fake", model="fake",
+                       source_text="Apple (AAPL) rose 2%.", tickers=("AAPL",))
+    post = _post(copy)
+    replies = [CLEAN_REVIEW, {"title": "AAPL rose 2%", "content": "AAPL rose 2%."}, CLEAN_REVIEW]
+    snapshots = []
+
+    def complete(instruction, **kwargs):
+        saved = _private_audits(tmp_path, post["id"])
+        assert len(saved) == 1
+        path, audit = saved[0]
+        snapshots.append(audit)
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert path.parent.stat().st_mode & 0o777 == 0o700
+        assert audit["humanizer"]["attempts"][-1]["title"] == "$AAPL rose 2%"
+        return LadderResult(data=replies.pop(0), text="{}", provider="fake", model="fake")
+
+    result = mc.certify(post, copy, complete=complete, audit_root=tmp_path)
+    humanizer.validate_certificate(result)
+    path, audit = _private_audits(tmp_path, post["id"])[0]
+    attempts = audit["humanizer"]["attempts"]
+    assert [attempt["score"] for attempt in attempts] == [85, 100]
+    assert attempts[0]["content"] == "$AAPL rose 2%. Robust seamless innovative."
+    assert {(finding["text"], finding["category"], finding["deduction"]) for finding in attempts[0]["findings"]} == {
+        ("Robust", "vocabulary", 5), ("seamless", "vocabulary", 5), ("innovative", "vocabulary", 5)}
+    assert attempts[1]["content"] == result["content"] == "$AAPL rose 2%."
+    assert audit["humanizer"]["final"] == result["source"]["humanizer"]
+    assert attempts[1]["copy_sha256"] == humanizer.copy_digest(result)
+    assert snapshots[1]["humanizer"]["attempts"][0]["status"] == "rewrite_required"
+    assert snapshots[2]["humanizer"]["attempts"][1]["content"] == "$AAPL rose 2%."
+    assert "humanizer" not in post["source"]  # input remains untouched
+
+
+def test_certify_outage_audit_survives_and_retry_preserves_the_previous_run(tmp_path) -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    post = _post(copy)
+    failed, _ = _ladder(ModelLadderExhausted("Model ladder exhausted. tried=anthropic:http_529"))
+    with pytest.raises(mc.CopyOutage):
+        mc.certify(post, copy, complete=failed, audit_root=tmp_path)
+    first = _private_audits(tmp_path, post["id"])
+    assert len(first) == 1
+    assert first[0][1]["humanizer"]["attempts"][0]["status"] == "reviewer_error"
+    old_bytes = first[0][0].read_bytes()
+    complete, _ = _ladder(CLEAN_REVIEW)
+    mc.certify(post, copy, complete=complete, audit_root=tmp_path)
+    assert len(_private_audits(tmp_path, post["id"])) == 2
+    assert first[0][0].read_bytes() == old_bytes
+
+
+@pytest.mark.parametrize("post_id", ["../../outside", "research-" + "a" * 65, "research-x", ""])
+def test_private_audit_rejects_unsafe_or_unbounded_post_ids(tmp_path, post_id) -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    post = {**_post(copy), "id": post_id}
+    complete, calls = _ladder(CLEAN_REVIEW)
+    with pytest.raises(mc.CopyUnavailable, match="audit"):
+        mc.certify(post, copy, complete=complete, audit_root=tmp_path)
+    assert calls == [] and list(tmp_path.iterdir()) == []
+
+
+def test_private_audit_refuses_symlinked_directories_before_model_io(tmp_path) -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "private"
+    root.mkdir()
+    (root / "marketdesk").symlink_to(outside, target_is_directory=True)
+    complete, calls = _ladder(CLEAN_REVIEW)
+    with pytest.raises(mc.CopyOutage, match="audit"):
+        mc.certify(_post(copy), copy, complete=complete, audit_root=root)
+    assert calls == [] and list(outside.iterdir()) == []
+
+
+def test_audit_storage_failure_blocks_model_io_and_publication(tmp_path, monkeypatch) -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    def unavailable(*args, **kwargs):
+        raise OSError("private storage unavailable")
+    monkeypatch.setattr(mc, "atomic_save", unavailable, raising=False)
+    complete, calls = _ladder(CLEAN_REVIEW)
+    with pytest.raises(mc.CopyOutage, match="audit"):
+        mc.certify(_post(copy), copy, complete=complete, audit_root=tmp_path)
+    assert calls == []
+
+
+def test_certify_without_audit_root_keeps_pure_unit_test_seam(monkeypatch) -> None:
+    def unexpected(*args, **kwargs):
+        raise AssertionError("unexpected filesystem audit write")
+    monkeypatch.setattr(mc, "atomic_save", unexpected, raising=False)
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    complete, _ = _ladder(CLEAN_REVIEW)
+    humanizer.validate_certificate(mc.certify(_post(copy), copy, complete=complete))

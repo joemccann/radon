@@ -84,17 +84,15 @@ describe("MarketDesk research card", () => {
     expect(line.textContent).not.toContain("pp.");
   });
 
-  it("renders Markdown content and summary bullets without em dashes", async () => {
+  it("renders authored content without appending raw source bullets", async () => {
     render(<DashboardNewsFeed />);
     const item = await screen.findByTestId("news-feed-item");
     const body = item.querySelector<HTMLElement>(".news-feed-summary")!;
     expect(within(body).getByRole("heading", { name: "Setup", level: 2 })).not.toBeNull();
     expect(body.querySelector("strong")?.textContent).toBe("Breadth");
-    const summary = within(item).getByRole("list", { name: "Summary" });
-    expect(within(summary).getAllByRole("listitem").map(li => li.textContent)).toEqual([
-      "Breadth improved across sectors",
-      "Spreads, tighter on the week",
-    ]);
+    expect(within(item).queryByRole("list", { name: "Summary" })).toBeNull();
+    expect(item.textContent).not.toContain("Breadth improved across sectors");
+    expect(item.textContent).not.toContain("Spreads, tighter on the week");
     expect(item.textContent).not.toContain("—");
   });
 
@@ -107,14 +105,42 @@ describe("MarketDesk research card", () => {
     expect(within(item).getByText(/Text-only source evidence/)).not.toBeNull();
   });
 
-  it("opens the lightbox with page-free captions and summary bullets", async () => {
+  it("opens the lightbox with page-free captions and no source bullet list", async () => {
     render(<DashboardNewsFeed />);
     const item = await screen.findByTestId("news-feed-item");
     fireEvent.click(within(item).getByRole("button", { name: `Open lightbox for: ${post.title}` }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("MarketDesk · Breadth thrust")).not.toBeNull();
     expect(dialog.textContent).not.toMatch(/\bp\. \d/);
-    expect(within(dialog).getByRole("list", { name: "Summary" })).not.toBeNull();
+    expect(within(dialog).queryByRole("list", { name: "Summary" })).toBeNull();
     expect(within(dialog).getByRole("link", { name: "Source PDF" }).getAttribute("href")).toBe(pdf);
   });
+});
+
+
+it("shows an article source before its PDF is available and preserves cashtags", async () => {
+  const { summary: _summary, ...bareSource } = source;
+  fetchMock.mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json: async () => [{
+    ...post, title: "$AAPL demand holds", content: "$AAPL demand holds. $NVDA orders are unchanged.",
+    source: { ...bareSource, evidenceKind: "article", pages: [], url: source.articleUrl },
+  }] });
+  render(<DashboardNewsFeed />);
+  const item = await screen.findByTestId("news-feed-item");
+  expect(within(item).getByRole("link", { name: "MarketDesk · Source article" }).getAttribute("href")).toBe(source.articleUrl);
+  expect(item.textContent).toContain("$AAPL demand holds. $NVDA orders are unchanged.");
+  fireEvent.click(within(item).getByRole("button", { name: "Open lightbox for: $AAPL demand holds" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("link", { name: "Source article" }).getAttribute("href")).toBe(source.articleUrl);
+  expect(within(dialog).queryByRole("list", { name: "Summary" })).toBeNull();
+});
+
+it("uses an asynchronously attached PDF without changing the article", async () => {
+  const { summary: _summary, ...bareSource } = source;
+  fetchMock.mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json: async () => [{
+    ...post, source: { ...bareSource, evidenceKind: "article", pages: [], url: source.articleUrl, pdfUrl: pdf, pdfHash: sha },
+  }] });
+  render(<DashboardNewsFeed />);
+  const item = await screen.findByTestId("news-feed-item");
+  expect(within(item).getByRole("link", { name: "MarketDesk · Source PDF" }).getAttribute("href")).toBe(pdf);
+  expect(within(item).getByRole("heading", { name: post.title })).not.toBeNull();
 });

@@ -35,6 +35,7 @@
   "leap-scan": "radon-leap.service",
   "llm-token-index": "radon-llm-index.service",
   "marketdesk-dropbox": "radon-marketdesk.service",
+  "marketdesk-pdf": "radon-marketdesk-pdf.service",
   "marketdesk-research": "radon-marketdesk.service",
   "menthorq-cta": "radon-cta-sync.service",
   "menthorq-login-probe": "radon-monitor.service",

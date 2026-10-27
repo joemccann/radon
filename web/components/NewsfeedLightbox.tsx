@@ -15,6 +15,7 @@ import NewsfeedPostContent from "./NewsfeedPostContent";
 import { ResearchCharts } from "./PlannedCharts";
 import StarToggle from "@/components/StarToggle";
 import PublisherLogo from "./PublisherLogo";
+import { researchSourceLabel } from "@/lib/newsfeedSource";
 
 export type NewsfeedLightboxFocus = {
   post: MarketEarPost & { href: string; isoTimestamp: string };
@@ -195,7 +196,7 @@ export default function NewsfeedLightbox({
                 ) : (
                   <LinkIcon size={12} />
                 )}
-                <span>{post.source ? "Source PDF" : "Open original"}</span>
+                <span>{post.source ? researchSourceLabel(post.source) : "Open original"}</span>
               </a>
               <StarToggle
                 active={isBookmarked(post.id)}
