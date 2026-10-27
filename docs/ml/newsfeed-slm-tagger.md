@@ -94,7 +94,7 @@ scripts/newsfeed/index.js  (radon-newsfeed.service, Hetzner, 120 s loop)
         │                                                            log_prefix="newsfeed-tagger")
         │                      _run_ladder over MODEL_LADDER_ORDER:
         │                        anthropic -> grok -> cursor(unwired) -> codex -> antigravity -> nvidia -> cerebras
-        │                      subscription creds only for the first band unless RADON_LADDER_ALLOW_PREPAID=1
+        │                      subscription creds only for the first band (never prepaid keys)
         │       normaliseTags(parsed.tags).slice(0,3); exactly 3 or null
         └─ visionTagger = createVisionTagger(...)      OUT OF SCOPE (Anthropic direct)
 
@@ -189,7 +189,7 @@ Sampling for human-ok: 200 posts stratified by month across the test window, at 
 
 ### C.5 Label-noise ceiling (required baseline)
 
-The labels are machine outputs. Before any SLM number is interpreted, the implement PR measures how much the current tagger agrees with itself: re-tag 200 valid-window posts through the ladder (`backfill_tags.js --retag` semantics, but written to a scratch file, not to `posts.json` or Turso) and compute exact-3 and Jaccard between the stored `tags_text` and the re-tag. That agreement is the noise ceiling; an SLM cannot be expected to exceed it against machine labels. Run this on a host with subscription credentials and `RADON_LADDER_ALLOW_PREPAID` unset (about 200 subscription calls, zero prepaid spend).
+The labels are machine outputs. Before any SLM number is interpreted, the implement PR measures how much the current tagger agrees with itself: re-tag 200 valid-window posts through the ladder (`backfill_tags.js --retag` semantics, but written to a scratch file, not to `posts.json` or Turso) and compute exact-3 and Jaccard between the stored `tags_text` and the re-tag. That agreement is the noise ceiling; an SLM cannot be expected to exceed it against machine labels. Run this on a host with subscription credentials (about 200 subscription calls, zero prepaid spend).
 
 ### C.6 Content licence, PII, publication
 
@@ -283,7 +283,7 @@ scripts/newsfeed/slm/
   requirements-slm.txt                # train-only uv lock; never the runtime requirements
 ```
 
-Benchmark arms A, B and C forward each corpus row's `messages` system prompt and user content by default. Supplying a non-empty `--system-file` overrides the system prompt for either predictor; use the same file for every arm in a comparison. Arm A still refuses `RADON_LADDER_ALLOW_PREPAID`. Fake-inference entry-point regressions in `scripts/tests/test_slm_predictors.py` cover row-specific prompts, overrides, identity, refusal and error records without invoking a model.
+Benchmark arms A, B and C forward each corpus row's `messages` system prompt and user content by default. Supplying a non-empty `--system-file` overrides the system prompt for either predictor; use the same file for every arm in a comparison. Arm A is subscription-only because the ladder never reads prepaid keys. Fake-inference entry-point regressions in `scripts/tests/test_slm_predictors.py` cover row-specific prompts, overrides, identity, refusal and error records without invoking a model.
 
 Starting configuration (`configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`. Loss is masked (`train_on_prompt: false`). The mlx-lm YAML keeps `mask_prompt: true` for the optional Mini path:
 
@@ -389,7 +389,7 @@ models/
 
 | Arm | System | Prompt | Where quality runs | Where latency runs |
 |---|---|---|---|---|
-| A | current ladder tagger (`complete_text_json`, subscription creds only, `RADON_LADDER_ALLOW_PREPAID` unset) | production `buildSystemPrompt(taxonomy)` + user prompt | Mini | **serve host** (the CLI runs there in production; measure from there) |
+| A | current ladder tagger (`complete_text_json`, subscription creds only) | production `buildSystemPrompt(taxonomy)` + user prompt | Mini | **serve host** (the CLI runs there in production; measure from there) |
 | B | prompt-only `Qwen/Qwen2.5-1.5B-Instruct`, Q4_K_M, no adapter | production system prompt (taxonomy included) + user prompt, grammar on | Mini or serve host (identical weights) | **serve host** |
 | C | QLoRA-tuned 1.5B, fused Q4_K_M GGUF (after G0) | live tagger prompt + user prompt, grammar on | Mini or serve host | **serve host** |
 

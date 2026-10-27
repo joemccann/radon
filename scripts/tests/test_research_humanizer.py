@@ -451,3 +451,36 @@ def test_duplicate_descriptor_cannot_hide_malformed_weight():
     f = {"field": "content", "text": "e", "category": "filler"}
     with pytest.raises(ValueError, match="deduction"):
         humanizer._normalise_findings(post("e"), [f, {**f, "deduction": 5}], qualitative=True)
+
+
+def _review_prompt(value):
+    return humanizer.RUBRIC_INSTRUCTION + "\nUNTRUSTED SUMMARY JSON:\n" + __import__("json").dumps(
+        humanizer._summary(value), ensure_ascii=False)
+
+
+@pytest.mark.parametrize("response", [None, [], "{}", {}, {"findings": []},
+    {"findings": [], "qualitative": "none"},
+    {"findings": ["invalid"], "qualitative": []},
+    {"findings": [{"field": "source", "start": 0, "end": 1, "category": "vocabulary"}], "qualitative": []},
+    {"findings": [{"field": "title", "start": True, "end": 2, "category": "vocabulary"}], "qualitative": []},
+    {"findings": [{"field": "title", "start": 0, "end": 999, "category": "vocabulary"}], "qualitative": []},
+    {"findings": [{"field": "title", "start": 0, "end": 7, "category": "invented"}], "qualitative": []},
+    {"findings": [{"field": "content", "text": "not in the copy", "category": "filler"}], "qualitative": []}])
+def test_reply_ok_rejects_every_review_review_post_would_call_malformed(response):
+    """A ladder uses reply_ok as its accept hook, so a rung that misquotes the copy falls to the next rung
+    instead of failing the article closed (malformed_review)."""
+    assert humanizer.reply_ok(_review_prompt(post()), response) is False
+
+
+def test_reply_ok_accepts_well_formed_reviews():
+    value = post()
+    assert humanizer.reply_ok(_review_prompt(value), clean()) is True
+    flagged = {"findings": [finding(value["content"], "net equity purchases")], "qualitative": []}
+    assert humanizer.reply_ok(_review_prompt(value), flagged) is True
+
+
+@pytest.mark.parametrize("rewrite,ok", [({"title": "x", "content": "y"}, True), ({}, False),
+    ({"title": "x", "content": "y", "source": {}}, False), ({"title": "x", "content": " "}, False),
+    ({"title": 1, "content": "x"}, False), ([], False)])
+def test_reply_ok_checks_rewrite_shape(rewrite, ok):
+    assert humanizer.reply_ok(humanizer.REWRITE_INSTRUCTION + "{}", rewrite) is ok

@@ -1171,10 +1171,12 @@ class TestOperatorSafetyOwners:
         ops = (_ROOT / "docs/operations.md").read_text()
         binds = ops.split("**Subscription credential binds")[1].split("The staged copy")[0]
         assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in binds
-        assert "RADON_LADDER_ALLOW_PREPAID" in binds
+        # Subscriptions only (2026-10-26): the prepaid opt-in flag is gone.
+        assert "never fall back to a prepaid key" in binds
         assert "as the fallback" not in binds
         for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
-            assert "RADON_LADDER_ALLOW_PREPAID" in (_ROOT / path).read_text()
+            assert "prepaid" in (_ROOT / path).read_text()
+            assert "ALLOW_PREPAID" not in (_ROOT / path).read_text()
 
     def test_tradingview_retention_owner_and_migration(self):
         import sqlite3
@@ -1390,7 +1392,8 @@ class TestModelLadderByteCapOwner:
         vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
         assert "max_response_bytes: int = 2_000_000" in vision
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
-        assert call.count("max_bytes=max_response_bytes") == 6
+        # Five HTTP rungs (codex has no prepaid api.openai.com path since 2026-10-26).
+        assert call.count("max_bytes=max_response_bytes") == 5
         assert "_antigravity_complete" in call
 
 
@@ -2715,6 +2718,8 @@ class TestDocumentation20261023:
         )
         assert "/home/radon/radon-cloud" in inaccessible
         assert "-/etc/radon/env" in inaccessible
+        assert "/home/radon/radon-cloud/.env is 0600 radon-owned" not in unit
+        assert "/etc/radon/env is root-owned" in unit
 
 
 class TestDocumentation20261024:
@@ -2910,3 +2915,47 @@ class TestDocumentation20261026:
         assert "partial redaction" in fn
         assert 'while after < len(text) and text[after] in " \\t"' in fn
 
+
+class TestDocumentation20261027:
+    """Contracts that landed after the 2026-10-26 documentation audit."""
+
+    def test_darkpool_day_ends_at_eastern_midnight(self):
+        text = (_ROOT / "docs/unusual_whales_api.md").read_text()
+        section = text.split("### Dark Pool", 1)[1].split("### Options Flow", 1)[0]
+        assert "Eastern midnight" in section
+        assert "upper bound" in section
+        assert "until a short page.\n" not in section
+        src = (_ROOT / "scripts/fetch_flow.py").read_text()
+        fn = src.split("def walk_darkpool", 1)[1].split("\ndef fetch_darkpool", 1)[0]
+        assert "crossed_into_prior_day" in fn
+        assert "day_start_et" in fn
+        cache = (_ROOT / "scripts/utils/darkpool_cache.py").read_text()
+        assert "def day_start_et" in cache
+        assert "before its Eastern day start" in cache
+
+    def test_marketdesk_pdf_is_the_json_blob(self):
+        intro = (_ROOT / "docs/marketdesk-research.md").read_text()
+        intro = intro.split("## Relevance filter", 1)[0]
+        assert "a.action.preview" not in intro
+        assert "GET /files/<id>/blob" in intro
+        assert "https://marketdesk.ai" in intro
+        ops = (_ROOT / "docs/operations.md").read_text()
+        block = ops.split("### MarketDesk research ingest", 1)[1]
+        block = block.split("### Research evidence archive", 1)[0]
+        assert "plain HTTP" not in block
+        assert "HTTPS" in block
+        assert 'BASE_URL = "https://marketdesk.ai"' in (
+            _ROOT / "scripts/research/marketdesk_auth.py"
+        ).read_text()
+        scrape = (_ROOT / "scripts/research/marketdesk_scrape.py").read_text()
+        assert "/files/<id>/blob" in scrape
+
+    def test_release_publish_refuses_extra_commit_headers(self):
+        text = (_ROOT / "docs/unattended-releases.md").read_text()
+        section = text.split("## Private validation feedback", 1)[0]
+        publish = section.split("identical Git objects", 1)[1][:600]
+        assert "committer" in publish
+        assert "refused before the push" in publish
+        src = (_ROOT / "scripts/private_security_release.py").read_text()
+        fn = src.split("def _require_plain_commit", 1)[1].split("\ndef ", 1)[0]
+        assert "tree/parent/author/committer" in fn

@@ -23,7 +23,7 @@ describe.each(["complete", "sparse"])("Chromium environment (%s)", (density) => 
     const childEnv = {
       ...runtime,
       TURSO_AUTH_TOKEN: "synthetic-database", TURSO_DB_URL: "https://synthetic.invalid",
-      UW_TOKEN: "synthetic-provider", ANTHROPIC_API_KEY: "synthetic-provider",
+      UW_TOKEN: "synthetic-provider", CEREBRAS_API_KEY: "synthetic-provider",
       FUTURE_SERVICE_CREDENTIAL: "synthetic-future", NODE_ENV: "test",
       ...(mode === "disabled" ? { PLAYWRIGHT_CHROMIUM_SANDBOX: "0" } : {}),
     };

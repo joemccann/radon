@@ -53,37 +53,37 @@ def http(monkeypatch):
 
 
 class TestHttpVerdictMapping:
-    def test_anthropic_valid(self, http):
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-ant-x"})
+    def test_cerebras_valid(self, http):
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-x"})
         assert result.status == "valid"
         (call,) = http.calls
-        assert call.url == "https://api.anthropic.com/v1/models"
-        assert call.headers["x-api-key"] == "sk-ant-x"
+        assert call.url == "https://api.cerebras.ai/v1/models"
+        assert call.headers["Authorization"] == "Bearer csk-x"
         assert call.timeout is not None
 
-    def test_anthropic_unauthorized_is_invalid(self, http):
+    def test_cerebras_unauthorized_is_invalid(self, http):
         http.box["response"] = _Response(401)
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-bad"})
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-bad"})
         assert result.status == "invalid"
 
     def test_forbidden_is_invalid(self, http):
         http.box["response"] = _Response(403)
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-bad"})
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-bad"})
         assert result.status == "invalid"
 
     def test_vendor_5xx_is_error_not_invalid(self, http):
         http.box["response"] = _Response(503)
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-x"})
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-x"})
         assert result.status == "error"
 
     def test_network_failure_is_error(self, http):
         http.box["response"] = requests.ConnectionError("refused")
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-x"})
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-x"})
         assert result.status == "error"
 
     def test_timeout_is_error(self, http):
         http.box["response"] = requests.Timeout("slow")
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-x"})
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-x"})
         assert result.status == "error"
 
 
@@ -100,11 +100,11 @@ class TestWireShapes:
         assert call.url == "https://api.cerebras.ai/v1/models"
         assert call.headers["Authorization"] == "Bearer csk-1"
 
-    def test_xai_models(self, http):
-        cv.validate("xai", {"XAI_API_KEY": "xai-1"})
-        (call,) = http.calls
-        assert call.url == "https://api.x.ai/v1/models"
-        assert call.headers["Authorization"] == "Bearer xai-1"
+    def test_subscription_providers_have_no_key_validator(self, http):
+        # Subscriptions only (2026-10-26): no prepaid key is ever sent to validate.
+        for service_id in ("anthropic", "xai", "openai"):
+            assert service_id not in cv.VALIDATORS
+        assert http.calls == []
 
     def test_exa_search_post(self, http):
         cv.validate("exa", {"EXA_API_KEY": "exa-1"})
@@ -250,8 +250,8 @@ class TestDispatch:
         def _boom(*a, **k):
             raise RuntimeError("unexpected")
 
-        monkeypatch.setitem(cv.VALIDATORS, "anthropic", _boom)
-        result = cv.validate("anthropic", {"ANTHROPIC_API_KEY": "sk-x"})
+        monkeypatch.setitem(cv.VALIDATORS, "cerebras", _boom)
+        result = cv.validate("cerebras", {"CEREBRAS_API_KEY": "csk-x"})
         assert result.status == "error"
 
     def test_blocks_save_only_when_invalid(self):

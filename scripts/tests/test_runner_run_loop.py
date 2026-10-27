@@ -163,6 +163,8 @@ def rig(tmp_path):
     rig = Rig()
     rig.calls = calls
     rig.install = install
+    rig.origin = origin
+    rig.origin_src = origin_src
     rig.work = home / "radon-runner" / "work" / "doc"
     rig.loop_state = home / "radon-runner" / "state" / "doc"
     rig.configure()
@@ -1467,6 +1469,140 @@ def test_install_runner_copies_every_loop_env(tmp_path):
         assert copied.is_file(), src.name
         assert copied.read_bytes() == src.read_bytes(), src.name
     assert (prefix / "loops" / "reliability.env").read_text() != "STALE=1\n"
+
+
+FASTEMBED_WHEEL = "vendor/fastembed-0.8.0-py3-none-any.whl"
+FASTEMBED_REQ = f"fastembed @ file:./{FASTEMBED_WHEEL}\n"
+FASTEMBED_SCRIPT = """\
+import os
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[2]
+dest = root / "vendor" / "fastembed-0.8.0-py3-none-any.whl"
+if dest.is_symlink():
+    raise SystemExit("refusing to write through a symlink")
+dest.parent.mkdir(parents=True, exist_ok=True)
+dest.write_text("patched-wheel\\n", encoding="utf-8")
+calls = os.environ.get("CALLS")
+if calls:
+    with open(os.path.join(calls, "order"), "a", encoding="utf-8") as handle:
+        handle.write("materialize\\n")
+"""
+WHEEL_READY = r"""
+printf 'grok\n' >> "$CALLS/order"
+wheel="vendor/fastembed-0.8.0-py3-none-any.whl"
+[[ -L "$wheel" ]] && exit 1
+[[ -f "$wheel" ]] || exit 1
+grep -qx 'patched-wheel' "$wheel"
+"""
+
+
+def _publish(rig, files):
+    for rel, text in files.items():
+        path = rig.origin_src / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        _git("-c", "user.email=t@t", "-c", "user.name=t", "add", "--", rel, cwd=rig.origin_src)
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture", cwd=rig.origin_src)
+    _git("fetch", "-q", str(rig.origin_src), "+main:main", cwd=rig.origin)
+
+
+def test_fastembed_wheel_exists_before_the_first_package_install(rig):
+    _publish(rig, {
+        "requirements.txt": FASTEMBED_REQ,
+        "scripts/deps/materialize_fastembed_pillow13.py": FASTEMBED_SCRIPT,
+    })
+
+    proc = rig.run(STUB_GROK=WHEEL_READY)
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert (rig.calls / "order").read_text().splitlines() == ["materialize", "grok"]
+    assert rig.called() == ["grok"]
+
+
+def test_fastembed_wheel_is_rebuilt_after_each_pre_run_clean(rig):
+    _publish(rig, {
+        "requirements.txt": FASTEMBED_REQ,
+        "scripts/deps/materialize_fastembed_pillow13.py": FASTEMBED_SCRIPT,
+    })
+    rig.configure(PHASES="audit:60 remediate:60", PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", 'printf "pre\\n" >> "$CALLS/order"\nrm -rf vendor\n')
+
+    proc = rig.run(STUB_GROK=WHEEL_READY)
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert (rig.calls / "order").read_text().splitlines() == [
+        "pre", "materialize", "grok", "pre", "materialize", "grok"]
+
+
+def test_fastembed_wheel_symlink_is_replaced_before_install(rig):
+    _publish(rig, {
+        "requirements.txt": FASTEMBED_REQ,
+        "scripts/deps/materialize_fastembed_pillow13.py": FASTEMBED_SCRIPT,
+    })
+    rig.configure(PHASES="audit:60", PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", """
+printf 'pre\\n' >> "$CALLS/order"
+mkdir -p vendor
+printf 'hijack\\n' > "$CALLS/hijack"
+ln -sfn "$CALLS/hijack" vendor/fastembed-0.8.0-py3-none-any.whl
+""")
+
+    proc = rig.run(STUB_GROK=WHEEL_READY)
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert (rig.calls / "order").read_text().splitlines() == ["pre", "materialize", "grok"]
+    wheel = rig.work / FASTEMBED_WHEEL
+    assert wheel.is_file() and not wheel.is_symlink()
+    assert wheel.read_text() == "patched-wheel\n"
+    assert (rig.calls / "hijack").read_text() == "hijack\n"
+
+
+def test_fastembed_wheel_already_present_is_not_rewritten(rig):
+    _publish(rig, {
+        "requirements.txt": FASTEMBED_REQ,
+        "scripts/deps/materialize_fastembed_pillow13.py": FASTEMBED_SCRIPT,
+    })
+    rig.configure(PHASES="audit:60", PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", """
+mkdir -p vendor
+printf 'already\\n' > vendor/fastembed-0.8.0-py3-none-any.whl
+""")
+
+    proc = rig.run(STUB_GROK=r"""
+wheel="vendor/fastembed-0.8.0-py3-none-any.whl"
+[[ -L "$wheel" ]] && exit 1
+grep -qx 'already' "$wheel"
+""")
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert not (rig.calls / "order").exists()
+
+
+def test_fastembed_wheel_step_skips_a_tree_without_the_vendored_requirement(rig):
+    _publish(rig, {
+        "requirements.txt": "pytest==8.0.0\n",
+        "scripts/deps/materialize_fastembed_pillow13.py": FASTEMBED_SCRIPT,
+    })
+
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert not (rig.calls / "order").exists()
+    assert rig.called() == ["grok"]
+
+
+def test_fastembed_wheel_materialize_failure_still_starts_the_agent(rig):
+    _publish(rig, {
+        "requirements.txt": FASTEMBED_REQ,
+        "scripts/deps/materialize_fastembed_pillow13.py": "import sys\nsys.stderr.write('fastembed wheel: boom\\n')\nraise SystemExit(1)\n",
+    })
+
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert rig.called() == ["grok"]
+    assert "fastembed wheel materialize failed" in rig.log()
 
 
 def test_a_missing_dead_man_label_is_logged_not_silent(rig):

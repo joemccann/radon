@@ -1,7 +1,7 @@
 #!/usr/bin/env python3.13
 """Held-out posts -> complete_text_json (subscription only) -> predictions JSONL (arm A).
 
-    RADON_LADDER_ALLOW_PREPAID must be unset. About 200-1400 subscription calls.
+    The ladder never reads prepaid keys. About 200-1400 subscription calls.
 """
 from __future__ import annotations
 
@@ -27,9 +27,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--system-file", default="")
     args = parser.parse_args(argv)
-    if (os.environ.get("RADON_LADDER_ALLOW_PREPAID") or "").strip():
-        sys.stderr.write("predict_ladder.py refuses RADON_LADDER_ALLOW_PREPAID (arm A is subscription only)\n")
-        return 2
     system = Path(args.system_file).read_text(encoding="utf-8") if args.system_file else ""
     rows = load_jsonl(Path(args.gold))
     dest = Path(args.out)

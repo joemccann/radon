@@ -3271,3 +3271,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:710-759` and `:871-917`, wire `placeOrder` at `:759` and `:917`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6188` (used at `:6297` and `:6375`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. Catalog parity 38 passed. The range did not add a service_health writer. Permanent drills 114 passed.
 
 Audited through: 7f6ad940b407dfecee951310aa78c787cc97cb9a on 2026-10-26 — 1 new finding
+
+## Delta audit 2026-10-27
+
+Trusted cursor `7f6ad940b407dfecee951310aa78c787cc97cb9a` (rolling issue #81, 2026-10-26) through `32cc2594b09e484000b28447f9feac8cf04c6a9a`: 47 commits, 126 paths. No open `reliability/` PR. Highest IDs before tonight: R-743 / REL-332. Codemap `generated_at` 2026-10-26T09:00:08Z. Incoming edges of `scripts/leap_scanner_uw.py`: 7, all tests. The preset timer reaches it through `POST /leap/scan` (`scripts/api/server.py`), which returns 502 when the child exits nonzero and otherwise serves the file the child just wrote.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-744 / REL-333 | P1 | `scripts/leap_scanner_uw.py` `main` (`budget_spent` at the status and `mirror_scan_snapshot` call) | DONE. A wall-clock stop kept the names that finished and exited 0 with `status` ok and no `health_error`. `/leap/scan` treats exit 0 as success, and the watchdog reads the `leap-scan` row, so a partial universe replaced the canonical cache behind a green banner (the R-095 shape). Acceptance: the partial file is still written, `status` is `degraded`, the heartbeat class is `scan_budget_spent`, and the process exits 1. Deferred names stay out of `provider_failures`. RED 1 failed (`main()` returned 0). GREEN 3 passed (fault, cache-still-written, provider-wipeout control); 108 passed across the leap suites. |
+
+Reviewed and not filed: REL-332 is on this range and still requires the same clientId when permId is 0. `connect_ib_with_retry` retries only connection failures and is used by position reconcile and journal sync, not by a placer. The dark-pool walk stops at Eastern midnight and a row with an earlier print misses. Flow's self-built client waits 120s for admission. The app-role Gateway password PUT requires an operator JWT. `marketdesk-research` and `marketdesk-dropbox` are in both watchdog catalogs; `dropbox-research` is gone. Redaction, the private-release header allowlist, and the dividend and performance session reuse do not sit on the order funnel.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse). NEW_FINDINGS and the REL-021b remainder have no new changed-surface instance.
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:710-759` and `:871-917`, wire `placeOrder` at `:759` and `:917`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6190` (used at `:6299` and `:6377`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:224` (used at `:790`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. Catalog parity 21 passed. Permanent drills 118 passed.
+
+Audited through: 32cc2594b09e484000b28447f9feac8cf04c6a9a on 2026-10-27 — 1 new finding

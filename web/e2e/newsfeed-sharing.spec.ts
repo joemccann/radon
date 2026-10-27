@@ -394,7 +394,7 @@ for (const width of [1440, 393]) {
     await item.getByRole("button", { name: "Share", exact: true }).click();
     await item.getByRole("button", { name: "Open chart 2: Weekly distribution" }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveAttribute("src", second);
+    await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveJSProperty("src", new URL(second, page.url()).href);
     await dismissNotices(page);
     await dialog.getByRole("button", { name: "Share", exact: true }).click();
     const lightboxPanel = dialog.getByRole("region", { name: "Share news item" });
@@ -405,7 +405,7 @@ for (const width of [1440, 393]) {
     await caption.press("ArrowRight");
     await caption.press("ArrowLeft");
     await expect(dialog.getByRole("heading", { name: post.title })).toBeVisible();
-    await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveAttribute("src", second);
+    await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveJSProperty("src", new URL(second, page.url()).href);
     await caption.press("Escape");
     await expect(lightboxPanel).toHaveCount(0);
     await expect(dialog).toBeVisible();

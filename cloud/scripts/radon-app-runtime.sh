@@ -671,7 +671,7 @@ start_notify_proxy() {
 }
 
 # docker --env-file takes each line VERBATIM: there is no shell quoting, so
-# XAI_API_KEY='xai-…' reached the container WITH its quotes and xAI answered
+# a quoted provider key reached the container WITH its quotes and xAI answered
 # 400 "Incorrect API key" (2026-08-30; six secrets in /etc/radon/env are
 # single-quoted because `set -a; . file` consumers need $-bearing values
 # quoted, see CLAUDE.md). Strip one matching pair of surrounding quotes per
@@ -688,12 +688,17 @@ render_env_file() {
     sed -E \
       -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
       -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
+      -e '/^(ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|RADON_LADDER_ALLOW_PREPAID)=/d' \
       "$ENV_FILE" > "$temporary" || exit 71
+    # ^ Subscriptions only (operator policy 2026-10-26): prepaid Anthropic,
+    # Claude, xAI and OpenAI keys left in the host file never reach any
+    # container, where an agent CLI would otherwise bill them. Scrub list
+    # mirrors scripts/clients/prepaid_denylist.json.
     # The newsfeed's Chromium renders third-party web content (and
     # may fall back to --no-sandbox); hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
-      grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
+      grep -E '^(#|$|(NODE_ENV|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       # grep's 1 means a valid empty allowlist; 2 means a failed filter.
@@ -712,7 +717,7 @@ render_env_file() {
     # login, and the WRITE-scoped Dropbox app only: never the read-only
     # research reader (DROPBOX_APP_KEY...), B2, IB or Clerk secrets.
     if [[ "$unit" == "radon-marketdesk.service" ]]; then
-      grep -E '^(#|$|(ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_RESEARCH_MODEL|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
+      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_RESEARCH_MODEL|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71

@@ -626,3 +626,31 @@ def test_selected_finding_numbers_do_not_widen_the_numeric_firewall() -> None:
                          images=IMAGES, complete=fake, finding={"title": "Sold $99.9bn", "content": "x"})
     assert "Sold $99.9bn" in seen["instruction"]
     assert "99.9" not in copy.source_text
+
+
+def test_certify_lets_a_malformed_review_fall_to_the_next_rung() -> None:
+    copy = _feed_copy(clean()["title"], clean()["content"])
+    complete, calls = _ladder(CLEAN_REVIEW)
+    mc.certify(_post(copy), copy, complete=complete)
+    accept = calls[0]["accept"]
+    assert accept(CLEAN_REVIEW) is True
+    assert accept({"findings": [{"field": "content", "text": "absent quote", "category": "filler"}],
+                   "qualitative": []}) is False
+    assert accept({"findings": []}) is False
+
+
+def test_copy_with_images_skips_grok() -> None:
+    """grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27)."""
+    seen = {}
+
+    def fake(instruction, **kwargs):
+        seen.update(kwargs)
+        return LadderResult(data=clean(), text="{}", provider="p", model="m")
+
+    _call(fake)
+    assert "grok" not in seen["providers"] and seen["providers"][:2] == ("anthropic", "cursor")
+    assert "codex" in seen["providers"]
+
+
+def test_captions_follow_the_numeric_firewall() -> None:
+    assert "Rule 8 covers captions too" in mc.SYSTEM

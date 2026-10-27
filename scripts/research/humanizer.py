@@ -298,6 +298,37 @@ def validate_certificate(post: dict) -> None:
         raise ValueError("PDF summary Humanizer certificate does not pass the rubric")
 
 
+_REVIEW_MARKER = "\nUNTRUSTED SUMMARY JSON:\n"
+
+
+def reply_ok(prompt: str, reply: object) -> bool:
+    """Whether ``reply`` has the shape ``review_post`` accepts for ``prompt`` (a review or a rewrite).
+
+    For a ladder's accept hook: a rung whose review misquotes the copy, or whose rewrite carries extra
+    fields, then falls to the next rung instead of failing the review closed. review_post still checks
+    every reply itself; this only decides which rung answers.
+    """
+    if prompt.startswith(RUBRIC_INSTRUCTION):
+        try:
+            current = _summary(json.loads(prompt.rsplit(_REVIEW_MARKER, 1)[1]))
+            if not isinstance(reply, dict) or "findings" not in reply or "qualitative" not in reply:
+                return False
+            budget = _FindingBudget()
+            _normalise_findings(current, reply["findings"], budget=budget)
+            _normalise_findings(current, reply["qualitative"], qualitative=True, budget=budget)
+        except FindingBudgetExceeded:
+            return True  # well formed; review_post records it as finding_budget_exceeded
+        except (ValueError, IndexError, TypeError):
+            return False
+        return True
+    if prompt.startswith(REWRITE_INSTRUCTION):
+        try:
+            return isinstance(reply, dict) and set(reply) == set(FIELDS) and bool(_summary(reply))
+        except ValueError:
+            return False
+    return True
+
+
 def review_post(post: dict, *, ask: Callable[[str], dict], verify: Callable[[dict], bool],
                 record: Callable[[dict], None], max_rewrites: int = MAX_REWRITES) -> dict | None:
     """Review, bounded rewrite, fact-verify, and rescore the full final summary.

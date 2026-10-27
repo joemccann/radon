@@ -22,7 +22,7 @@ vi.mock("@/lib/radonApi", async (importOriginal) => ({
   radonFetch,
 }));
 
-const KEYS = ["UW_TOKEN", "XAI_API_KEY", "CLERK_SECRET_KEY"] as const;
+const KEYS = ["UW_TOKEN", "EXA_API_KEY", "CLERK_SECRET_KEY"] as const;
 let saved: Record<string, string | undefined>;
 let repo: string;
 
@@ -31,7 +31,7 @@ beforeEach(async () => {
   radonFetch.mockReset();
   saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
   process.env.UW_TOKEN = "old-uw";
-  delete process.env.XAI_API_KEY;
+  delete process.env.EXA_API_KEY;
   process.env.CLERK_SECRET_KEY = "boot-clerk";
   repo = await fs.mkdtemp(path.join(os.tmpdir(), "radon-live-cred-"));
   await fs.mkdir(path.join(repo, "web"));
@@ -163,12 +163,12 @@ describe("PUT /api/credentials/[service] live web env", () => {
     radonFetch.mockResolvedValue({ ok: true });
     const { PUT } = await import("../app/api/credentials/[service]/route");
 
-    await PUT(put("clerk", { CLERK_SECRET_KEY: "new-clerk", XAI_API_KEY: "xai-new" }) as never, {
+    await PUT(put("clerk", { CLERK_SECRET_KEY: "new-clerk", EXA_API_KEY: "exa-new" }) as never, {
       params: Promise.resolve({ service: "clerk" }),
     });
 
     expect(process.env.CLERK_SECRET_KEY).toBe("boot-clerk");
-    expect(process.env.XAI_API_KEY).toBe("xai-new");
+    expect(process.env.EXA_API_KEY).toBe("exa-new");
     const webEnv = await fs.readFile(path.join(repo, "web", ".env"), "utf8");
     expect(webEnv).not.toContain("new-clerk");
   });

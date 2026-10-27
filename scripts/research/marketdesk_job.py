@@ -48,6 +48,7 @@ import time  # noqa: E402
 from api.db_http import DbHttpError  # noqa: E402
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox import DropboxError  # noqa: E402
+from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
 from research.marketdesk_copy import scrub, summary_problems  # noqa: E402
 from research.marketdesk_filter import decide as relevance, fingerprint_index  # noqa: E402
 from research.publish import stable_post_id  # noqa: E402
@@ -77,6 +78,8 @@ NY = ZoneInfo("America/New_York")
 NO_CREDS_MESSAGE = "Dropbox write credentials absent; uploads skipped"
 FORBIDDEN_PUBLISHERS = re.compile(r"market\s*ear|zero\s*hedge|zerohedge|themarketear|tyler\s+durden", re.I)
 _HEALTH_RANK = {"ok": 0, "paused": 1, "error": 2}
+EXIT_STOPPED = 143  # 128+SIGTERM; the unit maps it with SuccessExitStatus=143. Not 75: radon-app-runtime run
+# exits 75 itself when an orphan container survives, and that must stay a failure.
 
 
 class CycleTerminated(Exception):
@@ -432,8 +435,13 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
         except (DbHttpError, CycleTerminated):
             raise  # Turso down / killed: the lease stays and the next claim counts it
         except Exception as exc:  # noqa: BLE001 - one bad article never fails the cycle
-            attempted += 1
             error = _safe_error(exc)
+            if error == PREVIEW_QUOTA:  # every later PDF bounces the same way until marketdesk.ai resets it
+                store.park(ref.article_id, error)
+                counts["quota_deferred"] += len(todo) - index
+                _log(f"preview allowance spent: {counts['quota_deferred']} articles wait for the reset")
+                break
+            attempted += 1
             notes["last_error"] = error
             if getattr(exc, "transient", False):
                 store.park(ref.article_id, error)
@@ -536,7 +544,7 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     for anything just published. Health: marketdesk-dropbox gets the worse of the two outbox runs."""
     deps = deps or default_deps()
     counts = dict.fromkeys(("listed", "excluded", "unseen", "pending", "published", "held", "dropped", "requeued",
-                            "healed", "failed", "parked", "retired", "skipped", "deferred", "uploaded",
+                            "healed", "failed", "parked", "retired", "skipped", "deferred", "quota_deferred", "uploaded",
                             "upload_skipped", "upload_failed"), 0)
     notes: dict = {}
     workdir = Path(tempfile.mkdtemp(prefix="marketdesk-"))
@@ -602,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     previous = signal.signal(signal.SIGTERM, _terminate)
     try:
         counts = run_cycle()
+    except CycleTerminated as exc:  # a stop (deploy stop-clean): 143 + SuccessExitStatus=143 keeps it out of `failed`
+        _log(f"cycle stopped: {_safe_error(exc)}")
+        return EXIT_STOPPED
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
         _log(f"cycle failed: {_safe_error(exc)}")
         return 1

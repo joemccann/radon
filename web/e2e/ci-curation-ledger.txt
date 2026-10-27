@@ -118,6 +118,10 @@ admin-log-disclosure.spec.ts
 #   isolated next start :3033 with RADON_AUTHLESS_TEST. Pins CSS-only Prefs/Keys
 #   `.preferences-shell` scroll so MenthorQ sits above `mobile-tab-bar`, and
 #   BOOKMARKS unclipped at 390x844. Held out of e2e-financial-smoke.
+# REVIEWED 2026-10-26 profile-credentials-tab.spec.ts - 3/3 Chromium against
+#   local next dev :3033 with RADON_AUTHLESS_TEST. Fixture service moved from
+#   anthropic to cerebras (subscriptions only: no prepaid AI key is stored);
+#   armed save still PUTs /api/credentials/cerebras with the exact body.
 # REVIEWED 2026-09-21 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
 #   next dev :3000 with RADON_AUTHLESS_TEST. Pins flex-chip rail: nowrap
 #   Capture basis, no SOURCE/CAPTURE overlap, even 18px gaps at 1440/1024,

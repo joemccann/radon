@@ -76,7 +76,8 @@ def build_triple_quoted_assignment_re(key_pattern: str) -> "re.Pattern[str]":
     delimiter pair as an empty value, so the credential survived both.
     """
     return re.compile(
-        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*)(\"\"\"|''')"
+        # A string prefix may open the value (`r"""`, DS-2026-10-26-19).
+        rf"([\"']?{key_pattern}[\"']?[ \t]*[:=][ \t]*(?:[rRbBuUfF]{{1,2}})?)(\"\"\"|''')"
         # A backslash escape consumes the next character, so an escaped first
         # quote of the closer does not end the value and leave the rest
         # published (DS-2026-10-22-11). Each position takes exactly one branch
@@ -159,7 +160,9 @@ def _redact_triple_quoted(text: str) -> str:
     Ahead of the specific shapes too: `authorization = \"\"\"` would otherwise
     have its own rule treat the opening delimiter as the whole value.
     """
-    return _TRIPLE_QUOTED_ASSIGNMENT_RE.sub(r"\1[redacted-secret]", text)
+    # The delimiters stay, so the tokenizer still reads a literal concatenated
+    # after this one as part of the same value.
+    return _TRIPLE_QUOTED_ASSIGNMENT_RE.sub(r"\1\2[redacted-secret]\2", text)
 
 
 def _redact_block_scalar(text: str) -> str:
@@ -203,7 +206,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
             # `ApiKey` and kept the credential after it, and one token kept
             # a Digest header's later fields (DS-2026-10-25-08). A quoted
             # value may continue on later lines; the tokenizer owns it.
-            r"(?![\"'\s])[^\r\n]+",
+            # Prefixed (`b"`, `$'`) and template literals too (DS-2026-10-27-07).
+            r"(?!(?:[rRbBuUfF]{1,2}|\$)?[\"'`]|\s)[^\r\n]+",
             re.IGNORECASE,
         ),
         r"\1\2[redacted]",
@@ -219,7 +223,9 @@ _SPECIFIC_SCRUB_PATTERNS = [
     (re.compile(r"\b(?:D?U|F)\d{6,}\b"), "[redacted-account]"),
     # The username run is optional: password-only userinfo (`://:secret@`)
     # is valid and used to escape this rule entirely (DS-2026-10-22-13).
-    (re.compile(r"(://[^\s/:@]*:)[^\s/@]+@"), r"\1[redacted]@"),
+    # Through the LAST `@` of the authority, where a URL parser splits the
+    # host off: a password may itself hold `@` (DS-2026-10-27-15).
+    (re.compile(r"(://[^\s/:@]*:)[^\s/]+@"), r"\1[redacted]@"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"), "[redacted-key]"),
@@ -262,8 +268,24 @@ _SPECIFIC_SCRUB_PATTERNS = [
 # gate runs over text an outside contributor shapes.
 
 # Only a prefix that is actually followed by a quote is a string prefix; `rb`
-# at the start of an unquoted value is part of the value.
-_STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
+# at the start of an unquoted value is part of the value. `$` opens shell
+# ANSI-C (`$'...'`) and locale (`$"..."`) quoting (DS-2026-10-27-01).
+_STRING_PREFIX = re.compile(r"(?:[rRbBuUfF]{1,2}|\$)(?=[\"'])")
+
+# DS-2026-10-26-18: an unquoted run touching a closed literal is the same
+# shell word (`'abc'<v>`): it runs to whitespace or a shell metacharacter
+# (DS-2026-10-27-08/-10). `,`, `]` and `}` end it too, so a JSON separator
+# after a quoted value is not read as part of it.
+_UNQUOTED_SEGMENT = re.compile(r"[^\s\"'`;&|()<>,\]}]+")
+
+# DS-2026-10-27-01: a command substitution whose heredoc carries the value on
+# the following lines. The window to the operator is bounded, so a long line
+# of `$(` values costs at most that much each.
+_HEREDOC_OPERATOR = re.compile(
+    # A quoted word may hold any character but its quote (DS-2026-10-27-16).
+    r"[^\r\n]{0,256}?<<(?P<dash>-?)[ \t]*"
+    r"(?:(?P<quote>[\"'])(?P<quoted>[^\"'\r\n]{1,64})(?P=quote)|(?P<word>[A-Za-z0-9_.@%+-]{1,64}))"
+)
 
 # One line break plus indentation may sit between the key and its value: a
 # YAML `password:` with the value on the next line kept it (DS-2026-10-24-04).
@@ -272,13 +294,22 @@ _STRING_PREFIX = re.compile(r"[rRbBuUfF]{1,2}(?=[\"'])")
 # YAML requires before `#`, so an env value starting `#` stays the value.
 _ASSIGNMENT_HEAD = re.compile(
     # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?[ \t]*[:=][ \t]*"
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
+    # A type annotation before the initializer, `NAME: str = ...`
+    # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
+    # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
+    # A union (`str | None`, DS-2026-10-27-17) is up to four more members.
+    r"(?::[ \t]*(?P<annotation_quote>[\"']?)[A-Za-z_][A-Za-z0-9_.]{0,64}"
+    r"(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?"
+    r"(?:[ \t]*\|[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?){0,4}"
+    r"(?P=annotation_quote)[ \t]*(?==))?"
+    r"[ \t]*[:=][ \t]*"
     r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
     re.IGNORECASE,
 )
 
 
-def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
+def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int, str]:
     """``(body_start, body_end, delimiter)`` of the value starting at ``pos``.
 
     The delimiter is ``""`` for an unquoted value, which runs to the next
@@ -305,8 +336,27 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
         # recursion, so a long run of literals cannot exhaust the stack.
         while delimiter:
             following = end + len(delimiter)
+            segment = _UNQUOTED_SEGMENT.match(text, following)
+            if segment is not None:
+                following = segment.end()
+                prefix = _STRING_PREFIX.match(text, following)
+                if prefix is not None:
+                    following = prefix.end()
+                if following < length and text[following] in "\"'`":
+                    _, end, delimiter = _scan_quoted(text, following)
+                    continue
+                return body, following, ""
+            joined = False
             while following < length:
                 if text[following] in " \t":
+                    following += 1
+                elif text[following] == "+" and not joined:
+                    # Explicit concatenation, `"" + "<v>"`; one per gap.
+                    joined = True
+                    following += 1
+                elif joined and text[following] in "\r\n":
+                    # A `+` carries the expression onto the next line
+                    # (DS-2026-10-27-13).
                     following += 1
                 elif text.startswith(("\\\n", "\\\r\n"), following):
                     # A backslash line continuation joins the next line's literal.
@@ -316,7 +366,7 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
             prefix = _STRING_PREFIX.match(text, following)
             if prefix is not None:
                 following = prefix.end()
-            if following >= length or text[following] not in "\"'":
+            if following >= length or text[following] not in "\"'`":
                 break
             _, end, delimiter = _scan_quoted(text, following)
         return body, end, delimiter
@@ -324,7 +374,34 @@ def _scan_value(text: str, pos: int) -> tuple[int, int, str]:
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
+    if heredoc and text.startswith("$(", index):
+        operators = []
+        operator = _HEREDOC_OPERATOR.match(text, index)
+        while operator is not None:
+            operators.append(operator)
+            operator = _HEREDOC_OPERATOR.match(text, operator.end())
+        if operators:
+            return index, _heredoc_end(text, operators), ""
     return index, cursor, ""
+
+
+def _heredoc_end(text: str, operators: "list[re.Match[str]]") -> int:
+    """End of the last terminator line of the heredocs on one line, or of the text.
+
+    Every heredoc on the line is read in order, its body after the previous
+    one's terminator (DS-2026-10-27-09). The terminator is exact, as the shell
+    reads it: `<<-` strips leading tabs only, and a padded line is body.
+    """
+    end = _end_of_line(text, operators[-1].end())
+    for operator in operators:
+        indent = "\t*" if operator.group("dash") else ""
+        word = operator.group("quoted") or operator.group("word")
+        terminator = re.compile(rf"^{indent}{re.escape(word)}\r?$", re.M)
+        found = terminator.search(text, end)
+        if found is None:
+            return len(text)
+        end = found.end()
+    return end
 
 
 def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
@@ -348,7 +425,9 @@ def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
             eol = _end_of_line(text, body)
             if literal is None or literal < eol:
                 return body, eol, ""
-            close = literal
+            # A later-line literal close is not a close both grammars agree
+            # on (DS-2026-10-26-16): unterminated, through that line's end.
+            return body, _end_of_line(text, literal + 1), ""
         elif literal is not None and literal > close:
             close = literal
     if close is not None:
@@ -549,7 +628,8 @@ def _redact_assignments(text: str) -> str:
                 eol = _continuation_end(
                     text, line_start(head_start), _end_of_line(text, body_start)
                 )
-            body_end = eol
+            # The tokenizer may already run past the line (a heredoc).
+            body_end = max(body_end, eol)
         body = text[body_start:body_end]
         if not delimiter and not body:
             # An EMPTY quoted value still gets the label (the key is the tell);
@@ -582,7 +662,7 @@ _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.
     # A quoted value may continue on later lines; the tokenizer owns it.
-    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?![\"' \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
+    (re.compile(r"(\b(?:set-)?cookie[\"']?[ \t]*[:=][ \t]*)(?!(?:[rRbBuUfF]{1,2}|\$)?[\"'`]|[ \t])[^\r\n]*", re.IGNORECASE), r"\1[redacted-secret]"),
 ]
 
 _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
@@ -638,12 +718,24 @@ _COOKIE_VALUE = re.compile(r"[A-Za-z0-9_+/=~-]{16,}")
 _QUOTE_SPLIT = re.compile(r"[\"']")
 
 
+def _has_letter_and_digit(value: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", value) and re.search(r"\d", value))
+
+
 def _is_opaque(value: str) -> bool:
-    return bool(
-        re.search(r"[A-Za-z]", value)
-        and re.search(r"\d", value)
-        and not _PLACEHOLDER.search(value)
-    )
+    if not _has_letter_and_digit(value):
+        return False
+    if not _PLACEHOLDER.search(value):
+        return True
+    # DS-2026-10-26-17: a placeholder WORD inside a value does not make the
+    # value a placeholder. Only one with no long opaque component is: a
+    # component counts when what is left of it without the word is still
+    # opaque, so `<8>test<8>` is a secret and `changeme<digits>` is not.
+    for part in re.split(r"[^A-Za-z0-9]+", value):
+        rest = _PLACEHOLDER.sub("", part)
+        if len(part) >= 16 and len(rest) >= 12 and _has_letter_and_digit(rest):
+            return True
+    return False
 
 
 _WRAPPER_PAREN = re.compile(r"\(+(?=(?:[rRbBuUfF]{1,2})?[\"'])")
@@ -665,7 +757,9 @@ def _wrapped_value_is_secret(text: str, body_start: int, body_end: int) -> bool:
         following += 1
     if following >= len(text) or text[following] in "\r\n":
         return False
-    value_start, value_end, delimiter = _scan_value(text, following)
+    # No heredoc: only a literal matters here, and following one from every
+    # wrapper re-scanned the rest of the text each time (DS-2026-10-27-12).
+    value_start, value_end, delimiter = _scan_value(text, following, heredoc=False)
     value = text[value_start:value_end]
     if delimiter or (value_start > following):
         return _quoted_value_is_secret(value)
@@ -693,6 +787,9 @@ def find_secret_assignments(text: str) -> list[str]:
         quoted = delimiter or (body_start > 0 and text[body_start - 1] in "\"'")
         if quoted and _quoted_value_is_secret(body):
             return ["[redacted-secret]"]
+        # An unquoted value spans lines only through a heredoc.
+        if not delimiter and "\n" in body and _quoted_value_is_secret(body):
+            return ["[redacted-secret]"]
         if not delimiter and _wrapped_value_is_secret(text, body_start, body_end):
             return ["[redacted-secret]"]
         if not delimiter and head_start >= continued_to:
@@ -703,7 +800,9 @@ def find_secret_assignments(text: str) -> list[str]:
                 return ["[redacted-secret]"]
         # The literal scanner bounds its value run at 1024, so a longer
         # unquoted literal (a session token) matched neither rule.
-        if not delimiter and len(body) > 1024 and _LONG_LITERAL.fullmatch(body) and _is_opaque(body):
+        # Its leading run only: shell punctuation may follow it (DS-2026-10-27-14).
+        literal = _LONG_LITERAL.match(body) if not delimiter else None
+        if literal is not None and len(literal.group(0)) > 1024 and _is_opaque(literal.group(0)):
             return ["[redacted-secret]"]
     for match in _COOKIE_HEADER.finditer(text or ""):
         for pair in match.group("pairs").split(";"):

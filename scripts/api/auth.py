@@ -211,6 +211,45 @@ def is_private_net_probe(request) -> bool:
     return not _is_browser_page_request(request)
 
 
+# Path prefixes the shared service token can NEVER reach, however valid it is.
+# RADON_SERVICE_TOKEN is a machine credential with no per-user identity, and it
+# is consumed inside verify_clerk_jwt, whose return value the middleware takes
+# as its global verdict — so its scope has to be stated here or it has none.
+# Only verify_clerk_bearer applies the operator allowlist, so a principal
+# admitted on this lane is never allowlist-checked. Same least-privilege shape
+# as API_KEY_ALLOWED_PATHS below ("API key cannot access trading/order
+# endpoints"), applied to the credential with the wider reach.
+#
+# Covered: live order admission, the trading halt, the arbitrary-script bridge,
+# the credential store, service/host controls, Gateway lifecycle, journal
+# mutation, live portfolio sync, the preference WRITES that tune the
+# order-notional caps (GET /preferences stays reachable — the demo frontend
+# proxies it), and the two metered third-party lanes (UW quota, the TradingView
+# MCP) that no demo route proxies and that a stolen token would otherwise spend.
+# The read surfaces the demo actually uses are enumerated in
+# web/lib/demo/routePolicy.ts as "backend" endpoints; none of them sit under a
+# prefix here. Pinned route-by-route by
+# scripts/api/tests/test_service_token_scope.py.
+SERVICE_TOKEN_DENIED_PREFIXES = (
+    "/admin/",
+    "/credentials",
+    "/ib/",
+    "/journal/",
+    "/orders/",
+    "/pi/exec",
+    "/portfolio/",
+    "/preferences/",
+    "/research/tradingview/",
+    "/trading/",
+    "/uw/",
+)
+
+
+def service_token_path_allowed(path: str) -> bool:
+    """False for a privileged sink the demo service principal must not reach."""
+    return not path.startswith(SERVICE_TOKEN_DENIED_PREFIXES)
+
+
 def is_trusted_service_request(request) -> bool:
     """True for a trusted service caller presenting the shared service token.
 
@@ -221,6 +260,10 @@ def is_trusted_service_request(request) -> bool:
     header rather than forwarding a per-user JWT. Returns False (no-op) when
     RADON_SERVICE_TOKEN is unset — i.e. on prod, where it is never configured,
     so prod trust behavior is unchanged.
+
+    Scoped: a valid token on a SERVICE_TOKEN_DENIED_PREFIXES path returns False,
+    so the caller falls through to verify_clerk_bearer and needs a real operator
+    JWT like any other public caller.
     """
     expected = os.environ.get("RADON_SERVICE_TOKEN")
     if not expected:
@@ -233,7 +276,11 @@ def is_trusted_service_request(request) -> bool:
     )
     if not provided:
         return False
-    return hmac.compare_digest(provided.encode(), expected.encode())
+    if not hmac.compare_digest(provided.encode(), expected.encode()):
+        return False
+    url = getattr(request, "url", None)
+    path = getattr(url, "path", "") if url is not None else ""
+    return service_token_path_allowed(path)
 
 
 _jwks_client = None

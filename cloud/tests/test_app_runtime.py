@@ -1827,7 +1827,7 @@ def test_run_newsfeed_points_media_delivery_at_the_mounted_volume(tmp_path: Path
 
 # docker --env-file takes lines verbatim (no shell quoting), so a secret the
 # host file single-quotes for `set -a; . file` consumers reached the container
-# WITH its quotes: XAI_API_KEY='xai-…' → xAI 400 "Incorrect API key"
+# WITH its quotes: a quoted provider key → the provider answered 400 "Incorrect API key"
 # (2026-08-30 04:16Z, six quoted secrets in /etc/radon/env).
 
 
@@ -1845,7 +1845,7 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     host_env.write_text(
         "NODE_ENV=production\n"
         "# comment stays\n"
-        "XAI_API_KEY='xai-abc$1'\n"
+        "CEREBRAS_API_KEY='csk-abc$1'\n"
         + QUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS='it''s'\n"
         "PLAIN=unquoted\n",
@@ -1865,13 +1865,46 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     assert rendered.read_text(encoding="utf-8") == (
         "NODE_ENV=production\n"
         "# comment stays\n"
-        "XAI_API_KEY=xai-abc$1\n"
+        "CEREBRAS_API_KEY=csk-abc$1\n"
         + UNQUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS=it''s\n"
         "PLAIN=unquoted\n"
     )
     # The host file is the secret of record and is never rewritten.
-    assert "XAI_API_KEY='xai-abc$1'" in host_env.read_text(encoding="utf-8")
+    assert "CEREBRAS_API_KEY='csk-abc$1'" in host_env.read_text(encoding="utf-8")
+
+
+PREPAID_NAMES = (
+    "ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY",
+    "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "RADON_LADDER_ALLOW_PREPAID",
+)
+
+
+@pytest.mark.parametrize(
+    "unit", ["radon-nextjs.service", "radon-api.service", "radon-newsfeed.service"]
+)
+def test_run_strips_prepaid_provider_keys_from_every_container_env(
+    tmp_path: Path, unit: str
+) -> None:
+    """Subscriptions only (2026-10-26): a prepaid key left in /etc/radon/env
+    never reaches a container, where an agent CLI would otherwise bill it."""
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        + "".join(f"{name}='prepaid-{i}'\n" for i, name in enumerate(PREPAID_NAMES))
+        + "CLAUDE_CODE_OAUTH_TOKEN=grant\n"
+        "CEREBRAS_API_KEY=k2\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path, ["run", unit], extra_env={"RADON_TEST_ENV_FILE": str(host_env)})
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1)).read_text(encoding="utf-8")
+    assert "prepaid-" not in rendered
+    keys = {line.split("=", 1)[0] for line in rendered.splitlines() if "=" in line}
+    assert {"NODE_ENV", "CLAUDE_CODE_OAUTH_TOKEN", "CEREBRAS_API_KEY"} <= keys
+    assert "prepaid-" in host_env.read_text(encoding="utf-8")  # host file untouched
 
 
 def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
@@ -1919,15 +1952,13 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     assert "CLERK_SECRET_KEY" not in keys
     assert "MENTHORQ_PASS" not in keys
     assert "GEMINI_API_KEY" not in keys  # retired: Google is the Antigravity CLI only
+    # Subscriptions only (2026-10-26): prepaid keys never reach a container.
+    assert not {"ANTHROPIC_API_KEY", "RADON_LADDER_ALLOW_PREPAID", "XAI_API_KEY", "OPENAI_API_KEY"} & keys
     assert {
         "NODE_ENV",
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
-        "ANTHROPIC_API_KEY",
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "RADON_LADDER_ALLOW_PREPAID",
-        "XAI_API_KEY",
-        "OPENAI_API_KEY",
         "ANTIGRAVITY_MODEL",
         "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
@@ -2559,9 +2590,6 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "RADON_LADDER_ALLOW_PREPAID",
-        "XAI_API_KEY",
-        "OPENAI_API_KEY",
         "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
         "THEMARKETEAR_EMAIL",
@@ -2579,6 +2607,10 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
     } <= keys
     for forbidden in (
         GATEWAY_SECRET_KEY,
+        # Subscriptions only (2026-10-26): prepaid keys never reach a container.
+        "RADON_LADDER_ALLOW_PREPAID",
+        "XAI_API_KEY",
+        "OPENAI_API_KEY",
         "PLAYWRIGHT_CHROMIUM_EXECUTABLE",  # no browser in this unit since the JSON API rewrite
         "PLAYWRIGHT_CHROMIUM_SANDBOX",
         "DROPBOX_APP_KEY",

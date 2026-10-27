@@ -2,10 +2,10 @@
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
 (`radon-research.service`, retired 2026-10-26) as the research feed's source.
-Every 5 minutes it signs in to marketdesk.ai over plain HTTP, lists the latest
+Every 5 minutes it signs in to https://marketdesk.ai, lists the latest
 library items, and for each new item reads MarketDesk's bullet summary and chart
-images, downloads the source PDF (the file behind the article's
-`a.action.preview` link, `/standalone/<id>`), stores the PDF and every chart as
+images, downloads the source PDF (`GET /files/<id>/blob`, following one
+redirect to the file host; `/standalone/<id>` is only the viewer), stores the PDF and every chart as
 private research assets, runs the old Dropbox PDF pipeline's relevance filters
 (below), and for each item that passes writes the post copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. The PDF is
@@ -149,9 +149,19 @@ later cycle.
   rung), HTTP 5xx or 429, a transport error, and a session that stays signed
   out after one re-login (which also stops the cycle).
   Parked articles retry every cycle until they publish or leave the lookback.
+- The account has a PDF preview allowance. Once it is spent, `/files/<id>/blob`
+  bounces back to `/files/<id>` and `/api/user/limits` answers
+  `{"previews": false}`. The article is parked as `preview_quota`, the rest of
+  the cycle is deferred (`quota_deferred`), and the cycle exits clean: the unit
+  does not fail while marketdesk.ai resets the allowance.
 - `claim` writes a lease before the slow work. A run killed mid-article
   (`TimeoutStartSec`, SIGTERM) leaves it, and the next claim counts that
   attempt, so an article that always overruns retires after 5 kills.
+- A SIGTERM exits 143 and the unit maps it with `SuccessExitStatus=143`: a
+  deploy's `stop-clean` lands on this 5-minute oneshot often and must not leave
+  it `failed`. A hung cycle still fails as `Result=timeout`, and the
+  `marketdesk-research` health row still records the SIGTERM as `error`. Not
+  75: `radon-app-runtime run` exits 75 for a surviving orphan container.
 - Host disk holds only the rotated refresh token
   (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600) and a per-cycle
   temp workdir that is deleted at cycle end. The session cookie lives in memory
@@ -170,15 +180,21 @@ caption keys that do not match the attached images, structural humanize tells
 length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
-ladder is `scripts/clients/model_ladder.py`; no provider is hardcoded.
+ladder is `scripts/clients/model_ladder.py`. The image copy call skips grok
+(`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
+image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
+numeric rule as the content (system rule 26), since chart values are not in
+the source text.
 
 `research.publish` refuses any research post without a valid Humanizer
 certificate (`scripts/research/humanizer.py`), so `marketdesk_copy.certify` runs
 the shared Humanizer review over the accepted title and content through
 `complete_text_json`. A rewrite it requests is accepted only when it still passes
 `copy_problems` against the same source text and needs no em-dash or quote scrub.
-A review the ladder cannot reach parks the article; a failed review spends an
-attempt. The certificate is stripped from `research_post_sources` on publish.
+Each review and rewrite reply goes through `humanizer.reply_ok` as the ladder's
+accept hook, so a rung that misquotes the copy falls to the next rung instead of
+failing the article (`malformed_review`). A review the ladder cannot reach parks
+the article; a failed review spends an attempt. The certificate is stripped from `research_post_sources` on publish.
 
 Summary bullets are shown verbatim, so each one is scrubbed (em dashes, curly
 quotes) and dropped when it names Market Ear or ZeroHedge, carries a URL or

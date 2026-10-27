@@ -1839,6 +1839,16 @@ class TestNewsfeedShutdownExitStatus:
         )
 
 
+class TestMarketdeskStopExitStatus:
+    """marketdesk_job.py exits 143 when SIGTERM stops a cycle. Every deploy's stop-clean lands on the
+    5-minute oneshot often; without the mapping a routine stop latches `failed` and the watchdog pages
+    (2026-10-27 14:14 UTC). A hung cycle still fails as Result=timeout. Not 75: radon-app-runtime run
+    exits 75 for a surviving orphan container, and that must stay a failure."""
+
+    def test_sigterm_exit_is_not_a_unit_failure(self, unit):
+        assert unit("radon-marketdesk.service")["Service"].get("successexitstatus") == "143"
+
+
 class TestHostedMcp:
     """radon-mcp.service is the only unit terminating anonymous internet
     traffic (Caddy /mcp* -> 127.0.0.1:8334). It gets a stripped env and a

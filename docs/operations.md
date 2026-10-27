@@ -7,8 +7,8 @@ Live-trading operational concerns: IB Gateway connection modes, background servi
 ### Web app (`web/.env`)
 
 ```bash
-# ANTHROPIC_API_KEY is NOT required: subscriptions only (2026-09-18), the
-# Claude Max grant in ~/.claude/.credentials.json is the meter.
+# No Anthropic / xAI / OpenAI key: subscriptions only (absolute since
+# 2026-10-26). The CLI grants under ~/.claude, ~/.grok, ~/.codex are the meter.
 UW_TOKEN=
 EXA_API_KEY=
 CEREBRAS_API_KEY=                       # optional, last-rung model ladder
@@ -56,6 +56,18 @@ write. `setup-vps.sh` prints the staged form when the file is missing.
 
 **Service token.** `RADON_SERVICE_TOKEN` is the shared Next.js to FastAPI bearer. When set, `radonFetch` (`web/lib/radonApi.ts`) sends it as `X-Radon-Service-Token` and `is_trusted_service_request` (`scripts/api/auth.py`) admits the caller as a trusted service. It is set only on the demo deployment (Vercel `radon-demo` project plus the demo VM `.env`, same value in both; see `docs/demo-environment.md`). Leave it unset on prod: there the header is never sent and the API stays loopback/Clerk JWT gated.
 
+### Read-only env capture and retention writes
+
+`scripts/phase0_capture.sh` inspects `/etc/radon/env` before the retired
+home env files in its env, database and client-ID sections. Secret-pattern
+values remain redacted. Run the capture on the host through the operator
+channel; do not publish unreviewed diagnostic output.
+
+`db.retention.apply_policy_http` refuses non-Linux production writes before
+credential lookup or HTTP, including margin-sample `DELETE ... RETURNING`
+batches. The daily VPS timer remains the retention owner. Do not run a
+production retention sweep from a laptop.
+
 ### Encrypted credential store (profile Credentials tab)
 
 **The store wins over `.env`.** Keys entered in the profile Credentials tab
@@ -97,8 +109,8 @@ IBKR login throttle writes the file and defers the restart. Runbook:
 that must precede the first rotation is its "Gateway env split cutover
 (one time)" section.
 The Next.js process that proxies a save also applies the per-request web keys
-(`UW_TOKEN`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`,
-`EXA_API_KEY`; `LIVE_WEB_ENV_KEYS` in `web/lib/setup/envFiles.ts`) to its own
+(`UW_TOKEN`, `CEREBRAS_API_KEY`, `EXA_API_KEY`; `LIVE_WEB_ENV_KEYS` in
+`web/lib/setup/envFiles.ts`) to its own
 `process.env` and `web/.env`, so they take effect without a restart. Another
 Next.js instance (laptop vs Hetzner) still picks a change up only at its next
 restart, and the boot-read Clerk / Turso keys always need one.
@@ -235,8 +247,10 @@ content too: it gets the read-only `.grok`, `.codex` and `.claude` grants, no
 antigravity bind and no `~/.local/bin` (the Python image ships pinned CLIs). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
 The Python and Next.js model ladders use the
 [subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
-Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
-opt-in; funding a prepaid wallet alone does not recover a missing subscription.
+Those tiers never fall back to a prepaid key: the opt-in flag was removed
+(operator policy 2026-10-26), and `radon-app-runtime` strips prepaid Anthropic,
+xAI and OpenAI keys from every container env. Funding a prepaid wallet does
+not recover a missing subscription.
 NVIDIA and Cerebras have separate rung policies in that owner. Check subscription
 availability and the credential binds before changing billing policy.
 `radon-subscription-tokens`
@@ -439,7 +453,7 @@ If the host still refuses the sandbox at launch,
 `chromium sandbox unavailable`; `PLAYWRIGHT_CHROMIUM_SANDBOX=0` in
 `/etc/radon/env` forces that mode. Also,
 `radon-app-runtime` hands it a filtered env file — only the keys the
-newsfeed code reads (`NODE_ENV`, model-ladder keys including `ANTHROPIC_API_KEY` and `CEREBRAS_API_KEY` last,
+newsfeed code reads (`NODE_ENV`, model-ladder keys: the Claude grant token, NVIDIA and `CEREBRAS_API_KEY` last,
 Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and
 `RADON_NEWSFEED_*`), never the full production secret set — and starts its
 container on an isolated bridge network (egress only) instead of the host
@@ -1247,7 +1261,7 @@ The API credential staging/cleanup contract remains in force when research mount
 `scripts/research/marketdesk_job.py` in the Python image through
 `radon-app-runtime` with the read/write private research bind and nothing else
 of the host state (no data, media or lease binds), plus the newsfeed's
-isolation (the job reads the marketdesk.ai JSON API over plain HTTP, no
+isolation (the job reads the marketdesk.ai JSON API over HTTPS, no
 browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
 without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
 `THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
