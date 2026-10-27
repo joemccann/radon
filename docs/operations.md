@@ -1261,7 +1261,7 @@ The API credential staging/cleanup contract remains in force when research mount
 `scripts/research/marketdesk_job.py` in the Python image through
 `radon-app-runtime` with the read/write private research bind and nothing else
 of the host state (no data, media or lease binds), plus the newsfeed's
-isolation (the job reads the marketdesk.ai JSON API over plain HTTP, no
+isolation (the job reads the marketdesk.ai JSON API over HTTPS, no
 browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
 without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
 `THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
