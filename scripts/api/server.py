@@ -544,6 +544,14 @@ FLOW_REPORT_MIN_RUN_SECS = 90.0
 # `_scan_once_per_ticker` detaches the scan and this budget bounds the CACHE
 # WRITE, not a response anyone is still waiting on.
 FLOW_REPORT_TOTAL_DEADLINE_SECS = 225.0
+# Seconds flow_report.py may spend walking UNCACHED prior sessions. QQQ prior
+# days walk the 40-page cap (~13s each), so 20 uncached days outlived the
+# deadline on every scan from 2026-08-07 and no report was ever written. The
+# script now stops walking at this budget and returns a partial window; the
+# walked days land in the per-day cache, so the next scan starts further back.
+# Today's walk, options alerts, skew and analysis run after it, so it leaves
+# 30s of the shortest run the capacity chain will seat.
+FLOW_REPORT_HISTORY_BUDGET_SECS = FLOW_REPORT_MIN_RUN_SECS - 30.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
 
 # One in-flight scan per ticker. Nothing deduped concurrent requests, so N
@@ -2941,15 +2949,53 @@ async def run_flow_report(ticker: str):
     return await _scan_once_per_ticker(upper, lambda: _scan_and_cache(upper))
 
 
+def _write_scan_status(upper: str, state: str, started_at: str, error: Optional[str] = None) -> None:
+    """Record the scan outcome beside the report (``<TICKER>.scan.json``).
+
+    A scan detached from its request used to fail with no trace but journald:
+    the page kept saying "scan running" until its poll gave up. The Next.js GET
+    passes this through so the client ends the poll with the real reason.
+    """
+    status = {
+        "state": state,
+        "started_at": started_at,
+        "finished_at": None if state == "running" else datetime.now(timezone.utc).isoformat(),
+        "error": None if error is None else str(_scrub_secrets(error))[:500],
+    }
+    try:
+        _write_cache(_FLOW_REPORTS_DIR / f"{upper}.scan.json", status)
+    except OSError:
+        logger.warning("flow-report %s: could not record scan status %s", upper, state)
+
+
 async def _scan_and_cache(upper: str) -> dict:
     """One flow scan for one ticker: run it, gate it, persist it, return it."""
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_scan_status(upper, "running", started_at)
+    try:
+        data = await _scan_and_cache_inner(upper)
+    except HTTPException as exc:
+        _write_scan_status(upper, "failed", started_at, str(exc.detail))
+        raise
+    except Exception as exc:
+        _write_scan_status(upper, "failed", started_at, f"{type(exc).__name__}: {exc}")
+        raise
+    if data.get("_cache_refused"):
+        reason = data.pop("_cache_refused")
+        _write_scan_status(upper, "refused", started_at, reason)
+    else:
+        _write_scan_status(upper, "ok", started_at)
+    return data
+
+
+async def _scan_and_cache_inner(upper: str) -> dict:
     # 20 trading-day dark-pool history (flow_report DEFAULT_LOOKBACK_DAYS).
     # Cold liquid names paginate UW heavily; allow longer than the old 120s.
     # Capacity shed is retryable: the general lane is often full for seconds
     # because GET /informed-flow/{ticker} and hourly scans share it.
     result = await _run_script_retrying_capacity(
         "flow_report.py",
-        [upper, "--days", "20"],
+        [upper, "--days", "20", "--history-budget-secs", f"{FLOW_REPORT_HISTORY_BUDGET_SECS:.0f}"],
         timeout=300,
         retries=FLOW_REPORT_SHED_RETRIES,
         delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
@@ -2979,7 +3025,10 @@ async def _scan_and_cache(upper: str) -> dict:
     #       assume a per-day call was swallowed and refuse the cache
     #       write. The previous valid cache stays served.
     if not _flow_report_is_cacheable(result.data, upper):
-        return result.data
+        return {
+            **result.data,
+            "_cache_refused": "Report had empty trading days (likely a partial UW outage); the previous report is kept.",
+        }
     _write_cache(_FLOW_REPORTS_DIR / f"{upper}.json", result.data)
     return result.data
 
