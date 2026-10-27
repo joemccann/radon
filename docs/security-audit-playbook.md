@@ -381,7 +381,23 @@ line here whenever you ship a security fix.**
   a redaction label opts a value out only when it is the whole value or is
   followed by query structure whose key is itself a query parameter. A
   trailing backslash joins the next line, and a subscript target
-  (`os.environ['NAME'] = ...`) is an assignment.
+  (`os.environ['NAME'] = ...`) is an assignment. Shell quoting is tokenized
+  too: `$'...'` and `$"..."` are quoted values, an unquoted run touching a
+  closed literal belongs to the same word up to whitespace or a shell
+  metacharacter, and a `$(...)` value with heredocs runs through the exact
+  terminator line of the last one (`<<-` strips leading tabs only). Only the
+  assignment scan follows a heredoc; a helper that rescans from every wrapper
+  must not, or one unterminated heredoc per line costs quadratic time.
+  Explicit `+` concatenation joins literals like adjacency does, across a
+  line break too, template and triple-quoted literals included. A quoted
+  heredoc word may hold any character but its quote. A type annotation (`NAME: str = ...`) is
+  skipped to the initializer, a quoted or union one too, and a string prefix may open a triple-quoted
+  value. A later-line literal close that the escaping grammar rejects is not a
+  close: the value is unterminated through that line. A placeholder word
+  inside a value exempts it only when no long component stays opaque
+  without that word. A line-oriented header rule (`Authorization`, auth
+  token, `Cookie`) leaves every quoted value to the tokenizer, prefixed and
+  template literals included.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
