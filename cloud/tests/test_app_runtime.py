@@ -2590,9 +2590,6 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "RADON_LADDER_ALLOW_PREPAID",
-        "XAI_API_KEY",
-        "OPENAI_API_KEY",
         "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
         "THEMARKETEAR_EMAIL",
@@ -2610,6 +2607,10 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
     } <= keys
     for forbidden in (
         GATEWAY_SECRET_KEY,
+        # Subscriptions only (2026-10-26): prepaid keys never reach a container.
+        "RADON_LADDER_ALLOW_PREPAID",
+        "XAI_API_KEY",
+        "OPENAI_API_KEY",
         "PLAYWRIGHT_CHROMIUM_EXECUTABLE",  # no browser in this unit since the JSON API rewrite
         "PLAYWRIGHT_CHROMIUM_SANDBOX",
         "DROPBOX_APP_KEY",
