@@ -21,6 +21,13 @@ export type PriceData = {
   vega: number | null;
   impliedVol: number | null;
   undPrice: number | null;
+  // tickOptionComputation extras (options only; absent from older relays):
+  // IV implied by the bid / ask, IB's model theoretical price, and the
+  // present value of dividends to expiry the model priced in.
+  bidIv?: number | null;
+  askIv?: number | null;
+  optPrice?: number | null;
+  pvDividend?: number | null;
   // Forward price: for forward-priced indices (VIX) the relay publishes the
   // front-month future last/mid here so option pricing uses the tradeable
   // forward instead of the (after-hours-frozen) cash index. Null otherwise.
