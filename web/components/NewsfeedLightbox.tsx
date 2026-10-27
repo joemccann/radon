@@ -145,7 +145,6 @@ export default function NewsfeedLightbox({
       />
       <div className={`newsfeed-lightbox__frame${expanded ? " newsfeed-lightbox__frame--expanded" : ""}`}>
         <header className="newsfeed-lightbox__toolbar">
-          <span className="newsfeed-lightbox__reader-label">Article reader</span>
           <nav className="newsfeed-lightbox__controls" aria-label="Article navigation">
             {onNavigate && canNavigatePrev ? <button type="button" className="newsfeed-lightbox__control" onClick={() => onNavigate(-1)} aria-label="Previous article" data-testid="newsfeed-lightbox-prev"><ChevronLeft size={18} /><span>Previous article</span></button> : null}
             {onNavigate && canNavigateNext ? <button type="button" className="newsfeed-lightbox__control" onClick={() => onNavigate(1)} aria-label="Next article" data-testid="newsfeed-lightbox-next"><span>Next article</span><ChevronRight size={18} /></button> : null}

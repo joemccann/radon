@@ -5121,7 +5121,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   font-size: 13px;
   color: var(--text-secondary);
 }
-.newsfeed-lightbox__reader-label { flex: 1; font-weight: 600; }
 .newsfeed-lightbox__controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .newsfeed-lightbox__control {
   display: inline-flex;

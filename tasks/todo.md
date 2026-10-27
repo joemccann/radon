@@ -10297,3 +10297,5 @@ L3 broader importers: cloud health wiring exposed one legacy zero-argument clien
 - Browser: all eight final gallery width/theme cases passed in isolated batches, including 600px desktop height, touch, focus wrapping, Escape, zoom and reset-on-next-article. Existing source context and sharing/export checks passed. Both PDF-tab compatibility cases passed after awaiting URL-owned tag filter transitions.
 - Private 2x before/after captures inspected for the exact JP Morgan article at 393px and 1440px, dark/light. Original images and article copy preserved; no new dependencies or production changes. Exact-head PR CI and notification remain T5.
 - Standalone typecheck remains red on four pre-existing diagnostics in unchanged `DashboardNewsFeed.tsx` and `lib/sameOrigin.ts`; neither reader component has a diagnostic.
+
+- User preference: removed the toolbar label and its unused CSS. Focused cloud: 35 passed; all eight responsive gallery cases passed after removal.
