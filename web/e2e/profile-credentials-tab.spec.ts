@@ -60,18 +60,18 @@ const CREDENTIALS_PAYLOAD = {
       ],
     },
     {
-      id: "anthropic",
-      label: "Anthropic",
+      id: "cerebras",
+      label: "Cerebras",
       group: "AI Providers",
       validator: true,
       slow: false,
       note: "",
       fields: [
         {
-          name: "ANTHROPIC_API_KEY",
+          name: "CEREBRAS_API_KEY",
           label: "API key",
           secret: true,
-          placeholder: "sk-ant-...",
+          placeholder: "csk-...",
           configured: false,
           hint: "",
           version: 0,
@@ -257,7 +257,7 @@ test.describe("profile operator tabs", () => {
       route.fulfill({ json: CREDENTIALS_PAYLOAD }),
     );
     const putBodies: Array<{ url: string; payload: unknown }> = [];
-    await page.route("**/api/credentials/anthropic", (route) => {
+    await page.route("**/api/credentials/cerebras", (route) => {
       putBodies.push({
         url: new URL(route.request().url()).pathname,
         payload: route.request().postDataJSON(),
@@ -267,9 +267,9 @@ test.describe("profile operator tabs", () => {
         json: {
           detail: {
             code: "CREDENTIAL_REJECTED",
-            service: "anthropic",
+            service: "cerebras",
             status: "invalid",
-            message: "Anthropic rejected the credential (HTTP 401)",
+            message: "Cerebras rejected the credential (HTTP 401)",
           },
         },
       });
@@ -278,23 +278,23 @@ test.describe("profile operator tabs", () => {
     await page.goto("/profile");
     await page.getByRole("tab", { name: "Credentials" }).click();
 
-    const save = page.getByTestId("credential-save-anthropic");
+    const save = page.getByTestId("credential-save-cerebras");
     await expect(save).toBeDisabled();
 
-    await page.locator("#cred-ANTHROPIC_API_KEY").fill("sk-ant-rejected");
+    await page.locator("#cred-CEREBRAS_API_KEY").fill("csk-rejected");
     await expect(save).toBeEnabled();
     await save.click();
 
-    await expect(page.getByTestId("credential-notice-anthropic")).toContainText(
+    await expect(page.getByTestId("credential-notice-cerebras")).toContainText(
       /absolutely not/i,
     );
     expect(putBodies).toHaveLength(1);
-    expect(putBodies[0].url).toBe("/api/credentials/anthropic");
+    expect(putBodies[0].url).toBe("/api/credentials/cerebras");
     expect(putBodies[0].payload).toEqual({
-      values: { ANTHROPIC_API_KEY: "sk-ant-rejected" },
+      values: { CEREBRAS_API_KEY: "csk-rejected" },
     });
     // The rejected draft stays for a retry.
-    await expect(page.locator("#cred-ANTHROPIC_API_KEY")).toHaveValue("sk-ant-rejected");
+    await expect(page.locator("#cred-CEREBRAS_API_KEY")).toHaveValue("csk-rejected");
     await page.screenshot({ path: "test-results/profile-credentials-rejection.png", fullPage: true });
   });
 

@@ -47,7 +47,7 @@ CLEAN_COPY = (
     "of its 3-month range against +1.75 a month ago.\n\n"
     "Analyzed by Radon · radon.run"
 )
-ON = {"RADON_CTA_LLM_COPY": "1", "ANTHROPIC_API_KEY": "sk-test"}
+ON = {"RADON_CTA_LLM_COPY": "1", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-test"}
 
 
 def caller_returning(text: str):
@@ -167,10 +167,10 @@ class TestGracefulDegradation:
 
     def test_injected_env_never_falls_back_to_the_project_env_files(self, monkeypatch):
         """An explicit mapping is authoritative; only os.environ reads .env."""
-        monkeypatch.setattr(cta_llm, "_project_env", lambda: {"ANTHROPIC_API_KEY": "live-key"})
+        monkeypatch.setattr(cta_llm, "_project_env", lambda: {"RADON_CTA_LLM_MODEL": "live-value"})
 
-        assert cta_llm.setting({}, "ANTHROPIC_API_KEY") == ""
-        assert cta_llm.setting({"ANTHROPIC_API_KEY": "given"}, "ANTHROPIC_API_KEY") == "given"
+        assert cta_llm.setting({}, "RADON_CTA_LLM_MODEL") == ""
+        assert cta_llm.setting({"RADON_CTA_LLM_MODEL": "given"}, "RADON_CTA_LLM_MODEL") == "given"
 
     def test_model_id_is_configurable_and_defaults_to_current_opus(self):
         assert cta_llm.model_name({}) == "claude-opus-5"
@@ -268,6 +268,6 @@ class TestAnthropicCallerIsSubscriptionOnly:
         with pytest.raises(RuntimeError, match="subscription"):
             cta_llm._anthropic_caller(
                 system="s", user="u", model="m",
-                env={"ANTHROPIC_API_KEY": "sk-ant-prepaid"},
+                env={"ANTHROPIC_API_KEY": "sk-ant-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1"},
                 post=lambda *a, **k: pytest.fail("must not call the API"),
             )

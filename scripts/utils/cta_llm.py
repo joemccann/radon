@@ -191,9 +191,8 @@ def _anthropic_caller(
     """Claude Max subscription call (subscriptions only, 2026-09-18).
 
     Credentials come from the shared ladder resolver: the Claude Code grant in
-    ``~/.claude/.credentials.json`` / ``CLAUDE_CODE_OAUTH_TOKEN``, or a prepaid
-    key only under ``RADON_LADDER_ALLOW_PREPAID=1``. Never the Anthropic SDK with
-    an API key.
+    ``~/.claude/.credentials.json`` / ``CLAUDE_CODE_OAUTH_TOKEN``. A prepaid key
+    is never read, and never the Anthropic SDK with an API key.
     """
     from clients import model_ladder  # lazy: the deterministic path must not need it
 

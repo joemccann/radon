@@ -26,9 +26,8 @@ Credentials (project root .env, loaded via a local fallback loader):
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
     anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity
     -> nvidia (free) -> cerebras (last).
-    Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
-    XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY,
-    NVIDIA_API_KEY, CEREBRAS_API_KEY.
+    Subscription grants only for the first band (see clients/model_ladder.py);
+    NVIDIA_API_KEY, CEREBRAS_API_KEY for the last two.
 """
 from __future__ import annotations
 
@@ -167,9 +166,6 @@ SCREENER_SLUGS = {
     ],
 }
 
-# Anthropic API key env var names (tried in order)
-_ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"]
-
 # Vision extraction prompt for CTA tables
 _CTA_EXTRACTION_PROMPT = """Extract CTA positioning data from this table image.
 Return ONLY a JSON array of objects with these exact fields:
@@ -245,7 +241,6 @@ class MenthorQClient:
                 "Add it to the project root .env file."
             )
 
-        self._api_key = self._resolve_api_key()
         self._headless = headless
         self._artifact_dir = Path(artifact_dir) if artifact_dir else None
         self._storage_state_path = Path(storage_state_path) if storage_state_path else None
@@ -291,15 +286,6 @@ class MenthorQClient:
         self.close()
 
     # ── credentials ────────────────────────────────────────────────
-
-    @staticmethod
-    def _resolve_api_key() -> Optional[str]:
-        """Resolve Anthropic API key from environment."""
-        for key in _ANTHROPIC_ENV_KEYS:
-            value = os.environ.get(key, "").strip()
-            if value:
-                return value
-        return None
 
     def _restore_session(self) -> bool:
         """Reuse a stored authenticated browser state when still valid."""

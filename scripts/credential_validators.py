@@ -90,17 +90,6 @@ def _post(url: str, headers: Dict[str, str], payload: dict, vendor: str) -> Vali
 # -- HTTP validators ---------------------------------------------------------
 
 
-def _validate_anthropic(values: Dict[str, str]) -> ValidationResult:
-    return _get(
-        "https://api.anthropic.com/v1/models",
-        {
-            "x-api-key": values["ANTHROPIC_API_KEY"],
-            "anthropic-version": "2023-06-01",
-        },
-        "Anthropic",
-    )
-
-
 def _validate_unusual_whales(values: Dict[str, str]) -> ValidationResult:
     # A key validity check shares account admission but deliberately makes
     # one uncached read. REST acceptance is not a websocket entitlement.
@@ -130,14 +119,6 @@ def _validate_cerebras(values: Dict[str, str]) -> ValidationResult:
         "https://api.cerebras.ai/v1/models",
         {"Authorization": f"Bearer {values['CEREBRAS_API_KEY']}"},
         "Cerebras",
-    )
-
-
-def _validate_xai(values: Dict[str, str]) -> ValidationResult:
-    return _get(
-        "https://api.x.ai/v1/models",
-        {"Authorization": f"Bearer {values['XAI_API_KEY']}"},
-        "xAI",
     )
 
 
@@ -340,10 +321,8 @@ def _validate_themarketear(values: Dict[str, str]) -> ValidationResult:
 
 
 VALIDATORS: Dict[str, Callable[[Dict[str, str]], ValidationResult]] = {
-    "anthropic": _validate_anthropic,
     "unusual_whales": _validate_unusual_whales,
     "cerebras": _validate_cerebras,
-    "xai": _validate_xai,
     "nvidia": _validate_nvidia,
     "fred": _validate_fred,
     "exa": _validate_exa,
