@@ -210,11 +210,23 @@ def _validate_marketdesk(source: dict, images) -> list:
     if not re.fullmatch(r"[a-f0-9]{64}", source["contentHash"]):
         raise ValueError("source content hash must be SHA-256")
     pages = source.get("pages")
-    if not isinstance(pages, list) or len(pages) != 1 or type(pages[0]) is not int or pages[0] != 1:
-        raise ValueError("MarketDesk source pages must be [1]")
-    _asset_url(source.get("url"), "pdf")
-    if source["url"][len(URL_PREFIX):].split("#", 1)[0] != source["contentHash"] + ".pdf":
-        raise ValueError("content hash must name the stored source PDF")
+    if source.get("evidenceKind") == "article":
+        if pages != [] or source.get("url") != source["articleUrl"] or "summary" in source:
+            raise ValueError("article evidence needs its exact source URL, no PDF pages or rendered source bullets")
+    else:
+        if source.get("evidenceKind") not in (None, "pdf"):
+            raise ValueError("invalid MarketDesk evidence kind")
+        if not isinstance(pages, list) or len(pages) != 1 or type(pages[0]) is not int or pages[0] != 1:
+            raise ValueError("MarketDesk source pages must be [1]")
+        _asset_url(source.get("url"), "pdf")
+        if source["url"][len(URL_PREFIX):].split("#", 1)[0] != source["contentHash"] + ".pdf":
+            raise ValueError("content hash must name the stored source PDF")
+    if "pdfUrl" in source or "pdfHash" in source:
+        if not isinstance(source.get("pdfHash"), str) or not re.fullmatch(r"[a-f0-9]{64}", source["pdfHash"]):
+            raise ValueError("downloaded PDF hash required")
+        if source.get("pdfUrl") != URL_PREFIX + source["pdfHash"] + ".pdf":
+            raise ValueError("downloaded PDF hash must name its private asset")
+        _asset_url(source.get("pdfUrl"), "pdf")
     figures = source.get("figures", [])
     if not isinstance(images, list) or not isinstance(figures, list) or len(figures) > MARKETDESK_MAX_FIGURES:
         raise ValueError("invalid images or figures")

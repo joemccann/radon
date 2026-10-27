@@ -255,6 +255,7 @@ readonly -a SOURCES=(
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
   services/radon-marketdesk.service.d/runtime-container.conf
+  services/radon-marketdesk-pdf.service.d/runtime-container.conf
   scripts/subscription_service_env.py
   scripts/media_publish.py
   services/radon-media-publish.service
@@ -320,6 +321,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
   /etc/systemd/system/radon-marketdesk.service.d/runtime-container.conf
+  /etc/systemd/system/radon-marketdesk-pdf.service.d/runtime-container.conf
   /usr/local/lib/radon/subscription_service_env.py
   /usr/local/lib/radon/media_publish.py
   /etc/systemd/system/radon-media-publish.service
@@ -343,6 +345,7 @@ readonly -a MODES=(
   0440
   0440
   0440
+  0644
   0644
   0644
   0644
@@ -444,6 +447,7 @@ readonly -a KINDS=(
   systemd
   dropin
   systemd
+  dropin
   dropin
   dropin
   dropin

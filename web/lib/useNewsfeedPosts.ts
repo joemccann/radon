@@ -11,7 +11,7 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 
-import { parseImageSources, parseResearchSource, type ResearchSource } from "./newsfeedSource";
+import { parseImageSources, parseResearchSource, researchSourceHref, type ResearchSource } from "./newsfeedSource";
 import type { PostFeedback } from "./researchFeedback";
 import { getReturnCacheGeneration, isReturnCacheFresh, useReturnCache } from "./returnCache";
 
@@ -123,7 +123,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
             timestampMs: Number.isFinite(ms) ? ms : 0,
             source,
             imageSources: parseImageSources(post.imageSources, Array.isArray(post.images) ? post.images : []),
-            href: source?.url ?? buildPostHref(post.id),
+            href: source ? researchSourceHref(source) : buildPostHref(post.id),
             // Research bodies are authored Markdown: indentation, line breaks,
             // and trailing spaces carry formatting that scrape rewrapping loses.
             content: source ? withoutEmDashes(post.content || "") : normalisePostContent(post.content || "", post.title || ""),

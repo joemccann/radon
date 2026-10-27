@@ -82,3 +82,23 @@ describe("marketdesk research provenance", () => {
     expect(parseResearchSource({ ...md, summary: ["a".repeat(500) + "\u{1F4C8}"] })).toBeUndefined();
   });
 });
+
+
+describe("article-first MarketDesk provenance", () => {
+  const article = {
+    kind: "marketdesk", evidenceKind: "article", publisher: "UBS", articleId: "lpS7ST23Vhc",
+    articleUrl: "https://marketdesk.ai/library/browse/lpS7ST23Vhc", url: "https://marketdesk.ai/library/browse/lpS7ST23Vhc",
+    contentHash: "c".repeat(64), documentDate: "2026-10-27", folderDate: "2026-10-27", pages: [],
+    figures: [{ url: path + ".png", caption: "Source chart" }],
+  };
+  it("accepts article evidence without fabricating a PDF or page", () => expect(parseResearchSource(article)).toEqual(article));
+  it("accepts a separately hashed PDF attachment", () => {
+    const attached = { ...article, pdfHash: "b".repeat(64), pdfUrl: `/api/newsfeed/research/files/${"b".repeat(64)}.pdf` };
+    expect(parseResearchSource(attached)).toEqual(attached);
+  });
+  it.each([
+    {url: "https://evil.example/source"}, {pages: [1]}, {summary: ["Raw source bullet"]},
+    {pdfHash: "b".repeat(64)}, {pdfUrl: path + ".pdf"},
+    {pdfHash: "b".repeat(64), pdfUrl: path + ".pdf"}, {evidenceKind: "unknown"},
+  ])("rejects unbound or misleading article evidence %j", change => expect(parseResearchSource({...article,...change})).toBeUndefined());
+});

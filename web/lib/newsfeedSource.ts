@@ -7,6 +7,9 @@ export type ResearchSource = DropboxResearchSource | MarketDeskResearchSource;
 /** MarketDesk article provenance (SPEC 4.6). Figures carry no page number. */
 export type MarketDeskResearchSource = {
   kind: "marketdesk";
+  evidenceKind?: "article" | "pdf";
+  pdfUrl?: string;
+  pdfHash?: string;
   publisher: string;
   articleId: string;
   articleUrl: string;
@@ -90,7 +93,14 @@ function parseMarketDeskSource(s: MarketDeskResearchSource): MarketDeskResearchS
     || typeof s.documentDate !== "string" || !ISO_DATE.test(s.documentDate)
     || typeof s.folderDate !== "string" || !ISO_DATE.test(s.folderDate)
     || !Array.isArray(s.pages) || !s.pages.every(p => Number.isInteger(p) && p > 0)
-    || typeof s.url !== "string" || !PRIVATE_RESEARCH_ASSET.test(s.url) || !s.url.includes(".pdf")
+    || typeof s.url !== "string"
+    || (s.evidenceKind === "article"
+      ? s.url !== s.articleUrl || s.pages.length !== 0 || s.summary !== undefined
+      : (s.evidenceKind !== undefined && s.evidenceKind !== "pdf")
+        || !PRIVATE_RESEARCH_ASSET.test(s.url) || !s.url.includes(".pdf"))
+    || ((s.pdfUrl !== undefined || s.pdfHash !== undefined)
+      && (typeof s.pdfHash !== "string" || !/^[a-f0-9]{64}$/.test(s.pdfHash)
+        || s.pdfUrl !== `/api/newsfeed/research/files/${s.pdfHash}.pdf`))
     || !Array.isArray(s.figures) || s.figures.length > 12
     || !s.figures.every(f => f && isPrivatePng(f.url) && typeof f.caption === "string")
     || (s.summary !== undefined && (!Array.isArray(s.summary) || s.summary.length > 20
@@ -99,6 +109,8 @@ function parseMarketDeskSource(s: MarketDeskResearchSource): MarketDeskResearchS
       || !s.extraImages.every(isPrivatePng)))) return undefined;
   return {
     kind: "marketdesk",
+    ...(s.evidenceKind ? { evidenceKind: s.evidenceKind } : {}),
+    ...(s.pdfUrl ? { pdfUrl: s.pdfUrl, pdfHash: s.pdfHash } : {}),
     publisher: withoutEmDashes(s.publisher),
     articleId: s.articleId,
     articleUrl: s.articleUrl,
@@ -133,4 +145,15 @@ export function getImageSource(
   if (!imageUrl || !post.images?.includes(imageUrl)) return undefined;
   const source = post.imageSources?.[imageUrl];
   return typeof source === "string" && source.trim() ? source.trim() : undefined;
+}
+
+
+/** PDF attachment can arrive later without changing the published article identity. */
+export function researchSourceHref(source: ResearchSource): string {
+  return source.kind === "marketdesk" ? source.pdfUrl ?? source.url : source.url;
+}
+
+export function researchSourceLabel(source: ResearchSource): "Source article" | "Source PDF" {
+  return source.kind === "marketdesk" && source.evidenceKind === "article" && !source.pdfUrl
+    ? "Source article" : "Source PDF";
 }

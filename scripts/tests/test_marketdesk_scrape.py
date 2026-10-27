@@ -207,14 +207,15 @@ def test_fetch_article_refuses_bad_ref_without_a_call():
     ("**Document Missing**: No source document provided for extraction", []),
     ("", []),
     (None, []),
-    ("- " + "x" * 900, ["x" * 500]),
+    ("- " + "x" * 900, ["x" * 900]),
 ])
 def test_parse_summary(text, expected):
     assert scrape.parse_summary(text) == expected
 
 
 def test_parse_summary_caps_item_count():
-    assert len(scrape.parse_summary("\n".join(f"- item {i}" for i in range(40)))) == scrape.MAX_SUMMARY_ITEMS
+    with pytest.raises(scrape.ScrapeError, match="summary_too_large"):
+        scrape.parse_summary("\n".join(f"- item {i}" for i in range(40)))
 
 
 def test_parse_images_validates_ids_dedups_and_orders_by_page():
@@ -358,3 +359,13 @@ def test_to_png_rejects_pdf_bytes():
                                             ("not_pdf", False), ("bad_response", False)])
 def test_scrape_error_transient_classification(code, transient):
     assert scrape.ScrapeError(code).transient is transient
+
+
+def test_summary_input_preserves_a_trailing_hedge_beyond_old_display_cap():
+    item = "A" * 700 + " but the forecast remains conditional on demand."
+    assert scrape.parse_summary("- " + item) == [item]
+
+
+def test_oversized_summary_input_is_rejected_instead_of_silently_cut():
+    with pytest.raises(scrape.ScrapeError, match="summary_too_large"):
+        scrape.parse_summary("- " + "x" * (scrape.MAX_SUMMARY_CHARS + 1))

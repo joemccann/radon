@@ -10369,3 +10369,17 @@ Review: Sol found no actionable regression; Luna independently passed 292 focuse
 - Four pre-existing TypeScript errors are in files identical to origin/main; no new errors.
 - Strict renewal proof rejects absent/throwing DOM probes: 2 native Node regressions failed first, then passed; full Vitest confirms both.
 - Latest-head CI and installed fresh-browser renewal remain pending in the PR.
+
+## MarketDesk article-first publication and independent PDF archive (2026-10-27)
+
+Dependency graph: M1 -> [M2, C1, D1] -> U1 -> M4 -> M5.
+
+- [x] M1 depends_on: [] Verify preview-denied/download-enabled account state; no independent working download route verified. User prioritizes source summaries and charts over PDFs.
+- [x] M2 depends_on: [M1] Persist discovery before slow work; replay pending rows outside latest-25/lookback; publish article provenance without downloading PDF.
+- [x] C1 depends_on: [M1] Parallel voice-copy lane: input-only bullets, connected prose, grounded $tickers, final Humanizer score/certificate after normalization. Slash-separated ticker red/green covered; private per-run editorial audits retain every scored draft and park on storage outage.
+- [x] D1 depends_on: [M1] Parallel durable PDF archive with isolated credentials, global throttling, atomic backoff, attachment CAS and same-post provenance healing; three kill/recovery boundaries.
+- [x] U1 depends_on: [M2, C1, D1] Article-only provenance, no raw source bullet lists for legacy/new posts, accurate article/PDF links; 48 component tests and two desktop/mobile browser cases green and screenshots inspected.
+- [ ] M4 depends_on: [U1] Full suites, PR exact-head CI, accepted notification, admin merge and production deploy.
+- [ ] M5 depends_on: [M4] Drain backlog through managed job and verify named reports in Turso and live feed, recording held/dropped/provider-blocked outcomes honestly.
+
+Review: source facts and qualifications remain intact; full web 11,587 passed, final full Python 18,202 passed, 12 skipped after owner-document repairs. PDF store/job 36 passed after independent P2 repairs; full cloud 3,525 passed, 24 skipped. Existing relevance/fidelity/Humanizer gates remain; request-limit refusals never bypassed. No working standalone download endpoint claimed.
