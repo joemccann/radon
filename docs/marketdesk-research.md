@@ -175,15 +175,21 @@ caption keys that do not match the attached images, structural humanize tells
 length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
-ladder is `scripts/clients/model_ladder.py`; no provider is hardcoded.
+ladder is `scripts/clients/model_ladder.py`. The image copy call skips grok
+(`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
+image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
+numeric rule as the content (system rule 26), since chart values are not in
+the source text.
 
 `research.publish` refuses any research post without a valid Humanizer
 certificate (`scripts/research/humanizer.py`), so `marketdesk_copy.certify` runs
 the shared Humanizer review over the accepted title and content through
 `complete_text_json`. A rewrite it requests is accepted only when it still passes
 `copy_problems` against the same source text and needs no em-dash or quote scrub.
-A review the ladder cannot reach parks the article; a failed review spends an
-attempt. The certificate is stripped from `research_post_sources` on publish.
+Each review and rewrite reply goes through `humanizer.reply_ok` as the ladder's
+accept hook, so a rung that misquotes the copy falls to the next rung instead of
+failing the article (`malformed_review`). A review the ladder cannot reach parks
+the article; a failed review spends an attempt. The certificate is stripped from `research_post_sources` on publish.
 
 Summary bullets are shown verbatim, so each one is scrubbed (em dashes, curly
 quotes) and dropped when it names Market Ear or ZeroHedge, carries a URL or
