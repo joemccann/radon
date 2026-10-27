@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -64,7 +65,7 @@ BACKFILL_RANGE = "2y"           # Yahoo range for --backfill (all members)
 INCREMENTAL_RANGE = "1mo"       # Yahoo range for stale members only
 FETCH_WORKERS = 8               # plan-capped Yahoo concurrency
 YAHOO_COURTESY_SLEEP_S = 0.25
-FETCH_TIMEOUT_S = 30            # spark + per-symbol chart urlopen
+FETCH_TIMEOUT_S = 30            # spark + per-symbol chart GET
 # Wall-clock ceiling for the whole NDX/SPX/RUT Yahoo sweep. 2026-08-24
 # 21:30Z: RUT spark of 1996 members (~100 x 20-symbol chunks at ~60s)
 # was still running when systemd SIGTERM'd at TimeoutStartSec=6900
@@ -96,6 +97,42 @@ MAX_DATE_READ_SYMBOL_CHUNK = 200
 
 SMOKE_CAP_ENV = "BPI_SMOKE_MEMBER_CAP"  # dev/smoke: first N members only
 DATA_DIR_ENV = "BPI_DATA_DIR"           # dev/smoke: redirect disk artifacts
+
+_THREAD_HTTP = threading.local()
+YAHOO_UA = "Mozilla/5.0"
+
+
+def _http_session():
+    """One requests.Session per thread so sequential Yahoo GETs reuse a
+    keep-alive socket (PERF-031). Session is not thread-safe."""
+    import requests
+
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        session = requests.Session()
+        _THREAD_HTTP.session = session
+    return session
+
+
+def close_http_session() -> None:
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        return
+    try:
+        session.close()
+    finally:
+        _THREAD_HTTP.session = None
+
+
+def _yahoo_get_json(url: str) -> Any:
+    resp = _http_session().get(
+        url,
+        headers={"User-Agent": YAHOO_UA},
+        timeout=FETCH_TIMEOUT_S,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ── scan math ─────────────────────────────────────────────────────
@@ -433,16 +470,12 @@ def members_still_stale(
 
 def _fetch_spark_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
     from urllib.parse import quote
-    from urllib.request import Request, urlopen
 
     url = (
         "https://query1.finance.yahoo.com/v8/finance/spark"
         f"?symbols={quote(','.join(chunk))}&range={SPARK_RANGE}&interval=1d"
     )
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
-        payload = json.load(resp)
-    return parse_yahoo_spark(payload)
+    return parse_yahoo_spark(_yahoo_get_json(url))
 
 
 def _fetch_members_spark(
@@ -493,17 +526,13 @@ def _fetch_yahoo_daily(symbol: str, range_str: str) -> dict[str, float]:
     """Daily closes from the Yahoo v8 chart API (quote close: split-adjusted,
     dividend-UNadjusted — matches the price_history_daily contract; never
     adjclose)."""
-    from urllib.request import Request, urlopen
-
     time.sleep(YAHOO_COURTESY_SLEEP_S)
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
         f"?range={range_str}&interval=1d"
     )
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
-            result = json.load(resp)["chart"]["result"][0]
+        result = _yahoo_get_json(url)["chart"]["result"][0]
     except Exception as exc:
         print(f"  Yahoo: {symbol} failed: {exc}", file=sys.stderr)
         return {}
