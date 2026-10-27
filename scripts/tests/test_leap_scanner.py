@@ -908,9 +908,52 @@ def test_scan_universe_stops_at_the_wall_clock_budget(monkeypatch):
     assert set(deferred) | {r.ticker for r in results} == set(names)
 
 
-def test_budget_truncated_scan_writes_cache_and_exits_zero(tmp_path, monkeypatch):
+def test_budget_truncated_scan_does_not_heartbeat_ok(tmp_path, monkeypatch):
+    """R-744 / REL-333: stopping at the wall clock used to write the partial
+    universe with status ok, heartbeat ok, and exit 0. That is the R-095
+    green banner over a short LEAP tab. The names that finished stay on
+    disk; the row and the exit say the scan is incomplete.
+    """
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    health: list = []
+    monkeypatch.setattr(
+        leap_scanner_uw,
+        "mirror_scan_snapshot",
+        lambda *a, **k: health.append(k.get("health_error")),
+    )
+
+    def fake_scan(tickers, min_gap, workers=16, failed_tickers=None, provider_failures=None, deferred_tickers=None, deadline=None):
+        assert deferred_tickers is not None
+        deferred_tickers.append("MSFT")
+        if provider_failures is not None:
+            assert provider_failures == []
+        return [_one_scan_result("AAPL")]
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_universe", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["leap_scanner_uw.py", "AAPL", "MSFT", "--json", "--output", str(tmp_path / "report.html")],
+    )
+
+    assert leap_scanner_uw.main() == 1
+    payload = json.loads(cache.read_text())
+    assert [row["ticker"] for row in payload["results"]] == ["AAPL"]
+    assert payload["provider_failures"] == []
+    assert payload["status"] == "degraded"
+    assert payload["scan_budget_spent"] is True
+    assert payload["deferred_tickers"] == ["MSFT"]
+    assert health and health[-1] is not None
+    assert health[-1]["class"] == "scan_budget_spent"
+    assert "1 names deferred" in health[-1]["message"]
+    assert "1 results" in health[-1]["message"]
+
+
+def test_budget_truncated_scan_still_writes_the_partial_cache(tmp_path, monkeypatch):
     """The 2026-10-26 page was the kill before the cache write. A budget
-    stop with at least one result must still write leap.json and exit 0.
+    stop with at least one result must still write leap.json. The exit is
+    nonzero so the route does not report success (REL-333 / R-744).
     """
     cache = tmp_path / "leap.json"
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
@@ -928,10 +971,10 @@ def test_budget_truncated_scan_writes_cache_and_exits_zero(tmp_path, monkeypatch
         ["leap_scanner_uw.py", "AAPL", "MSFT", "--json", "--output", str(tmp_path / "report.html")],
     )
 
-    assert leap_scanner_uw.main() == 0
+    assert leap_scanner_uw.main() == 1
     payload = json.loads(cache.read_text())
     assert [row["ticker"] for row in payload["results"]] == ["AAPL"]
     assert payload["provider_failures"] == []
-    assert payload["status"] == "ok"
+    assert payload["status"] == "degraded"
     assert payload["scan_budget_spent"] is True
     assert payload["deferred_tickers"] == ["MSFT"]

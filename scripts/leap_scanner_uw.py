@@ -1133,6 +1133,11 @@ def main():
         deferred_tickers=deferred_tickers,
     )
     exhausted = scan_is_exhausted(len(results), len(provider_failures))
+    # A wall-clock stop is not a provider wipeout (those names never ran),
+    # but it is still an incomplete universe. Heartbeating ok here is the
+    # R-095 green banner: the dashboard serves whatever did finish as the
+    # daily scan (REL-333 / R-744).
+    budget_spent = bool(deferred_tickers)
     
     # Summary
     print(f"\n{'='*60}")
@@ -1161,7 +1166,7 @@ def main():
         json_data = build_json_payload(results, args.min_gap, universe, tickers)
         json_data["failed_tickers"] = failed_tickers
         json_data["provider_failures"] = provider_failures
-        json_data["status"] = "degraded" if exhausted else "ok"
+        json_data["status"] = "degraded" if (exhausted or budget_spent) else "ok"
         if deferred_tickers:
             json_data["scan_budget_spent"] = True
             json_data["deferred_tickers"] = deferred_tickers
@@ -1183,8 +1188,11 @@ def main():
         # R-095: an exhausted run must not heartbeat ok. `data/leap.json`
         # still carries whatever did resolve, but the row says error so the
         # banner and the watchdog see a 2-name LEAP tab for what it is.
-        health_error = (
-            {
+        # REL-333 / R-744: a budget stop is the same lie with a different
+        # cause. The partial file stays (the kill used to lose it); the row
+        # does not say ok.
+        if exhausted:
+            health_error = {
                 "message": (
                     f"leap-scan exhausted: {len(provider_failures)} provider "
                     f"failures vs {len(results)} results "
@@ -1192,9 +1200,16 @@ def main():
                 ),
                 "class": "provider_exhausted",
             }
-            if exhausted
-            else None
-        )
+        elif budget_spent:
+            health_error = {
+                "message": (
+                    f"leap-scan budget spent: {len(deferred_tickers)} names "
+                    f"deferred vs {len(results)} results"
+                ),
+                "class": "scan_budget_spent",
+            }
+        else:
+            health_error = None
         mirror_scan_snapshot("leap-scan", json_data, health_error=health_error)
 
     # HTML (+ optional sidecar JSON under --output) is best-effort. An
@@ -1213,6 +1228,13 @@ def main():
     if exhausted:
         print(
             f"✗ leap-scan exhausted: {len(provider_failures)} provider failures "
+            f"vs {len(results)} results",
+            file=sys.stderr,
+        )
+        return 1
+    if budget_spent:
+        print(
+            f"✗ leap-scan budget spent: {len(deferred_tickers)} names deferred "
             f"vs {len(results)} results",
             file=sys.stderr,
         )

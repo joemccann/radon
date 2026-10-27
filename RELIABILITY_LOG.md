@@ -1064,3 +1064,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-332 / R-743 | DONE | RED 2 failed, 1 passed in `TestAForeignOrderIdStillReserves` (the other client's sell was dropped; the resize exited 0 and transmitted `qty 1 → 100`). GREEN 29 passed, 2 skipped in `test_close_exemption_broker_book.py`; 119 passed, 2 skipped across broker-book, bankroll admission, enforce-all-paths, and order-manage. Catalog parity 38 passed. Permanent drills 114 passed. | A modify with permId 0 excludes only the same clientId and orderId. Another client's order that reused the number still reserves its size, so the resize is not waived as a close. An unacked order is still excluded from its own reservation. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-10-27
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-333 / R-744 | DONE | RED 1 failed (`test_budget_truncated_scan_does_not_heartbeat_ok`: `main()` returned 0). GREEN 3 passed (that fault, the partial-cache write, and the provider-wipeout control); 108 passed across the leap suites. Catalog parity 21 passed. Permanent drills 118 passed. | A LEAP scan that stops at the wall clock still writes the names that finished, but `status` is `degraded`, the `leap-scan` row class is `scan_budget_spent`, and the process exits 1. Deferred names are not provider failures. No catch was widened and no retry was added. |
