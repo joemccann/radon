@@ -16,7 +16,7 @@ vi.mock("@/lib/radonApi", () => ({
     status: number;
     detail: string | Record<string, unknown>;
     constructor(status: number, detail: string | Record<string, unknown>) {
-      super(`Radon API ${status}: ${detail}`);
+      super(`Radon API ${status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
       this.name = "RadonApiError";
       this.status = status;
       this.detail = detail;
@@ -238,8 +238,14 @@ describe("POST /api/orders/place broker acknowledgement remains indeterminate", 
       expect(first.status).toBe(504);
       expect(retry.status).toBe(504);
       expect(placeCallCount()).toBe(1);
-      expect((await first.json()).error).toMatch(/check open orders before re-placing/i);
-      expect((await retry.json()).detail).toMatch(/NOT sent again/i);
+      const firstBody = await first.json();
+      const retryBody = await retry.json();
+      expect(firstBody.error).toMatch(/check open orders before re-placing/i);
+      expect(firstBody.detail).toContain("radon-combo-pending");
+      expect(firstBody.detail).toContain('"orderId":17');
+      expect(retryBody.detail).toMatch(/NOT sent again/i);
+      expect(retryBody.detail).toContain("radon-combo-pending");
+      expect(retryBody.detail).toContain('"orderId":17');
     },
   );
 
