@@ -175,4 +175,4 @@ rows or exposes raw provider errors/accounts/topology.
 
 ## Placement acknowledgement outcomes
 
-A completed placement subprocess may return `status: "error", indeterminate: true` after transmit. Preserve its broker identity and status, record an `indeterminate` audit event, and return 504 `ORDER_INDETERMINATE` before the rejection branch. Unknown confirmation is not a definitive rejection and must not trigger an automatic retry. Next.js retains the placement idempotency key for this coded outcome as well as transport aborts.
+A completed placement subprocess may return `status: "error", indeterminate: true` after transmit. Preserve its broker identity and status, record an `indeterminate` audit event, and return 504 `ORDER_INDETERMINATE` before the rejection branch. Recovery must retain this structured outcome and identity even when it replaces connection-error guidance; cloud/managed recovery and legacy restart success/failure must not erase it. Unknown confirmation is not a definitive rejection and must not trigger an automatic retry. Next.js retains the placement idempotency key for this coded outcome as well as transport aborts.

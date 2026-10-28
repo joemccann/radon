@@ -10457,12 +10457,16 @@ Review: article-first PR #1314, renewal PR #1312 and follow-up #1316 are deploye
 Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 
 - [x] T1 depends_on: [] Inspect repository instructions, current branch, code map and reported PendingSubmit failure; isolate current main.
-- [ ] T2 depends_on: [T1] Trace Python combo construction, transport and acknowledgement; identify and repair verified defects with regression coverage.
-- [ ] T3 depends_on: [T1] Independently trace web/API combo payload and broker lifecycle boundaries; report evidence and targeted corrections.
-- [ ] T4 depends_on: [T1] Independently inspect broker protocol, history and existing tests; challenge diagnosis and define missing coverage.
+- [x] T2 depends_on: [T1] Trace Python combo construction, transport and acknowledgement; identify and repair verified defects with regression coverage.
+- [x] T3 depends_on: [T1] Independently trace web/API combo payload and broker lifecycle boundaries; report evidence and targeted corrections.
+- [x] T4 depends_on: [T1] Independently inspect broker protocol, history and existing tests; challenge diagnosis and define missing coverage.
 - [ ] T5 depends_on: [T2,T3,T4] Reconcile findings, review changes and obtain GitHub-runner red/green verification.
 - [ ] T6 depends_on: [T5] Publish template-compliant PR, wait for all applicable exact-head CI checks and send one accepted green notification.
 
 Constraints: no local test suites; no live order placement, cancellations, risk-gate weakening or automatic leg splitting. Preserve unrelated branch/work. Root cause remains unknown until source evidence.
 
-Review: pending.
+Review checkpoint: three-agent trace found and repaired missed orderStatus.permId acknowledgement, unknown-transmit classification, API audit/response propagation, and idempotency retention. GitHub RED a8d428f50 / run 40709528967: 12 broker + 6 API + 2 web regressions failed, with 7039 other tests passing in those shards. Independent review added four recovery-path regressions; The original 20 regressions passed at dd15072e9. The first four recovery failures at that head were fixture-only and excluded. Corrected recovery RED 5c00ca26a / run 40712276100: four expected identity/status failures and 2308 passing; the same tests are retained for final GREEN. Local work used static parsing, TypeScript, ESLint and diff checks only. The hook required installing locked dependencies and correcting two pre-existing type declarations (optional newsfeed content and environment index signature); runtime behavior is unchanged for those declarations.
+
+Production evidence: retained API logs show CBRS BUY50 timed out PendingSubmit without permId on 2026-10-28 14:36:49Z; fresh broker sync 14:49:09Z contained no matching open order or fill. Gateway 10.50.1f, IBC 3.24.2, ib_insync 0.9.86 with advertised protocol 157–176. Six explicit non-executing margin previews yielded five combo timeouts and one single-option result; the final preview had no errorEvent or decoder exception. IB documents SMART-combo what-if limitation 360, so these previews do not establish execution-router failure or validate a routing fix. No live orders/cancellations, Gateway settings, routing flags or risk gates changed. The current combo outage's broker cause and actual submission restoration remain unverified; the operator confirmed only the live session is available, so paper-session reproduction is blocked. Do not describe this PR as proven restoration of live combo execution.
+
+Final source review: broker/API/web independent review completed; recovery retains only explicit indeterminate placement data and leaves restart/cooldown/read-script behavior unchanged. Final exact-head CI and notification remain pending.
