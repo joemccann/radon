@@ -47,7 +47,7 @@ MAX_PDF_BYTES = 100 * 1024 * 1024
 MAX_IMAGE_BYTES = 20_000_000
 MAX_IMAGE_PIXELS = 16_000_000
 MAX_SUMMARY_ITEMS = 20
-MAX_SUMMARY_CHARS = 500
+MAX_SUMMARY_CHARS = 3000
 MAX_TITLE_CHARS = 300
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 RASTER_FORMATS = {"PNG", "JPEG", "GIF", "WEBP", "BMP"}
@@ -110,11 +110,13 @@ def parse_summary(text) -> list[str]:
         match = _BULLET_RE.match(line)
         if not match:
             continue
-        item = _clean_text(match.group(1).replace("**", "").replace("__", ""))[:MAX_SUMMARY_CHARS]
+        item = _clean_text(match.group(1).replace("**", "").replace("__", ""))
+        if len(item) > MAX_SUMMARY_CHARS:
+            raise ScrapeError("summary_too_large")
         if item and item not in items:
             items.append(item)
-        if len(items) == MAX_SUMMARY_ITEMS:
-            break
+        if len(items) > MAX_SUMMARY_ITEMS:
+            raise ScrapeError("summary_too_large")
     return items
 
 

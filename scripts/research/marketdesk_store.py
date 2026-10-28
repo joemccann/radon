@@ -25,7 +25,7 @@ ERROR_MAX_CHARS = 300
 DROPBOX_STATUSES = frozenset({"uploaded", "skipped_no_creds", "failed"})
 DECISION_STATUSES = frozenset({"held", "dropped"})
 WORK_PREFIX = "marketdesk:"
-# Terminal for the listing: a held or dropped article comes back only through an operator re-queue.
+# Terminal for the listing; retired relevance decisions are replayed by a bounded policy migration.
 _DONE = "('published','failed','held','dropped')"
 _IN_CHUNK = 200
 
@@ -59,6 +59,27 @@ def unseen(refs, *, lookback_hours: int, now: datetime | None = None) -> list:
             f"AND article_id IN ({','.join('?' * len(ids))})", ids)
         done.update(row[0] for row in rows)
     return [ref for ref in candidates if ref.article_id not in done]
+
+
+def discover(refs) -> None:
+    """Persist every discovered article before slow work; never acquire a processing lease here."""
+    now = _now()
+    for ref in refs:
+        hrana_execute(
+            "INSERT INTO marketdesk_articles (article_id,title,article_url,published_at,first_seen_at,updated_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(article_id) DO NOTHING",
+            (ref.article_id, str(ref.title or "")[:500], ref.url, _utc(ref.published_at).isoformat(), now, now))
+
+
+def pending(limit: int = 100) -> list:
+    """Replay durable pending work outside the site's latest-25 window, with fair transient retries."""
+    rows = hrana_execute(
+        "SELECT article_id,article_url,published_at,title,note FROM marketdesk_articles "
+        "WHERE status='pending' AND attempts<? "
+        "ORDER BY CASE WHEN note IS NOT NULL THEN 0 ELSE 1 END,updated_at,published_at,article_id LIMIT ?",
+        (MAX_ATTEMPTS, max(1, min(int(limit), 500))))
+    return [RequeuedRef(r[0], r[1], _utc(datetime.fromisoformat(str(r[2]).replace("Z", "+00:00"))), r[3] or "", r[4] or "")
+            for r in rows]
 
 
 def claim(ref) -> bool:
@@ -121,26 +142,53 @@ def _folders_json(folders) -> str | None:
     return json.dumps([str(f) for f in folders if isinstance(f, str) and f.strip()][:12])
 
 
-def record_published(article_id: str, post_id: str, pdf_asset: str, pdf_sha256: str, *, fingerprint=None,
+def record_published(article_id: str, post_id: str, pdf_asset: str | None, pdf_sha256: str | None, *, fingerprint=None,
                      publisher: str | None = None, folders=None, file_name: str | None = None) -> None:
     hrana_execute(
-        "UPDATE marketdesk_articles SET status='published', post_id=?, pdf_asset=?, pdf_sha256=?, "
+        "UPDATE marketdesk_articles SET status='published', post_id=?, pdf_asset=COALESCE(?,pdf_asset), pdf_sha256=COALESCE(?,pdf_sha256), "
         "fingerprint=COALESCE(?,fingerprint), publisher=COALESCE(?,publisher), folders_json=COALESCE(?,folders_json), "
         "file_name=COALESCE(?,file_name), reason_code=NULL, note=NULL, last_error=NULL, updated_at=? WHERE article_id=?",
         (post_id, pdf_asset, pdf_sha256, _hex(fingerprint), publisher, _folders_json(folders),
          (str(file_name)[:300] if file_name else None), _now(), article_id))
 
 
-def record_decision(article_id: str, status: str, reason_code: str | None, *, pdf_asset: str, pdf_sha256: str,
+def record_decision(article_id: str, status: str, reason_code: str | None, *, pdf_asset: str | None, pdf_sha256: str | None,
                     fingerprint, publisher: str | None, folders, file_name: str | None) -> None:
     """Held or dropped by the relevance filter. The PDF stays stored so the Dropbox outbox still saves it."""
     if status not in DECISION_STATUSES:
         raise ValueError("unknown relevance decision")
     hrana_execute(
-        "UPDATE marketdesk_articles SET status=?, reason_code=?, pdf_asset=?, pdf_sha256=?, fingerprint=?, publisher=?, "
+        "UPDATE marketdesk_articles SET status=?, reason_code=?, pdf_asset=COALESCE(?,pdf_asset), pdf_sha256=COALESCE(?,pdf_sha256), fingerprint=?, publisher=?, "
         "folders_json=?, file_name=?, note=NULL, last_error=NULL, updated_at=? WHERE article_id=?",
         (status, str(reason_code or "")[:64] or None, pdf_asset, pdf_sha256, _hex(fingerprint), publisher,
          _folders_json(folders), (str(file_name)[:300] if file_name else None), _now(), article_id))
+
+
+# Only the removed MarketDesk relevance/selector gates, never source identity,
+# duplicates, failed copy certification, or another pipeline's decisions.
+RETIRED_RELEVANCE_CODES = (
+    "DOC_TYPE_FX_PAIR_NOTE", "SINGLE_STOCK_NOT_IN_BOOK", "SERIES_DENYLIST",
+    "RULE_DOC_TYPE", "RULE_PUBLISHER", "NO_CANDIDATES", "INVALID_CANDIDATE",
+)
+
+
+def requeue_suitable(limit: int = 5) -> int:
+    """Replay a bounded batch of retired relevance decisions exactly once.
+
+    Moving each row to pending atomically removes it from this migration's
+    eligible set. Retries cannot reset a live lease/attempt budget; subsequent
+    source/identity/duplicate failures have different reason codes and remain
+    terminal. Preserve source metadata, stored assets, outbox state and notes.
+    """
+    placeholders = ",".join("?" for _ in RETIRED_RELEVANCE_CODES)
+    rows = hrana_execute(
+        "UPDATE marketdesk_articles SET status='pending', attempts=0, reason_code=NULL, last_error=NULL, updated_at=? "
+        "WHERE article_id IN (SELECT article_id FROM marketdesk_articles "
+        f"WHERE status IN ('held','dropped') AND reason_code IN ({placeholders}) "
+        "ORDER BY updated_at,article_id LIMIT ?) "
+        f"AND status IN ('held','dropped') AND reason_code IN ({placeholders}) RETURNING article_id",
+        (_now(), *RETIRED_RELEVANCE_CODES, max(1, min(int(limit), 100)), *RETIRED_RELEVANCE_CODES))
+    return len(rows)
 
 
 def published_fingerprints() -> list[tuple]:

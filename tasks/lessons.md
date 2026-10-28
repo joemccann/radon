@@ -1,3 +1,19 @@
+# A broad newsfeed is not the trading book (2026-10-27)
+
+- The user chose "Publish all suitable reports" for MarketDesk. Do not infer portfolio relevance from the trading workflow: FX and off-book single-name source reports belong in this newsfeed. Keep the separate Dropbox intake policy scoped to that intake.
+- Admission still requires usable source material, known identity, deduplication and source-grounded final copy/Humanizer certification. Replay only the retired relevance reason codes in bounded idempotent batches; never reset every held, failed or published item.
+
+# Backlog replay must yield to deployment (2026-10-27)
+
+- Before each manual managed-job start, atomically check the production deploy lock and refuse admission while a transition journal exists. Never queue starts during teardown or recovery. Release the admission lock immediately after the nonblocking start; do not hold up deployment for an article cycle.
+- Successful oneshot starts count toward systemd StartLimit too. Bound an accelerated replay, stop on start-limit-hit and retain the normal service limit; do not spin on refused starts or loosen the timer's crash-loop protection.
+- Managed cancellation is control flow. Provider error handling must not convert it into a fallback request. Verify actual SIGTERM during request setup and streaming, exit 143, cleanup and the error heartbeat.
+
+# The portfolio flow book must not inherit the report admission wait (2026-10-27)
+
+- `FLOW_ADMISSION_WAIT_S` (120s) is the single-ticker `flow_report.py` path. Its subprocess budget is 300s. `flow_analysis.py` is the hourly book inside `radon-flow-refresh.service`, and the wrapper curl deadline is 180s. `fetch_flow` defaults `retry_transient=True`, so the book used to open `UWClient(admission_timeout=120)` per name. One saturated top-of-hour wait holds `POST /flow-analysis` until `curl: (28)` / `http=000` / 0 bytes, and the oneshot exits 1.
+- Pass `retry_transient=False` on that book (scanner and discover already do). Do not raise `SCAN_TIMEOUT` to cover the report wait, and do not shorten `FLOW_ADMISSION_WAIT_S`. The live unit `Result` is the latest run. A later hour can be `success` while the page is the 180s curl abort. Read the journal at `paged_at`.
+
 # A second short UW rate limit is a shed, not a provider outage (2026-10-22)
 
 - `flow-refresh-discover-admission-busy` waits once. If that retry is still inside a short embargo, or every darkpool ticker raises a transient 429, discover used to set `required provider data unavailable`. The wrapper treated HTTP 400 as exit 1 and `radon-flow-refresh.service` paged with `NRestarts=0`. Shed that body (`discover rate limit shed`, exit 75). Quota text and an embargo longer than 70s stay a hard 400.
@@ -1323,3 +1339,9 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 ## 2026-10-27: Article lightbox toolbar
 - Do not display an "Article reader" label in the lightbox toolbar. Keep navigation and Close; the article title already names the dialog.
+
+
+## 2026-10-27: Article publication must not wait for source PDF access
+- Treat source summaries and charts as independently available inputs. Keep PDF archive throttling and provider denials outside the publication transaction.
+- Use source bullets to write reviewed prose; never append their unreviewed list. Normalize grounded security tickers before the final Humanizer score and certificate.
+- Discover durably before slow work; a provider's latest-25 page is not a backlog. Preserve full bounded input qualifications and reject oversized facts explicitly instead of silently cutting them.

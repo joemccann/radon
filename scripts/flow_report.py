@@ -12,8 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from clients.uw_client import UWClient
 from fetch_flow import fetch_flow
@@ -93,10 +94,18 @@ def fetch_ticker_skew(ticker: str) -> Dict[str, Any]:
         return unavailable_skew([f"skew:{exc}"])
 
 
-def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dict[str, Any]:
+def build_report(
+    ticker: str,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    history_budget_s: Optional[float] = None,
+) -> Dict[str, Any]:
     """Run the flow fetch + analysis pipeline for a single ticker."""
     ticker = ticker.upper()
-    flow = fetch_flow(ticker, lookback_days=lookback_days)
+    if history_budget_s is None:
+        flow = fetch_flow(ticker, lookback_days=lookback_days)
+    else:
+        flow = fetch_flow(ticker, lookback_days=lookback_days, history_budget_s=history_budget_s)
+    daily = (flow.get("dark_pool") or {}).get("daily") or []
     analysis = analyze_signal(flow)
     verdict = _classify_direction(flow, analysis)
 
@@ -113,6 +122,9 @@ def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dic
         "market_status": flow.get("market_status"),
         "trading_day_progress": flow.get("trading_day_progress"),
         "trading_days_checked": flow.get("trading_days_checked", []),
+        # Sessions the budget skipped; they backfill on the next scan.
+        "history_backfill_skipped": flow.get("history_backfill_skipped", []),
+        "sessions_covered": len(daily),
     }
 
 
@@ -125,10 +137,32 @@ def main() -> None:
         default=DEFAULT_LOOKBACK_DAYS,
         help=f"Lookback trading days (default {DEFAULT_LOOKBACK_DAYS})",
     )
+    parser.add_argument(
+        "--history-budget-secs",
+        type=float,
+        default=None,
+        help="Seconds of UW paging this run may spend; skipped closed days backfill next scan",
+    )
+    parser.add_argument(
+        "--deadline-epoch",
+        type=float,
+        default=None,
+        help="Unix time paging must stop by; FastAPI sets it from its scan deadline",
+    )
     args = parser.parse_args()
 
+    # An absolute deadline survives FastAPI's capacity-shed retries, which
+    # re-run this script later with the same argv: a relative budget would
+    # overrun the scan window by however long the retries waited.
+    budget = args.history_budget_secs
+    if args.deadline_epoch is not None:
+        budget = max(0.0, args.deadline_epoch - time.time())
+
     try:
-        report = build_report(args.ticker, lookback_days=args.days)
+        if budget is None:
+            report = build_report(args.ticker, lookback_days=args.days)
+        else:
+            report = build_report(args.ticker, lookback_days=args.days, history_budget_s=budget)
     except Exception as exc:  # noqa: BLE001 - surface root cause to caller
         print(json.dumps({"error": str(exc), "ticker": args.ticker.upper()}))
         sys.exit(1)

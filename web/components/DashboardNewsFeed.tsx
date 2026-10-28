@@ -1,4 +1,6 @@
 "use client";
+
+import { researchSourceLabel } from "@/lib/newsfeedSource";
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
@@ -529,7 +531,7 @@ export default function DashboardNewsFeed() {
                   {post.source ? <p className={researchStyles.feedSource}>
                     <a href={post.href} target="_blank" rel="noopener noreferrer" className={researchStyles.feedSourceLink}>
                       <PublisherLogo publisher={post.source.publisher} size={14} aria-hidden />
-                      <span>{post.source.publisher} · Source PDF</span>
+                      <span>{post.source.publisher} · {researchSourceLabel(post.source)}</span>
                     </a>
                     {` · ${post.source.documentDate}${post.source.kind === "dropbox" ? ` · pp. ${post.source.pages.join(", ")}` : ""}`}
                     {!firstImage ? " · Text-only source evidence" : ""}

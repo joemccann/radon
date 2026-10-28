@@ -132,7 +132,9 @@ def service_cycle(service: str, *, market_hours_class: str) -> Iterator[ServiceC
     cycle = ServiceCycle(service, market_hours_class, _iso(_now_utc()))
     try:
         yield cycle
-    except Exception as exc:
+    except BaseException as exc:
+        # Managed cancellation must bypass provider Exception handlers while
+        # still recording this cycle's outcome before the original re-raises.
         _record(
             service, "error",
             started_at=cycle.started_at, finished_at=cycle.finished_at,

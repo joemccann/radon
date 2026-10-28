@@ -81,6 +81,7 @@ EXEMPT: dict[str, str] = {
     # a defined way, so requiring it would fail preflight on a value the job
     # does not need to run.
     "MARKETDESK_FIREBASE_REFRESH_TOKEN": "seed only; the rotated token in $RADON_RESEARCH_DIR/marketdesk/firebase.json wins, and THEMARKETEAR_* is the fallback",
+    "MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "optional independent PDF archive throttle, default 300 seconds; persisted globally in Turso",
     "PLAYWRIGHT_CHROMIUM_SANDBOX": "escape hatch; unset launches Chromium sandbox-first and falls back only on a sandbox-start failure",
     "MARKETDESK_SUMMARY_WAIT_HOURS": "optional; unset waits 6 hours for MarketDesk's summary before failing the item",
     "MARKETDESK_ASSET_HOSTS": "optional extra chart-image hosts; unset allows the MarketDesk CDN only",
