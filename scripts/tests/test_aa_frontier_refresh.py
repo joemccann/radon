@@ -86,6 +86,81 @@ def sized_catalog(size: int, *extra: dict) -> dict:
     return payload
 
 
+def _null_provider_scores(payload: dict, provider: str, *, keep_slug: str) -> None:
+    for row in payload["data"]:
+        creator = row.get("model_creator") or {}
+        if creator.get("id") == CREATOR_IDS[provider] and row.get("slug") != keep_slug:
+            row["evaluations"]["artificial_analysis_intelligence_index"] = None
+
+
+def test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_row():
+    """Page 20e25092fdae5b3e816ca688ed48c54d (2026-10-28 07:04Z).
+
+    AA withdrew the intelligence index from every other Mistral row. The
+    only scored, priced text model kept the stable slug mistral-large-4
+    and the display name "Mistral Large 4 Preview". Matching Preview on
+    the display name left the provider with zero candidates, so the
+    oneshot raised CatalogError and exited 1.
+    """
+    payload = catalog(
+        model(
+            "mistral",
+            "mistral-large-4",
+            score=38.4,
+            released="2026-10-06",
+            name="Mistral Large 4 Preview",
+        )
+    )
+    _null_provider_scores(payload, "mistral", keep_slug="mistral-large-4")
+
+    selected = select_frontier_basket(payload, today=date(2026, 10, 28))
+
+    assert selected[6] == "mistral-large-4"
+
+
+def test_preview_slug_still_rejects_the_only_scored_row():
+    payload = catalog(
+        model(
+            "mistral",
+            "mistral-large-preview",
+            score=50,
+            released="2026-10-06",
+            name="Mistral Large",
+        )
+    )
+    _null_provider_scores(payload, "mistral", keep_slug="mistral-large-preview")
+
+    with pytest.raises(CatalogError, match="mistral"):
+        select_frontier_basket(payload, today=date(2026, 10, 28))
+
+
+def test_specialist_display_name_still_rejects_a_stable_slug():
+    payload = catalog(
+        model("google", "gemini-3", score=99, released="2026-10-01", name="Gemini Vision")
+    )
+    _null_provider_scores(payload, "google", keep_slug="gemini-3")
+
+    with pytest.raises(CatalogError, match="google"):
+        select_frontier_basket(payload, today=date(2026, 10, 28))
+
+
+def test_preview_display_name_outside_the_frontier_band_does_not_replace_the_leader():
+    payload = catalog(
+        model("google", "gemini-4-argon", score=52.6, released="2026-09-30", name="Gemini 4 Argon"),
+        model(
+            "google",
+            "gemini-3-pro",
+            score=28,
+            released="2025-11-18",
+            name="Gemini 3 Pro Preview (High)",
+        ),
+    )
+
+    selected = select_frontier_basket(payload, today=date(2026, 10, 28))
+
+    assert selected[2] == "gemini-4-argon"
+
+
 def test_selects_highest_scoring_current_text_model_per_provider():
     payload = catalog(
         model("openai", "openai-new-winner", score=52, released="2026-09-01"),

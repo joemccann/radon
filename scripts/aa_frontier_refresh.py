@@ -50,9 +50,16 @@ MINIMUM_CATALOG_ROWS = 100
 FETCH_TIMEOUT_SECONDS = 30
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
-_NON_TEXT_OR_UNSTABLE = re.compile(
-    r"(?:\bpreview\b|\bexperimental\b|(?:^|-)exp(?:-|$)|\balpha\b|\bbeta\b|"
-    r"\bvision\b|\bimage\b|\baudio\b|\bembedding\b|\bembed\b|\brerank\b|"
+# Unstable-release tokens are judged on the slug only. Artificial Analysis
+# puts "Preview" in the shipping display name of stable slugs such as
+# mistral-large-4. Matching that word on the name dropped the only scored
+# Mistral row and failed the oneshot (2026-10-28).
+_UNSTABLE_RELEASE_SLUG = re.compile(
+    r"(?:\bpreview\b|\bexperimental\b|(?:^|-)exp(?:-|$)|\balpha\b|\bbeta\b)",
+    re.IGNORECASE,
+)
+_SPECIALIST_MODEL = re.compile(
+    r"(?:\bvision\b|\bimage\b|\baudio\b|\bembedding\b|\bembed\b|\brerank\b|"
     r"\bmoderation\b|\bguard\b|\bsearch\b|\bcoding\b|\bcode\b|\bmath\b|\bocr\b|"
     r"\btranslation\b|(?:^|-)vl(?:-|$))",
     re.IGNORECASE,
@@ -97,7 +104,9 @@ def _candidate(row: Any, provider: str, today: date) -> FrontierModel | None:
         return None
     if not isinstance(slug, str) or not _SLUG.fullmatch(slug):
         return None
-    if not isinstance(name, str) or _NON_TEXT_OR_UNSTABLE.search(f"{name} {slug}"):
+    if not isinstance(name, str):
+        return None
+    if _UNSTABLE_RELEASE_SLUG.search(slug) or _SPECIALIST_MODEL.search(f"{name} {slug}"):
         return None
     try:
         released = date.fromisoformat(row["release_date"])

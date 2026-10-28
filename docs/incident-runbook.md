@@ -4653,6 +4653,54 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
   `scripts/tests/test_aa_frontier_refresh.py::test_ok_heartbeat_timeout_does_not_fail_the_oneshot`,
   `test_refresh_failure_still_exits_one_and_names_the_exception_class`.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_record_ok_health`, `main`).
+
+## aa-frontier-preview-display-name
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer when the only
+scored Mistral row is a stable slug whose display name says Preview.**
+Peak: 2026-10-28 07:04Z, page `20e25092fdae5b3e816ca688ed48c54d`. State
+file stayed on `completed_date=2026-10-27`. Health row `aa-frontier-basket`
+stored `No eligible frontier model for provider mistral`.
+
+- **Mechanism:** The selector treated `\bpreview\b` on the display name
+  the same as a preview slug. `mistral-large-4` ("Mistral Large 4 Preview",
+  released 2026-10-06, priced, intelligence index present) was excluded.
+  On 2026-10-28 the publisher no longer returned a positive intelligence
+  index for the other Mistral rows, so the provider had zero candidates.
+  `select_frontier_models` raised `CatalogError`, `main` wrote the error
+  health row and exited 1. OpenAI through Alibaba still had eligible
+  rows. The run was about three seconds, so this was not the 30s
+  transport timeout. Edge and `/health` stayed up. Not IB. Turso accepted
+  the error write. Not the 2026-10-08 ok-heartbeat case: the state file
+  was not already current, and the detail is a `CatalogError` sentence.
+- **Detection:** `service_health` detail
+  `No eligible frontier model for provider mistral`. Journal stdout
+  `{"status": "error", "reason": "No eligible frontier model for provider mistral"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  State `checked_at` stays on the previous success.
+- **Discriminating check:** the catalog still contains `mistral-large-4`
+  with positive input and output prices and a positive intelligence
+  index, and every other Mistral row fails the score or price check.
+  A slug that itself contains `preview`, `experimental`, `alpha`, `beta`,
+  or an `exp` token must still fail closed. A specialist name
+  (`vision`, `code`, and the rest of that list) must still fail closed.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Python Turso `SELECT 1` failing
+  in the same minute is a platform outage: stand down.
+- **Remediation (code):** judge unstable-release tokens on the slug
+  only. Keep specialist tokens on the slug and the display name. Do not
+  `reset-failed` as the fix. The next timer is 07:00 UTC. A manual
+  start after the deploy picks up `mistral-large-4` and rewrites the
+  state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_row`,
+  `test_preview_slug_still_rejects_the_only_scored_row`,
+  `test_specialist_display_name_still_rejects_a_stable_slug`,
+  `test_preview_display_name_outside_the_frontier_band_does_not_replace_the_leader`.
+- **Code:** `scripts/aa_frontier_refresh.py` (`_UNSTABLE_RELEASE_SLUG`,
+  `_SPECIALIST_MODEL`, `_candidate`).
+
 ## pnl-story-stock-entry-timing
 
 **A realized stock P&L story shows entry price and exit timestamp but omits entry timestamp and hold duration.**
