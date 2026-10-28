@@ -20,6 +20,14 @@ export const MAX_CLIENT_SUBSCRIPTIONS = 512;
 /** Most snapshot requests waiting on the IB pacing limiter. */
 export const MAX_SNAPSHOT_QUEUE = 1000;
 
+/** Longest accepted symbol. The longest real subject this relay carries is an
+ * option composite key (`SYMBOL_YYYYMMDD_STRIKE_RIGHT`), and a root is at most
+ * a handful of characters, so 64 is far above legitimate demand. Without it a
+ * single frame could carry a thousand megabyte-long strings for the relay to
+ * uppercase, key and hold.
+ */
+export const MAX_SYMBOL_LENGTH = 64;
+
 export function capItems(raw) {
   return raw.length > MAX_ITEMS_PER_MESSAGE ? raw.slice(0, MAX_ITEMS_PER_MESSAGE) : raw;
 }

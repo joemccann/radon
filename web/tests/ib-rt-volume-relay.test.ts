@@ -21,6 +21,7 @@ const projectRoot = resolve(__dirname, "..", "..");
 const source = readFileSync(resolve(projectRoot, "scripts", "ib_realtime_server.js"), "utf8");
 const handlerPath = new URL("../../scripts/ib_tick_handler.js", import.meta.url).pathname;
 const {
+  applyOptionComputation,
   createPriceData,
   parseRtVolume,
   updatePriceFromTickString,
@@ -49,7 +50,7 @@ function relayFixture() {
     symbolStates, snapshotRequests, requestIdToSymbol: new Map(),
     symbolSubscribers: new Map([[symbol, new Set([client])]]),
     optionSessionCache: new Map(), seedOptionSessionMark: vi.fn(), requestFundamentals: vi.fn(),
-    createPriceData, updatePriceFromTickSize, updatePriceFromTickString,
+    createPriceData, updatePriceFromTickSize, updatePriceFromTickString, applyOptionComputation,
     markTick: vi.fn(), verbose: vi.fn(), applyCachedClose: vi.fn(), bufferPriceForClient,
     nowIso: () => "2026-09-29T15:00:00Z", console,
   };
@@ -90,6 +91,44 @@ describe("ib_realtime_server.js — RT_VOLUME + tickSize broadcast", () => {
     fixture.callbacks.get("tickString")!(999, RT_VOLUME, "4.20;1;1694438400;17;4.18;true");
     fixture.callbacks.get("tickSize")!(999, 8, 17);
     expect(fixture.symbolStates.get(fixture.symbol).data.volume).toBeNull();
+    expect(fixture.bufferPriceForClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("tickOptionComputation reaches the broadcast", () => {
+  it("a bid computation publishes bidIv and nothing else", () => {
+    const fixture = relayFixture();
+    const callback = fixture.callbacks.get("tickOptionComputation");
+    expect(callback).toBeTypeOf("function");
+    callback!(1, 10, 0.19, -1, -1, -1, -1, -1, -1, -1);
+    const data = fixture.symbolStates.get(fixture.symbol).data;
+    expect(data.bidIv).toBe(0.19);
+    expect(data.impliedVol).toBeNull();
+    expect(data.delta).toBeNull();
+    expect(fixture.bufferPriceForClient).toHaveBeenCalledExactlyOnceWith(
+      fixture.client, fixture.symbol, expect.objectContaining({ bidIv: 0.19 }),
+    );
+  });
+
+  it("a model tick publishes the theoretical price", () => {
+    const fixture = relayFixture();
+    fixture.callbacks.get("tickOptionComputation")!(
+      1, 13, 0.21, 0.51, 10.8, 0.42, 0.012, 0.53, -0.071, 352.85,
+    );
+    expect(fixture.bufferPriceForClient).toHaveBeenCalledExactlyOnceWith(
+      fixture.client,
+      fixture.symbol,
+      expect.objectContaining({ optPrice: 10.8, delta: 0.51, pvDividend: 0.42 }),
+    );
+  });
+
+  it("a model tick of only sentinels does not broadcast", () => {
+    const fixture = relayFixture();
+    fixture.callbacks.get("tickOptionComputation")!(
+      1, 13, -1, -2, -1, Number.MAX_VALUE, -2, Number.NaN, undefined, -1,
+    );
+    expect(fixture.symbolStates.get(fixture.symbol).data.delta).toBeNull();
+    expect(fixture.symbolStates.get(fixture.symbol).data.optPrice).toBeNull();
     expect(fixture.bufferPriceForClient).not.toHaveBeenCalled();
   });
 });
