@@ -224,21 +224,27 @@ def is_private_net_probe(request) -> bool:
 # the credential store, service/host controls, Gateway lifecycle, journal
 # mutation, live portfolio sync, the preference WRITES that tune the
 # order-notional caps (GET /preferences stays reachable — the demo frontend
-# proxies it), and the two metered third-party lanes (UW quota, the TradingView
+# proxies it), and the metered third-party lanes (UW quota, the TradingView
 # MCP) that no demo route proxies and that a stolen token would otherwise spend.
+# Metered lanes are not all under one prefix: the assistant tool loop's own
+# UW-backed reads sit on their own paths, so each is listed here individually
+# (/options/ cannot be denied wholesale — the demo proxies /options/rv-ratio/).
 # The read surfaces the demo actually uses are enumerated in
 # web/lib/demo/routePolicy.ts as "backend" endpoints; none of them sit under a
 # prefix here. Pinned route-by-route by
-# scripts/api/tests/test_service_token_scope.py.
+# scripts/api/tests/test_service_token_scope.py, and derived from the handlers
+# themselves by scripts/api/tests/test_metered_client_scope.py.
 SERVICE_TOKEN_DENIED_PREFIXES = (
     "/admin/",
     "/credentials",
     "/ib/",
     "/journal/",
+    "/options/uw-chain",
     "/orders/",
     "/pi/exec",
     "/portfolio/",
     "/preferences/",
+    "/quote/",
     "/research/tradingview/",
     "/trading/",
     "/uw/",
