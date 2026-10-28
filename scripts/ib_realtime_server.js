@@ -35,7 +35,7 @@ import {
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
-import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
+import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_SYMBOL_LENGTH, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
   applyOperatorHold,
   buildRelayHealthDetail,
@@ -161,10 +161,45 @@ function parseArgs(argv) {
   return args;
 }
 
+/**
+ * Own the handler promise's rejection (DS-2026-10-28-06).
+ *
+ * The dispatch used to discard it inside a synchronous try/catch, which only
+ * ever guarded JSON.parse. Any throw the handler reached asynchronously became
+ * an unhandled rejection, and with no process-level handler Node's default
+ * policy ended the relay -- an outage for every connected client, caused by
+ * one client's frame. Every async throw on the whole message surface lands
+ * here, not just the one input that exposed it.
+ */
+async function dispatchClientMessage(client, data) {
+  try {
+    await handleClientMessage(client, data);
+  } catch (error) {
+    console.error("Client message handler failed:", error?.message ?? String(error));
+    sendMessage(client, { type: "error", message: "Request failed" });
+  }
+}
+
+/** A normalized string field, or null when absent or over the length bound.
+ *
+ * The bound belongs on every subscription path, not only the symbol array:
+ * a contract and an index descriptor are keyed and retained the same way.
+ */
+function boundedField(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toUpperCase();
+  return trimmed.length > 0 && trimmed.length <= MAX_SYMBOL_LENGTH ? trimmed : null;
+}
+
 function normalizeSymbols(raw) {
+  // Strings only. String() on an arbitrary JSON value throws: a plain object
+  // whose own toString is null has no primitive conversion, and that TypeError
+  // reached the dispatch asynchronously (DS-2026-10-28-06). The sibling
+  // normalizers are already type-strict; this one was not.
   return capItems(raw)
-    .map((symbol) => String(symbol).trim().toUpperCase())
-    .filter((symbol) => symbol.length > 0);
+    .filter((symbol) => typeof symbol === "string")
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter((symbol) => symbol.length > 0 && symbol.length <= MAX_SYMBOL_LENGTH);
 }
 
 /** Build composite key for an option contract: SYMBOL_YYYYMMDD_STRIKE_RIGHT */
@@ -182,7 +217,7 @@ function normalizeContracts(raw) {
   return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
-      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
+      const symbol = boundedField(c.symbol);
       const expiry = typeof c.expiry === "string" ? c.expiry.trim() : null;
       const strike = typeof c.strike === "number" && Number.isFinite(c.strike) && c.strike > 0 ? c.strike : null;
       const right = c.right === "C" || c.right === "P" ? c.right : null;
@@ -201,8 +236,8 @@ function normalizeIndexes(raw) {
   return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
-      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
-      const exchange = typeof c.exchange === "string" ? c.exchange.trim().toUpperCase() : null;
+      const symbol = boundedField(c.symbol);
+      const exchange = boundedField(c.exchange);
       if (!symbol || !exchange) return null;
       return { symbol, exchange };
     })
@@ -2960,12 +2995,14 @@ wss.on("connection", (client) => {
 
     if (!payload) return;
 
+    let data;
     try {
-      const data = JSON.parse(payload);
-      void handleClientMessage(client, data);
+      data = JSON.parse(payload);
     } catch {
       sendMessage(client, { type: "error", message: "Invalid JSON" });
+      return;
     }
+    void dispatchClientMessage(client, data);
   });
 
   client.on("close", () => {

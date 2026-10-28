@@ -7,6 +7,8 @@ import inspect
 import json
 import os
 
+import pathlib
+
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, call
 
@@ -1155,6 +1157,50 @@ class TestMenthorQStorageStatePersistence:
         )
         # Parent directory must be created lazily
         assert ss_path.parent.exists()
+
+    # DS-2026-10-28-03: the authenticated session jar was written with the
+    # inherited umask, so the cookie file landed 0644 and its parent 0755. The
+    # deployed host provisions no principal that would read it today, which is
+    # why this is hygiene rather than a disclosure, but a session jar must not
+    # depend on the umask of whatever invoked the job.
+    def test_persist_storage_state_restricts_the_jar_and_its_parent(
+        self, mock_env_creds, mock_playwright, tmp_path
+    ):
+        import stat
+
+        ss_path = tmp_path / "menthorq_cache" / "menthorq_storage_state.json"
+        c = MenthorQClient(storage_state_path=ss_path)
+
+        ctx = mock_playwright["context"]
+        ctx.storage_state.side_effect = lambda path: pathlib.Path(path).write_text("{}")
+
+        c.persist_storage_state()
+
+        assert stat.S_IMODE(ss_path.stat().st_mode) == 0o600, oct(ss_path.stat().st_mode)
+        assert stat.S_IMODE(ss_path.parent.stat().st_mode) == 0o700, oct(
+            ss_path.parent.stat().st_mode
+        )
+
+    def test_persist_storage_state_repairs_an_existing_loose_mode(
+        self, mock_env_creds, mock_playwright, tmp_path
+    ):
+        import stat
+
+        cache = tmp_path / "menthorq_cache"
+        cache.mkdir()
+        cache.chmod(0o755)
+        ss_path = cache / "menthorq_storage_state.json"
+        ss_path.write_text("{}")
+        ss_path.chmod(0o644)
+        c = MenthorQClient(storage_state_path=ss_path)
+
+        ctx = mock_playwright["context"]
+        ctx.storage_state.side_effect = lambda path: pathlib.Path(path).write_text("{}")
+
+        c.persist_storage_state()
+
+        assert stat.S_IMODE(ss_path.stat().st_mode) == 0o600, oct(ss_path.stat().st_mode)
+        assert stat.S_IMODE(cache.stat().st_mode) == 0o700, oct(cache.stat().st_mode)
 
     def test_persist_storage_state_no_op_when_unconfigured(self, mock_env_creds, mock_playwright):
         """persist_storage_state() is a no-op (no exception) when no path configured."""
