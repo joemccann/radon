@@ -10454,13 +10454,14 @@ Review: article-first PR #1314, renewal PR #1312 and follow-up #1316 are deploye
 
 ## Combo order submission repair (2026-10-28)
 
-Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+Dependency graph: T1 -> {T2,T3,T4} -> T7 -> T5 -> T6.
 
 - [x] T1 depends_on: [] Inspect repository instructions, current branch, code map and reported PendingSubmit failure; isolate current main.
 - [x] T2 depends_on: [T1] Trace Python combo construction, transport and acknowledgement; identify and repair verified defects with regression coverage.
 - [x] T3 depends_on: [T1] Independently trace web/API combo payload and broker lifecycle boundaries; report evidence and targeted corrections.
 - [x] T4 depends_on: [T1] Independently inspect broker protocol, history and existing tests; challenge diagnosis and define missing coverage.
-- [ ] T5 depends_on: [T2,T3,T4] Reconcile findings, review changes and obtain GitHub-runner red/green verification.
+- [ ] T7 depends_on: [T2,T3,T4] Preserve non-blocking order-warning evidence for unresolved submissions without changing acceptance policy.
+- [ ] T5 depends_on: [T2,T3,T4,T7] Reconcile findings, review changes and obtain GitHub-runner red/green verification.
 - [ ] T6 depends_on: [T5] Publish template-compliant PR, wait for all applicable exact-head CI checks and send one accepted green notification.
 
 Constraints: no local test suites; no live order placement, cancellations, risk-gate weakening or automatic leg splitting. Preserve unrelated branch/work. Root cause remains unknown until source evidence.
@@ -10470,3 +10471,5 @@ Review checkpoint: three-agent trace found and repaired missed orderStatus.permI
 Production evidence: retained API logs show CBRS BUY50 timed out PendingSubmit without permId on 2026-10-28 14:36:49Z; fresh broker sync 14:49:09Z contained no matching open order or fill. Gateway 10.50.1f, IBC 3.24.2, ib_insync 0.9.86 with advertised protocol 157–176. Six explicit non-executing margin previews yielded five combo timeouts and one single-option result; the final preview had no errorEvent or decoder exception. IB documents SMART-combo what-if limitation 360, so these previews do not establish execution-router failure or validate a routing fix. No live orders/cancellations, Gateway settings, routing flags or risk gates changed. The current combo outage's broker cause and actual submission restoration remain unverified; the operator confirmed only the live session is available, so paper-session reproduction is blocked. Do not describe this PR as proven restoration of live combo execution.
 
 Final source review: broker/API/web independent review completed; recovery retains only explicit indeterminate placement data and leaves restart/cooldown/read-script behavior unchanged. Final exact-head CI and notification remain pending.
+
+New operator evidence: CBRS SELL close also timed out at 2026-10-28 15:09:54Z, order417, total23.3578s. Production container source matches origin/main. Code review proves warning399 is emitted but omitted from trade.log and discarded by the placer; child stderr is not retained after normal process exit. Whether any warning occurred on417 is unknown. Add order-scoped warning retention before final publication; do not make benign warnings blocking. d74987047 passed all37 reported checks before this extension.
