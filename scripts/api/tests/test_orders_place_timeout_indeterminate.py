@@ -149,7 +149,7 @@ async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, 
     outcome = {
         "status": "error", "indeterminate": True,
         "orderRef": body["orderRef"], "orderId": 19, "permId": 0,
-        "message": "Order transmitted; ConnectionRefusedError during confirmation. CHECK OPEN ORDERS.",
+        "message": "Order transmitted; [Errno 111] Connection refused during confirmation. CHECK OPEN ORDERS.",
     }
     runner = AsyncMock(return_value=ScriptResult(
         ok=False, error=outcome["message"], data=outcome,
@@ -177,14 +177,15 @@ async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, 
     with pytest.raises(HTTPException) as exc:
         await server._orders_place_after_rate_reservation(body)
 
-    assert exc.value.status_code == 504
-    assert exc.value.detail == {**outcome, "code": "ORDER_INDETERMINATE"}
+    # Prove the recovery branch ran before judging its returned outcome.
     runner.assert_awaited_once()
     gateway.assert_awaited_once()
     if mode.startswith("restart-"):
         restart.assert_awaited_once()
     else:
         restart.assert_not_awaited()
+    assert exc.value.status_code == 504
+    assert exc.value.detail == {**outcome, "code": "ORDER_INDETERMINATE"}
     audit.assert_awaited_once()
     assert audit.await_args.args == ("indeterminate",)
     assert audit.await_args.kwargs["order_id"] == 19
