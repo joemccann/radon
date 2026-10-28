@@ -530,18 +530,27 @@ _BRACKETS = {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}
 def _bracket_depth(text: str, start: int, end: int) -> int:
     """Net unclosed-bracket count over ``text[start:end]``, quotes skipped.
 
-    A bracket inside a quoted run is data, not structure, so the scan steps
-    over each quoted span. Bounded by the slice, which is one line.
+    A bracket inside a quoted run is data, not structure. The quote state is
+    tracked here rather than by calling the value tokenizer: that one follows
+    a triple-delimited or unterminated run past the slice, so a line of such
+    openers would cost one whole-input walk each. Every character of the
+    slice is read exactly once, so the cost is the slice's length.
     """
     depth = 0
+    quote = ""
     cursor = start
     while cursor < end:
         char = text[cursor]
-        if char in "\"'`":
-            _, close, delimiter = _scan_quoted(text, cursor)
-            cursor = min(end, close + len(delimiter)) if delimiter else close
+        if char == "\\":
+            cursor += 2
             continue
-        depth += _BRACKETS.get(char, 0)
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'`":
+            quote = char
+        else:
+            depth += _BRACKETS.get(char, 0)
         cursor += 1
     return depth
 

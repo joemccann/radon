@@ -35,7 +35,7 @@ import {
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
-import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
+import { MAX_CLIENT_SUBSCRIPTIONS, MAX_SNAPSHOT_QUEUE, MAX_SYMBOL_LENGTH, MAX_WS_PAYLOAD_BYTES, capItems } from "./lib/relayLimits.js";
 import {
   applyOperatorHold,
   buildRelayHealthDetail,
@@ -188,7 +188,7 @@ function normalizeSymbols(raw) {
   return capItems(raw)
     .filter((symbol) => typeof symbol === "string")
     .map((symbol) => symbol.trim().toUpperCase())
-    .filter((symbol) => symbol.length > 0);
+    .filter((symbol) => symbol.length > 0 && symbol.length <= MAX_SYMBOL_LENGTH);
 }
 
 /** Build composite key for an option contract: SYMBOL_YYYYMMDD_STRIKE_RIGHT */
