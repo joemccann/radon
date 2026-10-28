@@ -1,3 +1,11 @@
+# MarketDesk account limits require filtered archive pacing (2026-10-27)
+
+The user confirmed the authenticated standalone example is blocked by account-wide usage. Respect that refusal: slow and persist the archive clock, progressively back off account-limit errors, and download only eligible reports. Do not keep guessing alternative endpoints or promise a fresh allowance from a downloads flag. Keep broad article publication independent of PDF selection, and distinguish archived, filtered and deferred backlog counts.
+
+# 2026-10-27: prove the provider operation before claiming a quota fix
+
+When asked to replace previews with downloads, trace the actual authenticated Download action and verify its request, redirect destination and allowance behavior on a previously blocked document. A file-saving function, separate queue or one successful PDF fetched from the viewer route does not establish a download operation or remove preview metering. Report partial completion explicitly until the real operation and backlog are verified.
+
 # A broad newsfeed is not the trading book (2026-10-27)
 
 - The user chose "Publish all suitable reports" for MarketDesk. Do not infer portfolio relevance from the trading workflow: FX and off-book single-name source reports belong in this newsfeed. Keep the separate Dropbox intake policy scoped to that intake.
