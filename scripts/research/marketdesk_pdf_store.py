@@ -13,12 +13,23 @@ import re
 import uuid
 
 from api.db_http import hrana_execute, hrana_transaction
+from research import marketdesk_pdf_policy as policy
 
 ARTICLE_BASE = "https://marketdesk.ai/library/browse/"
 ASSET_BASE = "/api/newsfeed/research/files/"
 ID = re.compile(r"[A-Za-z0-9]{8,16}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 LEASE_SECONDS = 600
+MIN_INTERVAL_SECONDS = 1800
+QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
+# Trust the article pipeline's source, duplicate, accuracy and writing gates.
+# Recheck at claim time so legacy discovery rows cannot bypass publication.
+ELIGIBLE_IDS = """SELECT a.article_id FROM marketdesk_articles a
+JOIN posts p ON p.id=a.post_id JOIN research_post_sources s ON s.post_id=a.post_id
+WHERE a.status='published' AND CASE WHEN json_valid(s.provenance_json) THEN
+json_extract(s.provenance_json,'$.kind')='marketdesk'
+AND json_extract(s.provenance_json,'$.articleId')=a.article_id
+AND json_extract(s.provenance_json,'$.url')=a.article_url ELSE 0 END"""
 
 
 def _time(now=None):
@@ -31,14 +42,14 @@ def _stamp(now=None):
 
 
 def enqueue(ref, *, now=None):
-    """Idempotent enqueue on discovery, including documents not selected for publication."""
+    """Idempotent enqueue only after the report passes publication gates."""
     if not ID.fullmatch(ref.article_id) or ref.url != ARTICLE_BASE + ref.article_id:
         raise ValueError("invalid MarketDesk PDF reference")
     stamp = _stamp(now)
     rows = hrana_execute(
         "INSERT INTO marketdesk_pdf_queue(article_id,article_url,title,published_at,next_attempt_at,first_seen_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?) ON CONFLICT(article_id) DO NOTHING RETURNING article_id",
-        (ref.article_id, ref.url, str(ref.title or "")[:500], _stamp(ref.published_at), stamp, stamp, stamp))
+        f"SELECT ?,?,?,?,?,?,? WHERE ? IN ({ELIGIBLE_IDS}) ON CONFLICT(article_id) DO NOTHING RETURNING article_id",
+        (ref.article_id, ref.url, str(ref.title or "")[:500], _stamp(ref.published_at), stamp, stamp, stamp, ref.article_id))
     return bool(rows)
 
 
@@ -48,7 +59,8 @@ def seed_missing(*, now=None):
     rows = hrana_execute(
         "INSERT INTO marketdesk_pdf_queue(article_id,article_url,title,published_at,next_attempt_at,first_seen_at,updated_at) "
         "SELECT article_id,article_url,title,published_at,?,?,? FROM marketdesk_articles "
-        "WHERE (pdf_asset IS NULL OR pdf_asset='') AND article_id NOT IN (SELECT article_id FROM marketdesk_pdf_queue) "
+        f"WHERE article_id IN ({ELIGIBLE_IDS}) AND (pdf_asset IS NULL OR pdf_asset='') "
+        "AND article_id NOT IN (SELECT article_id FROM marketdesk_pdf_queue) ORDER BY article_id LIMIT 200 "
         "RETURNING article_id", (stamp, stamp, stamp))
     return len(rows)
 
@@ -66,18 +78,62 @@ def pending(limit=10, *, now=None):
     """Due backlog, including expired attempts. Read-only diagnostics; claim_next owns admission."""
     return hrana_execute(
         "SELECT article_id,article_url,title,published_at FROM marketdesk_pdf_queue "
-        "WHERE (status='pending' AND next_attempt_at<=?) OR (status='downloading' AND lease_until<=?) "
+        f"WHERE article_id IN ({ELIGIBLE_IDS}) AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
+        "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
         "ORDER BY next_attempt_at,published_at,article_id LIMIT ?", (_stamp(now), _stamp(now), max(1, min(int(limit), 100))))
 
 
-def claim_next(*, now=None, interval_seconds=300):
+def _selected():
+    return ("SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
+            "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash="
+            "? AND x.post_updated_at IS p.updated_at")
+
+
+def prepare_selection(*, now=None):
+    """Bounded cached classification; rejected PDFs never spend provider allowance.
+
+    A changed book/rule set invalidates old decisions immediately. At most 100
+    stale/new rows are refreshed per timer cycle, so rejected early rows cannot
+    starve later reports. Published text and post identity are never written.
+    """
+    context = policy.load_context()
+    key = context.key
+    rows = hrana_execute(
+        "SELECT a.article_id,a.title,p.content,a.publisher,p.updated_at FROM marketdesk_articles a "
+        "JOIN posts p ON p.id=a.post_id WHERE a.article_id IN ("
+        "SELECT q.article_id FROM marketdesk_pdf_queue q WHERE q.status!='downloaded' "
+        f"AND q.article_id IN ({ELIGIBLE_IDS}) "
+        "AND NOT EXISTS(SELECT 1 FROM marketdesk_pdf_selection x JOIN marketdesk_articles a2 ON a2.article_id=x.article_id "
+        "JOIN posts p2 ON p2.id=a2.post_id WHERE x.article_id=q.article_id AND x.context_hash=? "
+        "AND x.post_updated_at IS p2.updated_at) ORDER BY q.article_id LIMIT 100) ORDER BY a.article_id", (key,))
+    statements = []
+    for article_id, title, content, publisher, updated in rows:
+        eligible, reason = policy.decide(title=title, content=content, publisher=publisher, context=context)
+        statements.append((
+            "INSERT INTO marketdesk_pdf_selection(article_id,context_hash,post_updated_at,eligible,reason_code,updated_at) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET context_hash=excluded.context_hash,"
+            "post_updated_at=excluded.post_updated_at,eligible=excluded.eligible,reason_code=excluded.reason_code,updated_at=excluded.updated_at",
+            (article_id, key, updated, int(eligible), reason, _stamp(now))))
+    if statements:
+        hrana_transaction(statements)
+    return key
+
+
+def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     """Atomic fleet-wide throttle before a bounded single-row lease. A crash can only defer work."""
     current = _time(now)
+    context_hash = prepare_selection(now=current)
     if not pending(limit=1, now=current):
         return None
-    interval = max(300, min(int(interval_seconds), 86400))
+    if not hrana_execute(
+        f"SELECT 1 FROM marketdesk_pdf_queue WHERE article_id IN ({_selected()}) "
+        "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) OR "
+        "(status='downloading' AND julianday(lease_until)<=julianday(?))) LIMIT 1",
+        (context_hash, _stamp(current), _stamp(current))):
+        return None
+    interval = max(MIN_INTERVAL_SECONDS, min(int(interval_seconds), 86400))
     allowed = hrana_execute(
-        "UPDATE marketdesk_pdf_throttle SET next_attempt_at=? WHERE singleton=1 AND next_attempt_at<=? RETURNING singleton",
+        "UPDATE marketdesk_pdf_throttle SET next_attempt_at=? WHERE singleton=1 AND julianday(next_attempt_at)<=julianday(?) RETURNING singleton",
         (_stamp(current + timedelta(seconds=interval)), _stamp(current)))
     if not allowed:
         return None
@@ -85,9 +141,11 @@ def claim_next(*, now=None, interval_seconds=300):
     rows = hrana_execute(
         "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?,lease_until=?,updated_at=? "
         "WHERE article_id=(SELECT article_id FROM marketdesk_pdf_queue "
-        "WHERE (status='pending' AND next_attempt_at<=?) OR (status='downloading' AND lease_until<=?) "
+        f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) "
+        "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
+        "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
         "ORDER BY next_attempt_at,published_at,article_id LIMIT 1) RETURNING article_id,article_url,title,published_at",
-        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), _stamp(current), _stamp(current), _stamp(current)))
+        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), _stamp(current), context_hash, _stamp(current), _stamp(current)))
     if not rows:
         return None
     key, url, title, published = rows[0]
@@ -96,36 +154,51 @@ def claim_next(*, now=None, interval_seconds=300):
     return Work(key, url, title, datetime.fromisoformat(published.replace("Z", "+00:00")), token)
 
 
-def record_download(work, asset, digest, *, now=None):
+def record_download(work, asset, digest, *, now=None, provider_success=False):
     if not HASH.fullmatch(digest) or asset != ASSET_BASE + digest + ".pdf":
         raise ValueError("invalid PDF attachment")
-    return bool(hrana_execute(
+    # A recovered local receipt must not erase a later account-level refusal.
+    statements = []
+    if provider_success:
+        statements.append((
+            "UPDATE marketdesk_pdf_throttle SET quota_failures=0,last_error=NULL WHERE singleton=1 "
+            "AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND lease_token=?)",
+            (work.article_id, work.token)))
+    statements.append((
         "UPDATE marketdesk_pdf_queue SET status='downloaded',pdf_asset=?,pdf_sha256=?,last_error=NULL,"
-        "lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=? RETURNING article_id",
-        (asset, digest, _stamp(now), work.article_id, work.token)))
+        "download_token=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
+        (asset, digest, work.token, _stamp(now), work.article_id, work.token)))
+    hrana_transaction(statements)
+    return bool(hrana_execute("SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND status='downloaded' "
+                              "AND pdf_asset=? AND pdf_sha256=? AND download_token=?", (work.article_id, asset, digest, work.token)))
 
 
 def retry(work, error, *, now=None, backoff_seconds=900):
-    current = _time(now)
-    until = _stamp(current + timedelta(seconds=max(60, min(int(backoff_seconds), 86400))))
     # Error must be a short code, never an exception string containing signed URLs/cookies.
     code = error if isinstance(error, str) and re.fullmatch(r"[a-z0-9_]{1,64}", error) else "download_failed"
-    # Keep provider backoff indivisible across a killed worker or failed SQL
-    # step. Check ownership before the item update clears the lease token.
+    quota = code in QUOTA_ERRORS
+    delay = max(21600 if quota else 60, min(int(backoff_seconds), 86400))
+    # Compute escalation inside the transaction, shared across all reports and
+    # processes. Keep the item and account clocks indivisible on failed writes.
     hrana_transaction([
-        ("UPDATE marketdesk_pdf_throttle SET next_attempt_at=MAX(next_attempt_at,?) WHERE singleton=1 "
+        ("UPDATE marketdesk_pdf_throttle SET next_attempt_at=MAX(next_attempt_at,"
+         "strftime('%Y-%m-%dT%H:%M:%f+00:00',?, '+' || MIN(86400,? * (1 << MIN(quota_failures,2))) || ' seconds')),"
+         "quota_failures=MIN(3,quota_failures+?),last_error=? WHERE singleton=1 "
          "AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND lease_token=?)",
-         (until, work.article_id, work.token)),
-        ("UPDATE marketdesk_pdf_queue SET status='pending',next_attempt_at=?,last_error=?,lease_token=NULL,"
-         "lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
-         (until, code, _stamp(current), work.article_id, work.token)),
+         (_stamp(now), delay, int(quota), code, work.article_id, work.token)) if quota else
+        ("UPDATE marketdesk_pdf_throttle SET next_attempt_at=MAX(next_attempt_at,?),last_error=? WHERE singleton=1 "
+         "AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND lease_token=?)",
+         (_stamp(_time(now) + timedelta(seconds=delay)), code, work.article_id, work.token)),
+        ("UPDATE marketdesk_pdf_queue SET status='pending',next_attempt_at=(SELECT next_attempt_at FROM marketdesk_pdf_throttle WHERE singleton=1),"
+         "last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
+         (code, _stamp(now), work.article_id, work.token)),
     ])
 
 
 def attach_downloads(*, now=None, limit=25):
     """CAS provenance and ledger in one transaction. Never rewrite source identity or published copy."""
-    # Saving a PDF does not require a published article. Held/dropped notes
-    # remain eligible for the established Dropbox outbox, too.
+    # Preserve previously saved assets even if their article was later held.
+    # This local reconciliation does not authorize a new provider download.
     hrana_execute(
         "UPDATE marketdesk_articles SET pdf_asset=(SELECT pdf_asset FROM marketdesk_pdf_queue q WHERE q.article_id=marketdesk_articles.article_id),"
         "pdf_sha256=(SELECT pdf_sha256 FROM marketdesk_pdf_queue q WHERE q.article_id=marketdesk_articles.article_id),updated_at=? "
@@ -170,8 +243,11 @@ def attach_downloads(*, now=None, limit=25):
 
 def blocked():
     """Provider failures remain visible during persisted backoff instead of a false green no-op."""
-    rows = hrana_execute("SELECT last_error FROM marketdesk_pdf_queue WHERE status='pending' AND last_error IS NOT NULL "
-                         "ORDER BY updated_at DESC LIMIT 1")
+    context_hash = policy.load_context().key
+    rows = hrana_execute(
+        "SELECT last_error FROM marketdesk_pdf_throttle WHERE singleton=1 AND last_error IS NOT NULL "
+        f"AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id IN ({ELIGIBLE_IDS}) "
+        f"AND article_id IN ({_selected()}) AND status!='downloaded')", (context_hash,))
     if not rows:
         return None
     code = str(rows[0][0])
