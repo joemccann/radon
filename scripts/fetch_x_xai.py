@@ -175,9 +175,24 @@ def xai_search(account: str, days: int = 3) -> Dict:
     # Note: Using allowed_x_handles filter causes slow pagination; prompting is faster
     query = f"List all stock tickers mentioned by @{account} in the last {days} days. Format each as: $TICKER: Bullish/Bearish - brief reason"
     
+    from research.humanizer import VOCABULARY, QUALITATIVE, WEIGHTS
+    editorial = (
+        "Humanizer: review every generated reason before returning it. Preserve facts, attribution "
+        "and source uncertainty; never rewrite quoted source text or fabricate quotations. "
+        "Start at 100, clamp 0-100, require at least 90. Deduct vocabulary per occurrence; "
+        "other numeric categories per distinct passage. Apply both when applicable: "
+        + json.dumps(WEIGHTS) + ". Vocabulary: " + ", ".join(VOCABULARY)
+        + ". Contextual vocabulary: abstract landscape, underscore and highlight as verbs only. "
+        "Remove remaining qualitative patterns without invented numerical weights: "
+        + "; ".join(QUALITATIVE.values())
+        + ". Prohibit negative parallelism including X, not Y and X. Not Y. "
+        "Rewrite offending prose and rescore the entire result after each change. "
+        "Keep this editorial self-assessment separate from the returned ticker data."
+    )
     payload = {
         "model": "grok-4-0709",  # Required for x_search tool
         "input": [
+            {"role": "system", "content": editorial},
             {
                 "role": "user",
                 "content": query

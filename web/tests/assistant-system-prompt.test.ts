@@ -68,6 +68,14 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).not.toContain("Today is");
   });
 
+  it("requires Humanizer self-review for prose without changing factual tool data", async () => {
+    const { SYSTEM_PROMPT } = await import("@/app/api/assistant/route");
+    expect(SYSTEM_PROMPT).toContain("Humanizer");
+    expect(SYSTEM_PROMPT).toContain("90");
+    expect(SYSTEM_PROMPT).toContain("negative parallelism");
+    expect(SYSTEM_PROMPT).toContain("source uncertainty");
+  });
+
   it("injects today's ET date into the per-request system string", async () => {
     const chat = vi.fn().mockResolvedValue({
       provider: "anthropic",
