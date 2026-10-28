@@ -96,6 +96,20 @@ describe("applyOptionComputation", () => {
     expect(d.delta).toBe(-1);
   });
 
+  it("a model tick of only sentinels is not a change", () => {
+    const d = createPriceData("X");
+    expect(applyOptionComputation(d, 13, {
+      impliedVol: -1, delta: -2, optPrice: -1, pvDividend: Number.MAX_VALUE,
+      gamma: -2, vega: Number.NaN, theta: undefined, undPrice: -1,
+    })).toBe(false);
+    expect(d.delta).toBeNull();
+    expect(d.impliedVol).toBeNull();
+    expect(d.optPrice).toBeNull();
+    expect(d.pvDividend).toBeNull();
+    expect(d.gamma).toBeNull();
+    expect(d.vega).toBeNull();
+  });
+
   it("returns false for unrelated tick types", () => {
     const d = createPriceData("X");
     expect(applyOptionComputation(d, 4, MODEL)).toBe(false);
