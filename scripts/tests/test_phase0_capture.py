@@ -30,3 +30,66 @@ def test_live_root_env_is_in_all_diagnostic_sections_and_secrets_are_redacted(tm
     assert "TURSO_AUTH_TOKEN=<redacted:" in db
     assert "synthetic-secret" not in result.stdout
     assert "synthetic-client-secret" not in result.stdout
+
+
+def _redact(text: str) -> str:
+    """Run only the capture's redact() over ``text``."""
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    result = subprocess.run(
+        ["bash"],
+        input=functions + 'redact\n',
+        text=True,
+        capture_output=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    return result.stdout
+
+
+TWS_PW_KEY = "TWS_" + "PASSWORD"  # joined so no static assignment sits in the tree
+
+
+def _redact_input(text: str) -> str:
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    script = functions + "redact <<'RADON_FIXTURE_EOF'\n" + text + "\nRADON_FIXTURE_EOF\n"
+    result = subprocess.run(
+        ["bash"], input=script, text=True, capture_output=True, check=True
+    )
+    return result.stdout
+
+
+# DS-2026-10-28-07: the header promises the capture carries no secret values,
+# but redact() keyed on the text before the FIRST `=` of each physical line.
+# A systemd `Environment="KEY=value"` directive keys on `Environment`, which
+# matches no secret name, and the continuation lines of a quoted multi-line
+# value were keyed on nothing at all. Both printed verbatim. The capture is
+# the sanctioned way to share VPS ground truth, so a redactor that silently
+# fails is worse than none.
+def test_a_systemd_environment_directive_is_redacted():
+    out = _redact_input('Environment="RADON_SERVICE_TOKEN=live_tok_NOTREAL123"')
+    assert "live_tok_NOTREAL123" not in out, out
+    assert "<redacted:" in out, out
+
+
+def test_every_systemd_environment_spelling_is_redacted():
+    for line in (
+        'Environment="RADON_SERVICE_TOKEN=live_tok_NOTREAL123"',
+        "Environment=RADON_SERVICE_TOKEN=live_tok_NOTREAL123",
+        "Environment='UW_TOKEN=live_tok_NOTREAL123'",
+        'DefaultEnvironment="API_KEY=live_tok_NOTREAL123"',
+    ):
+        out = _redact_input(line)
+        assert "live_tok_NOTREAL123" not in out, (line, out)
+
+
+def test_a_quoted_multiline_value_does_not_leak_its_continuation():
+    out = _redact_input(TWS_PW_KEY + '="first_line\nsecond_line_NOTREALsecret"')
+    assert "second_line_NOTREALsecret" not in out, out
+
+
+def test_a_non_secret_key_still_shows_its_value():
+    out = _redact_input("RADON_MODE=hetzner\nEnvironment=NODE_ENV=production")
+    assert "RADON_MODE=hetzner" in out, out
+    assert "production" in out, out
