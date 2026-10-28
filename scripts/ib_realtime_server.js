@@ -161,9 +161,33 @@ function parseArgs(argv) {
   return args;
 }
 
+/**
+ * Own the handler promise's rejection (DS-2026-10-28-06).
+ *
+ * The dispatch used to discard it inside a synchronous try/catch, which only
+ * ever guarded JSON.parse. Any throw the handler reached asynchronously became
+ * an unhandled rejection, and with no process-level handler Node's default
+ * policy ended the relay -- an outage for every connected client, caused by
+ * one client's frame. Every async throw on the whole message surface lands
+ * here, not just the one input that exposed it.
+ */
+async function dispatchClientMessage(client, data) {
+  try {
+    await handleClientMessage(client, data);
+  } catch (error) {
+    console.error("Client message handler failed:", error?.message ?? String(error));
+    sendMessage(client, { type: "error", message: "Request failed" });
+  }
+}
+
 function normalizeSymbols(raw) {
+  // Strings only. String() on an arbitrary JSON value throws: a plain object
+  // whose own toString is null has no primitive conversion, and that TypeError
+  // reached the dispatch asynchronously (DS-2026-10-28-06). The sibling
+  // normalizers are already type-strict; this one was not.
   return capItems(raw)
-    .map((symbol) => String(symbol).trim().toUpperCase())
+    .filter((symbol) => typeof symbol === "string")
+    .map((symbol) => symbol.trim().toUpperCase())
     .filter((symbol) => symbol.length > 0);
 }
 
@@ -2960,12 +2984,14 @@ wss.on("connection", (client) => {
 
     if (!payload) return;
 
+    let data;
     try {
-      const data = JSON.parse(payload);
-      void handleClientMessage(client, data);
+      data = JSON.parse(payload);
     } catch {
       sendMessage(client, { type: "error", message: "Invalid JSON" });
+      return;
     }
+    void dispatchClientMessage(client, data);
   });
 
   client.on("close", () => {
