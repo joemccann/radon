@@ -8,20 +8,102 @@ set +e
 sec() { printf '\n\n========== %s ==========\n' "$1"; }
 
 # Redact values for secret-looking env keys; show everything else (ports/URLs/modes).
+#
+# DS-2026-10-28-07: keying on the text before the FIRST `=` of each physical
+# line printed a systemd `Environment="SECRET=..."` directive verbatim (the
+# inspected key was `Environment`), and the continuation lines of a quoted
+# multi-line value were keyed on nothing and fell through the catch-all. The
+# header above states a guarantee, so the key is resolved through a systemd
+# `Environment=` wrapper and a quoted value is consumed to its real close.
+SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET'
 redact() {
-  awk -F= '
+  awk -v secret="$SECRET_KEY_PATTERN" '
+    function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
+    # True while a quoted value opened on an earlier line is still open.
+    function unclosed(s, q,   i, c, open) {
+      open=0
+      for (i=1; i<=length(s); i++) {
+        c=substr(s, i, 1)
+        if (c == "\\") { i++; continue }
+        if (c == q) open=!open
+      }
+      return open
+    }
+    carry != "" {
+      # A continuation of an already-redacted value: never print it, and stay
+      # in carry until a line consumes the closing delimiter. Clearing on the
+      # first line that merely held no quote resumed printing a value that
+      # was still open.
+      if (unclosed($0, carry)) carry=""
+      next
+    }
     /^[[:space:]]*#/ {print; next}
     /^[[:space:]]*$/ {print; next}
     /=/ {
-      key=$1
-      up=toupper(key)
-      if (up ~ /TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET/) {
-        rest=substr($0, length(key)+2)
-        print key"=<redacted:"length(rest)"chars>"
-      } else { print }
+      eq=index($0, "=")
+      key=substr($0, 1, eq-1)
+      rest=substr($0, eq+1)
+      # systemd and dotenv both tolerate whitespace around the separator, so
+      # the key run can end in a space or tab and the value can start after
+      # one. Trimming both is what makes the name tests below see the name.
+      sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
+      sub(/^[[:space:]]+/, "", rest)
+      # A systemd directive carries the real assignment inside its value.
+      if (toupper(key) ~ /ENVIRONMENT$/) {
+        inner=rest
+        quote=""
+        if (substr(inner, 1, 1) == "\"" || substr(inner, 1, 1) == "'"'"'") {
+          quote=substr(inner, 1, 1)
+          inner=substr(inner, 2)
+        }
+        outer=rest
+        ieq=index(inner, "=")
+        if (ieq > 0) {
+          key=key"="substr(inner, 1, ieq-1)
+          rest=substr(inner, ieq+1)
+          # systemd accepts SEVERAL assignments in one directive, so every
+          # name in the remainder is inspected and any secret among them
+          # redacts the whole directive value. Checking the first assignment
+          # alone printed the rest of the line unchecked.
+          hit=0
+          scan=inner
+          while (match(scan, /[A-Za-z_][A-Za-z0-9_]*=/)) {
+            name=substr(scan, RSTART, RLENGTH-1)
+            if (toupper(name) ~ secret) { hit=1; break }
+            scan=substr(scan, RSTART+RLENGTH)
+          }
+          if (hit) {
+            # Only a redacted value suppresses its continuation lines; a
+            # non-secret multi-line directive keeps printing as before.
+            if (quote != "" && unclosed(outer, quote)) carry=quote
+            emit(key, rest)
+            next
+          }
+          print
+          next
+        }
+      }
+      if (toupper(key) ~ secret) {
+        if (substr(rest, 1, 1) == "\"" || substr(rest, 1, 1) == "'"'"'") {
+          quote=substr(rest, 1, 1)
+          if (unclosed(rest, quote)) carry=quote
+        }
+        emit(key, rest)
+        next
+      }
+      print
       next
     }
     {print}'
+}
+
+# Every configured env file, each redacted whole so quoted multi-line values
+# keep the key that decides them.
+redact_env_files() {
+  local f
+  for f in "${ENV_FILES[@]}"; do
+    [ -f "$f" ] && redact < "$f"
+  done
 }
 
 sec "HOST BASICS"
@@ -109,7 +191,10 @@ for f in "${ENV_FILES[@]}"; do
 done
 
 sec "TURSO / DB references in env (keys only)"
-grep -rhiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON' "${ENV_FILES[@]}" 2>/dev/null | redact
+# Redact each whole file BEFORE filtering: grep hands redact() single lines,
+# so a quoted value's continuation line arrives with no key in front of it and
+# is printed by the catch-all if it happens to match the filter.
+redact_env_files | grep -hiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON'
 
 sec "DOCKER (ib-gateway etc.)"
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "docker n/a / no perm"
@@ -120,7 +205,7 @@ echo "media.radon.run -> $(getent hosts media.radon.run 2>/dev/null | awk '{prin
 echo "beta.radon.run -> $(getent hosts beta.radon.run 2>/dev/null | awk '{print $1}' || echo 'NXDOMAIN (expected)')"
 
 sec "CLIENT-ID usage hints (grep configs)"
-grep -rhniE 'client_id|clientId|CLIENT_ID' "${ENV_FILES[@]}" 2>/dev/null | redact | head
+redact_env_files | grep -hniE 'client_id|clientId|CLIENT_ID' | head
 
 sec "CAPTURE COMPLETE"
 date -u +"%Y-%m-%dT%H:%M:%SZ"

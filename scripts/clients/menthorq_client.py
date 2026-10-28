@@ -329,8 +329,14 @@ class MenthorQClient:
         if not self._storage_state_path:
             return
         try:
-            self._storage_state_path.parent.mkdir(parents=True, exist_ok=True)
+            # The jar holds an authenticated session. Its mode is set
+            # explicitly rather than inherited from whatever umask invoked the
+            # job (DS-2026-10-28-03), and an existing loose mode is repaired.
+            parent = self._storage_state_path.parent
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(parent, 0o700)
             self._browser_context.storage_state(path=str(self._storage_state_path))
+            os.chmod(self._storage_state_path, 0o600)
         except Exception as exc:
             logger.warning(f"Failed to persist MenthorQ storage state: {exc}")
 
