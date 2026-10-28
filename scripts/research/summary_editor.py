@@ -23,7 +23,7 @@ def _numbers(post):
                    for token in ground.numeric_tokens(post[field]))
 
 
-def edit_summaries(posts, *, ask, text, audit, out, source_context=None):
+def edit_summaries(posts, *, ask, text, audit, out, source_context=None, max_rewrites=humanizer.MAX_REWRITES):
     """Review exact final title/body/captions, retaining every attempt before further model I/O.
 
     Captions are scored but immutable: flagged captions hold for upstream regeneration.
@@ -74,7 +74,7 @@ def edit_summaries(posts, *, ask, text, audit, out, source_context=None):
             atomic_save(str(path), entry)
             return passed
 
-        revised = humanizer.review_post(post, ask=ask, verify=verify, record=record)
+        revised = humanizer.review_post(post, ask=ask, verify=verify, record=record, max_rewrites=max_rewrites)
         if revised is None:
             entry['held'] = 'HUMANIZER_FAILED'
             last = entry['humanizer']['attempts'][-1]

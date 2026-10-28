@@ -21,6 +21,45 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## off-book-equity-research-publication
+
+- **Detection:** research feed cards contain company earnings previews, stock
+  ratings, price targets or valuation theses whose primary issuers are absent
+  from the current portfolio and watchlist. A Humanizer certificate establishes
+  copy review, not publication eligibility.
+- **Mechanism:** the MarketDesk all-suitable policy bypassed the book gate;
+  Dropbox desk/operator overrides could bypass its older single-stock triage.
+  A broad source title could also produce a company-focused final rewrite;
+  certified outbox payloads could bypass intake checks on later publication.
+  Title/body-only checks also missed issuer ratings in figure captions. Adding
+  generated captions after editorial certification invalidated the digest and
+  could repeatedly return the payload to source review.
+- **Discriminating check:** freeze actual served/published rows and original
+  source titles, read the canonical watchlist, and verify current portfolio
+  underlyings with `scripts/ib_sync.py`. Compare primary issuers, not incidental
+  watched peers. Preserve macro, fixed-income, FX, flows and broad strategy;
+  stock-picking sections inside macro wrappers require separate eligibility.
+- **Containment:** pause only `radon-marketdesk.timer` and its active oneshot
+  through `radon unit stop` while the gate is being repaired. Preserve the feed
+  and original source assets. Reversibly quarantine independently reviewed
+  violations with complete original row/provenance/ledger backups, fresh book
+  evidence, atomic compare-and-swap writes and durable readback receipts.
+  Never classify these as retired relevance holds that auto-replay.
+- **Remediation:** shared primary-subject eligibility before copy/image models and again
+  on the final title, body and rendered figure captions. Require all primary issuers in a complete canonical
+  book with a portfolio sync no older than 15 minutes. Unknown subject/scope or
+  unavailable book remains held. The shared publisher repeats the check against
+  the exact certified copy and fresh book immediately before writing. Outbox
+  refusals preserve payloads/history and stop ordinary replay. No desk or
+  feedback override bypasses it. Added generated-chart captions receive a fresh
+  final Humanizer assessment; optional visual failure restores the exact
+  certified pre-chart article, while a new prose finding holds publication.
+- **Regression:** `scripts/tests/test_research_equity_admission.py` covers
+  international symbols, named-only companies, peer mentions, mixed issuer
+  lists, stale/partial books, macro/credit preservation and pre-publication
+  enforcement. Record the exact failing/green results and production scope in
+  the PR and private operation audit.
+
 ## test-created-operator-hold-page
 
 - **Detection:** a Pushover `IB Gateway HELD` page names actor `test` and

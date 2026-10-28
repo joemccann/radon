@@ -157,7 +157,7 @@ def test_dropped_document_makes_no_model_call(tmp_path, publisher):
 
 
 STOCK_PAGE = ("**Estimates Revised** **US Equity Research** 15 September 2026 RatingPrice Target **BUY US$11.00** "
-              "Price **ASPI-NASDAQ US$3.16** We reiterate our Buy rating after the quarter.")
+              "Price **ASPI-NASDAQ US$3.16** We reiterate Buy on ASPI.")
 
 
 def stock_extractor(pdf, out):
@@ -178,7 +178,7 @@ def test_single_stock_off_book_is_dropped_without_a_model_call(tmp_path, publish
     posts = pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", [])
     assert posts == [] and reviewer.calls == []
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    assert review["outcome"] == "dropped" and review["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+    assert review["outcome"] == "dropped" and review["reason_code"] == "EQUITY_RESEARCH_NOT_IN_BOOK"
 
 
 def test_unknown_publisher_is_held_before_any_model_call(tmp_path, publisher):
@@ -214,6 +214,24 @@ def test_single_stock_in_book_reaches_selection(tmp_path, publisher):
     assert review["outcome"] == "reviewed" and review["triage"]["decision"] == "review"
 
 
+def test_unresolved_rating_reference_holds_even_with_a_watched_header(tmp_path, publisher):
+    def unresolved_stock(pdf, out):
+        result = stock_extractor(pdf, out)
+        (out / "page-0001.md").write_text(STOCK_PAGE.replace(
+            "We reiterate Buy on ASPI.", "We reiterate our Buy rating after the quarter."))
+        return result
+
+    reviewer = Reviewer([])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=unresolved_stock,
+        figure_catalogue=catalogue, pdf_created=lambda pdf: None,
+        book_tickers=lambda: frozenset({"ASPI"}))
+    assert pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", []) == []
+    assert reviewer.calls == [] and publisher.stored == []
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert review["outcome"] == "held"
+    assert review["reason_code"] == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"
+
+
 def test_book_is_reloaded_per_document_so_membership_tracks_the_live_book(tmp_path, publisher):
     # Watchlist and portfolio are dynamic: the same series must drop before the
     # operator holds the name and reach review after, within one pipeline instance.
@@ -222,7 +240,7 @@ def test_book_is_reloaded_per_document_so_membership_tracks_the_live_book(tmp_pa
     pipe = build_stock(tmp_path, reviewer, publisher, lambda: books.pop(0))
     assert pipe.process(work("aspi - a sum of its parts.pdf"), tmp_path / "r.pdf", []) == []
     first = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    assert first["outcome"] == "dropped" and first["reason_code"] == "SINGLE_STOCK_NOT_IN_BOOK"
+    assert first["outcome"] == "dropped" and first["reason_code"] == "EQUITY_RESEARCH_NOT_IN_BOOK"
     later = dict(work("aspi - a sum of its parts.pdf"), key="n" * 64)
     later["metadata"] = dict(later["metadata"], id="id:two", rev="r2")
     assert pipe.process(later, tmp_path / "r.pdf", []) == []
@@ -655,6 +673,8 @@ def test_generated_png_is_reviewed_by_separate_agent_before_publication(tmp_path
     assert posts[0]['images'][0].endswith('.png')
     assert posts[0]['source']['figures'][0]['generated'] is True
     assert posts[0]['source']['chartGeneration']['status'] == 'passed'
+    from research import humanizer
+    humanizer.validate_certificate(posts[0])
     assert posts[0]['source']['chartGeneration']['charts'][0]['review']['visible_data'] == plan['bars']
     assert image_agent.calls[0][2][0][1].read_bytes().startswith(b'\x89PNG')
     assert len(claim_agent.calls) == (4 if has_decorative_assets else 2) and len(image_agent.calls) == 1
@@ -988,3 +1008,172 @@ def test_nonchart_proof_prompt_requests_explicit_visual_types_and_full_id_covera
     assert 'visual_type' in prompt and 'chart_fragment' in prompt
     for kind in ('photo', 'prose', 'logo', 'letterhead', 'banner', 'signature', 'unknown'):
         assert kind in prompt
+
+
+@pytest.mark.parametrize('override', ['desk', 'operator'])
+def test_equity_hard_gate_cannot_be_overridden(tmp_path,publisher,monkeypatch,override):
+    from types import SimpleNamespace
+    reviewer=Reviewer([])
+    pipe=build_stock(tmp_path,reviewer,publisher,lambda:frozenset({'MU'}))
+    item=work('aspi - a sum of its parts.pdf')
+    if override=='desk':
+        monkeypatch.setattr(intake.force_include,'match',lambda *a,**k:SimpleNamespace(always_publish=True))
+    else:
+        item['note']={'request':'always include this report'}
+    assert pipe.process(item,tmp_path/'r.pdf',[])==[]
+    assert reviewer.calls==[]
+    review=json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['reason_code']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+
+
+def test_unknown_book_holds_before_publisher_or_copy_models(tmp_path,publisher):
+    reviewer=Reviewer([])
+    pipe=build_stock(tmp_path,reviewer,publisher,lambda:None)
+    assert pipe.process(work('aspi - a sum of its parts.pdf'),tmp_path/'r.pdf',[])==[]
+    assert reviewer.calls==[]
+    review=json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['outcome']=='held' and review['reason_code']=='EQUITY_RESEARCH_BOOK_UNAVAILABLE'
+
+
+def test_later_page_off_book_stock_section_stops_before_selection(tmp_path,publisher):
+    def extract(pdf,out):
+        result=extractor(pdf,out)
+        (out/'page-0002.md').write_text('Walmart (WMT) Rating: Buy Price Target $100. EPS guidance increased.')
+        return result
+    reviewer=Reviewer([])
+    pipe=intake.Pipeline(tmp_path,reviewer,publisher,extractor=extract,figure_catalogue=catalogue,
+        pdf_created=lambda pdf:None,book_tickers=lambda:frozenset({'HOOD'}))
+    assert pipe.process(work(),tmp_path/'r.pdf',[])==[]
+    assert reviewer.calls==[]
+
+
+def test_all_final_candidates_blocked_preserve_terminal_admission_reason(tmp_path,publisher):
+    reviewer=Reviewer([selection(title='TransUnion (TRU) earnings'),verdict()])
+    pipe=build(tmp_path,reviewer,publisher)
+    pipe.book_tickers=lambda:frozenset({'HOOD'})
+    assert pipe.process(work(),tmp_path/'r.pdf',[])==[]
+    review=json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['outcome']=='dropped'
+    assert review['reason_code']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+    assert review['audit'][-1]['held']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+
+
+def test_partial_final_admission_keeps_eligible_posts_and_rejected_audit(tmp_path,publisher):
+    selected=selection()
+    selected['candidates'].append({**selected['candidates'][0],'title':'TransUnion (TRU) earnings','claim_key':'transunion'})
+    reviewer=Reviewer([selected,verdict(),verdict()])
+    pipe=build(tmp_path,reviewer,publisher)
+    pipe.book_tickers=lambda:frozenset({'HOOD'})
+    posts=pipe.process(work(),tmp_path/'r.pdf',[])
+    assert len(posts)==1 and 'Foreign investors' in posts[0]['title']
+    review=json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['outcome']=='reviewed' and review['items']==1
+    assert any(a.get('held')=='EQUITY_RESEARCH_NOT_IN_BOOK' for a in review['audit'])
+
+
+def test_post_humanizer_book_change_keeps_terminal_admission_reason(tmp_path,publisher,monkeypatch):
+    current={'HOOD'}
+    reviewer=Reviewer([selection(title='Robinhood (HOOD) earnings'),verdict()])
+    pipe=build(tmp_path,reviewer,publisher)
+    pipe.book_tickers=lambda:frozenset(current)
+    original=intake.edit_summaries
+    def edit(*args,**kwargs):
+        result=original(*args,**kwargs)
+        current.clear()
+        return result
+    monkeypatch.setattr(intake,'edit_summaries',edit)
+    assert pipe.process(work(),tmp_path/'r.pdf',[])==[]
+    review=json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['outcome']=='dropped' and review['reason_code']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+
+
+@pytest.mark.parametrize('stage', ['selected', 'edited', 'generated'])
+def test_caption_only_off_book_recommendation_never_leaves_intake(tmp_path, publisher, monkeypatch, stage):
+    caption = 'Meta (META): Buy, price target $850.'
+    reviewer = Reviewer([selection(captions={'f1': caption} if stage == 'selected' else {}), verdict()])
+    pipe = build(tmp_path, reviewer, publisher)
+    pipe.book_tickers = lambda: frozenset({'HOOD'})
+    original = intake.edit_summaries
+    def edit(posts, **kwargs):
+        if stage == 'selected':
+            pytest.fail('Off-book caption must stop before Humanizer')
+        result = original(posts, **kwargs)
+        if stage == 'edited':
+            result[0]['source']['figures'][0]['caption'] = caption
+        return result
+    monkeypatch.setattr(intake, 'edit_summaries', edit)
+    if stage == 'generated':
+        reviewer.responses[0] = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
+        # Isolate the optional chart attachment boundary; the source/selection remain macro.
+        monkeypatch.setattr(pipe, '_match_figures', lambda *args, **kwargs: None)
+        monkeypatch.setattr(pipe, '_attach_generated_charts',
+                            lambda post, *args: post['source']['figures'].append({'url': '/figure.png', 'caption': caption}))
+    assert pipe.process(work(), tmp_path/'r.pdf', []) == []
+    review = json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+    assert review['outcome'] in ('dropped', 'held')
+    assert review['reason_code'] in ('EQUITY_RESEARCH_NOT_IN_BOOK', 'EQUITY_RESEARCH_SUBJECT_UNRESOLVED')
+    assert review['audit'][-1]['admission_outcome'] == review['outcome']
+    assert review['audit'][-1]['held'] == review['reason_code']
+
+
+@pytest.mark.parametrize('review_result', ['passed', 'flagged', 'deadline', 'provider', 'book_removed', 'core_flagged'])
+def test_generated_caption_gets_final_editorial_review_or_restores_certified_original(tmp_path, publisher, monkeypatch, review_result):
+    import copy
+    from research import humanizer
+    from research.pipeline import DocumentDeadlineExceeded
+    current = {'HOOD'}
+    captured = {}
+    editorial = []
+    selected = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
+    if review_result == 'book_removed':
+        selected['candidates'][0]['title'] = 'Robinhood (HOOD) earnings'
+    reviewer = Reviewer([selected, verdict()])
+    initial_ask = reviewer.ask_text
+    def ask(instruction):
+        if instruction.startswith(humanizer.RUBRIC_INSTRUCTION):
+            editorial.append(instruction)
+            if '"caption:0"' in instruction:
+                if review_result == 'deadline':
+                    raise DocumentDeadlineExceeded('No optional review budget')
+                if review_result == 'provider':
+                    raise model.ModelError('Optional reviewer unavailable')
+                if review_result == 'flagged':
+                    return {'findings': [], 'qualitative': [{'field': 'caption:0', 'text': 'US equity flows', 'category': 'filler'}]}
+                if review_result == 'core_flagged':
+                    return {'findings': [], 'qualitative': [{'field': 'title', 'text': 'Foreign investors', 'category': 'filler'}]}
+                if review_result == 'book_removed':
+                    current.clear()
+        return initial_ask(instruction)
+    reviewer.ask_text = ask
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=lambda *args: [],
+                           pdf_created=lambda pdf: None, chart_producer=EmptyChartAgent(), chart_reviewer=EmptyChartAgent())
+    pipe.book_tickers = lambda: frozenset(current)
+    def attach(post, *args):
+        humanizer.validate_certificate(post)
+        captured['original'] = copy.deepcopy(post)
+        caption = 'US equity flows'
+        post['source']['figures'].append({'url': '/generated.png', 'page': 1, 'caption': caption, 'generated': True})
+        post['images'].append('/generated.png')
+        post['source']['chartGeneration'] = {'status': 'passed'}
+    monkeypatch.setattr(pipe, '_attach_generated_charts', attach)
+    posts = pipe.process(work(), tmp_path/'r.pdf', [])
+    assert len(editorial) == 2
+    if review_result == 'core_flagged':
+        assert posts == []
+        review = json.loads((tmp_path/'evidence'/('k'*64)/'review.json').read_text())
+        assert review['outcome'] == 'held' and review['reason_code'] == 'HUMANIZER_FAILED'
+        return
+    if review_result == 'book_removed':
+        assert posts == []
+        assert audit_of(tmp_path)[-1]['held'] == 'EQUITY_RESEARCH_NOT_IN_BOOK'
+        return
+    assert len(posts) == 1
+    humanizer.validate_certificate(posts[0])
+    if review_result != 'passed':
+        assert posts[0] == captured['original']
+        assert any('optional_chart_editorial' in item for item in audit_of(tmp_path))
+    else:
+        assert posts[0]['source']['figures'][0]['caption'] == 'US equity flows'
+    root = tmp_path/'evidence'/('k'*64)
+    assert list(root.glob('humanizer-*.json'))
+    assert list((root/'generated-caption-review').glob('humanizer-*.json'))
