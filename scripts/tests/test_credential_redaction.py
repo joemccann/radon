@@ -589,3 +589,28 @@ def test_unquoted_cookie_assignment_redacts_every_pair():
     body = scrub_credential_text(f"COOKIE=theme=light; sid={value}\nnext: 1")
     assert "NOTREAL" not in body, body
     assert body.endswith("\nnext: 1"), body
+
+
+# The bearer rule runs before the assignment tokenizer, so anything it eats
+# out of a quoted value changes where that value appears to end. Eating a
+# closing quote was fixed once (DS-2026-10-26-08); eating the BACKSLASH that
+# escapes a quote is the same root cause and left the credential's tail in
+# cleartext for the public PR body and rolling-issue sinks.
+def test_bearer_does_not_consume_the_escape_before_a_quote():
+    body = scrub_credential_text('PASSWORD="bearer \\" hunter2secretvalue"')
+    assert "hunter2secretvalue" not in body, body
+
+
+def test_bearer_escape_variants_redact_the_whole_value():
+    for text in (
+        'TOKEN="bearer \\" tail_secret_abcdef"',
+        "SECRET='bearer \\' tail_secret_abcdef'",
+        'TOKEN="bearer\\" tail_secret_abcdef"',
+    ):
+        body = scrub_credential_text(text)
+        assert "tail_secret_abcdef" not in body, (text, body)
+
+
+def test_a_backslash_inside_a_bare_bearer_token_is_still_redacted():
+    body = scrub_credential_text("authorization: bearer abc\\\\123def456ghi")
+    assert "123def456ghi" not in body, body
