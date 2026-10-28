@@ -227,7 +227,16 @@ def export_candidate(base, head, *, severity, cwd):
         ahead = (git('rev-list', '--count', f'{base}..{head}', capture=True).stdout or '').strip()
         if ahead != '1':
             raise ValueError(f'candidate must be exactly one commit ahead of base, not {ahead or "unknown"}: every intermediate commit would become public history')
-        git('push', '--atomic', f'git@github.com:{PRIVATE}.git', f'{base}:refs/heads/validation/base/{base}', f'{head}:refs/heads/validation/fix/{base}/{head}')
+        # `pack.threads=1`: this push carries the candidate's whole history,
+        # so it builds a large pack, and the multithreaded writer produced a
+        # CORRUPT one on the nightly host -- the remote rejected the push with
+        # `pack has bad object at offset <n>: inflate returned -3`, at a
+        # different offset on each attempt and also with `--no-thin`, while a
+        # local `git fsck` stayed clean. The objects were sound; only the pack
+        # was bad. That is a hard stop for the whole standing P1 release
+        # policy, and the single-threaded writer costs only export time, so it
+        # is pinned here rather than left to the host's default.
+        git('-c', 'pack.threads=1', 'push', '--atomic', f'git@github.com:{PRIVATE}.git', f'{base}:refs/heads/validation/base/{base}', f'{head}:refs/heads/validation/fix/{base}/{head}')
     return {'status': 'private-validation-pending', 'head_sha': head}
 
 
