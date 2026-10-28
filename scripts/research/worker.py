@@ -14,6 +14,7 @@ from research.dropbox import DropboxClient, DropboxError
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.pipeline import DocumentDeadlineExceeded
 from research.summary_editor import HumanizerCertificateError
+from research.publish import PublicationAdmissionError
 from research.state import State, date_scopes, eligible, folder_backlog_gap, should_persist_cursor
 from utils.atomic_io import atomic_save
 
@@ -159,6 +160,15 @@ def flush_outbox(state, publisher):
             continue
         try:
             publisher.publish(row['payload'])
+        except PublicationAdmissionError as error:
+            decision = state.block_publication(row['id'], row['work_key'], error.outcome, error.reason_code)
+            mirror = getattr(publisher, 'record_publication_block', None)
+            if decision and callable(mirror):
+                try:
+                    mirror(row['work_key'], row['payload'], error.outcome, error.reason_code, decision['published'])
+                except Exception as mirror_error:
+                    state.publication_mirror_failed(row['work_key'], mirror_error)
+            continue
         except HumanizerCertificateError:
             # Only unpublished work is re-reviewed; existing feed decisions stay intact.
             state.requeue_unscored(row['id'], row['work_key'])

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from utils.atomic_io import atomic_save
-from research import book, generated_charts, force_include, ground, identify, learn, novelty, triage
+from research import book, equity_admission, generated_charts, force_include, ground, identify, learn, novelty, rendered_copy, triage
 from research.summary_editor import edit_summaries
 from research.pipeline import DocumentDeadlineExceeded, EvidenceError, DOCUMENT_BUDGET_SECS, REVIEWER_CALL_TIMEOUT_SECS, comparison_posts
 from research.pipeline import creation_date_isolated, figures_isolated
@@ -160,7 +160,7 @@ class Pipeline:
         self.extractor = extractor or (lambda pdf, out: V1.extract(None, pdf, out))
         self.figure_catalogue = figure_catalogue or figures_isolated
         self.pdf_created = pdf_created or creation_date_isolated
-        self.book_tickers = book_tickers or book.tickers
+        self.book_tickers = book_tickers or book.current_tickers
         self.clock = clock or time.monotonic
         self.document_budget_secs = document_budget_secs
         self.chart_producer = chart_producer
@@ -263,6 +263,13 @@ class Pipeline:
         self._publisher_images = ()
 
         identity = identify.identify(text, work['metadata'], work['folder_date'], pdf_created=self.pdf_created(pdf))
+        eligibility, code, subjects = equity_admission.decide(
+            work['metadata'].get('name'), '\n\n'.join(text[n] for n in sorted(text)), doc_type=identity.doc_type,
+            book_tickers=self.book_tickers)
+        review['equity_admission'] = {'outcome': eligibility, 'reason_code': code, 'subjects': list(subjects)}
+        if eligibility != 'publish':
+            review['identity'] = identity.as_dict()
+            return self._finish(out, review, eligibility, reason_code=code)
         identity = self._resolve_publisher(identity, pdf, text, count, out / 'publisher', review)
         review['identity'] = identity.as_dict()
         page_one = text.get(1, '')
@@ -274,7 +281,7 @@ class Pipeline:
         note = _operator_note(work)
         review['operator_note'] = note or None
         decision, code = triage.decide(identity, rules=learn.load_rules(self.root),
-                                       book=self.book_tickers() if identity.doc_type == 'single_stock' else None)
+                                       book=None)
         review['triage'] = {'decision': decision, 'reason_code': code, 'overridden': bool((note or forced) and decision == 'drop')}
         if decision == 'drop' and not note and not forced:
             return self._finish(out, review, 'dropped', reason_code=code)
@@ -444,6 +451,25 @@ class Pipeline:
                 posts.append(fallback)
                 review['always_publish_fallback'] = True
                 review['audit'].append({'always_publish_fallback': True, 'reason_code': 'ALWAYS_PUBLISH_FALLBACK'})
+        admission_blocks = []
+        def eligible_posts(candidates):
+            accepted = []
+            for post in candidates:
+                eligibility, code, subjects = equity_admission.decide(
+                    post['title'], rendered_copy.content(post), book_tickers=self.book_tickers)
+                if eligibility == 'publish':
+                    accepted.append(post)
+                else:
+                    admission_blocks.append((eligibility, code))
+                    review['audit'].append({'post_id': post['id'], 'held': code, 'admission_outcome': eligibility,
+                                            'equity_subjects': list(subjects)})
+            return accepted
+
+        posts = eligible_posts(posts)
+        if not posts and admission_blocks:
+            outcome, code = next((item for item in admission_blocks if item[0] == 'held'), admission_blocks[0])
+            review['posts'] = []
+            return self._finish(out, review, outcome, reason_code=code, items=0)
         def ask_editor(instruction):
             self._guard_call('humanizer')
             result = self.reviewer.ask_text(instruction)
@@ -452,14 +478,65 @@ class Pipeline:
 
         posts = edit_summaries(posts, ask=ask_editor, text=text, audit=review['audit'], out=out,
                                source_context=identity.as_dict())
-        # All mandatory copy checks precede optional graphics. Chart attachment
-        # changes media/provenance only, leaving the scored title/body intact.
+        posts = eligible_posts(posts)
+        if not posts and admission_blocks:
+            outcome, code = next((item for item in admission_blocks if item[0] == 'held'), admission_blocks[0])
+            review['posts'] = []
+            return self._finish(out, review, outcome, reason_code=code, items=0)
+        # Optional graphics add rendered captions, so scope is checked again below.
+        # The publisher independently validates the final Humanizer certificate.
         accepted = {post['id']: post for post in posts}
+        before_charts = {}
         for original, candidate, key in chart_candidates:
             if original['id'] in accepted:
                 post = accepted[original['id']]
+                before_charts[post['id']] = copy.deepcopy(post)
                 candidate = dict(candidate, title=post['title'], content=post['content'])
                 self._attach_generated_charts(post, candidate, text, out / 'generated' / key, review)
+        posts = eligible_posts(posts)
+        if not posts and admission_blocks:
+            outcome, code = next((item for item in admission_blocks if item[0] == 'held'), admission_blocks[0])
+            review['posts'] = []
+            return self._finish(out, review, outcome, reason_code=code, items=0)
+        editorial_blocks = False
+        for index, post in enumerate(posts):
+            original = before_charts.get(post['id'])
+            if original is None or rendered_copy.content(original) == rendered_copy.content(post):
+                continue
+            # Optional captions need a real final review. If they cannot pass,
+            # retain the exact already-certified article without those graphics.
+            from research.model import ModelError
+            final_audit = []
+            try:
+                final = edit_summaries([post], ask=ask_editor, text=text, audit=final_audit,
+                                       out=out / 'generated-caption-review', source_context=identity.as_dict(), max_rewrites=0)
+                reason = 'rejected' if not final else None
+            except (ModelError, DocumentDeadlineExceeded) as error:
+                final = []
+                reason = 'budget_unavailable' if isinstance(error, DocumentDeadlineExceeded) else 'provider_unavailable'
+            review['audit'].extend(final_audit)
+            core_flagged = any(
+                finding.get('field') in ('title', 'content')
+                for entry in final_audit for attempt in entry.get('humanizer', {}).get('attempts', [])
+                for category in ('findings', 'qualitative') for finding in attempt.get(category, []))
+            if final:
+                posts[index] = final[0]
+            elif core_flagged:
+                # A newer finding against article prose invalidates the old approval.
+                posts[index] = None
+                editorial_blocks = True
+            else:
+                posts[index] = original
+                review['audit'].append({'post_id': post['id'], 'optional_chart_editorial': reason,
+                                        'restored_certified_article': True})
+        posts = eligible_posts([post for post in posts if post is not None])
+        if not posts and editorial_blocks:
+            review['posts'] = []
+            return self._finish(out, review, 'held', reason_code='HUMANIZER_FAILED', items=0)
+        if not posts and admission_blocks:
+            outcome, code = next((item for item in admission_blocks if item[0] == 'held'), admission_blocks[0])
+            review['posts'] = []
+            return self._finish(out, review, outcome, reason_code=code, items=0)
         review['posts'] = posts
         if posts:
             self._remember(work['key'], fp, identity.publisher)

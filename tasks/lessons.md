@@ -1,3 +1,11 @@
+# Equity research eligibility is mandatory across newsfeed sources (2026-10-28)
+
+- User correction: no company-focused equity research unless its subject company is in the current portfolio or watchlist. This applies to MarketDesk and Dropbox; broad-source admission never overrides this rule.
+- The earlier instruction below admitting off-book single-name MarketDesk reports was wrong and is superseded. Recheck eligibility separately from writing quality: a Humanizer pass does not authorize publication.
+- Use fresh canonical portfolio/watchlist evidence. Unknown or incomplete eligibility must hold publication, preserve source material, and await a valid check. Incidental references to an in-book company do not qualify unrelated equity research.
+- Audit every rendered caption as well as title/body; a broad article can carry separate issuer recommendations in attached tables. Apply the same complete-issuer claim grammar across macro, credit and in-book headings. A recognized recommendation with an unresolved object must hold, never inherit the heading's membership.
+- Appending generated-chart captions invalidates the prior Humanizer certificate. Review the entire final rendered copy again or restore the exact certified article without optional graphics; never update only the certificate digest.
+
 # MarketDesk account limits require filtered archive pacing (2026-10-27)
 
 The user confirmed the authenticated standalone example is blocked by account-wide usage. Respect that refusal: slow and persist the archive clock, progressively back off account-limit errors, and download only eligible reports. Do not keep guessing alternative endpoints or promise a fresh allowance from a downloads flag. Keep broad article publication independent of PDF selection, and distinguish archived, filtered and deferred backlog counts.
@@ -6,9 +14,9 @@ The user confirmed the authenticated standalone example is blocked by account-wi
 
 When asked to replace previews with downloads, trace the actual authenticated Download action and verify its request, redirect destination and allowance behavior on a previously blocked document. A file-saving function, separate queue or one successful PDF fetched from the viewer route does not establish a download operation or remove preview metering. Report partial completion explicitly until the real operation and backlog are verified.
 
-# A broad newsfeed is not the trading book (2026-10-27)
+# Superseded MarketDesk admission interpretation (2026-10-27)
 
-- The user chose "Publish all suitable reports" for MarketDesk. Do not infer portfolio relevance from the trading workflow: FX and off-book single-name source reports belong in this newsfeed. Keep the separate Dropbox intake policy scoped to that intake.
+- Historical incorrect interpretation, superseded 2026-10-28: broad source admission never overrides the portfolio/watchlist restriction on company-focused equity research.
 - Admission still requires usable source material, known identity, deduplication and source-grounded final copy/Humanizer certification. Replay only the retired relevance reason codes in bounded idempotent batches; never reset every held, failed or published item.
 
 # Backlog replay must yield to deployment (2026-10-27)

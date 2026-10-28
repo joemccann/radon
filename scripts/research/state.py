@@ -283,10 +283,10 @@ class State:
                 raise ValueError('Only claimed work can complete')
             for payload in publications:
                 publication_id = payload['id']
-                existing = self.db.execute('SELECT work_key,payload FROM outbox WHERE id=?', (publication_id,)).fetchone()
+                existing = self.db.execute('SELECT work_key,payload,status FROM outbox WHERE id=?', (publication_id,)).fetchone()
                 encoded = json.dumps(payload, sort_keys=True)
-                if existing and existing[0] == key and existing[1] != encoded:
-                    # The same document re-reviewed (operator "want more"): the revised payload replaces the old one.
+                if existing and existing[0] == key and (existing[1] != encoded or existing[2] == 'cancelled'):
+                    # Explicit claimed re-review can replace or revive a policy-cancelled payload.
                     self.db.execute("UPDATE outbox SET payload=?,status='pending' WHERE id=?", (encoded, publication_id))
                 elif existing and (existing[0] != key or existing[1] != encoded):
                     previous = self.db.execute('SELECT file_id,rev,status FROM work WHERE key=?', (existing[0],)).fetchone()
@@ -357,6 +357,46 @@ class State:
         return bool(self.db.execute("""SELECT 1 FROM outbox o JOIN work w ON w.key=o.work_key
             WHERE o.id=? AND o.work_key=? AND o.status='pending' AND w.status='complete'""",
             (publication_id,key)).fetchone())
+
+    def block_publication(self, publication_id, key, outcome, reason_code):
+        """Atomically park an ineligible batch, preserving payloads and history.
+
+        A saved editorial certificate does not authorize changed book membership.
+        Explicit operator re-review can revisit this complete held/dropped work;
+        ordinary outbox replay cannot dispatch cancelled siblings or mark it sent.
+        """
+        if outcome not in ('held', 'dropped') or reason_code not in {
+            'EQUITY_RESEARCH_NOT_IN_BOOK', 'EQUITY_RESEARCH_BOOK_UNAVAILABLE',
+            'EQUITY_RESEARCH_SUBJECT_UNRESOLVED', 'EQUITY_RESEARCH_SCOPE_REVIEW',
+        }:
+            raise ValueError('invalid publication admission decision')
+        with self.db:
+            row = self.db.execute("""SELECT w.result FROM outbox o JOIN work w ON w.key=o.work_key
+                WHERE o.id=? AND o.work_key=? AND o.status='pending' AND w.status='complete'""",
+                (publication_id, key)).fetchone()
+            if row is None:
+                return False
+            try:
+                prior = json.loads(row['result'] or 'null')
+            except (TypeError, ValueError):
+                prior = row['result']
+            result = {'status': outcome, 'reason_code': reason_code,
+                      'publication_id': publication_id, 'prior_result': prior}
+            self.db.execute("UPDATE outbox SET status='cancelled' WHERE work_key=? AND status='pending'", (key,))
+            self.db.execute("UPDATE work SET result=?,error=? WHERE key=? AND status='complete'",
+                            (json.dumps(result), reason_code, key))
+            published = self.db.execute("SELECT count(*) FROM outbox WHERE work_key=? AND status='published'", (key,)).fetchone()[0]
+            return {'work_key': key, 'outcome': outcome, 'reason_code': reason_code, 'published': published}
+
+    def publication_mirror_failed(self, key, error):
+        # The terminal policy decision remains authoritative if telemetry is down.
+        safe = type(error).__name__
+        with self.db:
+            row = self.db.execute("SELECT result FROM work WHERE key=? AND status='complete'", (key,)).fetchone()
+            if row:
+                result = json.loads(row['result'])
+                result['publication_mirror_error'] = safe
+                self.db.execute('UPDATE work SET result=? WHERE key=?', (json.dumps(result), key))
 
     def requeue_unscored(self, publication_id, key):
         """Cancel an unscored pending batch and review its source again atomically."""

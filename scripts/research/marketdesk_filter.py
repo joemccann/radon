@@ -1,9 +1,8 @@
-"""MarketDesk admission: source identity, usable facts and published-content deduplication.
+"""MarketDesk admission: primary issuer eligibility, usable sources and deduplication.
 
-The operator's all-suitable-reports policy admits FX and off-book single-name
-research. Neither Dropbox triage rules nor a model relevance verdict can veto
-MarketDesk copy generation. The downstream copy validator and final Humanizer
-certificate still require source-grounded prose. Dropbox intake is unchanged.
+Broad market research remains eligible without a model relevance veto. Company
+research requires every primary issuer in the current portfolio or watchlist.
+Source grounding and the final Humanizer remain downstream hard gates.
 """
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from research import force_include, identify, novelty
+from research import equity_admission, force_include, identify, novelty
 from research.intake import FINGERPRINTS
 
 PIPELINE = "marketdesk"
@@ -107,13 +106,20 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
     forced = desk is not None
     always = bool(desk and desk.always_publish)
     review.update(force_include=forced, always_publish=always, operator_note=note or None)
-    review["admission_policy"] = "all_suitable_reports"
+    review["admission_policy"] = "current_book_issuer_research"
     if not text.strip() or not any(isinstance(item, str) and item.strip() for item in summary):
         review["audit"].append({"held": "SOURCE_MATERIAL_MISSING"})
         return done("held", "SOURCE_MATERIAL_MISSING")
     if ident.publisher == "unknown":
         review["audit"].append({"held": "PUBLISHER_UNKNOWN"})
         return done("held", "PUBLISHER_UNKNOWN")
+
+    eligibility, reason, subjects = equity_admission.decide(
+        metadata["name"], text, doc_type=ident.doc_type, book_tickers=book_tickers)
+    review["equity_admission"] = {"outcome": eligibility, "reason_code": reason, "subjects": list(subjects)}
+    if eligibility != "publish":
+        review["audit"].append({eligibility: reason})
+        return done(eligibility, reason)
 
     others = {k: v for k, v in index.items() if k != "marketdesk:" + article_id}
     duplicate = novelty.duplicate_of(fp, {k: v[0] for k, v in others.items()})
@@ -124,6 +130,5 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
         return done("dropped", "DUPLICATE_OF_PUBLISHED")
 
     # Copy generation sees the original source summary and images directly.
-    # No preliminary model can exclude an otherwise suitable report by topic,
-    # portfolio membership, routine-content labels, or an empty SELECT reply.
+    # No preliminary model relevance verdict can exclude eligible research.
     return done("publish")

@@ -656,7 +656,7 @@ def test_default_deps_wire_real_modules():
     assert not hasattr(deps, "pdf_pages") and not hasattr(deps, "download_pdf")
     assert deps.enqueue_pdf is marketdesk_pdf_store.enqueue
     assert deps.select is marketdesk_filter.ladder_select
-    assert deps.book_tickers is book.tickers and deps.record_outcome is publish.record_outcome
+    assert deps.book_tickers is book.current_tickers and deps.record_outcome is publish.record_outcome
     assert deps.list_latest is marketdesk_scrape.list_latest
     assert deps.write_copy is marketdesk_copy.write_copy
     assert callable(deps.certify)
@@ -888,7 +888,7 @@ def test_summary_bullets_are_input_facts_never_a_published_output_section(world,
 
 
 def test_summary_input_preserves_long_bullets_and_their_trailing_hedge(world, db):
-    world.refs = [make_ref("Zzzzzzzz03")]
+    world.refs = [make_ref("Zzzzzzzz03", title="Macro estimate")]
     world.summary = ["a" * 499 + "\U0001F4C8" + "b" * 10 + "; this estimate is preliminary"]
     run(world)
     bullet = next(c[1][0] for c in world.calls if c[0] == "copy_summary")
@@ -917,11 +917,11 @@ def test_excess_summary_bullets_fail_instead_of_dropping_the_final_qualifier(wor
 
 
 def test_copy_is_grounded_in_the_source_summary_without_pdf_claims(world, db):
-    world.refs = [make_ref("Pdftext001")]
+    world.refs = [make_ref("Pdftext001", title="Credit curve update")]
     world.summary = ["EBITDA $13.80B, curve up 12bp."]
     run(world)
     assert not [c for c in world.calls if c[0] in ("pdf_pages", "download_pdf")]
-    assert ("copy_body", "Title Pdftext001\nEBITDA $13.80B, curve up 12bp.") in world.calls
+    assert ("copy_body", "Credit curve update\nEBITDA $13.80B, curve up 12bp.") in world.calls
     assert world.prompts == []  # no preliminary relevance model; full source goes to copy
 
 
@@ -1260,20 +1260,26 @@ def test_pending_backlog_runs_after_it_leaves_latest_listing(world, db):
     assert ledger(db, old.article_id)["status"] == "published"
 
 
-def test_off_book_single_name_is_published_without_book_or_selector_io(world, db):
+@pytest.mark.parametrize('members,expected', [(frozenset({'MU'}), 'dropped'), (None, 'held')])
+def test_off_book_single_name_stops_before_images_copy_and_certification(world, db, members, expected):
     world.refs = [make_ref('Offbook001', title='Acme Corp (ACME) initiation')]
     world.summary = ['Acme Corp (ACME) Rating: BUY Price Target $50']
     deps = build_deps(world)
-    def forbidden():
-        raise AssertionError('Portfolio lookup cannot gate all-suitable MarketDesk admission')
-    deps.book_tickers = forbidden
-    deps.recent_titles = forbidden
-    deps.select = lambda _: forbidden()
+    deps.book_tickers = lambda: members
+    def forbidden(*a, **kw):
+        raise AssertionError('Ineligible issuer must stop before image or model work')
+    deps.download_images = forbidden
+    deps.write_copy = forbidden
+    deps.select = forbidden
     counts = job.run_cycle(env=dict(ENV), deps=deps)
-    assert counts['published'] == 1 and ledger(db, 'Offbook001')['status'] == 'published'
-    assert ('copy_finding', None) in world.calls
-    assert ('copy_summary', tuple(world.summary)) in world.calls
-    assert any(c[0] == 'certify' for c in world.calls)
+    assert counts['published'] == 0
+    saved = ledger(db, 'Offbook001')
+    assert saved['status'] in ({expected, 'held'} if members is not None else {'held'})
+    allowed_reasons = ({'EQUITY_RESEARCH_NOT_IN_BOOK'} if saved['status'] == 'dropped'
+                       else {'EQUITY_RESEARCH_SUBJECT_UNRESOLVED', 'EQUITY_RESEARCH_BOOK_UNAVAILABLE'})
+    assert saved['reason_code'] in allowed_reasons
+    assert counts[saved['status']] == 1
+    assert not any(c[0] == 'certify' for c in world.calls)
 
 
 def test_retired_relevance_holds_replay_automatically_outside_listing_once(world, db):
@@ -1322,3 +1328,88 @@ def test_same_cycle_operator_vote_retains_note_before_automatic_policy_replay(wo
     assert ledger(db, ref.article_id)['status'] == 'published'
     assert len([c for c in world.calls if c[0] == 'fetch_article']) == 1
     assert run(world)['requeued'] == 0 and len(world.published) == 1
+
+
+def test_broad_source_cannot_publish_generated_off_book_company_research(world,db):
+    world.refs=[make_ref('BroadName1',title='Global macro strategy')]
+    deps=build_deps(world)
+    deps.book_tickers=lambda:frozenset({'MU'})
+    deps.write_copy=lambda **kw:SimpleNamespace(title='TransUnion (TRU) earnings beat',content='Revenue rose 10%.',captions={},tags=[])
+    deps.certify=lambda *a:pytest.fail('off-book draft must stop before Humanizer')
+    counts=job.run_cycle(env=dict(ENV),deps=deps)
+    assert counts['published']==0 and counts['dropped']==1
+    assert ledger(db,'BroadName1')['reason_code']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+
+
+def test_crash_heal_does_not_restore_quarantined_provenance_without_live_copy(world,db):
+    world.refs=[make_ref('NoLive001')]
+    run(world)
+    db.execute("UPDATE marketdesk_articles SET status='pending',post_id=NULL")
+    db.execute('PRAGMA foreign_keys=OFF')
+    db.execute('DELETE FROM posts')
+    db.execute('PRAGMA foreign_keys=ON')
+    counts=run(world)
+    assert counts['healed']==0 and counts['published']==0
+    assert ledger(db,'NoLive001')['status']=='held'
+
+
+def test_crash_heal_rechecks_issuer_eligibility(world,db):
+    world.refs=[make_ref('HealName1')]
+    run(world)
+    db.execute("UPDATE marketdesk_articles SET status='pending',post_id=NULL")
+    db.execute("UPDATE posts SET title='TransUnion (TRU) earnings',content='Revenue rose 10%.'")
+    deps=build_deps(world);deps.book_tickers=lambda:frozenset({'MU'})
+    counts=job.run_cycle(env=dict(ENV),deps=deps)
+    assert counts['healed']==0 and counts['published']==0
+    assert ledger(db,'HealName1')['status']=='dropped'
+
+
+
+def test_commit_time_admission_block_is_terminal_not_a_provider_retry(world,db):
+    from research.publish import PublicationAdmissionError
+    world.refs=[make_ref('LateBook1')]
+    deps=build_deps(world)
+    def blocked(post):
+        raise PublicationAdmissionError('held','EQUITY_RESEARCH_BOOK_UNAVAILABLE',('HOOD',))
+    deps.publish=blocked
+    counts=job.run_cycle(env=dict(ENV),deps=deps)
+    assert counts['published']==0 and counts['held']==1 and counts['failed']==0
+    saved=ledger(db,'LateBook1')
+    assert saved['status']=='held' and saved['reason_code']=='EQUITY_RESEARCH_BOOK_UNAVAILABLE'
+    assert world.outcomes[-1][1]['publication_admission']['subjects']==['HOOD']
+    assert world.published==[]
+
+
+@pytest.mark.parametrize('stage', ['draft', 'certified', 'crash_heal'])
+def test_caption_only_off_book_recommendation_is_blocked_at_each_final_boundary(world, db, stage):
+    import json
+    caption = 'Meta (META): Buy, price target $850.'
+    world.refs = [make_ref('Caption01', title='Global macro strategy')]
+    deps = build_deps(world)
+    deps.book_tickers = lambda: frozenset({'HOOD'})
+    if stage == 'crash_heal':
+        job.run_cycle(env=dict(ENV), deps=deps)
+        row = db.execute('SELECT post_id,provenance_json FROM research_post_sources').fetchone()
+        source = json.loads(row[1])
+        source['figures'][0]['caption'] = caption
+        db.execute('UPDATE research_post_sources SET provenance_json=? WHERE post_id=?', (json.dumps(source), row[0]))
+        db.execute("UPDATE marketdesk_articles SET status='pending',post_id=NULL")
+    else:
+        write = deps.write_copy
+        def copied(**kwargs):
+            copy = write(**kwargs)
+            if stage == 'draft':
+                copy.captions['i1'] = caption
+            return copy
+        deps.write_copy = copied
+        certify = deps.certify
+        def certified(post, copy):
+            if stage == 'draft':
+                pytest.fail('Off-book caption must stop before Humanizer')
+            result = certify(post, copy)
+            result['source']['figures'][0]['caption'] = caption
+            return result
+        deps.certify = certified
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts['published'] == 0 and counts['healed'] == 0 and counts['dropped'] == 1
+    assert ledger(db, 'Caption01')['reason_code'] == 'EQUITY_RESEARCH_NOT_IN_BOOK'

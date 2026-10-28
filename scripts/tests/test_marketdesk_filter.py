@@ -60,7 +60,7 @@ def test_suitable_report_enters_copy_without_a_selector_finding():
     decision = decide(select)
     assert decision.outcome == 'publish' and decision.reason_code is None
     assert decision.candidate is None and select.prompts == []
-    assert decision.review['admission_policy'] == 'all_suitable_reports'
+    assert decision.review['admission_policy'] == 'current_book_issuer_research'
     assert decision.fingerprint == novelty.fingerprint(' '.join(PAGES[p] for p in sorted(PAGES)))
 
 @pytest.mark.parametrize('reply', [
@@ -181,14 +181,14 @@ def test_ladder_outage_is_transient_and_bad_reply_is_not():
 
 @pytest.mark.parametrize('pages,title,book', [
     ({1: '# EURUSD: Range trade\n' + WORDS}, 'EURUSD note', {'SPY'}),
-    ({1: 'Acme Corp (ACME) Rating: BUY Price Target $50\n' + WORDS}, 'Acme Corp (ACME) initiation', {'SPY'}),
+
 ])
-def test_all_suitable_reports_bypass_book_fx_and_model_relevance(pages, title, book):
+def test_fx_reports_bypass_book_and_model_relevance(pages, title, book):
     select = Select({'candidates': [], 'reason': 'not relevant to portfolio'})
     decision = decide(select, pages=pages, title=title, book=book)
     assert decision.outcome == 'publish' and decision.candidate is None
     assert select.prompts == []
-    assert decision.review['admission_policy'] == 'all_suitable_reports'
+    assert decision.review['admission_policy'] == 'current_book_issuer_research'
 
 
 @pytest.mark.parametrize("pages,summary", [({1: "Only a title"}, []), ({1: "Only a title"}, ["", "  "]), ({}, SUMMARY)])

@@ -1,8 +1,9 @@
-"""Operator book for triage: watchlist plus portfolio underlying tickers.
+"""Watchlist and portfolio underlyings for legacy triage and strict admission.
 
-Turso first (watchlist table, latest portfolio snapshot), data/*.json fallback.
-`tickers()` returns None only when NEITHER source of a series is readable, so
-triage fails open to review; an empty-but-readable book is a real answer.
+`current_tickers()` requires complete, fresh canonical DB evidence and never
+uses JSON fallbacks. The legacy `tickers()` helper tries Turso then data/*.json
+and returns None only when neither source is readable; it is not sufficient
+evidence for the hard equity-research admission gate.
 """
 from __future__ import annotations
 import json
@@ -65,3 +66,36 @@ def tickers():
     if watch is None and port is None:
         return None
     return frozenset((watch or set()) | (port or set()))
+
+
+# A stale portfolio is not evidence that an issuer is still held. IB's normal
+# sync cadence is minutes; hold issuer research during a prolonged sync outage.
+CURRENT_BOOK_MAX_AGE_SECONDS = 15 * 60
+
+
+def current_tickers():
+    """Current complete canonical book, or None; never consult JSON fallbacks.
+
+    Both live DB reads must succeed, and the IB snapshot must carry a recent
+    timezone-aware last_sync and a complete positions list. Empty is valid.
+    """
+    from datetime import datetime, timezone
+    try:
+        from db.readers import read_watchlist_tickers, read_latest_portfolio_snapshot
+        watch = read_watchlist_tickers()
+        snapshot = read_latest_portfolio_snapshot()
+        if not isinstance(watch, list) or any(not isinstance(x, str) or not x.strip() for x in watch):
+            return None
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('positions'), list):
+            return None
+        stamp = datetime.fromisoformat(snapshot['last_sync'].replace('Z', '+00:00'))
+        age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        if stamp.tzinfo is None or not 0 <= age <= CURRENT_BOOK_MAX_AGE_SECONDS:
+            return None
+        positions = snapshot['positions']
+        if any(not isinstance(p, dict) or not isinstance(p.get('ticker') or p.get('symbol'), str)
+               or not (p.get('ticker') or p.get('symbol')).strip() for p in positions):
+            return None
+        return frozenset(_clean(watch) | _positions_tickers(positions))
+    except Exception:
+        return None

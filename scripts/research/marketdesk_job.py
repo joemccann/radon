@@ -10,11 +10,11 @@ publish, and research_post_sources heals a crash between publish and the ledger 
 Publish happens before the Dropbox upload; the upload is an outbox that never blocks the feed. The
 Dropbox path mirrors the library folder chain stored in the post provenance.
 
-Admission (research.marketdesk_filter) requires usable source facts, a known publisher and
-nonduplicate content. All suitable MarketDesk topics, including FX and off-book single names,
-proceed directly to grounded copy and final Humanizer certification. Retired relevance-only
-holds/drops replay automatically in bounded batches, even off the latest listing. The separate
-Dropbox intake policy is unchanged.
+Admission (research.marketdesk_filter) requires usable source facts, a known publisher,
+nonduplicate content and current portfolio/watchlist eligibility for company equity research.
+Eligible reports proceed to grounded copy and final Humanizer certification. Retired
+relevance-only holds/drops replay in bounded batches; off-book equity decisions do not.
+MarketDesk and Dropbox share the hard issuer gate while retaining separate topic policies.
 
 MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
@@ -46,12 +46,13 @@ import tempfile  # noqa: E402
 import time  # noqa: E402
 
 from api.db_http import DbHttpError  # noqa: E402
+from research import equity_admission, rendered_copy
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox import DropboxError  # noqa: E402
 from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
 from research.marketdesk_copy import scrub  # noqa: E402
 from research.marketdesk_filter import decide as relevance, fingerprint_index  # noqa: E402
-from research.publish import stable_post_id  # noqa: E402
+from research.publish import PublicationAdmissionError, stable_post_id  # noqa: E402
 
 SERVICE = "marketdesk-research"
 DROPBOX_SERVICE = "marketdesk-dropbox"
@@ -168,7 +169,7 @@ def default_deps() -> Deps:
         certify=certify, writer_from_env=DropboxWriter.from_env,
         marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
-        select=marketdesk_filter.ladder_select, book_tickers=book.tickers, recent_titles=recent_titles,
+        select=marketdesk_filter.ladder_select, book_tickers=book.current_tickers, recent_titles=recent_titles,
         record_outcome=publish.record_outcome, feedback_rows=feedback.fetch_rows, research_root=research_root,
         enqueue_pdf=marketdesk_pdf_store.enqueue,
     )
@@ -291,6 +292,15 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     post_id = stable_post_id("marketdesk:" + ref.article_id, "article")
     existing = store.post_source(post_id)
     if existing is not None:  # crash between publish and ledger write: record, never re-publish
+        current_copy = store.post_copy(post_id)
+        eligibility, reason, _ = (equity_admission.decide(
+            current_copy['title'], rendered_copy.content({**current_copy, 'source': existing}),
+            book_tickers=deps.book_tickers)
+            if current_copy else ('held', 'EXISTING_POST_NOT_VISIBLE', ()))
+        if eligibility != 'publish':
+            store.record_admission_block(ref.article_id, eligibility, reason)
+            counts[eligibility] += 1
+            return
         legacy = existing.get("evidenceKind") != "article"
         store.record_published(ref.article_id, post_id, existing.get("url") if legacy else None,
                                existing.get("contentHash") if legacy else None)
@@ -353,8 +363,33 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     post = build_post(ref, publisher=publisher, sha=sha,
                       figure_urls=figure_urls, image_ids=image_ids, extra_urls=extra_urls, copy=copy,
                       folders=folders, file_name=getattr(article, "title", None))
+    def eligible_copy(current):
+        eligibility, reason, subjects = equity_admission.decide(
+            current['title'], rendered_copy.content(current), book_tickers=deps.book_tickers)
+        review['final_equity_admission'] = {'outcome': eligibility, 'reason_code': reason, 'subjects': list(subjects)}
+        if eligibility == 'publish':
+            return True
+        store.record_admission_block(ref.article_id, eligibility, reason)
+        review.update(outcome=eligibility, reason_code=reason)
+        _record_outcome(deps, work, review)
+        counts[eligibility] += 1
+        return False
+
+    if not eligible_copy(post):
+        return
     post = deps.certify(post, copy)  # research.publish refuses copy without its Humanizer certificate
-    deps.publish(post)
+    if not eligible_copy(post):  # recheck the final copy and fresh book after certification
+        return
+    try:
+        deps.publish(post)
+    except PublicationAdmissionError as error:
+        store.record_admission_block(ref.article_id, error.outcome, error.reason_code)
+        review.update(outcome=error.outcome, reason_code=error.reason_code)
+        review['publication_admission'] = {'outcome': error.outcome, 'reason_code': error.reason_code,
+                                           'subjects': list(error.subjects)}
+        _record_outcome(deps, work, review)
+        counts[error.outcome] += 1
+        return
     store.record_published(ref.article_id, post["id"], None, None, fingerprint=decision.fingerprint,
                            publisher=decision.identity.publisher, folders=folders, file_name=title)
     review["posts"] = [post["id"]]

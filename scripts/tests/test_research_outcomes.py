@@ -512,3 +512,38 @@ def test_returning_to_held_starts_new_clock_after_a_different_decision(outcome_s
     clock.now += timedelta(days=2)
     publish.record_outcome(work(), review())
     assert connection.execute('SELECT outcome,held_at,expired_at FROM research_outcomes').fetchone() == ('held', clock.now.isoformat(), None)
+
+
+@pytest.mark.parametrize('count,expected', [(0,'held'),(1,'published')])
+def test_publication_admission_mirror_preserves_source_and_actual_published_siblings(outcome_store,count,expected):
+    connection,_=outcome_store
+    publish.record_outcome(work(),review(posts=[{'id':'prepared1'},{'id':'prepared2'}]))
+    before=dict(zip([r[1] for r in connection.execute('PRAGMA table_info(research_outcomes)')],
+                    connection.execute('SELECT * FROM research_outcomes').fetchone()))
+    post={'id':'blocked','title':'Robinhood earnings','content':'Robinhood EPS rose.'}
+    for _ in range(2):
+        publish.record_publication_block(work()['key'],post,'held','EQUITY_RESEARCH_BOOK_UNAVAILABLE',count)
+    after=dict(zip(before,connection.execute('SELECT * FROM research_outcomes').fetchone()))
+    assert after['outcome']==expected and after['posts']==count
+    assert json.loads(after['reason_codes'])==json.loads(before['reason_codes'])+['EQUITY_RESEARCH_BOOK_UNAVAILABLE']
+    assert json.loads(after['drafts_json'])[:-1]==json.loads(before['drafts_json'])
+    assert json.loads(after['drafts_json'])[-1]['publicationId']=='blocked'
+    for key in ['file_id','file_name','publisher','series','doc_type','folder_date','document_date','pipeline']:
+        assert after[key]==before[key]
+    context=json.loads(after['context_json']); old_context=json.loads(before['context_json'])
+    assert {k:v for k,v in context.items() if k!='publicationAdmission'}==old_context
+    assert context['publicationAdmission']['reason_code']=='EQUITY_RESEARCH_BOOK_UNAVAILABLE'
+    publish.record_publication_block('not-existing',post,'held','EQUITY_RESEARCH_BOOK_UNAVAILABLE',0)
+    assert connection.execute('SELECT count(*) FROM research_outcomes').fetchone()[0]==1
+
+
+def test_publication_hold_mirror_replay_does_not_extend_existing_ttl(outcome_store):
+    from datetime import timedelta
+    connection,clock=outcome_store
+    publish.record_outcome(work(),review(posts=[{'id':'prepared'}],audit=[]))
+    post={'id':'blocked','title':'Robinhood earnings','content':'Robinhood EPS rose.'}
+    publish.record_publication_block(work()['key'],post,'held','EQUITY_RESEARCH_BOOK_UNAVAILABLE',0)
+    original=connection.execute('SELECT held_at FROM research_outcomes').fetchone()[0]
+    clock.now+=timedelta(hours=1)
+    publish.record_publication_block(work()['key'],post,'held','EQUITY_RESEARCH_BOOK_UNAVAILABLE',0)
+    assert connection.execute('SELECT held_at FROM research_outcomes').fetchone()[0]==original
