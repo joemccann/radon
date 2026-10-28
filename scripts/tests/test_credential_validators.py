@@ -356,3 +356,67 @@ class TestValidatorRedaction:
         assert result.status == "error"
         assert "sk-ant-api03-deadbeef" not in result.message
         assert "[redacted-key]" in result.message
+
+
+class TestValidatorRedactionOrdering:
+    """DS-2026-10-28-05: scrub the WHOLE diagnostic, then truncate.
+
+    Recurrence of DS-2026-09-20-06. Truncating first can cut away the `KEY=`
+    or provider prefix every redaction rule keys on, leaving the secret's
+    suffix in a string no rule matches. The submitted values are also
+    substituted by exact match, so a credential quoted with no assignment
+    shape at all does not depend on pattern coverage.
+    """
+
+    SECRET = "NOTREALpassphrase_with_no_shape_0123456789"
+
+    def _stderr_run(self, monkeypatch, stderr):
+        monkeypatch.setattr(
+            cv.subprocess,
+            "run",
+            lambda *a, **k: cv.subprocess.CompletedProcess(
+                args=a[0], returncode=1, stdout="", stderr=stderr
+            ),
+        )
+
+    LONG_SECRET = "NOTREAL" + "".join(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"[i % 52] for i in range(300)
+    )
+
+    def test_a_prefix_cut_away_by_truncation_is_still_redacted(self, monkeypatch):
+        # A session token longer than the 200-character window: the `KEY=`
+        # prefix every pattern keys on falls outside it, the secret's tail
+        # does not.
+        self._stderr_run(monkeypatch, "MENTHORQ_PASS=" + self.LONG_SECRET)
+        result = cv.validate(
+            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": self.LONG_SECRET}
+        )
+        assert result.status == "error"
+        assert self.LONG_SECRET[-40:] not in result.message, result.message
+
+    def test_a_submitted_value_with_no_assignment_shape_is_redacted(self, monkeypatch):
+        self._stderr_run(monkeypatch, f'Timeout: page still showed "{self.SECRET}" after 30s')
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": self.SECRET})
+        assert result.status == "error"
+        assert self.SECRET not in result.message, result.message
+
+    def test_a_submitted_value_in_the_success_branch_is_redacted(self, monkeypatch):
+        monkeypatch.setattr(
+            cv.subprocess,
+            "run",
+            lambda *a, **k: cv.subprocess.CompletedProcess(
+                args=a[0],
+                returncode=0,
+                stdout=cv.json.dumps(
+                    {"status": "invalid", "message": f"rejected {self.SECRET}"}
+                ),
+                stderr="",
+            ),
+        )
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": self.SECRET})
+        assert self.SECRET not in result.message, result.message
+
+    def test_the_diagnostic_is_still_bounded(self, monkeypatch):
+        self._stderr_run(monkeypatch, "x" * 5000)
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"})
+        assert len(result.message) < 400, len(result.message)
