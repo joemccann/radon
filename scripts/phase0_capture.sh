@@ -8,17 +8,72 @@ set +e
 sec() { printf '\n\n========== %s ==========\n' "$1"; }
 
 # Redact values for secret-looking env keys; show everything else (ports/URLs/modes).
+#
+# DS-2026-10-28-07: keying on the text before the FIRST `=` of each physical
+# line printed a systemd `Environment="SECRET=..."` directive verbatim (the
+# inspected key was `Environment`), and the continuation lines of a quoted
+# multi-line value were keyed on nothing and fell through the catch-all. The
+# header above states a guarantee, so the key is resolved through a systemd
+# `Environment=` wrapper and a quoted value is consumed to its real close.
+SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET'
 redact() {
-  awk -F= '
+  awk -v secret="$SECRET_KEY_PATTERN" '
+    function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
+    # True while a quoted value opened on an earlier line is still open.
+    function unclosed(s, q,   i, c, open) {
+      open=0
+      for (i=1; i<=length(s); i++) {
+        c=substr(s, i, 1)
+        if (c == "\\") { i++; continue }
+        if (c == q) open=!open
+      }
+      return open
+    }
+    carry != "" {
+      # A continuation of an already-redacted value: never print it.
+      if (unclosed($0, carry)) next
+      carry=""
+      next
+    }
     /^[[:space:]]*#/ {print; next}
     /^[[:space:]]*$/ {print; next}
     /=/ {
-      key=$1
-      up=toupper(key)
-      if (up ~ /TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET/) {
-        rest=substr($0, length(key)+2)
-        print key"=<redacted:"length(rest)"chars>"
-      } else { print }
+      eq=index($0, "=")
+      key=substr($0, 1, eq-1)
+      rest=substr($0, eq+1)
+      # A systemd directive carries the real assignment inside its value.
+      if (toupper(key) ~ /ENVIRONMENT$/) {
+        inner=rest
+        quote=""
+        if (substr(inner, 1, 1) == "\"" || substr(inner, 1, 1) == "'"'"'") {
+          quote=substr(inner, 1, 1)
+          inner=substr(inner, 2)
+        }
+        outer=rest
+        ieq=index(inner, "=")
+        if (ieq > 0) {
+          key=key"="substr(inner, 1, ieq-1)
+          rest=substr(inner, ieq+1)
+          if (toupper(key) ~ secret) {
+            # Only a redacted value suppresses its continuation lines; a
+            # non-secret multi-line directive keeps printing as before.
+            if (quote != "" && unclosed(outer, quote)) carry=quote
+            emit(key, rest)
+            next
+          }
+          print
+          next
+        }
+      }
+      if (toupper(key) ~ secret) {
+        if (substr(rest, 1, 1) == "\"" || substr(rest, 1, 1) == "'"'"'") {
+          quote=substr(rest, 1, 1)
+          if (unclosed(rest, quote)) carry=quote
+        }
+        emit(key, rest)
+        next
+      }
+      print
       next
     }
     {print}'
