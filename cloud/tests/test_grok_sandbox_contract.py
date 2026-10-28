@@ -182,3 +182,24 @@ def test_token_keeper_restricts_procfs_to_its_own_user():
         "the unit launches third-party CLIs and must not expose other users' "
         "process metadata to them"
     )
+
+
+# The subscription vault broker answers {"op":"get"} on an AF_UNIX socket with
+# no peer-identity check, so the socket's directory mode is the whole access
+# control and both grok units already run as the uid that owns it. The keeper
+# is the vault's only intended client; the agent-exposed units must be denied.
+VAULT_RUNTIME_DIR = "/run/radon-subscription-vault"
+
+
+@pytest.mark.parametrize("unit", [RESPONDER, UPGRADE])
+def test_subscription_vault_socket_is_inaccessible(unit):
+    assert VAULT_RUNTIME_DIR in _paths(unit, "InaccessiblePaths"), (
+        unit,
+        "the grok child runs as radon, which owns the vault socket directory; "
+        "subscription_vault.py performs no client authorization",
+    )
+
+
+def test_token_keeper_keeps_the_vault_socket():
+    assert VAULT_RUNTIME_DIR not in _paths(TOKENS, "InaccessiblePaths")
+    assert f"{VAULT_RUNTIME_DIR}/vault.sock" in (SERVICES / TOKENS).read_text(encoding="utf-8")
