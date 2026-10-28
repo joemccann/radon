@@ -30,3 +30,105 @@ def test_live_root_env_is_in_all_diagnostic_sections_and_secrets_are_redacted(tm
     assert "TURSO_AUTH_TOKEN=<redacted:" in db
     assert "synthetic-secret" not in result.stdout
     assert "synthetic-client-secret" not in result.stdout
+
+
+def _redact(text: str) -> str:
+    """Run only the capture's redact() over ``text``."""
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    result = subprocess.run(
+        ["bash"],
+        input=functions + 'redact\n',
+        text=True,
+        capture_output=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    return result.stdout
+
+
+TWS_PW_KEY = "TWS_" + "PASSWORD"  # joined so no static assignment sits in the tree
+
+
+def _redact_input(text: str) -> str:
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    script = functions + "redact <<'RADON_FIXTURE_EOF'\n" + text + "\nRADON_FIXTURE_EOF\n"
+    result = subprocess.run(
+        ["bash"], input=script, text=True, capture_output=True, check=True
+    )
+    return result.stdout
+
+
+# DS-2026-10-28-07: the header promises the capture carries no secret values,
+# but redact() keyed on the text before the FIRST `=` of each physical line.
+# A systemd `Environment="KEY=value"` directive keys on `Environment`, which
+# matches no secret name, and the continuation lines of a quoted multi-line
+# value were keyed on nothing at all. Both printed verbatim. The capture is
+# the sanctioned way to share VPS ground truth, so a redactor that silently
+# fails is worse than none.
+def test_a_systemd_environment_directive_is_redacted():
+    out = _redact_input('Environment="RADON_SERVICE_TOKEN=live_tok_NOTREAL123"')
+    assert "live_tok_NOTREAL123" not in out, out
+    assert "<redacted:" in out, out
+
+
+def test_every_systemd_environment_spelling_is_redacted():
+    for line in (
+        'Environment="RADON_SERVICE_TOKEN=live_tok_NOTREAL123"',
+        "Environment=RADON_SERVICE_TOKEN=live_tok_NOTREAL123",
+        "Environment='UW_TOKEN=live_tok_NOTREAL123'",
+        'DefaultEnvironment="API_KEY=live_tok_NOTREAL123"',
+    ):
+        out = _redact_input(line)
+        assert "live_tok_NOTREAL123" not in out, (line, out)
+
+
+def test_a_quoted_multiline_value_does_not_leak_its_continuation():
+    out = _redact_input(TWS_PW_KEY + '="first_line\nsecond_line_NOTREALsecret"')
+    assert "second_line_NOTREALsecret" not in out, out
+
+
+def test_a_non_secret_key_still_shows_its_value():
+    out = _redact_input("RADON_MODE=hetzner\nEnvironment=NODE_ENV=production")
+    assert "RADON_MODE=hetzner" in out, out
+    assert "production" in out, out
+
+
+# Remediate rescan of the fix above: the carry cleared on the first
+# continuation line that held no quote, so a value spanning three or more
+# lines resumed printing before it closed; and only the FIRST assignment of a
+# systemd Environment directive was inspected, while systemd accepts several
+# per directive.
+def test_a_value_spanning_several_lines_stays_redacted_to_its_close():
+    out = _redact_input(TWS_PW_KEY + '="one\ntwo\nthree_NOTREALsecret"\nRADON_MODE=hetzner')
+    assert "three_NOTREALsecret" not in out, out
+    assert "RADON_MODE=hetzner" in out, out
+
+
+def test_every_assignment_in_one_environment_directive_is_inspected():
+    out = _redact_input('Environment="NODE_ENV=production" "UW_TOKEN=live_NOTREAL123"')
+    assert "live_NOTREAL123" not in out, out
+
+
+# Second rescan: systemd accepts whitespace around a directive's `=`, so the
+# key run carried a trailing space or tab and no longer ended in the
+# directive name.
+def test_whitespace_around_the_directive_separator_is_tolerated():
+    for line in (
+        'Environment = "UW_TOKEN=live_NOTREAL123"',
+        'Environment\t="UW_TOKEN=live_NOTREAL123"',
+        '  Environment  =  "UW_TOKEN=live_NOTREAL123"',
+        'UW_TOKEN = live_NOTREAL123',
+    ):
+        out = _redact_input(line)
+        assert "live_NOTREAL123" not in out, (line, out)
+
+
+# Third rescan: the DB and client-id sections piped grep into redact, so
+# redact() saw single lines and a quoted value's continuation arrived with no
+# key in front of it. Each file is redacted whole before any filter now.
+def test_the_filtered_sections_redact_before_they_filter():
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "redact_env_files | grep" in text, text[-600:]
+    assert "| redact" not in text, "a filter still runs before redaction"
