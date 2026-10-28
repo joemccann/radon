@@ -3396,6 +3396,28 @@ async def _orders_place_after_rate_reservation(
     result = await _run_ib_script_with_recovery(
         "ib_place_order.py", ["--json", order_json], timeout=25
     )
+    if isinstance(result.data, dict) and result.data.get("indeterminate") is True:
+        # A completed subprocess can still leave the broker outcome unknown.
+        # Preserve the placing client's identity and ambiguity before the
+        # generic status=error branch records a definitive rejection.
+        detail = {
+            **result.data,
+            "code": "ORDER_INDETERMINATE",
+            "orderRef": result.data.get("orderRef") or order_ref,
+        }
+        await record_order_event(
+            "indeterminate",
+            order_ref=detail["orderRef"],
+            order_id=detail.get("orderId"),
+            perm_id=detail.get("permId"),
+            symbol=body.get("symbol"),
+            action=body.get("action"),
+            quantity=body.get("quantity"),
+            limit_price=body.get("limitPrice"),
+            status=detail.get("initialStatus"),
+            detail=detail,
+        )
+        raise HTTPException(status_code=504, detail=detail)
     if not result.ok and (
         _is_indeterminate_place_failure(result.error)
         or not (result.data and result.data.get("status") == "error")
@@ -6368,6 +6390,18 @@ async def _run_ib_script_with_recovery(
 
     result = await _runner(script, args, timeout=timeout)
 
+    # Recovery guidance must not erase a placing subprocess's explicit
+    # post-transmit uncertainty or broker identity. Raw/read scripts and
+    # deterministic pre-transmit failures retain their existing behavior.
+    result_data = getattr(result, "data", None)
+    placement_outcome = (
+        result_data
+        if script in _NON_IDEMPOTENT_IB_SCRIPTS
+        and isinstance(result_data, dict)
+        and result_data.get("indeterminate") is True
+        else None
+    )
+
     # Clear cooldown on success
     if result.ok:
         _ib_last_failure = 0.0
@@ -6397,6 +6431,7 @@ async def _run_ib_script_with_recovery(
                 )
                 result = ScriptResult(
                     ok=False,
+                    data=placement_outcome,
                     error="IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
                 )
             else:
@@ -6407,6 +6442,7 @@ async def _run_ib_script_with_recovery(
                 )
                 result = ScriptResult(
                     ok=False,
+                    data=placement_outcome,
                     error=(
                         "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
                         "approve any existing IBKR Mobile 2FA prompt."
@@ -6447,7 +6483,7 @@ async def _run_ib_script_with_recovery(
                             f" {len(working_perm_ids)} working orders were live "
                             f"at restart (permIds: {working_perm_ids})."
                         )
-                    result = ScriptResult(ok=False, error=error_msg)
+                    result = ScriptResult(ok=False, data=placement_outcome, error=error_msg)
                 else:
                     logger.info("IB Gateway restarted, retrying %s", script)
                     result = await _runner(script, args, timeout=timeout)
@@ -6455,6 +6491,7 @@ async def _run_ib_script_with_recovery(
                 logger.error("IB Gateway restart failed: %s", gw_result)
                 result = ScriptResult(
                     ok=False,
+                    data=placement_outcome,
                     error=f"IB Gateway is down and restart failed. {gw_result.get('error', '')}".strip()
                         + " Check IBKR Mobile for 2FA approval.",
                 )
