@@ -36,6 +36,9 @@ MAX_PDF_BYTES = 100 * 1024 * 1024
 MIN_INTERVAL_SECONDS = 1800
 BACKOFF_SECONDS = 900
 PROVIDER_BACKOFF_SECONDS = 21600
+# Allowance is already a durable error row. Exit 1 makes every timer fire a
+# new oneshot Result=exit-code and a P1 page. Other deferrals still fail.
+ALLOWANCE_DEFERRALS = frozenset({PREVIEW_QUOTA, "download_quota"})
 ID = re.compile(r"[A-Za-z0-9]{8,16}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 ASSET_PREFIX = "/api/newsfeed/research/files/"
@@ -89,6 +92,15 @@ def _code(error):
     value = str(error)
     return value if isinstance(error, MarketDeskError) and re.fullmatch(r"[a-z0-9_]{1,64}", value) else (
         "unauthenticated" if isinstance(error, MarketDeskAuthError) else "download_failed")
+
+
+def _deferral_code(exc):
+    prefix = "PDF archive deferred: "
+    message = str(exc)
+    if not message.startswith(prefix):
+        return ""
+    code = message[len(prefix):]
+    return code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else ""
 
 
 def _receipts_root(root):
@@ -194,10 +206,12 @@ def main(argv=None):
         return 0
     except CycleTerminated:
         return 143
-    except Exception as exc:
+    except DownloadDeferred as exc:
         # Only our explicit public error code is safe to print.
-        message = str(exc) if isinstance(exc, DownloadDeferred) else type(exc).__name__
-        print("[marketdesk-pdf] " + message, file=sys.stderr)
+        print("[marketdesk-pdf] " + str(exc), file=sys.stderr)
+        return 0 if _deferral_code(exc) in ALLOWANCE_DEFERRALS else 1
+    except Exception as exc:
+        print("[marketdesk-pdf] " + type(exc).__name__, file=sys.stderr)
         return 1
     finally:
         signal.signal(signal.SIGTERM, previous)

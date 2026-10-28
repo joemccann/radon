@@ -334,6 +334,14 @@ def test_export_candidate_uses_only_pinned_private_atomic_refs(monkeypatch, tmp_
     assert ancestry[-4:] == ["merge-base", "--is-ancestor", BASE, HEAD]
     assert f"{BASE}:refs/heads/validation/base/{BASE}" in args
     assert f"{HEAD}:refs/heads/validation/fix/{BASE}/{HEAD}" in args
+    # The export pushes the candidate's whole history, so it builds a large
+    # pack. The multithreaded pack writer produced a corrupt one on the
+    # nightly host -- the remote rejected the push with an inflate error at a
+    # different offset on each attempt while `git fsck` stayed clean, so the
+    # objects were sound and only the pack was bad. A corrupt pack fails the
+    # whole standing P1 release policy, so the writer is pinned single
+    # threaded here rather than left to the host's default.
+    assert "pack.threads=1" in args
     ssh = kwargs["env"]["GIT_SSH_COMMAND"]
     assert "IdentitiesOnly=yes" in ssh and "StrictHostKeyChecking=yes" in ssh
     assert "UserKnownHostsFile=" in ssh and "synthetic-private-key" not in str(kwargs)
