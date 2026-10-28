@@ -3396,6 +3396,28 @@ async def _orders_place_after_rate_reservation(
     result = await _run_ib_script_with_recovery(
         "ib_place_order.py", ["--json", order_json], timeout=25
     )
+    if isinstance(result.data, dict) and result.data.get("indeterminate") is True:
+        # A completed subprocess can still leave the broker outcome unknown.
+        # Preserve the placing client's identity and ambiguity before the
+        # generic status=error branch records a definitive rejection.
+        detail = {
+            **result.data,
+            "code": "ORDER_INDETERMINATE",
+            "orderRef": result.data.get("orderRef") or order_ref,
+        }
+        await record_order_event(
+            "indeterminate",
+            order_ref=detail["orderRef"],
+            order_id=detail.get("orderId"),
+            perm_id=detail.get("permId"),
+            symbol=body.get("symbol"),
+            action=body.get("action"),
+            quantity=body.get("quantity"),
+            limit_price=body.get("limitPrice"),
+            status=detail.get("initialStatus"),
+            detail=detail,
+        )
+        raise HTTPException(status_code=504, detail=detail)
     if not result.ok and (
         _is_indeterminate_place_failure(result.error)
         or not (result.data and result.data.get("status") == "error")

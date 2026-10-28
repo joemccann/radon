@@ -26,6 +26,7 @@ import {
   CONTENT_HASH_TTL_MS,
   CLIENT_KEY_TTL_MS,
   IndeterminatePlacementError,
+  markIndeterminatePlacement,
 } from "@/lib/orders/orderIdempotency";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import { ordersFreshRefreshInit } from "@/lib/orders/ordersFreshRefresh";
@@ -117,16 +118,17 @@ async function readOrdersSnapshotBestEffort() {
 /** Operator instruction for an order whose fate at IB is unknown. Never phrased
  *  as a plain failure — a plain failure invites the retry that double-places. */
 const INDETERMINATE_PLACEMENT_MESSAGE =
-  "Order status unknown: the request to IB timed out. The order may have reached IB. Check open orders before re-placing.";
+  "Order status unknown: IB did not confirm the request. The order may have reached IB. Check open orders before re-placing.";
 
 function indeterminatePlacementDetail(error: IndeterminatePlacementError): string {
-  if (error.deduplicated) {
-    return "A duplicate submit inside the idempotency window returned the first attempt's indeterminate result. The order was NOT sent again.";
-  }
   const cause = error.cause;
   const reason =
-    cause instanceof Error ? `${cause.name}: ${cause.message}` : "upstream request aborted";
-  return `Placement was not confirmed (${reason}). The idempotency key is held so an identical resubmit cannot double-place.`;
+    cause instanceof Error ? `${cause.name}: ${cause.message}` : "upstream outcome unknown";
+  const context = `Placement was not confirmed (${reason}).`;
+  if (error.deduplicated) {
+    return `${context} A duplicate submit inside the idempotency window returned the first attempt's indeterminate result. The order was NOT sent again.`;
+  }
+  return `${context} The idempotency key is held so an identical resubmit cannot double-place.`;
 }
 
 export const radonCapability = "mutate.trading";
@@ -454,6 +456,18 @@ export async function POST(request: Request): Promise<Response> {
           // "stuck-in-PendingSubmit" error. Below the script timeout would abort
           // before the error could surface.
           timeout: 30_000,
+        }).catch((error: unknown) => {
+          // A broker acknowledgement timeout can return JSON before this
+          // fetch aborts. Mark it inside the idempotent operation so the key
+          // is retained; doing this in the outer catch is already too late.
+          if (
+            error instanceof RadonApiError
+            && typeof error.detail === "object"
+            && error.detail.code === "ORDER_INDETERMINATE"
+          ) {
+            markIndeterminatePlacement(error);
+          }
+          throw error;
         });
         // IB silent rejection: submitted but immediately cancelled/inactive.
         const REJECTED_STATUSES = new Set(["Cancelled", "ApiCancelled", "Inactive", "Unknown"]);
@@ -482,10 +496,9 @@ export async function POST(request: Request): Promise<Response> {
         );
       }
       if (placeErr instanceof IndeterminatePlacementError) {
-        // The 30s client abort fires after FastAPI has the request (25s budget),
-        // so IB may already hold a live order. The generic 500 INTERNAL_ERROR
-        // envelope reads as "nothing happened" and invites the resubmit that
-        // double-places — answer with the ambiguity, explicitly.
+        // Both transport aborts and FastAPI's structured unknown outcome
+        // leave IB potentially holding a live order. Preserve that ambiguity
+        // and the idempotency hold instead of inviting a duplicate submit.
         return setNoStoreResponseHeaders(
           jsonApiError({
             message: INDETERMINATE_PLACEMENT_MESSAGE,
