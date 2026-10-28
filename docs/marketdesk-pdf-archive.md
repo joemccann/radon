@@ -94,9 +94,12 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 
 `marketdesk-pdf` uses a continuous 15-minute freshness window, maps to
 `radon-marketdesk-pdf.service`, and reports error during provider backoff.
-A normal admission wait with no provider failure is healthy. This row is
-separate from `marketdesk-research` and `marketdesk-dropbox`; a healthy article
-cycle cannot conceal a blocked archive.
+A normal admission wait with no provider failure is healthy. A persisted
+`preview_quota` or `download_quota` deferral keeps that error row, prints the
+deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.
+Other download failures still exit 1. This row is separate from
+`marketdesk-research` and `marketdesk-dropbox`; a healthy article cycle cannot
+conceal a blocked archive.
 
 Focused contracts are in `scripts/tests/test_marketdesk_pdf_store.py`,
 `scripts/tests/test_marketdesk_pdf_job.py`, and

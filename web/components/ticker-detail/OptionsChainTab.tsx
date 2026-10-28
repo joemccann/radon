@@ -2,7 +2,7 @@
 
 import RequestError from "@/components/RequestError";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Crosshair } from "lucide-react";
 import styles from "./ChainFirst.module.css";
@@ -113,13 +113,15 @@ function prefillLabelForSource(src: string | null | undefined): string {
 
 /* ─── Chain Strike Row ─── */
 
-function StrikeRow({
+const StrikeRow = memo(function StrikeRow({
   ticker,
   expiry,
   strike,
   callKey,
   putKey,
-  prices,
+  callData,
+  putData,
+  tickerData,
   isAtm,
   onClickCall,
   onClickPut,
@@ -136,7 +138,9 @@ function StrikeRow({
   strike: number;
   callKey: string;
   putKey: string;
-  prices: Record<string, PriceData>;
+  callData: PriceData | undefined;
+  putData: PriceData | undefined;
+  tickerData: PriceData | undefined;
   isAtm: boolean;
   onClickCall: (strike: number, action: "BUY" | "SELL") => void;
   onClickPut: (strike: number, action: "BUY" | "SELL") => void;
@@ -149,30 +153,36 @@ function StrikeRow({
   callColumns: readonly ChainColumn[];
   putColumns: readonly ChainColumn[];
 }) {
-  const callData = prices[callKey] ?? null;
-  const putData = prices[putKey] ?? null;
-
   // Black-Scholes implied (theoretical) per-share price. Reuses the same
   // resolver the dashboard PositionTable uses — same S, σ, K, T, r precedence.
   // contracts is set to 1 because we display per-share, not notional. Its
-  // inputs also price rho, which IB does not publish.
+  // inputs also price rho, which IB does not publish. Deps are the PriceData
+  // entries this leg actually reads so a tick on another strike does not
+  // reprice the rest of the ladder (PERF-032).
+  const tickerKey = ticker.toUpperCase();
   const callBs = useMemo(
     () =>
       computeLegImpliedValue(
         { ticker, expiry, strike, type: "Call", direction: "LONG", contracts: 1 },
-        prices,
+        {
+          ...(tickerData ? { [tickerKey]: tickerData } : {}),
+          ...(callData ? { [callKey]: callData } : {}),
+        },
         { riskFreeRate },
       ),
-    [ticker, expiry, strike, prices, riskFreeRate],
+    [ticker, tickerKey, expiry, strike, callKey, callData, tickerData, riskFreeRate],
   );
   const putBs = useMemo(
     () =>
       computeLegImpliedValue(
         { ticker, expiry, strike, type: "Put", direction: "LONG", contracts: 1 },
-        prices,
+        {
+          ...(tickerData ? { [tickerKey]: tickerData } : {}),
+          ...(putData ? { [putKey]: putData } : {}),
+        },
         { riskFreeRate },
       ),
-    [ticker, expiry, strike, prices, riskFreeRate],
+    [ticker, tickerKey, expiry, strike, putKey, putData, tickerData, riskFreeRate],
   );
 
   // Bidirectional reference: a leg staged in the ticket stays visible in the
@@ -192,7 +202,7 @@ function StrikeRow({
           col={col}
           side="call"
           strike={strike}
-          data={callData}
+          data={callData ?? null}
           bs={callBs}
           tint={callTint}
           onClick={onClickCall}
@@ -211,7 +221,7 @@ function StrikeRow({
           col={col}
           side="put"
           strike={strike}
-          data={putData}
+          data={putData ?? null}
           bs={putBs}
           tint={putTint}
           onClick={onClickPut}
@@ -219,7 +229,7 @@ function StrikeRow({
       ))}
     </tr>
   );
-}
+});
 
 const fmtFixed = (v: number | null | undefined, digits: number) => (v != null ? v.toFixed(digits) : "");
 const fmtVolPct = (v: number | null | undefined) => (v != null ? (v * 100).toFixed(1) : "");
@@ -1747,7 +1757,9 @@ export default function OptionsChainTab({
                     strike={row.strike}
                     callKey={row.callKey}
                     putKey={row.putKey}
-                    prices={prices}
+                    callData={prices[row.callKey]}
+                    putData={prices[row.putKey]}
+                    tickerData={prices[ticker.toUpperCase()]}
                     isAtm={isAtm}
                     onClickCall={handleCallClick}
                     onClickPut={handlePutClick}
