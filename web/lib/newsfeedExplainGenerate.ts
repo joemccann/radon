@@ -1,3 +1,4 @@
+import { assertHumanizedCopy, assertLocalHumanizer } from "./humanizer";
 import { alternateProvider, chat, resolveProvider, type LlmContentBlock, type LlmProviderName } from "@/lib/llm/provider";
 import {
   EXPLAIN_THIN_MESSAGE,
@@ -127,6 +128,7 @@ async function draftExplanation(
   onStage("checking");
   const explanation = stripExplainDisclaimer(result.text);
   if (!explanation) throw new Error("Empty explanation");
+  await assertHumanizedCopy({ content: explanation }, { provider, signal, timeoutMs: EXPLAIN_BUDGET_MS });
   const hasImage = images.length > 0;
   await writeExplainCache({
     postId: input.postId,
@@ -152,7 +154,11 @@ export async function explainNewsfeedPost(
 ): Promise<ExplainResult> {
   const contentHash = explainContentHash(input);
   const cached = await readExplainCache(input.postId, contentHash);
+  let cachePassed = false;
   if (cached) {
+    try { assertLocalHumanizer({ content: cached.explanation }); cachePassed = true; } catch { /* Regenerate rejected cache entries. */ }
+  }
+  if (cached && cachePassed) {
     options.onStage("loading");
     return { ...cached, cached: true, thin: false };
   }

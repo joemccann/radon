@@ -41,6 +41,7 @@ import {
 import { detectRealizedPnlWindow, formatRealizedPnlAnswer } from "@/lib/assistant/pnlIntent";
 import { etCalendarDateString } from "@/lib/orders/executedToday";
 import type { AssistantOrderComboLeg, AssistantOrderInput } from "@/lib/types";
+import { localHumanizerFindings } from "@/lib/humanizerCheck";
 import { AssistantResponseQualityError, hasRepetitiveText } from "@/lib/assistant/responseQuality";
 
 export const MAX_ROUNDS = 8;
@@ -363,20 +364,31 @@ export async function runAssistantLoop(
     return formatRealizedPnlAnswer(lastPnlData) ?? "";
   };
 
+  const failsProseReview = (text: string) => {
+    if (!text?.trim()) return false; // Empty text accompanies normal tool-use responses.
+    if (hasRepetitiveText(text)) return true;
+    try {
+      return localHumanizerFindings({ content: text }).some(finding => finding.category === "negative_parallelism");
+    } catch {
+      return true; // Over-budget prose uses the existing bounded repair/error path.
+    }
+  };
+
   const checkedChat = async (request: LlmChatRequest) => {
     const response = await chat(request);
     usedFallback = usedFallback || Boolean(response.usedFallback);
-    if (!hasRepetitiveText(response.text)) return response;
+    if (!failsProseReview(response.text)) return response;
     accumulateUsage(response.usage);
-    console.warn("[assistant] rejected repetitive completion; retrying once");
+    console.warn("[assistant] rejected completion quality; retrying once");
     if (signal?.aborted) throw new AssistantResponseQualityError();
     const repaired = await chat({
       ...request,
-      system: request.system + " A previous generation repeated itself and was discarded. " +
+      system: request.system + " A previous generation failed the Humanizer or repetition check and was discarded. " +
+        "Remove negative parallelism such as X, not Y; state the supported fact directly. Preserve all source uncertainty. " +
         "Respond concisely to the user's request. Do not narrate waiting for tools or repeat phrases.",
     });
     usedFallback = usedFallback || Boolean(repaired.usedFallback);
-    if (hasRepetitiveText(repaired.text)) throw new AssistantResponseQualityError();
+    if (failsProseReview(repaired.text)) throw new AssistantResponseQualityError();
     return repaired;
   };
 

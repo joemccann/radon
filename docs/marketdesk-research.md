@@ -352,3 +352,19 @@ journalctl -u radon-marketdesk.service -n 50
 - **Rollback:** `systemctl disable --now radon-marketdesk.timer` stops new posts.
   Published rows stay. The retired watcher is not a rollback target: deploys
   disable it on every `restart-managed` and `recover`.
+
+## Generated-copy editorial admission
+
+Every generated title, body and figure caption passes the shared Humanizer
+review before publication. The exact-copy certificate includes captions and the
+current rubric version. Deterministic structural checks reject negative
+parallelisms, including comma and sentence-split variants, even when a model
+reports no findings. A score of at least 90 and no qualitative findings are
+required. Rewrites retain source numbers, attribution, direction and conditions;
+a separate semantic check precedes the last editorial review. Failed captions
+hold the article for regeneration. Stale outbox certificates require re-review.
+
+The cross-service contract and share/cache behavior are documented in
+[Generated-copy Humanizer gate](generated-copy-humanizer.md). Existing published
+rows require separate reviewed corrections; deploying this gate does not rewrite
+article history.

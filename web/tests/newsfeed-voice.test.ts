@@ -71,3 +71,10 @@ describe("newsfeed voice", () => {
     expect(() => parseVoiceCopy(JSON.stringify({ title: "Meta: $30B-$60B from Muse", content: "Revenue opportunity from Muse." }), evidence)).toThrow("Unsupported numerical claim");
   });
 });
+
+describe("Humanizer output boundary", () => {
+  it("rejects the reported contrast in final voice copy", () => {
+    const copy = { title: "Dollar setup", content: "That's a conditional dollar-strength setup, not a confirmed breakout." };
+    expect(() => parseVoiceCopy(JSON.stringify(copy), copy)).toThrow(/Humanizer/);
+  });
+});
