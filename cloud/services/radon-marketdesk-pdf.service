@@ -20,6 +20,9 @@ StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=240
 SuccessExitStatus=143
+# Ends before the deploy helper's 60s stop wait, with room for ExecStopPost
+# cleanup; radon-marketdesk.service carries the 2026-10-27 outage that set it.
+TimeoutStopSec=40
 
 [Install]
 WantedBy=multi-user.target
