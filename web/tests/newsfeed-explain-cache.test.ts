@@ -3,6 +3,9 @@ import { createClient, type Client } from "@libsql/client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+const { editorialReview } = vi.hoisted(() => ({ editorialReview: vi.fn() }));
+vi.mock("@/lib/humanizer", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/humanizer")>(), assertHumanizedCopy: editorialReview }));
+
 const MIGRATION = readFileSync(
   path.join(__dirname, "../../scripts/db/migrations/0096_newsfeed_explanations.sql"),
   "utf8",
@@ -28,6 +31,7 @@ async function exec(sql: string) {
 beforeEach(async () => {
   vi.resetModules();
   chat.mockReset();
+  editorialReview.mockReset().mockResolvedValue({ score: 100, findings: [], qualitative: [] });
   db = createClient({ url: ":memory:" });
   await db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   await exec(MIGRATION);
@@ -182,4 +186,21 @@ describe("newsfeed explain cache and generate", () => {
     );
     vi.unstubAllGlobals();
   });
+  it("does not persist a draft when the final editorial review fails", async () => {
+    chat.mockResolvedValue({ text: "The auction paid plants to stay available.", provider: "anthropic", model: "test" });
+    editorialReview.mockRejectedValue(new Error("Humanizer review rejected the draft"));
+    const { explainNewsfeedPost } = await import("@/lib/newsfeedExplainGenerate");
+    await expect(explainNewsfeedPost(input, { signal: new AbortController().signal, onStage: () => {} })).rejects.toThrow(/Humanizer/);
+    expect(Number((await db.execute("SELECT COUNT(*) AS n FROM newsfeed_explanations")).rows[0].n)).toBe(0);
+  });
+  it("regenerates a cache entry containing deterministic slop", async () => {
+    const { writeExplainCache } = await import("@/lib/newsfeedExplainCache");
+    const { explainContentHash } = await import("@/lib/newsfeedExplain");
+    await writeExplainCache({ postId: input.postId, contentHash: explainContentHash(input), explanation: "That's a conditional dollar-strength setup, not a confirmed breakout.", provider: "anthropic", model: "test", hasImage: false });
+    chat.mockResolvedValue({ text: "The auction paid plants to stay available.", provider: "anthropic", model: "test" });
+    const { explainNewsfeedPost } = await import("@/lib/newsfeedExplainGenerate");
+    await expect(explainNewsfeedPost(input, { signal: new AbortController().signal, onStage: () => {} })).resolves.toMatchObject({ cached: false });
+    expect(editorialReview).toHaveBeenCalledOnce();
+  });
+
 });

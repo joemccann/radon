@@ -15,27 +15,58 @@ there is no separate root installation step.
 
 ## Durable queue and limits
 
-Migration `0103_marketdesk_pdf_queue.sql` creates `marketdesk_pdf_queue` and a
-singleton `marketdesk_pdf_throttle`. Article discovery calls `enqueue(ref)`.
-Every archive cycle also seeds missing PDFs from the entire article ledger,
-including older pending, held and dropped documents outside the latest-25
-provider listing. Existing stored PDFs are not downloaded again.
+Migration `0103_marketdesk_pdf_queue.sql` creates the queue and account clock;
+`0104_marketdesk_pdf_account_backoff.sql` adds durable quota escalation and
+PDF-only selection decisions. Discovery can only enqueue published reports.
+Each archive cycle seeds missing published reports from the full ledger,
+including articles outside the latest-25 listing. The claim rechecks publication
+and matching MarketDesk provenance. Pending, held, dropped, failed, deleted or
+mismatched sources cannot authorize a new download. Existing queue rows and
+saved assets remain intact.
 
-One cycle admits at most one download. The default global minimum interval is
-300 seconds. `MARKETDESK_PDF_MIN_INTERVAL_SECONDS` may increase that interval;
-values below 300 are clamped. Admission is committed in Turso before network
-work, so a restart cannot reset the throttle. A 600-second token lease permits
-recovery after a killed worker and prevents a stale lease owner from committing
-over a replacement attempt.
+The operator selected **stricter portfolio/watchlist and relevance filters for
+PDFs** on 2026-10-27. This does not narrow newsfeed publication. A deterministic
+PDF-only policy reads the current cloud watchlist, latest IB portfolio snapshot
+and approved research triage rules. Missing/invalid book context fails closed;
+local stale JSON and model guesses cannot admit downloads. It excludes FX pair
+notes, routine calendars, denied publishers/series/types, off-book security
+reports and unmeasured commentary. Book/watchlist names, established preferred
+desks, and measured market research on flows, positioning, options, volatility,
+liquidity, breadth, aggregate earnings, rates, credit and chip/AI investment remain in
+scope. Ambiguous relevance is excluded with an explicit reason rather than
+spending account allowance. No PDF or extra model call is needed for selection.
+
+At most 100 stale/new decisions are refreshed per timer cycle, using published
+source titles and feed text. The context hash changes with book/rules/policy;
+post edits also invalidate selection. Claims require a current eligible
+selection, so old decisions cannot leak through during a refresh. Rejected
+rows do not block later batches and can become eligible after a book change.
+The queue, selection table and account clock expose filtered versus deferred
+backlog separately.
+
+One cycle admits at most one PDF. The global minimum interval is 1,800 seconds
+(30 minutes). `MARKETDESK_PDF_MIN_INTERVAL_SECONDS` can increase it; existing
+values below 1,800 are clamped in both the worker and the store. Admission is
+committed before provider access, so restart/deployment cannot cause a catch-up
+burst. A 600-second token lease recovers a killed worker and protects against
+stale acknowledgements. The successful lease token is recorded separately so
+a stale owner cannot claim another worker's acknowledgement. This is conservative local pacing, not a documented
+MarketDesk rate guarantee; the same account's interactive use also consumes
+its provider allowance.
 
 The archive uses the existing authenticated `/files/<id>/blob` operation,
 which the provider routes through its preview file server. Its historical
 success does not override the current provider allowance. No working independent
 download endpoint has been verified; a `downloads: true` account flag does not
 make a blocked preview hop work. The archive never guesses file-server URLs or
-bypasses a provider refusal. Provider allowance/session errors defer the queue
-for one hour; other download failures defer it for at
-least 15 minutes. Both the item retry and the global backoff are persisted.
+bypasses a provider refusal. Before requesting bytes, the worker checks the
+provider's account allowance. A spent allowance causes no PDF request.
+Allowance errors and HTTP 429 defer the entire account for 6 hours, then 12,
+then 24 hours, capped at 24 across all subsequent refusals. The streak is
+shared across reports and survives restarts. Only a verified fresh provider
+success resets it; recovering a saved receipt does not. Authentication failures
+back off one hour, other failures at least 15 minutes, with the 30-minute
+admission floor still enforced. Item/account retry clocks commit atomically.
 Queued work is retained rather than retired after a fixed number of failures.
 Blocked archive health does not stop news publication.
 
@@ -56,8 +87,8 @@ retried on a later cycle. The archive does not change `contentHash`, `url`,
 article identity, title, body or Humanizer certificate. The existing article
 ledger receives `pdf_asset` and `pdf_sha256`, preserving its Dropbox outbox:
 the article service uploads a ready PDF on its next normal cycle. A PDF saved
-before publication is attached after the article exists; held and dropped
-notes retain their existing PDF outbox eligibility.
+before this policy is still reconciled locally; later held or dropped notes
+retain already-stored PDF outbox assets. They do not authorize new downloads.
 
 ## Health and verification
 
@@ -73,7 +104,8 @@ conceal a blocked archive.
 Focused contracts are in `scripts/tests/test_marketdesk_pdf_store.py`,
 `scripts/tests/test_marketdesk_pdf_job.py`, and
 `cloud/tests/test_marketdesk_pdf_runtime.py`. The parent MarketDesk release owns
-the complete test gates and production backlog/browser verification.
+the complete test gates and production backlog verification. Selection contracts
+are in `scripts/tests/test_marketdesk_pdf_policy.py`.
 
 Rollback: stop and disable `radon-marketdesk-pdf.timer` through the managed
 service controls before reverting to a runtime that does not recognize its

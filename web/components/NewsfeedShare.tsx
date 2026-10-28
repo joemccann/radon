@@ -1,14 +1,17 @@
 "use client";
+import { assertLocalHumanizer } from "@/lib/humanizerCheck";
+import { HUMANIZER_VERSION } from "@/lib/humanizerPolicy";
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
-import { buildShareCaption, buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
+import { buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import { readVoiceRewrite, voiceProgress, VOICE_REWRITE_CLIENT_TIMEOUT_MS, VOICE_STAGE_LABELS, type VoiceStage } from "@/lib/newsfeedVoiceProgress";
 import styles from "./NewsfeedShare.module.css";
 
-const voiceDrafts = new Map<string, { title: string; content: string }>();
+const voiceCacheKey = (post: SharePost) => JSON.stringify([HUMANIZER_VERSION, post.id, post.title, post.content]);
+const voiceDrafts = new Map<string, { title: string; content: string; caption: string }>();
 export function resetNewsfeedShareVoiceCache() { voiceDrafts.clear(); }
 
 export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; imageUrl?: string }) {
@@ -27,15 +30,18 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
 
 function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
   const id = useId();
-  const cached = voiceDrafts.get(post.id);
-  const [caption, setCaption] = useState(() => buildShareCaption(post, imageUrl));
+  const cacheKey = voiceCacheKey(post);
+  const cached = voiceDrafts.get(cacheKey);
+  const [caption, setCaption] = useState(() => cached?.caption ?? "");
   const original = useRef(post);
-  const [rewrite, setRewrite] = useState<{ title: string; content: string } | undefined>(cached);
+  const originalCacheKey = useRef(cacheKey);
+  const [rewrite, setRewrite] = useState<{ title: string; content: string; caption: string } | undefined>(cached);
   const [rewriting, setRewriting] = useState(!cached);
   const [voiceError, setVoiceError] = useState("");
   const [voiceAttempt, setVoiceAttempt] = useState(0);
   const [voiceStage, setVoiceStage] = useState<VoiceStage>("queued");
-  const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : post, [post, rewrite]);
+  const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : undefined, [post, rewrite]);
+  const ready = !!rewrite && !rewriting;
   const [preview, setPreview] = useState<string>();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -54,7 +60,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   useEffect(() => {
     const abort = new AbortController();
     let cancelled = false;
-    const hit = voiceAttempt === 0 ? voiceDrafts.get(original.current.id) : undefined;
+    const hit = voiceAttempt === 0 ? voiceDrafts.get(originalCacheKey.current) : undefined;
     if (hit) {
       setRewrite(hit);
       setRewriting(false);
@@ -72,19 +78,23 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         content: sanitizeShareText(original.current.content || ""),
       }),
     }).then(async response => {
-      if (!response.ok) throw new Error("Voice rewrite unavailable. Showing the original copy.");
+      if (!response.ok) throw new Error("Verified copy is unavailable. Retry to share.");
       const draft: unknown = await readVoiceRewrite(response, stage => { if (!cancelled) setVoiceStage(stage); });
       if (!draft || typeof draft !== "object" || !("title" in draft) || !("content" in draft)
         || typeof draft.title !== "string" || typeof draft.content !== "string"
+        || !("humanizerVersion" in draft) || draft.humanizerVersion !== HUMANIZER_VERSION
+        || !("caption" in draft) || typeof draft.caption !== "string" || !draft.caption.trim()
         || !sanitizeShareText(draft.title) || !sanitizeShareText(draft.content)) {
-        throw new Error("Voice rewrite unavailable. Showing the original copy.");
+        throw new Error("Verified copy is unavailable. Retry to share.");
       }
       if (cancelled) return;
-      const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content) };
-      voiceDrafts.set(original.current.id, next);
+      const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content), caption: sanitizeXShareText(draft.caption) };
+      assertLocalHumanizer(next);
+      voiceDrafts.set(originalCacheKey.current, next);
       setRewrite(next);
+      setCaption(next.caption);
     }).catch(() => {
-      if (!cancelled) setVoiceError("Voice rewrite unavailable. Showing the original copy.");
+      if (!cancelled) setVoiceError("Verified copy is unavailable. Retry to share.");
     }).finally(() => { if (!cancelled) setRewriting(false); }); }, 0);
     return () => { cancelled = true; clearTimeout(start); abort.abort(); };
   }, [voiceAttempt]);
@@ -96,6 +106,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     setPreview(undefined);
     controller.current?.abort();
     setError("");
+    if (!sharePost) return;
     void renderShareCard(sharePost, imageUrl).then(async rendered => {
       const blob = await canvasToPng(rendered);
       if (cancelled) return;
@@ -107,7 +118,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   }, [sharePost, imageUrl, attempt]);
 
   async function download(video: boolean) {
-    if (!canvas.current || busy || rewriting) return;
+    if (!canvas.current || busy || !ready) return;
     setBusy(true); setError(""); setMessage("");
     controller.current = new AbortController();
     try {
@@ -128,6 +139,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   }
 
   async function copyCaption() {
+    if (!ready) return;
     try { await navigator.clipboard.writeText(sanitizeXShareText(caption)); setMessage("Caption copied."); }
     catch { setError("Copy unavailable. Select and copy the caption below."); }
   }
@@ -142,16 +154,16 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
-        <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
-        <button type="button" disabled={!preview || busy || rewriting} onClick={() => void download(false)}>Download Story image</button>
-        <button type="button" disabled={!preview || busy || rewriting || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
+        <a className={styles.action} href={ready ? buildXShareUrl(caption) : undefined} role="link" aria-disabled={!ready} onClick={event => { if (!ready) event.preventDefault(); }} target="_blank" rel="noopener noreferrer">Compose on X</a>
+        <button type="button" disabled={!preview || busy || !ready} onClick={() => void download(false)}>Download Story image</button>
+        <button type="button" disabled={!preview || busy || !ready || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
         <p>Save the image or video, then upload in your social app. Attach images separately on X.</p>
         {!mp4 ? <p>MP4 export is unavailable in this browser. Use a browser with MP4 recording support, or import the image in your video editor.</p> : null}
       </div>
     </div>
     <label className={styles.label} htmlFor={id}>Post caption</label>
-    <textarea id={id} disabled={rewriting} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
-    <div className={styles.captionActions}><button type="button" disabled={rewriting} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters</span></div>
+    <textarea id={id} disabled={!ready} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
+    <div className={styles.captionActions}><button type="button" disabled={!ready} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters</span></div>
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
     {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
     {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}

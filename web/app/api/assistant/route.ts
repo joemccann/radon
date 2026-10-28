@@ -9,6 +9,7 @@ import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { buildDemoAssistantReply, DEMO_ASSISTANT_MODEL } from "@/lib/demo/fixtures/assistant";
 import { etCalendarDateString } from "@/lib/journal/rangePnl";
+import { HUMANIZER_DRAFT_INSTRUCTION } from "@/lib/humanizerPolicy";
 import { validateModelId } from "@/lib/llm/catalog";
 
 type ChatRole = "user" | "assistant";
@@ -59,7 +60,7 @@ export const SYSTEM_PROMPT =
   "The same fill can appear in BOTH families; never sum across families without deduping, and rows marked dup:true duplicate an aggregate. " +
   "Closes lot-match against opens by VWAP (per-unit basis = open_basis / quantity), and the matching open may lie OUTSIDE the date window you queried: a close early in a week can realize P&L against an open from a prior week. " +
   "For realized P&L questions prefer get_realized_pnl: it dedupes and lot-matches for you, attributes P&L to the close date, and handles cross-window opens. Use query_journal only to inspect raw rows. " +
-  "The operator may attach chart or screenshot images to a message: read every attached image as part of that request.";
+  "The operator may attach chart or screenshot images to a message: read every attached image as part of that request. " + HUMANIZER_DRAFT_INSTRUCTION;
 
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||

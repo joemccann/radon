@@ -8,7 +8,7 @@ from research import humanizer
 
 def post(content="Goldman Sachs reports $45bn of net equity purchases in July.", **extra):
     return {"title": "Foreign equity purchases rose in July", "content": content,
-            "source": {"pages": [1], "figures": [{"caption": "Robust chart highlight"}]} , **extra}
+            "source": {"pages": [1], "figures": [{"caption": "Equity purchases"}]} , **extra}
 
 
 def finding(content, text, category="significance_inflation", field="content"):
@@ -41,7 +41,7 @@ def run(value=None, *responses, verify=lambda _: True, max_rewrites=2):
     return result, list(latest.values()), ask.calls
 
 
-def test_clean_copy_preserves_source_and_certifies_only_summary():
+def test_clean_copy_preserves_source_and_certifies_all_copy():
     original = post()
     value, records, calls = run(original)
     assert original == post()
@@ -50,7 +50,7 @@ def test_clean_copy_preserves_source_and_certifies_only_summary():
     assert records[0]["title"] == original["title"]
     assert records[0]["content"] == original["content"]
     assert records[0]["status"] == "passed"
-    assert "Robust chart highlight" not in calls[0]
+    assert "Equity purchases" in calls[0]
     humanizer.validate_certificate(value)
 
 
@@ -318,6 +318,31 @@ def test_overlapping_same_category_findings_are_one_distinct_passage():
     assert len(patterns) == 1 and patterns[0]["text"] == "stands as a pivotal moment in equities"
 
 
+def test_broad_finding_cannot_bridge_two_disjoint_same_category_passages():
+    text = "This reflects broader conditions. It sets the stage for growth."
+    first = finding(text, "reflects broader conditions", "significance_inflation")
+    second = finding(text, "sets the stage for growth", "significance_inflation")
+    bridge = finding(text, text, "significance_inflation")
+    value, audits, _ = run(post(text), {"findings": [first, second, bridge], "qualitative": []}, max_rewrites=0)
+    assert value is None and audits[0]["score"] == 80
+    assert [item["text"] for item in audits[0]["findings"]] == [
+        "reflects broader conditions", "sets the stage for growth",
+    ]
+
+
+def test_new_broad_finding_cannot_bridge_unchanged_previous_passages():
+    text = "This reflects broader conditions. It sets the stage for growth."
+    first = finding(text, "reflects broader conditions", "significance_inflation")
+    second = finding(text, "sets the stage for growth", "significance_inflation")
+    bridge = finding(text, text, "significance_inflation")
+    previous = humanizer._normalise_findings(post(text), [first, second])
+    current = humanizer._normalise_findings(post(text), [bridge])
+    combined = humanizer._dedupe(previous + current)
+    assert [item["text"] for item in combined] == [
+        "reflects broader conditions", "sets the stage for growth",
+    ]
+
+
 def test_moving_capitalized_offending_passage_between_fields_does_not_erase_it():
     text = "In order to count purchases, Goldman Sachs checked July data."
     original = post(text)
@@ -367,7 +392,7 @@ def test_duplicate_model_quotes_are_deduplicated_before_occurrence_expansion(mon
     assert len(values) == 2000 and len(searches) == 1
 
 
-def test_carry_deduplicates_casefolded_needles_before_searching_both_fields(monkeypatch):
+def test_carry_deduplicates_casefolded_needles_before_searching_all_fields(monkeypatch):
     original = humanizer.re.finditer
     searches = []
     def counted(*args, **kwargs):
@@ -378,7 +403,7 @@ def test_carry_deduplicates_casefolded_needles_before_searching_both_fields(monk
                  "text": "robust" if i%2 else "ROBUST", "category": "vocabulary", "deduction": 5}
                 for i in range(200)]
     values = humanizer._carry_unchanged(post(" ".join(["robust"]*200)), previous)
-    assert len(values) == 200 and len(searches) == 2
+    assert len(values) == 200 and len(searches) == 3
 
 
 def test_local_finding_overflow_holds_before_model_call_and_keeps_full_draft():
@@ -484,3 +509,98 @@ def test_reply_ok_accepts_well_formed_reviews():
     ({"title": 1, "content": "x"}, False), ([], False)])
 def test_reply_ok_checks_rewrite_shape(rewrite, ok):
     assert humanizer.reply_ok(humanizer.REWRITE_INSTRUCTION + "{}", rewrite) is ok
+
+
+@pytest.mark.parametrize('text', [
+    "That's a conditional dollar-strength setup, not a confirmed breakout.",
+    'DXY is testing 102.86, not a confirmed breakout.',
+    "It isn't a breakout. It's a conditional setup.",
+    "This is not a rally but a positioning squeeze.",
+    'Not only demand but also supply improved.',
+    'The risk is positioning—not earnings.',
+    "That's a conditional setup. Not a confirmed breakout.",
+    "That's a conditional setup. It's not a confirmed breakout.",
+    'The risk is positioning. It is not earnings.',
+    'The risk is positioning.\nNot earnings.',
+    'I hope this helps.',
+])
+def test_clean_model_verdict_cannot_bypass_local_qualitative_rules(text):
+    value, audits, _ = run(post(text), clean(), max_rewrites=0)
+    assert value is None
+    assert audits[0]['qualitative']
+    assert all(f['deduction'] == 0 for f in audits[0]['qualitative'])
+
+
+def test_local_qualitative_keeps_measured_contrasts_and_conditionality():
+    text = 'DXY rose 2%, not 3%. The measured gain was 2%. Not 3%. If DXY closes above 104.59, Pictet targets 110. USD/CHF fell while USD/JPY rose.'
+    value, _, _ = run(post(text), clean())
+    assert value['content'] == text
+
+
+def test_sentence_split_negative_parallelism_cannot_pass_clean_review():
+    text = "That's a conditional dollar-strength setup. Not a confirmed breakout."
+    value, audits, _ = run(post(text), clean(), max_rewrites=0)
+    assert value is None
+    assert audits[-1]['qualitative'][0]['category'] == 'negative_parallelism'
+
+
+def test_certificate_cannot_forge_clean_verdict_for_negative_parallelism():
+    value, _, _ = run(post(), clean())
+    value['content'] = "That's a conditional setup, not a confirmed breakout."
+    value['source']['humanizer']['copy_sha256'] = humanizer.copy_digest(value)
+    with pytest.raises(ValueError, match='rubric'):
+        humanizer.validate_certificate(value)
+
+
+def test_caption_is_reviewed_and_bound_to_certificate():
+    original = post()
+    original['source']['figures'][0]['caption'] = 'Robust chart highlight'
+    value, _, calls = run(original, clean())
+    assert 'Robust chart highlight' in calls[0]
+    assert value['source']['humanizer']['score'] == 95
+    value['source']['figures'][0]['caption'] = 'An altered caption'
+    with pytest.raises(ValueError, match='stale'):
+        humanizer.validate_certificate(value)
+
+
+def test_caption_qualitative_blocks_clean_model_verdict():
+    original = post()
+    original['source']['figures'][0]['caption'] = 'A setup, not a confirmed breakout.'
+    value, _, _ = run(original, clean(), max_rewrites=0)
+    assert value is None
+
+
+def test_model_can_flag_caption_with_qualitative_rubric():
+    original = post()
+    quote = original['source']['figures'][0]['caption']
+    reply = {'findings': [], 'qualitative': [{'field': 'caption:0', 'text': quote, 'category': 'filler'}]}
+    assert humanizer.reply_ok(_review_prompt(original), reply)
+    value, audits, _ = run(original, reply, max_rewrites=0)
+    assert value is None
+    assert audits[-1]['qualitative'][0]['field'] == 'caption:0'
+
+
+def test_flat_caption_key_cannot_override_source_caption_at_publication():
+    original = post()
+    original['source']['figures'][0]['caption'] = "A setup, not a confirmed breakout."
+    original['caption:0'] = 'Flows'
+    value, _, _ = run(original, clean(), max_rewrites=0)
+    assert value is None
+
+
+def test_rewrite_is_rescanned_when_model_calls_new_contrast_clean():
+    original = post('Robust innovative seamless purchases were $45bn.')
+    revision = {'title': original['title'], 'content': 'Purchases were $45bn, not a breakout.'}
+    value, audits, _ = run(original, clean(), revision, clean(), max_rewrites=1)
+    assert value is None
+    assert audits[-1]['score'] == 100
+    assert audits[-1]['qualitative'][0]['category'] == 'negative_parallelism'
+
+
+def test_same_caption_finding_cannot_disappear_after_body_rewrite():
+    original = post('Robust innovative seamless purchases were $45bn.')
+    reply = {'findings': [], 'qualitative': [{'field': 'caption:0', 'text': 'Equity purchases', 'category': 'filler'}]}
+    revision = {'title': original['title'], 'content': 'Purchases were $45bn.'}
+    value, audits, _ = run(original, reply, revision, clean(), max_rewrites=1)
+    assert value is None
+    assert audits[-1]['qualitative'][0]['field'] == 'caption:0'

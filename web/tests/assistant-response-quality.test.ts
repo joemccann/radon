@@ -37,6 +37,27 @@ describe("assistant generation and knowledge continuation", () => {
     expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10 });
   });
 
+  it("rejects the reported contrast before returning copy or executing attached tools", async () => {
+    const slop = "That's a conditional dollar-strength setup, not a confirmed breakout.";
+    const chat = vi.fn().mockResolvedValueOnce(response(slop, [call("get_quote")]))
+      .mockResolvedValueOnce(response("Pictet requires a sustained close above 104.59 for a breakout toward 110."));
+    const { runAssistantLoop, executeTool } = await load(chat);
+    const result = await runAssistantLoop([{ role: "user", content: "Explain the dollar setup" }], "system", PRINCIPAL);
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(result.content).not.toContain("not a confirmed breakout");
+    expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10 });
+    expect(chat.mock.calls[1][0].system).toContain("Humanizer");
+  });
+
+  it("fails closed when the repair still contains a prohibited contrast", async () => {
+    const chat = vi.fn().mockResolvedValue(response("This is a conditional setup, not a breakout."));
+    const { runAssistantLoop } = await load(chat);
+    await expect(runAssistantLoop([{ role: "user", content: "Explain the setup" }], "system", PRINCIPAL))
+      .rejects.toMatchObject({ name: "AssistantResponseQualityError" });
+    expect(chat).toHaveBeenCalledTimes(2);
+  });
+
   it("fails through the existing safe error path when repair is also repetitive", async () => {
     const chat = vi.fn().mockResolvedValue(response(LOOP));
     const { runAssistantLoop } = await load(chat);

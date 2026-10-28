@@ -327,6 +327,18 @@ other home credential store (`~/.claude`, `~/.codex`, `~/.gnupg`,
 responder and upgrade units, and the clone syncs `main` over public HTTPS,
 so the agent's sandbox holds no GitHub credential.
 
+The subscription vault's runtime directory (`/run/radon-subscription-vault`)
+is in both deny-lists too. The vault broker answers its socket with no
+client authorization -- no peer-credential or keeper-identity check -- so the
+socket's mode and the owner of its directory are the whole access control,
+and that owner is the same application account these units run as. Without
+the deny entry an agent session could read the sealed third-party
+subscription credentials straight off the socket, which is exactly what the
+rest of the deny-list exists to prevent. `radon-subscription-tokens.service`
+is the vault's only intended client and is a separate unit, so it keeps its
+access; `cloud/tests/test_grok_sandbox_contract.py` pins both halves of that
+split.
+
 `scripts/grok_fix_pickup.py` on the Mac mini (launchd
 `com.radon.grok-fix-pickup`, every 15 min) first refreshes its clone to
 `origin/main`, then fetches those branches over the

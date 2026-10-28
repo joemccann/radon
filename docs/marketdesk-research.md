@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) persists its own throttle/backoff and retries provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. Other download failures still exit 1.
+The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. Other download failures still exit 1.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
@@ -23,7 +23,9 @@ images, stores charts as private research assets, and applies source, identity
 and duplicate safety. Every suitable report proceeds to copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. Independently archived PDFs are
 then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
-the library's folder layout, whether or not the item was published. No browser runs.
+the library's folder layout. New PDF downloads require publication plus the
+archive's stricter portfolio/watchlist and relevance policy; article coverage
+is unchanged. Previously archived assets keep their existing outbox behavior. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
 watcher stay served. MarketDesk admission is separate from the unchanged
@@ -352,3 +354,19 @@ journalctl -u radon-marketdesk.service -n 50
 - **Rollback:** `systemctl disable --now radon-marketdesk.timer` stops new posts.
   Published rows stay. The retired watcher is not a rollback target: deploys
   disable it on every `restart-managed` and `recover`.
+
+## Generated-copy editorial admission
+
+Every generated title, body and figure caption passes the shared Humanizer
+review before publication. The exact-copy certificate includes captions and the
+current rubric version. Deterministic structural checks reject negative
+parallelisms, including comma and sentence-split variants, even when a model
+reports no findings. A score of at least 90 and no qualitative findings are
+required. Rewrites retain source numbers, attribution, direction and conditions;
+a separate semantic check precedes the last editorial review. Failed captions
+hold the article for regeneration. Stale outbox certificates require re-review.
+
+The cross-service contract and share/cache behavior are documented in
+[Generated-copy Humanizer gate](generated-copy-humanizer.md). Existing published
+rows require separate reviewed corrections; deploying this gate does not rewrite
+article history.

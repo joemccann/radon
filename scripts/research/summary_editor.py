@@ -24,9 +24,10 @@ def _numbers(post):
 
 
 def edit_summaries(posts, *, ask, text, audit, out, source_context=None):
-    """Review exact final title/body, retaining every attempt before further model I/O.
+    """Review exact final title/body/captions, retaining every attempt before further model I/O.
 
-    Source captions and all non-copy fields are immutable. Existing source verification
+    Captions are scored but immutable: flagged captions hold for upstream regeneration.
+    All non-copy fields are immutable. Existing source verification
     precedes this stage; every rewrite gets fresh local grounding and semantic review.
     Provider/deadline exceptions deliberately propagate to the durable queue owner.
     """
