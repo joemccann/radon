@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-marketdesk.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -129,7 +129,7 @@ in_list() {
 uses_secret_store() { in_list "$1" "$SECRET_STORE_UNITS"; }
 is_store_job() { in_list "$1" "$STORE_JOB_UNITS"; }
 # Units that own the private research bind read-write and nothing else.
-is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-marketdesk.service" ]]; }
+is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
 # Units whose Chromium renders third-party web content. Each gets an isolated
 # bridge network, the vendored seccomp profile, a sized /dev/shm, an env
 # allowlist and no writable host-shared credential grant.
@@ -698,7 +698,7 @@ render_env_file() {
     # may fall back to --no-sandbox); hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
-      grep -E '^(#|$|(NODE_ENV|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
+      grep -E '^(#|$|(NODE_ENV|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       # grep's 1 means a valid empty allowlist; 2 means a failed filter.
@@ -718,6 +718,15 @@ render_env_file() {
     # research reader (DROPBOX_APP_KEY...), B2, IB or Clerk secrets.
     if [[ "$unit" == "radon-marketdesk.service" ]]; then
       grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_RESEARCH_MODEL|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
+        "$temporary" > "${temporary}.filtered"
+      status=$?
+      [[ "$status" -le 1 ]] || exit 71
+      mv "${temporary}.filtered" "$temporary" || exit 71
+    fi
+    # The independent PDF archive needs only Turso and its provider login.
+    # No model grants, Dropbox credentials, broker or secret-store master key.
+    if [[ "$unit" == "radon-marketdesk-pdf.service" ]]; then
+      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
@@ -973,7 +982,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service) image="$(python_image)" ;;
+    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -1054,6 +1063,7 @@ cmd_run() {
   # gets an isolated bridge network (egress only), never the host stack.
   local container_network=host
   is_chromium_unit "$unit" && container_network=bridge
+  [[ "$unit" == "radon-marketdesk-pdf.service" ]] && container_network=bridge
 
   rendered_env="$(render_env_file "$unit")" || exit 71
   set -- \
@@ -1281,6 +1291,9 @@ cmd_run() {
     # Same script as the base unit's host ExecStart.
     radon-marketdesk.service)
       set -- "$@" python scripts/research/marketdesk_job.py
+      ;;
+    radon-marketdesk-pdf.service)
+      set -- "$@" python scripts/research/marketdesk_pdf_job.py
       ;;
     # DS-2026-10-05-05: the same module and arguments as each base unit's
     # host ExecStart (pinned by cloud/tests/test_ds_secret_store_key_units.py).

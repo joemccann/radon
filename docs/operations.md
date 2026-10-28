@@ -460,6 +460,13 @@ container on an isolated bridge network (egress only) instead of the host
 stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
 `cloud/tests/test_app_runtime.py` pin both behaviors.
+The exact `MARKETDESK_FIREBASE_REFRESH_TOKEN` seed also enters this unit for
+TheMarketEar renewal, bound to `THEMARKETEAR_EMAIL` and the shared Firebase
+project. The newsfeed owns a separate 0600 rotated grant in
+`data/newsfeed-firebase.json`; no research-private mount is added. Chromium
+receives none of these credentials in its environment. The six-hour renewal
+requires an advanced product-cookie expiry and real premium content; see
+[the authentication owner](cloud-services.md#newsfeed-themarketearcom--self-contained-headless-flow).
 
 **App startup and rollback images.** The nextjs container starts through
 `next-clerk-guard`, which requires the runtime Clerk publishable key to match
@@ -679,7 +686,8 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | varies | Service-health alerting (Pushover) |
 | `radon-host-metrics.timer` | every 1 min | Host CPU, memory, loop lag. Details: [`cloud-services.md`](cloud-services.md#host-metrics-dur-12) |
 | `radon-tv-alerts.timer` | every 5 min | TradingView alert digest (one Pushover per cycle), 180-day prune. Details: [`cloud-services.md`](cloud-services.md#tradingview-alerts) |
-| `radon-marketdesk.timer` | every 5 min (`*:04/5:41`) | marketdesk.ai research ingest: new articles to operator-only research posts, PDF copied to `/Radon/MarketDesk` in the operator's Dropbox. Heartbeats `marketdesk-research` and `marketdesk-dropbox` (15m). Spec: [`marketdesk-research.md`](marketdesk-research.md) |
+| `radon-marketdesk.timer` | every 5 min (`*:04/5:41`) | marketdesk.ai article-first ingest: summaries and chart images become operator-only voice articles; source bullets are inputs only. Ready archived PDFs are copied to `/Radon/MarketDesk` in the operator's Dropbox. Heartbeats `marketdesk-research` and `marketdesk-dropbox` (15m). Spec: [`marketdesk-research.md`](marketdesk-research.md) |
+| `radon-marketdesk-pdf.timer` | every 5 min (`*:02/5:17`) | Independent private PDF archive, one admitted attempt per cycle, fleet-wide minimum 300s; provider refusal pauses it for one hour. Migration 0103, heartbeat `marketdesk-pdf` (15m). Spec: [`marketdesk-pdf-archive.md`](marketdesk-pdf-archive.md) |
 | `radon-equibles-{13f,ats,cot,filings,short-crowding}.timer` | daily / weekly | 13F, ATS, COT, filings, short crowding. Spec: [`equibles-api.md`](equibles-api.md) |
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
@@ -1274,6 +1282,21 @@ when write credentials are absent, `error`), both 15 minutes. Runbook:
 systemctl start radon-marketdesk.service        # run one cycle now
 journalctl -u radon-marketdesk.service -n 50
 ```
+
+The article job never waits for PDF retrieval. It persists discovery and retries
+pending items outside the current latest listing, uses source bullets and chart
+images as evidence, and publishes prose with grounded `$` tickers after the
+final Humanizer review. The source link says **Source article** until a private
+PDF is attached; raw provider bullet lists are never appended to the article.
+
+`radon-marketdesk-pdf.timer` runs separately at `*:02/5:17`. Its root-owned
+runtime drop-in admits only Turso, MarketDesk authentication and the private
+research bind to an immutable application-UID container. It has no model,
+broker or Dropbox credentials. Normal deploy installs and enables the timer.
+The durable Turso queue and global throttle survive restarts; one attempt per
+cycle, minimum 300 seconds, and a one-hour provider refusal backoff. A blocked
+archive reports its own `marketdesk-pdf` heartbeat without holding article
+publication. See [archive limits and recovery](marketdesk-pdf-archive.md).
 
 ### Research evidence archive
 

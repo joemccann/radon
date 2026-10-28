@@ -9,10 +9,13 @@ and never burn a rung.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import copy as copy_module
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Sequence
+import uuid
 
 from clients.model_ladder import (
     MODEL_LADDER_ORDER,
@@ -23,6 +26,7 @@ from clients.model_ladder import (
     safe_error_message,
 )
 from research import humanizer
+from utils.atomic_io import atomic_save
 
 # Ported verbatim from the voice + humanize prompt (voice rules 1-10, humanize 11-21, format 22-26).
 SYSTEM = """\
@@ -58,15 +62,17 @@ Humanize (port of the humanizer skill, patterns 1-24)
 Format
 22. Never use em dashes, including HTML entities that render as one. Use a period, comma, colon or parentheses. Keep hyphens, numeric ranges and minus signs intact.
 23. Plain text. No markdown, no bold, no headings, no bullet glyphs, no numbered lists, no emoji, straight quotes only.
-24. Title at most 180 characters. Content is 2 to 5 short paragraphs separated by a blank line (real newline characters), at most 2500 characters; prefer 400 to 1200. Do not pad a short source.
+24. Title at most 180 characters. Content is 2 to 5 short paragraphs separated by a blank line (real newline characters), at most 2500 characters; prefer 400 to 1200. Do not pad a short source. The source bullet points are input only. Do not reproduce the bullet list or append a key-points section. Use those facts and the attached images to write one connected news article in Joe's voice.
 25. Never name The Market Ear or ZeroHedge (any spacing or case), their handles, domains, links or source credits. Retain legitimate underlying researchers.
 26. Captions: one per attached image, keyed by its image id, at most 180 characters: instrument, metric, period, read from that image, in words. Rule 8 covers captions too: a number (level, year, date, percent) goes in a caption only if it appears verbatim in SUMMARY_BULLETS or ARTICLE_TEXT; otherwise leave it out ("S&P 500 forward P/E since the GFC", not "since 2010"). If an image does not show them, describe only what it visibly shows. No source credit, no restated title.
+27. Prefix security ticker symbols with $ in the title, content and captions (AAPL becomes $AAPL, BRK.B becomes $BRK.B). Include those symbols, without $, in tickers. Only identify actual securities whose exact symbols occur in the source text. Do not invent a symbol from a company name. US, CPI, GDP, EPS, PDF, AI and currency pairs are not securities merely because they are uppercase. For an overlapping security explicitly identified by an exchange or ticker marker, write $ only where it denotes the security ($AI stock versus ordinary AI spending). Do not change tag taxonomy.
 
 Before answering, silently ask "what makes this obviously AI generated?" and fix it. Do not output that audit.
 
 Return exactly one JSON object and nothing else, first character { and last }:
-{"title": "...", "content": "...", "captions": {"<image_id>": "..."}, "tags": ["UPPERCASE-KEBAB", ...]}
+{"title": "...", "content": "...", "captions": {"<image_id>": "..."}, "tags": ["UPPERCASE-KEBAB", ...], "tickers": ["AAPL", ...]}
 tags: 1 to 10, uppercase kebab-case.
+tickers: 0 to 32 source-grounded security symbols, uppercase, no $.
 
 """
 
@@ -119,6 +125,30 @@ _NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 _MARKDOWN_RE = re.compile(r"^\s*(?:#|[-*•]\s|\d+[.)]\s)|\*\*|(?:^|\s)#\w", re.M)
 _EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿️‍]")
 _URL_RE = re.compile(r"https?://", re.I)
+_BULLETS_RE = re.compile(r"[•◦▪‣]|</?(?:ul|ol|li)(?:\s|>)", re.I)
+_SYMBOL_RE = re.compile(r"[A-Z][A-Z0-9]{0,5}(?:[.-][A-Z]{1,3})?\Z")
+# A small ambiguity-free fallback covers common source symbols when the model
+# omits metadata. Other securities require a model declaration or an explicit
+# source marker; uppercase words alone never become ticker candidates.
+_COMMON_SYMBOLS = frozenset({
+    "AAPL", "NVDA", "MSFT", "AMZN", "GOOG", "GOOGL", "META", "TSLA", "AVGO",
+    "NFLX", "BRK.B", "QQQ", "SPY", "IWM", "GLD", "TLT", "SMH", "SOXX",
+    "PLTR", "AMD", "INTC", "MU", "BABA", "TSM", "COIN", "MSTR",
+})
+_NOT_SECURITIES = frozenset({
+    "US", "USA", "UK", "EU", "AI", "PDF", "CPI", "PPI", "PCE", "GDP", "EPS",
+    "PE", "ROE", "ROA", "EBIT", "EBITDA", "YOY", "MOM", "QOQ", "YTD", "FX",
+    "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY", "CNH",
+    "HKD", "KRW", "TWD", "INR", "BRL", "MXN", "NOK", "SEK", "ZAR",
+    "NYSE", "NASDAQ", "MSCI", "ETF", "ETFS", "CEO", "CFO", "FED", "ECB", "BOJ",
+    "BOE", "FOMC", "NFP", "ISM", "PMI", "CTA", "CTAS", "BPS", "UST", "TIPS",
+})
+_CURRENCIES = frozenset({"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY", "CNH",
+                         "HKD", "KRW", "TWD", "INR", "BRL", "MXN", "NOK", "SEK", "ZAR"})
+_EXPLICIT_SYMBOL_RE = re.compile(
+    r"\$([A-Z][A-Z0-9]{0,5}(?:[.-][A-Z]{1,3})?)(?!\w)|"
+    r"\b(?:NASDAQ|NYSE|AMEX|ticker|symbol)\s*[:=]\s*\$?([A-Z][A-Z0-9]{0,5}(?:[.-][A-Z]{1,3})?)(?!\w)"
+)
 _QUOTES = str.maketrans({"‘": "'", "’": "'", "‚": "'", "‛": "'",
                          "“": '"', "”": '"', "„": '"', "‟": '"'})
 
@@ -133,6 +163,7 @@ class FeedCopy:
     model: str
     source_text: str = ""
     image_ids: tuple[str, ...] = ()
+    tickers: tuple[str, ...] = ()
 
 
 class CopyUnavailable(RuntimeError):
@@ -185,6 +216,115 @@ def _scrub_obj(obj: Any) -> Any:
     return out
 
 
+def _security_symbol(symbol: object, *, source_text: str = "") -> bool:
+    return (isinstance(symbol, str) and bool(_SYMBOL_RE.fullmatch(symbol))
+            and (symbol not in _NOT_SECURITIES or any(match.group(2) == symbol
+                 for match in _EXPLICIT_SYMBOL_RE.finditer(source_text)))
+            and not (len(symbol) == 6 and symbol[:3] in _CURRENCIES and symbol[3:] in _CURRENCIES))
+
+
+def _source_has_symbol(source_text: str, symbol: str) -> bool:
+    return bool(re.search(r"(?<![\w.])" + re.escape(symbol) + r"(?!\w|\.[A-Z])", source_text))
+
+
+def _source_tickers(source_text: str, declared: object = ()) -> tuple[str, ...]:
+    candidates = set(_COMMON_SYMBOLS)
+    candidates.update(next(group for group in match.groups() if group)
+                      for match in _EXPLICIT_SYMBOL_RE.finditer(source_text))
+    if isinstance(declared, (list, tuple)):
+        candidates.update(symbol for symbol in declared if _security_symbol(symbol, source_text=source_text))
+    return tuple(sorted(symbol for symbol in candidates
+                        if _security_symbol(symbol, source_text=source_text) and _source_has_symbol(source_text, symbol)))
+
+
+def _ticker_pattern(symbols: Sequence[str]) -> re.Pattern:
+    return re.compile(r"(?i:[a-z][a-z0-9+.-]*://|www\.)\S+|[\w.+-]+@[\w.-]+|(?<![\w$.])(?:"
+                      + "|".join(re.escape(symbol) for symbol in sorted(symbols, key=len, reverse=True))
+                      + r")(?!\w|\.[A-Z])")
+
+
+_INDEX_LABEL_RE = re.compile(r"^\s+(?:stock|equity|shares?)\s+(?:index|indices|indexes)\b", re.I)
+
+
+def _stock_context(text: str, start: int, end: int) -> bool:
+    before, after = text[:start], text[end:]
+    if _INDEX_LABEL_RE.match(after):
+        return False
+    return bool(re.search(r"\b(?:NASDAQ|NYSE|AMEX|ticker|symbol)\s*[:=]\s*$|"
+                          r"\b(?:shares|stock|equity)\s+(?:of|in)\s+$", before, re.I)
+                or re.match(r"^(?:'s)?\s+(?:shares\b|share\s+price\b|stock\b|equity\b|ADRs?\b)", after, re.I))
+
+
+def _ordinary_acronym_context(text: str, symbol: str, start: int, end: int) -> bool:
+    before, after = text[:start], text[end:]
+    if _INDEX_LABEL_RE.match(after):
+        return True
+    if symbol in _CURRENCIES or symbol in {"US", "USA", "UK", "EU"}:
+        return True  # bare currency/country codes do not denote securities
+    if symbol == "AI":
+        return bool(re.search(r"\b(?:generative|agentic|applied|artificial)\s+$|"
+                              r"\b(?:use|adoption|application|deployment|benefits|risks)\s+of\s+$", before, re.I)
+                    or re.match(r"^\s+(?:spending|capex|adoption|investment|investments|demand|boom|cycle|"
+                                r"infrastructure|models?|workloads?|software|hardware|technology|tools?|agents?|"
+                                r"systems?|applications?|training|inference|compute|computing|power|chips?|"
+                                r"data|research|sector|stocks|share\s+of)\b", after, re.I))
+    return bool(re.search(r"\b(?:according\s+to|reported\s+by|published\s+by)\s+$", before, re.I)
+                or re.match(r"^\s+(?:index|indices|indexes|World|US|Europe|Asia|Emerging|growth|inflation|"
+                            r"estimates?|forecasts?|report|release|data|spending|capex)\b", after, re.I))
+
+
+def normalize_tickers(text: str, symbols: Sequence[str], *, source_text: str = "") -> str:
+    """Prefix identified securities once without rewriting ordinary acronyms.
+
+    Overlapping symbols require an explicit source security marker AND stock
+    context at that occurrence. Unclear bare mentions are rejected separately.
+    URLs, email, ordinary AI spending and currency/index labels stay untouched.
+    """
+    allowed = [symbol for symbol in symbols if _security_symbol(symbol, source_text=source_text)]
+    if not allowed:
+        return text
+
+    def replace(match: re.Match) -> str:
+        symbol = match.group()
+        if symbol not in allowed:
+            return symbol
+        if (symbol in _CURRENCIES or symbol in {"US", "USA", "UK", "EU"}) and not re.search(
+                r"\b(?:NASDAQ|NYSE|AMEX|ticker|symbol)\s*[:=]\s*$", text[:match.start()], re.I):
+            return symbol
+        if symbol in _NOT_SECURITIES and not _stock_context(text, match.start(), match.end()):
+            return symbol
+        return "$" + symbol
+
+    return _ticker_pattern(allowed).sub(replace, text)
+
+
+def _ambiguous_ticker_problems(texts: Sequence[str], *, source_text: str, declared=()) -> list[str]:
+    ambiguous = [symbol for symbol in _source_tickers(source_text, declared) if symbol in _NOT_SECURITIES]
+    if not ambiguous:
+        return []
+    unresolved = set()
+    for text in texts:
+        for match in _ticker_pattern(ambiguous).finditer(text):
+            symbol = match.group()
+            if symbol in ambiguous and not _ordinary_acronym_context(text, symbol, match.start(), match.end()):
+                unresolved.add(symbol)
+    return [f"ticker_ambiguous:{symbol}" for symbol in sorted(unresolved)]
+
+
+def _normalize_obj(obj: Any, *, source_text: str) -> Any:
+    out = _scrub_obj(obj)
+    if not isinstance(out, dict):
+        return out
+    symbols = _source_tickers(source_text, out.get("tickers", ()))
+    for key in ("title", "content"):
+        if isinstance(out.get(key), str):
+            out[key] = normalize_tickers(out[key], symbols, source_text=source_text)
+    if isinstance(out.get("captions"), dict):
+        out["captions"] = {key: normalize_tickers(value, symbols, source_text=source_text) if isinstance(value, str) else value
+                           for key, value in out["captions"].items()}
+    return out
+
+
 def _numbers(text: str) -> set[str]:
     return {m.group(0).rstrip(",") for m in _NUMBER_RE.finditer(text)}
 
@@ -232,8 +372,18 @@ def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[
     """Deterministic reasons to reject a model object. Empty list means publishable."""
     if not isinstance(obj, dict):
         return ["not_object"]
-    obj = _scrub_obj(obj)
-    problems: list[str] = []
+    declared = obj.get("tickers", [])
+    ticker_problems = []
+    if not isinstance(declared, list) or len(declared) > 32:
+        ticker_problems.append("ticker_metadata")
+    else:
+        for symbol in declared:
+            if not _security_symbol(symbol, source_text=source_text):
+                ticker_problems.append(f"ticker_invalid:{symbol}")
+            elif not _source_has_symbol(source_text, symbol):
+                ticker_problems.append(f"ticker_unsupported:{symbol}")
+    obj = _normalize_obj(obj, source_text=source_text)
+    problems: list[str] = ticker_problems
 
     title, content = obj.get("title"), obj.get("content")
     if not isinstance(title, str) or not title.strip() or len(title) > TITLE_MAX:
@@ -264,7 +414,20 @@ def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[
                 tag_texts.append(tag)
 
     prose = [t for t in (title, content) if isinstance(t, str)] + caption_texts
+    problems.extend(_ambiguous_ticker_problems(prose, source_text=source_text, declared=declared))
     everything = "\n".join(prose + tag_texts)
+    prose_text = "\n".join(prose)
+    for symbol in sorted(_COMMON_SYMBOLS):
+        if _source_has_symbol(prose_text, symbol) and not _source_has_symbol(source_text, symbol):
+            problems.append(f"ticker_unsupported:{symbol}")
+    for match in _EXPLICIT_SYMBOL_RE.finditer(prose_text):
+        symbol = match.group(1)
+        if not symbol:
+            continue
+        if not _security_symbol(symbol, source_text=source_text):
+            problems.append(f"ticker_invalid:{symbol}")
+        elif not _source_has_symbol(source_text, symbol):
+            problems.append(f"ticker_unsupported:{symbol}")
     if FORBIDDEN_PUBLISHERS.search(everything):
         problems.append("forbidden_publisher")
     for match in _BANNED_RE.finditer("\n".join(prose)):
@@ -274,6 +437,8 @@ def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[
             problems.append(f"humanize:{name}")
     if any(_MARKDOWN_RE.search(text) for text in prose):
         problems.append("markdown")
+    if any(_BULLETS_RE.search(text) for text in prose):
+        problems.append("source_bullets")
     if _EMOJI_RE.search(everything):
         problems.append("emoji")
     if any(_URL_RE.search(text) for text in prose):
@@ -301,6 +466,9 @@ def _repair(ask, instruction: str, rejected: list[tuple[list[str], dict]]):
         "REJECTED_FOR: " + ", ".join(problems[:20]),
         "Return the same JSON object with every listed problem fixed. Remove or rewrite any sentence or caption "
         "whose number is not verbatim in SUMMARY_BULLETS or ARTICLE_TEXT; keep everything else.",
+        "For ticker_ambiguous, clarify the mention using the source: a security needs its cashtag or explicit stock "
+        "context. Ordinary AI spending, AI capex, currency codes and index labels must stay ordinary words. "
+        "Never guess a security or turn an unclear acronym into a cashtag.",
     ])
     try:
         return ask(prompt)
@@ -365,7 +533,7 @@ def write_copy(
     problems = copy_problems(data, source_text=source_text, image_ids=ids)
     if problems:  # fail closed even if a caller-supplied ladder ignored accept
         raise CopyUnavailable("copy_rejected: " + ", ".join(problems[:8]))
-    data = _scrub_obj(data)
+    data = _normalize_obj(data, source_text=source_text)
     return FeedCopy(
         title=data["title"].strip(),
         content=data["content"].strip(),
@@ -375,22 +543,83 @@ def write_copy(
         model=result.model,
         source_text=source_text,
         image_ids=tuple(ids),
+        tickers=_source_tickers(source_text, data.get("tickers", ())),
     )
 
 
-def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = complete_text_json) -> dict:
+def _audit_path(root: Path | None, post_id: Any) -> Path | None:
+    if root is None:
+        return None
+    if not isinstance(post_id, str) or not re.fullmatch(r"research-[a-f0-9]{32,64}", post_id):
+        raise CopyUnavailable("humanizer_audit_invalid_post")
+    root = Path(root)
+    try:
+        for directory in (root, root / "marketdesk", root / "marketdesk" / "humanizer",
+                          root / "marketdesk" / "humanizer" / post_id):
+            if directory.is_symlink():
+                raise OSError("unsafe audit directory")
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(directory, 0o700)
+    except OSError:
+        raise CopyOutage("humanizer_audit_unavailable") from None
+    # Separate certification runs survive queue retries without overwriting an
+    # earlier outage or rejected draft. Each file retains every rewrite attempt.
+    return directory / (uuid.uuid4().hex + ".json")
+
+
+def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = complete_text_json,
+            audit_root: Path | None = None) -> dict:
     """Run the shared Humanizer review (``research.publish`` refuses a post without its certificate).
 
     A rewrite is accepted only when it still passes ``copy_problems`` against the same facts and
     needs no scrub, so an em dash or an unsupported number can never ride in through the rewrite.
     Ladder outages stay transient (parked); a failed review spends an attempt.
+    Production supplies its private research root. Every attempt is atomically
+    persisted before further model I/O; unit callers may leave the sink unset.
     """
     ids = list(copy.image_ids)
+    symbols = _source_tickers(copy.source_text, getattr(copy, "tickers", ()))
+    post = copy_module.deepcopy(post)
+    for field in ("title", "content"):
+        if isinstance(post.get(field), str):
+            post[field] = normalize_tickers(post[field], symbols, source_text=copy.source_text)
+    ambiguity = _ambiguous_ticker_problems(
+        [post[field] for field in ("title", "content") if isinstance(post.get(field), str)],
+        source_text=copy.source_text, declared=getattr(copy, "tickers", ()))
+    if ambiguity:
+        raise CopyUnavailable("copy_rejected: " + ", ".join(ambiguity))
+    path = _audit_path(audit_root, post.get("id"))
+    entry = {"post_id": post.get("id"), "humanizer": {"attempts": []}}
+
+    def persist() -> None:
+        if path is not None:
+            try:
+                atomic_save(str(path), entry)
+            except OSError:
+                raise CopyOutage("humanizer_audit_unavailable") from None
+
+    statuses: list[str] = []
+
+    def record(audit: dict) -> None:
+        statuses.append(str(audit.get("status")))
+        attempts = entry["humanizer"]["attempts"]
+        index = audit["attempt"]
+        if index == len(attempts):
+            attempts.append(copy_module.deepcopy(audit))
+        else:
+            attempts[index] = copy_module.deepcopy(audit)
+        persist()
 
     def ask(instruction: str) -> Any:
-        return complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
-                        accept=lambda reply: humanizer.reply_ok(instruction, reply),
-                        log_prefix="marketdesk-humanizer").data
+        reply = complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
+                         accept=lambda reply: humanizer.reply_ok(instruction, reply),
+                         log_prefix="marketdesk-humanizer").data
+        if isinstance(reply, dict) and set(reply) == {"title", "content"}:
+            # The next Humanizer pass reviews and hashes these exact normalized
+            # strings. Never change copy after the final review certificate.
+            return {field: normalize_tickers(value, symbols, source_text=copy.source_text) if isinstance(value, str) else value
+                    for field, value in reply.items()}
+        return reply
 
     def verify(revised: dict) -> bool:
         texts = [revised.get("title"), revised.get("content")]
@@ -399,10 +628,8 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
         candidate = {"title": texts[0], "content": texts[1], "captions": dict(copy.captions), "tags": list(copy.tags)}
         return not copy_problems(candidate, source_text=copy.source_text, image_ids=ids)
 
-    statuses: list[str] = []
     try:
-        reviewed = humanizer.review_post(post, ask=ask, verify=verify,
-                                         record=lambda audit: statuses.append(str(audit.get("status"))))
+        reviewed = humanizer.review_post(post, ask=ask, verify=verify, record=record)
     except ModelLadderExhausted as exc:
         if _every_rung_rejected(str(exc)):
             raise CopyUnavailable("humanizer: every rung failed") from None
@@ -410,5 +637,9 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
     except ModelResponseError as exc:
         raise CopyUnavailable("humanizer: " + safe_error_message(exc)) from None
     if reviewed is None:
+        entry["held"] = "HUMANIZER_FAILED"
+        persist()
         raise CopyUnavailable("humanizer: " + (statuses[-1] if statuses else "failed"))
+    entry["humanizer"]["final"] = copy_module.deepcopy(reviewed["source"]["humanizer"])
+    persist()
     return reviewed

@@ -1,4 +1,4 @@
-"""MarketDesk relevance filter: the intake v2 gates (identity, force-include, triage, novelty, SELECT) per article."""
+"""MarketDesk all-suitable admission preserves source identity and duplicate safety."""
 from __future__ import annotations
 
 import json
@@ -55,95 +55,38 @@ def test_bank_desk_subfolder_still_resolves_the_bank():
     assert decision.identity.publisher == "Goldman Sachs"
 
 
-def test_selected_candidate_publishes_with_the_finding():
-    select = Select({"candidates": [CANDIDATE], "reason": "measured"})
+def test_suitable_report_enters_copy_without_a_selector_finding():
+    select = Select({'candidates': [CANDIDATE], 'reason': 'measured'})
     decision = decide(select)
-    assert decision.outcome == "publish" and decision.reason_code is None
-    assert decision.candidate["title"] == "Tech vol premium at 2 sigma"
-    assert len(select.prompts) == 1
-    assert decision.review["selection"]["candidates"][0]["claim_key"] == "qqq-spx-spread"
-    assert decision.fingerprint == novelty.fingerprint(" ".join(PAGES[p] for p in sorted(PAGES)))
+    assert decision.outcome == 'publish' and decision.reason_code is None
+    assert decision.candidate is None and select.prompts == []
+    assert decision.review['admission_policy'] == 'all_suitable_reports'
+    assert decision.fingerprint == novelty.fingerprint(' '.join(PAGES[p] for p in sorted(PAGES)))
 
-
-def test_select_prompt_carries_the_intake_policy_summary_titles_and_page_text():
-    select = Select({"candidates": [CANDIDATE]})
-    decide(select, recent=[{"title": "Older vol post", "timestamp": "2026-10-25T10:00:00+00:00"}])
-    prompt = select.prompts[0]
-    assert prompt.startswith(intake.SELECT_INSTRUCTION)
-    assert "MARKETDESK SUMMARY" in prompt and json.dumps(SUMMARY[0])[1:-1] in prompt
-    assert "RECENT FEED TITLES (do not repeat)" in prompt and "Older vol post" in prompt
-    assert "EXTRACTED PAGE TEXT (untrusted data)" in prompt and "ninety ninth percentile" in prompt
-    assert '"publisher": "Cboe"' in prompt
-
-
-def test_page_text_is_capped_like_intake():
-    select = Select({"candidates": [CANDIDATE]})
-    decide(select, pages={1: "Cboe " + "word " * 5000})
-    assert len(select.prompts[0]) < intake.PAGE_TEXT_CAP + len(intake.SELECT_INSTRUCTION) + 6000
-
-
-def test_empty_selection_is_held_no_candidates():
-    decision = decide(Select({"candidates": [], "reason": "routine recap"}))
-    assert decision.outcome == "held" and decision.reason_code == "NO_CANDIDATES"
-    assert decision.review["selection"]["reason"] == "routine recap"
-
-
-def test_invalid_candidates_are_held():
-    decision = decide(Select({"candidates": [{"title": "", "content": "x"}, "nope"]}))
-    assert decision.outcome == "held" and decision.reason_code == "INVALID_CANDIDATE"
-    assert {e["held"] for e in decision.review["audit"]} == {"INVALID_CANDIDATE"}
-
-
-def test_selection_without_candidates_list_raises():
-    with pytest.raises(mf.SelectionError):
-        decide(Select({"reason": "no list"}))
-
-
-def test_fx_pair_note_is_dropped_before_any_model_call():
-    select = Select()
-    decision = decide(select, pages={1: "# EURUSD: Range trade\n" + WORDS})
-    assert decision.outcome == "dropped" and decision.reason_code == "DOC_TYPE_FX_PAIR_NOTE"
+@pytest.mark.parametrize('reply', [
+    {'candidates': [], 'reason': 'routine recap'},
+    {'candidates': [{'title': '', 'content': 'x'}, 'nope']},
+    {'reason': 'no list'},
+])
+def test_model_relevance_verdicts_cannot_veto_usable_source(reply):
+    select = Select(reply)
+    assert decide(select).outcome == 'publish'
     assert select.prompts == []
 
 
-def test_approved_series_rule_drops(tmp_path):
-    (tmp_path / learn.RULES).write_text(json.dumps({"series_deny": ["macro volatility digest"]}))
-    select = Select()
-    decision = decide(select, root=tmp_path)
-    assert decision.outcome == "dropped" and decision.reason_code == "SERIES_DENYLIST"
+def test_approved_dropbox_relevance_rules_do_not_exclude_marketdesk(tmp_path):
+    (tmp_path / learn.RULES).write_text(json.dumps({'series_deny': ['macro volatility digest'],
+        'publisher_deny': ['Cboe'], 'doc_type_drop': ['research']}))
+    assert decide(root=tmp_path).outcome == 'publish'
+
+
+def test_always_publish_desk_metadata_is_retained_without_model_selection():
+    select = Select({'candidates': []})
+    decision = decide(select, title='Citadel Securities GMI Rubner',
+                      folders=['2026', 'October', 'Oct 26', 'Citadel'])
+    assert decision.outcome == 'publish' and decision.candidate is None
+    assert decision.review['always_publish'] is True
     assert select.prompts == []
-
-
-def test_single_stock_outside_the_book_drops_and_inside_reviews():
-    pages = {1: "Acme Corp (ACME) Rating: BUY Price Target $50\n" + WORDS}
-    title = "Acme Corp (ACME) initiation"
-    assert decide(pages=pages, title=title, book={"SPY"}).reason_code == "SINGLE_STOCK_NOT_IN_BOOK"
-    assert decide(pages=pages, title=title, book={"ACME"}).outcome == "publish"
-    assert decide(pages=pages, title=title, book=None).outcome == "publish"  # no book source: fail open
-
-
-def test_force_included_desk_overrides_a_triage_drop_and_reselects_once():
-    select = Select({"candidates": []}, {"candidates": [CANDIDATE]})
-    decision = decide(select, title="BofA Flow Show", pages={1: "# EURUSD: flows\n" + WORDS},
-                      folders=["2026", "October", "Oct 26", "Bank of America"])
-    assert decision.outcome == "publish"
-    assert decision.review["triage"] == {"decision": "drop", "reason_code": "DOC_TYPE_FX_PAIR_NOTE", "overridden": True}
-    assert len(select.prompts) == 2 and select.prompts[1].startswith(intake.FORCE_RESELECT_INSTRUCTION)
-    assert "this series is always in scope" in select.prompts[0]
-
-
-def test_forced_desk_still_empty_after_reselect_is_held():
-    decision = decide(Select({"candidates": []}, {"candidates": []}), title="BofA Flow Show",
-                      folders=["2026", "October", "Oct 26", "Bank of America"])
-    assert decision.outcome == "held" and decision.reason_code == "NO_CANDIDATES"
-
-
-def test_always_publish_desk_publishes_the_summary_when_selection_stays_empty():
-    decision = decide(Select({"candidates": []}, {"candidates": []}), title="Citadel Securities GMI Rubner",
-                      folders=["2026", "October", "Oct 26", "Citadel"])
-    assert decision.outcome == "publish" and decision.candidate is None
-    assert decision.review["always_publish"] is True
-    assert decision.review["always_publish_fallback"] is True
 
 
 def test_unknown_publisher_is_held_before_select():
@@ -175,24 +118,22 @@ def test_always_publish_desk_survives_a_duplicate_from_another_publisher():
     assert decision.outcome == "publish"
 
 
-def test_operator_note_overrides_triage_and_reaches_select():
-    select = Select({"candidates": [CANDIDATE]})
-    decision = decide(select, pages={1: "# EURUSD: Range trade\n" + WORDS},
-                      note={"kind": "publish", "comment": "this one matters", "feedback_id": "f1"})
-    assert decision.outcome == "publish"
-    assert decision.review["triage"]["overridden"] is True
-    assert "OPERATOR NOTE" in select.prompts[0] and "this one matters" in select.prompts[0]
-    assert decision.review["operator_note"]["feedback_id"] == "f1"
+def test_operator_note_is_retained_without_overriding_safety():
+    note = {'kind': 'publish', 'comment': 'this one matters', 'feedback_id': 'f1'}
+    decision = decide(note=note)
+    assert decision.outcome == 'publish'
+    assert decision.review['operator_note'] == note
+    assert decide(note=note, summary=[]).reason_code == 'SOURCE_MATERIAL_MISSING'
 
 
-def test_operator_preferences_reach_select(tmp_path):
-    (tmp_path / learn.EXAMPLES).write_text(json.dumps({"examples": [
-        {"id": "v1", "verdict": "not wanted", "vote": "down", "target": "post", "title": "Cboe vol digest recap",
-         "publisher": "Cboe", "series": "macro volatility digest", "docType": "research", "tags": [],
-         "reasons": ["not_relevant"], "comment": "too routine", "at": "2026-10-20"}]}))
-    select = Select({"candidates": [CANDIDATE]})
-    decide(select, root=tmp_path)
-    assert "OPERATOR PREFERENCES" in select.prompts[0] and "too routine" in select.prompts[0]
+def test_operator_preferences_cannot_restore_model_relevance_veto(tmp_path):
+    (tmp_path / learn.EXAMPLES).write_text(json.dumps({'examples': [
+        {'id': 'v1', 'verdict': 'not wanted', 'vote': 'down', 'target': 'post', 'title': 'Cboe recap',
+         'publisher': 'Cboe', 'series': 'macro volatility digest', 'docType': 'research',
+         'reasons': ['not_relevant'], 'comment': 'too routine'}]}))
+    select = Select({'candidates': []})
+    assert decide(select, root=tmp_path).outcome == 'publish'
+    assert select.prompts == []
 
 
 def test_index_reads_research_fingerprints_and_ledger(tmp_path):
@@ -237,3 +178,20 @@ def test_ladder_outage_is_transient_and_bad_reply_is_not():
     with pytest.raises(mf.SelectionError) as info:
         mf.ladder_select("P", complete=bad)
     assert getattr(info.value, "transient", False) is False
+
+@pytest.mark.parametrize('pages,title,book', [
+    ({1: '# EURUSD: Range trade\n' + WORDS}, 'EURUSD note', {'SPY'}),
+    ({1: 'Acme Corp (ACME) Rating: BUY Price Target $50\n' + WORDS}, 'Acme Corp (ACME) initiation', {'SPY'}),
+])
+def test_all_suitable_reports_bypass_book_fx_and_model_relevance(pages, title, book):
+    select = Select({'candidates': [], 'reason': 'not relevant to portfolio'})
+    decision = decide(select, pages=pages, title=title, book=book)
+    assert decision.outcome == 'publish' and decision.candidate is None
+    assert select.prompts == []
+    assert decision.review['admission_policy'] == 'all_suitable_reports'
+
+
+@pytest.mark.parametrize("pages,summary", [({1: "Only a title"}, []), ({1: "Only a title"}, ["", "  "]), ({}, SUMMARY)])
+def test_all_suitable_policy_cannot_admit_empty_source_material(pages, summary):
+    decision = decide(pages=pages, summary=summary)
+    assert decision.outcome == 'held' and decision.reason_code == 'SOURCE_MATERIAL_MISSING'

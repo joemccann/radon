@@ -191,11 +191,11 @@ describe("MarketDesk research rich text", () => {
     expectFormattedResearch(lightboxBody);
     expect(lightboxBody.textContent).toBe(feedBody.textContent);
   });
-  it("renders summary bullets even without body content", async () => {
+  it("never substitutes raw source bullets for missing authored content", async () => {
     fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => [{ ...post, id: "research-md", content: "", source: { ...mdSource, summary: ["Only **bullet**"] } }] });
     render(<DashboardNewsFeed />);
     const item = await screen.findByTestId("news-feed-item");
-    const list = within(item).getByRole("list", { name: "Summary" });
-    expect(within(list).getAllByRole("listitem").map(li => li.textContent)).toEqual(["Only **bullet**"]);
+    expect(within(item).queryByRole("list", { name: "Summary" })).toBeNull();
+    expect(item.textContent).not.toContain("Only **bullet**");
   });
 });

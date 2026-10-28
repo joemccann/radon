@@ -15,6 +15,7 @@ import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistor
 import FlowSkewPanel from "@/components/flow-analysis/FlowSkewPanel";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
 import { flowReportAgeLabel } from "@/lib/flowReportStaleness";
+import { sessionCoverageNote } from "@/lib/flowReportCoverage";
 
 /** The scan the server actually runs is `--days 20` (server.py). Every piece
  * of window copy derives from this or from the payload's own
@@ -409,6 +410,7 @@ function MobileTickerFlowReport({
           style={{ padding: "0 16px 12px", margin: 0, fontSize: "var(--text-meta)" }}
         >
           {new Date(data.fetched_at).toLocaleString()}
+          {sessionCoverageNote(data) ? ` · ${sessionCoverageNote(data)}` : ""}
           {isAnalyzing ? " · Scan running. Figures update when it lands." : ""}
         </div>
       )}
@@ -730,6 +732,7 @@ function ReportSections({
           {data.fetched_at
             ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? DEFAULT_LOOKBACK_DAYS} Trading Days`
             : "No report timestamp available"}
+          {sessionCoverageNote(data) ? ` - ${sessionCoverageNote(data)}` : ""}
           {isAnalyzing ? " - Scan running. Figures update when it lands." : ""}
         </div>
       </section>

@@ -222,3 +222,51 @@ for (const width of [375, 768, 1024, 1440]) for (const theme of ["dark", "light"
 }
 
 });
+
+for (const width of [1440, 393]) {
+  test(`MarketDesk article publishes before PDF at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await installClearFixtures(page);
+    await installClearRealtimeFixtures(page);
+    const articleUrl = "https://marketdesk.ai/library/browse/lpS7ST23Vhc";
+    const authored = "$AAPL demand holds. $NVDA orders are unchanged.\n\nThe source leaves the outlook conditional on demand.";
+    let attached = false;
+    const articleSource = {
+      kind: "marketdesk", evidenceKind: "article", publisher: "UBS", articleId: "lpS7ST23Vhc",
+      articleUrl, url: articleUrl, contentHash: "d".repeat(64), documentDate: "2026-10-27", folderDate: "2026-10-27",
+      pages: [], figures: [{ url: first, caption: "$AAPL demand chart" }],
+    };
+    await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [{
+      id: "research-article-first", title: "$AAPL demand holds", content: authored,
+      timestamp: "2026-10-27T16:26:36Z", images: [first], tags: ["MARKETDESK"],
+      source: { ...articleSource, ...(attached ? { pdfUrl: pdf, pdfHash: "c".repeat(64) } : {}) },
+    }, {
+      id: "research-legacy-bullets", title: "Legacy authored article", content: "The authored summary remains.",
+      timestamp: "2026-10-27T15:00:00Z", images: [], tags: ["MARKETDESK"],
+      source: { ...articleSource, evidenceKind: undefined, pages: [1], url: pdf, contentHash: "c".repeat(64),
+        figures: [], summary: ["RAW_SOURCE_BULLET_MUST_NOT_RENDER"] },
+    }] }));
+    await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg(1000,600) }));
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    const item = page.getByTestId("news-feed-item").filter({ hasText: "$AAPL demand holds" });
+    await expect(item.locator(".news-feed-summary")).toHaveText(authored);
+    await expect(item.getByRole("link", { name: "UBS · Source article", exact: true })).toHaveAttribute("href", articleUrl);
+    await expect(page.getByText("RAW_SOURCE_BULLET_MUST_NOT_RENDER", { exact: true })).toHaveCount(0);
+    await page.getByRole("tab", { name: "PDFs", exact: true }).click();
+    await expect(item.getByRole("heading", { name: "$AAPL demand holds", exact: true })).toBeVisible();
+    await item.getByRole("button", { name: "Open lightbox for: $AAPL demand holds" }).click();
+    const dialog = page.getByRole("dialog", { name: "$AAPL demand holds", exact: true });
+    await expect(dialog.locator(".newsfeed-lightbox__body")).toHaveText(authored);
+    await expect(dialog.getByRole("list", { name: "Summary" })).toHaveCount(0);
+    await expect(dialog.getByRole("link", { name: "Source article", exact: true })).toHaveAttribute("href", articleUrl);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const screenshot = testInfo.outputPath(`marketdesk-article-first-${width}.png`);
+    await page.screenshot({ path: screenshot });
+    await testInfo.attach(`marketdesk-article-first-${width}`, { path: screenshot, contentType: "image/png" });
+    await dialog.getByRole("button", { name: "Close article" }).click();
+    attached = true;
+    await page.getByRole("button", { name: "Refresh feed", exact: true }).click();
+    await expect(item.getByRole("link", { name: "UBS · Source PDF", exact: true })).toHaveAttribute("href", pdf);
+    await expect(item.locator(".news-feed-summary")).toHaveText(authored);
+  });
+}
