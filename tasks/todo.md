@@ -10450,3 +10450,19 @@ Dependency graph: F1 -> [F2, F3] -> F4 -> F5.
 - [x] F5 depends_on: [F4] PR #1316 passed 43 current checks, one accepted notification, admin merge 0e3572cc1 and successful production deployment at 19:32 UTC. Installed job/copy/cycle hashes match the merge; named live feed and private source/audit receipts verified.
 
 Review: article-first PR #1314, renewal PR #1312 and follow-up #1316 are deployed. All six originally missing reports are live with source-grounded prose and preserved images. PDF archival remains provider-blocked with persisted backoff; it does not block publication. The newly chosen all-suitable policy and its replay are tracked in MS1–MS5.
+
+
+## Combo order submission repair (2026-10-28)
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+
+- [x] T1 depends_on: [] Inspect repository instructions, current branch, code map and reported PendingSubmit failure; isolate current main.
+- [ ] T2 depends_on: [T1] Trace Python combo construction, transport and acknowledgement; identify and repair verified defects with regression coverage.
+- [ ] T3 depends_on: [T1] Independently trace web/API combo payload and broker lifecycle boundaries; report evidence and targeted corrections.
+- [ ] T4 depends_on: [T1] Independently inspect broker protocol, history and existing tests; challenge diagnosis and define missing coverage.
+- [ ] T5 depends_on: [T2,T3,T4] Reconcile findings, review changes and obtain GitHub-runner red/green verification.
+- [ ] T6 depends_on: [T5] Publish template-compliant PR, wait for all applicable exact-head CI checks and send one accepted green notification.
+
+Constraints: no local test suites; no live order placement, cancellations, risk-gate weakening or automatic leg splitting. Preserve unrelated branch/work. Root cause remains unknown until source evidence.
+
+Review: pending.

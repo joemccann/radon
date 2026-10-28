@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import ib_place_order
 import trading_halt
+import pytest
 
 
 def _mock_client(post_transmit_exc=None, qualify_exc=None):
@@ -77,3 +78,93 @@ class TestPostTransmitIndeterminate:
                 {**_PARAMS, "orderRef": "radon-route-supplied-ref"}
             )
         assert result["orderRef"] == "radon-route-supplied-ref"
+
+
+@pytest.mark.parametrize("status", ["PendingSubmit", "ApiPending", "Unknown", ""])
+@pytest.mark.parametrize("order_type", ["stock", "combo"])
+def test_unacknowledged_transmission_preserves_indeterminate_identity(
+    tmp_path, monkeypatch, status, order_type
+):
+    """A deadline cannot establish rejection or make replacement legs safe."""
+    monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
+    client = _mock_client()
+    client.place_order.return_value.orderStatus.status = status
+    params = {**_PARAMS, "type": order_type, "orderRef": "radon-timeout-reconcile"}
+    if order_type == "combo":
+        params.update(
+            limitPrice=1.0,
+            legs=[
+                {"expiry": "20270115", "strike": 200, "right": "C", "action": "BUY"},
+                {"expiry": "20270115", "strike": 210, "right": "C", "action": "SELL"},
+            ],
+        )
+        client.qualify_contracts.side_effect = lambda *contracts: [
+            MagicMock(conId=1000 + i) for i in range(len(contracts))
+        ]
+    # The placement happens, then the acknowledgement deadline expires. No
+    # broker calls or real sleep: only the explicit fake client is reachable.
+    clock = iter([100.0, 200.0])
+    with patch.object(ib_place_order, "IBClient", return_value=client):
+        result = ib_place_order.place_order(params, _clock=lambda: next(clock))
+
+    assert result["status"] == "error"
+    assert result.get("indeterminate") is True
+    assert result.get("orderRef") == "radon-timeout-reconcile"
+    assert result["orderId"] == 42
+    assert result["permId"] == 0
+    assert result["initialStatus"] == (status or "Unknown")
+    assert "check open orders" in result["message"].lower()
+    assert "legs separately" not in result["message"].lower()
+    assert "silently dropped" not in result["message"].lower()
+    client.place_order.assert_called_once()
+    client.disconnect.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "broker_status,expected_status",
+    [("PendingSubmit", "ok"), ("ApiPending", "ok"), ("Submitted", "ok"), ("Cancelled", "error")],
+)
+def test_status_callback_permanent_id_is_preserved_without_open_order(
+    tmp_path, monkeypatch, broker_status, expected_status
+):
+    """Exercise ib_insync's real callback: it only updates OrderStatus.permId."""
+    from ib_insync import Contract, LimitOrder, OrderStatus, Trade
+    from ib_insync.wrapper import Wrapper
+
+    monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
+    client = _mock_client()
+    order = LimitOrder("BUY", 1, 1.0, orderId=42, clientId=26)
+    trade = Trade(
+        Contract(symbol="AAPL", secType="BAG", exchange="SMART"),
+        order,
+        OrderStatus(orderId=42, status="PendingSubmit"),
+    )
+    wrapper = Wrapper(client._ib)
+    wrapper.trades[(26, 42)] = trade
+    client.place_order.return_value = trade
+    client.qualify_contracts.side_effect = lambda *contracts: [
+        MagicMock(conId=1000 + i) for i in range(len(contracts))
+    ]
+
+    def deliver_status(_seconds):
+        wrapper.orderStatus(42, broker_status, 0, 1, 0, 987654, 0, 0, 26, "")
+
+    client.sleep.side_effect = deliver_status
+    params = {
+        **_PARAMS, "type": "combo", "limitPrice": 1.0,
+        "legs": [
+            {"expiry": "20270115", "strike": 200, "right": "C", "action": "BUY"},
+            {"expiry": "20270115", "strike": 210, "right": "C", "action": "SELL"},
+        ],
+    }
+    ticks = iter(range(100, 200))
+    with patch.object(ib_place_order, "IBClient", return_value=client):
+        result = ib_place_order.place_order(params, _clock=lambda: next(ticks))
+
+    assert trade.order.permId == 0, "No openOrder callback was delivered"
+    assert trade.orderStatus.permId == 987654
+    assert result["status"] == expected_status
+    assert result["permId"] == 987654
+    assert result["initialStatus"] == broker_status
+    assert result.get("indeterminate") is not True
+    client.place_order.assert_called_once()
