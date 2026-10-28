@@ -43,6 +43,11 @@ redact() {
       eq=index($0, "=")
       key=substr($0, 1, eq-1)
       rest=substr($0, eq+1)
+      # systemd and dotenv both tolerate whitespace around the separator, so
+      # the key run can end in a space or tab and the value can start after
+      # one. Trimming both is what makes the name tests below see the name.
+      sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
+      sub(/^[[:space:]]+/, "", rest)
       # A systemd directive carries the real assignment inside its value.
       if (toupper(key) ~ /ENVIRONMENT$/) {
         inner=rest

@@ -109,3 +109,17 @@ def test_a_value_spanning_several_lines_stays_redacted_to_its_close():
 def test_every_assignment_in_one_environment_directive_is_inspected():
     out = _redact_input('Environment="NODE_ENV=production" "UW_TOKEN=live_NOTREAL123"')
     assert "live_NOTREAL123" not in out, out
+
+
+# Second rescan: systemd accepts whitespace around a directive's `=`, so the
+# key run carried a trailing space or tab and no longer ended in the
+# directive name.
+def test_whitespace_around_the_directive_separator_is_tolerated():
+    for line in (
+        'Environment = "UW_TOKEN=live_NOTREAL123"',
+        'Environment\t="UW_TOKEN=live_NOTREAL123"',
+        '  Environment  =  "UW_TOKEN=live_NOTREAL123"',
+        'UW_TOKEN = live_NOTREAL123',
+    ):
+        out = _redact_input(line)
+        assert "live_NOTREAL123" not in out, (line, out)

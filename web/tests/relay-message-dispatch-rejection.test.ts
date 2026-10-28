@@ -70,6 +70,28 @@ describe("relay client-message dispatch", () => {
     expect(normalize(["x".repeat(MAX_SYMBOL_LENGTH)])).toHaveLength(1);
   });
 
+  // Second rescan: the bound belongs on every subscription path, not just
+  // the symbol one. An option composite key and an index exchange are keyed
+  // and retained the same way.
+  it.each(["normalizeContracts", "normalizeIndexes"])(
+    "%s bounds its string fields",
+    (name) => {
+      const normalize = runInNewContext(
+        `${fnBody("boundedField")}; ${fnBody(name)}; ${name}`,
+        { capItems, MAX_SYMBOL_LENGTH },
+      );
+      const long = "x".repeat(MAX_SYMBOL_LENGTH + 1);
+      const item =
+        name === "normalizeContracts"
+          ? { symbol: long, expiry: "20261218", strike: 100, right: "C" }
+          : { symbol: long, exchange: "CBOE" };
+      expect(normalize([item])).toEqual([]);
+      const exchange =
+        name === "normalizeIndexes" ? [{ symbol: "VIX", exchange: long }] : [];
+      if (exchange.length) expect(normalize(exchange)).toEqual([]);
+    },
+  );
+
   it("attaches a rejection handler to the dispatched handler promise", () => {
     // The chokepoint: any future async throw anywhere on the message surface
     // must land here, not in Node's default unhandled-rejection exit.
