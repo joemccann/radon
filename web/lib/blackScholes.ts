@@ -67,6 +67,27 @@ export function bsPut(S: number, K: number, T: number, r: number, sigma: number)
 }
 
 /**
+ * Rho per share, per 1 percentage point of the risk-free rate. IB's
+ * tickOptionComputation publishes delta/gamma/vega/theta but no rho, so the
+ * chain derives it from the same inputs as the Implied column.
+ */
+export function bsRho({ S, K, T, r, sigma, type }: BsInputs): number {
+  if (T <= 0) return 0;
+  const discountedStrikeT = K * T * Math.exp(-r * T);
+  if (sigma <= SIGMA_FLOOR) {
+    const callItm = S > K * Math.exp(-r * T);
+    if (type === "Call") return callItm ? discountedStrikeT / 100 : 0;
+    return callItm ? 0 : -discountedStrikeT / 100;
+  }
+  const sqrtT = Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  return type === "Call"
+    ? (discountedStrikeT * normCdf(d2)) / 100
+    : (-discountedStrikeT * normCdf(-d2)) / 100;
+}
+
+/**
  * Back-solve implied volatility from an observed option price using bisection
  * over [σ_low, σ_high]. Returns null when the observed price is outside no-
  * arbitrage bounds — both indicate a usable σ doesn't exist.

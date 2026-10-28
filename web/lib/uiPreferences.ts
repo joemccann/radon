@@ -74,7 +74,11 @@ export function mergeUiPreferences(
 export function hydrateUiPreferences(): Promise<UiPreferences> {
   if (cache) return Promise.resolve(cache);
   if (!hydratePromise) {
-    hydratePromise = fetch("/api/profile", { cache: "no-store" })
+    // Start inside the chain so a fetch that throws synchronously (strict
+    // test doubles, broken polyfills) lands in the catch below instead of
+    // escaping to the caller's effect.
+    hydratePromise = Promise.resolve()
+      .then(() => fetch("/api/profile", { cache: "no-store" }))
       .then(async (res) => {
         if (!res.ok) throw new Error(`profile hydrate ${res.status}`);
         const json = (await res.json()) as { ui_preferences?: unknown };
