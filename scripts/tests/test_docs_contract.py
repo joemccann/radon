@@ -2959,3 +2959,23 @@ class TestDocumentation20261027:
         src = (_ROOT / "scripts/private_security_release.py").read_text()
         fn = src.split("def _require_plain_commit", 1)[1].split("\ndef ", 1)[0]
         assert "tree/parent/author/committer" in fn
+
+
+class TestDocumentation20261028:
+    """Contracts that landed after the 2026-10-27 documentation audit."""
+
+    def test_leap_budget_stop_is_degraded_and_exits_nonzero(self):
+        text = (_ROOT / "docs/incident-runbook.md").read_text()
+        section = text.split("## leap-preset-timeout-before-cache-write", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert "still exits 0" not in section
+        assert "scan_budget_spent" in section
+        assert "degraded" in section
+        assert "test_budget_truncated_scan_writes_cache_and_exits_zero" not in section
+        assert "test_budget_truncated_scan_does_not_heartbeat_ok" in section
+        src = (_ROOT / "scripts/leap_scanner_uw.py").read_text()
+        main = src.split("def main(", 1)[1]
+        assert '"scan_budget_spent"' in main
+        assert "if budget_spent:" in main
+        exit_block = main.split("leap-scan budget spent:")[2][:400]
+        assert "return 1" in exit_block
