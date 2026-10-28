@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { capItems } from "../../scripts/lib/relayLimits.js";
+import { capItems, MAX_SYMBOL_LENGTH } from "../../scripts/lib/relayLimits.js";
 
 const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const source = readFileSync(
@@ -36,7 +36,7 @@ describe("relay client-message dispatch", () => {
   it("normalizeSymbols survives a hostile JSON element", () => {
     const normalize = runInNewContext(
       `${fnBody("normalizeSymbols")}; normalizeSymbols`,
-      { capItems },
+      { capItems, MAX_SYMBOL_LENGTH },
     );
     // A plain object whose own toString is null: String() finds toString
     // non-callable and valueOf non-primitive, so ToPrimitive throws.
@@ -53,10 +53,21 @@ describe("relay client-message dispatch", () => {
   ])("normalizeSymbols drops non-string element %#", (input) => {
     const normalize = runInNewContext(
       `${fnBody("normalizeSymbols")}; normalizeSymbols`,
-      { capItems },
+      { capItems, MAX_SYMBOL_LENGTH },
     );
     expect(() => normalize(input)).not.toThrow();
     expect(normalize(input)).toEqual([]);
+  });
+
+  it("drops a symbol longer than the bound", () => {
+    // DS-2026-09-23-09 residual: without a length bound one frame could carry
+    // a thousand megabyte-long strings for the relay to uppercase and key.
+    const normalize = runInNewContext(
+      `${fnBody("normalizeSymbols")}; normalizeSymbols`,
+      { capItems, MAX_SYMBOL_LENGTH },
+    );
+    expect(normalize(["x".repeat(MAX_SYMBOL_LENGTH + 1), "aapl"])).toEqual(["AAPL"]);
+    expect(normalize(["x".repeat(MAX_SYMBOL_LENGTH)])).toHaveLength(1);
   });
 
   it("attaches a rejection handler to the dispatched handler promise", () => {

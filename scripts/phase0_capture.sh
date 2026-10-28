@@ -30,9 +30,11 @@ redact() {
       return open
     }
     carry != "" {
-      # A continuation of an already-redacted value: never print it.
-      if (unclosed($0, carry)) next
-      carry=""
+      # A continuation of an already-redacted value: never print it, and stay
+      # in carry until a line consumes the closing delimiter. Clearing on the
+      # first line that merely held no quote resumed printing a value that
+      # was still open.
+      if (unclosed($0, carry)) carry=""
       next
     }
     /^[[:space:]]*#/ {print; next}
@@ -54,7 +56,18 @@ redact() {
         if (ieq > 0) {
           key=key"="substr(inner, 1, ieq-1)
           rest=substr(inner, ieq+1)
-          if (toupper(key) ~ secret) {
+          # systemd accepts SEVERAL assignments in one directive, so every
+          # name in the remainder is inspected and any secret among them
+          # redacts the whole directive value. Checking the first assignment
+          # alone printed the rest of the line unchecked.
+          hit=0
+          scan=inner
+          while (match(scan, /[A-Za-z_][A-Za-z0-9_]*=/)) {
+            name=substr(scan, RSTART, RLENGTH-1)
+            if (toupper(name) ~ secret) { hit=1; break }
+            scan=substr(scan, RSTART+RLENGTH)
+          }
+          if (hit) {
             # Only a redacted value suppresses its continuation lines; a
             # non-secret multi-line directive keeps printing as before.
             if (quote != "" && unclosed(outer, quote)) carry=quote

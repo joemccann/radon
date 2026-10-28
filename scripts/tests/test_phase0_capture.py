@@ -93,3 +93,19 @@ def test_a_non_secret_key_still_shows_its_value():
     out = _redact_input("RADON_MODE=hetzner\nEnvironment=NODE_ENV=production")
     assert "RADON_MODE=hetzner" in out, out
     assert "production" in out, out
+
+
+# Remediate rescan of the fix above: the carry cleared on the first
+# continuation line that held no quote, so a value spanning three or more
+# lines resumed printing before it closed; and only the FIRST assignment of a
+# systemd Environment directive was inspected, while systemd accepts several
+# per directive.
+def test_a_value_spanning_several_lines_stays_redacted_to_its_close():
+    out = _redact_input('TWS_PASSWORD="one\ntwo\nthree_NOTREALsecret"\nRADON_MODE=hetzner')
+    assert "three_NOTREALsecret" not in out, out
+    assert "RADON_MODE=hetzner" in out, out
+
+
+def test_every_assignment_in_one_environment_directive_is_inspected():
+    out = _redact_input('Environment="NODE_ENV=production" "UW_TOKEN=live_NOTREAL123"')
+    assert "live_NOTREAL123" not in out, out
