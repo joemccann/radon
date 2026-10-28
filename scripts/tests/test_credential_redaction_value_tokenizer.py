@@ -404,6 +404,20 @@ _RESCAN_SHAPES = {
     "same-line-paren": f'PASSWORD = ("{OPAQUE}{TAIL}")\n',
     "same-line-yaml-tag": f"password: !!str {OPAQUE}{TAIL}\n",
     "same-line-yaml-anchor": f"password: &pw {OPAQUE}{TAIL}\n",
+    # -21: the continuation rule was indentation only, so a bracket opened on
+    # the key line with the value at column 0 published it. An unclosed
+    # bracket is implicit line joining, exactly like a trailing backslash.
+    "unindented-paren": f'TOKEN = (\n"{OPAQUE}{TAIL}"\n)\n',
+    "unindented-list": f'TOKENS = [\n"{OPAQUE}{TAIL}",\n]\n',
+    "unindented-paren-blank-line": f'TOKEN = (\n\n"{OPAQUE}{TAIL}"\n)\n',
+    # -22: a multi-line subscript annotation before the initializer. The
+    # annotation group admitted no newline, so the head never reached the `=`.
+    "multiline-annotation": f'TOKEN: Annotated[\n    str,\n    Field(),\n] = "{OPAQUE}{TAIL}"\n',
+    # A `+` that touches its left literal is still explicit concatenation; the
+    # gap walk only reached the `+` branch after at least one space, so the
+    # value on the next line at column zero escaped.
+    "touching-concat-unindented": f'PASSWORD = "pre"+\n"{OPAQUE}{TAIL}"\n',
+    "touching-concat-indented": f'PASSWORD = "pre"+\n    "{OPAQUE}{TAIL}"\n',
 }
 
 
