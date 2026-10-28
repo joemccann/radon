@@ -24,6 +24,20 @@ Dependency graph: MC1 -> MC2 -> MC3.
 
 Four red cases reproduced cancellation relabeled as network failure and missing control-flow telemetry. Focused job, service-cycle, model-ladder and PDF suites passed 251 tests, including actual SIGTERM during HTTP setup and streamed reads. Original pending lease/attempt budget, response cleanup, error heartbeat, temporary cleanup, handler restoration and exit143 are retained. No runtime policy or timeout changes. Parent reviewed the exact runtime edits and regressions; integrated full gates remain parent-owned.
 
+# Generated-copy humanizer enforcement (2026-10-27)
+
+Dependency graph: T1 -> [T2, T3] -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inventory AI copy generation and publication paths; reproduce supplied contrast escaping review.
+- [x] T2 depends_on: [T1] Harden shared Python humanizer and MarketDesk final gate with red/green regressions.
+- [x] T3 depends_on: [T1] Enforce humanizer across web news/social generation and cache/fallback paths.
+- [x] T4 depends_on: [T2, T3] Independent Sol and Luna verification; repair findings.
+- [x] T5 depends_on: [T4] Run affected checks, document coverage and remaining operational state.
+
+## Review
+
+Independent Sol and Luna reviews complete; semantic-direction, stale-response and scoring findings repaired. Final focused scoring checks: Python 126 passed and web 16 passed. Affected Python 715 passed before the final two scoring regressions. Full Python: 18,670 passed, 12 skipped, 63 subtests; two unchanged local failures remain in credential-environment fallback and the documentation scan of other worktrees. Full Vitest: 11,648 passed, 21 skipped with the supported history-derived RADON_RELEASE_VERSION=0.48.9 override; default imports hit five unrelated configuration timeouts. Playwright sharing: 21 passed; desktop/mobile screenshots inspected. Typecheck retains four existing DashboardNewsFeed/sameOrigin errors. Full cloud: 3,527 passed, 24 skipped. Exact-head PR checks pending. No published article rows changed; production writes remain with the authorized publisher.
+
 # Bun 1.4.4 security pin (2026-10-22)
 
 Dependency graph: B1 -> B2 -> B3.

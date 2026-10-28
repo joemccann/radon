@@ -15,7 +15,7 @@ export const VOICE_STAGE_LABELS: Record<VoiceStage, string> = {
   queued: "Starting rewrite",
   drafting: "Drafting in your voice",
   hedging: "Still drafting. Trying a second model",
-  checking: "Checking numbers against the source",
+  checking: "Checking facts and writing",
 };
 
 const QUEUED_PROGRESS = 0.04;

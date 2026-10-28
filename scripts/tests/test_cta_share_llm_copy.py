@@ -52,6 +52,10 @@ ON = {"RADON_CTA_LLM_COPY": "1", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-test"}
 
 def caller_returning(text: str):
     def _caller(**_kwargs):
+        if "Check CTA copy against the source facts" in _kwargs.get("system", ""):
+            return json.dumps({"supported": True})
+        if "HUMANIZER FINAL EDITORIAL REVIEW" in _kwargs.get("user", ""):
+            return json.dumps({"findings": [], "qualitative": []})
         return text
 
     return _caller
@@ -82,6 +86,137 @@ class TestOptIn:
         )
 
         assert out == CLEAN_COPY
+
+
+class TestHumanizerGate:
+    def test_initial_copy_cannot_reverse_direction_with_supported_numbers(self):
+        bad = 'CTAs are maximum short at +3.69. Analyzed by Radon · radon.run'
+        calls = []
+
+        def caller(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return bad
+            if 'HUMANIZER FINAL EDITORIAL REVIEW' in kwargs['user']:
+                return json.dumps({'findings': [], 'qualitative': []})
+            return json.dumps({'supported': False})
+
+        assert cta_llm.generate_share_copy(FACTS, TEMPLATE, env=ON, caller=caller) == TEMPLATE
+        assert len(calls) == 2
+        assert 'source facts' in calls[-1]['system']
+
+    def test_clean_copy_gets_final_scored_review_before_return(self):
+        calls = []
+
+        def caller(**kwargs):
+            calls.append(kwargs)
+            return caller_returning(CLEAN_COPY)(**kwargs)
+
+        assert cta_llm.generate_share_copy(FACTS, TEMPLATE, env=ON, caller=caller) == CLEAN_COPY
+        assert len(calls) == 3
+        assert "Check CTA copy against the source facts" in calls[1]["system"]
+        assert "HUMANIZER FINAL EDITORIAL REVIEW" in calls[-1]["user"]
+        assert "negative parallelism" in calls[0]["system"].lower()
+
+    def test_malformed_review_cannot_publish_generated_copy(self):
+        replies = iter([CLEAN_COPY, json.dumps({"supported": True}), "Looks human. Score: 100."])
+        assert cta_llm.generate_share_copy(
+            FACTS, TEMPLATE, env=ON, caller=lambda **_: next(replies),
+        ) == TEMPLATE
+
+    def test_reviewer_outage_falls_back(self):
+        calls = []
+
+        def caller(**kwargs):
+            calls.append(kwargs)
+            if len(calls) > 2:
+                raise TimeoutError("review unavailable")
+            return caller_returning(CLEAN_COPY)(**kwargs)
+
+        assert cta_llm.generate_share_copy(FACTS, TEMPLATE, env=ON, caller=caller) == TEMPLATE
+
+    def test_copy_budget_exhaustion_does_not_start_review(self, monkeypatch):
+        ticks = iter([0.0, 0.0, cta_llm.REQUEST_TIMEOUT_SECONDS + 1])
+        monkeypatch.setattr(cta_llm.time, "monotonic", lambda: next(ticks))
+        calls = []
+
+        def caller(**kwargs):
+            calls.append(kwargs)
+            return CLEAN_COPY
+
+        assert cta_llm.generate_share_copy(FACTS, TEMPLATE, env=ON, caller=caller) == TEMPLATE
+        assert len(calls) == 1
+
+    def test_provider_review_uses_remaining_generation_budget(self, monkeypatch):
+        ticks = iter([0.0, 0.0, 30.0, 40.0])
+        monkeypatch.setattr(cta_llm.time, "monotonic", lambda: next(ticks))
+        calls = []
+
+        def caller(**kwargs):
+            calls.append(kwargs)
+            return caller_returning(CLEAN_COPY)(**kwargs)
+
+        monkeypatch.setattr(cta_llm, "_anthropic_caller", caller)
+        assert cta_llm.generate_share_copy(FACTS, TEMPLATE, env=ON) == CLEAN_COPY
+        assert [c["timeout"] for c in calls] == [45.0, 15.0, 5.0]
+
+    def test_reviewer_false_clean_does_not_bypass_negative_parallelism(self):
+        bad = CLEAN_COPY + "\nThat's a positioning setup, not a confirmed breakout."
+        assert cta_llm.generate_share_copy(
+            FACTS, TEMPLATE, env=ON, caller=caller_returning(bad),
+        ) == TEMPLATE
+
+    def test_rewrite_rechecks_numbers_and_keeps_audit_out_of_copy(self):
+        bad = CLEAN_COPY + "\nThat's a positioning setup, not a confirmed breakout."
+        replies = iter([
+            bad,
+            json.dumps({"supported": True}),
+            json.dumps({"findings": [], "qualitative": [{
+                "field": "content", "text": "That's a positioning setup, not a confirmed breakout.",
+                "category": "negative_parallelism",
+            }]}),
+            json.dumps({"title": "CTA positioning", "content": CLEAN_COPY + " $90.6B selling."}),
+        ])
+        assert cta_llm.generate_share_copy(
+            FACTS, TEMPLATE, env=ON, caller=lambda **_: next(replies),
+        ) == TEMPLATE
+
+    def test_clean_rewrite_is_rescored_and_audited(self, capsys):
+        bad = CLEAN_COPY + "\nThat's a positioning setup, not a confirmed breakout."
+        replies = iter([
+            bad,
+            json.dumps({"supported": True}),
+            json.dumps({"findings": [], "qualitative": [{
+                "field": "content", "text": "That's a positioning setup, not a confirmed breakout.",
+                "category": "negative_parallelism",
+            }]}),
+            json.dumps({"title": "CTA positioning", "content": CLEAN_COPY}),
+            json.dumps({"supported": True}),
+            json.dumps({"findings": [], "qualitative": []}),
+        ])
+        assert cta_llm.generate_share_copy(
+            FACTS, TEMPLATE, env=ON, caller=lambda **_: next(replies),
+        ) == CLEAN_COPY
+        audit = capsys.readouterr().err
+        assert '"status": "passed"' in audit
+        assert '"score": 100' in audit
+        assert "negative_parallelism" in audit
+
+    def test_rewrite_cannot_reverse_direction_with_supported_numbers(self):
+        bad = CLEAN_COPY + "\nThat's a positioning setup, not a confirmed breakout."
+        replies = iter([
+            bad,
+            json.dumps({"supported": True}),
+            json.dumps({"findings": [], "qualitative": [{
+                "field": "content", "text": "That's a positioning setup, not a confirmed breakout.",
+                "category": "negative_parallelism",
+            }]}),
+            json.dumps({"title": "CTA positioning", "content": "CTAs are maximum short at +3.69."}),
+            json.dumps({"supported": False}),
+        ])
+        assert cta_llm.generate_share_copy(
+            FACTS, TEMPLATE, env=ON, caller=lambda **_: next(replies),
+        ) == TEMPLATE
 
 
 class TestNumericFirewall:

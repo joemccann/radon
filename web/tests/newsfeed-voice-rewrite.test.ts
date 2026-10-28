@@ -1,4 +1,8 @@
+import { HUMANIZER_VERSION } from "@/lib/humanizerPolicy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const { editorialReview } = vi.hoisted(() => ({ editorialReview: vi.fn() }));
+vi.mock("@/lib/humanizer", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/humanizer")>(), assertHumanizedCopy: editorialReview }));
+
 const { chat, resolveProvider, alternateProvider } = vi.hoisted(() => ({
   chat: vi.fn(),
   resolveProvider: vi.fn(),
@@ -24,6 +28,7 @@ function run(value = input, signal = new AbortController().signal) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  editorialReview.mockReset().mockResolvedValue({ score: 100, findings: [], qualitative: [] });
   resetVoiceRewriteCache();
   resolveProvider.mockReturnValue("xai");
   alternateProvider.mockReturnValue("anthropic");
@@ -35,9 +40,10 @@ describe("rewriteInVoice", () => {
     chat.mockResolvedValue(draft("104 to 130. That is the historical path."));
     const { promise, stages } = run();
     await expect(promise).resolves.toEqual({
+      humanizerVersion: HUMANIZER_VERSION,
       title: "Seasonality",
       content: "104 to 130. That is the historical path.",
-      caption: "Seasonality\n\n104 to 130.\n\nThat is the historical path.",
+      caption: "Seasonality\n\nMedian rises from 104 to 130.",
     });
     expect(chat).toHaveBeenCalledOnce();
     expect(chat.mock.calls[0][0]).toMatchObject({ provider: "xai", fallback: false, reasoningEffort: "low" });
@@ -124,4 +130,42 @@ describe("rewriteInVoice", () => {
     await expect(run().promise).resolves.toMatchObject({ content: "104 to 130." });
     expect(chat).toHaveBeenCalledTimes(2);
   });
+  it("falls back when editorial review rejects and caches only the reviewed result", async () => {
+    chat.mockResolvedValue(draft("104 to 130."));
+    editorialReview.mockRejectedValueOnce(new Error("Reviewer unavailable"));
+    await expect(run().promise).resolves.toMatchObject({ content: "104 to 130." });
+    expect(editorialReview).toHaveBeenCalledTimes(2);
+    expect(chat).toHaveBeenCalledTimes(2);
+    await run().promise;
+    expect(editorialReview).toHaveBeenCalledTimes(2);
+  });
+  it("never returns or caches an unreviewed draft when reviewers fail", async () => {
+    chat.mockResolvedValue(draft("104 to 130."));
+    editorialReview.mockRejectedValue(new Error("Humanizer review unavailable"));
+    await expect(run().promise).rejects.toThrow(/Humanizer/);
+    await expect(run().promise).rejects.toThrow(/Humanizer/);
+    expect(chat).toHaveBeenCalledTimes(4);
+  });
+
+  it("preserves a complete clean X caption while reviewing both caption and media", async () => {
+    const full = { title: "Dollar levels", content: "DXY tests 102.86. Pictet says 104.59 is resistance. USD/JPY resistance is 158-159." };
+    chat.mockResolvedValue(draft("DXY tests 102.86.", "Dollar levels"));
+    const result = await run(full).promise;
+    expect(result.caption).toBe("Dollar levels\n\nDXY tests 102.86.\n\nPictet says 104.59 is resistance.\n\nUSD/JPY resistance is 158-159.");
+    expect(editorialReview).toHaveBeenCalledWith(expect.objectContaining({ caption: result.caption, mediaCaption: "Dollar levels\n\nDXY tests 102.86." }), expect.any(Object));
+  });
+  it("repairs the full caption and verifies facts before its final editorial review", async () => {
+    const { HumanizerReviewError } = await import("@/lib/humanizer");
+    const full = { title: "Dollar levels", content: "DXY tests 102.86. That's a conditional setup, not a confirmed breakout." };
+    chat.mockResolvedValueOnce(draft("DXY tests 102.86.", "Dollar levels"))
+      .mockResolvedValueOnce(draft("DXY tests 102.86. The breakout remains conditional.", "Dollar levels"))
+      .mockResolvedValueOnce({ text: '{"supported":true}' });
+    editorialReview.mockRejectedValueOnce(new HumanizerReviewError({ score: 100, findings: [], qualitative: [{field:"caption", text:"not a confirmed breakout", category:"negative_parallelism", start:0, end:24, deduction:0}] }));
+    const result = await run(full).promise;
+    expect(result.caption).toContain("The breakout remains conditional.");
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(editorialReview).toHaveBeenCalledTimes(2);
+    expect(editorialReview.mock.calls[1][1].previousAudit.qualitative).toHaveLength(1);
+  });
+
 });
