@@ -10460,7 +10460,7 @@ Dependency graph: T1 -> {T2,T3,T4} -> T7 -> T5 -> T6.
 - [x] T2 depends_on: [T1] Trace Python combo construction, transport and acknowledgement; identify and repair verified defects with regression coverage.
 - [x] T3 depends_on: [T1] Independently trace web/API combo payload and broker lifecycle boundaries; report evidence and targeted corrections.
 - [x] T4 depends_on: [T1] Independently inspect broker protocol, history and existing tests; challenge diagnosis and define missing coverage.
-- [ ] T7 depends_on: [T2,T3,T4] Preserve non-blocking order-warning evidence for unresolved submissions without changing acceptance policy.
+- [x] T7 depends_on: [T2,T3,T4] Preserve non-blocking order-warning evidence for unresolved submissions without changing acceptance policy.
 - [ ] T5 depends_on: [T2,T3,T4,T7] Reconcile findings, review changes and obtain GitHub-runner red/green verification.
 - [ ] T6 depends_on: [T5] Publish template-compliant PR, wait for all applicable exact-head CI checks and send one accepted green notification.
 
@@ -10472,4 +10472,6 @@ Production evidence: retained API logs show CBRS BUY50 timed out PendingSubmit w
 
 Final source review: broker/API/web independent review completed; recovery retains only explicit indeterminate placement data and leaves restart/cooldown/read-script behavior unchanged. Final exact-head CI and notification remain pending.
 
-New operator evidence: CBRS SELL close also timed out at 2026-10-28 15:09:54Z, order417, total23.3578s. Production container source matches origin/main. Code review proves warning399 is emitted but omitted from trade.log and discarded by the placer; child stderr is not retained after normal process exit. Whether any warning occurred on417 is unknown. Add order-scoped warning retention before final publication; do not make benign warnings blocking. d74987047 passed all37 reported checks before this extension.
+New operator evidence: CBRS SELL close also timed out at 2026-10-28 15:09:54Z, order 417, total 23.3578s. Production container source matches origin/main. Code review proves warning 399 is emitted but omitted from trade.log and discarded by the placer; child stderr is not retained after normal process exit. Whether any warning occurred on 417 is unknown. Add order-scoped warning retention before final publication; do not make benign warnings blocking. d74987047 passed all 37 reported checks before this extension.
+
+Warning diagnostics RED: cb8e9271f / run 40715646220 produced five expected missing-warning failures and 3016 passing tests; two unrelated/farm-warning controls passed. Runtime now preserves nonblocking, order-scoped 399/2109 diagnostics across all five post-transmit result paths, with existing credential scrubbing, deduplication and bounded retention. Independent review found no blocker. Original warning-test blobs unchanged for final GREEN. Native IBKR combo acceptance is untested; the operator has tried only Radon.
