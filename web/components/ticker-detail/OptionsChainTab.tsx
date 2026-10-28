@@ -16,7 +16,17 @@ import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { useChainPrefetch } from "@/lib/useChainPrefetch";
 import { useChainUrlState, parseSideParam, parseStrikesParam, type SideFilter } from "@/lib/useChainUrlState";
-import { computeLegImpliedValue } from "@/lib/impliedValue";
+import { computeLegImpliedValue, type ImpliedValueResult } from "@/lib/impliedValue";
+import { bsRho } from "@/lib/blackScholes";
+import { useColumnVisibility } from "@/lib/useColumnVisibility";
+import { ColumnsToggle } from "@/components/ColumnsToggle";
+import {
+  CHAIN_COLUMNS,
+  CHAIN_COLUMN_DEFAULTS,
+  CHAIN_COLUMNS_TABLE_ID,
+  visibleChainColumns,
+  type ChainColumn,
+} from "@/lib/chainColumns";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import {
   type OrderLeg,
@@ -118,6 +128,8 @@ function StrikeRow({
   riskFreeRate,
   staged,
   currentPrice,
+  callColumns,
+  putColumns,
 }: {
   ticker: string;
   expiry: string;
@@ -134,46 +146,32 @@ function StrikeRow({
   /** Which sides of THIS strike are staged in the ticket. */
   staged?: { call: boolean; put: boolean };
   currentPrice: number | null;
+  callColumns: readonly ChainColumn[];
+  putColumns: readonly ChainColumn[];
 }) {
   const callData = prices[callKey] ?? null;
   const putData = prices[putKey] ?? null;
 
-  const callBid = callData?.bid;
-  const callAsk = callData?.ask;
-  const callMid = callBid != null && callAsk != null ? (callBid + callAsk) / 2 : null;
-  const callLast = callData?.last;
-  const callVol = callData?.volume;
-  const callOI = callData?.avgVolume; // OI not available via WS, placeholder
-  const callIV = callData?.impliedVol;
-  const callDelta = callData?.delta;
-
-  const putBid = putData?.bid;
-  const putAsk = putData?.ask;
-  const putMid = putBid != null && putAsk != null ? (putBid + putAsk) / 2 : null;
-  const putLast = putData?.last;
-  const putVol = putData?.volume;
-  const putIV = putData?.impliedVol;
-  const putDelta = putData?.delta;
-
   // Black-Scholes implied (theoretical) per-share price. Reuses the same
   // resolver the dashboard PositionTable uses — same S, σ, K, T, r precedence.
-  // contracts is set to 1 because we display per-share, not notional.
-  const callImplied = useMemo(
+  // contracts is set to 1 because we display per-share, not notional. Its
+  // inputs also price rho, which IB does not publish.
+  const callBs = useMemo(
     () =>
       computeLegImpliedValue(
         { ticker, expiry, strike, type: "Call", direction: "LONG", contracts: 1 },
         prices,
         { riskFreeRate },
-      ).perContract,
+      ),
     [ticker, expiry, strike, prices, riskFreeRate],
   );
-  const putImplied = useMemo(
+  const putBs = useMemo(
     () =>
       computeLegImpliedValue(
         { ticker, expiry, strike, type: "Put", direction: "LONG", contracts: 1 },
         prices,
         { riskFreeRate },
-      ).perContract,
+      ),
     [ticker, expiry, strike, prices, riskFreeRate],
   );
 
@@ -188,42 +186,18 @@ function StrikeRow({
   return (
     <tr className={rowClass} ref={atmRef} data-strike={strike}>
       {/* Call side */}
-      {showCalls && (
-        <>
-          <td className={`chain-cell chain-greek${callTint}`}>{callDelta != null ? callDelta.toFixed(2) : ""}</td>
-          <td className={`chain-cell chain-iv${callTint}`}>{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
-          <td
-            className={`chain-cell chain-implied${callTint}`}
-            title="Black-Scholes implied (theoretical) per-share price"
-          >
-            {callImplied != null ? fmtPrice(callImplied) : ""}
-          </td>
-          <td className={`chain-cell chain-vol${callTint}`}>{callVol != null ? callVol.toLocaleString() : ""}</td>
-          <td
-            className={`chain-cell chain-bid chain-clickable${callTint}`}
-            onClick={() => onClickCall(strike, "SELL")}
-            title="Sell call"
-          >
-            {callBid != null ? fmtPrice(callBid) : "---"}
-          </td>
-          <td
-            className={`chain-cell chain-mid chain-clickable${callTint}`}
-            data-testid={`chain-call-mid-${strike}`}
-            onClick={() => onClickCall(strike, "BUY")}
-            title="Buy call"
-          >
-            {callMid != null ? fmtPrice(callMid) : "---"}
-          </td>
-          <td
-            className={`chain-cell chain-ask chain-clickable${callTint}`}
-            onClick={() => onClickCall(strike, "BUY")}
-            title="Buy call"
-          >
-            {callAsk != null ? fmtPrice(callAsk) : "---"}
-          </td>
-          <td className={`chain-cell chain-last${callTint}`}>{callLast != null ? fmtPrice(callLast) : ""}</td>
-        </>
-      )}
+      {showCalls && callColumns.map((col) => (
+        <ChainCell
+          key={col.key}
+          col={col}
+          side="call"
+          strike={strike}
+          data={callData}
+          bs={callBs}
+          tint={callTint}
+          onClick={onClickCall}
+        />
+      ))}
 
       {/* Strike */}
       <td className={`chain-cell chain-strike ${isAtm ? "chain-strike-atm" : ""}`}>
@@ -231,42 +205,106 @@ function StrikeRow({
       </td>
 
       {/* Put side */}
-      {showPuts && (
-        <>
-          <td className={`chain-cell chain-last${putTint}`}>{putLast != null ? fmtPrice(putLast) : ""}</td>
-          <td
-            className={`chain-cell chain-bid chain-clickable${putTint}`}
-            onClick={() => onClickPut(strike, "SELL")}
-            title="Sell put"
-          >
-            {putBid != null ? fmtPrice(putBid) : "---"}
-          </td>
-          <td
-            className={`chain-cell chain-mid chain-clickable${putTint}`}
-            onClick={() => onClickPut(strike, "BUY")}
-            title="Buy put"
-          >
-            {putMid != null ? fmtPrice(putMid) : "---"}
-          </td>
-          <td
-            className={`chain-cell chain-ask chain-clickable${putTint}`}
-            onClick={() => onClickPut(strike, "BUY")}
-            title="Buy put"
-          >
-            {putAsk != null ? fmtPrice(putAsk) : "---"}
-          </td>
-          <td className={`chain-cell chain-vol${putTint}`}>{putVol != null ? putVol.toLocaleString() : ""}</td>
-          <td
-            className={`chain-cell chain-implied${putTint}`}
-            title="Black-Scholes implied (theoretical) per-share price"
-          >
-            {putImplied != null ? fmtPrice(putImplied) : ""}
-          </td>
-          <td className={`chain-cell chain-iv${putTint}`}>{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
-          <td className={`chain-cell chain-greek${putTint}`}>{putDelta != null ? putDelta.toFixed(2) : ""}</td>
-        </>
-      )}
+      {showPuts && putColumns.map((col) => (
+        <ChainCell
+          key={col.key}
+          col={col}
+          side="put"
+          strike={strike}
+          data={putData}
+          bs={putBs}
+          tint={putTint}
+          onClick={onClickPut}
+        />
+      ))}
     </tr>
+  );
+}
+
+const fmtFixed = (v: number | null | undefined, digits: number) => (v != null ? v.toFixed(digits) : "");
+const fmtVolPct = (v: number | null | undefined) => (v != null ? (v * 100).toFixed(1) : "");
+const fmtOptPrice = (v: number | null | undefined) => (v != null ? fmtPrice(v) : "");
+
+function ChainCell({
+  col,
+  side,
+  strike,
+  data,
+  bs,
+  tint,
+  onClick,
+}: {
+  col: ChainColumn;
+  side: "call" | "put";
+  strike: number;
+  data: PriceData | null;
+  bs: ImpliedValueResult;
+  tint: string;
+  onClick: (strike: number, action: "BUY" | "SELL") => void;
+}) {
+  const sideLabel = side === "call" ? "call" : "put";
+  const base = { "data-col": `${side}-${col.key}` };
+  const bid = data?.bid;
+  const ask = data?.ask;
+
+  switch (col.key) {
+    case "bid":
+    case "mid":
+    case "ask": {
+      const value = col.key === "bid" ? bid : col.key === "ask" ? ask : bid != null && ask != null ? (bid + ask) / 2 : null;
+      const action = col.key === "bid" ? "SELL" : "BUY";
+      return (
+        <td
+          {...base}
+          className={`chain-cell chain-${col.key} chain-clickable${tint}`}
+          data-testid={col.key === "mid" && side === "call" ? `chain-call-mid-${strike}` : undefined}
+          onClick={() => onClick(strike, action)}
+          title={`${action === "SELL" ? "Sell" : "Buy"} ${sideLabel}`}
+        >
+          {value != null ? fmtPrice(value) : "---"}
+        </td>
+      );
+    }
+    case "implied":
+      return (
+        <td {...base} className={`chain-cell chain-implied${tint}`} title={col.title}>
+          {fmtOptPrice(bs.perContract)}
+        </td>
+      );
+    case "rho": {
+      const rho = bs.inputs ? bsRho({ ...bs.inputs, type: side === "call" ? "Call" : "Put" }) : null;
+      return <td {...base} className={`chain-cell chain-greek${tint}`}>{fmtFixed(rho, 3)}</td>;
+    }
+    case "delta":
+      return <td {...base} className={`chain-cell chain-greek${tint}`}>{fmtFixed(data?.delta, 2)}</td>;
+    case "gamma":
+      return <td {...base} className={`chain-cell chain-greek${tint}`}>{fmtFixed(data?.gamma, 4)}</td>;
+    case "theta":
+      return <td {...base} className={`chain-cell chain-greek${tint}`}>{fmtFixed(data?.theta, 3)}</td>;
+    case "vega":
+      return <td {...base} className={`chain-cell chain-greek${tint}`}>{fmtFixed(data?.vega, 3)}</td>;
+    case "iv":
+      return <td {...base} className={`chain-cell chain-iv${tint}`}>{fmtVolPct(data?.impliedVol)}</td>;
+    case "bidIv":
+      return <td {...base} className={`chain-cell chain-iv${tint}`}>{fmtVolPct(data?.bidIv)}</td>;
+    case "askIv":
+      return <td {...base} className={`chain-cell chain-iv${tint}`}>{fmtVolPct(data?.askIv)}</td>;
+    case "model":
+      return <td {...base} className={`chain-cell chain-implied${tint}`}>{fmtOptPrice(data?.optPrice)}</td>;
+    case "volume":
+      return <td {...base} className={`chain-cell chain-vol${tint}`}>{data?.volume != null ? data.volume.toLocaleString() : ""}</td>;
+    case "last":
+      return <td {...base} className={`chain-cell chain-last${tint}`}>{fmtOptPrice(data?.last)}</td>;
+  }
+}
+
+function ChainColgroup({ callCount, putCount, sideFilter }: { callCount: number; putCount: number; sideFilter: SideFilter }) {
+  return (
+    <colgroup>
+      {sideFilter !== "puts" && Array.from({ length: callCount }, (_, index) => <col key={`call-${index}`} />)}
+      <col className="chain-anchor-strike-col" />
+      {sideFilter !== "calls" && Array.from({ length: putCount }, (_, index) => <col key={`put-${index}`} />)}
+    </colgroup>
   );
 }
 
@@ -1084,6 +1122,10 @@ export default function OptionsChainTab({
   const searchParams = useSearchParams();
   const [strikesPerSide, setStrikesPerSide] = useState(() => chainUrl.initialStrikes);
   const [sideFilter, setSideFilter] = useState<SideFilter>(() => chainUrl.initialSide);
+  const chainColumnVisibility = useColumnVisibility(CHAIN_COLUMNS_TABLE_ID, CHAIN_COLUMN_DEFAULTS);
+  const callColumns = useMemo(() => visibleChainColumns(chainColumnVisibility.visible, "call"), [chainColumnVisibility.visible]);
+  const putColumns = useMemo(() => visibleChainColumns(chainColumnVisibility.visible, "put"), [chainColumnVisibility.visible]);
+  const chainColumnCount = (sideFilter !== "puts" ? callColumns.length : 0) + (sideFilter !== "calls" ? putColumns.length : 0);
   const { isMobile, hasMounted } = useViewport();
   const showMobileChain = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
@@ -1583,6 +1625,13 @@ export default function OptionsChainTab({
           ))}
         </select>
         <div className="chain-first-toolbar-controls" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+          <ColumnsToggle
+            columns={CHAIN_COLUMNS}
+            visible={chainColumnVisibility.visible}
+            onToggle={chainColumnVisibility.toggle}
+            onReset={chainColumnVisibility.reset}
+            floating
+          />
           <div className="chain-side-toggle">
             {(["both", "calls", "puts"] as const).map((val) => (
               <button
@@ -1625,50 +1674,36 @@ export default function OptionsChainTab({
         </div>
       </div>
 
-        <div className="chain-grid-wrapper chain-anchor-panes" data-side={sideFilter}>
+        <div
+          className="chain-grid-wrapper chain-anchor-panes"
+          data-side={sideFilter}
+          style={{ "--chain-data-cols": chainColumnCount } as React.CSSProperties}
+        >
           <div className="chain-anchor-header" ref={headerRef} onScroll={syncChainScroll}>
           <table className="chain-grid" data-sortable-exempt="chain-layout" aria-label="Options chain columns">
-            <colgroup>
-              {sideFilter !== "puts" && Array.from({ length: 8 }, (_, index) => <col key={`call-${index}`} />)}
-              <col className="chain-anchor-strike-col" />
-              {sideFilter !== "calls" && Array.from({ length: 8 }, (_, index) => <col key={`put-${index}`} />)}
-            </colgroup>
+            <ChainColgroup callCount={callColumns.length} putCount={putColumns.length} sideFilter={sideFilter} />
             <thead data-testid="chain-columns-header">
               <tr>
-                {sideFilter !== "puts" && (
-                  <>
-                    <th className="chain-header">Δ</th>
-                    <th className="chain-header">IV</th>
-                    <th className="chain-header" title="Black-Scholes implied (theoretical) per-share price">
-                      Implied
-                    </th>
-                    <th className="chain-header">Vol</th>
-                    <th className="chain-header">Bid</th>
-                    <th className="chain-header chain-header-mid">Mid</th>
-                    <th className="chain-header">Ask</th>
-                    <th className="chain-header">Last</th>
-                  </>
-                )}
+                {sideFilter !== "puts" && callColumns.map((col) => (
+                  <th key={col.key} className={`chain-header${col.key === "mid" ? " chain-header-mid" : ""}`} title={col.title}>
+                    {col.header}
+                  </th>
+                ))}
                 <th className="chain-header chain-header-strike">Strike</th>
-                {sideFilter !== "calls" && (
-                  <>
-                    <th className="chain-header">Last</th>
-                    <th className="chain-header">Bid</th>
-                    <th className="chain-header chain-header-mid">Mid</th>
-                    <th className="chain-header">Ask</th>
-                    <th className="chain-header">Vol</th>
-                    <th className="chain-header" title="Black-Scholes implied (theoretical) per-share price">
-                      Implied
-                    </th>
-                    <th className="chain-header">IV</th>
-                    <th className="chain-header">Δ</th>
-                  </>
-                )}
+                {sideFilter !== "calls" && putColumns.map((col) => (
+                  <th key={col.key} className={`chain-header${col.key === "mid" ? " chain-header-mid" : ""}`} title={col.title}>
+                    {col.header}
+                  </th>
+                ))}
               </tr>
               <tr>
-                {sideFilter !== "puts" && <th className="chain-side-label" colSpan={8}>CALLS</th>}
+                {sideFilter !== "puts" && callColumns.length > 0 && (
+                  <th className="chain-side-label" colSpan={callColumns.length}>CALLS</th>
+                )}
                 <th className="chain-side-label" />
-                {sideFilter !== "calls" && <th className="chain-side-label" colSpan={8}>PUTS</th>}
+                {sideFilter !== "calls" && putColumns.length > 0 && (
+                  <th className="chain-side-label" colSpan={putColumns.length}>PUTS</th>
+                )}
               </tr>
             </thead>
           </table>
@@ -1700,11 +1735,7 @@ export default function OptionsChainTab({
               >
                 {loadingStrikes ? <div className="chain-anchor-empty"><SpectralLoader label="Loading chain" /></div> : (
                   <table className="chain-grid" data-sortable-exempt="chain-layout" aria-label={`${side === "upper" ? "Lower" : "Higher"} strikes, calls and puts`}>
-                    <colgroup>
-                      {sideFilter !== "puts" && Array.from({ length: 8 }, (_, index) => <col key={`call-${index}`} />)}
-                      <col className="chain-anchor-strike-col" />
-                      {sideFilter !== "calls" && Array.from({ length: 8 }, (_, index) => <col key={`put-${index}`} />)}
-                    </colgroup>
+                    <ChainColgroup callCount={callColumns.length} putCount={putColumns.length} sideFilter={sideFilter} />
                     <tbody>
               {(side === "upper" ? upperStrikes : lowerStrikes).map((row) => {
                 const isAtm = row.strike === atmStrike;
@@ -1724,6 +1755,8 @@ export default function OptionsChainTab({
                     riskFreeRate={riskFreeRate}
                     staged={stagedSides.get(row.strike)}
                     currentPrice={currentPrice}
+                    callColumns={callColumns}
+                    putColumns={putColumns}
                   />
                 );
               })}

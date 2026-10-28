@@ -24,6 +24,7 @@ import { WebSocketServer } from "ws";
 import { IBApi, EventName, SecType, OptionType, TickByTickDataType } from "@stoqey/ib";
 import { classifyIBConnectionError } from "./ib_connection_status.js";
 import {
+  applyOptionComputation,
   createPriceData,
   createFundamentalsData,
   parseFundamentalRatios,
@@ -2849,21 +2850,11 @@ function wireIBEvents() {
     if (!liveState) return;
     markTick(symbol);
 
-    const validTickTypes = [13, 83, 12, 82];
-    if (!validTickTypes.includes(tickType)) return;
-
     const pd = liveState.data;
-    const isModel = tickType === 13 || tickType === 83;
-    if (!isModel && pd.delta !== null) return;
-
-    const valid = (v) => v !== undefined && v !== -2 && v !== -1 && Number.isFinite(v);
-
-    if (valid(delta)) pd.delta = delta;
-    if (valid(gamma)) pd.gamma = gamma;
-    if (valid(theta)) pd.theta = theta;
-    if (valid(vega)) pd.vega = vega;
-    if (valid(impliedVol)) pd.impliedVol = impliedVol;
-    if (valid(undPrice)) pd.undPrice = undPrice;
+    const changed = applyOptionComputation(pd, tickType, {
+      impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice,
+    });
+    if (!changed) return;
 
     pd.timestamp = nowIso();
     verbose(`greeks ${symbol} tickType=${tickType} delta=${delta} iv=${impliedVol}`);

@@ -137,6 +137,7 @@ admin-log-disclosure.spec.ts
 # clear-shell.spec.ts is curated in ci.yml for AI Industry desktop/mobile navigation verification.
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
 # REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
+# REVIEWED 2026-10-27 chain-column-toggle.spec.ts - Passed locally under next dev (Chromium, 1/1): grouped menu, show-all greeks to 31 header/body cells, hide Last persists across reload. Not preflighted under next start, so it stays held out; unit coverage in chain-column-visibility.test.tsx.
 # REVIEWED 2026-09-15 chain-held-leg-prices.spec.ts - Static locator adaptation to the shared header table; existing price assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 chain-sticky-header.spec.ts - Static review of stationary header geometry and hit-testing across both panes; curated chain-anchored-scroll covers header stability. This suite remains held out.
 # REVIEWED 2026-09-15 chain-strikes-selector.spec.ts - Static locator adaptation to the shared header table; strike-count assertions retained. Browser suite remains held out.
@@ -187,6 +188,7 @@ cash-flows-section.spec.ts
 cash-flows-withdrawal-may8.spec.ts
 catalyst-card-weekend.spec.ts
 catalysts-scrollbar-autohide.spec.ts
+chain-column-toggle.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts

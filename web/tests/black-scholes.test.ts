@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bsCall, bsImpliedVol, bsPrice, bsPut, normCdf } from "../lib/blackScholes";
+import { bsCall, bsImpliedVol, bsPrice, bsPut, bsRho, normCdf } from "../lib/blackScholes";
 
 /**
  * Reference values produced by scripts/scenario_analysis.py:
@@ -141,5 +141,34 @@ describe("bsImpliedVol — round-trip", () => {
   it("returns null when price exceeds upper arbitrage bound", () => {
     expect(bsImpliedVol(150, 100, 100, 0.5, 0, "Call")).toBeNull();
     expect(bsImpliedVol(150, 100, 100, 0.5, 0, "Put")).toBeNull();
+  });
+});
+
+describe("bsRho", () => {
+  // IB's tickOptionComputation carries no rho, so the chain derives it here.
+  // Convention: price change per 1 percentage point of rate (per share).
+  const cases = [
+    { S: 100, K: 100, T: 0.5, r: 0.04, sigma: 0.25 },
+    { S: 352.85, K: 380, T: 53 / 365, r: 0.043, sigma: 0.19 },
+    { S: 50, K: 40, T: 1.2, r: 0.0, sigma: 0.6 },
+  ];
+
+  it.each(cases)("matches a central finite difference of bsPrice ($S/$K)", ({ S, K, T, r, sigma }) => {
+    const h = 1e-5;
+    for (const type of ["Call", "Put"] as const) {
+      const up = bsPrice({ S, K, T, r: r + h, sigma, type });
+      const down = bsPrice({ S, K, T, r: r - h, sigma, type });
+      const fd = (up - down) / (2 * h) / 100;
+      expect(bsRho({ S, K, T, r, sigma, type })).toBeCloseTo(fd, 4);
+    }
+  });
+
+  it("is positive for calls and negative for puts", () => {
+    expect(bsRho({ S: 100, K: 100, T: 1, r: 0.04, sigma: 0.2, type: "Call" })).toBeGreaterThan(0);
+    expect(bsRho({ S: 100, K: 100, T: 1, r: 0.04, sigma: 0.2, type: "Put" })).toBeLessThan(0);
+  });
+
+  it("is zero at or past expiry", () => {
+    expect(bsRho({ S: 100, K: 90, T: 0, r: 0.04, sigma: 0.2, type: "Call" })).toBe(0);
   });
 });
