@@ -9,7 +9,7 @@ const EXPLAIN_CLIENT_TIMEOUT_MS = EXPLAIN_BUDGET_MS + 10_000;
 const ERROR_COPY = "Could not explain this post. Try again.";
 const ELAPSED_TICK_MS = 250;
 
-type ExplainPost = { id: string; title: string; content: string };
+type ExplainPost = { id: string; title: string; content?: string };
 type ExplainResult = { explanation: string; thin?: boolean };
 
 type ExplainFrame = { event: string; data: unknown };

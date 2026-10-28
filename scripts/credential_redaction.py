@@ -197,8 +197,15 @@ _SPECIFIC_SCRUB_PATTERNS = [
     # which would otherwise treat the word "Bearer" itself as the value and
     # leave the real token in "authorization: bearer <token>" untouched.
     # The token stops at a quote: eating a closing quote misaligned the
-    # tokenizer, so `"Bearer " "<token>"` kept the token.
-    (re.compile(r"\bbearer\s+[^\s\"']+", re.IGNORECASE), "bearer [redacted]"),
+    # tokenizer, so `"Bearer " "<token>"` kept the token. It stops at an
+    # escaping backslash for the same reason: consuming the `\\` of
+    # `PASS="bearer \\" tail"` turned the escaped quote into the value's
+    # terminator and left `tail` outside every credential span. A backslash
+    # that is not escaping a quote or whitespace stays part of the token.
+    (
+        re.compile(r"\bbearer\s+(?:[^\s\"'\\]|\\(?![\s\"']))+", re.IGNORECASE),
+        "bearer [redacted]",
+    ),
     (
         re.compile(
             r"(auth[_-]?token|authorization|bearer)([\"']?\s*[=:]\s*)"
@@ -292,6 +299,11 @@ _HEREDOC_OPERATOR = re.compile(
 # A YAML comment may end that header line, and whole comment lines may sit
 # before the value (DS-2026-10-25-11); a trailing comment needs the whitespace
 # YAML requires before `#`, so an env value starting `#` stays the value.
+# Whitespace, a trailing comment and one or more blank/comment lines may
+# sit between an assignment's punctuation and its value.
+_HEAD_GAP = r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?"
+
+
 _ASSIGNMENT_HEAD = re.compile(
     # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
     rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
@@ -300,11 +312,11 @@ _ASSIGNMENT_HEAD = re.compile(
     # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
     # A union (`str | None`, DS-2026-10-27-17) is up to four more members.
     r"(?::[ \t]*(?P<annotation_quote>[\"']?)[A-Za-z_][A-Za-z0-9_.]{0,64}"
-    r"(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?"
-    r"(?:[ \t]*\|[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \[\]]{0,64}\])?){0,4}"
+    r"(?:\[[A-Za-z0-9_., \t\r\n\[\]()]{0,96}\])?"
+    r"(?:[ \t]*\|[ \t]*[A-Za-z_][A-Za-z0-9_.]{0,64}(?:\[[A-Za-z0-9_., \t\r\n\[\]()]{0,96}\])?){0,4}"
     r"(?P=annotation_quote)[ \t]*(?==))?"
     r"[ \t]*[:=][ \t]*"
-    r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)?",
+    rf"{_HEAD_GAP}",
     re.IGNORECASE,
 )
 
@@ -336,7 +348,15 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
         # recursion, so a long run of literals cannot exhaust the stack.
         while delimiter:
             following = end + len(delimiter)
-            segment = _UNQUOTED_SEGMENT.match(text, following)
+            # A `+` that TOUCHES its left literal is still explicit
+            # concatenation, so it belongs to the gap walk below, which is the
+            # only branch that crosses a line break. The segment match claims
+            # it otherwise, and the value on the next line escaped.
+            segment = (
+                None
+                if following < length and text[following] == "+"
+                else _UNQUOTED_SEGMENT.match(text, following)
+            )
             if segment is not None:
                 following = segment.end()
                 prefix = _STRING_PREFIX.match(text, following)
@@ -475,11 +495,17 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
     anchor) puts the value on the next one. Both kept those lines. Stops at
     the first non-blank line indented no deeper than the key's; blank lines
     between deeper ones belong to the value.
+
+    An unclosed bracket joins the next line whatever its indentation, the
+    same implicit continuation the trailing backslash gets below: the
+    indentation rule alone published `TOKEN = (` followed by the value at
+    column 0 (DS-2026-10-27-21).
     """
     indent = line_start
     while indent < len(text) and text[indent] in " \t":
         indent += 1
     indent -= line_start
+    depth = _bracket_depth(text, line_start, eol)
     end = cursor = eol
     while cursor < len(text):
         # A trailing backslash joins the next line whatever its indentation
@@ -496,10 +522,45 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
             # Blank: the next non-blank line decides.
             cursor = line_end
             continue
-        if first - start <= indent and not joined:
+        # An unclosed bracket continues the value whatever the indentation;
+        # a blank line inside one is still inside it, so the blank-line
+        # branch above keeps deciding on the next non-blank line.
+        if first - start <= indent and not joined and depth <= 0:
             break
+        depth = max(0, depth + _bracket_depth(text, first, line_end))
         end = cursor = line_end
     return end
+
+
+_BRACKETS = {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}
+
+
+def _bracket_depth(text: str, start: int, end: int) -> int:
+    """Net unclosed-bracket count over ``text[start:end]``, quotes skipped.
+
+    A bracket inside a quoted run is data, not structure. The quote state is
+    tracked here rather than by calling the value tokenizer: that one follows
+    a triple-delimited or unterminated run past the slice, so a line of such
+    openers would cost one whole-input walk each. Every character of the
+    slice is read exactly once, so the cost is the slice's length.
+    """
+    depth = 0
+    quote = ""
+    cursor = start
+    while cursor < end:
+        char = text[cursor]
+        if char == "\\":
+            cursor += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'`":
+            quote = char
+        else:
+            depth += _BRACKETS.get(char, 0)
+        cursor += 1
+    return depth
 
 
 class _LineStarts:

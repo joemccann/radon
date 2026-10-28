@@ -1223,25 +1223,32 @@ when the largecaps child is killed at the FastAPI preset timeout before
   that writes `leap.json` with `status` `degraded`
   (`leap-admission-busy-exhausted` / `leap-admission-window-exhaustion`).
   Cache `status` `ok` with exit 1 after `SCAN COMPLETE` is
-  `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
+  `leap-partial-ticker-exit-pages-p1`. A fresh cache with `status`
+  `degraded`, `scan_budget_spent`, and `deferred_tickers`, plus exit 1,
+  is the budget stop below: the names that finished are on disk and the
+  heartbeat is not `ok`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down, or the gateway is unauthenticated
   or unreachable, stand down. Do not raise `LEAP_PRESET_TIMEOUT_S` or
   `TimeoutStartSec` to hide the serialized history lock.
 - **Remediation (code):** `LEAP_SCAN_BUDGET_S` (3300) stops the pool
   before the 3600s kill, leaving one in-flight 120s admission wait plus
   one 70s retry for the cache write. Names still queued are
-  `deferred_tickers`, not provider failures. A nonempty partial result
-  still exits 0. Leap passes `LEAP_IB_HISTORY_TIMEOUT_S` (3) into the
+  `deferred_tickers`, not provider failures. The partial file is still
+  written. `status` is `degraded`, the `leap-scan` heartbeat class is
+  `scan_budget_spent`, and the process exits 1. A nonempty result with
+  only `failed_tickers` (no deferred names) exits 0. Leap passes
+  `LEAP_IB_HISTORY_TIMEOUT_S` (3) into the
   serialized historical call so a paced name falls through to
   Robinhood, then UW, instead of holding the lock for 15s. Do not
-  `reset-failed` as the fix. The next timer after deploy, or one
+  `reset-failed` to clear a budget stop. The next timer after deploy, or one
   `reset-failed` plus start once the unit is on a newer green deploy
   (`RERUNNABLE_ONESHOT_UNITS`), reruns the scan.
 - **Regression:**
   `scripts/tests/test_leap_scanner.py::test_leap_history_bounds_serialized_ib_timeout`,
   `test_scan_budget_returns_before_the_preset_subprocess_kill`,
   `test_scan_universe_stops_at_the_wall_clock_budget`,
-  `test_budget_truncated_scan_writes_cache_and_exits_zero`,
+  `test_budget_truncated_scan_does_not_heartbeat_ok`,
+  `test_budget_truncated_scan_still_writes_the_partial_cache`,
   `scripts/tests/test_uw_surface.py::test_fetch_daily_closes_forwards_explicit_ib_timeout`.
 - **Code:** `scripts/leap_scanner_uw.py` (`LEAP_SCAN_BUDGET_S`,
   `LEAP_IB_HISTORY_TIMEOUT_S`, `scan_universe`),
@@ -2817,8 +2824,10 @@ after one curl-7 retry. Discover then shed a short UW rate limit.
   `retry_transient=False`, the same fail-fast client scanner and
   discover use (5s default admission, no client retry ladder). A
   rate-limited name is caught per ticker and the book still prints
-  JSON inside the 180s budget. The single-ticker report keeps the
-  120s wait. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
+  JSON inside the 180s budget. A report invoked without a history
+  budget keeps `FLOW_ADMISSION_WAIT_S` (120s). `POST /flow-analysis/{ticker}`
+  passes `--deadline-epoch`, and that walk waits
+  `FLOW_BUDGETED_ADMISSION_WAIT_S` (60s) per page. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
   shorten `FLOW_ADMISSION_WAIT_S`. Do not `reset-failed`. The next
   timer after deploy is enough.
 - **Regression:**
@@ -3177,9 +3186,12 @@ when the last heartbeat is the cloud-mode gateway-down string.** Peak:
   seconds. Portfolio-tab `POST /flow-analysis` cooldown path is
   `flow-refresh-capacity-502`.
 - **Remediation (code):** retry capacity shed on the ticker POST
-  (`FLOW_REPORT_SHED_RETRIES` default 2,
-  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` default 8), same budget as
-  orders-sync. Persistent shed still 502. UI maps the capacity string to
+  (`FLOW_REPORT_SHED_RETRIES` is 12,
+  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` is 5 seconds, backoff capped at
+  20 seconds). That chain is not the orders-sync pair
+  (`ORDERS_SYNC_SHED_RETRIES` 2, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS` 8
+  seconds). Paging stops at `--deadline-epoch` so a shed retry cannot
+  start a new full budget. Persistent shed still 502. UI maps the capacity string to
   operator copy and shows `Scan failed` instead of ANALYZING.
 - **Regression:**
   `test_flow_report_capacity_shed.py::test_flow_report_retries_capacity_shed_then_succeeds`,
@@ -4653,6 +4665,54 @@ service_health write raises.** Peak: 2026-10-08 22:14Z, page
   `scripts/tests/test_aa_frontier_refresh.py::test_ok_heartbeat_timeout_does_not_fail_the_oneshot`,
   `test_refresh_failure_still_exits_one_and_names_the_exception_class`.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_record_ok_health`, `main`).
+
+## aa-frontier-preview-display-name
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer when the only
+scored Mistral row is a stable slug whose display name says Preview.**
+Peak: 2026-10-28 07:04Z, page `20e25092fdae5b3e816ca688ed48c54d`. State
+file stayed on `completed_date=2026-10-27`. Health row `aa-frontier-basket`
+stored `No eligible frontier model for provider mistral`.
+
+- **Mechanism:** The selector treated `\bpreview\b` on the display name
+  the same as a preview slug. `mistral-large-4` ("Mistral Large 4 Preview",
+  released 2026-10-06, priced, intelligence index present) was excluded.
+  On 2026-10-28 the publisher no longer returned a positive intelligence
+  index for the other Mistral rows, so the provider had zero candidates.
+  `select_frontier_models` raised `CatalogError`, `main` wrote the error
+  health row and exited 1. OpenAI through Alibaba still had eligible
+  rows. The run was about three seconds, so this was not the 30s
+  transport timeout. Edge and `/health` stayed up. Not IB. Turso accepted
+  the error write. Not the 2026-10-08 ok-heartbeat case: the state file
+  was not already current, and the detail is a `CatalogError` sentence.
+- **Detection:** `service_health` detail
+  `No eligible frontier model for provider mistral`. Journal stdout
+  `{"status": "error", "reason": "No eligible frontier model for provider mistral"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  State `checked_at` stays on the previous success.
+- **Discriminating check:** the catalog still contains `mistral-large-4`
+  with positive input and output prices and a positive intelligence
+  index, and every other Mistral row fails the score or price check.
+  A slug that itself contains `preview`, `experimental`, `alpha`, `beta`,
+  or an `exp` token must still fail closed. A specialist name
+  (`vision`, `code`, and the rest of that list) must still fail closed.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. Python Turso `SELECT 1` failing
+  in the same minute is a platform outage: stand down.
+- **Remediation (code):** judge unstable-release tokens on the slug
+  only. Keep specialist tokens on the slug and the display name. Do not
+  `reset-failed` as the fix. The next timer is 07:00 UTC. A manual
+  start after the deploy picks up `mistral-large-4` and rewrites the
+  state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_row`,
+  `test_preview_slug_still_rejects_the_only_scored_row`,
+  `test_specialist_display_name_still_rejects_a_stable_slug`,
+  `test_preview_display_name_outside_the_frontier_band_does_not_replace_the_leader`.
+- **Code:** `scripts/aa_frontier_refresh.py` (`_UNSTABLE_RELEASE_SLUG`,
+  `_SPECIALIST_MODEL`, `_candidate`).
+
 ## pnl-story-stock-entry-timing
 
 **A realized stock P&L story shows entry price and exit timestamp but omits entry timestamp and hold duration.**
@@ -4863,3 +4923,14 @@ Observed 2026-10-21 18:18:13Z for page `72cdada6f65595cfd32c1885c614ed75`.
 Signal: MarketDesk has new article summaries/images while the feed's PDF research timestamps stop; `marketdesk_articles` has pending `preview_quota` rows. Check the canonical ledger, provider article metadata and `/api/user/limits` separately from the Commentary scraper. A green process exit is not evidence of new publication.
 
 The article path must not request a PDF. It persists every discovered reference and replays pending rows outside the latest-25 listing, then uses summary facts and source images under the existing selection/copy/Humanizer gates. Original bullets stay input-only. Article evidence is labeled with its source URL, not fabricated PDF pages. The separate `radon-marketdesk-pdf.timer` archives one authorized PDF per persisted admission interval; denied PDF access backs off independently. Verify both live stored provenance and the rendered feed before closing. Regression files: `test_marketdesk_job.py`, `test_marketdesk_pdf_job.py`, `test_marketdesk_copy.py`, and `newsfeed-research-media.spec.ts`.
+
+## marketdesk-pdf-allowance-oneshot
+
+**`radon-marketdesk-pdf.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) during a persisted provider allowance backoff.**
+
+- **Observed:** page `ba78cd1c2481fb685978eec0c3f37e11` at 2026-10-27T18:35:00Z. The same oneshot was still `failed` at 2026-10-28 02:17:17Z, `ExecMainStatus=1`, about four seconds, `NRestarts=0`. `marketdesk-pdf` `last_error` was `PDF archive deferred: preview_quota`. `marketdesk-research` and `marketdesk-dropbox` stayed `ok`. Edge `/status` was `up`. The health write succeeded, so this was not a Turso platform outage and not IB. The same loop paged `cf427722febf0786a82ff8443a606f10` at 2026-10-27T19:45:00Z. PR 1319 carried that later page and failed the docs owner contract because `docs/marketdesk-research.md` was unchanged.
+- **Mechanism:** `preview_quota` and `download_quota` persist a 6-hour backoff, then 12 and 24 hours. Later timer fires find no admitted work, `blocked()` returns that code, and `run_cycle` raises `DownloadDeferred`. `service_cycle` records the error row, then `main` returned 1. The timer is `*:02/5:17`, so each fire is a new `InactiveEnterTimestamp`. The unit watchdog treats that as a fresh P1. The error row is the designed visibility signal. The P2 error bucket fires through hysteresis, then stays quiet while `next_attempt_at` is in the future.
+- **Discriminating check:** the stderr and health message are exactly `PDF archive deferred: preview_quota` or `PDF archive deferred: download_quota`, article rows stay `ok`, and the oneshot is `Result=exit-code` rather than `signal` or exit 143. `not_pdf`, `http_transport`, `unauthenticated`, and any other exception still exit 1. A Turso `SELECT 1` failure in the same minute is a platform outage: stand down, do not restart-flap. Do not invent a download URL or bypass the provider refusal.
+- **Remediation (code):** those two allowance deferrals still print the public code and keep the error row, and the oneshot exits 0. Other deferrals and unexpected exceptions still exit 1. Do not `reset-failed` as the fix. The provider quota itself remains until the provider allows the existing blob route.
+- **Regression:** `scripts/tests/test_marketdesk_pdf_job.py::test_persisted_allowance_backoff_keeps_error_and_exits_zero`, `test_preview_quota_download_exits_zero_after_durable_retry`, `test_non_allowance_deferral_still_fails_the_oneshot`, `test_unexpected_cycle_error_still_fails_the_oneshot`.
+- **Code:** `scripts/research/marketdesk_pdf_job.py` (`ALLOWANCE_DEFERRALS`, `main`). The owner doc is `docs/marketdesk-research.md`.
