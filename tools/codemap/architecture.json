@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-27T09:00:09Z",
-  "node_count": 4189,
-  "edge_count": 8593,
+  "generated_at": "2026-10-28T09:00:09Z",
+  "node_count": 4226,
+  "edge_count": 8672,
   "areas": {
-    "web": 2371,
+    "web": 2391,
     "site": 159,
-    "scripts": 1488,
-    "cloud": 123,
+    "scripts": 1503,
+    "cloud": 125,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -20,12 +20,12 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 284
+      "count": 285
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 242
+      "count": 244
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 459
+      "count": 466
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1120
+      "count": 1130
     },
     {
       "id": "site/app",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 144
+      "count": 146
     },
     {
       "id": "scripts/backtest",
@@ -130,7 +130,7 @@
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 28
+      "count": 29
     },
     {
       "id": "scripts/control_service",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 42
+      "count": 45
     },
     {
       "id": "scripts/runner",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 785
+      "count": 794
     },
     {
       "id": "scripts/trade_blotter",
@@ -275,7 +275,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 105
+      "count": 107
     },
     {
       "id": "lib/tools",
@@ -314,7 +314,7 @@
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 208,
+      "in": 209,
       "out": 0,
       "test": false
     },
@@ -342,7 +342,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 106,
+      "in": 107,
       "out": 0,
       "test": false
     },
@@ -410,17 +410,17 @@
       "test": false
     },
     {
+      "id": "scripts/api/server.py",
+      "area": "scripts",
+      "in": 50,
+      "out": 17,
+      "test": false
+    },
+    {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
       "in": 64,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/api/server.py",
-      "area": "scripts",
-      "in": 49,
-      "out": 17,
       "test": false
     },
     {
@@ -510,7 +510,7 @@
     {
       "id": "web/e2e/clear-fixtures.ts",
       "area": "web",
-      "in": 34,
+      "in": 35,
       "out": 10,
       "test": true
     },
@@ -529,6 +529,13 @@
       "test": false
     },
     {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
+      "in": 42,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/userError.ts",
       "area": "web",
       "in": 41,
@@ -538,13 +545,6 @@
     {
       "id": "web/lib/refreshSchedule.ts",
       "area": "web",
-      "in": 41,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/api/auth.py",
-      "area": "scripts",
       "in": 41,
       "out": 0,
       "test": false
@@ -564,6 +564,13 @@
       "test": false
     },
     {
+      "id": "scripts/clients/uw_client.py",
+      "area": "scripts",
+      "in": 36,
+      "out": 3,
+      "test": false
+    },
+    {
       "id": "web/components/RegimeStrip.tsx",
       "area": "web",
       "in": 38,
@@ -571,17 +578,10 @@
       "test": false
     },
     {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
-      "in": 35,
-      "out": 3,
-      "test": false
-    },
-    {
-      "id": "web/components/DashboardNewsFeed.tsx",
+      "id": "web/lib/TickerDetailContext.tsx",
       "area": "web",
-      "in": 18,
-      "out": 20,
+      "in": 36,
+      "out": 2,
       "test": false
     }
   ],
