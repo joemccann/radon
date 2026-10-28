@@ -180,6 +180,17 @@ async function dispatchClientMessage(client, data) {
   }
 }
 
+/** A normalized string field, or null when absent or over the length bound.
+ *
+ * The bound belongs on every subscription path, not only the symbol array:
+ * a contract and an index descriptor are keyed and retained the same way.
+ */
+function boundedField(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toUpperCase();
+  return trimmed.length > 0 && trimmed.length <= MAX_SYMBOL_LENGTH ? trimmed : null;
+}
+
 function normalizeSymbols(raw) {
   // Strings only. String() on an arbitrary JSON value throws: a plain object
   // whose own toString is null has no primitive conversion, and that TypeError
@@ -206,7 +217,7 @@ function normalizeContracts(raw) {
   return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
-      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
+      const symbol = boundedField(c.symbol);
       const expiry = typeof c.expiry === "string" ? c.expiry.trim() : null;
       const strike = typeof c.strike === "number" && Number.isFinite(c.strike) && c.strike > 0 ? c.strike : null;
       const right = c.right === "C" || c.right === "P" ? c.right : null;
@@ -225,8 +236,8 @@ function normalizeIndexes(raw) {
   return capItems(raw)
     .map((c) => {
       if (typeof c !== "object" || c === null) return null;
-      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
-      const exchange = typeof c.exchange === "string" ? c.exchange.trim().toUpperCase() : null;
+      const symbol = boundedField(c.symbol);
+      const exchange = boundedField(c.exchange);
       if (!symbol || !exchange) return null;
       return { symbol, exchange };
     })

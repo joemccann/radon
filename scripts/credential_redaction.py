@@ -348,7 +348,15 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
         # recursion, so a long run of literals cannot exhaust the stack.
         while delimiter:
             following = end + len(delimiter)
-            segment = _UNQUOTED_SEGMENT.match(text, following)
+            # A `+` that TOUCHES its left literal is still explicit
+            # concatenation, so it belongs to the gap walk below, which is the
+            # only branch that crosses a line break. The segment match claims
+            # it otherwise, and the value on the next line escaped.
+            segment = (
+                None
+                if following < length and text[following] == "+"
+                else _UNQUOTED_SEGMENT.match(text, following)
+            )
             if segment is not None:
                 following = segment.end()
                 prefix = _STRING_PREFIX.match(text, following)
