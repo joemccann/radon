@@ -1,3 +1,15 @@
+# Equity research newsfeed admission repair (2026-10-28)
+
+- [x] EQ1 depends_on: [] Reproduce against recent published articles and fresh portfolio/watchlist; freeze an eligibility audit.
+- [x] EQ2 depends_on: [EQ1] Red/green regressions for off-book issuer research, in-book subjects, incidental mentions, unavailable book, and preserved macro/FX admission.
+- [x] EQ3 depends_on: [EQ2] Surgical admission/replay repair; focused/full gates and independent Sol/Luna code review.
+- [x] EQ4 depends_on: [EQ1] Reversibly remove verified ineligible publications with originals and audit retained; verify served results and unaffected posts.
+- [ ] EQ5 depends_on: [EQ3, EQ4] Exact-head green PR and accepted notification; operator merge, production verification and managed intake resumption.
+
+## Review
+
+Live audit frozen at 368 MarketDesk posts against the canonical watchlist and IB-verified current portfolio. Initial independent Sol and Luna review produced 114 withdrawals, 12 holds and 242 retained posts. A full rendered-caption addendum reviewed 24 of those retained posts and approved nine further holds; all 135 final mutations have exact live transaction readbacks, original row/source/ledger/outcome backups and hashed source assets. Final scope: 114 withdrawn, 21 held, 233 retained. Both reviewers independently verified every prepared and applied item; all 233 retained whole rows match the fresh pre-addendum snapshot exactly. Authenticated browser verifies every served title, body and caption against database digest cb48afbc47a1c8efb369ebd97ee02e4756e8061d169b6898e819ad359642d9ae. Temporary maintenance containers and credentials are removed; private Linux recovery remains. MarketDesk timer/service remain stopped pending release. Independent Sol and Luna code review is approved against frozen classifier/publication hashes. Final classifier/book/filter: 471 passed, classifier coverage 98.1%; intake: 154 passed. Full Python: 18,982 passed / 12 skipped / 40 subtests; cloud: 3,533 passed / 24 skipped; web: 11,666 passed / 21 skipped. Code release remains separate from completed production cleanup; operator merge, production verification and managed intake resumption remain open under EQ5.
+
 # MarketDesk filtered, account-throttled PDF archive (2026-10-27)
 
 Dependency graph: MD1 -> MD2 -> MD3 -> MD4 -> MD5.

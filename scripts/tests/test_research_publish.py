@@ -244,7 +244,7 @@ def test_empty_caption_publishes(db, post):
 
 
 def test_long_title_and_body_publish(db, post):
-    post["title"] = "T" * 600
+    post["title"] = "Macro " + "T" * 600
     post["content"] = "B" * 40000
     post = certify(post)
     publish.publish(post)
@@ -252,6 +252,7 @@ def test_long_title_and_body_publish(db, post):
 
 
 def test_publication_preserves_evidence_quotes_assets_and_financial_punctuation(db, post):
+    post["title"] = "Macro demand"
     post["content"] = "Demand fell -5.65%. The 2-3% range isn't a forecast."
     post["source"]["source_quote"] = "Source wording\u2014unchanged."
     post["source"]["date_evidence"] = {"source_quote": "Report\u2014September 5, 2026"}
@@ -305,7 +306,7 @@ def test_publication_manifest_binds_exact_source_pdf(db, tmp_path, monkeypatch):
     manifest = build_manifest({'source_sha256':digest,'pages':[{'page_number':1,'markdown_file':'page-0001.md','needs_ocr':False}]},tmp_path)
     file = tmp_path/'manifest.json';file.write_text(json.dumps(manifest))
     evidence_url = publish.store_asset(file)
-    post = {'id':'research-'+'d'*32,'title':'Capex research','content':'Capex 20.',
+    post = {'id':'research-'+'d'*32,'title':'Sector capex research','content':'Capex 20.',
         'timestamp':'2026-09-07T12:00:00+00:00','images':[],'tags':['CAPEX'],
         'source':{'kind':'dropbox','publisher':'Research','url':url,'evidenceUrl':evidence_url,
             'fileId':'id:test','revision':'r1','contentHash':'a'*64,'documentDate':'2026-09-07',
@@ -493,3 +494,64 @@ def test_marketdesk_article_rejects_unbound_source_or_download(db, marketdesk_po
     with pytest.raises(ValueError):
         publish.publish(post)
     assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('title,body,current,reason', [
+    ('TransUnion (TRU) earnings', 'TransUnion revenue rose 10%.', {'HOOD'}, 'EQUITY_RESEARCH_NOT_IN_BOOK'),
+    ('Robinhood (HOOD) earnings', 'Robinhood EPS rose 10%.', set(), 'EQUITY_RESEARCH_NOT_IN_BOOK'),
+    ('Robinhood (HOOD) earnings', 'Robinhood EPS rose 10%.', None, 'EQUITY_RESEARCH_BOOK_UNAVAILABLE'),
+])
+def test_publication_rechecks_current_book_even_with_valid_editorial_certificate(db,post,monkeypatch,title,body,current,reason):
+    from research import book
+    monkeypatch.setattr(book,'current_tickers',lambda:current)
+    post=certify({**post,'title':title,'content':body})
+    with pytest.raises(ValueError,match=reason) as caught:
+        publish.publish(post)
+    assert caught.value.reason_code==reason
+    assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
+
+
+def test_legacy_certified_outbox_cannot_publish_after_book_removal(db,post,monkeypatch,tmp_path):
+    from research import book
+    from research.state import State
+    from research.worker import flush_outbox
+    post=certify({**post,'title':'Robinhood (HOOD) earnings','content':'Robinhood EPS rose 10%.'})
+    current={'HOOD'}
+    monkeypatch.setattr(book,'current_tickers',lambda:current)
+    humanizer.validate_certificate(post)
+    state=State(tmp_path/'outbox.sqlite')
+    with state.db:
+        state.db.execute("INSERT INTO work(key,file_id,rev,path,scope,metadata,status,result) VALUES('work','id:abc','r1','/report.pdf','scope','{}','complete',?)",
+                         (json.dumps({'status':'reviewed','items':1}),))
+        state.db.execute("INSERT INTO outbox VALUES(?,'work',?,'pending')",(post['id'],json.dumps(post)))
+    current.clear()
+    assert flush_outbox(state,publish)==0
+    assert flush_outbox(state,publish)==0
+    assert state.outbox()==[]
+    row=state.db.execute('SELECT status,error,result FROM work').fetchone()
+    assert row['status']=='complete' and row['error']=='EQUITY_RESEARCH_NOT_IN_BOOK'
+    assert json.loads(row['result'])['status']=='dropped'
+    assert json.loads(state.db.execute('SELECT payload FROM outbox').fetchone()[0])==post
+    assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
+    state.close()
+
+
+@pytest.mark.parametrize('caption,current,blocked', [
+    ('Meta (META): Buy, price target $850.', {'HOOD'}, True),
+    ('Robinhood (HOOD): Buy, price target $150.', {'HOOD'}, False),
+    ('US equity fund flows by sector.', {'HOOD'}, False),
+])
+def test_rendered_caption_is_subject_to_fresh_publication_admission(db, post, monkeypatch, caption, current, blocked):
+    from research import book
+    monkeypatch.setattr(book, 'current_tickers', lambda: current)
+    post['source']['figures'][0]['caption'] = caption
+    post = certify(post)
+    humanizer.validate_certificate(post)
+    if blocked:
+        with pytest.raises(publish.PublicationAdmissionError, match='EQUITY_RESEARCH_NOT_IN_BOOK'):
+            publish.publish(post)
+        assert db.execute('SELECT count(*) FROM posts').fetchone()[0] == 0
+        assert db.execute('SELECT count(*) FROM research_post_sources').fetchone()[0] == 0
+    else:
+        publish.publish(post)
+        assert db.execute('SELECT count(*) FROM posts').fetchone()[0] == 1
