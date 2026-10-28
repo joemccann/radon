@@ -11921,3 +11921,45 @@ Serial from the repo root, OpenSSL 3.6.5 first on `PATH`, Python 3.13.16, `/bin/
 | 3 | 17,767 passed / 12 skipped / 23 subtests (165.49s) | 5 failed / 11,482 passed / 21 skipped / 1,162 files (123.00s) | 42 failed / 3,404 passed / 31 skipped (876.01s) | 0 added / 0 removed |
 
 Base cloud at `7f6ad940` on this Mac: 42 failed / 3,403 passed / 31 skipped (774.90s). The failed-node set matches all three rounds. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The cloud 42 are bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56` and `mapfile` missing in `cloud/scripts/operator-radon.sh`, plus the gateway-control and media-publication cases in that same set.
+
+
+## Delta audit 2026-10-28
+
+Range `32cc2594b09e484000b28447f9feac8cf04c6a9a..2415f718bc8bbc61082c5a567e799e0cdf4f771c`: 77 commits / 248 paths. Newest trusted checkpoint is the 2026-10-27 collaborator comment on issue #83 (`audited-through: 32cc2594b09e484000b28447f9feac8cf04c6a9a`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-570.
+
+MarketDesk admission, the flow deadline, the service-token prefix list, the humanizer certificate, and the LEAP budget heartbeat each ship a test that calls the behavior. `ci.yml` and the coverage thresholds are unchanged. The chain-column spec stays held out under the existing dated `REVIEWED` line in `web/e2e/ci-curation-ledger.txt`. The delta is 93 test files; the three closing rounds are the three executions of that set.
+
+Not filed: the five `await import("../next.config.mjs")` Vitest cases still time out at 5000ms and passed 29 tests at a 60s ceiling. The committed ceiling was not raised. `cloud/tests` on this Mac matches `2415f718` (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`). Caddy 2.11.7 is on PATH. Linux CI is the authority for that suite.
+
+### T-570 — P1 — the new option-computation tests never enter the relay
+
+`web/tests/ib-option-computation.test.ts` imports `applyOptionComputation` and calls it (`web/tests/ib-option-computation.test.ts:17-27`). The relay change is the call inside `wireIBEvents` (`scripts/ib_realtime_server.js:2854-2856`). An early `return` before that call left the unit file green (10 passed) while tick 10 and tick 13 never reached `bufferPriceForClient`. Bid IV and the model price would disappear from the chain with the new tests still green.
+
+Acceptance: dispatch `tickOptionComputation` 10 and 13 through the relay fixture and assert the broadcast carries `bidIv` and `optPrice`. Removing the call fails those cases.
+
+### T-571 — P2 — a sentinel model tick is reported as a change
+
+`applyOptionComputation` assigned only finite fields and then returned true (`scripts/ib_tick_handler.js`, the model/last path). A model tick of IB sentinels (`-1`, `-2`, `NaN`, `MAX_VALUE`) left every greek null and still returned true, so `wireIBEvents` stamped a timestamp and broadcast the unchanged book (`scripts/ib_realtime_server.js:2857-2861`). The new unit case did not read the return value.
+
+Acceptance: that tick returns false and the relay does not broadcast. A tick that writes a greek still broadcasts.
+
+Audited through: 2415f718bc8bbc61082c5a567e799e0cdf4f771c on 2026-10-28 — 2 new findings
+
+## Remediation 2026-10-28
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-570 | DONE | Early `return` before `applyOptionComputation` in `scripts/ib_realtime_server.js`: `web/tests/ib-option-computation.test.ts` 10 passed, `web/tests/ib-rt-volume-relay.test.ts` bid and model 2 failed (0 broadcasts). Restored the call. The relay file passed 7 on each of three runs. Product source unchanged in this commit. |
+| T-571 | DONE | Before the return tracked a write, the sentinel unit case failed `expected true to be false` and the relay case saw 1 call with an all-null snapshot (2 failed / 17 passed). After `return wrote` at `scripts/ib_tick_handler.js:327`, both files passed 19 on each of three runs. |
+
+### Closing gates 2026-10-28
+
+Serial from the repo root, OpenSSL 3.6.5 first on `PATH`, Python 3.13.16, `/bin/bash` 3.2.57, caddy 2.11.7. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `next.config.mjs` imports (`Test timed out in 5000ms`). Those five passed 29 tests at a 60s ceiling. Cloud exit 1 each round on the same 42 nodes as each other and as `2415f718` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `2415f718` |
+|---|---|---|---|---|
+| 1 | 18,743 passed / 12 skipped / 63 subtests (161.08s) | 5 failed / 11,647 passed / 21 skipped / 1,174 files (131.79s) | 42 failed / 3,478 passed / 31 skipped (900.83s) | 0 added / 0 removed |
+| 2 | 18,743 passed / 12 skipped / 63 subtests (138.36s) | 5 failed / 11,647 passed / 21 skipped / 1,174 files (173.88s) | 42 failed / 3,478 passed / 31 skipped (1096.34s) | 0 added / 0 removed |
+| 3 | 18,743 passed / 12 skipped / 63 subtests (149.82s) | 5 failed / 11,647 passed / 21 skipped / 1,174 files (131.46s) | 42 failed / 3,478 passed / 31 skipped (922.04s) | 0 added / 0 removed |
+
+Base cloud at `2415f718` on this Mac: 42 failed / 3,478 passed / 31 skipped (1177.65s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
