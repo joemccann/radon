@@ -122,6 +122,15 @@ describe("tickOptionComputation reaches the broadcast", () => {
     );
   });
 
+  it("a model tick of only sentinels does not broadcast", () => {
+    const fixture = relayFixture();
+    fixture.callbacks.get("tickOptionComputation")!(
+      1, 13, -1, -2, -1, Number.MAX_VALUE, -2, Number.NaN, undefined, -1,
+    );
+    expect(fixture.symbolStates.get(fixture.symbol).data.delta).toBeNull();
+    expect(fixture.symbolStates.get(fixture.symbol).data.optPrice).toBeNull();
+    expect(fixture.bufferPriceForClient).not.toHaveBeenCalled();
+  });
 });
 
 describe("parseRtVolume — SNDK-shaped option payload", () => {

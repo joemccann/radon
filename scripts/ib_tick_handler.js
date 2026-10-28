@@ -307,8 +307,12 @@ export function applyOptionComputation(data, tickType, values) {
   if (!isModel && !LAST_COMPUTATION.has(tickType)) return false;
   if (!isModel && data.delta !== null) return false;
 
+  let wrote = false;
   const assign = (field, value) => {
-    if (value != null) data[field] = value;
+    if (value != null) {
+      data[field] = value;
+      wrote = true;
+    }
   };
   assign("delta", greekValue(delta));
   assign("gamma", greekValue(gamma));
@@ -320,7 +324,7 @@ export function applyOptionComputation(data, tickType, values) {
     assign("optPrice", nonNegativeValue(optPrice));
     assign("pvDividend", nonNegativeValue(pvDividend));
   }
-  return true;
+  return wrote;
 }
 
 /* ─── Fundamentals (tickString type 47) ─────────────────────── */
