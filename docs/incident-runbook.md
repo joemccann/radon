@@ -1223,25 +1223,32 @@ when the largecaps child is killed at the FastAPI preset timeout before
   that writes `leap.json` with `status` `degraded`
   (`leap-admission-busy-exhausted` / `leap-admission-window-exhaustion`).
   Cache `status` `ok` with exit 1 after `SCAN COMPLETE` is
-  `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
+  `leap-partial-ticker-exit-pages-p1`. A fresh cache with `status`
+  `degraded`, `scan_budget_spent`, and `deferred_tickers`, plus exit 1,
+  is the budget stop below: the names that finished are on disk and the
+  heartbeat is not `ok`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down, or the gateway is unauthenticated
   or unreachable, stand down. Do not raise `LEAP_PRESET_TIMEOUT_S` or
   `TimeoutStartSec` to hide the serialized history lock.
 - **Remediation (code):** `LEAP_SCAN_BUDGET_S` (3300) stops the pool
   before the 3600s kill, leaving one in-flight 120s admission wait plus
   one 70s retry for the cache write. Names still queued are
-  `deferred_tickers`, not provider failures. A nonempty partial result
-  still exits 0. Leap passes `LEAP_IB_HISTORY_TIMEOUT_S` (3) into the
+  `deferred_tickers`, not provider failures. The partial file is still
+  written. `status` is `degraded`, the `leap-scan` heartbeat class is
+  `scan_budget_spent`, and the process exits 1. A nonempty result with
+  only `failed_tickers` (no deferred names) exits 0. Leap passes
+  `LEAP_IB_HISTORY_TIMEOUT_S` (3) into the
   serialized historical call so a paced name falls through to
   Robinhood, then UW, instead of holding the lock for 15s. Do not
-  `reset-failed` as the fix. The next timer after deploy, or one
+  `reset-failed` to clear a budget stop. The next timer after deploy, or one
   `reset-failed` plus start once the unit is on a newer green deploy
   (`RERUNNABLE_ONESHOT_UNITS`), reruns the scan.
 - **Regression:**
   `scripts/tests/test_leap_scanner.py::test_leap_history_bounds_serialized_ib_timeout`,
   `test_scan_budget_returns_before_the_preset_subprocess_kill`,
   `test_scan_universe_stops_at_the_wall_clock_budget`,
-  `test_budget_truncated_scan_writes_cache_and_exits_zero`,
+  `test_budget_truncated_scan_does_not_heartbeat_ok`,
+  `test_budget_truncated_scan_still_writes_the_partial_cache`,
   `scripts/tests/test_uw_surface.py::test_fetch_daily_closes_forwards_explicit_ib_timeout`.
 - **Code:** `scripts/leap_scanner_uw.py` (`LEAP_SCAN_BUDGET_S`,
   `LEAP_IB_HISTORY_TIMEOUT_S`, `scan_universe`),
@@ -2817,8 +2824,10 @@ after one curl-7 retry. Discover then shed a short UW rate limit.
   `retry_transient=False`, the same fail-fast client scanner and
   discover use (5s default admission, no client retry ladder). A
   rate-limited name is caught per ticker and the book still prints
-  JSON inside the 180s budget. The single-ticker report keeps the
-  120s wait. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
+  JSON inside the 180s budget. A report invoked without a history
+  budget keeps `FLOW_ADMISSION_WAIT_S` (120s). `POST /flow-analysis/{ticker}`
+  passes `--deadline-epoch`, and that walk waits
+  `FLOW_BUDGETED_ADMISSION_WAIT_S` (60s) per page. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
   shorten `FLOW_ADMISSION_WAIT_S`. Do not `reset-failed`. The next
   timer after deploy is enough.
 - **Regression:**
@@ -3177,9 +3186,12 @@ when the last heartbeat is the cloud-mode gateway-down string.** Peak:
   seconds. Portfolio-tab `POST /flow-analysis` cooldown path is
   `flow-refresh-capacity-502`.
 - **Remediation (code):** retry capacity shed on the ticker POST
-  (`FLOW_REPORT_SHED_RETRIES` default 2,
-  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` default 8), same budget as
-  orders-sync. Persistent shed still 502. UI maps the capacity string to
+  (`FLOW_REPORT_SHED_RETRIES` is 12,
+  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` is 5 seconds, backoff capped at
+  20 seconds). That chain is not the orders-sync pair
+  (`ORDERS_SYNC_SHED_RETRIES` 2, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS` 8
+  seconds). Paging stops at `--deadline-epoch` so a shed retry cannot
+  start a new full budget. Persistent shed still 502. UI maps the capacity string to
   operator copy and shows `Scan failed` instead of ANALYZING.
 - **Regression:**
   `test_flow_report_capacity_shed.py::test_flow_report_retries_capacity_shed_then_succeeds`,
