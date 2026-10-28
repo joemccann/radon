@@ -115,6 +115,12 @@ export function createPriceData(symbol) {
     vega: null,
     impliedVol: null,
     undPrice: null,
+    // tickOptionComputation extras: IV implied by the bid (10/80) and ask
+    // (11/81), and IB's model theoretical price + PV of dividends (13/83).
+    bidIv: null,
+    askIv: null,
+    optPrice: null,
+    pvDividend: null,
     // Forward price for forward-priced indices (VIX): the relay copies the
     // front-month future last/mid here so option pricing uses the tradeable
     // forward, not the after-hours-frozen cash index. Null for everything else.
@@ -260,6 +266,61 @@ export function updatePriceFromTickPrice(data, tickType, value) {
 
   restoreOptionSessionMark(data);
   data.timestamp = new Date().toISOString();
+}
+
+/* ─── Option computation (tickOptionComputation) ───────────── */
+
+const BID_COMPUTATION = new Set([10, 80]);
+const ASK_COMPUTATION = new Set([11, 81]);
+const LAST_COMPUTATION = new Set([12, 82]);
+const MODEL_COMPUTATION = new Set([13, 83]);
+
+// IB "not computed" sentinels: -2 for the greeks (delta can legitimately be
+// -1 on a deep ITM put), -1 for IV / prices / dividends, DBL_MAX for either.
+function greekValue(v) {
+  return typeof v === "number" && !isSentinel(v) && v !== -2 ? v : null;
+}
+
+function nonNegativeValue(v) {
+  return typeof v === "number" && !isSentinel(v) && v >= 0 ? v : null;
+}
+
+/**
+ * Apply one tickOptionComputation to an option's PriceData. Returns true when
+ * the payload changed (caller rebroadcasts).
+ *
+ * Bid/ask computations carry only the IV implied by that side. The last-trade
+ * computation fills greeks until IB's model tick arrives; the model tick owns
+ * every greek plus the theoretical price and PV dividend.
+ */
+export function applyOptionComputation(data, tickType, values) {
+  const { impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice } = values;
+  if (BID_COMPUTATION.has(tickType) || ASK_COMPUTATION.has(tickType)) {
+    const iv = nonNegativeValue(impliedVol);
+    if (iv == null) return false;
+    if (BID_COMPUTATION.has(tickType)) data.bidIv = iv;
+    else data.askIv = iv;
+    return true;
+  }
+
+  const isModel = MODEL_COMPUTATION.has(tickType);
+  if (!isModel && !LAST_COMPUTATION.has(tickType)) return false;
+  if (!isModel && data.delta !== null) return false;
+
+  const assign = (field, value) => {
+    if (value != null) data[field] = value;
+  };
+  assign("delta", greekValue(delta));
+  assign("gamma", greekValue(gamma));
+  assign("theta", greekValue(theta));
+  assign("vega", greekValue(vega));
+  assign("impliedVol", nonNegativeValue(impliedVol));
+  assign("undPrice", nonNegativeValue(undPrice));
+  if (isModel) {
+    assign("optPrice", nonNegativeValue(optPrice));
+    assign("pvDividend", nonNegativeValue(pvDividend));
+  }
+  return true;
 }
 
 /* ─── Fundamentals (tickString type 47) ─────────────────────── */
