@@ -86,9 +86,8 @@ def test_indeterminate_attempt_never_becomes_a_rejection_digest(
     monkeypatch.setattr(server, '_run_ib_script_with_recovery', _fake_recovery(
         SimpleNamespace(ok=ok, error=error, data=detail)))
     response = client.post('/orders/place', json=_STOCK_ORDER)
-    assert response.status_code == (504 if not ok else 502)
-    if not ok:
-        assert response.json()['detail']['code'] == 'ORDER_INDETERMINATE'
-    else:
+    assert response.status_code == 504
+    assert response.json()['detail']['code'] == 'ORDER_INDETERMINATE'
+    if ok:
         assert response.json()['detail']['indeterminate'] is True
     assert not digest.exists()

@@ -51,6 +51,19 @@ _GRACE_WAIT_POLLS = 5
 _GRACE_WAIT_INTERVAL = 0.3   # seconds per poll; total grace budget ≈ 1.5s
 
 
+def _trade_perm_id(trade) -> int:
+    """Read broker identity from either acknowledgement callback.
+
+    ib_insync's openOrder updates Order.permId, while orderStatus updates
+    OrderStatus.permId. Either callback can arrive first.
+    """
+    for source in (trade.order, trade.orderStatus):
+        perm_id = getattr(source, "permId", 0)
+        if isinstance(perm_id, int) and perm_id != 0:
+            return perm_id
+    return 0
+
+
 def _grace_wait_for_ib_error(client, ib_errors: list, trade) -> tuple:
     """Poll the error buffer for up to ~1.5s waiting for an async IB error.
 
@@ -663,26 +676,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         _transmitted["done"] = True
         _transmitted["trade"] = trade
 
-        # Poll trade.orderStatus until IB issues a permId OR the status moves
-        # past PendingSubmit/ApiPending. Without this wait, `finally:
-        # client.disconnect()` runs while the order is still in PendingSubmit;
-        # IB then drops the order because the placing client went away before
-        # acknowledging.  The 2026-05-27 MU risk-reversal repro returned
-        # `{status:"ok", permId:0, initialStatus:"PendingSubmit"}` and the
-        # subsequent /orders sync found nothing — because IB had silently
-        # discarded the unconfirmed order on disconnect.
-        #
-        # Terminal-or-confirmed predicate:
-        #   perm_id != 0                      → IB assigned the permanent id
-        #   status in {Submitted, PreSubmitted, Filled, Cancelled,
-        #              Inactive, ApiCancelled, Rejected}
-        #       → IB has fully processed; whatever the verdict, it's not in
-        #         limbo.  PendingSubmit / ApiPending / Unknown are the
-        #         "still in limbo" cases and we keep waiting on those.
-        #
-        # Combos get the longer deadline because IB risk-checks each leg
-        # independently AND the SmartRouting + NonGuaranteed handshake adds
-        # ~3-5s on top of single-leg latency.
+        # Wait for broker identity from either openOrder or orderStatus, or
+        # an explicit processed status. The callback order is not guaranteed.
+        # Preserve the bounded acknowledgement budget; expiry does not prove
+        # that an already-transmitted order was rejected or discarded.
         deadline = _clock() + (12.0 if order_type == "combo" else 6.0)
         terminal_states = {
             "Submitted",
@@ -694,7 +691,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             "Rejected",
         }
         while _clock() < deadline:
-            if trade.order.permId != 0:
+            if _trade_perm_id(trade) != 0:
                 break
             s = trade.orderStatus.status if trade.orderStatus else ""
             if s in terminal_states:
@@ -706,8 +703,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         timer.mark("permId")
 
         order_id = trade.order.orderId
-        perm_id = trade.order.permId
-        status = trade.orderStatus.status if trade.orderStatus else "Unknown"
+        perm_id = _trade_perm_id(trade)
+        status = (trade.orderStatus.status if trade.orderStatus else "") or "Unknown"
 
         # Surface any IB error events caught during the wait — with the
         # STRUCTURED code/text fields the terminal-failed builder already
@@ -725,25 +722,20 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "ib_error_text": msg,
             }
 
-        # Refuse to claim success if IB hasn't actually accepted the order.
-        # PendingSubmit + permId=0 after the polling deadline means IB
-        # never confirmed; disconnecting now would drop the order. Surface
-        # a clear error so the UI doesn't show a misleading green toast.
-        if perm_id == 0 and status in ("PendingSubmit", "ApiPending", "Unknown", ""):
-            hint = (
-                "IB never confirmed the order. Common causes: "
-                "(1) market is closed and TIF=DAY (use GTC for after-hours), "
-                "(2) insufficient trading permissions for this structure (Tier 4 for naked shorts), "
-                "(3) pre-trade risk rejection, "
-                "(4) IB combo router doesn't route this BAG structure — "
-                "specifically, bearish risk reversals (SELL CALL + BUY PUT) "
-                "are silently dropped by IB Smart even when the bullish "
-                "counterpart routes fine on the same account. Workaround: "
-                "place the legs separately as two single-leg orders."
-            )
+        # A transmitted order without acknowledgement has an unknown outcome.
+        # Disconnecting after the bounded wait does not establish rejection;
+        # retain its identity so callers reconcile instead of submitting again.
+        if perm_id == 0 and status in ("PendingSubmit", "ApiPending", "Unknown"):
             return {
                 "status": "error",
-                "message": f"Order stuck in {status or 'Unknown'} (no permId). {hint}",
+                "indeterminate": True,
+                "message": (
+                    f"Order outcome INDETERMINATE: IB has not acknowledged "
+                    f"the transmitted order ({status}, no permId). "
+                    f"CHECK OPEN ORDERS before re-placing "
+                    f"(orderRef {order_ref})."
+                ),
+                "orderRef": order_ref,
                 "orderId": order_id,
                 "permId": perm_id,
                 "initialStatus": status,

@@ -136,3 +136,57 @@ async def test_structured_unacknowledged_combo_is_indeterminate(
     assert event.kwargs["perm_id"] == 0
     assert event.kwargs["status"] == broker_status
     assert event.kwargs["detail"] == exc.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cloud", "managed", "restart-success", "restart-failure"])
+async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, mode):
+    """Exercise real recovery: a down gateway cannot erase post-transmit identity."""
+    from scripts.api import server
+    from scripts.api.subprocess import ScriptResult
+
+    body = {**_ORDER, "orderRef": "radon-socket-lost"}
+    outcome = {
+        "status": "error", "indeterminate": True,
+        "orderRef": body["orderRef"], "orderId": 19, "permId": 0,
+        "message": "Order transmitted; ConnectionRefusedError during confirmation. CHECK OPEN ORDERS.",
+    }
+    runner = AsyncMock(return_value=ScriptResult(
+        ok=False, error=outcome["message"], data=outcome,
+    ))
+    gateway = AsyncMock(return_value={"port_listening": False, "upstream_dead": True})
+    restart = AsyncMock(return_value={
+        "restarted": mode == "restart-success",
+        "port_listening": mode == "restart-success",
+        "error": "gateway unavailable" if mode == "restart-failure" else None,
+    })
+    audit = AsyncMock()
+    monkeypatch.setattr(server, "test_mode", False)
+    monkeypatch.setattr(server, "run_script", runner)
+    monkeypatch.setattr(server, "record_order_event", audit)
+    monkeypatch.setattr(server, "check_ib_gateway", gateway)
+    monkeypatch.setattr(server, "restart_ib_gateway", restart)
+    monkeypatch.setattr(server, "_working_open_order_perm_ids", AsyncMock(return_value=[]))
+    monkeypatch.setattr(server, "_pool_has_any_connection", lambda: True)
+    monkeypatch.setattr(server, "_ib_last_failure", 0.0)
+    monkeypatch.setattr(server, "ib_pool", None)
+    monkeypatch.setattr(server, "is_cloud_mode", lambda: mode == "cloud")
+    monkeypatch.setattr(server, "is_docker_mode", lambda: False)
+    monkeypatch.setattr(server, "is_launchd_mode", lambda: mode == "managed")
+
+    with pytest.raises(HTTPException) as exc:
+        await server._orders_place_after_rate_reservation(body)
+
+    assert exc.value.status_code == 504
+    assert exc.value.detail == {**outcome, "code": "ORDER_INDETERMINATE"}
+    runner.assert_awaited_once()
+    gateway.assert_awaited_once()
+    if mode.startswith("restart-"):
+        restart.assert_awaited_once()
+    else:
+        restart.assert_not_awaited()
+    audit.assert_awaited_once()
+    assert audit.await_args.args == ("indeterminate",)
+    assert audit.await_args.kwargs["order_id"] == 19
+    assert audit.await_args.kwargs["order_ref"] == body["orderRef"]
+    assert audit.await_args.kwargs["detail"] == exc.value.detail
