@@ -31,24 +31,34 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 from clients.ib_timing import PhaseTimer
+from credential_redaction import scrub_credential_text
 
 CLIENT_ID = CLIENT_IDS.get("ib_place_order", 26)
 PORT = DEFAULT_GATEWAY_PORT
 
-# IB error codes that must NOT block order placement. Connection/data-farm
-# informational codes (2104/2106/2108/2158/10358) PLUS benign ORDER WARNINGS
-# (NOT rejections — rejections use 201/202/etc.):
-#   399  "Your order will not be placed at the exchange until <next open>" — a
-#        DAY order accepted outside RTH; it still receives a permId. Treating
-#        this as an error is exactly why after-hours orders couldn't be placed.
-#   2109 "Attribute 'Outside Regular Trading Hours' is ignored …" — surfaced for
-#        instruments/destinations with no extended session; harmless.
-NON_BLOCKING_IB_CODES = frozenset({2104, 2106, 2108, 2158, 10358, 399, 2109})
+# These callbacks do not by themselves establish rejection. 399 is a generic
+# order message (including held-until-open notices), not only an after-hours
+# warning. Retain order-scoped warning evidence while continuing the ACK wait.
+ORDER_WARNING_CODES = frozenset({399, 2109})
+NON_BLOCKING_IB_CODES = frozenset({2104, 2106, 2108, 2158, 10358}) | ORDER_WARNING_CODES
 
 # Grace-wait constants for SPX-01: async 201-class errors arrive after the
 # confirm-poll loop breaks on a terminal-failed state.
 _GRACE_WAIT_POLLS = 5
 _GRACE_WAIT_INTERVAL = 0.3   # seconds per poll; total grace budget ≈ 1.5s
+
+
+def _trade_perm_id(trade) -> int:
+    """Read broker identity from either acknowledgement callback.
+
+    ib_insync's openOrder updates Order.permId, while orderStatus updates
+    OrderStatus.permId. Either callback can arrive first.
+    """
+    for source in (trade.order, trade.orderStatus):
+        perm_id = getattr(source, "permId", 0)
+        if isinstance(perm_id, int) and perm_id != 0:
+            return perm_id
+    return 0
 
 
 def _grace_wait_for_ib_error(client, ib_errors: list, trade) -> tuple:
@@ -565,14 +575,23 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
 
         timer.mark("qualify")
 
-        # Capture IB error events so we can detect silent rejections
+        # ib_insync does not append warning callbacks to Trade.log, and the
+        # subprocess bridge discards stderr on a normal JSON exit. Preserve
+        # bounded, order-scoped warning evidence in the result itself.
         ib_errors: list = []
+        ib_warnings: list = []
 
         def _on_error(reqId, errorCode, errorString, contract=None):
-            # Benign informational + order-warning codes must not block placement
-            # (see NON_BLOCKING_IB_CODES — 399 is the after-hours "held until next
-            # open" warning that previously made placement fail).
-            if errorCode not in NON_BLOCKING_IB_CODES:
+            if errorCode in ORDER_WARNING_CODES:
+                live_trade = _transmitted["trade"]
+                if live_trade is not None and reqId == live_trade.order.orderId and len(ib_warnings) < 8:
+                    warning = {
+                        "code": errorCode,
+                        "message": scrub_credential_text(str(errorString))[:512],
+                    }
+                    if warning not in ib_warnings:
+                        ib_warnings.append(warning)
+            elif errorCode not in NON_BLOCKING_IB_CODES:
                 ib_errors.append((errorCode, errorString))
 
         client._ib.errorEvent += _on_error
@@ -663,26 +682,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         _transmitted["done"] = True
         _transmitted["trade"] = trade
 
-        # Poll trade.orderStatus until IB issues a permId OR the status moves
-        # past PendingSubmit/ApiPending. Without this wait, `finally:
-        # client.disconnect()` runs while the order is still in PendingSubmit;
-        # IB then drops the order because the placing client went away before
-        # acknowledging.  The 2026-05-27 MU risk-reversal repro returned
-        # `{status:"ok", permId:0, initialStatus:"PendingSubmit"}` and the
-        # subsequent /orders sync found nothing — because IB had silently
-        # discarded the unconfirmed order on disconnect.
-        #
-        # Terminal-or-confirmed predicate:
-        #   perm_id != 0                      → IB assigned the permanent id
-        #   status in {Submitted, PreSubmitted, Filled, Cancelled,
-        #              Inactive, ApiCancelled, Rejected}
-        #       → IB has fully processed; whatever the verdict, it's not in
-        #         limbo.  PendingSubmit / ApiPending / Unknown are the
-        #         "still in limbo" cases and we keep waiting on those.
-        #
-        # Combos get the longer deadline because IB risk-checks each leg
-        # independently AND the SmartRouting + NonGuaranteed handshake adds
-        # ~3-5s on top of single-leg latency.
+        # Wait for broker identity from either openOrder or orderStatus, or
+        # an explicit processed status. The callback order is not guaranteed.
+        # Preserve the bounded acknowledgement budget; expiry does not prove
+        # that an already-transmitted order was rejected or discarded.
         deadline = _clock() + (12.0 if order_type == "combo" else 6.0)
         terminal_states = {
             "Submitted",
@@ -694,7 +697,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             "Rejected",
         }
         while _clock() < deadline:
-            if trade.order.permId != 0:
+            if _trade_perm_id(trade) != 0:
                 break
             s = trade.orderStatus.status if trade.orderStatus else ""
             if s in terminal_states:
@@ -706,8 +709,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         timer.mark("permId")
 
         order_id = trade.order.orderId
-        perm_id = trade.order.permId
-        status = trade.orderStatus.status if trade.orderStatus else "Unknown"
+        perm_id = _trade_perm_id(trade)
+        status = (trade.orderStatus.status if trade.orderStatus else "") or "Unknown"
 
         # Surface any IB error events caught during the wait — with the
         # STRUCTURED code/text fields the terminal-failed builder already
@@ -723,30 +726,27 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "initialStatus": status,
                 "ib_error_code": code,
                 "ib_error_text": msg,
+                **({"ib_warnings": ib_warnings} if ib_warnings else {}),
             }
 
-        # Refuse to claim success if IB hasn't actually accepted the order.
-        # PendingSubmit + permId=0 after the polling deadline means IB
-        # never confirmed; disconnecting now would drop the order. Surface
-        # a clear error so the UI doesn't show a misleading green toast.
-        if perm_id == 0 and status in ("PendingSubmit", "ApiPending", "Unknown", ""):
-            hint = (
-                "IB never confirmed the order. Common causes: "
-                "(1) market is closed and TIF=DAY (use GTC for after-hours), "
-                "(2) insufficient trading permissions for this structure (Tier 4 for naked shorts), "
-                "(3) pre-trade risk rejection, "
-                "(4) IB combo router doesn't route this BAG structure — "
-                "specifically, bearish risk reversals (SELL CALL + BUY PUT) "
-                "are silently dropped by IB Smart even when the bullish "
-                "counterpart routes fine on the same account. Workaround: "
-                "place the legs separately as two single-leg orders."
-            )
+        # A transmitted order without acknowledgement has an unknown outcome.
+        # Disconnecting after the bounded wait does not establish rejection;
+        # retain its identity so callers reconcile instead of submitting again.
+        if perm_id == 0 and status in ("PendingSubmit", "ApiPending", "Unknown"):
             return {
                 "status": "error",
-                "message": f"Order stuck in {status or 'Unknown'} (no permId). {hint}",
+                "indeterminate": True,
+                "message": (
+                    f"Order outcome INDETERMINATE: IB has not acknowledged "
+                    f"the transmitted order ({status}, no permId). "
+                    f"CHECK OPEN ORDERS before re-placing "
+                    f"(orderRef {order_ref})."
+                ),
+                "orderRef": order_ref,
                 "orderId": order_id,
                 "permId": perm_id,
                 "initialStatus": status,
+                **({"ib_warnings": ib_warnings} if ib_warnings else {}),
             }
 
         # Terminal-but-failed states. If IB rejected or cancelled the order
@@ -761,14 +761,18 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             ib_error_code, ib_error_text = _grace_wait_for_ib_error(
                 client, ib_errors, trade
             )
-            return _build_terminal_error(
-                status, order_id, perm_id, ib_error_code, ib_error_text,
-                filled=_fill_value(trade.orderStatus.filled),
-                avg_fill_price=_fill_value(trade.orderStatus.avgFillPrice),
-            )
+            return {
+                **_build_terminal_error(
+                    status, order_id, perm_id, ib_error_code, ib_error_text,
+                    filled=_fill_value(trade.orderStatus.filled),
+                    avg_fill_price=_fill_value(trade.orderStatus.avgFillPrice),
+                ),
+                **({"ib_warnings": ib_warnings} if ib_warnings else {}),
+            }
 
         result = {
             "status": "ok",
+            **({"ib_warnings": ib_warnings} if ib_warnings else {}),
             "orderId": order_id,
             "permId": perm_id,
             "orderRef": order_ref,
@@ -806,6 +810,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "indeterminate": True,
                 "orderRef": order_ref,
                 "orderId": order_id,
+                **({"ib_warnings": ib_warnings} if ib_warnings else {}),
                 "message": (
                     f"Order outcome INDETERMINATE — the order was transmitted "
                     f"but confirmation failed ({e}). CHECK OPEN ORDERS before "

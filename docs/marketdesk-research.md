@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) persists its own throttle/backoff and retries provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed.
+The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. Other download failures still exit 1.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
@@ -23,7 +23,9 @@ images, stores charts as private research assets, and applies source, identity
 and duplicate safety. Every suitable report proceeds to copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. Independently archived PDFs are
 then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
-the library's folder layout, whether or not the item was published. No browser runs.
+the library's folder layout. New PDF downloads require publication plus the
+archive's stricter portfolio/watchlist and relevance policy; article coverage
+is unchanged. Previously archived assets keep their existing outbox behavior. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
 watcher stay served. MarketDesk admission is separate from the unchanged

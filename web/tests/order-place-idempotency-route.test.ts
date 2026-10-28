@@ -11,11 +11,12 @@ const mockReadDataFile = vi.fn();
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mockRadonFetch,
+  radonErrorDetailText: (detail: unknown) => typeof detail === "string" ? detail : JSON.stringify(detail),
   RadonApiError: class extends Error {
     status: number;
-    detail: string;
-    constructor(status: number, detail: string) {
-      super(`Radon API ${status}: ${detail}`);
+    detail: string | Record<string, unknown>;
+    constructor(status: number, detail: string | Record<string, unknown>) {
+      super(`Radon API ${status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
       this.name = "RadonApiError";
       this.status = status;
       this.detail = detail;
@@ -203,6 +204,63 @@ describe("POST /api/orders/place upstream timeout is indeterminate, not a generi
     const different = await POST(placeReq({ ...STOCK, quantity: 200 }));
 
     expect(different.status).toBe(200);
+    expect(placeCallCount()).toBe(2);
+  });
+});
+
+
+describe("POST /api/orders/place broker acknowledgement remains indeterminate", () => {
+  const COMBO = {
+    type: "combo", symbol: "CBRS", action: "BUY", quantity: 1, limitPrice: -0.70,
+    legs: [
+      { expiry: "20261106", strike: 120, right: "C", action: "BUY", ratio: 1 },
+      { expiry: "20261106", strike: 115, right: "P", action: "SELL", ratio: 1 },
+    ],
+  };
+
+  it.each([undefined, "combo-intent-1"])(
+    "holds a coded FastAPI indeterminate response for key %s",
+    async (idempotencyKey) => {
+      const { RadonApiError } = await import("@/lib/radonApi");
+      mockRadonFetch.mockImplementation((url: string) => url === "/orders/place"
+        ? Promise.reject(new RadonApiError(504, {
+            code: "ORDER_INDETERMINATE", indeterminate: true, orderId: 17, permId: 0,
+            orderRef: "radon-combo-pending", initialStatus: "PendingSubmit",
+            message: "IB did not confirm. CHECK OPEN ORDERS before re-placing.",
+          }))
+        : Promise.resolve({}));
+      const { POST } = await import("../app/api/orders/place/route");
+      const body = { ...COMBO, ...(idempotencyKey ? { idempotencyKey } : {}) };
+
+      const first = await POST(placeReq(body));
+      const retry = await POST(placeReq(body));
+
+      expect(first.status).toBe(504);
+      expect(retry.status).toBe(504);
+      expect(placeCallCount()).toBe(1);
+      const firstBody = await first.json();
+      const retryBody = await retry.json();
+      expect(firstBody.error).toMatch(/check open orders before re-placing/i);
+      expect(firstBody.detail).toContain("radon-combo-pending");
+      expect(firstBody.detail).toContain('"orderId":17');
+      expect(retryBody.detail).toMatch(/NOT sent again/i);
+      expect(retryBody.detail).toContain("radon-combo-pending");
+      expect(retryBody.detail).toContain('"orderId":17');
+    },
+  );
+
+  it("does not retain a confirmed broker rejection as an unknown outcome", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockImplementation((url: string) => url === "/orders/place"
+      ? Promise.reject(new RadonApiError(502, {
+          status: "error", initialStatus: "Inactive", ib_error_code: 201,
+          message: "Order rejected: insufficient margin",
+        }))
+      : Promise.resolve({}));
+    const { POST } = await import("../app/api/orders/place/route");
+
+    expect((await POST(placeReq(COMBO))).status).toBe(502);
+    expect((await POST(placeReq(COMBO))).status).toBe(502);
     expect(placeCallCount()).toBe(2);
   });
 });
