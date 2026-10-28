@@ -4,6 +4,7 @@ import configparser
 from pathlib import Path
 
 import pathlib
+import re
 
 import pytest
 
@@ -1748,6 +1749,39 @@ class TestRepeatingTimerStartLimitHeadroom:
             f"radon-tv-alerts.service burst={burst} parks a healthy 5-minute "
             f"drain after {attempts} starts in {interval}s"
         )
+
+
+class TestMarketdeskStopFitsTheDeployWait:
+    """2026-10-27 18:39-18:45: a deploy took production down for ~6 minutes.
+
+    The MarketDesk timer started a fresh cycle mid-deploy; its SIGTERM was not
+    honoured, and systemd's default 90s TimeoutStopSec only SIGKILLed it at
+    18:42:29, after the deploy helper's 60s STATE_WAIT_SECONDS had expired for
+    both the stop and the recovery pass. The helper exited 71 with every radon
+    service stopped. The stop bound must end before the helper stops waiting,
+    leaving room for ExecStopPost's container cleanup.
+    """
+
+    UNITS = ("radon-marketdesk.service", "radon-marketdesk-pdf.service")
+    CLEANUP_MARGIN_SECS = 15
+
+    @staticmethod
+    def _deploy_state_wait(root) -> int:
+        helper = (root / "scripts" / "deploy-root-helper.sh").read_text()
+        match = re.search(r"^\s*readonly STATE_WAIT_SECONDS=(\d+)\s*$", helper, re.M)
+        assert match, "deploy-root-helper.sh must pin a numeric production STATE_WAIT_SECONDS"
+        return int(match.group(1))
+
+    @pytest.mark.parametrize("unit", UNITS)
+    def test_stop_timeout_ends_before_the_deploy_stops_waiting(self, services_dir, unit):
+        texts = [(services_dir / unit).read_text()]
+        dropins = services_dir / f"{unit}.d"
+        if dropins.is_dir():
+            texts += [p.read_text() for p in sorted(dropins.glob("*.conf"))]
+        values = [m.group(1) for t in texts for m in re.finditer(r"^TimeoutStopSec=(\d+)s?\s*$", t, re.M)]
+        assert values, f"{unit} must set TimeoutStopSec (systemd's 90s default outlives the deploy wait)"
+        wait = self._deploy_state_wait(services_dir.parent)
+        assert int(values[-1]) + self.CLEANUP_MARGIN_SECS <= wait
 
 
 class TestDemoMirrorSchemaGate:
