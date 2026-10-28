@@ -97,6 +97,15 @@ redact() {
     {print}'
 }
 
+# Every configured env file, each redacted whole so quoted multi-line values
+# keep the key that decides them.
+redact_env_files() {
+  local f
+  for f in "${ENV_FILES[@]}"; do
+    [ -f "$f" ] && redact < "$f"
+  done
+}
+
 sec "HOST BASICS"
 hostname; whoami; uname -a; cat /etc/os-release 2>/dev/null | grep -E '^(NAME|VERSION)='; uptime
 echo "nproc: $(nproc)"; free -h; df -h / /home 2>/dev/null
@@ -182,7 +191,10 @@ for f in "${ENV_FILES[@]}"; do
 done
 
 sec "TURSO / DB references in env (keys only)"
-grep -rhiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON' "${ENV_FILES[@]}" 2>/dev/null | redact
+# Redact each whole file BEFORE filtering: grep hands redact() single lines,
+# so a quoted value's continuation line arrives with no key in front of it and
+# is printed by the catch-all if it happens to match the filter.
+redact_env_files | grep -hiE 'TURSO|LIBSQL|DATABASE_URL|RADON_DB|RADON_MODE|NEXT_PUBLIC_RADON'
 
 sec "DOCKER (ib-gateway etc.)"
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "docker n/a / no perm"
@@ -193,7 +205,7 @@ echo "media.radon.run -> $(getent hosts media.radon.run 2>/dev/null | awk '{prin
 echo "beta.radon.run -> $(getent hosts beta.radon.run 2>/dev/null | awk '{print $1}' || echo 'NXDOMAIN (expected)')"
 
 sec "CLIENT-ID usage hints (grep configs)"
-grep -rhniE 'client_id|clientId|CLIENT_ID' "${ENV_FILES[@]}" 2>/dev/null | redact | head
+redact_env_files | grep -hniE 'client_id|clientId|CLIENT_ID' | head
 
 sec "CAPTURE COMPLETE"
 date -u +"%Y-%m-%dT%H:%M:%SZ"
