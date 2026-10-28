@@ -494,6 +494,28 @@ line here whenever you ship a security fix.**
   identifier characters cannot drive a quadratic backtracking scan and stall
   the gate.
 
+  A rule that runs BEFORE the assignment tokenizer may not consume a
+  character the tokenizer's quoting depends on. The bearer rule deliberately
+  runs first, so every character class in it excludes both quotes AND the
+  backslash that escapes one: eating a closing quote, or the escape in front
+  of one, moved where the value appeared to end and published its tail. That
+  root cause has now shipped three times, each time as a different character.
+  A new pre-tokenizer rule carries the burden of proving it alters no quoting.
+
+  The continuation rule follows the language, not just the indentation: an
+  unclosed bracket joins the next line whatever its column, exactly like a
+  trailing backslash, and a blank line inside a bracket is still inside it.
+  A value that continues only because of indentation was the narrower rule,
+  and a key line ending in `(` with the value at column zero escaped it.
+
+  An egress scrub runs before any truncation, never after. Slicing a
+  diagnostic to its last N characters can remove the `KEY=` or provider
+  prefix every pattern keys on while keeping the secret's tail, so no rule
+  matches what remains. Where the caller knows the credential values it
+  passed (a validation subprocess's env overlay), it substitutes them by
+  exact match first: an exact match needs no recognisable shape, which is the
+  only thing that covers a bare password quoted by a third-party exception.
+
   Redaction is a backstop for the renderer, not a licence to put secrets in the
   JSON. If a value is genuinely needed to reproduce a finding, reference where
   it lives (`/etc/radon/env` on the broker, line N) and leave it there.

@@ -43,6 +43,7 @@ const FIRST_PARTY_ORIGINS = [
 ];
 
 export type SameOriginEnv = {
+  [key: string]: string | undefined;
   RADON_CORS_EXTRA_ORIGINS?: string;
   RADON_ALLOWED_HOSTS?: string;
   RADON_APP_ORIGIN?: string;
