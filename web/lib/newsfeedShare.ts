@@ -184,12 +184,16 @@ export function sanitizeXShareText(text: string): string {
     )).join("").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export function buildShareCaption(post: SharePost, _imageUrl = post.images?.[0]): string {
-  const title = sanitizeXShareText(post.title);
-  const content = sanitizeXShareText(post.content || "");
+export function fullShareCaption(sourceTitle: string, sourceContent: string): string {
+  const title = sanitizeXShareText(sourceTitle);
+  const content = sanitizeXShareText(sourceContent);
   // Keep existing paragraph boundaries; add breathing room to single-block prose.
   const paragraphs = (content.includes("\n") ? content.split(/\n+/) : splitSentences(content)).filter(Boolean);
   return [title, ...paragraphs].filter(Boolean).join("\n\n");
+}
+
+export function buildShareCaption(post: SharePost, _imageUrl = post.images?.[0]): string {
+  return fullShareCaption(post.title, post.content || "");
 }
 
 export function buildXShareUrl(caption: string): string {

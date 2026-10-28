@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   MAX_ITEMS_PER_MESSAGE,
+  MAX_SYMBOL_LENGTH,
   MAX_WS_PAYLOAD_BYTES,
   capItems,
 } from "../../scripts/lib/relayLimits.js";
@@ -44,7 +45,10 @@ describe("relay input limits", () => {
     "%s bounds output and normalization work", (name) => {
       // Execute the production function with the real pure cap helper;
       // importing the relay itself would start sockets and a broker client.
-      const normalize = runInNewContext(`${fnBody(name)}; ${name}`, { capItems });
+      const normalize = runInNewContext(
+        `${fnBody("boundedField")}; ${fnBody(name)}; ${name}`,
+        { capItems, MAX_SYMBOL_LENGTH },
+      );
       const item = name === "normalizeSymbols" ? " aapl "
         : name === "normalizeContracts"
           ? { symbol: " aapl ", expiry: "20261218", strike: 100, right: "C" }

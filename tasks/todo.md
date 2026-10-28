@@ -1,3 +1,17 @@
+# MarketDesk filtered, account-throttled PDF archive (2026-10-27)
+
+Dependency graph: MD1 -> MD2 -> MD3 -> MD4 -> MD5.
+
+- [x] MD1 depends_on: [] Freeze 206 pending / 4 downloaded rows. Trace authenticated standalone/blob flow and account refusal; user confirms account rate limit and requests slow filtered downloads, not an unverified alternate endpoint.
+- [x] MD2 depends_on: [MD1] Reproduce unfiltered discovery/archive admission and fast fixed retries with failing database and worker regressions; preserve article independence and saved assets.
+- [x] MD3 depends_on: [MD2] Gate PDFs on published matching-source reports plus stricter portfolio/watchlist/relevance selection; enforce 30-minute global admission and durable 6/12/24-hour account-limit backoff, with no catch-up burst or manual clock reset. Update owner documentation.
+- [ ] MD4 depends_on: [MD3] Run focused and full suites sequentially, review, exact-head CI, accepted notification and admin merge.
+- [ ] MD5 depends_on: [MD4] Verify production eligibility, persisted clocks and backlog receipts; distinguish archived, filtered and account-deferred items honestly.
+
+## Review
+
+Red/green: 20 failing regressions reproduced before repair across filtering, pacing, strict book policy, stale ownership and ambiguous company earnings. Final focused/broader verification on latest main: 580 passed, including 3 actual SIGKILL receipt/WAL/ack tests. Combined touched archive coverage 96% (policy 98%, worker/store 96%). Selection is cached in batches of 100 and invalidates with book/rules or published post edits; no model or PDF request is used for filtering. Provider failures share durable 6/12/24-hour account cooldown, with atomic acknowledgement/reset and stale-owner protection. Latest-main full local gates: Python 18,743 passed / 12 skipped / 63 subtests; cloud 3,527 passed / 24 skipped; Vitest 11,661 passed / 8 skipped. Web uses the calculated release-version build override (0.48.10); no timeout/retry gate changes. Reviewed SQL selection invalidation, account/lease CAS and atomic backoff/reset. PR CI and production verification pending. Existing account allowance cannot be restored by pacing or relabeling viewer requests; do not claim the backlog is archived from retry scheduling.
+
 # MarketDesk all suitable reports (2026-10-27)
 
 Dependency graph: MS1 -> MS2 -> MS3 -> MS4 -> MS5.
@@ -23,6 +37,20 @@ Dependency graph: MC1 -> MC2 -> MC3.
 ## Review
 
 Four red cases reproduced cancellation relabeled as network failure and missing control-flow telemetry. Focused job, service-cycle, model-ladder and PDF suites passed 251 tests, including actual SIGTERM during HTTP setup and streamed reads. Original pending lease/attempt budget, response cleanup, error heartbeat, temporary cleanup, handler restoration and exit143 are retained. No runtime policy or timeout changes. Parent reviewed the exact runtime edits and regressions; integrated full gates remain parent-owned.
+
+# Generated-copy humanizer enforcement (2026-10-27)
+
+Dependency graph: T1 -> [T2, T3] -> T4 -> T5.
+
+- [x] T1 depends_on: [] Inventory AI copy generation and publication paths; reproduce supplied contrast escaping review.
+- [x] T2 depends_on: [T1] Harden shared Python humanizer and MarketDesk final gate with red/green regressions.
+- [x] T3 depends_on: [T1] Enforce humanizer across web news/social generation and cache/fallback paths.
+- [x] T4 depends_on: [T2, T3] Independent Sol and Luna verification; repair findings.
+- [x] T5 depends_on: [T4] Run affected checks, document coverage and remaining operational state.
+
+## Review
+
+Independent Sol and Luna reviews complete; semantic-direction, stale-response and scoring findings repaired. Final focused scoring checks: Python 126 passed and web 16 passed. Affected Python 715 passed before the final two scoring regressions. Full Python: 18,670 passed, 12 skipped, 63 subtests; two unchanged local failures remain in credential-environment fallback and the documentation scan of other worktrees. Full Vitest: 11,648 passed, 21 skipped with the supported history-derived RADON_RELEASE_VERSION=0.48.9 override; default imports hit five unrelated configuration timeouts. Playwright sharing: 21 passed; desktop/mobile screenshots inspected. Typecheck retains four existing DashboardNewsFeed/sameOrigin errors. Full cloud: 3,527 passed, 24 skipped. Exact-head PR checks pending. No published article rows changed; production writes remain with the authorized publisher.
 
 # Bun 1.4.4 security pin (2026-10-22)
 

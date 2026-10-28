@@ -49,10 +49,16 @@ _PATH_PARAM_PLACEHOLDERS = {
 # one. These are the privileged sinks: live order admission, the trading halt,
 # the arbitrary-script bridge, the credential store, the service/host controls,
 # Gateway lifecycle, journal mutation, live portfolio sync, the preference
-# writes that tune the order-notional caps, and the two metered third-party
-# lanes (UW quota, the TradingView MCP) that no demo route proxies and that a
-# stolen token would otherwise spend. Read surfaces the demo actually proxies
-# (see web/lib/demo/routePolicy.ts "backend" endpoints) stay reachable.
+# writes that tune the order-notional caps, and the metered third-party lanes
+# (UW quota, the TradingView MCP) that no demo route proxies and that a stolen
+# token would otherwise spend. Read surfaces the demo actually proxies (see
+# web/lib/demo/routePolicy.ts "backend" endpoints) stay reachable.
+#
+# This set is reviewed by hand, so it cannot see a privileged route nobody
+# added to it: such a route sits under no denied prefix, both sides of the
+# set-equality pin below agree, and the gap ships green. Scope blind spots on
+# the metered lanes are therefore caught from the handler side instead, by
+# scripts/api/tests/test_metered_client_scope.py.
 _REVIEWED_PRIVILEGED = frozenset({
     "/admin/logs",
     "/admin/services",
@@ -67,6 +73,7 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/ib/restart",
     "/journal/reconcile",
     "/journal/rehydrate",
+    "/options/uw-chain",
     "/orders/cancel",
     "/orders/cancel-all",
     "/orders/modify",
@@ -78,6 +85,7 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/portfolio/background-sync",
     "/portfolio/sync",
     "/preferences/{key}",
+    "/quote/{ticker}",
     "/research/tradingview/call",
     "/research/tradingview/ohlcv",
     "/research/tradingview/status",
@@ -144,9 +152,40 @@ def service_token_client(monkeypatch):
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: False)
     monkeypatch.setattr(server, "verify_api_key", lambda request: None)
 
+    # These cases assert the perimeter REFUSES the request, so the handler is
+    # never supposed to run. Stub its outbound sinks anyway: when the scope
+    # regresses, the assertion must fail on the status code, not by letting a
+    # test suite make a live third-party call on the way to failing.
+    _inert_third_party_clients(monkeypatch)
+
     from scripts.api.server import app
 
     return TestClient(app, headers={"X-Radon-Service-Token": SERVICE_TOKEN})
+
+
+def _inert_third_party_clients(monkeypatch):
+    """Make every metered/third-party egress sink behind these routes inert."""
+
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            "A third-party client was constructed while testing the service-token "
+            "scope. The route under test must be refused at the perimeter; a "
+            "handler that runs here means the scope regressed."
+        )
+
+    from clients import uw_client
+
+    monkeypatch.setattr(uw_client, "UWClient", _refuse)
+    monkeypatch.delenv("UW_TOKEN", raising=False)
+
+    from api.routes import assistant_market
+
+    monkeypatch.setattr(assistant_market, "UWClient", _refuse)
+    monkeypatch.setattr(assistant_market, "fetch_yahoo_last", lambda ticker: None)
+
+    from api.routes import tradingview
+
+    monkeypatch.setattr(tradingview, "_client", _refuse)
 
 
 _PRIVILEGED_CALLS = sorted(
@@ -231,6 +270,16 @@ _NORMALIZED_PRIVILEGED_SHAPES = (
     ("GET", "/credentials/"),
     ("POST", "/admin/stack/restart"),
     ("PUT", "/preferences/RADON_MAX_ORDER_NOTIONAL"),
+    # The metered lanes that sit on their own path rather than under /uw/.
+    ("GET", "/options/uw-chain"),
+    ("GET", "/options/uw-chain?symbol=AAPL"),
+    ("GET", "/./options/uw-chain"),
+    ("GET", "/x/../options/uw-chain"),
+    ("GET", "/options/%75w-chain"),
+    ("GET", "/quote/AAPL"),
+    ("GET", "/quote/./AAPL"),
+    ("GET", "/x/../quote/AAPL"),
+    ("GET", "/%71uote/AAPL"),
 )
 
 

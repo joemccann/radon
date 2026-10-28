@@ -442,11 +442,13 @@ def test_rejection_classified_even_when_the_message_is_long() -> None:
 from research import humanizer  # noqa: E402
 
 CLEAN_REVIEW = {"findings": [], "qualitative": []}
+SUPPORTED_REWRITE = {'supported': True, 'same_meaning': True, 'no_unresolved_conflicts': True,
+                     'not_forecast_as_flow': True, 'reason': 'The source supports the revised claims.'}
 
 
-def _feed_copy(title: str, content: str) -> mc.FeedCopy:
+def _feed_copy(title: str, content: str, *, source_text: str = SOURCE) -> mc.FeedCopy:
     return mc.FeedCopy(title=title, content=content, captions={"i1": "Systematic flows", "i2": "CTA positioning"},
-                       tags=["CTA"], provider="fake", model="fake-1", source_text=SOURCE, image_ids=("i1", "i2"))
+                       tags=["CTA"], provider="fake", model="fake-1", source_text=source_text, image_ids=("i1", "i2"))
 
 
 def _post(copy: mc.FeedCopy) -> dict:
@@ -492,11 +494,84 @@ def test_certify_accepts_clean_rewrite_after_qualitative_finding() -> None:
     finding = {"field": "content", "text": "That's the largest since March 2020.", "category": "filler"}
     rewrite = {"title": clean()["title"],
                "content": "Goldman's flow desk says systematic funds sold $12.5bn of US equities last week. "
-                          "CTA positioning sits at the 15th percentile."}
-    complete, _ = _ladder({"findings": [], "qualitative": [finding]}, rewrite, CLEAN_REVIEW)
+                          "The sale was the largest since March 2020. CTA positioning sits at the 15th percentile."}
+    complete, calls = _ladder({"findings": [], "qualitative": [finding]}, rewrite, SUPPORTED_REWRITE, CLEAN_REVIEW)
     post = mc.certify(_post(copy), copy, complete=complete)
     humanizer.validate_certificate(post)
     assert post["content"] == rewrite["content"]
+    assert len(calls) == 4
+    assert calls[2]['instruction'].startswith('MARKETDESK EDITORIAL REWRITE FACT CHECK')
+    assert calls[-1]['instruction'].startswith(humanizer.RUBRIC_INSTRUCTION)
+    assert all(call['read_timeout'] == 120.0 for call in calls)
+    assert calls[2]['accept']({**SUPPORTED_REWRITE, 'supported': False}) is True
+    assert calls[2]['accept']({**SUPPORTED_REWRITE, 'same_meaning': 'true'}) is False
+    assert calls[2]['accept']({'supported': True}) is False
+
+
+@pytest.mark.parametrize('verdict', [None, {}, {'supported': True},
+    {**SUPPORTED_REWRITE, 'same_meaning': 'true'}, {**SUPPORTED_REWRITE, 'reason': ''}])
+def test_certify_rejects_malformed_semantic_verdict_even_if_ladder_ignores_accept(verdict) -> None:
+    copy = _feed_copy(clean()['title'], clean()['content'])
+    finding = {'field': 'content', 'text': "That's the largest since March 2020.", 'category': 'filler'}
+    rewrite = {'title': copy.title, 'content': copy.content.replace("That's the largest", 'The sale was the largest')}
+    complete, calls = _ladder({'findings': [], 'qualitative': [finding]}, rewrite, verdict)
+    with pytest.raises(mc.CopyUnavailable, match='factual_verification_failed'):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize('changed', [
+    "Goldman's flow desk says systematic funds bought $12.5bn of US equities last week.",
+    'Systematic funds sold $12.5bn of US equities last week.',
+    "Goldman's flow desk says systematic funds sold $12.5bn of US equities in March 2020.",
+])
+def test_certify_semantic_verifier_rejects_changed_financial_meaning(changed: str) -> None:
+    copy = _feed_copy(clean()['title'], clean()['content'])
+    finding = {'field': 'content', 'text': "That's the largest since March 2020.", 'category': 'filler'}
+    calls = []
+
+    def complete(instruction, **kwargs):
+        calls.append(instruction)
+        if instruction.startswith('MARKETDESK EDITORIAL REWRITE FACT CHECK'):
+            reply = {'supported': False, 'same_meaning': False, 'no_unresolved_conflicts': True,
+                     'not_forecast_as_flow': True, 'reason': 'The revision changed the source claim.'}
+        elif len(calls) == 1:
+            reply = {'findings': [], 'qualitative': [finding]}
+        elif instruction.startswith(humanizer.REWRITE_INSTRUCTION):
+            reply = {'title': copy.title, 'content': changed}
+        else:
+            reply = CLEAN_REVIEW
+        return LadderResult(data=reply, text='{}', provider='fake', model='fake-1')
+
+    with pytest.raises(mc.CopyUnavailable, match='factual_verification_failed'):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert len(calls) == 3
+    assert SOURCE in calls[-1]
+
+
+def test_certify_rewrite_cannot_convert_conditional_target_into_realized_price() -> None:
+    source = 'If DXY closes above 104.59, Pictet targets 110.'
+    copy = _feed_copy('Pictet sets conditional DXY target',
+                      source + " That's a conditional setup, not a confirmed breakout.", source_text=source)
+    rewrite = {'title': copy.title, 'content': 'Pictet says DXY closed above 104.59 and reached 110.'}
+    verdict = {**SUPPORTED_REWRITE, 'supported': False, 'same_meaning': False, 'not_forecast_as_flow': False,
+               'reason': 'The source states a conditional target, not an observed price.'}
+    complete, calls = _ladder(CLEAN_REVIEW, rewrite, verdict)
+    with pytest.raises(mc.CopyUnavailable, match='factual_verification_failed'):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert len(calls) == 3
+    assert source in calls[-1]['instruction']
+
+
+def test_certify_semantic_verifier_outage_is_transient() -> None:
+    copy = _feed_copy(clean()['title'], clean()['content'])
+    finding = {'field': 'content', 'text': "That's the largest since March 2020.", 'category': 'filler'}
+    rewrite = {'title': copy.title, 'content': copy.content.replace("That's the largest", 'The sale was the largest')}
+    complete, calls = _ladder({'findings': [], 'qualitative': [finding]}, rewrite,
+                              ModelLadderExhausted('Model ladder exhausted. tried=anthropic:http_529'))
+    with pytest.raises(mc.CopyOutage):
+        mc.certify(_post(copy), copy, complete=complete)
+    assert len(calls) == 3
 
 
 @pytest.mark.parametrize("bad", [
@@ -753,10 +828,14 @@ def test_humanizer_rewrite_is_cashtagged_before_its_final_review() -> None:
                        captions={}, tags=["EQUITIES"], provider="fake", model="fake",
                        source_text="Apple (AAPL) rose 2%. CPI is unchanged.", tickers=("AAPL",))
     review = {"findings": [], "qualitative": [{"field": "content", "text": "Worth noting,", "category": "filler"}]}
-    complete, calls = _ladder(review, {"title": "AAPL rose 2%", "content": "AAPL rose 2%. CPI is unchanged."}, CLEAN_REVIEW)
+    complete, calls = _ladder(review, {"title": "AAPL rose 2%", "content": "AAPL rose 2%. CPI is unchanged."},
+                               SUPPORTED_REWRITE, CLEAN_REVIEW)
     post = mc.certify(_post(copy), copy, complete=complete)
     humanizer.validate_certificate(post)
     assert post["title"] == "$AAPL rose 2%"
+    assert len(calls) == 4 and calls[2]['log_prefix'] == 'marketdesk-humanizer-verify'
+    assert '"content": "$AAPL rose 2%. CPI is unchanged."' in calls[2]['instruction']
+    assert calls[-1]['instruction'].startswith(humanizer.RUBRIC_INSTRUCTION)
     assert '"content": "$AAPL rose 2%. CPI is unchanged."' in calls[-1]["instruction"]
 
 
@@ -831,7 +910,8 @@ def test_certify_persists_every_attempt_before_model_io_and_final_normalized_sco
                        captions={}, tags=["EQUITIES"], provider="fake", model="fake",
                        source_text="Apple (AAPL) rose 2%.", tickers=("AAPL",))
     post = _post(copy)
-    replies = [CLEAN_REVIEW, {"title": "AAPL rose 2%", "content": "AAPL rose 2%."}, CLEAN_REVIEW]
+    replies = [CLEAN_REVIEW, {"title": "AAPL rose 2%", "content": "AAPL rose 2%."},
+               SUPPORTED_REWRITE, CLEAN_REVIEW]
     snapshots = []
 
     def complete(instruction, **kwargs):
@@ -856,7 +936,11 @@ def test_certify_persists_every_attempt_before_model_io_and_final_normalized_sco
     assert audit["humanizer"]["final"] == result["source"]["humanizer"]
     assert attempts[1]["copy_sha256"] == humanizer.copy_digest(result)
     assert snapshots[1]["humanizer"]["attempts"][0]["status"] == "rewrite_required"
+    assert len(snapshots) == 4
     assert snapshots[2]["humanizer"]["attempts"][1]["content"] == "$AAPL rose 2%."
+    assert snapshots[2]["humanizer"]["attempts"][1]["status"] == "verifying_rewrite"
+    assert snapshots[3]["humanizer"]["attempts"][1]["status"] == "reviewing"
+    assert snapshots[3]["humanizer"]["attempts"][1]["content"] == result["content"]
     assert "humanizer" not in post["source"]  # input remains untouched
 
 
@@ -1009,11 +1093,15 @@ def test_humanizer_rewrite_normalizes_stock_context_before_its_new_final_review(
                        captions={}, tags=["EQUITIES"], provider="fake", model="fake",
                        source_text="C3.ai (NYSE:AI). AI shares rose 2%. AI capex is unchanged.", tickers=("AI",))
     review = {"findings": [], "qualitative": [{"field": "content", "text": "Worth noting,", "category": "filler"}]}
-    complete, calls = _ladder(review, {"title": "AI shares rose 2%", "content": "AI stock rose 2%. AI capex is unchanged."}, CLEAN_REVIEW)
+    complete, calls = _ladder(review, {"title": "AI shares rose 2%", "content": "AI stock rose 2%. AI capex is unchanged."},
+                               SUPPORTED_REWRITE, CLEAN_REVIEW)
     post = mc.certify(_post(copy), copy, complete=complete, audit_root=tmp_path)
     humanizer.validate_certificate(post)
     assert post["title"] == "$AI shares rose 2%"
     assert post["content"] == "$AI stock rose 2%. AI capex is unchanged."
+    assert len(calls) == 4 and calls[2]['log_prefix'] == 'marketdesk-humanizer-verify'
+    assert '"content": "$AI stock rose 2%. AI capex is unchanged."' in calls[2]['instruction']
+    assert calls[-1]['instruction'].startswith(humanizer.RUBRIC_INSTRUCTION)
     assert '"content": "$AI stock rose 2%. AI capex is unchanged."' in calls[-1]["instruction"]
     _, saved = _private_audits(tmp_path, post["id"])[0]
     assert saved["humanizer"]["attempts"][-1]["content"] == post["content"]
@@ -1049,3 +1137,14 @@ def test_overlapping_security_preserves_compound_index_labels(symbol, label) -> 
     draft = {"title": f"{symbol} shares", "content": text, "captions": {},
              "tags": ["EQUITIES"], "tickers": [symbol]}
     assert mc.copy_problems(draft, source_text=source, image_ids=[]) == []
+
+
+@pytest.mark.parametrize('field', ['title', 'content', 'caption'])
+def test_negative_parallelism_blocks_every_prose_surface(field):
+    value = clean()
+    text = "That's a conditional dollar-strength setup, not a confirmed breakout."
+    if field == 'caption':
+        value['captions']['i1'] = text
+    else:
+        value[field] = text
+    assert 'humanize:negative_parallelism' in problems(value)

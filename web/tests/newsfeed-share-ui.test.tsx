@@ -1,3 +1,4 @@
+import { HUMANIZER_VERSION } from "@/lib/humanizerPolicy";
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ let clipboard: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   vi.resetAllMocks();
   resetNewsfeedShareVoiceCache();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` }) }));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` }) }));
   const actual = await vi.importActual<typeof import("@/lib/newsfeedShare")>("@/lib/newsfeedShare");
   engine.buildShareCaption.mockImplementation(actual.buildShareCaption);
   engine.renderShareCard.mockResolvedValue(document.createElement("canvas"));
@@ -53,40 +54,31 @@ async function openShare() {
 
 describe("news feed sharing", () => {
 
-  it("shares the complete Morgan Stanley post before and after rewriting and cached reopening", async () => {
-    const original = {
-      ...post,
-      id: "morgan-stanley-ai-cds",
-      title: "Morgan Stanley: AI CDS basket trades ~45bp wider than CDX IG, and protection is still its preferred credit-derivatives expression",
-      content: 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
-      source: { ...equityIssuance.source, publisher: "Tyler Durden", documentDate: "2026-10-07" },
-    };
-    let resolveRewrite!: (response: Response) => void;
-    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
-    const { unmount } = render(<NewsfeedShare post={original} />);
+  it("withholds the original until reviewed copy arrives and reuses only that copy", async () => {
+    let release!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { release = resolve; }));
+    const { unmount } = render(<NewsfeedShare post={equityIssuance} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
-    const expected = `${original.title}\n\n${original.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
-    const caption = screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement;
-    expect(caption.value).toBe(expected);
-    expect(expected.length).toBeGreaterThan(400);
-    expect(new URL(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")!).searchParams.get("text")).toBe(expected);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByRole("link", { name: "Compose on X" }).hasAttribute("href")).toBe(false);
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    await act(async () => { resolveRewrite({ ok: true, json: async () => ({ title: "Short AI credit hook", content: "Buy protection.", caption: "Short rewritten caption" }) } as Response); });
-    await waitFor(() => expect(caption.disabled).toBe(false));
-    expect(caption.value).toBe(expected);
-    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
-    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(expected));
+    await act(async () => release({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Equity issuance", content: "Goldman estimates $700bn in supply.", caption: 'Equity issuance\n\nGoldman estimates $700bn in supply.' }) } as Response));
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
+    const expected = "Equity issuance\n\n@GoldmanSachs estimates $700bn in supply.";
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(expected);
     unmount();
-    render(<NewsfeedShare post={{ ...original }} />);
+    render(<NewsfeedShare post={equityIssuance} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
-    expect((screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value).toBe(expected);
-    expect(new URL(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")!).searchParams.get("text")).toBe(expected);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(expected);
     expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("mentions known banks by handle without guessing an unknown source handle", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Goldman Sachs and J.P. Morgan", content: "Goldman sees supply grow. Synthetic Bank agrees.", caption: 'Goldman Sachs and J.P. Morgan\n\nGoldman sees supply grow. Synthetic Bank agrees.' }) } as Response);
     render(<NewsfeedShare post={{ ...post, title: "Goldman Sachs and J.P. Morgan", content: "Goldman sees supply grow. Synthetic Bank agrees.", source: { ...equityIssuance.source, publisher: "Synthetic Bank" } }} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
     expect(caption).toContain("@GoldmanSachs and @jpmorgan");
     expect(caption).toContain("@GoldmanSachs sees supply grow.");
@@ -96,12 +88,12 @@ describe("news feed sharing", () => {
     await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
   });
 
-  it("keeps the original caption while using the voice draft for image/video rendering", async () => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
+  it("uses reviewed copy for captions and media", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge", caption: 'Hedge demand is back.\n\nPositioning is neutral. Source: ZeroHedge' }) } as Response);
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
-    expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back.\n\nPositioning is neutral.");
+    expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral.", caption: 'Hedge demand is back.\n\nPositioning is neutral.' }), undefined);
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
 
@@ -115,12 +107,12 @@ describe("news feed sharing", () => {
     };
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }),
+      json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Hedge demand is back.", content: "Positioning remains neutral.", caption: 'Hedge demand is back.\n\nPositioning remains neutral.' }),
     } as Response);
     render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
     await openShare();
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
-    expect(caption).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(caption).toBe("Hedge demand is back.\n\nPositioning remains neutral.");
     expect(caption).not.toContain("Source:");
     expect(caption).not.toContain(provider);
     expect(caption).not.toContain(otherProvider);
@@ -133,20 +125,14 @@ describe("news feed sharing", () => {
     );
   });
 
-  it("keeps Compose on X available while rewriting and aborts on close", async () => {
+  it("disables every export while review is pending and aborts on close", async () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     render(<NewsfeedShare post={post} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
-    const compose = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
-    expect(compose.getAttribute("aria-disabled")).not.toBe("true");
-    expect(compose.getAttribute("target")).toBe("_blank");
-    expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Download Reels / TikTok video" }) as HTMLButtonElement).disabled).toBe(true);
-    // The preview renders from the original copy immediately; the rewrite never blocks it.
-    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledWith(post, undefined));
+    expect(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")).toBeNull();
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
@@ -175,82 +161,81 @@ describe("news feed sharing", () => {
     await act(async () => { push("stage", { stage: "hedging" }); });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Still drafting. Trying a second model…"));
     expect(bar.getAttribute("aria-valuetext")).toMatch(/^Still drafting\. Trying a second model, \d+s elapsed$/);
-    await act(async () => { push("stage", { stage: "checking" }); push("result", { title: "Hedge demand is back.", content: "Positioning remains neutral." }); finish(); });
+    await act(async () => { push("stage", { stage: "checking" }); push("result", { humanizerVersion: HUMANIZER_VERSION, title: "Hedge demand is back.", content: "Positioning remains neutral.", caption: 'Hedge demand is back.\n\nPositioning remains neutral.' }); finish(); });
     await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back.\n\nPositioning remains neutral.");
   });
 
   it("surfaces a streamed server error as the rewrite toast", async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(encodeVoiceEvent("error", { error: "Rewrite timed out. Try again.", status: 504 }), { headers: { "content-type": "text/event-stream; charset=utf-8" } }));
     render(<NewsfeedShare post={post} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
-    await screen.findByText("Voice rewrite unavailable. Showing the original copy.");
+    await screen.findByText("Verified copy is unavailable. Retry to share.");
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("preserves the original X intent after rewriting without waiting for the preview", async () => {
+  it("enables reviewed X copy without waiting for the preview", async () => {
     let resolveRewrite!: (response: Response) => void;
     vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
     engine.renderShareCard.mockImplementation(() => new Promise(() => {}));
     render(<NewsfeedShare post={post} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     const compose = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toContain(post.title);
+    expect(compose.getAttribute("href")).toBeNull();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await act(async () => {
-      resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
+      resolveRewrite({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Hedge demand is back.", content: "Positioning remains neutral.", caption: 'Hedge demand is back.\n\nPositioning remains neutral.' }) } as Response);
     });
     await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back.\n\nPositioning remains neutral.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("composes the equity-issuance fallback on X while rewrite is pending", async () => {
-    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
-    render(<NewsfeedShare post={equityIssuance} />);
-    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
-    const compose = screen.getByRole("link", { name: "Compose on X" });
-    const caption = (screen.getByRole("textbox") as HTMLTextAreaElement).value;
-    const text = new URL(compose.getAttribute("href")!).searchParams.get("text")!;
-    expect(text).toBe(caption);
-    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
-    expect(caption).toContain("$700bn");
-    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
-    expect(caption.split("\n\n").length).toBeGreaterThan(1);
-    expect(caption).not.toContain("Source:");
-    expect(caption).toContain("@GoldmanSachs estimates");
-    expect(caption).toContain("Supply overhang is a headwind, not a gale.");
-    expect(caption.replace(/\s+/g, " ")).toBe(
-      `${equityIssuance.title} ${equityIssuance.content}`.replace(/\bGoldman\b/g, "@GoldmanSachs"),
-    );
-    expect(compose.getAttribute("aria-disabled")).not.toBe("true");
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
-    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    const sent = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
-    expect(sent.title).toContain("$252bn");
-    expect(sent.content).toContain("$700bn");
-    expect(sent.content).toContain("Supply overhang is a headwind, not a gale.");
-  });
-
-  it("shows original copy on failure and retries voice generation", async () => {
+  it("keeps exports unavailable on failure and retries generation", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
     render(<NewsfeedShare post={post} />);
-    await openShare();
-    expect((await screen.findByRole("alert")).textContent).toContain("Showing the original copy");
-    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Verified copy is unavailable");
+    expect(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")).toBeNull();
+    expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  it("rejects a stale server response carrying the reported contrast", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ humanizerVersion: HUMANIZER_VERSION, title: "Dollar setup", content: "That's a conditional dollar-strength setup, not a confirmed breakout.", caption: "Dollar setup\n\nThat's a conditional dollar-strength setup, not a confirmed breakout." }) } as Response);
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await screen.findByRole("alert");
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")).toBeNull();
+  });
+
+  it.each([undefined, "radon-humanizer-old-version"])("rejects a successful response without current review provenance (%s)", async version => {
+    const draft: Record<string, unknown> = {
+      title: "Dollar setup",
+      content: "DXY tests 102.86.",
+      caption: "Dollar setup\n\nDXY tests 102.86.",
+    };
+    if (version !== undefined) draft.humanizerVersion = version;
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => draft } as Response);
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await screen.findByRole("alert");
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Compose on X" }).getAttribute("href")).toBeNull();
+    expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("prepares only on demand and uses the selected source chart", async () => {
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     expect(engine.renderShareCard).not.toHaveBeenCalled();
     await openShare();
-    expect(engine.renderShareCard).toHaveBeenCalledWith(post, "/chart-2.png");
+    expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining(post), "/chart-2.png");
     expect(screen.getByRole("button", { name: "Share", exact: true }).getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect(screen.queryByRole("region", { name: "Share news item" })).toBeNull();
@@ -293,7 +278,7 @@ describe("news feed sharing", () => {
 
   it("retries failed chart loading without discarding caption edits", async () => {
     // Original-copy render and post-rewrite render both fail; the retry succeeds.
-    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded")).mockRejectedValueOnce(new Error("Chart could not be loaded"));
+    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded"));
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
@@ -352,7 +337,7 @@ describe("news feed sharing", () => {
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("My carefully edited caption");
     expect(fetch).toHaveBeenCalledOnce();
-    expect(engine.renderShareCard).toHaveBeenLastCalledWith(post, "/chart-2.png");
+    expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining(post), "/chart-2.png");
   });
 
   it("disables exports while the newly selected chart is rendering", async () => {
@@ -362,7 +347,7 @@ describe("news feed sharing", () => {
     const pendingChart = new Promise<HTMLCanvasElement>(resolve => { resolveChart = resolve; });
     engine.renderShareCard.mockReturnValueOnce(pendingChart);
     rerender(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
-    await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(post, "/chart-2.png"));
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining(post), "/chart-2.png"));
     expect(screen.queryByAltText("Portrait share preview: Yen hedge demand")).toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Download Reels / TikTok video" }) as HTMLButtonElement).disabled).toBe(true);

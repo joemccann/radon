@@ -28,13 +28,14 @@ from types import SimpleNamespace
 
 from lib.checkpoint import CheckpointedJob
 from research.marketdesk_auth import PREVIEW_QUOTA, MarketDeskAuthError, MarketDeskError
+from research.marketdesk_pdf_policy import SelectionUnavailable
 from utils.atomic_io import atomic_save, verified_load
 
 SERVICE = "marketdesk-pdf"
 MAX_PDF_BYTES = 100 * 1024 * 1024
-MIN_INTERVAL_SECONDS = 300
+MIN_INTERVAL_SECONDS = 1800
 BACKOFF_SECONDS = 900
-PROVIDER_BACKOFF_SECONDS = 3600
+PROVIDER_BACKOFF_SECONDS = 21600
 # Allowance is already a durable error row. Exit 1 makes every timer fire a
 # new oneshot Result=exit-code and a P1 page. Other deferrals still fail.
 ALLOWANCE_DEFERRALS = frozenset({PREVIEW_QUOTA, "download_quota"})
@@ -60,6 +61,10 @@ def download_pdf(session, article_id):
     """
     if not ID.fullmatch(article_id):
         raise MarketDeskError("bad_ref")
+    # The allowance is account-wide. Do not issue a PDF request (or repeated
+    # login/PDF retries) when the provider already declares it exhausted.
+    if not session.previews_available():
+        raise MarketDeskError(PREVIEW_QUOTA)
     from research.marketdesk_scrape import download_pdf as fetch_pdf
     with tempfile.TemporaryDirectory(prefix="marketdesk-pdf-source-") as temporary:
         path = fetch_pdf(session, SimpleNamespace(ref=SimpleNamespace(article_id=article_id)), Path(temporary))
@@ -132,7 +137,10 @@ def run_cycle(*, env=os.environ, deps=None):
     with deps.service_cycle(SERVICE, market_hours_class="continuous") as cycle:
         counts["seeded"] = deps.store.seed_missing(now=deps.now())
         counts["attached"] += deps.store.attach_downloads(now=deps.now())
-        work = deps.store.claim_next(now=deps.now(), interval_seconds=_interval(env))
+        try:
+            work = deps.store.claim_next(now=deps.now(), interval_seconds=_interval(env))
+        except SelectionUnavailable:
+            raise DownloadDeferred("PDF archive deferred: book_unavailable") from None
         if work is None:
             counts["throttled"] = 1
             blocked = deps.store.blocked()
@@ -146,6 +154,7 @@ def run_cycle(*, env=os.environ, deps=None):
         # The receipt is written before the WAL/DB. If SIGKILL lands between
         # either acknowledgement, a fresh process verifies the saved bytes.
         saved = _receipt(receipt_path, deps)
+        provider_success = saved is None
         if saved is None:
             temporary = Path(tempfile.mkdtemp(prefix="pdf-", dir=receipts))
             try:
@@ -170,7 +179,7 @@ def run_cycle(*, env=os.environ, deps=None):
                     atomic_save(str(receipt_path), saved)
                 except (MarketDeskError, MarketDeskAuthError, OSError, ValueError) as exc:
                     code = _code(exc)
-                    delay = PROVIDER_BACKOFF_SECONDS if code in {PREVIEW_QUOTA, "download_quota", "unauthenticated"} else BACKOFF_SECONDS
+                    delay = PROVIDER_BACKOFF_SECONDS if code in {PREVIEW_QUOTA, "download_quota", "http_429"} else (3600 if code == "unauthenticated" else BACKOFF_SECONDS)
                     deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay)
                     checkpoint.record_error(work.article_id, code)
                     raise DownloadDeferred("PDF archive deferred: " + code) from None
@@ -178,10 +187,11 @@ def run_cycle(*, env=os.environ, deps=None):
                 shutil.rmtree(temporary, ignore_errors=True)
         if not checkpoint.is_done(work.article_id):
             checkpoint.record_finding(work.article_id, saved)
-        if deps.store.record_download(work, saved["asset"], saved["digest"], now=deps.now()):
+        if deps.store.record_download(work, saved["asset"], saved["digest"], now=deps.now(), provider_success=provider_success):
             counts["downloaded"] = 1
             counts["attached"] += deps.store.attach_downloads(now=deps.now())
         checkpoint.set_cursor({"last_article_id": work.article_id})
+        checkpoint.checkpoint()
         cycle.finished_at = deps.now().isoformat()
     return counts
 

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { HUMANIZER_VERSION } from "../lib/humanizerPolicy";
 import { installClearFixtures } from "./clear-fixtures";
 
 const base = "/api/newsfeed/research/files/";
@@ -28,7 +29,7 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setSystemTime(new Date());
   await page.route("**/api/newsfeed/share", async route => {
     const request = route.request().postDataJSON() as { title: string; content: string };
-    await route.fulfill({ json: {
+    await route.fulfill({ json: { humanizerVersion: HUMANIZER_VERSION,
       title: request.title, content: request.content,
       caption: [request.title, request.content].join("\n\n"),
     } });
@@ -36,7 +37,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const width of [1440, 393]) {
-  test(`news sharing composes on X while voice and preview are pending at ${width}px`, async ({ page, context }, testInfo) => {
+  test(`news sharing blocks unreviewed copy and enables reviewed copy before preview completes at ${width}px`, async ({ page, context }, testInfo) => {
     test.setTimeout(90_000);
     const fixture = {
       ...post,
@@ -44,14 +45,14 @@ for (const width of [1440, 393]) {
       content: `${post.content} Source: ZeroHedge https://zerohedge.com/markets/example`,
     };
     const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
-    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell.\n\nReturns: -2.5%.\n\nSource: Synthetic Bank · 2026-09-07";
+    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell.\n\nReturns: -2.5%.";
     let requests = 0;
     let releaseRewrite!: () => void;
     const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
     await page.route("**/api/newsfeed/share", async route => {
       requests += 1;
       await rewriteReady;
-      await route.fulfill({ json: { ...rewritten, caption: rewrittenCaption } });
+      await route.fulfill({ json: { humanizerVersion: HUMANIZER_VERSION, ...rewritten, caption: rewrittenCaption } });
     });
     // Context routing also catches the first navigation in target="_blank" pages.
     await context.route(/^https:\/\/(?:twitter|x)\.com\/intent\/tweet\?/, route => route.fulfill({
@@ -111,31 +112,27 @@ for (const width of [1440, 393]) {
       await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
       await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
-      const fallbackCaption = await caption.inputValue();
-      expect(fallbackCaption).toContain("Yen hedge demand, increases");
-      expect(fallbackCaption).not.toMatch(/^[•●▪◦*-]\s/m);
-      expect(fallbackCaption.split("\n\n").length).toBeGreaterThan(1);
-      expect(fallbackCaption).toContain("Demand for yen hedges increased");
-      expect(fallbackCaption).not.toMatch(excludedPublisher);
-      expect(fallbackCaption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
-      await openComposer(fallbackCaption);
-      await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-rewrite-${width}.png`) });
+      await expect(caption).toHaveValue("");
+      await expect(compose).toHaveAttribute("aria-disabled", "true");
+      await expect(compose).not.toHaveAttribute("href");
+      await expect(panel.getByRole("button", { name: "Copy caption", exact: true })).toBeDisabled();
+      await panel.screenshot({ path: testInfo.outputPath(`share-review-pending-${width}.png`) });
 
       releaseRewrite();
-      await expect(caption).toHaveValue(fallbackCaption);
+      await expect(caption).toHaveValue(rewrittenCaption);
       await expect.poll(() => page.evaluate(() => (window as unknown as { previewGate: { pending: boolean } }).previewGate.pending), { timeout: 30_000 }).toBe(true);
       await expect(caption).toBeEnabled();
       await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
       await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
-      await openComposer(fallbackCaption);
+      await openComposer(rewrittenCaption);
       await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-preview-${width}.png`) });
       await page.evaluate(() => (window as unknown as { previewGate: { release: () => void } }).previewGate.release());
       await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(fallbackCaption);
+      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
       const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
       expect(drawn).toContain("Seasonality, the setup");
-      // Media uses the voice draft while the X caption retains the original post.
+      // Media and the separately reviewed full X caption are both released after review.
       expect(drawn).toContain("Positioning, the tell.");
       expect(drawn).toContain("Returns: -2.5%.");
       expect(drawn).not.toMatch(/Source:|EXCERPT|SEP 7, 2026/);
@@ -155,13 +152,13 @@ for (const width of [1440, 393]) {
   });
 }
 
-test("news sharing retains sanitized fallback and retries a failed voice rewrite", async ({ page }) => {
+test("news sharing blocks failed review and retries without original-copy fallback", async ({ page }) => {
   test.setTimeout(90_000);
   let requests = 0;
   await page.route("**/api/newsfeed/share", async route => {
     requests += 1;
-    if (requests === 1) return route.fulfill({ status: 503, json: { error: "Rewrite unavailable" } });
-    await route.fulfill({ json: { title: "Retry succeeds", content: "Positioning remains the tell.", caption: "Retry succeeds\n\nPositioning remains the tell." } });
+    if (requests === 1) return route.fulfill({ status: 503, json: { humanizerVersion: HUMANIZER_VERSION, error: "Rewrite unavailable" } });
+    await route.fulfill({ json: { humanizerVersion: HUMANIZER_VERSION, title: "Retry succeeds", content: "Positioning remains the tell.", caption: "Retry succeeds\n\nPositioning remains the tell." } });
   });
   await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [{ ...post, source: undefined }] }));
   await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
@@ -169,19 +166,18 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
   await item.getByRole("button", { name: "Share", exact: true }).click();
   const panel = item.getByRole("region", { name: "Share news item" });
-  const failure = page.locator(".toast-container").getByRole("alert").filter({ hasText: "Showing the original copy" });
+  const failure = page.locator(".toast-container").getByRole("alert").filter({ hasText: "Verified copy is unavailable" });
   await expect(failure.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(panel.getByRole("alert")).toHaveCount(0);
-  expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).toContain(post.title);
-  expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).not.toMatch(excludedPublisher);
-  await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-  const originalCaption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("");
+  await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
+  await expect(panel.getByRole("link", { name: "Compose on X" })).not.toHaveAttribute("href");
   await failure.getByRole("button", { name: "Try again" }).click();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(originalCaption);
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
   await expect.poll(() => requests).toBe(2);
 });
 
-test("voice rewrite shows progress while retaining the original X caption", async ({ page }, testInfo) => {
+test("voice rewrite shows progress until reviewed X caption arrives", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -192,7 +188,7 @@ test("voice rewrite shows progress while retaining the original X caption", asyn
     await route.fulfill({
       headers: { "content-type": "text/event-stream; charset=utf-8" },
       body: frame("stage", { stage: "queued" }) + frame("stage", { stage: "drafting" }) + frame("stage", { stage: "checking" })
-        + frame("result", { title: "Streamed draft lands", content: "Positioning stays near neutral." }),
+        + frame("result", { humanizerVersion: HUMANIZER_VERSION, title: "Streamed draft lands", content: "Positioning stays near neutral.", caption: "Streamed draft lands\n\nPositioning stays near neutral." }),
     });
   });
   await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [{ ...post, source: undefined }] }));
@@ -205,14 +201,14 @@ test("voice rewrite shows progress while retaining the original X caption", asyn
   await expect(bar).toBeVisible();
   await expect(panel.getByRole("status")).toHaveText("Starting rewrite…");
   await expect(bar).toHaveAttribute("aria-valuetext", /^Starting rewrite, [1-9]\d*s elapsed$/, { timeout: 5_000 });
-  const originalCaption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("");
   await panel.screenshot({ path: testInfo.outputPath("voice-rewrite-progress.png") });
   release();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(originalCaption);
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Streamed draft lands\n\nPositioning stays near neutral.");
   await expect(bar).toHaveCount(0);
 });
 
-test("equity-issuance fallback is hook plus short paragraphs and Compose on X stays usable", async ({ page, context }) => {
+test("equity-issuance copy cannot escape through Compose on X while review is pending or failed", async ({ page, context }) => {
   test.setTimeout(90_000);
   const equity = {
     id: "equity-issuance-252bn",
@@ -227,7 +223,7 @@ test("equity-issuance fallback is hook plus short paragraphs and Compose on X st
   const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
   await page.route("**/api/newsfeed/share", async route => {
     await rewriteReady;
-    await route.fulfill({ status: 502, json: { error: "Rewrite unavailable" } });
+    await route.fulfill({ status: 502, json: { humanizerVersion: HUMANIZER_VERSION, error: "Rewrite unavailable" } });
   });
   await context.route(/^https:\/\/(?:twitter|x)\.com\/intent\/tweet\?/, route => route.fulfill({
     contentType: "text/html", body: "<title>Mock X composer</title><p>Compose draft</p>",
@@ -240,24 +236,13 @@ test("equity-issuance fallback is hook plus short paragraphs and Compose on X st
     await item.getByRole("button", { name: "Share", exact: true }).click();
     const panel = item.getByRole("region", { name: "Share news item" });
     const compose = panel.getByRole("link", { name: "Compose on X" });
-    const caption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
-    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
-    expect(caption).toContain("$700bn");
-    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
-    expect(caption.split("\n\n").length).toBeGreaterThan(1);
-    expect(caption).not.toContain("Source:");
-    expect(caption.length).toBeGreaterThan(400);
-    expect(caption).toContain("@GoldmanSachs estimates");
-    expect(caption).toContain("Sarah Herring");
-    expect(caption).toContain("The $700bn figure is a meaningful supply overhang and a headwind rather than a gale.");
-    await expect(compose).toBeEnabled();
-    const popupReady = page.waitForEvent("popup");
-    await compose.click();
-    const popup = await popupReady;
-    try {
-      await expect(popup).toHaveTitle("Mock X composer");
-      expect(new URL(popup.url()).searchParams.get("text")).toBe(caption);
-    } finally { await popup.close(); }
+    await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("");
+    await expect(compose).toHaveAttribute("aria-disabled", "true");
+    await expect(compose).not.toHaveAttribute("href");
+    releaseRewrite();
+    await expect(page.locator(".toast-container").getByRole("alert").filter({ hasText: "Verified copy is unavailable" })).toBeVisible();
+    await expect(compose).not.toHaveAttribute("href");
+    await expect(panel.getByRole("button", { name: "Copy caption", exact: true })).toBeDisabled();
   } finally {
     releaseRewrite();
     await page.unrouteAll({ behavior: "wait" });
@@ -422,7 +407,7 @@ for (const width of [1440, 393]) {
       ...post,
       id: "morgan-stanley-ai-cds",
       title: "Morgan Stanley: AI CDS basket trades ~45bp wider than CDX IG, and protection is still its preferred credit-derivatives expression",
-      content: 'Morgan Stanley’s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
+      content: 'Morgan Stanley\'s AI CDS basket now trades ~45bp wider than CDX IG.\n\nMS says buying CDS protection "remains our preferred way of playing the AI story in the credit derivatives market." The reason is not just a bearish default call. MS expects "increasing needs for non-economic hedging to manage counterparty exposure," even in a benign scenario where AI investments are profitable and continue.\n\nThat is an important distinction. The hedge bid can grow even if the capex cycle keeps working. More AI financing creates more counterparty exposure, and that creates more demand for protection.',
       source: { ...source, publisher: "Tyler Durden", documentDate: "2026-10-07" },
     };
     const expected = `${fixture.title}\n\n${fixture.content}`.replace(/Morgan Stanley|\bMS\b/g, "@morganstanley");
@@ -441,7 +426,7 @@ for (const width of [1440, 393]) {
     await page.route("**/api/newsfeed/share", async route => {
       requests += 1;
       await rewriteReady;
-      await route.fulfill({ json: { title: "Short credit hook", content: "Buy protection.", caption: "Short rewritten caption" } });
+      await route.fulfill({ json: { humanizerVersion: HUMANIZER_VERSION, title: "Short credit hook", content: "Buy protection.", caption: expected } });
     });
     await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [fixture] }));
     await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
@@ -453,9 +438,9 @@ for (const width of [1440, 393]) {
       const panel = item.getByRole("region", { name: "Share news item" });
       const caption = panel.getByRole("textbox", { name: "Post caption" });
       const compose = panel.getByRole("link", { name: "Compose on X" });
-      await expect(caption).toHaveValue(expected);
+      await expect(caption).toHaveValue("");
       expect(expected.length).toBeGreaterThan(400);
-      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(expected);
+      await expect(compose).not.toHaveAttribute("href");
       releaseRewrite();
       await expect(caption).toBeEnabled();
       await expect(caption).toHaveValue(expected);
@@ -489,7 +474,7 @@ for (const width of [320, 393, 640, 1440]) {
       const held = new Promise<void>(resolve => { release = resolve; });
       await page.route("**/api/newsfeed/share", async route => {
         await held;
-        await route.fulfill({ json: { title: post.title, content: post.content } });
+        await route.fulfill({ json: { humanizerVersion: HUMANIZER_VERSION, title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` } });
       });
       try {
         await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
