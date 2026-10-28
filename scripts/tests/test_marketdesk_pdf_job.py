@@ -75,6 +75,59 @@ def test_no_work_does_not_authenticate_or_download(tmp_path):
     assert job.run_cycle(env={}, deps=dependency)["throttled"] == 1
 
 
+@pytest.mark.parametrize("code", ["preview_quota", "download_quota"])
+def test_persisted_allowance_backoff_keeps_error_and_exits_zero(tmp_path, monkeypatch, capsys, code):
+    """A durable provider allowance is already the error row. Exit 1 pages P1."""
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    dependency = deps(tmp_path)
+    dependency.service_cycle = recording
+    dependency.store.work = None
+    dependency.store.blocked = lambda: code
+    dependency.open_session = lambda env: pytest.fail("persisted allowance must not sign in")
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert recorded == ["PDF archive deferred: " + code]
+    assert "PDF archive deferred: " + code in capsys.readouterr().err
+
+
+def test_preview_quota_download_exits_zero_after_durable_retry(tmp_path, monkeypatch):
+    def fail(session, key):
+        raise MarketDeskError("preview_quota")
+
+    dependency = deps(tmp_path, download=fail)
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert dependency.store.retries[0][0] == "preview_quota"
+    assert dependency.store.retries[0][1]["backoff_seconds"] >= 3600
+    assert not dependency.store.downloads
+
+
+@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated"])
+def test_non_allowance_deferral_still_fails_the_oneshot(tmp_path, monkeypatch, code):
+    dependency = deps(tmp_path)
+    dependency.store.work = None
+    dependency.store.blocked = lambda: code
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 1
+
+
+def test_unexpected_cycle_error_still_fails_the_oneshot(monkeypatch):
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(job, "run_cycle", boom)
+    assert job.main([]) == 1
+
+
 @pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429", "http_transport"])
 def test_provider_failure_backoff_is_visible_and_durable(tmp_path, code):
     def fail(session, key):

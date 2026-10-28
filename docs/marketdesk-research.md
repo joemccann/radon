@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) persists its own throttle/backoff and retries provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed.
+The independent [PDF archive service](marketdesk-pdf-archive.md) persists its own throttle/backoff and retries provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. Other download failures still exit 1.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
