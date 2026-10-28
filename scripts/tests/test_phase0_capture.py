@@ -123,3 +123,12 @@ def test_whitespace_around_the_directive_separator_is_tolerated():
     ):
         out = _redact_input(line)
         assert "live_NOTREAL123" not in out, (line, out)
+
+
+# Third rescan: the DB and client-id sections piped grep into redact, so
+# redact() saw single lines and a quoted value's continuation arrived with no
+# key in front of it. Each file is redacted whole before any filter now.
+def test_the_filtered_sections_redact_before_they_filter():
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "redact_env_files | grep" in text, text[-600:]
+    assert "| redact" not in text, "a filter still runs before redaction"
