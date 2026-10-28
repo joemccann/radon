@@ -499,6 +499,18 @@ HTTP 404 with `error=auth_error` for a rejected bearer key; its validator
 classifies that explicit provider response as invalid so Profile blocks the
 save, while unrelated 404 and transport failures remain retryable errors.
 
+**A validator diagnostic is scrubbed whole, then bounded.** Browser-login
+validators return the child process's own output, which can quote a
+credential. `_safe_detail` in `scripts/credential_validators.py` substitutes
+the values that run passed the child by exact match, then runs the shared
+pattern scrub, and only then trims the message to its last 200 characters.
+The order matters: trimming first can cut away the `KEY=` or provider prefix
+every pattern keys on while leaving the secret's tail, so nothing matches
+what remains, and the result reaches the authenticated credentials response
+and the unit journal. The exact-match pass covers the case no pattern can --
+a third-party exception quoting a bare password with no assignment shape.
+Both the success and the failure branch go through that one helper.
+
 **Values are validated at the persist chokepoint.** `PUT
 /credentials/{service}` rejects values the process environment cannot hold
 (NUL bytes, unencodable text) before anything is written, and both env-export

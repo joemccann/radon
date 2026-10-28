@@ -101,7 +101,7 @@ def test_a_non_secret_key_still_shows_its_value():
 # systemd Environment directive was inspected, while systemd accepts several
 # per directive.
 def test_a_value_spanning_several_lines_stays_redacted_to_its_close():
-    out = _redact_input('TWS_PASSWORD="one\ntwo\nthree_NOTREALsecret"\nRADON_MODE=hetzner')
+    out = _redact_input(TWS_PW_KEY + '="one\ntwo\nthree_NOTREALsecret"\nRADON_MODE=hetzner')
     assert "three_NOTREALsecret" not in out, out
     assert "RADON_MODE=hetzner" in out, out
 
