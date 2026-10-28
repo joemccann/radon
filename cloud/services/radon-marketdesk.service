@@ -34,6 +34,12 @@ TimeoutStartSec=270
 # page; a hung cycle still fails as Result=timeout. Not 75: radon-app-runtime run
 # exits 75 for a surviving orphan container, which must stay a failure.
 SuccessExitStatus=143
+# The deploy helper waits 60s (STATE_WAIT_SECONDS) for a stopped unit to go
+# inactive. systemd's 90s default let a cycle that ignored SIGTERM outlive
+# that wait for both the stop and the recovery pass, and the deploy exited 71
+# with every radon service down (2026-10-27 18:39-18:45). 40s leaves room for
+# ExecStopPost's container cleanup inside the helper's wait.
+TimeoutStopSec=40
 
 [Install]
 WantedBy=multi-user.target

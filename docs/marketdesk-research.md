@@ -182,6 +182,11 @@ later cycle.
   Managed cancellation bypasses provider exception handlers, so interrupted
   requests do not advance the model ladder; cleanup and the error heartbeat
   still run before exit 143.
+- `TimeoutStopSec=40` (this unit and `radon-marketdesk-pdf.service`): a cycle
+  that does not exit on SIGTERM is SIGKILLed before the deploy helper's 60s
+  stop wait ends. The 90s default outlived that wait on 2026-10-27 and the
+  deploy exited 71 with every radon service stopped. Pinned by
+  `cloud/tests/test_systemd_services.py::TestMarketdeskStopFitsTheDeployWait`.
 - The private research store holds the rotated refresh token
   (`$RADON_RESEARCH_DIR/marketdesk/firebase.json`, mode 0600), image/PDF assets
   and editorial audits. The per-cycle temp workdir is deleted at cycle end;
