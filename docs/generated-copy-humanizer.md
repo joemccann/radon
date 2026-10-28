@@ -16,7 +16,7 @@ about human authorship.
 | Newsfeed X captions and media copy | `web/lib/newsfeedVoice.ts` | Local checks plus separate model review before response/cache; full captions retain facts; client requires current review version |
 | Newsfeed Explain | `web/lib/newsfeedExplain.ts` | Local checks plus model review before caching; cache keys include rubric version |
 | CTA social copy | `scripts/utils/cta_llm.py` | Source fidelity, shared scored review, bounded rewrite, final certificate; failure uses deterministic template |
-| Operational assistant prose | Shared draft instructions in assistant system prompt | Negative-parallelism and repetition checks, one bounded regeneration, then existing error path |
+| Operational assistant prose | Shared draft instructions in assistant system prompt | Negative-parallelism and repetition checks, one bounded regeneration; a remaining style finding still answers, only repetition takes the existing error path |
 | Generated X watchlist reasons | `scripts/fetch_x_xai.py` | Full rubric in generation instructions and self-review; quoted source text remains unchanged |
 
 Closed-vocabulary tags, numeric extraction, internal knowledge records, original
