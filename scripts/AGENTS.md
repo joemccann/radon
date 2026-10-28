@@ -33,11 +33,12 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 ## Order Placement Contract
 
 - Prefer `scripts/ib_execute.py` for real execution; it places, monitors, and logs.
-- `ib_place_order.py` must never disconnect while `trade.order.permId == 0`.
+- `ib_place_order.py` recognizes a broker permanent ID from either `trade.order.permId` or `trade.orderStatus.permId`; the IB callbacks may arrive in either order.
 - Wait up to 12s for combo orders and 6s for single-leg orders before disconnecting.
-- If still `PendingSubmit`, `ApiPending`, or `Unknown`, return `status:"error"` with an operator-readable hint.
+- Without a broker permanent ID, `PendingSubmit`, `ApiPending`, or `Unknown` after the deadline returns `status:"error"`, `indeterminate:true`, and `orderRef` plus the broker IDs. Disconnecting does not prove rejection; reconcile open orders and executions before any retry.
 - stdout is reserved for result JSON. Every progress/debug print goes to stderr.
-- IB may silently drop some combo structures, especially bearish risk reversals. Verify with counterpart/spread; workaround is split single-leg orders.
+- Preserve order-scoped `399` and `2109` callbacks as nonblocking `ib_warnings` diagnostics (up to 8 distinct messages, credential-scrubbed and capped at 512 characters each). Unrelated request IDs and farm messages are excluded. A warning alone never changes acceptance, proves rejection, or authorizes a retry.
+- A timeout alone does not establish a routing limitation, missing permissions, or rejection. Preserve broker evidence; never recommend replacement legs while the original submission has an unknown outcome.
 - Live probes can fill. Use qty 1 max, far-away limit, immediate cancel, and verify open orders.
 - Heavy connect/disconnect subprocess load can trigger IB Gateway 2FA renewal; reuse one `IBClient` for multi-case probes.
 
