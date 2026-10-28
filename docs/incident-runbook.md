@@ -2824,8 +2824,10 @@ after one curl-7 retry. Discover then shed a short UW rate limit.
   `retry_transient=False`, the same fail-fast client scanner and
   discover use (5s default admission, no client retry ladder). A
   rate-limited name is caught per ticker and the book still prints
-  JSON inside the 180s budget. The single-ticker report keeps the
-  120s wait. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
+  JSON inside the 180s budget. A report invoked without a history
+  budget keeps `FLOW_ADMISSION_WAIT_S` (120s). `POST /flow-analysis/{ticker}`
+  passes `--deadline-epoch`, and that walk waits
+  `FLOW_BUDGETED_ADMISSION_WAIT_S` (60s) per page. Do not raise `SCAN_TIMEOUT` to hide the wait, and do not
   shorten `FLOW_ADMISSION_WAIT_S`. Do not `reset-failed`. The next
   timer after deploy is enough.
 - **Regression:**
@@ -3184,9 +3186,12 @@ when the last heartbeat is the cloud-mode gateway-down string.** Peak:
   seconds. Portfolio-tab `POST /flow-analysis` cooldown path is
   `flow-refresh-capacity-502`.
 - **Remediation (code):** retry capacity shed on the ticker POST
-  (`FLOW_REPORT_SHED_RETRIES` default 2,
-  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` default 8), same budget as
-  orders-sync. Persistent shed still 502. UI maps the capacity string to
+  (`FLOW_REPORT_SHED_RETRIES` is 12,
+  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` is 5 seconds, backoff capped at
+  20 seconds). That chain is not the orders-sync pair
+  (`ORDERS_SYNC_SHED_RETRIES` 2, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS` 8
+  seconds). Paging stops at `--deadline-epoch` so a shed retry cannot
+  start a new full budget. Persistent shed still 502. UI maps the capacity string to
   operator copy and shows `Scan failed` instead of ANALYZING.
 - **Regression:**
   `test_flow_report_capacity_shed.py::test_flow_report_retries_capacity_shed_then_succeeds`,
