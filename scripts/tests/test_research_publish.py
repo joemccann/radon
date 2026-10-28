@@ -11,7 +11,7 @@ import pytest
 from research_editor_fixtures import certify
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api import db_http
-from research import assets, publish
+from research import assets, humanizer, publish
 from knowledge.sources import newsfeed
 
 
@@ -110,6 +110,7 @@ def test_invalid_provenance(db, post, key, value):
 
 def test_text_only_finding_is_publishable(db, post):
     post["images"] = []; post["source"]["figures"] = []
+    post = certify(post)
     publish.publish(post)
     assert db.execute("SELECT images FROM posts").fetchone()[0] == "[]"
 
@@ -225,16 +226,18 @@ def test_required_stable_id_components():
     with pytest.raises(ValueError): publish.stable_post_id("id:a", "")
 
 
-def test_em_dash_and_bank_publisher_publish(db, post):
+def test_em_dash_copy_cannot_publish_with_bank_publisher_or_forged_clean_digest(db, post):
     post["content"] = "Rates \u2014 positioning"
     post["source"]["publisher"] = "Goldman Sachs"
-    post = certify(post)
-    assert publish.publish(post) == post["id"]
-    assert db.execute("SELECT content FROM posts").fetchone()[0] == "Rates \u2014 positioning"
+    post['source']['humanizer']['copy_sha256'] = humanizer.copy_digest(post)
+    with pytest.raises(publish.HumanizerCertificateError, match='rubric'):
+        publish.publish(post)
+    assert db.execute('SELECT count(*) FROM posts').fetchone()[0] == 0
 
 
 def test_empty_caption_publishes(db, post):
     post["source"]["figures"][0]["caption"] = ""
+    post = certify(post)
     publish.publish(post)
     source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
     assert source["figures"][0]["caption"] == ""
@@ -384,6 +387,7 @@ def test_marketdesk_minimal_without_figures_summary_or_extras(db, marketdesk_pos
     post = _clean(marketdesk_post)
     post["images"] = []
     post["source"].update(figures=[], summary=[], extraImages=[])
+    post = certify(post)
     publish.publish(post)
     del post["source"]["summary"], post["source"]["extraImages"]
     publish.publish(post)
@@ -442,6 +446,7 @@ def test_marketdesk_rejects_more_than_twelve_figures(db, marketdesk_post):
     with pytest.raises(ValueError): publish.publish(post)
     post["source"]["figures"] = post["source"]["figures"][:12]
     post["images"] = pngs[:12]
+    post = certify(post)
     publish.publish(post)
 
 

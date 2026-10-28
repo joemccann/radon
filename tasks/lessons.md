@@ -1345,3 +1345,7 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - Treat source summaries and charts as independently available inputs. Keep PDF archive throttling and provider denials outside the publication transaction.
 - Use source bullets to write reviewed prose; never append their unreviewed list. Normalize grounded security tickers before the final Humanizer score and certificate.
 - Discover durably before slow work; a provider's latest-25 page is not a backlog. Preserve full bounded input qualifications and reject oversized facts explicitly instead of silently cutting them.
+
+## 2026-10-27: Generated-copy review must enforce prohibited contrasts
+
+- A model's clean humanizer verdict does not prove copy is clean. Enforce detectable prohibited constructions against final text, including “That's X, not Y”, at publication and generated-response boundaries. Cover provider fallbacks, cached copy, titles, bodies and captions; preserve source facts and uncertainty during rewrites.

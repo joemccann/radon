@@ -452,11 +452,20 @@ def test_long_caption_publishes_unchanged(tmp_path, publisher):
     assert posts[0]["source"]["figures"][0]["caption"] == caption
 
 
-def test_em_dash_title_reaches_verify(tmp_path, publisher):
-    reviewer = Reviewer([selection(title="Foreign investors bought $45bn of US equities in July \u2014 TIC"), verdict()])
+def test_em_dash_title_reaches_verify_then_requires_final_editorial_rewrite(tmp_path, publisher):
+    revised_title = "Foreign investors bought $45bn of US equities in July (TIC)"
+    rewrite = {'title': revised_title, 'content': selection()['candidates'][0]['content']}
+    semantic_verdict = {'supported': True, 'same_meaning': True, 'no_unresolved_conflicts': True,
+                        'not_forecast_as_flow': True, 'reason': 'Page 1 supports the same TIC purchases and amounts.'}
+    reviewer = Reviewer([selection(title="Foreign investors bought $45bn of US equities in July \u2014 TIC"),
+                         verdict(), rewrite, semantic_verdict])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    assert len(reviewer.calls) == 3 and len(posts) == 1
+    assert len(reviewer.calls) == 5 and len(posts) == 1
+    assert posts[0]['title'] == revised_title
+    assert reviewer.calls[3][1].startswith('HUMANIZER REWRITE')
+    assert reviewer.calls[4][1].startswith('Independently verify an editorial rewrite')
+    assert posts[0]['source']['humanizer']['score'] == 100
     assert not any(a.get("held") == "INVALID_CANDIDATE" for a in review["audit"])
 
 
