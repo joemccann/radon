@@ -128,6 +128,20 @@ def post_source(post_id: str) -> dict | None:
     return value if isinstance(value, dict) else {}
 
 
+def post_copy(post_id: str) -> dict | None:
+    """Visible row required before a provenance-only crash can be healed."""
+    rows = hrana_execute("SELECT title,content FROM posts WHERE id=? LIMIT 1", (post_id,))
+    return {'title': rows[0][0], 'content': rows[0][1]} if rows else None
+
+
+def record_admission_block(article_id: str, status: str, reason_code: str) -> None:
+    """Park claimed work without changing its evidence, provenance or archive."""
+    if status not in DECISION_STATUSES:
+        raise ValueError('unknown admission decision')
+    hrana_execute("UPDATE marketdesk_articles SET status=?,reason_code=?,last_error=NULL,updated_at=? "
+                  "WHERE article_id=? AND status='pending'", (status, reason_code, _now(), article_id))
+
+
 def post_exists(post_id: str) -> bool:
     return post_source(post_id) is not None
 
@@ -167,7 +181,7 @@ def record_decision(article_id: str, status: str, reason_code: str | None, *, pd
 # Only the removed MarketDesk relevance/selector gates, never source identity,
 # duplicates, failed copy certification, or another pipeline's decisions.
 RETIRED_RELEVANCE_CODES = (
-    "DOC_TYPE_FX_PAIR_NOTE", "SINGLE_STOCK_NOT_IN_BOOK", "SERIES_DENYLIST",
+    "DOC_TYPE_FX_PAIR_NOTE", "SERIES_DENYLIST",
     "RULE_DOC_TYPE", "RULE_PUBLISHER", "NO_CANDIDATES", "INVALID_CANDIDATE",
 )
 

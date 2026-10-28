@@ -11,7 +11,7 @@ import time
 
 from api.db_http import HRANA_TIMEOUT_S, hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
-from research import force_include, humanizer
+from research import book, equity_admission, force_include, humanizer, rendered_copy
 from research.summary_editor import HumanizerCertificateError
 
 PT = ZoneInfo("America/Los_Angeles")
@@ -248,6 +248,15 @@ def _validate_marketdesk(source: dict, images) -> list:
     return images
 
 
+class PublicationAdmissionError(ValueError):
+    """A final publication is ineligible; preserve its payload for review."""
+    def __init__(self, outcome, reason_code, subjects):
+        self.outcome = outcome
+        self.reason_code = reason_code
+        self.subjects = subjects
+        super().__init__(reason_code)
+
+
 def publish(post: dict) -> str:
     """Validate and commit one normalized post. Outbox owns retries."""
     post_id = post.get("id", "")
@@ -273,6 +282,9 @@ def publish(post: dict) -> str:
         humanizer.validate_certificate(post)
     except ValueError as error:
         raise HumanizerCertificateError(str(error)) from error
+    outcome, reason, subjects = equity_admission.decide(title, rendered_copy.content(post), book_tickers=book.current_tickers)
+    if outcome != 'publish':
+        raise PublicationAdmissionError(outcome, reason, subjects)
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
@@ -348,6 +360,28 @@ def record_outcome(work: dict, review: dict) -> None:
         f"THEN COALESCE(research_outcomes.held_at, excluded.held_at) ELSE excluded.held_at END "
         f"ELSE research_outcomes.held_at END,expired_at=NULL",
         (*[row[c] for c in _OUTCOME_COLUMNS], now, held_at))
+
+
+def record_publication_block(work_key, post, outcome, reason_code, published_count):
+    """Correct dispatch telemetry without replacing source metadata or prior drafts."""
+    now = datetime.now(timezone.utc).isoformat()
+    final_outcome = 'published' if published_count else outcome
+    decision = {'postId': post.get('id'), 'outcome': outcome, 'reason_code': reason_code}
+    draft = {'publicationId': post.get('id'), 'title': str(post.get('title') or '')[:300],
+             'content': str(post.get('content') or '')[:600], 'held': reason_code,
+             'detail': 'Publication refused by current research admission policy.'}
+    hrana_execute("""UPDATE research_outcomes SET outcome=?, posts=?,
+        reason_codes=CASE WHEN EXISTS(SELECT 1 FROM json_each(reason_codes) WHERE value=?)
+            THEN reason_codes ELSE json_insert(reason_codes,'$[#]',?) END,
+        drafts_json=CASE WHEN EXISTS(SELECT 1 FROM json_each(drafts_json)
+            WHERE json_extract(value,'$.publicationId')=?) THEN drafts_json
+            ELSE json_insert(drafts_json,'$[#]',json(?)) END,
+        context_json=json_set(COALESCE(context_json,'{}'),'$.publicationAdmission',json(?)),
+        held_at=CASE WHEN ?='held' THEN CASE WHEN outcome='held' AND expired_at IS NULL
+            THEN COALESCE(held_at,?) ELSE ? END ELSE held_at END,expired_at=NULL,updated_at=?
+        WHERE work_key=?""",
+        (final_outcome, published_count, reason_code, reason_code, post.get('id'), json.dumps(draft),
+         json.dumps(decision), final_outcome, now, now, now, work_key), timeout=min(HRANA_TIMEOUT_S, 5.0))
 
 
 def recent_posts(days: int = 90) -> list[dict]:

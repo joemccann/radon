@@ -360,13 +360,17 @@ def test_article_publication_never_clears_an_already_downloaded_pdf(db):
 
 
 def test_all_suitable_replay_is_bounded_idempotent_and_reason_scoped(db):
-    eligible = ['DOC_TYPE_FX_PAIR_NOTE', 'SINGLE_STOCK_NOT_IN_BOOK', 'NO_CANDIDATES', 'INVALID_CANDIDATE',
+    eligible = ['DOC_TYPE_FX_PAIR_NOTE', 'NO_CANDIDATES', 'INVALID_CANDIDATE',
                 'SERIES_DENYLIST', 'RULE_DOC_TYPE', 'RULE_PUBLISHER']
     for n, code in enumerate(eligible):
         article_id = f'Replay000{n}'
         store.claim(ref(article_id))
         db.execute("UPDATE marketdesk_articles SET status=?,reason_code=?,attempts=3,note='operator note',pdf_asset='saved-pdf',pdf_sha256='saved-hash',dropbox_status='uploaded' WHERE article_id=?", ('dropped' if n % 2 else 'held', code, article_id))
-    excluded = [('Unknown001', 'held', 'PUBLISHER_UNKNOWN'), ('Dupe000001', 'dropped', 'DUPLICATE_OF_PUBLISHED'),
+    excluded = [('EquityOld1', 'dropped', 'SINGLE_STOCK_NOT_IN_BOOK'),
+                ('EquityNew1', 'dropped', 'EQUITY_RESEARCH_NOT_IN_BOOK'),
+                ('EquityBook', 'held', 'EQUITY_RESEARCH_BOOK_UNAVAILABLE'),
+                ('EquityName', 'held', 'EQUITY_RESEARCH_SUBJECT_UNRESOLVED'),
+                ('Unknown001', 'held', 'PUBLISHER_UNKNOWN'), ('Dupe000001', 'dropped', 'DUPLICATE_OF_PUBLISHED'),
                 ('BadFact001', 'held', 'SOURCE_MATERIAL_MISSING'), ('Failed0001', 'failed', 'NO_CANDIDATES'),
                 ('Publish001', 'published', 'NO_CANDIDATES'), ('Pending001', 'pending', 'NO_CANDIDATES')]
     for article_id, status, code in excluded:
@@ -375,7 +379,7 @@ def test_all_suitable_replay_is_bounded_idempotent_and_reason_scoped(db):
     assert store.requeue_suitable(limit=2) == 2
     assert db.execute("SELECT count(*) FROM marketdesk_articles WHERE status='pending' AND reason_code IS NULL").fetchone()[0] == 2
     assert store.requeue_suitable(limit=2) == 2
-    assert store.requeue_suitable(limit=20) == 3
+    assert store.requeue_suitable(limit=20) == 2
     assert store.requeue_suitable(limit=20) == 0
     for n in range(len(eligible)):
         saved = row(db, f'Replay000{n}')

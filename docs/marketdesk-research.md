@@ -2,7 +2,7 @@
 
 ## Article-first publication and deferred PDF archive (2026-10-27)
 
-The newsfeed publishes from the accessible MarketDesk article summary and chart images. Source bullets are input facts, never an appended list in the feed or reader. The model writes connected prose in Joe's voice, preserves source qualifications, and prefixes grounded security tickers with `$` before the final Humanizer review. Source identity, fidelity, novelty and >=90 Humanizer gates remain mandatory; every suitable MarketDesk topic is in scope.
+The newsfeed publishes from the accessible MarketDesk article summary and chart images. Source bullets are input facts, never an appended list in the feed or reader. The model writes connected prose in Joe's voice, preserves source qualifications, and prefixes grounded security tickers with `$` before the final Humanizer review. Source identity, equity-research eligibility, fidelity, novelty and >=90 Humanizer gates remain mandatory. Company-focused equity research is limited to current portfolio/watchlist subjects.
 
 PDF retrieval is not a publication dependency. New provenance uses `evidenceKind: article`, the exact MarketDesk article URL, no PDF page numbers, and a SHA-256 digest of the canonical article inputs. A later archived PDF adds a separate `pdfUrl`/`pdfHash` pair without changing article copy or its identity. Legacy PDF-backed posts remain supported; their raw summary lists no longer render.
 
@@ -19,52 +19,68 @@ The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricte
 (`radon-research.service`, retired 2026-10-26) as the research feed's source.
 Every 5 minutes it signs in to https://marketdesk.ai, lists the latest
 library items, and for each new item reads MarketDesk's bullet summary and chart
-images, stores charts as private research assets, and applies source, identity
-and duplicate safety. Every suitable report proceeds to copy in Joe's voice
+images, stores charts as private research assets, and applies source, identity,
+equity-research eligibility and duplicate safety. Every eligible report proceeds to copy in Joe's voice
 through the shared model ladder and publishes one operator-only research post. Independently archived PDFs are
 then copied into the operator's own Dropbox under `/Radon/MarketDesk`, mirroring
 the library's folder layout. New PDF downloads require publication plus the
-archive's stricter portfolio/watchlist and relevance policy; article coverage
-is unchanged. Previously archived assets keep their existing outbox behavior. No browser runs.
+archive's separate portfolio/watchlist and relevance policy. Article publication
+independently enforces the company-equity-research restriction. Previously archived assets keep their existing outbox behavior. No browser runs.
 
 Existing research posts, assets and `research_post_sources` rows from the old
-watcher stay served. MarketDesk admission is separate from the unchanged
-Dropbox intake v2 relevance policy. GROUND, FIGURE MATCH and VERIFY calls are
+watcher stay served. MarketDesk retains separate topic/relevance admission from Dropbox intake v2,
+but both enforce the same hard company-equity eligibility rule. GROUND, FIGURE MATCH and VERIFY calls are
 not run. The copy is a voice rewrite
 from MarketDesk's source title, bullet-summary facts and images, guarded by a
 numeric firewall (below).
 
-## Admission: all suitable MarketDesk reports
+## Admission: portfolio/watchlist equity research only
 
-The operator selected "Publish all suitable reports" on 2026-10-27.
-`scripts/research/marketdesk_filter.py` admits every MarketDesk report with
-usable source facts, known publisher identity and nonduplicate content. FX
-and single-name reports outside the portfolio/watchlist are in scope. The
-separate Dropbox intake retains its existing triage and selector policy.
+The operator clarified the standing restriction on 2026-10-28: company-focused
+equity research is eligible only when every primary subject is in the current
+portfolio or watchlist. The earlier interpretation that broad MarketDesk
+admission allowed off-book company reports was incorrect. Macro, FX, rates,
+commodities, broad index strategy, flows and positioning remain eligible.
+Company names used as market context do not by themselves make a report issuer
+research; off-book stock ratings, price targets, valuation theses and separate
+issuer-research sections cannot be admitted under a broad desk-note title.
 
-1. Identity: `research.identify` on the article title and source summary. The
-   institution folder identifies the publisher; no PDF is read by publication.
+1. Identity: `research.identify` on the original article title and source facts.
+   The institution folder identifies the publisher; publication does not read a PDF.
 2. Source facts must be present (`SOURCE_MATERIAL_MISSING` otherwise), and an
-   unknown publisher remains held (`PUBLISHER_UNKNOWN`). The normal scraper
-   parks not-yet-summarised articles before admission and eventually records
-   `no_summary` after the existing wait/attempt limits.
-3. Novelty: simhash against published MarketDesk rows and the legacy
-   `fingerprints.json` drops `DUPLICATE_OF_PUBLISHED`. The existing
-   always-publish desk exception across different publishers is unchanged.
-4. Source summary and images go directly to copy generation. There is no
-   preliminary relevance SELECT, portfolio lookup or preference/triage veto.
-   Existing numerical/ticker/source validation and the final exact-copy
-   Humanizer certificate remain required before publication. Source bullet
-   lists are input only and are never displayed below the article.
+   unknown publisher remains held (`PUBLISHER_UNKNOWN`).
+3. Shared `research.equity_admission` runs before copy/image models. Primary
+   issuer subjects must all pass `research.book.current_tickers`; incidental
+   references to watched peers do not qualify an off-book issuer. The complete
+   canonical watchlist and an IB portfolio snapshot synchronized within 15
+   minutes are required for company research. Missing, stale or partial book
+   data holds publication; local JSON fallbacks cannot establish eligibility.
+   A resolved off-book issuer is dropped; unresolved subjects or mixed report
+   scope remain held. Every issuer in a resolved recommendation list must qualify.
+   Desk force-inclusion and operator notes cannot override this gate.
+4. Novelty drops `DUPLICATE_OF_PUBLISHED`, retaining the existing cross-publisher
+   always-publish desk exception. This exception does not override eligibility.
+5. The source summary and images proceed to grounded copy generation without
+   a generic model relevance SELECT. The final generated title, body and rendered figure captions are checked for
+   equity eligibility again, then pass the existing numerical/ticker/source
+   validation and exact-copy Humanizer certification. Source bullet lists are
+   input facts and are never appended to the article.
+6. The shared `research.publish` boundary checks the exact certified final copy
+   against the current canonical book immediately before its database write. A
+   saved certificate or queued payload cannot retain eligibility after an issuer
+   leaves the book. MarketDesk records a terminal eligibility outcome; the legacy
+   Dropbox outbox parks the affected batch with payload/history preserved.
+   Ordinary retries cannot republish it; explicit re-review reruns the gates.
 
 Each cycle applies operator feedback first, preserving an actionable vote's
 note before automatic replay can move that item to pending. Then
 `marketdesk_store.requeue_suitable(limit=5)` atomically reopens
 at most five held/dropped ledger rows carrying only retired relevance codes:
-`DOC_TYPE_FX_PAIR_NOTE`, `SINGLE_STOCK_NOT_IN_BOOK`, `SERIES_DENYLIST`,
+`DOC_TYPE_FX_PAIR_NOTE`, `SERIES_DENYLIST`,
 `RULE_DOC_TYPE`, `RULE_PUBLISHER`, `NO_CANDIDATES`, `INVALID_CANDIDATE`.
 The last code referred to an invalid preliminary SELECT candidate, not a
-failed copy certificate. Source/identity/duplicate decisions and all failed,
+failed copy certificate. Current and legacy off-book equity decisions are not retired-policy replay candidates.
+Source/identity/duplicate decisions and all failed,
 published or already-pending rows are excluded. Each reopened row leaves the
 eligible set, so retries never reset a live lease or its attempt budget.
 Metadata, stored assets, Dropbox outbox state and operator notes survive.
@@ -76,7 +92,7 @@ Outcomes remain mirrored to `research_outcomes` for Held-tab/history support.
 Feedback sync still records preferences for the separate intake, and an
 explicit "should have published" vote can reopen held/dropped MarketDesk work.
 Its note is retained in the private review, but cannot override source,
-identity or duplicate safety. A "want more" vote on a published MarketDesk
+identity, equity eligibility or duplicate safety. A "want more" vote on a published MarketDesk
 post remains handled without revising the existing article.
 
 ## marketdesk.ai API (captured signed in, 2026-10-26)
@@ -103,7 +119,7 @@ fetched with a cookie-less opener that never follows redirects.
 | Module | Role |
 |---|---|
 | `scripts/research/marketdesk_job.py` | One cycle: held-expiry sweep, operator feedback, policy replay, scrape, admission, publish, Dropbox outbox, health. Timer entry point, run by path. |
-| `scripts/research/marketdesk_filter.py` | MarketDesk-only source/identity/novelty admission; all suitable reports go to grounded copy. |
+| `scripts/research/marketdesk_filter.py` | MarketDesk source, issuer eligibility and novelty admission before grounded copy. |
 | `scripts/research/marketdesk_auth.py` | Firebase refresh-token exchange, password fallback, `POST /api/user/login`, cookie session with one re-login on a signed-out answer. |
 | `scripts/research/marketdesk_bootstrap.py` | Laptop only. `--from-cdp` reads the Firebase refresh token from a signed-in marketdesk.ai tab in Chrome; `--check` exchanges it, logs in and lists. Never run in a unit. |
 | `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
@@ -136,7 +152,7 @@ fetched with a cookie-less opener that never follows redirects.
    `listing_gap`: items between them may have been missed.
 6. Per item, inside its own try: claim and lease the ledger row, heal a crash
    between publish and ledger write (`research_post_sources` already has the
-   post id), read the summary and folder chain, run source/identity/novelty admission (held or dropped items stop here,
+   post id), read the summary and folder chain, run source/identity/equity-eligibility/novelty admission (held or dropped items stop here,
    counted against `MARKETDESK_MAX_PER_CYCLE`), store up to 40 images (12 shown,
    each attached to the copy request), write grounded prose from the original
    source facts, certify the exact final copy, publish, record. An item MarketDesk has not summarised yet is parked as
