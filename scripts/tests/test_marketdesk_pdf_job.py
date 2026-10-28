@@ -59,10 +59,10 @@ def deps(tmp_path, *, download=None):
 
 def test_one_attempt_per_cycle_and_persisted_admission(tmp_path):
     dependency = deps(tmp_path)
-    counts = job.run_cycle(env={"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "301"}, deps=dependency)
+    counts = job.run_cycle(env={"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "1801"}, deps=dependency)
     assert counts == {"seeded": 35, "attached": 0, "downloaded": 1, "throttled": 0}
     assert len(dependency.store.claims) == len(dependency.store.downloads) == 1
-    assert dependency.store.claims[0]["interval_seconds"] == 301
+    assert dependency.store.claims[0]["interval_seconds"] == 1801
     assert (tmp_path / "jobs/marketdesk-pdfs/state.json").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/findings.jsonl").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/SUMMARY.md").is_file()
@@ -73,6 +73,59 @@ def test_no_work_does_not_authenticate_or_download(tmp_path):
     dependency.store.work = None
     dependency.open_session = lambda env: pytest.fail("throttle must happen before sign in")
     assert job.run_cycle(env={}, deps=dependency)["throttled"] == 1
+
+
+@pytest.mark.parametrize("code", ["preview_quota", "download_quota"])
+def test_persisted_allowance_backoff_keeps_error_and_exits_zero(tmp_path, monkeypatch, capsys, code):
+    """A durable provider allowance is already the error row. Exit 1 pages P1."""
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    dependency = deps(tmp_path)
+    dependency.service_cycle = recording
+    dependency.store.work = None
+    dependency.store.blocked = lambda: code
+    dependency.open_session = lambda env: pytest.fail("persisted allowance must not sign in")
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert recorded == ["PDF archive deferred: " + code]
+    assert "PDF archive deferred: " + code in capsys.readouterr().err
+
+
+def test_preview_quota_download_exits_zero_after_durable_retry(tmp_path, monkeypatch):
+    def fail(session, key):
+        raise MarketDeskError("preview_quota")
+
+    dependency = deps(tmp_path, download=fail)
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert dependency.store.retries[0][0] == "preview_quota"
+    assert dependency.store.retries[0][1]["backoff_seconds"] >= 21600
+    assert not dependency.store.downloads
+
+
+@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated"])
+def test_non_allowance_deferral_still_fails_the_oneshot(tmp_path, monkeypatch, code):
+    dependency = deps(tmp_path)
+    dependency.store.work = None
+    dependency.store.blocked = lambda: code
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 1
+
+
+def test_unexpected_cycle_error_still_fails_the_oneshot(monkeypatch):
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(job, "run_cycle", boom)
+    assert job.main([]) == 1
 
 
 @pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429", "http_transport"])
@@ -109,6 +162,8 @@ def test_pdf_content_is_verified_before_asset_commit(tmp_path):
 
 def test_default_download_uses_existing_authorized_pdf_transport():
     class Session:
+        def previews_available(self):
+            return True
         def blob(self, path, *, limit):
             assert path == "/files/ABCdef12345/blob"
             assert limit == job.MAX_PDF_BYTES
@@ -118,6 +173,8 @@ def test_default_download_uses_existing_authorized_pdf_transport():
 
 def test_default_download_preserves_provider_allowance_denial():
     class Session:
+        def previews_available(self):
+            return True
         def blob(self, path, *, limit):
             assert path == "/files/ABCdef12345/blob"
             raise MarketDeskError("preview_quota")
@@ -194,3 +251,125 @@ def test_sigkill_at_each_ack_boundary_resumes_without_second_download(tmp_path, 
     wal = (tmp_path / "jobs/marketdesk-pdfs/findings.jsonl").read_text().splitlines()
     assert len(wal) == 1
     assert json.loads(wal[0])["asset"].endswith(".pdf")
+
+
+@pytest.mark.parametrize("value", [None, "300", "1", "garbage", "1800"])
+def test_archive_interval_is_conservative_even_with_old_configuration(value):
+    env = {} if value is None else {"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}
+    assert job._interval(env) == 1800
+
+
+@pytest.mark.parametrize("code", ["preview_quota", "download_quota", "http_429"])
+def test_account_limit_refusals_request_at_least_six_hour_backoff(tmp_path, code):
+    def fail(session, key):
+        raise MarketDeskError(code)
+    dependency = deps(tmp_path, download=fail)
+    with pytest.raises(job.DownloadDeferred):
+        job.run_cycle(env={}, deps=dependency)
+    assert dependency.store.retries[0][1]["backoff_seconds"] == 21600
+
+
+def test_exhausted_account_is_checked_before_any_pdf_request():
+    class Session:
+        def previews_available(self):
+            return False
+        def blob(self, *args, **kwargs):
+            pytest.fail("exhausted account must not request PDF bytes")
+    with pytest.raises(MarketDeskError, match="preview_quota"):
+        job.download_pdf(Session(), "ABCdef12345")
+
+
+@pytest.mark.parametrize("value", ["3600", "999999"])
+def test_operator_can_only_slow_archive_pacing_further(value):
+    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == min(int(value),86400)
+
+
+def test_missing_book_context_never_authenticates_or_downloads(tmp_path):
+    dependency = deps(tmp_path)
+    dependency.store.claim_next = lambda **kw: (_ for _ in ()).throw(job.SelectionUnavailable("book_unavailable"))
+    dependency.open_session = lambda env: pytest.fail("unknown selection must not authenticate")
+    with pytest.raises(job.DownloadDeferred, match="book_unavailable"):
+        job.run_cycle(env={}, deps=dependency)
+
+
+def test_deferred_account_error_remains_visible_without_retrying_network(tmp_path):
+    dependency = deps(tmp_path)
+    dependency.store.work = None
+    dependency.store.retries = [("preview_quota", {})]
+    dependency.open_session = lambda env: pytest.fail("persisted cooldown must not authenticate")
+    with pytest.raises(job.DownloadDeferred, match="preview_quota"):
+        job.run_cycle(env={}, deps=dependency)
+
+
+def test_invalid_id_is_rejected_before_allowance_query():
+    with pytest.raises(MarketDeskError, match="bad_ref"):
+        job.download_pdf(object(), "../private")
+
+
+def test_default_dependencies_are_the_managed_archive_components():
+    dependency = job.default_deps()
+    from research import marketdesk_pdf_store
+    assert dependency.store is marketdesk_pdf_store
+    assert dependency.download is job.download_pdf
+
+
+@pytest.mark.parametrize("failure", ["too_large", "digest_mismatch"])
+def test_uncommitted_pdf_assets_cannot_be_acknowledged(tmp_path, monkeypatch, failure):
+    dependency = deps(tmp_path)
+    if failure == "too_large":
+        monkeypatch.setattr(job, "MAX_PDF_BYTES", 4)
+    else:
+        dependency.store_asset = lambda path: "/api/newsfeed/research/files/" + "0"*64 + ".pdf"
+    with pytest.raises(job.DownloadDeferred):
+        job.run_cycle(env={}, deps=dependency)
+    assert not dependency.store.downloads
+    assert not list((tmp_path/'marketdesk/pdf-receipts').glob('pdf-*'))
+
+
+@pytest.mark.parametrize("corruption", ["oversized", "wrong_asset", "wrong_bytes", "read_error", "non_object", "symlink"])
+def test_corrupt_receipts_do_not_suppress_a_real_download(tmp_path, corruption):
+    dependency = deps(tmp_path)
+    root = job._receipts_root(tmp_path)
+    receipt = root / 'ABCdef12345.json'
+    digest = hashlib.sha256(b'%PDF-fake').hexdigest()
+    record = {"asset":job.ASSET_PREFIX+digest+'.pdf',"digest":digest}
+    if corruption == "oversized":
+        receipt.write_text('x'*4097)
+    elif corruption == "symlink":
+        receipt.symlink_to(tmp_path/'elsewhere')
+    else:
+        if corruption == "wrong_asset":
+            record['asset'] = '/elsewhere'
+        if corruption == "non_object":
+            receipt.write_text('[]')
+        else:
+            job.atomic_save(str(receipt), record)
+        if corruption == "wrong_bytes":
+            dependency.read_asset = lambda name:b'%PDF-changed'
+        if corruption == "read_error":
+            dependency.read_asset = lambda name: (_ for _ in ()).throw(OSError('unavailable'))
+    assert job._receipt(receipt, dependency) is None
+
+
+def test_receipt_directories_reject_symlink_escape(tmp_path):
+    (tmp_path/'marketdesk').symlink_to(tmp_path/'outside')
+    with pytest.raises(ValueError, match="receipt directory"):
+        job._receipts_root(tmp_path)
+
+
+@pytest.mark.parametrize("outcome", ["success", "deferred", "unexpected", "terminated"])
+def test_command_exit_and_sanitized_errors_restore_signal_handler(monkeypatch, capsys, outcome):
+    previous = signal.getsignal(signal.SIGTERM)
+    def run():
+        if outcome == "deferred":
+            raise job.DownloadDeferred('PDF archive deferred: http_transport')
+        if outcome == "unexpected":
+            raise RuntimeError('signed private secret')
+        if outcome == "terminated":
+            os.kill(os.getpid(),signal.SIGTERM)
+        return {'downloaded':1}
+    monkeypatch.setattr(job, "run_cycle", run)
+    assert job.main([]) == {'success':0,'deferred':1,'unexpected':1,'terminated':143}[outcome]
+    assert signal.getsignal(signal.SIGTERM) == previous
+    out = capsys.readouterr()
+    assert 'signed private secret' not in out.err + out.out

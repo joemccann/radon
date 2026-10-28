@@ -277,6 +277,24 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
 # -- Slow browser-login validators -------------------------------------------
 
 
+# DS-2026-10-28-05 (recurrence of DS-2026-09-20-06): the diagnostic was sliced
+# to its last 200 characters BEFORE redaction. A credential longer than that
+# window keeps its tail inside it while the `KEY=` or provider prefix every
+# pattern keys on falls outside, so no rule matched and the suffix reached the
+# credentials response and the unit journal. Substitute the values this run
+# actually passed to the child first -- an exact match needs no shape, which a
+# browser exception quoting a bare password does not have -- then scrub, and
+# only then bound the length.
+_DETAIL_LIMIT = 200
+
+
+def _safe_detail(text: str, env_overlay: Dict[str, str]) -> str:
+    for value in sorted((v for v in env_overlay.values() if len(v) >= 4), key=len, reverse=True):
+        text = text.replace(value, "[redacted-secret]")
+    scrubbed = scrub_validation_message({"message": text.strip()})["message"]
+    return scrubbed[-_DETAIL_LIMIT:]
+
+
 def _run_login_subprocess(service_id: str, env_overlay: Dict[str, str]) -> ValidationResult:
     env = dict(os.environ)
     env.update(env_overlay)
@@ -288,16 +306,13 @@ def _run_login_subprocess(service_id: str, env_overlay: Dict[str, str]) -> Valid
         timeout=SLOW_LOGIN_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        detail = scrub_validation_message({"message": (proc.stderr or proc.stdout or "").strip()[-200:]})["message"]
+        detail = _safe_detail(proc.stderr or proc.stdout or "", env_overlay)
         return ValidationResult("error", f"login check for {service_id} failed to run: {detail}")
     verdict = json.loads(proc.stdout.strip())
     status = verdict.get("status")
     if status not in _STATUSES:
         raise ValueError(f"login check returned unknown status {status!r}")
-    return ValidationResult(
-        status,
-        scrub_validation_message({"message": str(verdict.get("message", ""))})["message"],
-    )
+    return ValidationResult(status, _safe_detail(str(verdict.get("message", "")), env_overlay))
 
 
 def _validate_menthorq(values: Dict[str, str]) -> ValidationResult:
