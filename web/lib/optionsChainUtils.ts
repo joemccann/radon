@@ -129,15 +129,10 @@ function detectRiskReversalSpread(legs: OrderLeg[]): string | null {
 }
 
 /**
- * Detect a BEARISH risk reversal — SELL CALL + BUY PUT on the same expiry,
- * different strikes. IB Smart's combo router has been observed (2026-05-27)
- * to silently drop this structure as a BAG, even though the BULLISH
- * counterpart (BUY CALL + SELL PUT) routes fine and the individual legs as
- * singletons transmit cleanly. The chain order builder surfaces a heads-up
- * when this returns true so the operator knows to expect a possible
- * "Order stuck in PendingSubmit" error and can pre-emptively split into
- * single-leg orders. Full diagnostic in
- * `feedback_ib_combo_router_silent_drops_bearish_rr.md`.
+ * Detect a bearish risk reversal: SELL call + BUY put, same expiry,
+ * different strikes. Shape only. A missing acknowledgement is not evidence
+ * this structure was rejected, and it is not a reason to submit the legs
+ * as new orders. See the order placement contract in `scripts/CLAUDE.md`.
  */
 export function isBearishRiskReversal(legs: OrderLeg[]): boolean {
   if (legs.length !== 2) return false;

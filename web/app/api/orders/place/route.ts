@@ -451,10 +451,9 @@ export async function POST(request: Request): Promise<Response> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(orderPayload),
           // 30s = 25s FastAPI script budget + 5s network/transport slack.
-          // ib_place_order.py polls IB up to 12s for combo confirmation before
-          // returning either ok-with-permId or the explicit
-          // "stuck-in-PendingSubmit" error. Below the script timeout would abort
-          // before the error could surface.
+          // ib_place_order.py polls IB up to 12s for combo acknowledgement
+          // and returns indeterminate when none arrives. A shorter fetch
+          // timeout would abort before that result could surface.
           timeout: 30_000,
         }).catch((error: unknown) => {
           // A broker acknowledgement timeout can return JSON before this

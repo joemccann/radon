@@ -2,10 +2,9 @@
 """REL-002 — exit-order ack discipline (RELIABILITY_AUDIT.md R-003).
 
 The handler used to ``place_order`` → ``sleep(1)`` → mark the journal
-PLACED. IB silently discards orders still unacknowledged (permId==0,
-PendingSubmit) when the placing client disconnects — the documented
-2026-05-27 MU failure mode ``ib_place_order.py`` defends against. These
-fault injections pin the required behavior:
+PLACED. An unacknowledged order (permId==0, PendingSubmit) has an unknown
+outcome, so the journal must stay PENDING. These fault injections pin
+the required behavior:
 
   - never-acked placement (permId stays 0, PendingSubmit) → journal stays
     PENDING, the order is cancelled best-effort, cycle reports error

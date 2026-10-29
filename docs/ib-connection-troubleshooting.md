@@ -134,11 +134,12 @@ The sync and order subprocesses use the automatic allocator.
 **Safe diagnosis:** inspect the Gateway's active connections and the failing
 script's logs without stopping an order-placement client. The
 [order-placement contract](../scripts/CLAUDE.md#order-placement-contract-ib_place_orderpy)
-requires waiting for an IB `permId` or the bounded failure outcome before
-normal disconnect; killing a placing client early can discard its order.
-Stop cleanup when ownership or order acknowledgement is uncertain. Verify
-through the existing refreshed order view, and escalate unresolved collisions
-with sanitized connection evidence instead of killing processes by name.
+requires waiting for an IB `permId` or the bounded indeterminate outcome before
+normal disconnect. Killing a placing client early leaves the broker outcome
+unknown. Stop cleanup when ownership or order acknowledgement is uncertain.
+Verify through the existing refreshed order view before any new submit, and
+escalate unresolved collisions with sanitized connection evidence instead of
+killing processes by name.
 
 ---
 

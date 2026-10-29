@@ -464,10 +464,7 @@ describe("getVisibleStrikes", () => {
 /* ─── isBearishRiskReversal ─── */
 
 describe("isBearishRiskReversal", () => {
-  // The 2026-05-27 EWY/MU finding: IB Smart silently drops BAG orders of
-  // this exact structure, while the bullish counterpart routes fine.
-  // The chain order builder uses this classifier to show a heads-up tooltip
-  // so the operator pre-emptively knows to expect a PendingSubmit hang.
+  // Shape only. A missing acknowledgement is not a routing diagnosis.
 
   it("returns true for SELL call + BUY put at different strikes, same expiry", () => {
     const legs = [

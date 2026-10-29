@@ -204,11 +204,9 @@ class ExitOrdersHandler(BaseHandler):
         gap_pct = abs(target_price - current_price) / current_price
         return gap_pct <= self.max_gap_pct
 
-    # Ack polling mirrors the Order Placement Contract enforced by
-    # ib_place_order.py (single-leg deadline): IB silently discards an
-    # order still unacknowledged (permId==0, PendingSubmit) when the
-    # placing client disconnects, so PLACED must never be written on an
-    # unconfirmed trade (REL-002 / R-003).
+    # Ack polling mirrors the single-leg deadline in ib_place_order.py.
+    # An unacknowledged order (permId==0, PendingSubmit) has an unknown
+    # outcome, so the journal must not be marked PLACED (REL-002 / R-003).
     ACK_DEADLINE_SECONDS = 6.0
     ACK_POLL_STEP_SECONDS = 0.25
     _TERMINAL_FAILED_STATUSES = {"Rejected", "Cancelled", "ApiCancelled", "Inactive"}
