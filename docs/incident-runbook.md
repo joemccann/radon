@@ -4696,15 +4696,17 @@ The Grok page responder owns open diagnoses. No session-start hook surfaces
 
 ## newsfeed-share-missing-subscription-502
 
-**Symptom:** opening the Share panel leaves the original copy and reports that a verified draft could not be generated. The subscription-mount incident on 2026-09-19 returned HTTP 502; the route now streams after access and input validation, so a model failure arrives as an `error` event inside HTTP 200.
+**Status:** historical incident. Newsfeed voice rewriting was retired on
+2026-10-29. Share now uses sanitized original article copy and Compose on X is
+available independently of media generation.
 
-- **Prerequisites:** operator access to the Share panel and read-only access to Next.js service logs and container mount metadata. Credential binding and billing policy belong to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
-- **Blast radius:** voice rewrite and share export only. Keep the original article available; credential or deployment changes can also affect the assistant in the same Next.js container.
-- **Diagnosis:** inspect the failed request's event stream and the matching `[newsfeed/share] voice rewrite failed` log. Missing-subscription errors require checking the expected read-only mounts and subscription availability against the owner above. Inspect mount metadata only, never dump container environment values or token files. A proxy response without a stream is a separate edge failure.
-- **Stop:** do not infer success from response headers, enable prepaid billing to mask missing subscription access, or restart services solely because a draft failed.
-- **Verify:** an authorized Share attempt must receive a `result` event containing the verified draft and update the preview. HTTP 200 alone is not recovery; an `error` event or a stream ending without a draft is failure. The wire contract and rejection cases are pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
-- **Rollback:** keep using the sanitized original copy while the operator follows the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for any required runtime repair. Do not apply ad hoc mount or billing changes.
-- **Escalate:** provide the request time, terminal event type and sanitized Next.js error to the operator. Never attach grants, cookies or the container environment.
+- **Prerequisites:** operator access to the Share panel. The retained `POST /api/newsfeed/share` endpoint still enforces operator access and rate controls.
+- **Blast radius:** the retirement covers Newsfeed Share rewriting. Explain and research-pipeline editorial review retain their existing behavior.
+- **Diagnosis:** authorized requests to the retired endpoint return `410` JSON with `Cache-Control: no-store`. A share panel calling this endpoint is a stale client.
+- **Stop:** do not repair subscriptions, change billing, or restore a rewrite service to recover sharing. Credential binding for remaining consumers belongs to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
+- **Verify:** opening Share must provide original copy and an enabled Compose on X control while the preview prepares. No rewrite request or model call should occur. The retired endpoint contract is pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
+- **Rollback:** use the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for a stale client deployment. Preserve the retirement behavior.
+- **Escalate:** provide the client revision, request time and sanitized endpoint status. Never attach grants, cookies or the container environment.
 
 ---
 

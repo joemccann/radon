@@ -1369,3 +1369,14 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - `radon-signals-refresh` can log `curl: (28)` and `http=000` after the first POST already returned `curl=0 http=502` at the FastAPI child budget (theta 420s). The 490s wall then has only the leftover seconds, and retrying that 502 as capacity produces the curl 28.
 - Do not classify that shape as `signals-refresh-curl-timeout-pages-p1`. That case is a first-attempt abort with no completed HTTP response. A body of `Script timed out after Ns` must not be retried. Exit 0 and let the next hourly slot retry. An instant capacity 502 still retries and sheds.
+
+## 2026-10-28 - Requested PDF backlog precedence
+
+- A monitored cohort is not a scheduling priority. Persist explicit operator priority in the shared queue and verify the actual claim order; report current PDF policy exclusions separately from published-but-pending counts. Never change not-before timestamps to simulate priority or claim that monitoring changes the worker's ordering.
+
+
+## 2026-10-29: Sharing remains independent of export generation
+- Opening Share must immediately expose editable original copy and an active X composer link. Optional media generation must never gate text composition. Retired voice rewriting must not run from legacy API callers.
+- Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
+- Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
+- Verify mobile toolbar geometry after feedback confirmation appears, not just before opening panels. Screenshot named panels that retain a layout box when wrapper elements use display: contents.
