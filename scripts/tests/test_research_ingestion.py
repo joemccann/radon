@@ -488,12 +488,14 @@ def test_consumer_initialization_failure_is_safe_and_interruptible(state,tmp_pat
     monkeypatch.setattr(ingestion.os,'setsid',lambda:None)
     stop=threading.Event()
     monkeypatch.setattr(stop,'wait',lambda seconds:stop.set())
-    def broken():raise ValueError('secret')
+    def broken():raise ValueError('parse failed Bearer sk-ant-test1234567890abcdef')
     ingestion._consumer(tmp_path,stop,threading.Event(),threading.Event(),
                         Backoff(multiprocessing.get_context('spawn')),False,False,broken)
     detail=json.loads((tmp_path/'health-extraction.json').read_text())
     assert detail['state']=='error' and detail['error']=='ValueError'
-    assert 'secret' not in (tmp_path/'health-extraction.json').read_text()
+    text=(tmp_path/'health-extraction.json').read_text()
+    assert 'sk-ant-test1234567890abcdef' not in text
+    assert detail['error_detail']['message'] and 'parse failed' in detail['error_detail']['message']
 
 
 def test_consumer_review_loop_uses_ready_cache_and_stops(state,tmp_path,monkeypatch):

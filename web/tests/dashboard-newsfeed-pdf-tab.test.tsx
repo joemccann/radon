@@ -39,6 +39,23 @@ async function load(posts: unknown[]) {
 function openPdfs() { fireEvent.click(screen.getByRole("tab", { name: "PDFs", exact: true })); }
 
 describe("PDF article feed tab", () => {
+  it("keeps voting, Explain and Share in one action group when feedback opens", async () => {
+    await load([pdf()]);
+    const card = screen.getByTestId("news-feed-item");
+    const explain = within(card).getByRole("button", { name: "Explain", exact: true });
+    const share = within(card).getByRole("button", { name: "Share", exact: true });
+    const vote = within(card).getByRole("button", { name: "Thumbs up" });
+    const actions = explain.closest("[data-testid='newsfeed-explain']")!.parentElement;
+    expect(vote.closest("[data-research-feedback]")!.parentElement).toBe(actions);
+    expect(share.closest("[data-newsfeed-share]")!.parentElement).toBe(actions);
+
+    fireEvent.click(vote);
+    expect(within(actions!).getByRole("region", { name: "Thumbs up feedback" })).toBeTruthy();
+    expect(explain.hasAttribute("disabled")).toBe(false);
+    expect(share.hasAttribute("disabled")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("shows only validated PDF articles and keeps them in Commentary", async () => {
     await load([commentary, pdf(), { ...pdf(1), source: { ...source, url: "https://untrusted.example/file.pdf" } }]);
     expect(screen.getAllByTestId("news-feed-item")).toHaveLength(2);
