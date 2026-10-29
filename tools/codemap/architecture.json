@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-10-29T09:00:10Z",
-  "node_count": 4234,
-  "edge_count": 8689,
+  "generated_at": "2026-10-29T20:08:39Z",
+  "node_count": 4233,
+  "edge_count": 8671,
   "areas": {
-    "web": 2393,
+    "web": 2388,
     "site": 159,
-    "scripts": 1508,
+    "scripts": 1512,
     "cloud": 126,
     "lib": 28,
     "tests": 17,
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 466
+      "count": 463
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1132
+      "count": 1130
     },
     {
       "id": "site/app",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 147
+      "count": 148
     },
     {
       "id": "scripts/backtest",
@@ -160,7 +160,7 @@
     {
       "id": "scripts/health_service",
       "area": "scripts",
-      "count": 4
+      "count": 5
     },
     {
       "id": "scripts/ib_gateway_remote",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 796
+      "count": 798
     },
     {
       "id": "scripts/trade_blotter",
@@ -501,18 +501,18 @@
       "test": false
     },
     {
+      "id": "web/e2e/clear-fixtures.ts",
+      "area": "web",
+      "in": 36,
+      "out": 10,
+      "test": true
+    },
+    {
       "id": "scripts/clients/ib_client.py",
       "area": "scripts",
       "in": 42,
       "out": 3,
       "test": false
-    },
-    {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 35,
-      "out": 10,
-      "test": true
     },
     {
       "id": "web/lib/chartSystem.ts",
