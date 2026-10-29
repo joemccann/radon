@@ -386,3 +386,13 @@ The cross-service contract and share/cache behavior are documented in
 [Generated-copy Humanizer gate](generated-copy-humanizer.md). Existing published
 rows require separate reviewed corrections; deploying this gate does not rewrite
 article history.
+
+## Requested PDF backlog precedence
+
+The archive can reserve download slots for an operator-requested cohort using
+`marketdesk_pdf_store.prioritize(article_ids)` after migration 105. Preference is
+stored in the shared queue and survives workers/restarts. It changes neither
+article admission/copy nor provider retry/account clocks. Current publication,
+source and strict PDF relevance checks remain mandatory. See
+[PDF archive priority](marketdesk-pdf-archive.md#requested-backlog-priority) for
+activation, eligibility, deadline and rollback behavior.
