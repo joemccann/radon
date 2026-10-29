@@ -44,6 +44,24 @@ rows do not block later batches and can become eligible after a book change.
 The queue, selection table and account clock expose filtered versus deferred
 backlog separately.
 
+### Requested backlog priority
+
+Migration `0105_marketdesk_pdf_priority.sql` adds a durable binary queue priority.
+`marketdesk_pdf_store.prioritize(article_ids)` atomically replaces the requested
+cohort (at most 200 existing IDs; duplicates are ignored). Invoke this through a
+managed application container as the application UID, with the exact frozen IDs.
+An empty list clears the preference. The change never rewrites item retry times,
+account clocks, attempts, leases, source identity or published copy.
+
+While any priority row is unfinished, currently published with matching source,
+and selected by current PDF policy, ordinary rows cannot claim an account slot.
+A future retry or active lease reserves precedence without bypassing its deadline.
+Claim-time SQL rechecks priority, including a concurrent operator update. Within
+the cohort, the existing retry/publication/ID ordering remains. Finished or
+currently excluded/withdrawn priority rows do not block other permitted work;
+selection refresh processes stale priority rows first. Preference persists across
+restarts; completed membership is inert and needs no operator cleanup.
+
 One cycle admits at most one PDF. The global minimum interval is 1,800 seconds
 (30 minutes). `MARKETDESK_PDF_MIN_INTERVAL_SECONDS` can increase it; existing
 values below 1,800 are clamped in both the worker and the store. Admission is
