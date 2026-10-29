@@ -545,3 +545,5 @@ newsfeed-explain.spec.ts
 
 # REVIEWED 2026-10-27 public-share-preview-limit.spec.ts - HTTP-only middleware integration passed locally against real Next (1/1); not a P0 financial browser journey. Required Vitest covers its GET/HEAD, route/IP identity and window-reset contracts. Held out of the financial-browser CI list; no CI browser pass claimed.
 public-share-preview-limit.spec.ts
+
+# REVIEWED 2026-10-29 mobile-newsfeed-layout.spec.ts - All 12 iPhone Safari cases passed locally against Next dev on current main plus the sharing fix; horizontal 44px action targets, simultaneous feedback/Share panels, original caption and active X link verified. Dark mobile screenshot inspected. Held-out membership unchanged; this layout suite remains outside the financial-browser CI list.
