@@ -200,7 +200,7 @@ def check_service(*, service: str, kind: str, now: datetime, market_state: str) 
             status="disabled",
             severity=None,
             fired=False,
-            message="replica file absent",
+            message="retired" if service == "dropbox-research" else "replica file absent",
             consecutive_failures=0,
             now=now,
         )
@@ -459,12 +459,14 @@ def _fetch_bucket_snapshot() -> Optional[dict]:
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
+    from scripts.health_service.retired import present_service_health_rows
     from scripts.health_service.turso_http import fetch_service_health
     snapshot = fetch_service_health(timeout=4.0)
     if snapshot.get("state") != "ok":
         raise SnapshotUnavailable(
             f"service_health snapshot state={snapshot.get('state')!r}"
         )
+    rows = present_service_health_rows(list(snapshot.get("rows") or []))
     return {
-        row["service"]: row for row in snapshot.get("rows", []) if row.get("service")
+        row["service"]: row for row in rows if isinstance(row, dict) and row.get("service")
     }
