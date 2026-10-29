@@ -284,7 +284,8 @@
 }
 
 .postActions :global([data-newsfeed-share]),
-.postActions :global([data-research-feedback]) {
+.postActions :global([data-research-feedback]),
+.postActions :global([data-research-feedback]) > div:first-child {
   display: contents;
 }
 
@@ -292,9 +293,10 @@
   order: 2;
 }
 
-/* Expanded panels take their own row without moving the action triggers. */
+/* Panels and feedback confirmation take their own row below the triggers. */
 .postActions :global([data-newsfeed-share]) > section,
-.postActions :global([data-research-feedback]) > section {
+.postActions :global([data-research-feedback]) > section,
+.postActions :global([data-research-feedback]) :global([role="status"]) {
   order: 3;
   flex: 1 1 100%;
   width: 100%;
@@ -313,8 +315,7 @@
 }
 
 @media (max-width: 360px) {
-  :global(body[data-mobile="true"]) .postActions,
-  :global(body[data-mobile="true"]) .postActions :global([data-research-feedback]) > div:first-child {
+  :global(body[data-mobile="true"]) .postActions {
     gap: 4px;
   }
 

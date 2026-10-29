@@ -1375,3 +1375,4 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - Opening Share must immediately expose editable original copy and an active X composer link. Optional media generation must never gate text composition. Retired voice rewriting must not run from legacy API callers.
 - Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
 - Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
+- Verify mobile toolbar geometry after feedback confirmation appears, not just before opening panels. Screenshot named panels that retain a layout box when wrapper elements use display: contents.
