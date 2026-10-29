@@ -132,3 +132,30 @@ def test_the_filtered_sections_redact_before_they_filter():
     text = SCRIPT.read_text(encoding="utf-8")
     assert "redact_env_files | grep" in text, text[-600:]
     assert "| redact" not in text, "a filter still runs before redaction"
+
+
+# DS-2026-10-29-04: systemd joins a directive that ends in a backslash, so a
+# quoted assignment can OPEN on a later physical line, with its quote before
+# the key. The value then does not start with a quote, the carry never arms,
+# and every further continuation line falls through the catch-all print.
+def test_a_continued_directive_redacts_its_whole_value():
+    out = _redact_input(
+        'Environment=NODE_ENV=production \\\n  "UW_TOKEN=head_NOTREAL \\\n  tail_NOTREALsecret"'
+    )
+    assert "tail_NOTREALsecret" not in out, out
+    assert "head_NOTREAL" not in out, out
+
+
+def test_a_continued_non_secret_directive_keeps_its_lines():
+    out = _redact_input('Environment=NODE_ENV=production \\\n  PATH=/usr/bin\nRADON_MODE=hetzner')
+    assert "production" in out, out
+    assert "/usr/bin" in out, out
+    assert "RADON_MODE=hetzner" in out, out
+
+
+# Remediate rescan: the carry armed only for the two ASCII quotes, while the
+# project's dotenv accepts a backtick-quoted multiline value.
+def test_a_backtick_quoted_multiline_value_does_not_leak():
+    out = _redact_input(TWS_PW_KEY + "=`first\nsecond_line_NOTREALsecret`\nRADON_MODE=hetzner")
+    assert "second_line_NOTREALsecret" not in out, out
+    assert "RADON_MODE=hetzner" in out, out
