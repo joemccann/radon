@@ -92,6 +92,33 @@ describe("relay client-message dispatch", () => {
     expect(normalize(input)).toEqual([]);
   });
 
+  it("parseActionMessage drops a hostile symbol instead of throwing", () => {
+    // The helper cases above slice normalizeSymbols out of the file. Putting
+    // String() back in parseActionMessage left those cases green and threw
+    // again on the frame the relay actually parses.
+    const body = [
+      "boundedField",
+      "normalizeSymbols",
+      "normalizeContracts",
+      "normalizeIndexes",
+      "parseActionMessage",
+    ].map((name) => topLevelFunction(name).getText(relayAst)).join("\n");
+    const parse = runInNewContext(`${body}\nparseActionMessage`, {
+      capItems,
+      MAX_SYMBOL_LENGTH,
+    });
+    const hostile = JSON.parse('{"action":"subscribe","symbols":[{"toString":null},"aapl"]}');
+    expect(() => parse(hostile)).not.toThrow();
+    expect(parse(hostile)).toEqual({
+      action: "subscribe",
+      symbols: ["AAPL"],
+      contracts: [],
+      indexes: [],
+    });
+    const oversized = "x".repeat(MAX_SYMBOL_LENGTH + 1);
+    expect(parse({ action: "subscribe", symbols: [oversized, "spy"] }).symbols).toEqual(["SPY"]);
+  });
+
   it("drops a symbol longer than the bound", () => {
     // DS-2026-09-23-09 residual: without a length bound one frame could carry
     // a thousand megabyte-long strings for the relay to uppercase and key.
