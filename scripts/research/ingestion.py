@@ -13,7 +13,7 @@ from research.dropbox import DropboxClient, DropboxError, content_hash
 from utils.atomic_io import atomic_save
 from datetime import datetime, timezone
 from api.db_http import DbHttpError
-from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
+from research.model import PROVIDER_PARK_SECS, classify_error, error_detail, is_provider_outage
 from research.state import State
 
 FEEDBACK_POLL_SECS = 60
@@ -36,9 +36,12 @@ class Backoff:
 
 
 def stage_health(root, stage, state, error=None):
-    atomic_save(str(Path(root) / f'health-{stage}.json'), {
+    payload = {
         'stage': stage, 'state': state, 'updated_at': datetime.now(timezone.utc).isoformat(),
-        'error': classify_error(error) if error else None})
+        'error': classify_error(error) if error else None}
+    if error is not None:
+        payload['error_detail'] = error_detail(error)
+    atomic_save(str(Path(root) / f'health-{stage}.json'), payload)
 
 
 class GuardedClient:

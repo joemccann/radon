@@ -15,6 +15,8 @@ import socket
 import urllib.error
 import urllib.request
 
+from .retired import present_service_health_section
+
 
 # Three-valued state vocabulary used everywhere:
 #   "up"      — confirmed reachable / running
@@ -504,6 +506,8 @@ def build_status(probes: dict, units: dict, generated_at: str,
     Tier-3 off-box probe row (dict) or None when there is none / no creds. Both
     degrade without touching the response code or the rest of the body.
     """
+    if isinstance(service_health, dict):
+        service_health = present_service_health_section(service_health)
     role = resolve_host_role() if host_role is None else host_role
     role_names = not_applicable_names(role)
     effective = effective_not_applicable(probes, units, role)
