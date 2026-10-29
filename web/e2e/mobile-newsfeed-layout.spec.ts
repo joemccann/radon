@@ -13,6 +13,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
 
 const TAGS = ["SPX", "VOLATILITY", "OPTIONS", "MACRO", "DEALER-GAMMA", "SKEW"];
 
@@ -393,4 +394,58 @@ test.describe("defect F — the +N expander must not drop focus", () => {
     expect(after.visible).toBe(true);
     expect(after.inertExpanded).toBe(false);
   });
+});
+
+
+test("mobile research actions stay horizontal with feedback and Share open", async ({ page }, testInfo) => {
+  await installClearFixtures(page);
+  await page.addInitScript(() => localStorage.setItem("theme", "dark"));
+  const post = {
+    id: "mobile-share-actions", title: "Yen hedge demand increased",
+    content: "Demand increased. Positioning remained near neutral.",
+    timestamp: "2026-09-04T18:00:00Z", images: [], tags: ["JPY"],
+    source: { kind: "marketdesk", evidenceKind: "article", publisher: "Synthetic Bank",
+      articleId: "SYNTH123", articleUrl: "https://marketdesk.ai/library/browse/SYNTH123",
+      url: "https://marketdesk.ai/library/browse/SYNTH123", folderDate: "2026-09-04", pages: [],
+      documentDate: "2026-09-04", figures: [], contentHash: "d".repeat(64) },
+  };
+  let rewriteRequests = 0;
+  await page.route("**/api/newsfeed/share", route => {
+    rewriteRequests++;
+    return route.fulfill({ status: 410, json: { error: "Retired" } });
+  });
+  await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [post] }));
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
+  const toolbar = item.locator("[data-newsfeed-actions]");
+  const up = toolbar.getByRole("button", { name: "Thumbs up", exact: true });
+  const down = toolbar.getByRole("button", { name: "Thumbs down", exact: true });
+  const explain = toolbar.getByRole("button", { name: "Explain", exact: true });
+  const share = toolbar.getByRole("button", { name: "Share", exact: true });
+  async function assertHorizontal() {
+    const boxes = await Promise.all([up, down, explain, share].map(button => button.boundingBox()));
+    expect(boxes.every(Boolean)).toBe(true);
+    expect(Math.max(...boxes.map(box => box!.y)) - Math.min(...boxes.map(box => box!.y))).toBeLessThanOrEqual(1);
+    for (const box of boxes) expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await assertHorizontal();
+  await up.click();
+  const feedback = item.getByRole("region", { name: "Thumbs up feedback" });
+  await expect(feedback).toBeVisible();
+  await share.click();
+  const panel = item.getByRole("region", { name: "Share news item" });
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toBeEditable();
+  await expect(panel.getByRole("link", { name: "Compose on X" })).toHaveAttribute("href", /intent\/tweet\?text=/);
+  await assertHorizontal();
+  for (const section of [feedback, panel]) {
+    const box = await section.boundingBox();
+    const row = await up.boundingBox();
+    expect(box!.y).toBeGreaterThanOrEqual(row!.y + row!.height);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  }
+  const dismiss = page.locator(".toast-container").getByRole("button", { name: "Dismiss", exact: true });
+  for (let count = 0; count < 16 && await dismiss.count(); count++) await dismiss.first().click();
+  await share.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("mobile-horizontal-share-feedback.png"), fullPage: false });
+  expect(rewriteRequests).toBe(0);
 });

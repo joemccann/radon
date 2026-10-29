@@ -42,7 +42,7 @@ Access rejection: return the guard response unchanged. No model call.
 
 ## Stream
 
-Match `/api/newsfeed/share`. Headers go out before the model call:
+Headers go out before the Explain model call:
 
 ```
 Content-Type: text/event-stream; charset=utf-8
@@ -103,7 +103,8 @@ Reuse `chat()` from `web/lib/llm/provider.ts`. Subscriptions only. Never read `C
 
 Default: `resolveProvider()`. Images present: skip OpenAI (ChatGPT grant is text-only). Use Anthropic or xAI. If neither vision provider is wired, explain from text and set `hasImage: false`.
 
-Hedged race may follow `rewriteInVoice` (primary now, alternate after 15s). `reasoningEffort: "low"`. `maxTokens: 700`.
+`web/lib/newsfeedExplainGenerate.ts` calls the selected provider with
+`fallback: false`, `reasoningEffort: "low"` and `maxTokens: 700`.
 
 Recorded fixture for tests: `web/tests/fixtures/newsfeed-explain-pjm.json`.
 
