@@ -1351,3 +1351,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-570 | DONE | Early return before `applyOptionComputation` left `web/tests/ib-option-computation.test.ts` green (10 passed) and failed the new relay bid and model cases (2 failed, 0 broadcasts). Restored `scripts/ib_realtime_server.js`. `web/tests/ib-rt-volume-relay.test.ts` passed 7 on three runs. Product source unchanged in this commit. |
 | T-571 | DONE | Sentinel model tick returned true and the relay broadcast one all-null snapshot (2 failed / 17 passed). `return wrote` at `scripts/ib_tick_handler.js:327`. Both files passed 19 on three runs. Closing rounds: root pytest 18,743 passed / 12 skipped / 63 subtests each round. Vitest 5 failed / 11,647 passed / 21 skipped / 1,174 files each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 60s ceiling). Cloud 42 failed / 3,478 passed / 31 skipped each round, 0 added / 0 removed against `2415f718` (42 failed / 3,478 passed / 31 skipped, 1177.65s). |
+
+## 2026-10-29
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-572 | DONE | A comment containing `void dispatchClientMessage(client, data);` plus a direct `handleClientMessage` call left the old text search green (9 passed). The syntax-tree case failed `expected [] to have a length of 1 but got +0`. Restored `scripts/ib_realtime_server.js`. `web/tests/relay-message-dispatch-rejection.test.ts` passed 9 on three runs. Product source unchanged. |
+| T-573 | DONE | `String()` in `parseActionMessage` left the helper cases green and threw `TypeError` in the new case (1 failed / 9 passed). Restored the `normalizeSymbols` call. The file passed 10 on three runs. Product source unchanged. Closing rounds: root pytest 19,366 passed / 12 skipped / 63 subtests each round. Vitest 5 failed / 11,662 passed / 21 skipped / 1,176 files each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 60s ceiling). Cloud 42 failed / 3,484 passed / 31 skipped each round, 0 added / 0 removed against `e3b77881` (42 failed / 3,484 passed / 31 skipped, 949.13s). |
