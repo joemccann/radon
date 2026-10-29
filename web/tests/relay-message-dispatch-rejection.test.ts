@@ -12,6 +12,7 @@ import { runInNewContext } from "node:vm";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 import { capItems, MAX_SYMBOL_LENGTH } from "../../scripts/lib/relayLimits.js";
 
@@ -20,6 +21,38 @@ const source = readFileSync(
   resolve(__dirname, "..", "..", "scripts", "ib_realtime_server.js"),
   "utf8",
 );
+const relayAst = ts.createSourceFile(
+  "ib_realtime_server.js",
+  source,
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.JS,
+);
+
+function calleeName(expr: ts.Expression): string | null {
+  if (ts.isIdentifier(expr)) return expr.text;
+  if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
+  return null;
+}
+
+function callsIn(node: ts.Node): ts.CallExpression[] {
+  const found: ts.CallExpression[] = [];
+  const visit = (child: ts.Node) => {
+    if (ts.isCallExpression(child)) found.push(child);
+    ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return found;
+}
+
+function topLevelFunction(name: string): ts.FunctionDeclaration {
+  const decl = relayAst.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === name,
+  );
+  expect(decl, `${name} exists`).toBeDefined();
+  return decl!;
+}
 
 function fnBody(name: string): string {
   let start = source.indexOf(`function ${name}(`);
@@ -92,14 +125,42 @@ describe("relay client-message dispatch", () => {
     },
   );
 
-  it("attaches a rejection handler to the dispatched handler promise", () => {
-    // The chokepoint: any future async throw anywhere on the message surface
-    // must land here, not in Node's default unhandled-rejection exit.
-    expect(source).not.toMatch(/void handleClientMessage\(/);
-    expect(source).toMatch(/void dispatchClientMessage\(client, data\);/);
-    expect(fnBody("dispatchClientMessage")).toMatch(
-      /try \{\s*await handleClientMessage\(client, data\);\s*\} catch/,
+  it("the message listener calls dispatch and nothing else handles the frame", () => {
+    // A comment that still contains the call kept a text search green while
+    // the listener invoked handleClientMessage directly. That promise is
+    // discarded, and a rejection ends the process for every client.
+    const listeners = callsIn(relayAst).filter((call) => {
+      const expr = call.expression;
+      const event = call.arguments[0];
+      return ts.isPropertyAccessExpression(expr)
+        && expr.name.text === "on"
+        && event !== undefined
+        && ts.isStringLiteral(event)
+        && event.text === "message";
+    });
+    expect(listeners).toHaveLength(1);
+    const callback = listeners[0].arguments[1];
+    expect(callback).toBeDefined();
+    const dispatched = callsIn(callback!).filter(
+      (call) => calleeName(call.expression) === "dispatchClientMessage",
     );
+    const direct = callsIn(callback!).filter(
+      (call) => calleeName(call.expression) === "handleClientMessage",
+    );
+    expect(dispatched).toHaveLength(1);
+    expect(direct).toHaveLength(0);
+
+    const owner = topLevelFunction("dispatchClientMessage");
+    const handled = callsIn(relayAst).filter(
+      (call) => calleeName(call.expression) === "handleClientMessage",
+    );
+    expect(handled).toHaveLength(1);
+    expect(handled[0].getStart(relayAst)).toBeGreaterThan(owner.getStart(relayAst));
+    expect(handled[0].getEnd()).toBeLessThan(owner.getEnd());
+    expect(ts.isAwaitExpression(handled[0].parent)).toBe(true);
+    let cursor: ts.Node | undefined = handled[0];
+    while (cursor && !ts.isTryStatement(cursor)) cursor = cursor.parent;
+    expect(ts.isTryStatement(cursor)).toBe(true);
   });
 
   it("the dispatch rejection handler answers the client and keeps the process", () => {
