@@ -227,6 +227,68 @@ class TestHranaKeepAlive:
             server.shutdown()
             thread.join(timeout=2)
 
+    def test_health_lite_cadence_reuses_tcp_connection(self, monkeypatch):
+        """PERF-033: /health/lite polls every 5s. Idle retire at 5.0s used
+        `>= _KEEPALIVE_IDLE_S`, so each probe closed the socket and paid a
+        fresh Turso TLS handshake (probe p50 ~12ms) on the hottest API route.
+        """
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(db_http.time, "monotonic", lambda: clock["t"])
+        connections = {"n": 0}
+        empty_pipeline = json.dumps({
+            "results": [
+                {
+                    "type": "ok",
+                    "response": {
+                        "type": "execute",
+                        "result": {"cols": [], "rows": []},
+                    },
+                },
+                {"type": "ok", "response": {"type": "close"}},
+            ]
+        }).encode("utf-8")
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            timeout = 1
+
+            def setup(self):
+                super().setup()
+                connections["n"] += 1
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                self.rfile.read(length)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(empty_pipeline)))
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                self.wfile.write(empty_pipeline)
+
+            def log_message(self, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        monkeypatch.setenv("TURSO_DB_URL", f"http://{host}:{port}")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "token")
+        db_http._close_keepalive()
+        try:
+            for _ in range(5):
+                assert db_http.hrana_execute("SELECT 1") == []
+                clock["t"] += 5.0
+            assert connections["n"] == 1, (
+                f"TCP connections {connections['n']} for 5 pipelines "
+                "spaced 5s (health/lite cadence); want 1"
+            )
+        finally:
+            db_http._close_keepalive()
+            server.shutdown()
+            thread.join(timeout=2)
+
     def test_oversized_body_rejects_and_leaves_the_next_pipeline_usable(self, monkeypatch):
         """A body past the cap must not be parsed as a prefix, and the unread
         tail must not fail the next pipeline on this thread. The keep-alive

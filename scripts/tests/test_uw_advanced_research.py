@@ -241,6 +241,96 @@ def test_scheduled_cli_records_failed_cycle_without_raw_error(monkeypatch, capsy
     assert "../unsafe" not in text
 
 
+class _ClientBox:
+    """Context manager the scheduled CLI uses in place of UWAdvancedClient."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def __enter__(self):
+        return self.client
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _scheduled_universe(monkeypatch, tmp_path, client):
+    import uw_research
+    import uw_stream.config
+    monkeypatch.setattr(uw_stream.config, "hydrate_settings", lambda: None)
+    monkeypatch.setenv("RADON_UW_RESEARCH_TICKERS", "SPY")
+    monkeypatch.setattr(uw_research, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(uw_research, "UWAdvancedClient", lambda *a, **k: _ClientBox(client))
+    heartbeat = Mock()
+    monkeypatch.setattr(uw_research, "_record_health", heartbeat)
+    seed_at = datetime.now(timezone.utc) - timedelta(days=2)
+    seeded = collect_research("SPY", client=FakeClient(), now=seed_at, data_dir=tmp_path)
+    return uw_research, heartbeat, seed_at, seeded
+
+
+def test_scheduled_rate_limit_keeps_observations_and_exits_zero(monkeypatch, capsys, tmp_path):
+    """All-section 429 after retained rows must not fail the hourly oneshot.
+
+    2026-10-28 15:07Z: short-TTL sections were already rate limited and the
+    daily company and seasonality TTLs expired on the same fire. Every
+    section stayed stale/rate_limited, status became unavailable, and main
+    returned 1. systemd recorded Result=exit-code with NRestarts=0.
+    """
+    limited = FakeClient({
+        "get_multi_leg": UWRateLimitError("daily quota body", status_code=429),
+        "get_options_pulse": UWRateLimitError("daily quota body", status_code=429),
+        "get_volatility_context": UWRateLimitError("daily quota body", status_code=429),
+        "get_company_profile": UWRateLimitError("daily quota body", status_code=429),
+        "get_monthly_seasonality": UWRateLimitError("daily quota body", status_code=429),
+    })
+    uw_research, heartbeat, seed_at, seeded = _scheduled_universe(monkeypatch, tmp_path, limited)
+    assert uw_research.main(["--scheduled", "--json"]) == 0
+    heartbeat.assert_called_once_with("partial")
+    text = capsys.readouterr().out
+    payload = json.loads(text)
+    assert payload["status"] == "unavailable"
+    assert "daily quota body" not in text
+    for name, section in payload["sections"].items():
+        assert section["state"] == "stale"
+        assert section["error_code"] == "rate_limited"
+        assert section["observed_at"] == seeded["sections"][name]["observed_at"]
+        assert section["data"] == seeded["sections"][name]["data"]
+    assert seeded["sections"]["company"]["observed_at"] == seed_at.isoformat()
+
+
+def test_scheduled_schema_failure_with_retained_rows_still_exits_one(monkeypatch, capsys, tmp_path):
+    class _Malformed:
+        def __getattr__(self, _name):
+            def call(*_args, **_kwargs):
+                return {"message": "not an observation"}
+            return call
+
+    uw_research, heartbeat, _seed_at, _seeded = _scheduled_universe(monkeypatch, tmp_path, _Malformed())
+    assert uw_research.main(["--scheduled", "--json"]) == 1
+    heartbeat.assert_called_once_with("partial")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "unavailable"
+    assert all(section["error_code"] == "configuration_or_schema_invalid" for section in payload["sections"].values())
+
+
+def test_scheduled_mixed_rate_limit_and_schema_failure_still_exits_one(monkeypatch, capsys, tmp_path):
+    mixed = FakeClient({
+        "get_multi_leg": UWRateLimitError("daily quota body", status_code=429),
+        "get_options_pulse": UWRateLimitError("daily quota body", status_code=429),
+        "get_volatility_context": UWRateLimitError("daily quota body", status_code=429),
+        "get_company_profile": {"message": "not an observation"},
+        "get_monthly_seasonality": UWRateLimitError("daily quota body", status_code=429),
+    })
+    uw_research, _heartbeat, _seed_at, _seeded = _scheduled_universe(monkeypatch, tmp_path, mixed)
+    assert uw_research.main(["--scheduled", "--json"]) == 1
+    text = capsys.readouterr().out
+    payload = json.loads(text)
+    assert payload["status"] == "unavailable"
+    assert payload["sections"]["company"]["error_code"] == "configuration_or_schema_invalid"
+    assert payload["sections"]["pulse"]["error_code"] == "rate_limited"
+    assert "daily quota body" not in text
+
+
 def test_futures_rejects_reassigned_security_id_before_reading_blocks(tmp_path):
     fake = FakeClient({"get_futures_display_factor": {"data": {"security_id": 123, "symbol": "ESU6", "display_factor": "0.01"}}})
     result = collect_research("SPY", sections=["futures"], client=fake, now=NOW, data_dir=tmp_path, futures_contract="ESZ6", security_id=123)

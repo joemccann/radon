@@ -43,13 +43,19 @@ from utils.outcome_metrics import measure_operation
 # steady state; 4 s absorbs a slow tail while keeping a wedged request far
 # below FastAPI route timeouts.
 HRANA_TIMEOUT_S = 4.0
-_KEEPALIVE_IDLE_S = 5.0
+# /health/lite polls every 5s (health daemon UNIT_REFRESH_SECS). Retiring at
+# 5.0s used `>= idle`, so every probe closed the socket and paid a fresh
+# Turso TLS handshake (PERF-033). 30s covers six probes with margin and
+# still retires before typical HTTP/1.1 server idle closes (~60s); SELECT
+# health probes retry once on a dead reused socket.
+_KEEPALIVE_IDLE_S = 30.0
 
 _MAX_RESPONSE_BYTES = 8_388_608  # hard ceiling; these result sets are tiny
 
 # urllib.request.urlopen opens a fresh TCP/TLS socket per POST. The FastAPI
 # process issues Hrana pipelines on a hot path (/health/lite every 5s, plus
-# every route). Thread-local keep-alive reuses one socket per worker thread.
+# every route). Thread-local keep-alive reuses one socket per worker thread
+# for `_KEEPALIVE_IDLE_S` after the last success (PERF-008, PERF-033).
 # Tests that replace urllib.request.urlopen still take that seam.
 _STDLIB_URLOPEN = urllib.request.urlopen
 _local = threading.local()
