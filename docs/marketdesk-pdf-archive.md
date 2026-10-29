@@ -115,7 +115,9 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 A normal admission wait with no provider failure is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
 deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.
-Other download failures still exit 1. This row is separate from
+A Turso wire failure records that error row and exits 0 for the same reason.
+The next timer retries the queue. Statement errors and other download
+failures still exit 1. This row is separate from
 `marketdesk-research` and `marketdesk-dropbox`; a healthy article cycle cannot
 conceal a blocked archive.
 
