@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import Iterator
 
+from health_service.retired import RETIRED_RESEARCH_SERVICE
+
 from ..schema import KnowledgeDoc
 
 SOURCE = "incidents"
@@ -40,6 +42,13 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
 
 
 def _digest(service, state, last_error) -> str:
+    if service == RETIRED_RESEARCH_SERVICE:
+        return (
+            "Service dropbox-research is retired with radon-research.service. "
+            "Stored errors are not current. "
+            "Current research health is marketdesk-research and marketdesk-pdf. "
+            "The ingestion review stage does not run on those services."
+        )
     lines = [f"Service {service} is {state or 'unknown'}."]
     detail = _detail(last_error) if state != "ok" else None
     if detail:
