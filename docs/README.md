@@ -48,7 +48,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
 | AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity. Compute C5 Liquid Compute is a third-venue public GPU index, never the rental book |
 | MarketDesk research ingest (5-minute scraper, voice copy, Dropbox outbox; replaces the shared-folder watcher) | [`docs/marketdesk-research.md`](marketdesk-research.md) · retired watcher: [`docs/dropbox-research.md`](dropbox-research.md) |
-| Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
+| Historical social-voice provenance and share retirement | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md) |
