@@ -231,9 +231,10 @@ rung shells out to) land at
 the same paths inside the containers whose unit
 runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 `radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
-`os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
-`/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
-`Missing Anthropic subscription`. Never the whole home directory, and never
+`os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/explain` and
+`/api/assistant`. The retired `/api/newsfeed/share` route returns `410` without
+a model call; the 2026-09-19 missing-subscription share incident is historical.
+Never the whole home directory, and never
 into the relay. `radon-api` holds the secret-store key group, so it never
 gets `~/.local/bin`: its antigravity rung runs the image's integrity-pinned
 `/usr/local/bin/agy` (`docker/app/vendor-clis/`). Antigravity is the one read-write grant: `agy` refreshes its
