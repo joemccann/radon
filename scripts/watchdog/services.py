@@ -782,6 +782,9 @@ def freshness_window_for(service: str, market_state: str) -> int:
 
 def is_service_monitored(service: str) -> bool:
     """Whether the service is applicable to this host's active architecture."""
+    if service == "dropbox-research":
+        # radon-research.service is disabled. Its Turso row is not a live check.
+        return False
     if service == "uw-stream":
         # Optional collector is applicable after first activation; a stopped
         # activated collector retains its snapshot and must still alarm.
