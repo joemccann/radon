@@ -402,6 +402,27 @@ def _record_health(status: str) -> None:
         print("[uw-research] health telemetry unavailable", file=sys.stderr)
 
 
+def _rate_limit_only(result: dict) -> bool:
+    """True when every section of a finished cycle failed only as a 429.
+
+    The snapshot already kept the last matching observation. The next timer
+    retries. Auth, schema, budget and other upstream failures stay fatal.
+    """
+    sections = result.get("sections")
+    if result.get("status") != "unavailable" or not isinstance(sections, dict) or not sections:
+        return False
+    for section in sections.values():
+        if not isinstance(section, dict) or section.get("state") in {"ok", "empty"}:
+            return False
+        if section.get("error_code") != "rate_limited":
+            return False
+    return True
+
+
+def _scheduled_cycle_ok(result: dict) -> bool:
+    return result.get("status") in {"ok", "partial"} or _rate_limit_only(result)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -429,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.scheduled:
             _record_health("ok" if all(r["status"] == "ok" for r in results) else "partial")
         print(json.dumps(payload, allow_nan=False))
-        return 0 if all(r["status"] in {"ok", "partial"} for r in results) else 1
+        return 0 if all(_scheduled_cycle_ok(r) for r in results) else 1
     except Exception:
         if args.scheduled:
             _record_health("unavailable")

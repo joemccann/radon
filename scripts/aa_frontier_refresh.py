@@ -52,10 +52,16 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 # Unstable-release tokens are judged on the slug only. Artificial Analysis
 # puts "Preview" in the shipping display name of stable slugs such as
-# mistral-large-4. Matching that word on the name dropped the only scored
-# Mistral row and failed the oneshot (2026-10-28).
+# mistral-large-4 (2026-10-28). On 2026-10-29 it renamed that same model's
+# slug to mistral-large-4-preview. Preview is a soft exclusion: drop it
+# when the provider still has a stable candidate, so a preview cannot set
+# the frontier floor. If every stable row fails the score or price check,
+# keep the preview slug instead of failing the oneshot. Experimental,
+# alpha, beta, and exp tokens stay ineligible even when they are the only
+# scored row.
+_PREVIEW_SLUG = re.compile(r"\bpreview\b", re.IGNORECASE)
 _UNSTABLE_RELEASE_SLUG = re.compile(
-    r"(?:\bpreview\b|\bexperimental\b|(?:^|-)exp(?:-|$)|\balpha\b|\bbeta\b)",
+    r"(?:\bexperimental\b|(?:^|-)exp(?:-|$)|\balpha\b|\bbeta\b)",
     re.IGNORECASE,
 )
 _SPECIALIST_MODEL = re.compile(
@@ -93,7 +99,13 @@ def _finite_positive(value: Any) -> float | None:
     return parsed if math.isfinite(parsed) and parsed > 0 else None
 
 
-def _candidate(row: Any, provider: str, today: date) -> FrontierModel | None:
+def _candidate(
+    row: Any,
+    provider: str,
+    today: date,
+    *,
+    allow_preview_slug: bool = False,
+) -> FrontierModel | None:
     if not isinstance(row, dict):
         return None
     creator = row.get("model_creator")
@@ -107,6 +119,8 @@ def _candidate(row: Any, provider: str, today: date) -> FrontierModel | None:
     if not isinstance(name, str):
         return None
     if _UNSTABLE_RELEASE_SLUG.search(slug) or _SPECIALIST_MODEL.search(f"{name} {slug}"):
+        return None
+    if not allow_preview_slug and _PREVIEW_SLUG.search(slug):
         return None
     try:
         released = date.fromisoformat(row["release_date"])
@@ -170,6 +184,20 @@ def select_frontier_models(
         candidates = [
             candidate for row in rows if (candidate := _candidate(row, provider, effective_today)) is not None
         ]
+        if not candidates:
+            # The publisher sometimes renames the only scored shipping model
+            # onto a preview slug. Accept that row only when no stable
+            # candidate remains, so the oneshot can still refresh the basket.
+            candidates = [
+                candidate
+                for row in rows
+                if (
+                    candidate := _candidate(
+                        row, provider, effective_today, allow_preview_slug=True
+                    )
+                )
+                is not None
+            ]
         if not candidates:
             raise CatalogError(f"No eligible frontier model for provider {provider}")
         frontier_floor = max(candidate.score for candidate in candidates) * 0.9

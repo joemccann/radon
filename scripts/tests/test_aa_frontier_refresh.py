@@ -118,20 +118,56 @@ def test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_ro
     assert selected[6] == "mistral-large-4"
 
 
-def test_preview_slug_still_rejects_the_only_scored_row():
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "mistral-large-experimental",
+        "mistral-large-alpha",
+        "mistral-large-beta",
+        "mistral-exp",
+    ],
+)
+def test_unstable_slug_still_rejects_the_only_scored_row(slug: str):
     payload = catalog(
         model(
             "mistral",
-            "mistral-large-preview",
+            slug,
             score=50,
             released="2026-10-06",
             name="Mistral Large",
         )
     )
-    _null_provider_scores(payload, "mistral", keep_slug="mistral-large-preview")
+    _null_provider_scores(payload, "mistral", keep_slug=slug)
 
     with pytest.raises(CatalogError, match="mistral"):
         select_frontier_basket(payload, today=date(2026, 10, 28))
+
+
+def test_renamed_preview_slug_is_kept_when_it_is_the_only_scored_row():
+    """Page ca76efea59ce98d37e851b9b96cf1494 (2026-10-29 07:03Z).
+
+    The scored Mistral model kept its price, intelligence index, and
+    release date, and the publisher renamed the slug from mistral-large-4
+    to mistral-large-4-preview. Treating that suffix like an unstable
+    release left the provider with zero candidates, so the oneshot raised
+    CatalogError and exited 1. Every other Mistral row still has no score.
+    """
+    payload = catalog(
+        model(
+            "mistral",
+            "mistral-large-4-preview",
+            score=25.3,
+            released="2026-10-06",
+            name="Mistral Large 4 Preview",
+            input_price=1.36,
+            output_price=4.18,
+        )
+    )
+    _null_provider_scores(payload, "mistral", keep_slug="mistral-large-4-preview")
+
+    selected = select_frontier_basket(payload, today=date(2026, 10, 29))
+
+    assert selected[6] == "mistral-large-4-preview"
 
 
 def test_specialist_display_name_still_rejects_a_stable_slug():
