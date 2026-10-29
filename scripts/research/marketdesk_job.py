@@ -19,6 +19,8 @@ MarketDesk and Dropbox share the hard issuer gate while retaining separate topic
 MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
 against the per-cycle cap, and fails as ``no_summary`` once it is older than MARKETDESK_SUMMARY_WAIT_HOURS.
+That deadline still writes the error row and spends an attempt, and the oneshot exits 0 so the 5-minute
+timer does not page P1. Any other article failure still exits 1.
 """
 from __future__ import annotations
 
@@ -59,6 +61,9 @@ DROPBOX_SERVICE = "marketdesk-dropbox"
 DEFAULT_MAX_PER_CYCLE = 5
 DEFAULT_LOOKBACK_HOURS = 48
 DEFAULT_SUMMARY_WAIT_HOURS = 6
+# Ledger and health code for an item that is still unsummarised after the wait.
+# Exit 0: the error row is the P2 signal. Exit 1 would page P1 on every timer fire.
+SUMMARY_DEADLINE = "no_summary"
 # No new article starts after this much of the cycle; TimeoutStartSec=270 bounds the whole run.
 ARTICLE_START_BUDGET_SECONDS = 150
 MAX_IMAGES_STORED = 40
@@ -96,7 +101,15 @@ class SummaryPending(RuntimeError):
 
 
 class ArticlesFailed(RuntimeError):
-    """Raised after a cycle where nothing published but something failed, or an article was retired."""
+    """Raised after a cycle where nothing published but something failed, or an article was retired.
+
+    ``provider_deadline`` means every failure was the summary wait. The oneshot
+    exits 0. The error row is already written, and other failures still exit 1.
+    """
+
+    def __init__(self, message: str, *, provider_deadline: bool = False) -> None:
+        super().__init__(message)
+        self.provider_deadline = provider_deadline
 
 
 class ListingGap(RuntimeError):
@@ -312,7 +325,7 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
         age = datetime.now(timezone.utc) - _utc(ref.published_at)
         if age.total_seconds() < summary_wait_hours * 3600:
             raise SummaryPending("summary_pending")
-        raise ArticleRejected("no_summary")
+        raise ArticleRejected(SUMMARY_DEADLINE)
     dest = workdir / ref.article_id
     dest.mkdir(parents=True, exist_ok=True)
     # Summary text is a logical source block, never a claim that a PDF page was read.
@@ -486,6 +499,8 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
                 continue
             attempts = store.record_failure(ref.article_id, error)
             counts["failed"] += 1
+            if error == SUMMARY_DEADLINE:
+                notes["no_summary"] = int(notes.get("no_summary") or 0) + 1
             if attempts >= store.MAX_ATTEMPTS:
                 counts["retired"] += 1
             _log(f"article {ref.article_id} failed (attempt {attempts}): {error}")
@@ -559,6 +574,12 @@ def _upload_outbox(*, env, deps: Deps, workdir: Path, counts: dict) -> tuple[str
     return "ok", None
 
 
+def _summary_deadline_only(counts: dict, notes: dict) -> bool:
+    """Every failure is the summary wait. A parked outage or a listing gap still fails the oneshot."""
+    deadlines = int(notes.get("no_summary") or 0)
+    return deadlines > 0 and deadlines == counts["failed"] and counts["parked"] == 0 and not notes.get("gap")
+
+
 def _articles_failed(counts: dict, notes: dict) -> ArticlesFailed | None:
     bad = counts["failed"] + counts["parked"]
     good = counts["published"] + counts["healed"]
@@ -569,7 +590,7 @@ def _articles_failed(counts: dict, notes: dict) -> ArticlesFailed | None:
         message += f"; {counts['retired']} retired (attempts spent, never retried)"
     if notes.get("last_error"):
         message += f"; last error: {notes['last_error']}"
-    return ArticlesFailed(message[:ERROR_MAX_CHARS])
+    return ArticlesFailed(message[:ERROR_MAX_CHARS], provider_deadline=_summary_deadline_only(counts, notes))
 
 
 
@@ -647,6 +668,11 @@ def main(argv: list[str] | None = None) -> int:
     except CycleTerminated as exc:  # a stop (deploy stop-clean): 143 + SuccessExitStatus=143 keeps it out of `failed`
         _log(f"cycle stopped: {_safe_error(exc)}")
         return EXIT_STOPPED
+    except ArticlesFailed as exc:  # service_cycle already wrote the error row
+        _log(f"cycle failed: {_safe_error(exc)}")
+        # A summary deadline is the P2 error row. Exit 1 makes every 5-minute
+        # fire a new InactiveEnterTimestamp and a P1 page.
+        return 0 if exc.provider_deadline else 1
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
         _log(f"cycle failed: {_safe_error(exc)}")
         return 1

@@ -818,6 +818,63 @@ def test_summary_that_never_arrives_fails_after_the_wait(world, db):
     assert world.dests == []
 
 
+def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, capsys):
+    """A provider summary deadline is already the error row. Exit 1 pages P1."""
+    world.refs = [make_ref("SummDead01", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
+    world.summary = []
+    monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
+    assert job.main([]) == 0
+    saved = ledger(db, "SummDead01")
+    assert saved["status"] == "pending" and saved["attempts"] == 1
+    assert saved["last_error"] == "no_summary"
+    assert any("no_summary" in message for message in research_errors(world))
+    assert "no_summary" in capsys.readouterr().err
+
+
+def test_repeated_summary_deadline_exits_zero_until_retired(world, db, monkeypatch):
+    world.refs = [make_ref("SummDead04", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
+    world.summary = []
+    monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
+    for _ in range(store.MAX_ATTEMPTS):
+        assert job.main([]) == 0
+    saved = ledger(db, "SummDead04")
+    assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
+    assert saved["last_error"] == "no_summary"
+    assert len(research_errors(world)) == store.MAX_ATTEMPTS
+
+
+def test_copy_failure_still_fails_the_oneshot(world, monkeypatch):
+    world.refs = [make_ref("CopyFail01", title="Broken copy")]
+    world.copy_fail = {"Broken copy"}
+    monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
+    assert job.main([]) == 1
+    assert any("ladder exhausted" in message for message in research_errors(world))
+
+
+def test_summary_deadline_does_not_hide_another_article_failure(world, db, monkeypatch):
+    world.refs = [
+        make_ref("SummDead02", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1),
+        make_ref("OthrFail01", hours_ago=2),
+    ]
+    world.summary = []
+    world.fetch_errors = {"OthrFail01": RuntimeError("bad_response")}
+    monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
+    assert job.main([]) == 1
+    assert ledger(db, "SummDead02")["last_error"] == "no_summary"
+    assert ledger(db, "OthrFail01")["last_error"] == "bad_response"
+
+
+def test_listing_gap_still_fails_the_oneshot_beside_a_summary_deadline(world, db, monkeypatch):
+    known = make_ref("KnownOld01", hours_ago=40)
+    store.discover([known])
+    db.execute("UPDATE marketdesk_articles SET status='published' WHERE article_id=?", (known.article_id,))
+    world.refs = [make_ref("SummDead03", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
+    world.summary = []
+    monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
+    assert job.main([]) == 1
+    assert ledger(db, "SummDead03")["last_error"] == "no_summary"
+
+
 def test_pending_articles_do_not_use_up_the_per_cycle_cap(world, db):
     world.refs = [make_ref(f"Pend{n:07d}", hours_ago=4) for n in range(4)]
     world.refs += [make_ref("Ready000001", hours_ago=2), make_ref("Ready000002", hours_ago=3)]

@@ -151,3 +151,46 @@ class TestExitOrderAckDiscipline:
 
         assert _journal_status(db) == "PENDING"
         assert result.get("orders_placed", 0) == 0
+
+    def test_status_callback_permanent_id_confirms_without_open_order(self):
+        """REL-334 / R-745. ib_insync's orderStatus callback writes permId
+        onto OrderStatus only. PendingSubmit plus that id is an
+        acknowledgement on the entry path. The exit poll used to ignore
+        it, cancel the live sell, leave the journal PENDING, and place
+        again next cycle."""
+        from ib_insync import Contract, LimitOrder, OrderStatus, Trade
+        from ib_insync.wrapper import Wrapper
+
+        db = _pending_goog_db()
+        order = LimitOrder("SELL", 44, 15.0, orderId=99, clientId=26)
+        trade = Trade(
+            Contract(symbol="GOOG", secType="OPT", exchange="SMART"),
+            order,
+            OrderStatus(orderId=99, status="PendingSubmit"),
+        )
+        wrapper = Wrapper(MagicMock())
+        wrapper.trades[(26, 99)] = trade
+
+        def deliver(_seconds=0.25):
+            wrapper.orderStatus(99, "PendingSubmit", 0, 44, 0, 987654, 0, 0, 26, "")
+
+        result, mock_client = self._run(db, trade, sleep_side_effect=deliver)
+
+        assert trade.order.permId == 0
+        assert trade.orderStatus.permId == 987654
+        assert _journal_status(db) == "PLACED"
+        assert result["orders_placed"] == 1
+        assert "error" not in result
+        mock_client.cancel_order.assert_not_called()
+
+    def test_bool_status_permanent_id_does_not_confirm(self):
+        """A bool on OrderStatus.permId is still junk. The order object
+        staying at 0 must keep the cancel-and-PENDING contract."""
+        db = _pending_goog_db()
+        trade = _trade(perm_id=0, status="PendingSubmit")
+        trade.orderStatus.permId = True
+        result, mock_client = self._run(db, trade)
+
+        assert _journal_status(db) == "PENDING"
+        assert result.get("orders_placed", 0) == 0
+        mock_client.cancel_order.assert_called_once()
