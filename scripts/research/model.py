@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from clients.model_ladder import (
@@ -150,3 +151,74 @@ def classify_error(error: Exception) -> str:
             return message[:EXTRACT_MESSAGE_MAX - 3] + '...'
         return message
     return type(error).__name__
+
+
+_DETAIL_MAX = 240
+_TIMEOUT_NAMES = {"TimeoutError", "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "Timeout"}
+_TIMEOUT_TEXT = re.compile(
+    r"\b(?:TimeoutError|ReadTimeout|ConnectTimeout|socket\.timeout|timed out)\b",
+    re.IGNORECASE,
+)
+_HTTP_TEXT = re.compile(r"\bHTTP\s+(\d{3})\b")
+
+
+def _detail_message(error: BaseException) -> str | None:
+    from credential_redaction import scrub_credential_text
+    text = " ".join(scrub_credential_text(str(error)).split())
+    if not text:
+        return None
+    if len(text) > _DETAIL_MAX:
+        return text[:_DETAIL_MAX - 3] + "..."
+    return text
+
+
+def _http_status(error: BaseException) -> int | None:
+    for attr in ("status", "status_code", "code"):
+        value = getattr(error, attr, None)
+        if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+            return value
+    response = getattr(error, "response", None)
+    value = getattr(response, "status_code", None) if response is not None else None
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
+    match = _HTTP_TEXT.search(str(error))
+    if match:
+        code = int(match.group(1))
+        if 100 <= code <= 599:
+            return code
+    return None
+
+
+def _is_timeout(error: BaseException) -> bool:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        name = type(current).__name__
+        if isinstance(current, TimeoutError) or name in _TIMEOUT_NAMES or name.endswith("Timeout"):
+            return True
+        if _TIMEOUT_TEXT.search(str(current)):
+            return True
+        cause = current.__cause__
+        context = None if getattr(current, "__suppress_context__", False) else current.__context__
+        if isinstance(cause, BaseException):
+            current = cause
+        elif isinstance(context, BaseException):
+            current = context
+        else:
+            current = None
+    return False
+
+
+def error_detail(error: BaseException) -> dict:
+    """Class name plus a truncated, redacted message, HTTP status, and kind.
+
+    Stored beside ``classify_error``'s label. Secrets, tokens, credential
+    URLs, and database auth headers are scrubbed before the message is kept.
+    """
+    return {
+        "class": type(error).__name__,
+        "message": _detail_message(error),
+        "http_status": _http_status(error),
+        "kind": "timeout" if _is_timeout(error) else "other",
+    }
