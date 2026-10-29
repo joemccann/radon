@@ -5,11 +5,10 @@
  * picked Paper vs Live on the OrderRiskGate. Paper mode routes to the
  * homegrown shadow-fill engine (`scripts/paper/`); live mode routes to IB.
  *
- * LIMITATION — the shadow engine cannot reproduce IB-side combo-router drops
- * (e.g. bearish risk reversals that hang in PendingSubmit forever). For
- * faithful combo-router behaviour, point the order path at the IBKR NATIVE
- * paper account on port 7497 instead of the shadow engine. See
- * `feedback_ib_combo_router_silent_drops_bearish_rr.md`.
+ * The shadow engine fills marketable orders locally. A paper fill is not an
+ * IB acknowledgement. An unacknowledged live order has an unknown outcome;
+ * reconcile open orders before any new submit. See the order placement
+ * contract in `scripts/CLAUDE.md`. TWS paper is port 7497.
  */
 
 export type PlacementTarget = "ib" | "paper-shadow";
