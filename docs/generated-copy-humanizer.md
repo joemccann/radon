@@ -13,7 +13,6 @@ about human authorship.
 | --- | --- | --- |
 | MarketDesk articles | `scripts/research/marketdesk_copy.py` | Shared Python review, including captions; publisher validates exact-copy certificate |
 | PDF research articles, both pipeline versions | `scripts/research/policy.md` | `summary_editor.py` reviews titles, bodies and captions; publisher validates certificate |
-| Newsfeed X captions and media copy | `web/lib/newsfeedVoice.ts` | Local checks plus separate model review before response/cache; full captions retain facts; client requires current review version |
 | Newsfeed Explain | `web/lib/newsfeedExplain.ts` | Local checks plus model review before caching; cache keys include rubric version |
 | CTA social copy | `scripts/utils/cta_llm.py` | Source fidelity, shared scored review, bounded rewrite, final certificate; failure uses deterministic template |
 | Operational assistant prose | Shared draft instructions in assistant system prompt | Negative-parallelism and repetition checks, one bounded regeneration; a remaining style finding still answers, only repetition takes the existing error path |
@@ -37,12 +36,12 @@ upstream regeneration. Numeric and semantic checks run before the final
 editorial review of a rewritten body. Pending outbox records must be recertified
 under the current rubric.
 
-Web sharing starts with no exportable generated draft. Failed or unavailable
-review leaves copy, Compose on X, and media exports disabled with retry. The
-complete X caption is reviewed separately from short media copy; a repair must
-preserve every fact and numerical claim. Cached drafts and response contracts
-are versioned. Explain cache keys invalidate previous unreviewed entries.
-The existing total deadlines still apply to generation and review together.
+Newsfeed Share rewriting was retired on 2026-10-29. Share captions and media
+use sanitized original article copy without a model call or a new editorial
+review. Compose on X and caption editing are available while media renders.
+The protected legacy rewrite endpoint returns `410` with `Cache-Control: no-store`.
+Explain still generates and reviews its own prose; its cache keys include the
+rubric version and its total deadline covers generation and review together.
 
 Audits remain private: research audit files and CTA stderr records never enter
 published prose. Web review failures are returned through the existing error
@@ -54,5 +53,5 @@ any correction requires review and an exact-row update preserving provenance.
 Tests cover the reported DXY sentence, sentence-split variants, false clean
 verdicts, unchanged findings, computed scores, malformed reviews, caption
 mutation, stale certificates, semantic direction changes, provider outages,
-old response versions, full captions and disabled pending/failed exports.
+full captions, the retired rewrite endpoint and immediately available sharing.
 `web/e2e/newsfeed-sharing.spec.ts` covers desktop/mobile sharing and screenshots.
