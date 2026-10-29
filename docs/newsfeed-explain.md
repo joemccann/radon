@@ -10,7 +10,7 @@ Research copy (capacity auctions, collars, MW-day) is written for specialists. T
 
 - Card / feed: `DashboardNewsFeed` item, on desktop and mobile.
 - Expanded post: `NewsfeedLightbox`.
-- Placement: same action row as Share. Star stays in the footer.
+- Placement: thumbs up/down, Explain and Share stay in one horizontal row. Expanded panels and feedback confirmations occupy their own rows below the controls, including after a vote is saved at 320px. Mobile controls keep 44px minimum heights. Star stays in the footer.
 - Button label: `Explain` (matches `Share` casing). Idle icon is outline `CircleHelp`.
 
 ## API
@@ -42,7 +42,7 @@ Access rejection: return the guard response unchanged. No model call.
 
 ## Stream
 
-Match `/api/newsfeed/share`. Headers go out before the model call:
+Headers go out before the Explain model call:
 
 ```
 Content-Type: text/event-stream; charset=utf-8
@@ -103,7 +103,8 @@ Reuse `chat()` from `web/lib/llm/provider.ts`. Subscriptions only. Never read `C
 
 Default: `resolveProvider()`. Images present: skip OpenAI (ChatGPT grant is text-only). Use Anthropic or xAI. If neither vision provider is wired, explain from text and set `hasImage: false`.
 
-Hedged race may follow `rewriteInVoice` (primary now, alternate after 15s). `reasoningEffort: "low"`. `maxTokens: 700`.
+`web/lib/newsfeedExplainGenerate.ts` calls the selected provider with
+`fallback: false`, `reasoningEffort: "low"` and `maxTokens: 700`.
 
 Recorded fixture for tests: `web/tests/fixtures/newsfeed-explain-pjm.json`.
 
