@@ -50,8 +50,38 @@ describe("assistant generation and knowledge continuation", () => {
     expect(chat.mock.calls[1][0].system).toContain("Humanizer");
   });
 
-  it("fails closed when the repair still contains a prohibited contrast", async () => {
-    const chat = vi.fn().mockResolvedValue(response("This is a conditional setup, not a breakout."));
+  // 2026-10-28: three straight Grok 4.7 turns on the portfolio page died after
+  // their tools ran because the answer kept an "X, not Y" clause through the
+  // one repair. A style finding never outranks the operator's answer.
+  it("answers with the repair when it still contains a prohibited contrast", async () => {
+    const contrast = "This is a conditional setup, not a breakout.";
+    const chat = vi.fn().mockResolvedValue(response(contrast));
+    const { runAssistantLoop } = await load(chat);
+    const result = await runAssistantLoop([{ role: "user", content: "Explain the setup" }], "system", PRINCIPAL);
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.content).toBe(contrast);
+    expect(result.outcome).toBe("answered");
+  });
+
+  it("keeps a tool-backed answer whose repair still contrasts, after the tools ran", async () => {
+    const answer = "Underlying notional = 200 x 100 x $350 = $7,000,000. Defined risk stays the debit already paid, not a new position.";
+    const chat = vi.fn()
+      .mockResolvedValueOnce(response("", [call("get_portfolio")]))
+      .mockResolvedValue(response(answer));
+    const { runAssistantLoop, executeTool } = await load(chat);
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "if GOOGL trades $350 tomorrow what is the notional of my long calls" }], "system", PRINCIPAL,
+    );
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(result.content).toBe(answer);
+    expect(result.rounds).toBe(2);
+    expect(result.toolEvents.map((event) => event.name)).toEqual(["get_portfolio"]);
+  });
+
+  it("still fails closed when the repair of a contrast finding is repetitive", async () => {
+    const chat = vi.fn().mockResolvedValueOnce(response("This is a conditional setup, not a breakout."))
+      .mockResolvedValueOnce(response(LOOP));
     const { runAssistantLoop } = await load(chat);
     await expect(runAssistantLoop([{ role: "user", content: "Explain the setup" }], "system", PRINCIPAL))
       .rejects.toMatchObject({ name: "AssistantResponseQualityError" });

@@ -506,9 +506,17 @@ def idle_pool(monkeypatch, transport):
 
 
 @pytest.mark.parametrize('sql', ['SELECT 1', 'UPDATE synthetic_counter SET value=value+1'])
-@pytest.mark.parametrize('idle,expired', [(0.0, False), (4.999, False), (5.0, True), (70.0, True)])
-def test_pool_expires_idle_connections_before_sending_reads_or_writes(idle_pool, sql, idle, expired):
+@pytest.mark.parametrize('kind', ['zero', 'just_under', 'exact', 'past'])
+def test_pool_expires_idle_connections_before_sending_reads_or_writes(idle_pool, sql, kind):
     module, clock, connections, responses, request, _ = idle_pool
+    idle_s = module._KEEPALIVE_IDLE_S
+    idle = {
+        'zero': 0.0,
+        'just_under': idle_s - 0.001,
+        'exact': idle_s,
+        'past': idle_s + 40.0,
+    }[kind]
+    expired = kind in ('exact', 'past')
     request()
     clock.now += idle
     request(sql, timeout=2.0)
@@ -531,12 +539,14 @@ def test_pool_idle_age_starts_after_full_successful_response(idle_pool):
     responses.append(SlowResponse())
     request()
     assert clock.now == 120.0
-    clock.now = 124.999
+    idle_s = module._KEEPALIVE_IDLE_S
+    under = 120.0 + idle_s - 0.001
+    clock.now = under
     request('UPDATE synthetic_counter SET value=value+1')
     assert len(connections) == 1, 'request duration is not idle age'
-    clock.now = 129.999
+    clock.now = under + idle_s
     request('UPDATE synthetic_counter SET value=value+1')
-    assert len(connections) == 2, 'every full success refreshes the five-second idle clock'
+    assert len(connections) == 2, 'every full success refreshes the idle clock'
 
 
 @pytest.mark.parametrize('failure', ['headers', 'body', 'oversized', 'http'])
