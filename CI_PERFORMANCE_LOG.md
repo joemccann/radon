@@ -2328,3 +2328,72 @@ unknown pattern still refuses and the workflow still builds.
 2026-10-16 parser follow-up: head8739c052, CI38969889199 / job117205531902 reproduced 4 unsupported-source failures (3039 other tests passed). Refuse unsupported COPY spelling/whitespace, ADD and unknown external stages instead of omitting source inputs. Known previously parsed stages remain covered by their original COPY inputs. Ignore links only when an understood dockerignore rule excludes their entire source path.
 
 CIP-013 requested organic-nightly evidence: read /Users/joemccann-mac-mini/radon-weekend/logs/codemap-nightly.log without rerunning suites. The 2026-10-16 nightly records `1 passed in 1.06s`, regenerated from b79e1f5c, passed the substantive-change gate, and published https://github.com/joemccann/radon/pull/1101 at a8248bc7. This supplies the pending host-only freshness evidence; it makes no CIP-020 latency claim.
+
+## CIP-021 - skip the app-image disk wipe when 40 GiB is already free (2026-10-29) - VALIDATING
+
+`#1330` (`6ff8bae2`) added `Free runner disk` in front of both image builds
+after ENOSPC on a 7.7GB runner. Every main `ubuntu-24.04` log since then
+shows `/dev/root` 145G with 86G free before the step and 110G after. The
+step is silent `rm -rf` of Android, .NET, GHC, GHCup and CodeQL, then
+`docker system prune -af` (2.488GB). It costs 69-339s and, on clean mixed
+pushes, is why `Exact app images` authorizes deploy.
+
+Evidence (job timestamps, `gh run view --json jobs`; disk lines from
+`gh run view --log --job`):
+
+| Run | Class | Clock | Authorizer | Overhang | Disk on the later image | Python build step |
+|---|---|---|---|---|---|---|
+| [40719830345](https://github.com/joemccann/radon/actions/runs/40719830345) | mixed, warm rebuild | 504s | images | 132s | 165s | 120s |
+| [40726456392](https://github.com/joemccann/radon/actions/runs/40726456392) | mixed, warm rebuild | 512s | images | 112s | 126s | 121s |
+| [40723327678](https://github.com/joemccann/radon/actions/runs/40723327678) | mixed, warm rebuild | 537s | images | 129s | 126s | 157s |
+| [40730390208](https://github.com/joemccann/radon/actions/runs/40730390208) | mixed, warm rebuild | 552s | images | 126s | 188s | 93s |
+| [40749197175](https://github.com/joemccann/radon/actions/runs/40749197175) | mixed, cold rebuild | 700s | images | 253s | 155s | 273s |
+| [40710640135](https://github.com/joemccann/radon/actions/runs/40710640135) | mixed, python reused | 333s | images | 18s | 69s | skipped |
+
+Warm-rebuild p50 clock is 524.5s (n=4; a fifth same-cache sample does not
+exist yet, the wipe landed the same day). Predicted clock if the wipe is
+skipped and `df` stays ~1s: 372s, 400s, 412s, 426s (p50 406s, about -119s /
+-23%). The cold run stays image-authored after a 154s cut because the 273s
+build remains. The reuse run only had 18s of overhang. Queue on these runs
+is 2-3s and is not part of the gain. Runner wall on the four warm runs is
+3737-4003s; both image jobs skip the wipe, about -200s to -350s of runner
+time, under 20%.
+
+Representative critical path, run 40719830345 (clock 504s, queue 3s): path
+filter ends about +16s, `pytest (cloud al)` is still the slow test shard,
+pytest coverage ends before the image jobs, python image job 122927533216
+ends at +340s after a 165s wipe plus a 120s build. `df` at 15:49:36Z is
+86G free. Prestage and prepull then overlap. Deploy SSH is 118s.
+
+**Change.** `.github/workflows/app-images.yml` keeps the same deletions and
+`docker system prune -af || true` when `df -Pk` available KiB is missing or
+below `40 * 1024 * 1024`. At or above that bar it prints the skip and still
+prints `df -h /` before Buildx. Both image jobs share one script. No `needs`
+edge, test, coverage, provenance, health, rollback, or stability window
+changes. The 7.7GB runner cannot clear 40 GiB, so `#1330`'s ENOSPC path
+still deletes.
+
+**Safety and revert trigger.** Fail closed: unparsable `df` still deletes.
+The step stays immediately before `docker/setup-buildx-action` and has no
+`if:`. Revert this commit if an image job dies with ENOSPC after logging
+`skipping toolchain delete`, or if a runner with under 40 GiB free skips
+the delete.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 310s | pending | TBD until 5 samples |
+| Exact app images / Build node image | 262s | pending | TBD until 5 samples |
+
+Before python wall is run 40730390208 job 122965019214. Before node wall is
+run 40726456392 job 122951385640. Acceptance remains five comparable
+warm-rebuild mixed runs before and five after: same-class p50 at least 10%
+and 15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher. The warm-rebuild before set has
+four runs, not five. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_app_image_runner_disk.py` was red
+(`test_large_disk_skips_the_toolchain_delete` failed: no threshold) then
+green (5 passed in that file; 7 passed with the two node-image workflow
+asserts). `scripts/tests/test_cip020_python_image_reuse.py` stayed 15
+passed. Workflow YAML parses. The disk step passes `bash -n`. Full suites,
+Vitest, Docker builds, and workflow lint are left to PR CI.
