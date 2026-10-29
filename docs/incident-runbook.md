@@ -739,7 +739,10 @@ the unit stays failed.
   then `Signals refresh finished with N failed scan(s)`;
   `systemctl show radon-signals-refresh.service -p Result,NRestarts`
   → `exit-code` / `0`. Edge and `:8321/health/lite` stay up.
-- **Discriminating check:** curl 28 with http 000 (this case). Instant
+- **Discriminating check:** curl 28 with http 000 on the first attempt,
+  with no completed HTTP response before it (this case). A completed
+  `curl=0 http=502` at the FastAPI child budget, then curl 28 on the
+  retry, is `signals-refresh-script-timeout-retry`. Instant
   HTTP 502 with `Subprocess capacity exhausted` is
   `signals-refresh-capacity-502` (retry, `6093c087`). HTTP 502 with a
   scanner traceback is a real scan failure, still P1. `Result=signal`
@@ -759,6 +762,54 @@ the unit stays failed.
   (`RADON_SIGNALS_SCAN_TIMEOUT`, default 200),
   `cloud/services/radon-signals-refresh.service` (`TimeoutStartSec=1050`,
   `Environment=RADON_SIGNALS_SCAN_TIMEOUT=490`).
+
+---
+
+## signals-refresh-script-timeout-retry
+
+**`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a FastAPI script-timeout 502 is retried inside the
+leftover scan wall.** Peak: 2026-10-28 18:15Z, page
+`65b3441ed2bb1ad22398bc0479cc3e76`. The 19:05Z timer exited 0.
+
+- **Mechanism:** the unit exports `RADON_SIGNALS_SCAN_TIMEOUT=490`, and
+  that value is the whole scan's wall, not a fresh curl budget per
+  attempt. Theta's `run_script` timeout is 420s. A child that hits that
+  deadline returns HTTP 502 with detail `Script timed out after 420s`
+  (`curl=0`). The wrapper treated every 502 as a capacity shed and
+  retried. 420s plus the 8s retry sleep leaves about 62s. The retry
+  POST is accepted and still running when curl `-m` expires (`curl=28`,
+  `http=000`, 0 bytes). Starlette cancels that second scan. The wrapper
+  logs `outcome indeterminate` and exits 1. Strength in the same fire
+  still runs. `Type=oneshot` has no `Restart=`, so the unit stays
+  `failed` until the next timer. The 3-hour `theta-harvester` freshness
+  window does not page a single missed hour.
+- **Detection:** journal `FastAPI transient (curl=0 http=502)` one child
+  budget after the POST (theta: 420s, strength: 480s), then
+  `curl: (28) Operation timed out after N milliseconds with 0 bytes
+  received` where N is the leftover wall, then
+  `outcome indeterminate (curl=28, http=000)`, then
+  `Signals refresh finished with 1 failed scan(s)`. The other scan in
+  the same fire can still log `complete (OK)`. `:8321/health/lite`
+  stays authenticated.
+- **Discriminating check:** the first response is `curl=0` and `http=502`
+  at the child budget, and the retry is `curl=28` / `http=000`. An
+  instant 502 whose body is `Subprocess capacity exhausted` is
+  `signals-refresh-capacity-502`. Curl 28 on the first attempt, with no
+  completed HTTP response, is `signals-refresh-curl-timeout-pages-p1`.
+  A 502 whose body is a scanner traceback is still a real failure and
+  must exit 1. `Result=signal` is deploy stop-clean. If `/health/lite`
+  is down, or the database dependency is not `up`, stand down.
+- **Remediation (code):** a 502/503 body containing `script timed out`
+  is not retried and does not launch the direct scanner. The wrapper
+  exits 0 after logging `script budget exhausted` so the sibling scan
+  still runs and the next hourly timer retries. Instant non-timeout
+  502/503 retries are unchanged. Do not `reset-failed`. The 19:05Z fire
+  already recovered this page. After deploy, the next timer is enough.
+- **Regression:**
+  `scripts/tests/test_run_signals_refresh_wrapper.py::test_script_timeout_502_does_not_retry_into_a_curl_28`.
+- **Code:** `scripts/run_signals_refresh.sh` (`_is_script_timeout`,
+  `SCRIPT_BUDGET_EXIT`).
 
 ---
 

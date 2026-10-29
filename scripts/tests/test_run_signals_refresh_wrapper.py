@@ -30,7 +30,7 @@ import subprocess
 import textwrap
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 THETA_PATH = "/theta-harvester/scan"
@@ -171,6 +171,7 @@ def _run(
     *,
     retries: int | None = None,
     delay: int | None = None,
+    scan_timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
@@ -181,6 +182,8 @@ def _run(
         env["RADON_SIGNALS_REFRESH_RETRIES"] = str(retries)
     if delay is not None:
         env["RADON_SIGNALS_REFRESH_RETRY_DELAY_SECS"] = str(delay)
+    if scan_timeout is not None:
+        env["RADON_SIGNALS_SCAN_TIMEOUT"] = str(scan_timeout)
     return subprocess.run(
         ["bash", str(repo_dir / "scripts" / "run_signals_refresh.sh")],
         cwd=repo_dir,
@@ -381,6 +384,124 @@ def test_persistent_502_sheds_without_direct_fallback(tmp_path: Path) -> None:
     assert "fallback" not in combined
     assert "theta-direct" not in combined
     assert stub.hits.get(THETA_PATH, 0) >= 3, stub.hits
+
+
+class _ScriptTimeoutThenHang:
+    """First theta POST is the FastAPI child deadline. A retry must not start.
+
+    Production (page 65b3441ed2bb1ad22398bc0479cc3e76): theta returned HTTP 502
+    ``Script timed out after 420s`` at the 420s child budget. The 490s wall
+    left about 62s. The wrapper treated that 502 as a capacity shed, retried,
+    and curl exited 28 with zero bytes. That indeterminate result failed the
+    oneshot. Strength in the same fire still completed.
+    """
+
+    def __init__(self, port: int, *, first_delay_s: float) -> None:
+        self.theta_hits = 0
+        self.strength_hits = 0
+        self._first_delay_s = first_delay_s
+        self._stop = threading.Event()
+        self._server = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
+        self._server.daemon_threads = True
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def _handler(self) -> type[BaseHTTPRequestHandler]:
+        recorder = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802 - std lib signature
+                path = self.path.split("?", 1)[0]
+                if path == THETA_PATH:
+                    recorder.theta_hits += 1
+                    hit = recorder.theta_hits
+                    if hit == 1:
+                        time.sleep(recorder._first_delay_s)
+                        code = 502
+                        body = b'{"detail":"Script timed out after 420s"}'
+                    else:
+                        # A doomed retry sits here until curl -m fires.
+                        recorder._stop.wait(30)
+                        code = 502
+                        body = b'{"detail":"still running"}'
+                else:
+                    recorder.strength_hits += 1
+                    code = 200
+                    body = b'{"scan_time":"real"}'
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        return Handler
+
+    def start(self) -> None:
+        self._thread.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", self._server.server_port), timeout=0.1):
+                    return
+            except OSError:
+                time.sleep(0.01)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._server.shutdown()
+        self._server.server_close()
+
+
+def test_script_timeout_502_does_not_retry_into_a_curl_28(tmp_path: Path) -> None:
+    """A child-budget 502 must not be retried inside the leftover wall.
+
+    Scaled topology of the 2026-10-28 18:05Z fire: the first POST consumes
+    most of SCAN_TIMEOUT and returns the FastAPI script-timeout body. The
+    retry sleep still fits, so today's wrapper issues a second POST whose
+    ``-m`` is the leftover seconds. That curl exits 28, the wrapper reports
+    the outcome indeterminate, and the oneshot exits 1 even though strength
+    would have succeeded.
+    """
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "theta_harvester_scanner.py", "theta-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "strength_confirmation_scanner.py", "strength-direct")
+
+    port = _free_port()
+    stub = _ScriptTimeoutThenHang(port, first_delay_s=4)
+    stub.start()
+    try:
+        result = _run(
+            repo_dir,
+            python_bin,
+            port,
+            retries=2,
+            delay=1,
+            scan_timeout=8,
+        )
+    finally:
+        stub.stop()
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert stub.theta_hits == 1, stub.theta_hits
+    assert stub.strength_hits == 1, stub.strength_hits
+    lowered = combined.lower()
+    assert "script budget exhausted" in lowered
+    assert "next slot" in lowered
+    assert "indeterminate" not in lowered
+    assert "curl=28" not in lowered
+    assert "fallback" not in lowered
+    assert "theta-direct" not in lowered
+    assert "strength-direct" not in lowered
+    err_log = repo_dir / "logs" / "signals_refresh.err.log"
+    if err_log.exists():
+        assert "theta-direct" not in err_log.read_text()
 
 
 def test_wrapper_curl_deadline_covers_fastapi_scan_children() -> None:
