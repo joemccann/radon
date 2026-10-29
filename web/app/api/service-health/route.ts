@@ -14,7 +14,7 @@ import {
   type ServiceCategory,
 } from "@/lib/serviceHealthWindows";
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
-import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
+import { filterApplicableServiceHealthRows, reviewStageHealth } from "@/lib/serviceHealthApplicability";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
 import { clientIp, rateLimit } from "@/lib/rateLimit";
@@ -208,6 +208,9 @@ export async function GET(request?: Request): Promise<Response> {
       summary: {
         total: rows.length,
         failing_count: failing.length,
+      },
+      research: {
+        review_stage: reviewStageHealth(rows),
       },
     });
     return setNoStoreResponseHeaders(response, requestId);
