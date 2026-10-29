@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-28T09:00:09Z",
-  "node_count": 4226,
-  "edge_count": 8672,
+  "generated_at": "2026-10-29T20:08:39Z",
+  "node_count": 4233,
+  "edge_count": 8671,
   "areas": {
-    "web": 2391,
+    "web": 2388,
     "site": 159,
-    "scripts": 1503,
-    "cloud": 125,
+    "scripts": 1512,
+    "cloud": 126,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 466
+      "count": 463
     },
     {
       "id": "web/public",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 146
+      "count": 148
     },
     {
       "id": "scripts/backtest",
@@ -160,7 +160,7 @@
     {
       "id": "scripts/health_service",
       "area": "scripts",
-      "count": 4
+      "count": 5
     },
     {
       "id": "scripts/ib_gateway_remote",
@@ -210,7 +210,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 45
+      "count": 47
     },
     {
       "id": "scripts/runner",
@@ -230,7 +230,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 794
+      "count": 798
     },
     {
       "id": "scripts/trade_blotter",
@@ -275,7 +275,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 107
+      "count": 108
     },
     {
       "id": "lib/tools",
@@ -314,7 +314,7 @@
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 209,
+      "in": 210,
       "out": 0,
       "test": false
     },
@@ -347,6 +347,13 @@
       "test": false
     },
     {
+      "id": "web/lib/radonApi.ts",
+      "area": "web",
+      "in": 104,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "scripts/db/writer.py",
       "area": "scripts",
       "in": 100,
@@ -358,13 +365,6 @@
       "area": "web",
       "in": 61,
       "out": 44,
-      "test": false
-    },
-    {
-      "id": "web/lib/radonApi.ts",
-      "area": "web",
-      "in": 103,
-      "out": 1,
       "test": false
     },
     {
@@ -501,18 +501,18 @@
       "test": false
     },
     {
+      "id": "web/e2e/clear-fixtures.ts",
+      "area": "web",
+      "in": 36,
+      "out": 10,
+      "test": true
+    },
+    {
       "id": "scripts/clients/ib_client.py",
       "area": "scripts",
       "in": 42,
       "out": 3,
       "test": false
-    },
-    {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 35,
-      "out": 10,
-      "test": true
     },
     {
       "id": "web/lib/chartSystem.ts",
@@ -531,7 +531,7 @@
     {
       "id": "scripts/api/auth.py",
       "area": "scripts",
-      "in": 42,
+      "in": 43,
       "out": 0,
       "test": false
     },
@@ -564,6 +564,13 @@
       "test": false
     },
     {
+      "id": "web/lib/TickerDetailContext.tsx",
+      "area": "web",
+      "in": 37,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "scripts/clients/uw_client.py",
       "area": "scripts",
       "in": 36,
@@ -575,13 +582,6 @@
       "area": "web",
       "in": 38,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/TickerDetailContext.tsx",
-      "area": "web",
-      "in": 36,
-      "out": 2,
       "test": false
     }
   ],
