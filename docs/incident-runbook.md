@@ -4799,11 +4799,68 @@ stored `No eligible frontier model for provider mistral`.
   state file.
 - **Regression:**
   `scripts/tests/test_aa_frontier_refresh.py::test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_row`,
-  `test_preview_slug_still_rejects_the_only_scored_row`,
+  `test_unstable_slug_still_rejects_the_only_scored_row`,
   `test_specialist_display_name_still_rejects_a_stable_slug`,
   `test_preview_display_name_outside_the_frontier_band_does_not_replace_the_leader`.
+  On 2026-10-29 a preview slug that is the only scored row is kept. See
+  `aa-frontier-preview-slug-rename`. Experimental, alpha, beta, and exp
+  slugs still fail closed.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_UNSTABLE_RELEASE_SLUG`,
-  `_SPECIALIST_MODEL`, `_candidate`).
+  `_PREVIEW_SLUG`, `_SPECIALIST_MODEL`, `_candidate`).
+
+## aa-frontier-preview-slug-rename
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer when the only
+scored Mistral row is the shipping model renamed onto a preview slug.**
+Peak: 2026-10-29 07:03Z, page `ca76efea59ce98d37e851b9b96cf1494`. State
+file stayed on `completed_date=2026-10-27`. Health and journal reason:
+`No eligible frontier model for provider mistral`. Image
+`ghcr.io/joemccann/radon-python:e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9`
+already contained the 2026-10-28 display-name fix.
+
+- **Mechanism:** The 2026-10-28 07:17 catalog still had slug
+  `mistral-large-4` ("Mistral Large 4 Preview", released 2026-10-06,
+  priced, intelligence index about 25.3) and the current selector kept
+  it. By the 2026-10-29 07:03 run the public model list had renamed that
+  slug to `mistral-large-4-preview` and dropped `mistral-large-4`. The
+  07:20 ai-cycle raw catalog (716 rows) matches that: positive prices,
+  intelligence index 25.3, zero stable Mistral candidates, and no
+  `mistral-large-4` row. The
+  slug check treated `preview` as an unstable release, every other
+  Mistral row still failed the score or price check, and
+  `select_frontier_models` raised `CatalogError`. OpenAI through Alibaba
+  still had eligible rows, so the exception named mistral. The run was
+  about one second, so this was not the 30s transport timeout. Edge and
+  `/health/lite` stayed up (`database: up`). Not IB. Not the 2026-10-08
+  ok-heartbeat case: the state file was not already current, and the
+  detail is a `CatalogError` sentence.
+- **Detection:** `service_health` detail
+  `No eligible frontier model for provider mistral`. Journal stdout
+  `{"status": "error", "reason": "No eligible frontier model for provider mistral"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  State `checked_at` stays on the previous success.
+- **Discriminating check:** rename the prior catalog's
+  `mistral-large-4` slug to `mistral-large-4-preview` and the selector
+  raises the same `CatalogError`. The public model page for
+  `mistral-large-4` is gone and `mistral-large-4-preview` is the scored,
+  priced row. A stable scored sibling must still win, and a preview slug
+  must not set the frontier floor. An experimental, alpha, beta, or exp
+  slug that is the only scored row must still fail closed. A specialist
+  name must still fail closed. `Result=signal` or exit 143 inside a
+  deploy window is `deploy-stop-clean-oneshot-signal`. Python Turso
+  `SELECT 1` failing in the same minute is a platform outage: stand down.
+- **Remediation (code):** keep preview slugs out of the candidate pool
+  while any stable candidate remains. If that pool is empty, select the
+  preview slug instead of failing the oneshot. Do not `reset-failed` as
+  the fix. The next timer is 07:00 UTC. A manual start after the deploy
+  rewrites the state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_renamed_preview_slug_is_kept_when_it_is_the_only_scored_row`,
+  `test_unstable_slug_still_rejects_the_only_scored_row`,
+  `test_selects_highest_scoring_current_text_model_per_provider`.
+- **Code:** `scripts/aa_frontier_refresh.py` (`_PREVIEW_SLUG`,
+  `_candidate`, `select_frontier_models`).
 
 ## pnl-story-stock-entry-timing
 
