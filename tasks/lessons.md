@@ -1301,7 +1301,6 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.
 
-
 ### 2026-10-17: Diagnose incomplete responses from terminal evidence
 
 - A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON. A bounded output increase is a mitigation, not proof of completion: preserve one-call and fail-closed behavior and verify the next normal production decision. Synthetic token metadata proves protocol handling only.
@@ -1365,3 +1364,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-10-27: Generated-copy review must enforce prohibited contrasts
 
 - A model's clean humanizer verdict does not prove copy is clean. Enforce detectable prohibited constructions against final text, including “That's X, not Y”, at publication and generated-response boundaries. Cover provider fallbacks, cached copy, titles, bodies and captions; preserve source facts and uncertainty during rewrites.
+
+## 2026-10-28 - A signals-refresh curl 28 after a completed 502 is the retry
+
+- `radon-signals-refresh` can log `curl: (28)` and `http=000` after the first POST already returned `curl=0 http=502` at the FastAPI child budget (theta 420s). The 490s wall then has only the leftover seconds, and retrying that 502 as capacity produces the curl 28.
+- Do not classify that shape as `signals-refresh-curl-timeout-pages-p1`. That case is a first-attempt abort with no completed HTTP response. A body of `Script timed out after Ns` must not be retried. Exit 0 and let the next hourly slot retry. An instant capacity 502 still retries and sheds.
