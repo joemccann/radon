@@ -10,7 +10,7 @@ Research copy (capacity auctions, collars, MW-day) is written for specialists. T
 
 - Card / feed: `DashboardNewsFeed` item, on desktop and mobile.
 - Expanded post: `NewsfeedLightbox`.
-- Placement: same action row as Share. Star stays in the footer.
+- Placement: thumbs up/down, Explain and Share stay in one horizontal row. Expanded panels and feedback confirmations occupy their own rows below the controls, including after a vote is saved at 320px. Mobile controls keep 44px minimum heights. Star stays in the footer.
 - Button label: `Explain` (matches `Share` casing). Idle icon is outline `CircleHelp`.
 
 ## API
