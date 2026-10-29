@@ -1,6 +1,7 @@
 """A separately throttled archive cannot hold article publication hostage."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from http.client import RemoteDisconnected
 import hashlib
 import json
 import os
@@ -11,9 +12,11 @@ import time
 from textwrap import dedent
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pytest
 
+from api.db_http import DbHttpError
 from research import marketdesk_pdf_job as job
 from research.marketdesk_auth import MarketDeskError
 
@@ -125,6 +128,67 @@ def test_unexpected_cycle_error_still_fails_the_oneshot(monkeypatch):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(job, "run_cycle", boom)
+    assert job.main([]) == 1
+
+
+def _chained(message, cause):
+    error = DbHttpError(message)
+    error.__cause__ = cause
+    return error
+
+
+def _raising_cycle(tmp_path, monkeypatch, error):
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    dependency = deps(tmp_path)
+
+    def seed_missing(**kwargs):
+        raise error
+
+    dependency.store.seed_missing = seed_missing
+    dependency.service_cycle = recording
+    dependency.open_session = lambda env: pytest.fail("a database failure must not sign in")
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    return recorded
+
+
+@pytest.mark.parametrize("cause", [
+    TimeoutError("The read operation timed out"),
+    RemoteDisconnected("Remote end closed connection without response"),
+    URLError("timed out"),
+])
+def test_db_transport_blip_keeps_error_and_exits_zero(tmp_path, monkeypatch, capsys, cause):
+    """A chained Turso wire error is already the error row. Exit 1 pages P1."""
+    error = _chained("research transaction transport failed: " + type(cause).__name__, cause)
+    recorded = _raising_cycle(tmp_path, monkeypatch, error)
+    assert job.main([]) == 0
+    assert recorded == ["research transaction transport failed: " + type(cause).__name__]
+    assert "cycle transport non-fatal: " + type(cause).__name__ in capsys.readouterr().err
+
+
+def test_transport_message_without_cause_still_fails_the_oneshot(tmp_path, monkeypatch):
+    error = DbHttpError("research transaction transport failed: TimeoutError")
+    _raising_cycle(tmp_path, monkeypatch, error)
+    assert job.main([]) == 1
+
+
+def test_statement_db_error_still_fails_the_oneshot(tmp_path, monkeypatch):
+    _raising_cycle(tmp_path, monkeypatch, DbHttpError("no such table"))
+    assert job.main([]) == 1
+
+
+def test_runtime_error_chained_from_timeout_still_fails_the_oneshot(tmp_path, monkeypatch):
+    error = RuntimeError("db down")
+    error.__cause__ = TimeoutError("The read operation timed out")
+    _raising_cycle(tmp_path, monkeypatch, error)
     assert job.main([]) == 1
 
 

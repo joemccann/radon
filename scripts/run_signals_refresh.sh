@@ -131,24 +131,50 @@ PROBE_BUDGET_SECS="${RADON_SIGNALS_PROBE_BUDGET_SECS:-60}"
 # Distinct return code for "the general subprocess lane was full" (R-170), so
 # the caller can tell a capacity shed from a real scan failure.
 SHED_EXIT=75
+# FastAPI uses HTTP 502 for every script failure, including
+# "Script timed out after Ns". That body is the child budget, not a full
+# lane. Retrying it inside the leftover wall curl-28s and pages P1.
+SCRIPT_BUDGET_EXIT=76
+SCRIPT_TIMEOUT_MARKER="script timed out"
 
 mkdir -p logs
 
+_body_is_script_timeout() {
+    # $1 = response body. Match FastAPI's "Script timed out after Ns".
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | grep -qF -- "$SCRIPT_TIMEOUT_MARKER"
+}
+
+_is_script_timeout() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    case "$2" in
+        502|503) ;;
+        *) return 1 ;;
+    esac
+    _body_is_script_timeout "$3"
+}
+
 _retryable_signals_shed() {
-    # $1 = attempt (0-based), $2 = curl exit, $3 = http code
+    # $1 = attempt (0-based), $2 = curl exit, $3 = http code, $4 = body
     [ "$1" -lt "$RETRY_LIMIT" ] || return 1
     [ "$2" -eq 0 ] || return 1
     case "$3" in
-        502|503) return 0 ;;
+        502|503) ;;
+        *) return 1 ;;
     esac
-    return 1
+    # A script-timeout 502 already burned the child budget. Another POST
+    # cannot finish in the leftover seconds, and curl -m then kills it.
+    if _body_is_script_timeout "$4"; then
+        return 1
+    fi
+    return 0
 }
 
 refresh_scan() {
     local label="$1" endpoint="$2" script="$3"
     local url="http://${FASTAPI_HOST}:${FASTAPI_PORT}${endpoint}?preset=${PRESET}"
     local attempt=0
-    local HTTP_CODE=000 CURL_EXIT=28
+    local HTTP_CODE=000 CURL_EXIT=28 RESPONSE_BODY="" BODY_FILE=""
     local SCAN_DEADLINE=$((SECONDS + SCAN_TIMEOUT))
     local remaining delay
 
@@ -159,13 +185,17 @@ refresh_scan() {
             echo "$(date): ${label} scan deadline (${SCAN_TIMEOUT}s) reached" >&2
             break
         fi
-        HTTP_CODE=$(curl -sS -X POST -m "$remaining" -o /dev/null -w "%{http_code}" "$url")
+        BODY_FILE="$(mktemp)"
+        HTTP_CODE=$(curl -sS -X POST -m "$remaining" -o "$BODY_FILE" -w "%{http_code}" "$url")
         CURL_EXIT=$?
+        HTTP_CODE="${HTTP_CODE:-000}"
+        RESPONSE_BODY="$(head -c 2048 "$BODY_FILE" 2>/dev/null || true)"
+        rm -f "$BODY_FILE"
         if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
             echo "$(date): ${label} refresh via FastAPI complete (OK)"
             return 0
         fi
-        if ! _retryable_signals_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE"; then
+        if ! _retryable_signals_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
             break
         fi
         attempt=$((attempt + 1))
@@ -179,6 +209,16 @@ refresh_scan() {
         echo "$(date): ${label} FastAPI transient (curl=${CURL_EXIT} http=${HTTP_CODE}) — retry ${attempt}/${RETRY_LIMIT} in ${delay}s"
         sleep "$delay"
     done
+
+    # The child already ran to its own deadline and FastAPI returned the
+    # timeout detail. The leftover wall cannot hold another full scan, so
+    # a retry becomes curl 28 / http 000 and the oneshot pages. The next
+    # timer retries. Do not launch the direct scanner: the request was
+    # accepted (BUG-013).
+    if _is_script_timeout "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        echo "$(date): ${label} script budget exhausted (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$SCRIPT_BUDGET_EXIT"
+    fi
 
     # R-170: a 502/503 that survived the retries is the general subprocess
     # lane being FULL, not a fault. Capacity is
@@ -216,12 +256,14 @@ refresh_scan() {
 
 FAILURES=0
 SHED=0
+DEFERRED=0
 
 run_one() {
     refresh_scan "$@"
     case $? in
         0) ;;
         "$SHED_EXIT") SHED=$((SHED + 1)) ;;
+        "$SCRIPT_BUDGET_EXIT") DEFERRED=$((DEFERRED + 1)) ;;
         *) FAILURES=$((FAILURES + 1)) ;;
     esac
 }
@@ -234,8 +276,15 @@ if [ "$FAILURES" -gt 0 ]; then
     exit 1
 fi
 
+if [ "$DEFERRED" -gt 0 ]; then
+    echo "$(date): Signals refresh left ${DEFERRED} scan(s) for the next slot after a script budget" >&2
+fi
+
 if [ "$SHED" -gt 0 ]; then
     echo "$(date): Signals refresh shed ${SHED} scan(s) for subprocess capacity; the next slot retries" >&2
+fi
+
+if [ "$DEFERRED" -gt 0 ] || [ "$SHED" -gt 0 ]; then
     exit 0
 fi
 
