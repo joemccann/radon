@@ -436,8 +436,12 @@ def evaluate(
     deploy: Optional[dict] = None,
 ) -> list[CheckOutcome]:
     """One alert max per unit, plus a prior-P1 recovery observation."""
+    from scripts.health_service.retired import RETIRED_RESEARCH_UNIT
+
     outcomes = []
     for unit in current:
+        if (unit.get("Id") or "") == RETIRED_RESEARCH_UNIT:
+            continue
         p1_alert = _failed_alert(unit, now, deploy, previous) or _flap_alert(
             unit, previous, now
         )
