@@ -33,7 +33,6 @@ import {
   formatExpiry,
   daysToExpiry,
   detectStructure,
-  isBearishRiskReversal,
   computeNetPrice,
   computeNetOptionQuote,
   getComboEntryAction,
@@ -761,23 +760,6 @@ function OrderBuilder({
           </div>
         )}
 
-        {isBearishRiskReversal(legs) && (
-          <div
-            className="order-builder-routing-warning"
-            role="status"
-            data-testid="order-builder-bearish-rr-warning"
-          >
-            <div className="order-builder-routing-warning__title">
-              HEADS-UP: BEARISH RISK REVERSAL ROUTING
-            </div>
-            <div>
-              IB Smart sometimes silently drops this combo. If the order
-              sits in PendingSubmit with no permId after submit, place the
-              legs separately (SELL the call as one order, BUY the put as
-              another). Both transmit fine as singletons.
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Market: full quote telemetry above the tappable quote surface */}

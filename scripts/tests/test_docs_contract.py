@@ -3010,3 +3010,36 @@ class TestDocumentation20261028:
         assert "FLOW_REPORT_SHED_RETRIES = 12" in src
         assert "FLOW_REPORT_SHED_RETRY_DELAY_SECS = 5.0" in src
         assert "ORDERS_SYNC_SHED_RETRIES = 2" in src
+
+
+class TestDocumentation20261029:
+    """An unacknowledged combo is not a proven silent drop or a split-leg order."""
+
+    def test_chain_builder_does_not_advise_splitting_an_unacked_combo(self):
+        chain = (_ROOT / "web/components/ticker-detail/OptionsChainTab.tsx").read_text()
+        assert "place the legs separately" not in chain
+        assert "silently drops this combo" not in chain
+        assert "order-builder-bearish-rr-warning" not in chain
+
+        utils = (_ROOT / "web/lib/optionsChainUtils.ts").read_text()
+        doc = utils.split("export function isBearishRiskReversal", 1)[0]
+        assert "split into" not in doc
+        assert "silently drop" not in doc.lower()
+
+        paper = (_ROOT / "scripts/paper/__init__.py").read_text()
+        assert "silently drops" not in paper
+        assert "feedback_ib_combo_router_silent_drops_bearish_rr.md" not in paper
+
+        mode = (_ROOT / "web/lib/order/risk/paperMode.ts").read_text()
+        assert "PendingSubmit forever" not in mode
+        assert "feedback_ib_combo_router_silent_drops_bearish_rr.md" not in mode
+
+        trouble = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        section = trouble.split("### Scenario C:", 1)[1].split("### Scenario D:", 1)[0]
+        assert "can discard its order" not in section
+        assert "unknown" in section.lower()
+
+        owner = (_ROOT / "scripts/CLAUDE.md").read_text()
+        contract = owner.split("## Order Placement Contract", 1)[1].split("## ", 1)[0]
+        assert "Never advise splitting legs" in contract
+        assert "does not prove IB discarded" in contract

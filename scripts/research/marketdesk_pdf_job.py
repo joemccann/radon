@@ -103,6 +103,21 @@ def _deferral_code(exc):
     return code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else ""
 
 
+def _is_db_transport(exc):
+    """True only for a chained Turso wire error. Message text is not evidence.
+
+    service_cycle has already written the error row. Exit 0 lets the next
+    timer retry. A statement error has no transport cause and stays fatal.
+    """
+    from api.db_http import DbHttpError
+    from db.hrana_http import HranaHttpError, is_transport_error
+    if isinstance(exc, HranaHttpError):
+        return is_transport_error(exc)
+    if not isinstance(exc, DbHttpError) or exc.__cause__ is None:
+        return False
+    return is_transport_error(exc.__cause__)
+
+
 def _receipts_root(root):
     directory = root / "marketdesk" / "pdf-receipts"
     for path in (root, root / "marketdesk", directory):
@@ -211,6 +226,11 @@ def main(argv=None):
         print("[marketdesk-pdf] " + str(exc), file=sys.stderr)
         return 0 if _deferral_code(exc) in ALLOWANCE_DEFERRALS else 1
     except Exception as exc:
+        if _is_db_transport(exc):
+            # Cause type only. URLError text can carry a request URL.
+            named = exc.__cause__ if exc.__cause__ is not None else exc
+            print("[marketdesk-pdf] cycle transport non-fatal: " + type(named).__name__, file=sys.stderr)
+            return 0
         print("[marketdesk-pdf] " + type(exc).__name__, file=sys.stderr)
         return 1
     finally:

@@ -364,20 +364,26 @@ export async function runAssistantLoop(
     return formatRealizedPnlAnswer(lastPnlData) ?? "";
   };
 
-  const failsProseReview = (text: string) => {
-    if (!text?.trim()) return false; // Empty text accompanies normal tool-use responses.
-    if (hasRepetitiveText(text)) return true;
+  // A repetition loop fails the turn. A Humanizer style finding earns one
+  // regeneration and nothing more: the operator asked a question, and an
+  // answer carrying an "X, not Y" clause outranks no answer (2026-10-28,
+  // three straight Grok 4.7 turns died this way after their tools ran).
+  type ProseVerdict = "ok" | "style" | "repetitive";
+  const reviewProse = (text: string): ProseVerdict => {
+    if (!text?.trim()) return "ok"; // Empty text accompanies normal tool-use responses.
+    if (hasRepetitiveText(text)) return "repetitive";
     try {
-      return localHumanizerFindings({ content: text }).some(finding => finding.category === "negative_parallelism");
+      const findings = localHumanizerFindings({ content: text });
+      return findings.some(finding => finding.category === "negative_parallelism") ? "style" : "ok";
     } catch {
-      return true; // Over-budget prose uses the existing bounded repair/error path.
+      return "style"; // Over the finding budget: one regeneration, never a failed turn.
     }
   };
 
   const checkedChat = async (request: LlmChatRequest) => {
     const response = await chat(request);
     usedFallback = usedFallback || Boolean(response.usedFallback);
-    if (!failsProseReview(response.text)) return response;
+    if (reviewProse(response.text) === "ok") return response;
     accumulateUsage(response.usage);
     console.warn("[assistant] rejected completion quality; retrying once");
     if (signal?.aborted) throw new AssistantResponseQualityError();
@@ -388,7 +394,9 @@ export async function runAssistantLoop(
         "Respond concisely to the user's request. Do not narrate waiting for tools or repeat phrases.",
     });
     usedFallback = usedFallback || Boolean(repaired.usedFallback);
-    if (failsProseReview(repaired.text)) throw new AssistantResponseQualityError();
+    const verdict = reviewProse(repaired.text);
+    if (verdict === "repetitive") throw new AssistantResponseQualityError();
+    if (verdict === "style") console.warn("[assistant] repair kept a style finding; answering anyway");
     return repaired;
   };
 

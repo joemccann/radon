@@ -204,11 +204,9 @@ class ExitOrdersHandler(BaseHandler):
         gap_pct = abs(target_price - current_price) / current_price
         return gap_pct <= self.max_gap_pct
 
-    # Ack polling mirrors the Order Placement Contract enforced by
-    # ib_place_order.py (single-leg deadline): IB silently discards an
-    # order still unacknowledged (permId==0, PendingSubmit) when the
-    # placing client disconnects, so PLACED must never be written on an
-    # unconfirmed trade (REL-002 / R-003).
+    # Ack polling mirrors the single-leg deadline in ib_place_order.py.
+    # An unacknowledged order (permId==0, PendingSubmit) has an unknown
+    # outcome, so the journal must not be marked PLACED (REL-002 / R-003).
     ACK_DEADLINE_SECONDS = 6.0
     ACK_POLL_STEP_SECONDS = 0.25
     _TERMINAL_FAILED_STATUSES = {"Rejected", "Cancelled", "ApiCancelled", "Inactive"}
@@ -216,10 +214,26 @@ class ExitOrdersHandler(BaseHandler):
 
     @staticmethod
     def _ack_perm_id(trade: Any) -> Optional[int]:
-        """permId as a real int, or None for mock/None/junk (T-023 lesson:
-        never let a non-int truthy object count as an acknowledgement)."""
-        perm_id = getattr(trade.order, "permId", None)
-        return perm_id if isinstance(perm_id, int) and not isinstance(perm_id, bool) else None
+        """permId as a real int, or None for mock/None/junk/bool.
+
+        ib_insync writes ``openOrder`` onto ``Order.permId`` and
+        ``orderStatus`` onto ``OrderStatus.permId``. Either nonzero id is
+        an acknowledgement (REL-334 / R-745, same rule as
+        ``ib_place_order._trade_perm_id``). Reading only the order object
+        cancelled a live protective sell whose status was still
+        PendingSubmit, left the journal PENDING, and let the next cycle
+        place another. A bool is an int subclass and is still junk
+        (T-023)."""
+        for source in (
+            getattr(trade, "order", None),
+            getattr(trade, "orderStatus", None),
+        ):
+            perm_id = getattr(source, "permId", None)
+            if isinstance(perm_id, bool) or not isinstance(perm_id, int):
+                continue
+            if perm_id != 0:
+                return perm_id
+        return None
 
     def _confirm_placement(self, client: Any, trade: Any) -> tuple:
         """Poll until IB acknowledges (nonzero permId or accepted status),

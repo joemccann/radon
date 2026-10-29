@@ -13587,23 +13587,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   letter-spacing: 0.04em;
 }
 
-.order-builder-routing-warning {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-secondary);
-  padding: 6px 8px;
-  background: color-mix(in srgb, var(--warning, var(--fault)) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, var(--fault)) 40%, transparent);
-  border-radius: 4px;
-  line-height: 1.5;
-}
-
-.order-builder-routing-warning__title {
-  letter-spacing: 0.04em;
-  margin-bottom: 2px;
-  color: var(--text-primary);
-}
-
 .order-builder-legs {
   display: flex;
   flex-direction: column;
