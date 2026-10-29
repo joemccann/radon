@@ -42,6 +42,14 @@ matching old data as stale with its original observation/expiry timestamps. It
 never replaces missing data with zero or a successful empty observation. Provider
 exception strings, URLs and response error bodies do not enter snapshots or stdout.
 
+`--scheduled` exits 0 when every ticker is `ok`, `partial`, or `unavailable`
+only because each section is `rate_limited`. That cycle still records a non-ok
+health row, so a standing quota problem stays visible without latching
+`radon-uw-research.service` as `Result=exit-code`. Authentication, entitlement,
+schema, request-budget and other upstream failures still exit 1. An invalid
+ticker or any exception before a snapshot is written still exits 1 with
+`research_collection_unavailable` and no provider text.
+
 ## Integrity and bounded storage
 
 Snapshots live at `data/uw_research/TICKER.json`, written by `atomic_io` with
