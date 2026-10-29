@@ -1365,3 +1365,7 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-10-27: Generated-copy review must enforce prohibited contrasts
 
 - A model's clean humanizer verdict does not prove copy is clean. Enforce detectable prohibited constructions against final text, including “That's X, not Y”, at publication and generated-response boundaries. Cover provider fallbacks, cached copy, titles, bodies and captions; preserve source facts and uncertainty during rewrites.
+
+## 2026-10-28 - Requested PDF backlog precedence
+
+- A monitored cohort is not a scheduling priority. Persist explicit operator priority in the shared queue and verify the actual claim order; report current PDF policy exclusions separately from published-but-pending counts. Never change not-before timestamps to simulate priority or claim that monitoring changes the worker's ordering.
