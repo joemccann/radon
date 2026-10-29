@@ -536,8 +536,8 @@ export default function DashboardNewsFeed() {
                     {` · ${post.source.documentDate}${post.source.kind === "dropbox" ? ` · pp. ${post.source.pages.join(", ")}` : ""}`}
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}
-                  {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}
-                  <div className={styles.postActions}>
+                  <div className={styles.postActions} data-newsfeed-actions>
+                    {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}
                     <NewsfeedExplain post={post} imageUrls={post.images ?? []} />
                     <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
                   </div>

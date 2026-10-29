@@ -1,3 +1,14 @@
+# MarketDesk requested PDF backlog priority (2026-10-28)
+
+- [x] MP1 depends_on: [] Freeze the requested 32 IDs; verify live retry-time ordering and current policy separately.
+- [x] MP2 depends_on: [MP1] Red/green durable priority, strict cohort precedence, restart, throttle, lease and policy regressions.
+- [ ] MP3 depends_on: [MP2] Focused/full gates, owner docs, exact-head CI, accepted green notification and administrator merge.
+- [ ] MP4 depends_on: [MP3] Deploy, set the frozen cohort through the managed application container, verify next admitted PDF and monitor exact cohort until cleared.
+
+## Review
+
+Fourteen regressions failed before implementation. Final focused/replay: 111 passed; touched store coverage 95%. Full cloud: 3,533 passed / 24 skipped. Full web: 11,679 passed / 8 skipped. Full Python: 19,363 passed / 12 skipped / 63 subtests; three initial failures replayed green after the owner-doc and local dependency-layout repairs, with the untouched UW-client mock case green in isolation. Priority is durable, token/clock preserving and fail-closed on publication/current PDF policy. PR CI and production activation remain pending; unrelated primary-checkout edits remain untouched.
+
 # Equity research newsfeed admission repair (2026-10-28)
 
 - [x] EQ1 depends_on: [] Reproduce against recent published articles and fresh portfolio/watchlist; freeze an eligibility audit.
@@ -10487,3 +10498,27 @@ Final source review: broker/API/web independent review completed; recovery retai
 New operator evidence: CBRS SELL close also timed out at 2026-10-28 15:09:54Z, order 417, total 23.3578s. Production container source matches origin/main. Code review proves warning 399 is emitted but omitted from trade.log and discarded by the placer; child stderr is not retained after normal process exit. Whether any warning occurred on 417 is unknown. Add order-scoped warning retention before final publication; do not make benign warnings blocking. d74987047 passed all 37 reported checks before this extension.
 
 Warning diagnostics RED: cb8e9271f / run 40715646220 produced five expected missing-warning failures and 3016 passing tests; two unrelated/farm-warning controls passed. Runtime now preserves nonblocking, order-scoped 399/2109 diagnostics across all five post-transmit result paths, with existing credential scrubbing, deduplication and bounded retention. Independent review found no blocker. Original warning-test blobs unchanged for final GREEN. Native IBKR combo acceptance is untested; the operator has tried only Radon.
+
+
+## Share regression and voice retirement (2026-10-29)
+
+- [x] T1 depends_on: [] Reproduce pending-media composition and mobile action layout regressions with tests.
+- [x] T2 depends_on: [T1] Make original-copy composition immediate and retire share voice generation.
+- [x] T3 depends_on: [T1] Keep feedback, Explain and Share horizontal on mobile.
+- [x] T4 depends_on: [T2, T3] Run focused/full applicable suites, browser verification and independent review.
+
+- [ ] T5 depends_on: [T4] Publish a focused PR from current main; wait for every latest-head check, accepted PR-green notification, then operator-authorized admin merge and production verification.
+
+Review:
+- Three implementation agents and independent client/backend/mobile/E2E review; no remaining blockers. Red/green captured for immediate caption, protected retirement and shared action grouping. Browser found a real 320px wrap; final measured controls remain 44px high and share one baseline with full-width panels below.
+- Full web: 11,073 passed, 10 skipped / 1,112 files. Command: `RADON_RELEASE_VERSION=0.13.9 npm test` from web. Unpinned baseline had five unchanged next.config import timeouts: synchronous release-history import measured 9,228ms against a 5s timeout; the existing image-build-supported version override reduces import to 10ms, isolated config 29/29 passed. No timeout or gate changed.
+- Browser: 33/33 passed using Chromium at 320/393/640/1440 and iPhone Safari; pending/failing media, actual X popup/clipboard, full-copy reopen, genuine PNG/MP4 exports, contained feed/lightbox panels and simultaneous feedback+Share verified. Final dark mobile and pending-preview screenshots inspected under web/test-results.
+- Focused share component/retirement: 26 passed, 98.48% line coverage. Focused docs contract: 2 passed. Broader docs: 185 passed, 6 baseline failures (existing external .claude/worktrees scan, TEST_LOG/TEST_AUDIT ledgers behind origin/main, missing yaml/requests). No Python and Vitest suites ran concurrently.
+- Typecheck: four existing errors (unchanged optional content passed to Explain; three unchanged sameOrigin ProcessEnv incompatibilities). No errors added by this diff. git diff --check clean.
+- Share uses sanitized existing article text; retired model prompts/cache/progress modules and tests removed, protected endpoint returns 410/no-store. PDF/MarketDesk editorial pipelines remain outside this share-specific retirement.
+- Humanizer final editorial check for new synthetic caption fixture: "Yen hedge demand increased. Positioning remained near neutral." scored 100/100, no visible-rubric or supplemental qualitative findings. Existing source/regression text is preserved as fixture data, not newly drafted publishable copy.
+- Release preparation preserves unrelated dirty task files/data/jobs/output in the original checkout.
+- Fresh-main release validation on e3b778814: independent staged implementation review approved SHA256 32d3604cf8203fd0144fe82708364aac706e9784dfc51a5c0bbc8b9693a90882; Python 19,366 passed/12 skipped, cloud 3,533 passed/24 skipped, browser 33 passed, docs 194 passed and typecheck passed. Dependency directories are physical APFS clones for isolated Next resolution; an initial symlink-only environment failure was repaired and the full Python suite rerun green. Final web: 11,091 passed/10 skipped across 1,114 files with the supported release-version override; post-browser typecheck passed. All local required gates are green before commit.
+- PR #1347 initial head 8bfc09131: scripts-df rejected the stale held-out mobile-spec ledger stamp. Reproduced locally (1 failed/5 passed); added the dated receipt for the existing 12-case iPhone Safari run without changing CI membership or any test gate.
+- Curation repair verification: 200/200 curation and documentation tests passed; runtime implementation and its independent review digest remain unchanged.
+- Browser CI repair: named feedback regions replace screenshots of flattened wrappers; actual Saved-status 320px wrap reproduced at 48px and repaired by giving confirmation its own row. Independent review approved; full web 11,091 passed/10 skipped and combined browser 36 passed, including unchanged actual voting payload/down-hide/up-stay assertions. Runtime retirement and original-copy flow remain unchanged.
