@@ -179,6 +179,43 @@ describe("replica-watchdog reliability history applicability", () => {
 });
 
 
+describe("retired dropbox-research review health", () => {
+  it("omits the stale row from failing health and points review at the live services", async () => {
+    mockReplicaExists(false);
+    const stale = "2026-10-15T20:02:02Z";
+    const live = new Date().toISOString();
+    mockDbResults([
+      {
+        ...healthRow("dropbox-research", stale, "error"),
+        last_error: JSON.stringify({
+          stages: [{ stage: "review", state: "error", error: "DbHttpError" }],
+        }),
+      },
+      healthRow("marketdesk-research", live, "ok"),
+      { ...healthRow("marketdesk-pdf", live, "error"), last_error: "preview_quota" },
+    ]);
+    const { GET } = await import("../app/api/service-health/route");
+    const body = await (await GET()).json();
+    expect(body.services.map((row: DbRow) => row.service)).toEqual([
+      "marketdesk-research",
+      "marketdesk-pdf",
+    ]);
+    expect(body.failing.map((row: DbRow) => row.service)).toEqual(["marketdesk-pdf"]);
+    expect(JSON.stringify(body)).not.toContain("DbHttpError");
+    expect(body.research.review_stage).toMatchObject({
+      retired: true,
+      retired_service: "dropbox-research",
+      retired_unit: "radon-research.service",
+      runs_on: [],
+    });
+    expect(body.research.review_stage.live_services).toEqual([
+      { service: "marketdesk-research", state: "ok", updated_at: live },
+      { service: "marketdesk-pdf", state: "error", updated_at: live },
+    ]);
+  });
+});
+
+
 describe("retired exit-orders health applicability", () => {
   it("omits the unscheduled legacy control while preserving unknown writers", async () => {
     mockReplicaExists(false);
