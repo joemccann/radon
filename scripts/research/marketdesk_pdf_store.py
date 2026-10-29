@@ -53,6 +53,28 @@ def enqueue(ref, *, now=None):
     return bool(rows)
 
 
+def prioritize(article_ids):
+    """Replace the bounded requested cohort atomically; leave every retry/lease clock intact.
+
+    This is scheduling preference only. Publication, current PDF policy and the
+    shared account admission clock still authorize every claimed download.
+    """
+    if not isinstance(article_ids, (list, tuple)) or len(article_ids) > 200:
+        raise ValueError("expected at most 200 article IDs")
+    if any(not isinstance(key, str) or not ID.fullmatch(key) for key in article_ids):
+        raise ValueError("invalid priority article ID")
+    keys = sorted(set(article_ids))
+    statements = [("UPDATE marketdesk_pdf_queue SET priority=0 WHERE priority=1", ())]
+    if keys:
+        placeholders = ",".join("?" for _ in keys)
+        known = hrana_execute(f"SELECT article_id FROM marketdesk_pdf_queue WHERE article_id IN ({placeholders})", tuple(keys))
+        if {row[0] for row in known} != set(keys):
+            raise ValueError("priority article is not in the PDF queue")
+        statements.append((f"UPDATE marketdesk_pdf_queue SET priority=1 WHERE article_id IN ({placeholders})", tuple(keys)))
+    hrana_transaction(statements)
+    return len(keys)
+
+
 def seed_missing(*, now=None):
     """Replay the entire known ledger, not only the provider's latest-25 listing."""
     stamp = _stamp(now)
@@ -105,7 +127,7 @@ def prepare_selection(*, now=None):
         f"AND q.article_id IN ({ELIGIBLE_IDS}) "
         "AND NOT EXISTS(SELECT 1 FROM marketdesk_pdf_selection x JOIN marketdesk_articles a2 ON a2.article_id=x.article_id "
         "JOIN posts p2 ON p2.id=a2.post_id WHERE x.article_id=q.article_id AND x.context_hash=? "
-        "AND x.post_updated_at IS p2.updated_at) ORDER BY q.article_id LIMIT 100) ORDER BY a.article_id", (key,))
+        "AND x.post_updated_at IS p2.updated_at) ORDER BY q.priority DESC,q.article_id LIMIT 100) ORDER BY a.article_id", (key,))
     statements = []
     for article_id, title, content, publisher, updated in rows:
         eligible, reason = policy.decide(title=title, content=content, publisher=publisher, context=context)
@@ -119,6 +141,15 @@ def prepare_selection(*, now=None):
     return key
 
 
+def _priority_gate():
+    # Evaluate in the claim SQL too, so a concurrent operator update cannot let
+    # ordinary work overtake a newly configured, eligible priority cohort.
+    # Future retry/active lease rows still reserve precedence, never a download.
+    return ("(priority=1 OR NOT EXISTS(SELECT 1 FROM marketdesk_pdf_queue pq WHERE pq.priority=1 "
+            "AND pq.status!='downloaded' AND pq.article_id IN (" + ELIGIBLE_IDS + ") "
+            "AND pq.article_id IN (" + _selected() + ")))")
+
+
 def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     """Atomic fleet-wide throttle before a bounded single-row lease. A crash can only defer work."""
     current = _time(now)
@@ -126,10 +157,11 @@ def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     if not pending(limit=1, now=current):
         return None
     if not hrana_execute(
-        f"SELECT 1 FROM marketdesk_pdf_queue WHERE article_id IN ({_selected()}) "
+        f"SELECT 1 FROM marketdesk_pdf_queue WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) "
+        f"AND {_priority_gate()} "
         "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) OR "
         "(status='downloading' AND julianday(lease_until)<=julianday(?))) LIMIT 1",
-        (context_hash, _stamp(current), _stamp(current))):
+        (context_hash, context_hash, _stamp(current), _stamp(current))):
         return None
     interval = max(MIN_INTERVAL_SECONDS, min(int(interval_seconds), 86400))
     allowed = hrana_execute(
@@ -142,10 +174,11 @@ def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
         "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?,lease_until=?,updated_at=? "
         "WHERE article_id=(SELECT article_id FROM marketdesk_pdf_queue "
         f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) "
+        f"AND {_priority_gate()} "
         "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
         "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
-        "ORDER BY next_attempt_at,published_at,article_id LIMIT 1) RETURNING article_id,article_url,title,published_at",
-        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), _stamp(current), context_hash, _stamp(current), _stamp(current)))
+        "ORDER BY priority DESC,next_attempt_at,published_at,article_id LIMIT 1) RETURNING article_id,article_url,title,published_at",
+        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), _stamp(current), context_hash, context_hash, _stamp(current), _stamp(current)))
     if not rows:
         return None
     key, url, title, published = rows[0]

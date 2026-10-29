@@ -1,3 +1,14 @@
+# MarketDesk requested PDF backlog priority (2026-10-28)
+
+- [x] MP1 depends_on: [] Freeze the requested 32 IDs; verify live retry-time ordering and current policy separately.
+- [x] MP2 depends_on: [MP1] Red/green durable priority, strict cohort precedence, restart, throttle, lease and policy regressions.
+- [ ] MP3 depends_on: [MP2] Focused/full gates, owner docs, exact-head CI, accepted green notification and administrator merge.
+- [ ] MP4 depends_on: [MP3] Deploy, set the frozen cohort through the managed application container, verify next admitted PDF and monitor exact cohort until cleared.
+
+## Review
+
+Fourteen regressions failed before implementation. Final focused/replay: 111 passed; touched store coverage 95%. Full cloud: 3,533 passed / 24 skipped. Full web: 11,679 passed / 8 skipped. Full Python: 19,363 passed / 12 skipped / 63 subtests; three initial failures replayed green after the owner-doc and local dependency-layout repairs, with the untouched UW-client mock case green in isolation. Priority is durable, token/clock preserving and fail-closed on publication/current PDF policy. PR CI and production activation remain pending; unrelated primary-checkout edits remain untouched.
+
 # Equity research newsfeed admission repair (2026-10-28)
 
 - [x] EQ1 depends_on: [] Reproduce against recent published articles and fresh portfolio/watchlist; freeze an eligibility audit.

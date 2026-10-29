@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1] / "db/migrations"
 def db(monkeypatch):
     monkeypatch.setattr(store.policy, "load_context", lambda: store.policy.Context(frozenset(), {}))
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql"):
+    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql", "0105_marketdesk_pdf_priority.sql"):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
@@ -415,3 +415,120 @@ def test_stale_owner_cannot_claim_another_workers_success_or_clear_quota(db):
     db.execute("UPDATE marketdesk_pdf_throttle SET quota_failures=2,last_error='preview_quota'")
     assert not store.record_download(old, asset, 'a'*64, now=NOW, provider_success=True)
     assert db.execute("SELECT quota_failures,last_error FROM marketdesk_pdf_throttle").fetchone() == (2,'preview_quota')
+
+
+def priority_pair(db):
+    for key in ('Older000001', 'Priority001'):
+        published(db, key)
+    store.enqueue(ref('Older000001'), now=NOW - timedelta(days=1))
+    store.enqueue(ref('Priority001'), now=NOW)
+    return 'Older000001', 'Priority001'
+
+
+def test_priority_cohort_precedes_older_unrelated_queue_and_survives_restart(db, monkeypatch):
+    ordinary, priority = priority_pair(db)
+    clocks = db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchall()
+    dates = db.execute('SELECT article_id,next_attempt_at FROM marketdesk_pdf_queue ORDER BY article_id').fetchall()
+    assert store.prioritize([priority]) == 1
+    assert store.prioritize([priority, priority]) == 1
+    assert db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchall() == clocks
+    assert db.execute('SELECT article_id,next_attempt_at FROM marketdesk_pdf_queue ORDER BY article_id').fetchall() == dates
+    import importlib
+    execute, transaction = store.hrana_execute, store.hrana_transaction
+    importlib.reload(store)
+    # Reloaded module uses the same durable database, not process-local priority.
+    monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_transaction", transaction)
+    work = store.claim_next(now=NOW)
+    assert work.article_id == priority
+    assert store.claim_next(now=NOW + timedelta(seconds=1799)) is None
+    assert store.record_download(work, store.ASSET_BASE + 'a'*64 + '.pdf', 'a'*64, now=NOW)
+    assert store.claim_next(now=NOW + timedelta(seconds=1800)).article_id == ordinary
+
+
+def test_priority_waits_for_its_retry_deadline_without_spending_other_pdf(db):
+    _, priority = priority_pair(db)
+    store.prioritize([priority])
+    db.execute('UPDATE marketdesk_pdf_queue SET next_attempt_at=? WHERE article_id=?',
+               ((NOW + timedelta(hours=1)).isoformat(), priority))
+    clock = db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchone()
+    assert store.claim_next(now=NOW) is None
+    assert db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchone() == clock
+    assert store.claim_next(now=NOW + timedelta(hours=1)).article_id == priority
+
+
+@pytest.mark.parametrize('change', ['held', 'dropped', 'off_book', 'source_missing'])
+def test_priority_cannot_override_publication_source_or_pdf_policy(db, change):
+    ordinary, priority = priority_pair(db)
+    store.prioritize([priority])
+    if change in ('held', 'dropped'):
+        db.execute('UPDATE marketdesk_articles SET status=? WHERE article_id=?', (change, priority))
+    elif change == 'off_book':
+        db.execute('UPDATE posts SET content=? WHERE id=?', ('$MSFT earnings rose 12%.', 'research-'+priority))
+    else:
+        db.execute('DELETE FROM research_post_sources WHERE post_id=?', ('research-'+priority,))
+    assert store.claim_next(now=NOW).article_id == ordinary
+    assert db.execute('SELECT attempts FROM marketdesk_pdf_queue WHERE article_id=?', (priority,)).fetchone() == (0,)
+
+
+def test_priority_still_obeys_account_backoff_and_token_lease(db):
+    _, priority = priority_pair(db)
+    store.prioritize([priority])
+    first = store.claim_next(now=NOW)
+    store.retry(first, 'preview_quota', now=NOW)
+    assert store.claim_next(now=NOW + timedelta(hours=5, minutes=59)) is None
+    new = store.claim_next(now=NOW + timedelta(hours=6))
+    assert new.article_id == priority and new.token != first.token
+    assert not store.record_download(first, store.ASSET_BASE+'b'*64+'.pdf', 'b'*64)
+
+
+@pytest.mark.parametrize('bad', [['../bad'], ['Unknown0001'], ['x'*17], 'Priority001', ['Priority001', 1], [f'Key{i:08}' for i in range(201)]])
+def test_priority_configuration_validates_before_any_change(db, bad):
+    _, priority = priority_pair(db)
+    store.prioritize([priority])
+    with pytest.raises(ValueError):
+        store.prioritize(bad)
+    assert db.execute('SELECT article_id FROM marketdesk_pdf_queue WHERE priority=1').fetchall() == [(priority,)]
+
+
+def test_priority_configuration_is_atomic_and_can_be_cleared(db):
+    ordinary, priority = priority_pair(db)
+    store.prioritize([priority])
+    db.execute("CREATE TRIGGER fail_priority BEFORE UPDATE ON marketdesk_pdf_queue WHEN NEW.article_id='Older000001' AND NEW.priority=1 BEGIN SELECT RAISE(ABORT,'failed priority'); END")
+    with pytest.raises(sqlite3.IntegrityError):
+        store.prioritize([ordinary])
+    assert db.execute('SELECT article_id FROM marketdesk_pdf_queue WHERE priority=1').fetchall() == [(priority,)]
+    assert store.prioritize([]) == 0
+    assert store.claim_next(now=NOW).article_id == ordinary
+
+
+def test_priority_selection_refresh_precedes_unrelated_stale_batches(db):
+    for i in range(101):
+        published(db, f'Batch{i:07d}')
+    store.seed_missing(now=NOW)
+    store.prioritize(['Batch0000100'])
+    assert store.claim_next(now=NOW).article_id == 'Batch0000100'
+
+
+def test_priority_update_between_scan_and_claim_is_rechecked(db, monkeypatch):
+    _, priority = priority_pair(db)
+    execute = store.hrana_execute
+    def change(sql, args=(), **kwargs):
+        result = execute(sql, args, **kwargs)
+        if sql.startswith('UPDATE marketdesk_pdf_throttle SET next_attempt_at='):
+            store.prioritize([priority])
+        return result
+    monkeypatch.setattr(store, 'hrana_execute', change)
+    assert store.claim_next(now=NOW).article_id == priority
+
+
+def test_priority_migration_preserves_existing_queue_and_clock():
+    conn = sqlite3.connect(':memory:')
+    for name in ('0001_init.sql', '0103_marketdesk_pdf_queue.sql', '0104_marketdesk_pdf_account_backoff.sql'):
+        conn.executescript((ROOT/name).read_text())
+    conn.execute("INSERT INTO marketdesk_pdf_queue(article_id,article_url,published_at,next_attempt_at,first_seen_at,updated_at) VALUES('Priority001','source','published','retry','seen','updated')")
+    before = conn.execute('SELECT * FROM marketdesk_pdf_throttle').fetchall()
+    conn.executescript((ROOT/'0105_marketdesk_pdf_priority.sql').read_text())
+    assert conn.execute('SELECT next_attempt_at,priority FROM marketdesk_pdf_queue').fetchone() == ('retry', 0)
+    assert conn.execute('SELECT * FROM marketdesk_pdf_throttle').fetchall() == before
+    conn.close()
