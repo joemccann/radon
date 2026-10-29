@@ -29,17 +29,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
-      # Private hosted runners are about 7.7GB. Preinstalled Android, .NET,
-      # GHC, GHCup and CodeQL leave too little room to load the image.
+      # Private 7.7GB runners still ENOSPC while Docker loads the image
+      # (#1330). ubuntu-24.04 main runs already have ~86 GiB free; deleting
+      # the preinstalled toolchains there costs 69-339s and becomes the
+      # deploy authorizer. Unknown or low free space still deletes.
       - name: Free runner disk
         run: |
           df -h /
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/.ghcup || true
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-          docker system prune -af || true
+          avail_kb="$(df -Pk / | awk 'NR==2 { print $4 }')"
+          threshold_kb=$((40 * 1024 * 1024))
+          if printf '%s' "$avail_kb" | grep -Eq '^[0-9]+$' && [ "$avail_kb" -ge "$threshold_kb" ]; then
+            echo "disk already has ${avail_kb} KiB free; skipping toolchain delete"
+          else
+            echo "free space ${avail_kb:-unknown} KiB is below ${threshold_kb}; deleting preinstalled toolchains"
+            sudo rm -rf /usr/local/lib/android || true
+            sudo rm -rf /usr/share/dotnet || true
+            sudo rm -rf /opt/ghc || true
+            sudo rm -rf /usr/local/.ghcup || true
+            sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+            docker system prune -af || true
+          fi
           df -h /
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -199,17 +208,26 @@ jobs:
           done
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
-      # Private hosted runners are about 7.7GB. Preinstalled Android, .NET,
-      # GHC, GHCup and CodeQL leave too little room to load the image.
+      # Private 7.7GB runners still ENOSPC while Docker loads the image
+      # (#1330). ubuntu-24.04 main runs already have ~86 GiB free; deleting
+      # the preinstalled toolchains there costs 69-339s and becomes the
+      # deploy authorizer. Unknown or low free space still deletes.
       - name: Free runner disk
         run: |
           df -h /
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/.ghcup || true
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-          docker system prune -af || true
+          avail_kb="$(df -Pk / | awk 'NR==2 { print $4 }')"
+          threshold_kb=$((40 * 1024 * 1024))
+          if printf '%s' "$avail_kb" | grep -Eq '^[0-9]+$' && [ "$avail_kb" -ge "$threshold_kb" ]; then
+            echo "disk already has ${avail_kb} KiB free; skipping toolchain delete"
+          else
+            echo "free space ${avail_kb:-unknown} KiB is below ${threshold_kb}; deleting preinstalled toolchains"
+            sudo rm -rf /usr/local/lib/android || true
+            sudo rm -rf /usr/share/dotnet || true
+            sudo rm -rf /opt/ghc || true
+            sudo rm -rf /usr/local/.ghcup || true
+            sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+            docker system prune -af || true
+          fi
           df -h /
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0

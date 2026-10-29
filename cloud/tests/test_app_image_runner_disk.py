@@ -128,3 +128,79 @@ def test_cleanup_is_fail_open_and_idempotent(tmp_path: Path) -> None:
         check=False,
     )
     assert again.returncode == 0, again.stderr
+
+
+# 40 GiB, in KiB. Matches the workflow threshold.
+_ENOUGH_FREE_KIB = 40 * 1024 * 1024
+
+
+def _run_disk_script(tmp_path: Path, avail_kb: str | None) -> tuple[subprocess.CompletedProcess[str], str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    script = _disk_step("python-image")["run"]
+    root = tmp_path / "runner"
+    log = tmp_path / "calls.log"
+    rewritten = script
+    for target in DISK_TARGETS:
+        standin = root.joinpath(*target.strip("/").split("/"))
+        standin.parent.mkdir(parents=True, exist_ok=True)
+        standin.mkdir()
+        (standin / "blob").write_text("preinstalled", encoding="utf-8")
+        rewritten = rewritten.replace(target, str(standin), 1)
+    rewritten = rewritten.replace("sudo rm -rf", "rm -rf")
+    prelude = (
+        "df() {\n"
+        "  echo \"df $*\" >> \"$CALL_LOG\"\n"
+        "  if [ \"$1\" = \"-Pk\" ]; then\n"
+        "    printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\n'\n"
+        "    printf 'root 1 1 %s 1%% /\\n' \"${DF_AVAIL_KB-}\"\n"
+        "  fi\n"
+        "}\n"
+        "rm() { echo \"rm $*\" >> \"$CALL_LOG\"; command rm \"$@\"; }\n"
+        "docker() { echo \"docker $*\" >> \"$CALL_LOG\"; }\n"
+    )
+    env = os.environ.copy()
+    env["CALL_LOG"] = str(log)
+    if avail_kb is None:
+        env.pop("DF_AVAIL_KB", None)
+    else:
+        env["DF_AVAIL_KB"] = avail_kb
+    completed = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", prelude + rewritten],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
+    return completed, calls
+
+
+def test_large_disk_skips_the_toolchain_delete(tmp_path: Path) -> None:
+    """Main runners already have ~86 GiB free. The delete must not run there."""
+    script = _disk_step("python-image")["run"]
+    assert "threshold_kb=$((40 * 1024 * 1024))" in script
+    completed, calls = _run_disk_script(tmp_path, str(_ENOUGH_FREE_KIB))
+    assert completed.returncode == 0, completed.stderr
+    assert "rm -rf" not in calls
+    assert "docker system prune" not in calls
+    root = tmp_path / "runner"
+    for target in DISK_TARGETS:
+        standin = root.joinpath(*target.strip("/").split("/"))
+        assert standin.is_dir(), standin
+
+
+def test_small_or_unknown_disk_still_deletes_preinstalled_toolchains(tmp_path: Path) -> None:
+    """The 7.7GB hosted runner, and a df we cannot parse, still free space."""
+    small, small_calls = _run_disk_script(tmp_path / "small", "3000000")
+    assert small.returncode == 0, small.stderr
+    assert "docker system prune -af" in small_calls
+    for target in DISK_TARGETS:
+        standin = (tmp_path / "small" / "runner").joinpath(*target.strip("/").split("/"))
+        assert not standin.exists(), standin
+
+    unknown, unknown_calls = _run_disk_script(tmp_path / "unknown", None)
+    assert unknown.returncode == 0, unknown.stderr
+    assert "docker system prune -af" in unknown_calls
+    for target in DISK_TARGETS:
+        standin = (tmp_path / "unknown" / "runner").joinpath(*target.strip("/").split("/"))
+        assert not standin.exists(), standin
