@@ -1,18 +1,11 @@
 "use client";
-import { assertLocalHumanizer } from "@/lib/humanizerCheck";
-import { HUMANIZER_VERSION } from "@/lib/humanizerPolicy";
 import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
-import { buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
-import { readVoiceRewrite, voiceProgress, VOICE_REWRITE_CLIENT_TIMEOUT_MS, VOICE_STAGE_LABELS, type VoiceStage } from "@/lib/newsfeedVoiceProgress";
+import { buildShareCaption, buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import styles from "./NewsfeedShare.module.css";
-
-const voiceCacheKey = (post: SharePost) => JSON.stringify([HUMANIZER_VERSION, post.id, post.title, post.content]);
-const voiceDrafts = new Map<string, { title: string; content: string; caption: string }>();
-export function resetNewsfeedShareVoiceCache() { voiceDrafts.clear(); }
 
 export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; imageUrl?: string }) {
   const [open, setOpen] = useState(false);
@@ -30,18 +23,7 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
 
 function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
   const id = useId();
-  const cacheKey = voiceCacheKey(post);
-  const cached = voiceDrafts.get(cacheKey);
-  const [caption, setCaption] = useState(() => cached?.caption ?? "");
-  const original = useRef(post);
-  const originalCacheKey = useRef(cacheKey);
-  const [rewrite, setRewrite] = useState<{ title: string; content: string; caption: string } | undefined>(cached);
-  const [rewriting, setRewriting] = useState(!cached);
-  const [voiceError, setVoiceError] = useState("");
-  const [voiceAttempt, setVoiceAttempt] = useState(0);
-  const [voiceStage, setVoiceStage] = useState<VoiceStage>("queued");
-  const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : undefined, [post, rewrite]);
-  const ready = !!rewrite && !rewriting;
+  const [caption, setCaption] = useState(() => buildShareCaption(post));
   const [preview, setPreview] = useState<string>();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -58,56 +40,13 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   }, []);
 
   useEffect(() => {
-    const abort = new AbortController();
-    let cancelled = false;
-    const hit = voiceAttempt === 0 ? voiceDrafts.get(originalCacheKey.current) : undefined;
-    if (hit) {
-      setRewrite(hit);
-      setRewriting(false);
-      return;
-    }
-    setRewriting(true);
-    setVoiceStage("queued");
-    setVoiceError("");
-    // Defer past StrictMode's setup/cleanup probe to avoid duplicate paid requests.
-    const start = setTimeout(() => { void fetch("/api/newsfeed/share", {
-      method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(VOICE_REWRITE_CLIENT_TIMEOUT_MS)]),
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({
-        title: sanitizeShareText(original.current.title),
-        content: sanitizeShareText(original.current.content || ""),
-      }),
-    }).then(async response => {
-      if (!response.ok) throw new Error("Verified copy is unavailable. Retry to share.");
-      const draft: unknown = await readVoiceRewrite(response, stage => { if (!cancelled) setVoiceStage(stage); });
-      if (!draft || typeof draft !== "object" || !("title" in draft) || !("content" in draft)
-        || typeof draft.title !== "string" || typeof draft.content !== "string"
-        || !("humanizerVersion" in draft) || draft.humanizerVersion !== HUMANIZER_VERSION
-        || !("caption" in draft) || typeof draft.caption !== "string" || !draft.caption.trim()
-        || !sanitizeShareText(draft.title) || !sanitizeShareText(draft.content)) {
-        throw new Error("Verified copy is unavailable. Retry to share.");
-      }
-      if (cancelled) return;
-      const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content), caption: sanitizeXShareText(draft.caption) };
-      assertLocalHumanizer(next);
-      voiceDrafts.set(originalCacheKey.current, next);
-      setRewrite(next);
-      setCaption(next.caption);
-    }).catch(() => {
-      if (!cancelled) setVoiceError("Verified copy is unavailable. Retry to share.");
-    }).finally(() => { if (!cancelled) setRewriting(false); }); }, 0);
-    return () => { cancelled = true; clearTimeout(start); abort.abort(); };
-  }, [voiceAttempt]);
-
-  useEffect(() => {
     let cancelled = false;
     let url: string | undefined;
     canvas.current = null;
     setPreview(undefined);
     controller.current?.abort();
     setError("");
-    if (!sharePost) return;
-    void renderShareCard(sharePost, imageUrl).then(async rendered => {
+    void renderShareCard(post, imageUrl).then(async rendered => {
       const blob = await canvasToPng(rendered);
       if (cancelled) return;
       canvas.current = rendered;
@@ -115,10 +54,10 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setPreview(url);
     }).catch(err => { if (!cancelled) setError(userErrorMessage(err, "Could not prepare the image. Retry to export.")); });
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [sharePost, imageUrl, attempt]);
+  }, [post, imageUrl, attempt]);
 
   async function download(video: boolean) {
-    if (!canvas.current || busy || !ready) return;
+    if (!canvas.current || busy) return;
     setBusy(true); setError(""); setMessage("");
     controller.current = new AbortController();
     try {
@@ -139,14 +78,12 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   }
 
   async function copyCaption() {
-    if (!ready) return;
     try { await navigator.clipboard.writeText(sanitizeXShareText(caption)); setMessage("Caption copied."); }
     catch { setError("Copy unavailable. Select and copy the caption below."); }
   }
 
-  return <section id={panelId} className={styles.panel} aria-label="Share news item" aria-busy={busy || rewriting}>
+  return <section id={panelId} className={styles.panel} aria-label="Share news item" aria-busy={busy}>
     <div className={styles.heading}><strong>Share this analysis</strong><span>1080 × 1920</span></div>
-    {rewriting ? <RewriteProgress stage={voiceStage} /> : null}
     <div className={styles.layout}>
       <div className={styles.preview}>
         {/* Local blob generated on demand; next/image cannot optimize it. */}
@@ -154,45 +91,18 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
-        <a className={styles.action} href={ready ? buildXShareUrl(caption) : undefined} role="link" aria-disabled={!ready} onClick={event => { if (!ready) event.preventDefault(); }} target="_blank" rel="noopener noreferrer">Compose on X</a>
-        <button type="button" disabled={!preview || busy || !ready} onClick={() => void download(false)}>Download Story image</button>
-        <button type="button" disabled={!preview || busy || !ready || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
+        <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
+        <button type="button" disabled={!preview || busy} onClick={() => void download(false)}>Download Story image</button>
+        <button type="button" disabled={!preview || busy || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
         <p>Save the image or video, then upload in your social app. Attach images separately on X.</p>
         {!mp4 ? <p>MP4 export is unavailable in this browser. Use a browser with MP4 recording support, or import the image in your video editor.</p> : null}
       </div>
     </div>
     <label className={styles.label} htmlFor={id}>Post caption</label>
-    <textarea id={id} disabled={!ready} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
-    <div className={styles.captionActions}><button type="button" disabled={!ready} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters</span></div>
+    <textarea id={id} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
+    <div className={styles.captionActions}><button type="button" onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters</span></div>
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
-    {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
     {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}
-    <p role="status" className={rewriting ? `${styles.status} ${styles.visuallyHidden}` : styles.status}>{rewriting ? `${VOICE_STAGE_LABELS[voiceStage]}…` : message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
+    <p role="status" className={styles.status}>{message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
   </section>;
-}
-
-const ELAPSED_TICK_MS = 250;
-
-function useElapsedMs(): number {
-  const [elapsedMs, setElapsedMs] = useState(0);
-  useEffect(() => {
-    const startedAt = Date.now();
-    const tick = setInterval(() => setElapsedMs(Date.now() - startedAt), ELAPSED_TICK_MS);
-    return () => clearInterval(tick);
-  }, []);
-  return elapsedMs;
-}
-
-function RewriteProgress({ stage }: { stage: VoiceStage }) {
-  const elapsedMs = useElapsedMs();
-  const percent = Math.round(voiceProgress(stage, elapsedMs) * 100);
-  const seconds = Math.floor(elapsedMs / 1000);
-  return <div className={styles.progress}>
-    <span className={styles.progressLabel} aria-hidden>{VOICE_STAGE_LABELS[stage]}…</span>
-    <div role="progressbar" aria-label="Voice rewrite progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
-      aria-valuetext={`${VOICE_STAGE_LABELS[stage]}, ${seconds}s elapsed`} className={styles.progressTrack}>
-      <span className={styles.progressFill} style={{ width: `${percent}%` }} />
-    </div>
-    <span className={styles.progressElapsed} aria-hidden>{seconds}s</span>
-  </div>;
 }
