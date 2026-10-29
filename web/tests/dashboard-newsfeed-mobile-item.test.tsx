@@ -222,7 +222,9 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
       .map((chunk) => chunk.split("{")[0].trim())
       .filter((sel) => sel.length > 0 && !sel.startsWith("/*") && !sel.startsWith("@"));
     const unscoped = selectors.filter((sel) => !sel.includes(mobile));
-    // Only the two desktop `display: none` defaults may be unscoped. `.tagMore`
+    // The two desktop `display: none` defaults and shared action toolbar rules
+    // may be unscoped. The toolbar also appears in the desktop article reader;
+    // its wrapper flattening and full-width panels must apply there too. `.tagMore`
     // carries the doubled-class bump like every other rule in the file: a bare
     // `.tagMore` is (0,1,0), a tie with globals' `.news-feed-tag-chip
     // { display: inline-flex }` that resolves on injection order alone.
@@ -230,7 +232,9 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
       ".tsCompact",
       ".tagMore.tagMore",
       ".postActions",
-      ".postActions :global([data-newsfeed-share])",
+      ".postActions :global([data-newsfeed-share]),\n.postActions :global([data-research-feedback])",
+      ".postActions :global([data-newsfeed-share]) > button",
+      ".postActions :global([data-newsfeed-share]) > section,\n.postActions :global([data-research-feedback]) > section",
     ]);
   });
 

@@ -283,14 +283,44 @@
   min-width: 0;
 }
 
-.postActions :global([data-newsfeed-share]) {
+.postActions :global([data-newsfeed-share]),
+.postActions :global([data-research-feedback]) {
+  display: contents;
+}
+
+.postActions :global([data-newsfeed-share]) > button {
   order: 2;
-  flex: 0 0 auto;
+}
+
+/* Expanded panels take their own row without moving the action triggers. */
+.postActions :global([data-newsfeed-share]) > section,
+.postActions :global([data-research-feedback]) > section {
+  order: 3;
+  flex: 1 1 100%;
+  width: 100%;
   min-width: 0;
-  margin-top: 0;
+  box-sizing: border-box;
 }
 
 :global(body[data-mobile="true"]) .postActions {
   margin-top: 0;
-  gap: var(--nf-s2);
+  gap: var(--nf-s2, 8px);
+}
+
+:global(body[data-mobile="true"]) .postActions :global([data-testid="newsfeed-explain"]) > button,
+:global(body[data-mobile="true"]) .postActions :global([data-newsfeed-share]) > button {
+  padding-inline: 8px;
+}
+
+@media (max-width: 360px) {
+  :global(body[data-mobile="true"]) .postActions,
+  :global(body[data-mobile="true"]) .postActions :global([data-research-feedback]) > div:first-child {
+    gap: 4px;
+  }
+
+  :global(body[data-mobile="true"]) .postActions :global([data-testid="newsfeed-explain"]) > button,
+  :global(body[data-mobile="true"]) .postActions :global([data-newsfeed-share]) > button {
+    gap: 4px;
+    padding-inline: 6px;
+  }
 }

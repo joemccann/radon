@@ -1369,3 +1369,8 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-10-28 - Requested PDF backlog precedence
 
 - A monitored cohort is not a scheduling priority. Persist explicit operator priority in the shared queue and verify the actual claim order; report current PDF policy exclusions separately from published-but-pending counts. Never change not-before timestamps to simulate priority or claim that monitoring changes the worker's ordering.
+
+
+## 2026-10-29: Sharing remains independent of export generation
+- Opening Share must immediately expose editable original copy and an active X composer link. Optional media generation must never gate text composition. Retired voice rewriting must not run from legacy API callers.
+- Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
