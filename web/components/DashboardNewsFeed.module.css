@@ -283,14 +283,45 @@
   min-width: 0;
 }
 
-.postActions :global([data-newsfeed-share]) {
+.postActions :global([data-newsfeed-share]),
+.postActions :global([data-research-feedback]),
+.postActions :global([data-research-feedback]) > div:first-child {
+  display: contents;
+}
+
+.postActions :global([data-newsfeed-share]) > button {
   order: 2;
-  flex: 0 0 auto;
+}
+
+/* Panels and feedback confirmation take their own row below the triggers. */
+.postActions :global([data-newsfeed-share]) > section,
+.postActions :global([data-research-feedback]) > section,
+.postActions :global([data-research-feedback]) :global([role="status"]) {
+  order: 3;
+  flex: 1 1 100%;
+  width: 100%;
   min-width: 0;
-  margin-top: 0;
+  box-sizing: border-box;
 }
 
 :global(body[data-mobile="true"]) .postActions {
   margin-top: 0;
-  gap: var(--nf-s2);
+  gap: var(--nf-s2, 8px);
+}
+
+:global(body[data-mobile="true"]) .postActions :global([data-testid="newsfeed-explain"]) > button,
+:global(body[data-mobile="true"]) .postActions :global([data-newsfeed-share]) > button {
+  padding-inline: 8px;
+}
+
+@media (max-width: 360px) {
+  :global(body[data-mobile="true"]) .postActions {
+    gap: 4px;
+  }
+
+  :global(body[data-mobile="true"]) .postActions :global([data-testid="newsfeed-explain"]) > button,
+  :global(body[data-mobile="true"]) .postActions :global([data-newsfeed-share]) > button {
+    gap: 4px;
+    padding-inline: 6px;
+  }
 }
