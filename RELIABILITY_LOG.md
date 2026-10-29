@@ -1070,3 +1070,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-333 / R-744 | DONE | RED 1 failed (`test_budget_truncated_scan_does_not_heartbeat_ok`: `main()` returned 0). GREEN 3 passed (that fault, the partial-cache write, and the provider-wipeout control); 108 passed across the leap suites. Catalog parity 21 passed. Permanent drills 118 passed. | A LEAP scan that stops at the wall clock still writes the names that finished, but `status` is `degraded`, the `leap-scan` row class is `scan_budget_spent`, and the process exits 1. Deferred names are not provider failures. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-10-29
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-334 / R-745 | DONE | RED 1 failed, 6 passed in `test_exit_orders_ack.py` (the status-callback permId left the journal PENDING and the sell was cancelled). GREEN 7 passed in that file; 52 passed across exit-order ack, guard durability, exit orders, and the legacy halt service. Catalog parity 13 passed. Event-odds pin 1 passed. Permanent drills 120 passed, 1 warning. | An exit acknowledgement now accepts a nonzero int permId from `Order` or `OrderStatus`. A bool is still ignored. A missing id on both objects still cancels and leaves the journal PENDING. No catch was widened and no retry was added. |

@@ -216,10 +216,26 @@ class ExitOrdersHandler(BaseHandler):
 
     @staticmethod
     def _ack_perm_id(trade: Any) -> Optional[int]:
-        """permId as a real int, or None for mock/None/junk (T-023 lesson:
-        never let a non-int truthy object count as an acknowledgement)."""
-        perm_id = getattr(trade.order, "permId", None)
-        return perm_id if isinstance(perm_id, int) and not isinstance(perm_id, bool) else None
+        """permId as a real int, or None for mock/None/junk/bool.
+
+        ib_insync writes ``openOrder`` onto ``Order.permId`` and
+        ``orderStatus`` onto ``OrderStatus.permId``. Either nonzero id is
+        an acknowledgement (REL-334 / R-745, same rule as
+        ``ib_place_order._trade_perm_id``). Reading only the order object
+        cancelled a live protective sell whose status was still
+        PendingSubmit, left the journal PENDING, and let the next cycle
+        place another. A bool is an int subclass and is still junk
+        (T-023)."""
+        for source in (
+            getattr(trade, "order", None),
+            getattr(trade, "orderStatus", None),
+        ):
+            perm_id = getattr(source, "permId", None)
+            if isinstance(perm_id, bool) or not isinstance(perm_id, int):
+                continue
+            if perm_id != 0:
+                return perm_id
+        return None
 
     def _confirm_placement(self, client: Any, trade: Any) -> tuple:
         """Poll until IB acknowledges (nonzero permId or accepted status),
