@@ -1374,3 +1374,4 @@ When an operator asks for automated release or updater recovery, ship the durabl
 ## 2026-10-29: Sharing remains independent of export generation
 - Opening Share must immediately expose editable original copy and an active X composer link. Optional media generation must never gate text composition. Retired voice rewriting must not run from legacy API callers.
 - Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
+- Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
