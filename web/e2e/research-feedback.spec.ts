@@ -7,7 +7,7 @@ const keep = { id: "research-" + "a".repeat(64), title: "FOMC hikes 25 bps to 3.
   timestamp: "2026-09-19T08:34:00Z", images: [], tags: ["MACRO", "RATES"], source };
 const drop = { ...keep, id: "research-" + "b".repeat(64), title: "Bloomberg estimates use only 5 out of a total of 19 analysts on Avolta", tags: ["EQUITIES"] };
 
-for (const width of [1440, 393]) {
+for (const width of [1440, 393, 320]) {
   test(`operator votes on research items at ${width}px: down hides, up with want-more stays`, async ({ page }, testInfo) => {
     const votes: unknown[] = [];
     await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [keep, drop] }));
@@ -24,15 +24,34 @@ for (const width of [1440, 393]) {
     const controls = page.locator("[data-research-feedback]");
     await expect(controls).toHaveCount(2);
 
+    const item = page.getByTestId("news-feed-item").filter({ hasText: keep.title });
+    const actionButtons = [
+      item.getByRole("button", { name: "Thumbs up", exact: true }),
+      item.getByRole("button", { name: "Thumbs down", exact: true }),
+      item.getByRole("button", { name: "Explain", exact: true }),
+      item.getByRole("button", { name: "Share", exact: true }),
+    ];
+    async function expectHorizontalActions() {
+      const boxes = await Promise.all(actionButtons.map(button => button.boundingBox()));
+      expect(boxes.every(Boolean)).toBe(true);
+      expect(Math.max(...boxes.map(box => box!.y)) - Math.min(...boxes.map(box => box!.y))).toBeLessThanOrEqual(1);
+      if (width <= 640) {
+        for (const box of boxes) expect(box!.height).toBeGreaterThanOrEqual(44);
+      }
+    }
+    await expectHorizontalActions();
+
     // Thumbs up with "want more" on the FOMC item.
     const first = controls.first();
     await first.getByRole("button", { name: "Thumbs up" }).click();
     await first.getByRole("button", { name: "Want more (chart, detail)" }).click();
     await first.getByLabel("Comment (optional)").fill("add the dot plot chart");
     expect(votes).toHaveLength(0);
-    await first.screenshot({ path: testInfo.outputPath(`feedback-up-panel-${width}.png`) });
+    await first.getByRole("region", { name: "Thumbs up feedback" }).screenshot({ path: testInfo.outputPath(`feedback-up-panel-${width}.png`) });
     await first.getByRole("button", { name: "Save feedback" }).click();
     await expect(first.getByText("Saved")).toBeVisible();
+    await expectHorizontalActions();
+    await item.screenshot({ path: testInfo.outputPath(`feedback-saved-actions-${width}.png`) });
     expect(votes[0]).toEqual({ postId: keep.id, vote: "up", reasons: ["want_more"], comment: "add the dot plot chart" });
     await expect(page.getByText(keep.title, { exact: true })).toBeVisible();
 
@@ -41,7 +60,7 @@ for (const width of [1440, 393]) {
     await second.getByRole("button", { name: "Thumbs down" }).click();
     await second.getByRole("button", { name: "Not relevant to me" }).click();
     await second.getByLabel("Comment (optional)").fill("single stock, not for me");
-    await second.screenshot({ path: testInfo.outputPath(`feedback-down-panel-${width}.png`) });
+    await second.getByRole("region", { name: "Thumbs down feedback" }).screenshot({ path: testInfo.outputPath(`feedback-down-panel-${width}.png`) });
     await second.getByRole("button", { name: "Save feedback" }).click();
     await expect(page.getByText(drop.title, { exact: true })).toHaveCount(0);
     expect(votes[1]).toEqual({ postId: drop.id, vote: "down", reasons: ["not_relevant"], comment: "single stock, not for me" });

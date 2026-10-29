@@ -365,6 +365,28 @@ const httpServer = http.createServer((_req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
 
 httpServer.on("upgrade", async (req, socket, head) => {
+  // Registering this listener takes Node's own socket error handling away, and
+  // `ws` only assumes ownership inside handleUpgrade. A reset while ticket
+  // validation is awaited therefore emits "error" on a listener-less socket,
+  // which the surrounding try/catch cannot see and which terminated the whole
+  // relay for every live subscriber, before authentication and with no ticket.
+  const onSocketError = (err) => {
+    verbose("WS upgrade socket error: " + (err instanceof Error ? err.message : err));
+    socket.destroy();
+  };
+  socket.on("error", onSocketError);
+  // A refusal must not write to a socket the peer already tore down.
+  const refuse = (statusLine) => {
+    if (!socket.destroyed) socket.write(statusLine);
+    socket.destroy();
+  };
+  const accept = () => {
+    socket.removeListener("error", onSocketError);
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  };
+
   // Skip ticket validation only for genuine loopback server-to-server calls.
   // Browser handshakes are never locally trusted, and missing Clerk config
   // fails closed unless a non-production process explicitly opts in. Trusting the peer
@@ -380,9 +402,7 @@ httpServer.on("upgrade", async (req, socket, head) => {
     headers: req.headers,
   });
   if (skipTicket) {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
+    accept();
     return;
   }
 
@@ -390,8 +410,7 @@ httpServer.on("upgrade", async (req, socket, head) => {
     const url = resolveUpgradeTarget(req);
     const ticket = url.searchParams.get("ticket");
     if (!ticket) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-      socket.destroy();
+      refuse("HTTP/1.1 401 Unauthorized\r\n\r\n");
       return;
     }
 
@@ -404,18 +423,14 @@ httpServer.on("upgrade", async (req, socket, head) => {
 
     if (!res.ok) {
       verbose("WS ticket validation failed: " + res.status);
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-      socket.destroy();
+      refuse("HTTP/1.1 401 Unauthorized\r\n\r\n");
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
+    accept();
   } catch (err) {
     verbose("WS ticket validation error: " + (err instanceof Error ? err.message : err));
-    socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
-    socket.destroy();
+    refuse("HTTP/1.1 503 Service Unavailable\r\n\r\n");
   }
 });
 

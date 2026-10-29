@@ -29,6 +29,17 @@ redact() {
       }
       return open
     }
+    # DS-2026-10-29-04: systemd joins a directive that ends in a backslash, so
+    # a quoted assignment can OPEN on a later physical line with its quote
+    # ahead of the key. Inspected line by line, that value does not start with
+    # a quote, the carry never arms, and the rest of it falls through the
+    # catch-all print. The logical line is therefore assembled first, and the
+    # untouched physical lines are what gets printed when nothing is redacted.
+    function continued(s,   n) {
+      n=0
+      while (length(s) > n && substr(s, length(s)-n, 1) == "\\") n++
+      return n % 2
+    }
     carry != "" {
       # A continuation of an already-redacted value: never print it, and stay
       # in carry until a line consumes the closing delimiter. Clearing on the
@@ -37,8 +48,16 @@ redact() {
       if (unclosed($0, carry)) carry=""
       next
     }
-    /^[[:space:]]*#/ {print; next}
-    /^[[:space:]]*$/ {print; next}
+    {
+      cur=$0
+      if (buf != "") { raw=raw "\n" cur; sub(/^[[:space:]]+/, "", cur); line=buf " " cur }
+      else { raw=cur; line=cur }
+      if (continued(line)) { sub(/\\$/, "", line); buf=line; next }
+      buf=""
+      $0=line
+    }
+    /^[[:space:]]*#/ {print raw; next}
+    /^[[:space:]]*$/ {print raw; next}
     /=/ {
       eq=index($0, "=")
       key=substr($0, 1, eq-1)
@@ -52,7 +71,7 @@ redact() {
       if (toupper(key) ~ /ENVIRONMENT$/) {
         inner=rest
         quote=""
-        if (substr(inner, 1, 1) == "\"" || substr(inner, 1, 1) == "'"'"'") {
+        if (index("\"'"'"'`", substr(inner, 1, 1)) > 0) {
           quote=substr(inner, 1, 1)
           inner=substr(inner, 2)
         }
@@ -79,22 +98,31 @@ redact() {
             emit(key, rest)
             next
           }
-          print
+          print raw
           next
         }
       }
       if (toupper(key) ~ secret) {
-        if (substr(rest, 1, 1) == "\"" || substr(rest, 1, 1) == "'"'"'") {
+        # dotenv accepts a backtick-quoted multiline value too, and the
+        # carry armed only for the two ASCII quotes.
+        if (index("\"'"'"'`", substr(rest, 1, 1)) > 0) {
           quote=substr(rest, 1, 1)
           if (unclosed(rest, quote)) carry=quote
         }
         emit(key, rest)
         next
       }
-      print
+      print raw
       next
     }
-    {print}'
+    {print raw}
+    END {
+      # A directive left open by a truncated capture was never inspected.
+      if (buf != "") {
+        if (toupper(buf) ~ secret) print "<redacted:unterminated directive>"
+        else print raw
+      }
+    }'
 }
 
 # Every configured env file, each redacted whole so quoted multi-line values

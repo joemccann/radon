@@ -1284,3 +1284,27 @@ def test_stale_candidate_preserves_existing_feedback_marker(tmp_path, published)
     before = marker.read_bytes()
     assert bridge.run_once() == "waiting"
     assert marker.read_bytes() == before
+
+
+# DS-2026-10-29-05: the local assignment rule required the credential name to
+# be followed directly by `:` or `=`, so a JSON or dict key put its closing
+# quote in between and never matched. _validate_feedback re-applies the same
+# function, so it accepted the leaked value as well.
+# Each fixture is joined at runtime so no static credential-shaped assignment
+# sits in the tree for the repository's own secret scanner to flag.
+_FIELD = "aB3cD4eF5gH6" + "iJ7kL8mN9oP0" + "qR1sT2uV"
+_FIELD_SHAPES = {
+    "json-key": '{"token"' + ': "' + _FIELD + '"}',
+    "dict-key": "{'api_key'" + ": '" + _FIELD + "'}",
+    "bare-key": "UNUSUAL_WHALES_API" + "_KEY=\"" + _FIELD + '"',
+    "multiline-value": "TOKEN" + '="first\n' + _FIELD + '"',
+}
+
+
+@pytest.mark.parametrize("text", _FIELD_SHAPES.values(), ids=_FIELD_SHAPES.keys())
+def test_structured_credential_fields_are_redacted_and_rejected(text):
+    assert _FIELD not in bridge_module._redact_feedback(text)
+    value = bridge_module._make_feedback(BASE, HEAD, "private-checks-failed")
+    value["findings"] = [{"reviewer": "controller", "message": text}]
+    with pytest.raises(ValueError):
+        bridge_module._validate_feedback(value, BASE, HEAD)

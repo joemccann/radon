@@ -389,7 +389,11 @@ line here whenever you ship a security fix.**
   assignment scan follows a heredoc; a helper that rescans from every wrapper
   must not, or one unterminated heredoc per line costs quadratic time.
   Explicit `+` concatenation joins literals like adjacency does, across a
-  line break too, template and triple-quoted literals included. A quoted
+  line break too, template and triple-quoted literals included, and the
+  operator counts at EITHER end of that break: an expression may end a line
+  with it or open the continuation line with it. The walk crosses the break
+  only when an operator really follows, so an unrelated next statement still
+  ends the value. A quoted
   heredoc word may hold any character but its quote. A type annotation (`NAME: str = ...`) is
   skipped to the initializer, a quoted or union one too, and a string prefix may open a triple-quoted
   value. A later-line literal close that the escaping grammar rejects is not a

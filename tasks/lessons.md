@@ -1301,7 +1301,6 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - Retry not-before timestamps are eligibility gates, not queue age. Restart recovery can retain a zero sentinel on newer interrupted rows; order aged eligible retries by insertion row ID so those zeros cannot bypass the oldest backlog.
 
-
 ### 2026-10-17: Diagnose incomplete responses from terminal evidence
 
 - A generic incomplete response does not prove max_tokens, provider outage or bad PDF data. Retain only allowlisted terminal reasons and bounded numeric usage through the existing safe error path before changing request budgets or prompts. Never retain provider content or accept partial JSON. A bounded output increase is a mitigation, not proof of completion: preserve one-call and fail-closed behavior and verify the next normal production decision. Synthetic token metadata proves protocol handling only.
@@ -1366,6 +1365,18 @@ When an operator asks for automated release or updater recovery, ship the durabl
 
 - A model's clean humanizer verdict does not prove copy is clean. Enforce detectable prohibited constructions against final text, including “That's X, not Y”, at publication and generated-response boundaries. Cover provider fallbacks, cached copy, titles, bodies and captions; preserve source facts and uncertainty during rewrites.
 
+## 2026-10-28 - A signals-refresh curl 28 after a completed 502 is the retry
+
+- `radon-signals-refresh` can log `curl: (28)` and `http=000` after the first POST already returned `curl=0 http=502` at the FastAPI child budget (theta 420s). The 490s wall then has only the leftover seconds, and retrying that 502 as capacity produces the curl 28.
+- Do not classify that shape as `signals-refresh-curl-timeout-pages-p1`. That case is a first-attempt abort with no completed HTTP response. A body of `Script timed out after Ns` must not be retried. Exit 0 and let the next hourly slot retry. An instant capacity 502 still retries and sheds.
+
 ## 2026-10-28 - Requested PDF backlog precedence
 
 - A monitored cohort is not a scheduling priority. Persist explicit operator priority in the shared queue and verify the actual claim order; report current PDF policy exclusions separately from published-but-pending counts. Never change not-before timestamps to simulate priority or claim that monitoring changes the worker's ordering.
+
+
+## 2026-10-29: Sharing remains independent of export generation
+- Opening Share must immediately expose editable original copy and an active X composer link. Optional media generation must never gate text composition. Retired voice rewriting must not run from legacy API callers.
+- Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
+- Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
+- Verify mobile toolbar geometry after feedback confirmation appears, not just before opening panels. Screenshot named panels that retain a layout box when wrapper elements use display: contents.

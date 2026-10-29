@@ -11963,3 +11963,48 @@ Serial from the repo root, OpenSSL 3.6.5 first on `PATH`, Python 3.13.16, `/bin/
 | 3 | 18,743 passed / 12 skipped / 63 subtests (149.82s) | 5 failed / 11,647 passed / 21 skipped / 1,174 files (131.46s) | 42 failed / 3,478 passed / 31 skipped (922.04s) | 0 added / 0 removed |
 
 Base cloud at `2415f718` on this Mac: 42 failed / 3,478 passed / 31 skipped (1177.65s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
+
+## Delta audit 2026-10-29
+
+Range `2415f718bc8bbc61082c5a567e799e0cdf4f771c..e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9`: 37 commits / 93 paths. Newest trusted checkpoint is the 2026-10-28 collaborator comment on issue #83 (`audited-through: 2415f718bc8bbc61082c5a567e799e0cdf4f771c`). It carried no open verified finding. No open `testing/` pull request. Numbering continues at T-572.
+
+Order placement, recovery, and the Next place route call `place_order` and `_run_ib_script_with_recovery` (`scripts/api/tests/test_orders_place_timeout_indeterminate.py:97` and `:142`; `web/tests/order-place-idempotency-route.test.ts:365`). Equity admission calls `book.current_tickers` and `equity_admission.decide` (`scripts/tests/test_research_equity_admission.py:70`). The chain tick budget renders `OptionsChainTab` and counts `computeLegImpliedValue` (`web/tests/chain-row-implied-tick-budget.test.tsx:129`). `ci.yml` and the coverage thresholds are unchanged. No new `skip` or `xfail` in the delta. The phase0 filter assertion searches script text (`scripts/tests/test_phase0_capture.py:131`) and also runs the env sections (`:8`); putting `| redact` back fails that search, and dropping redaction fails the executing case. Not filed.
+
+Re-triaged TEST_LOG and NEW_FINDINGS against later DONE entries. T-492, T-493, and T-495 have accepted resolutions. The checkpoint carries no still-open verified finding.
+
+Not filed: the five `await import("../next.config.mjs")` Vitest cases still time out at 5000ms and passed 29 tests at a 60s ceiling. The committed ceiling was not raised. `cloud/tests` on this Mac matches `e3b77881` (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`). Caddy 2.11.7 is on PATH. Linux CI is the authority for that suite.
+
+Delta tests, three times: 24 root Python files, 1,868 passed each time; 2 cloud files, 43 passed each time; 6 web files, 52 passed each time.
+
+### T-572 — P1 — the relay dispatch pin is a source-text search
+
+`web/tests/relay-message-dispatch-rejection.test.ts` (before this night) asserted `source` matched `void dispatchClientMessage(client, data);` and did not match `void handleClientMessage(`. The listener is `scripts/ib_realtime_server.js:3005`. Leaving that string in a comment and calling `handleClientMessage(client, data)` without `void` left the file at 9 passed. The returned promise is discarded, so one rejected frame ends the relay for every client.
+
+Acceptance: the message listener's syntax tree calls `dispatchClientMessage` once and does not call `handleClientMessage`. The only `handleClientMessage` call in the file is awaited inside `dispatchClientMessage`'s try. The commented call fails that case.
+
+### T-573 — P2 — hostile symbols are tested outside the parser
+
+The same file slices `normalizeSymbols` with `fnBody` and runs that slice (`web/tests/relay-message-dispatch-rejection.test.ts`, the helper cases). `parseActionMessage` is what the frame reaches (`scripts/ib_realtime_server.js:251` and `:264`). Replacing that call with `String(symbol)` left those helper cases green (9 passed) and threw `TypeError: Cannot convert object to primitive value` on the object whose `toString` is null.
+
+Acceptance: `parseActionMessage` runs with the real normalizers. That object is dropped and `aapl` remains. A symbol longer than `MAX_SYMBOL_LENGTH` is dropped. The `String()` parser fails the case.
+
+Audited through: e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9 on 2026-10-29 — 2 new findings
+
+## Remediation 2026-10-29
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-572 | DONE | Comment plus `handleClientMessage(client, data)` at `scripts/ib_realtime_server.js:3005`: the old file passed 9. The syntax-tree case failed `expected [] to have a length of 1 but got +0` (1 failed / 8 passed). Restored the listener. `web/tests/relay-message-dispatch-rejection.test.ts` passed 9 on each of three runs. Product source unchanged. |
+| T-573 | DONE | `String()` inside `parseActionMessage` left the helper cases green and failed the new case with `TypeError` (1 failed / 9 passed). Restored `normalizeSymbols(payload.symbols)` at `scripts/ib_realtime_server.js:264`. The file passed 10 on each of three runs. Product source unchanged. |
+
+### Closing gates 2026-10-29
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy 2.11.7. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `next.config.mjs` imports (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. Those five passed 29 tests at a 60s ceiling. Cloud exit 1 each round on the same 42 nodes as each other and as `e3b77881` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `e3b77881` |
+|---|---|---|---|---|
+| 1 | 19,366 passed / 12 skipped / 63 subtests (116.40s) | 5 failed / 11,662 passed / 21 skipped / 1,176 files (72.93s) | 42 failed / 3,484 passed / 31 skipped (852.33s) | 0 added / 0 removed |
+| 2 | 19,366 passed / 12 skipped / 63 subtests (138.04s) | 5 failed / 11,662 passed / 21 skipped / 1,176 files (163.57s) | 42 failed / 3,484 passed / 31 skipped (1032.45s) | 0 added / 0 removed |
+| 3 | 19,366 passed / 12 skipped / 63 subtests (186.89s) | 5 failed / 11,662 passed / 21 skipped / 1,176 files (179.70s) | 42 failed / 3,484 passed / 31 skipped (913.54s) | 0 added / 0 removed |
+
+Base cloud at `e3b77881` on this Mac: 42 failed / 3,484 passed / 31 skipped (949.13s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.

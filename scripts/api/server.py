@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import sys
 import random
 import time
@@ -3387,12 +3387,12 @@ async def _orders_place_after_rate_reservation(
     order_json = json.dumps(body)
     # 25s timeout accommodates: connect (~3s) + qualify (~2s) + place + the
     # 12s combo confirm-poll inside ib_place_order.py + finally-disconnect.
-    # 15s was tight for combos and timed out before the script could surface
-    # PendingSubmit-stuck rejections — the script then never wrote a result
+    # 15s was tight for combos and timed out before the script could return
+    # the no-acknowledgement result. The script then never wrote a result
     # and the route reported an "Invalid JSON output" or timeout. Combo
     # orders DAY-TIF outside RTH naturally sit longer in PendingSubmit, so
-    # the script must be able to detect the no-confirm case and return an
-    # error inside the FastAPI timeout window.
+    # the script must be able to return that indeterminate outcome inside
+    # the FastAPI timeout window.
     result = await _run_ib_script_with_recovery(
         "ib_place_order.py", ["--json", order_json], timeout=25
     )
@@ -4828,6 +4828,11 @@ _EARNINGS_DATES_DIR = DATA_DIR / "earnings_dates"
 _EARNINGS_BATCH_MAX = 50
 _EARNINGS_TIMEOUT_S = 60.0
 _EARNINGS_BATCH_TIMEOUT_S = 180.0
+# Report dates do not move intra-session. Theta GET backfill and assistant
+# /earnings/{ticker} polls must not spawn earnings_dates.py on a fresh file
+# (PERF-034). 6h is inside a regular session and matches the theta snapshot
+# staleness window's order of magnitude.
+_EARNINGS_CACHE_TTL_S = 6 * 60 * 60
 
 
 def _earnings_missing_payload(ticker: str, dte: Optional[int]) -> dict:
@@ -4875,6 +4880,60 @@ def _normalize_earnings_batch(data: Any) -> list:
     return []
 
 
+def _path_age_seconds(path: Path) -> Optional[float]:
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return None
+    if age < 0:
+        return None
+    return age
+
+
+def _earnings_today_et() -> date:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).date()
+    except Exception:
+        return datetime.now(timezone.utc).date()
+
+
+def _refresh_earnings_payload(cached: dict, dte: Optional[int]) -> dict:
+    """Recompute days_until / within_dte from report_date for the request."""
+    payload = dict(cached)
+    report = payload.get("report_date")
+    days = payload.get("days_until")
+    if isinstance(report, str) and report:
+        try:
+            event_day = date.fromisoformat(report[:10])
+            days = (event_day - _earnings_today_et()).days
+        except ValueError:
+            pass
+    within: Optional[bool]
+    if dte is None or not isinstance(days, int):
+        within = None
+    else:
+        within = 0 <= days <= dte
+    payload["days_until"] = days
+    payload["within_dte"] = within
+    payload["dte"] = dte
+    payload["missing"] = False
+    return payload
+
+
+def _fresh_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
+    path = _EARNINGS_DATES_DIR / f"{ticker}.json"
+    age = _path_age_seconds(path)
+    if age is None or age >= _EARNINGS_CACHE_TTL_S:
+        return None
+    cached = _read_cache(path)
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("missing") or not cached.get("report_date"):
+        return None
+    return _refresh_earnings_payload(cached, dte)
+
+
 @app.get("/earnings")
 async def earnings_batch_get(
     tickers: str = Query(..., description="Comma-separated tickers (max 50)"),
@@ -4884,30 +4943,52 @@ async def earnings_batch_get(
 
     ``GET /earnings?tickers=AAPL,HONA&dte=16``. Cap 50 tickers. 200 with
     per-row ``missing`` when UW has no upcoming date; 400 only for invalid
-    symbols / empty / oversized lists.
+    symbols / empty / oversized lists. Fresh per-ticker JSON inside
+    ``_EARNINGS_CACHE_TTL_S`` is served without a spawn (PERF-034).
     """
     symbols = _parse_earnings_tickers(tickers)
-    args: list[str] = [*symbols]
-    if dte is not None:
-        args.extend(["--dte", str(dte)])
-    args.append("--json")
+    hits: dict[str, dict] = {}
+    missing: list[str] = []
+    for symbol in symbols:
+        cached = _fresh_earnings_cache(symbol, dte)
+        if cached is None:
+            missing.append(symbol)
+        else:
+            hits[symbol] = cached
+    live_by: dict[str, dict] = {}
+    result: Optional[ScriptResult] = None
+    if missing:
+        args: list[str] = [*missing]
+        if dte is not None:
+            args.extend(["--dte", str(dte)])
+        args.append("--json")
+        result = await run_script(
+            "earnings_dates.py", args, timeout=_EARNINGS_BATCH_TIMEOUT_S
+        )
+        if result.ok and result.data is not None and not (
+            isinstance(result.data, dict) and result.data.get("error")
+        ):
+            for row in _normalize_earnings_batch(result.data):
+                if isinstance(row, dict) and isinstance(row.get("ticker"), str):
+                    live_by[row["ticker"].upper()] = row
+        elif not result.ok and not hits:
+            raise HTTPException(status_code=502, detail=result.error)
 
-    result = await run_script(
-        "earnings_dates.py", args, timeout=_EARNINGS_BATCH_TIMEOUT_S
-    )
-    if result.ok and result.data is not None and not (
-        isinstance(result.data, dict) and result.data.get("error")
-    ):
-        rows = _normalize_earnings_batch(result.data)
-        return {"results": rows, "count": len(rows), "dte": dte}
-
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    return {
-        "results": [_earnings_missing_payload(t, dte) for t in symbols],
-        "count": len(symbols),
-        "dte": dte,
-    }
+    rows: list[dict] = []
+    for symbol in symbols:
+        if symbol in hits:
+            rows.append(hits[symbol])
+            continue
+        live = live_by.get(symbol)
+        if live is not None:
+            rows.append(live)
+            continue
+        stale = _read_cache(_EARNINGS_DATES_DIR / f"{symbol}.json")
+        if isinstance(stale, dict):
+            rows.append(stale)
+            continue
+        rows.append(_earnings_missing_payload(symbol, dte))
+    return {"results": rows, "count": len(rows), "dte": dte}
 
 
 @app.get("/earnings/{ticker}")
@@ -4921,11 +5002,17 @@ async def earnings_get(
     subprocess bridge (same pattern as informed-flow). 200 + ``missing``
     when UW has no upcoming row; on-disk cache under
     ``data/earnings_dates/{TICKER}.json`` is the fallback on live failure.
-    Never 4xx for legitimate missing earnings — only 400 for invalid ticker.
+    A cache whose mtime is inside ``_EARNINGS_CACHE_TTL_S`` is served
+    without a spawn (PERF-034). Never 4xx for legitimate missing earnings
+    — only 400 for invalid ticker.
     """
     upper = ticker.upper().strip()
     if not _TICKER_RE.match(upper):
         raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    cached = _fresh_earnings_cache(upper, dte)
+    if cached is not None:
+        return cached
 
     args: list[str] = [upper]
     if dte is not None:

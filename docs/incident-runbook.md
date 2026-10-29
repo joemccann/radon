@@ -739,7 +739,10 @@ the unit stays failed.
   then `Signals refresh finished with N failed scan(s)`;
   `systemctl show radon-signals-refresh.service -p Result,NRestarts`
   → `exit-code` / `0`. Edge and `:8321/health/lite` stay up.
-- **Discriminating check:** curl 28 with http 000 (this case). Instant
+- **Discriminating check:** curl 28 with http 000 on the first attempt,
+  with no completed HTTP response before it (this case). A completed
+  `curl=0 http=502` at the FastAPI child budget, then curl 28 on the
+  retry, is `signals-refresh-script-timeout-retry`. Instant
   HTTP 502 with `Subprocess capacity exhausted` is
   `signals-refresh-capacity-502` (retry, `6093c087`). HTTP 502 with a
   scanner traceback is a real scan failure, still P1. `Result=signal`
@@ -759,6 +762,54 @@ the unit stays failed.
   (`RADON_SIGNALS_SCAN_TIMEOUT`, default 200),
   `cloud/services/radon-signals-refresh.service` (`TimeoutStartSec=1050`,
   `Environment=RADON_SIGNALS_SCAN_TIMEOUT=490`).
+
+---
+
+## signals-refresh-script-timeout-retry
+
+**`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a FastAPI script-timeout 502 is retried inside the
+leftover scan wall.** Peak: 2026-10-28 18:15Z, page
+`65b3441ed2bb1ad22398bc0479cc3e76`. The 19:05Z timer exited 0.
+
+- **Mechanism:** the unit exports `RADON_SIGNALS_SCAN_TIMEOUT=490`, and
+  that value is the whole scan's wall, not a fresh curl budget per
+  attempt. Theta's `run_script` timeout is 420s. A child that hits that
+  deadline returns HTTP 502 with detail `Script timed out after 420s`
+  (`curl=0`). The wrapper treated every 502 as a capacity shed and
+  retried. 420s plus the 8s retry sleep leaves about 62s. The retry
+  POST is accepted and still running when curl `-m` expires (`curl=28`,
+  `http=000`, 0 bytes). Starlette cancels that second scan. The wrapper
+  logs `outcome indeterminate` and exits 1. Strength in the same fire
+  still runs. `Type=oneshot` has no `Restart=`, so the unit stays
+  `failed` until the next timer. The 3-hour `theta-harvester` freshness
+  window does not page a single missed hour.
+- **Detection:** journal `FastAPI transient (curl=0 http=502)` one child
+  budget after the POST (theta: 420s, strength: 480s), then
+  `curl: (28) Operation timed out after N milliseconds with 0 bytes
+  received` where N is the leftover wall, then
+  `outcome indeterminate (curl=28, http=000)`, then
+  `Signals refresh finished with 1 failed scan(s)`. The other scan in
+  the same fire can still log `complete (OK)`. `:8321/health/lite`
+  stays authenticated.
+- **Discriminating check:** the first response is `curl=0` and `http=502`
+  at the child budget, and the retry is `curl=28` / `http=000`. An
+  instant 502 whose body is `Subprocess capacity exhausted` is
+  `signals-refresh-capacity-502`. Curl 28 on the first attempt, with no
+  completed HTTP response, is `signals-refresh-curl-timeout-pages-p1`.
+  A 502 whose body is a scanner traceback is still a real failure and
+  must exit 1. `Result=signal` is deploy stop-clean. If `/health/lite`
+  is down, or the database dependency is not `up`, stand down.
+- **Remediation (code):** a 502/503 body containing `script timed out`
+  is not retried and does not launch the direct scanner. The wrapper
+  exits 0 after logging `script budget exhausted` so the sibling scan
+  still runs and the next hourly timer retries. Instant non-timeout
+  502/503 retries are unchanged. Do not `reset-failed`. The 19:05Z fire
+  already recovered this page. After deploy, the next timer is enough.
+- **Regression:**
+  `scripts/tests/test_run_signals_refresh_wrapper.py::test_script_timeout_502_does_not_retry_into_a_curl_28`.
+- **Code:** `scripts/run_signals_refresh.sh` (`_is_script_timeout`,
+  `SCRIPT_BUDGET_EXIT`).
 
 ---
 
@@ -4645,15 +4696,17 @@ The Grok page responder owns open diagnoses. No session-start hook surfaces
 
 ## newsfeed-share-missing-subscription-502
 
-**Symptom:** opening the Share panel leaves the original copy and reports that a verified draft could not be generated. The subscription-mount incident on 2026-09-19 returned HTTP 502; the route now streams after access and input validation, so a model failure arrives as an `error` event inside HTTP 200.
+**Status:** historical incident. Newsfeed voice rewriting was retired on
+2026-10-29. Share now uses sanitized original article copy and Compose on X is
+available independently of media generation.
 
-- **Prerequisites:** operator access to the Share panel and read-only access to Next.js service logs and container mount metadata. Credential binding and billing policy belong to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
-- **Blast radius:** voice rewrite and share export only. Keep the original article available; credential or deployment changes can also affect the assistant in the same Next.js container.
-- **Diagnosis:** inspect the failed request's event stream and the matching `[newsfeed/share] voice rewrite failed` log. Missing-subscription errors require checking the expected read-only mounts and subscription availability against the owner above. Inspect mount metadata only, never dump container environment values or token files. A proxy response without a stream is a separate edge failure.
-- **Stop:** do not infer success from response headers, enable prepaid billing to mask missing subscription access, or restart services solely because a draft failed.
-- **Verify:** an authorized Share attempt must receive a `result` event containing the verified draft and update the preview. HTTP 200 alone is not recovery; an `error` event or a stream ending without a draft is failure. The wire contract and rejection cases are pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
-- **Rollback:** keep using the sanitized original copy while the operator follows the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for any required runtime repair. Do not apply ad hoc mount or billing changes.
-- **Escalate:** provide the request time, terminal event type and sanitized Next.js error to the operator. Never attach grants, cookies or the container environment.
+- **Prerequisites:** operator access to the Share panel. The retained `POST /api/newsfeed/share` endpoint still enforces operator access and rate controls.
+- **Blast radius:** the retirement covers Newsfeed Share rewriting. Explain and research-pipeline editorial review retain their existing behavior.
+- **Diagnosis:** authorized requests to the retired endpoint return `410` JSON with `Cache-Control: no-store`. A share panel calling this endpoint is a stale client.
+- **Stop:** do not repair subscriptions, change billing, or restore a rewrite service to recover sharing. Credential binding for remaining consumers belongs to [the credential runtime owner](operations.md#encrypted-credential-store-profile-credentials-tab).
+- **Verify:** opening Share must provide original copy and an enabled Compose on X control while the preview prepares. No rewrite request or model call should occur. The retired endpoint contract is pinned by [`newsfeed-share-api.test.ts`](../web/tests/newsfeed-share-api.test.ts).
+- **Rollback:** use the [deployment and rollback owner](../cloud/CLAUDE.md#deployment-contract) for a stale client deployment. Preserve the retirement behavior.
+- **Escalate:** provide the client revision, request time and sanitized endpoint status. Never attach grants, cookies or the container environment.
 
 ---
 
@@ -4746,11 +4799,68 @@ stored `No eligible frontier model for provider mistral`.
   state file.
 - **Regression:**
   `scripts/tests/test_aa_frontier_refresh.py::test_stable_slug_survives_preview_display_name_when_it_is_the_only_scored_row`,
-  `test_preview_slug_still_rejects_the_only_scored_row`,
+  `test_unstable_slug_still_rejects_the_only_scored_row`,
   `test_specialist_display_name_still_rejects_a_stable_slug`,
   `test_preview_display_name_outside_the_frontier_band_does_not_replace_the_leader`.
+  On 2026-10-29 a preview slug that is the only scored row is kept. See
+  `aa-frontier-preview-slug-rename`. Experimental, alpha, beta, and exp
+  slugs still fail closed.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_UNSTABLE_RELEASE_SLUG`,
-  `_SPECIALIST_MODEL`, `_candidate`).
+  `_PREVIEW_SLUG`, `_SPECIALIST_MODEL`, `_candidate`).
+
+## aa-frontier-preview-slug-rename
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer when the only
+scored Mistral row is the shipping model renamed onto a preview slug.**
+Peak: 2026-10-29 07:03Z, page `ca76efea59ce98d37e851b9b96cf1494`. State
+file stayed on `completed_date=2026-10-27`. Health and journal reason:
+`No eligible frontier model for provider mistral`. Image
+`ghcr.io/joemccann/radon-python:e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9`
+already contained the 2026-10-28 display-name fix.
+
+- **Mechanism:** The 2026-10-28 07:17 catalog still had slug
+  `mistral-large-4` ("Mistral Large 4 Preview", released 2026-10-06,
+  priced, intelligence index about 25.3) and the current selector kept
+  it. By the 2026-10-29 07:03 run the public model list had renamed that
+  slug to `mistral-large-4-preview` and dropped `mistral-large-4`. The
+  07:20 ai-cycle raw catalog (716 rows) matches that: positive prices,
+  intelligence index 25.3, zero stable Mistral candidates, and no
+  `mistral-large-4` row. The
+  slug check treated `preview` as an unstable release, every other
+  Mistral row still failed the score or price check, and
+  `select_frontier_models` raised `CatalogError`. OpenAI through Alibaba
+  still had eligible rows, so the exception named mistral. The run was
+  about one second, so this was not the 30s transport timeout. Edge and
+  `/health/lite` stayed up (`database: up`). Not IB. Not the 2026-10-08
+  ok-heartbeat case: the state file was not already current, and the
+  detail is a `CatalogError` sentence.
+- **Detection:** `service_health` detail
+  `No eligible frontier model for provider mistral`. Journal stdout
+  `{"status": "error", "reason": "No eligible frontier model for provider mistral"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  State `checked_at` stays on the previous success.
+- **Discriminating check:** rename the prior catalog's
+  `mistral-large-4` slug to `mistral-large-4-preview` and the selector
+  raises the same `CatalogError`. The public model page for
+  `mistral-large-4` is gone and `mistral-large-4-preview` is the scored,
+  priced row. A stable scored sibling must still win, and a preview slug
+  must not set the frontier floor. An experimental, alpha, beta, or exp
+  slug that is the only scored row must still fail closed. A specialist
+  name must still fail closed. `Result=signal` or exit 143 inside a
+  deploy window is `deploy-stop-clean-oneshot-signal`. Python Turso
+  `SELECT 1` failing in the same minute is a platform outage: stand down.
+- **Remediation (code):** keep preview slugs out of the candidate pool
+  while any stable candidate remains. If that pool is empty, select the
+  preview slug instead of failing the oneshot. Do not `reset-failed` as
+  the fix. The next timer is 07:00 UTC. A manual start after the deploy
+  rewrites the state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_renamed_preview_slug_is_kept_when_it_is_the_only_scored_row`,
+  `test_unstable_slug_still_rejects_the_only_scored_row`,
+  `test_selects_highest_scoring_current_text_model_per_provider`.
+- **Code:** `scripts/aa_frontier_refresh.py` (`_PREVIEW_SLUG`,
+  `_candidate`, `select_frontier_models`).
 
 ## pnl-story-stock-entry-timing
 
@@ -4970,6 +5080,45 @@ The article path must not request a PDF. It persists every discovered reference 
 - **Observed:** page `ba78cd1c2481fb685978eec0c3f37e11` at 2026-10-27T18:35:00Z. The same oneshot was still `failed` at 2026-10-28 02:17:17Z, `ExecMainStatus=1`, about four seconds, `NRestarts=0`. `marketdesk-pdf` `last_error` was `PDF archive deferred: preview_quota`. `marketdesk-research` and `marketdesk-dropbox` stayed `ok`. Edge `/status` was `up`. The health write succeeded, so this was not a Turso platform outage and not IB. The same loop paged `cf427722febf0786a82ff8443a606f10` at 2026-10-27T19:45:00Z. PR 1319 carried that later page and failed the docs owner contract because `docs/marketdesk-research.md` was unchanged.
 - **Mechanism:** `preview_quota` and `download_quota` persist a 6-hour backoff, then 12 and 24 hours. Later timer fires find no admitted work, `blocked()` returns that code, and `run_cycle` raises `DownloadDeferred`. `service_cycle` records the error row, then `main` returned 1. The timer is `*:02/5:17`, so each fire is a new `InactiveEnterTimestamp`. The unit watchdog treats that as a fresh P1. The error row is the designed visibility signal. The P2 error bucket fires through hysteresis, then stays quiet while `next_attempt_at` is in the future.
 - **Discriminating check:** the stderr and health message are exactly `PDF archive deferred: preview_quota` or `PDF archive deferred: download_quota`, article rows stay `ok`, and the oneshot is `Result=exit-code` rather than `signal` or exit 143. `not_pdf`, `http_transport`, `unauthenticated`, and any other exception still exit 1. A Turso `SELECT 1` failure in the same minute is a platform outage: stand down, do not restart-flap. Do not invent a download URL or bypass the provider refusal.
-- **Remediation (code):** those two allowance deferrals still print the public code and keep the error row, and the oneshot exits 0. Other deferrals and unexpected exceptions still exit 1. Do not `reset-failed` as the fix. The provider quota itself remains until the provider allows the existing blob route.
+- **Remediation (code):** those two allowance deferrals still print the public code and keep the error row, and the oneshot exits 0. Other deferrals and non-transport exceptions still exit 1. A Turso wire blip is `marketdesk-pdf-transaction-transport`, not this case. Do not `reset-failed` as the fix. The provider quota itself remains until the provider allows the existing blob route.
 - **Regression:** `scripts/tests/test_marketdesk_pdf_job.py::test_persisted_allowance_backoff_keeps_error_and_exits_zero`, `test_preview_quota_download_exits_zero_after_durable_retry`, `test_non_allowance_deferral_still_fails_the_oneshot`, `test_unexpected_cycle_error_still_fails_the_oneshot`.
 - **Code:** `scripts/research/marketdesk_pdf_job.py` (`ALLOWANCE_DEFERRALS`, `main`). The owner doc is `docs/marketdesk-research.md`.
+
+## marketdesk-pdf-transaction-transport
+
+**`radon-marketdesk-pdf.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when one Turso transaction times out.**
+
+- **Observed:** page `a0c98ced717a45377c20e872ed7c2315` at 2026-10-29T05:35:00Z. The oneshot started 2026-10-29T05:32:17Z and exited 2026-10-29T05:32:26Z, `ExecMainStatus=1`, `NRestarts=0`. `marketdesk-pdf` `last_error` was `research transaction transport failed: TimeoutError`, with `next_attempt_at` about five minutes later. The 05:22 cycle had already set `finished_at`. `marketdesk-dropbox` stayed `ok`. `marketdesk-research` recorded `TimeoutError: The read operation timed out` on its 05:34 cycle. Edge `/status` was `up` and `/health/lite` stayed authenticated. The 05:37 PDF timer exited 0 and wrote `marketdesk-pdf` `state=ok` with `last_error` cleared. This was not IB. The API `database=down` probe uses a 0.35s deadline and flapped in the same window; that probe is not this exit.
+- **Mechanism:** `seed_missing`, selection refresh, attachment, and download acknowledgement use `api.db_http.hrana_transaction` or `hrana_execute` with `HRANA_TIMEOUT_S=4`. A `TimeoutError` becomes `DbHttpError("research transaction transport failed: TimeoutError")` chained from the timeout. `service_cycle` writes the error row and re-raises. `main` treated every non-allowance exception as exit 1. `Type=oneshot` has no `Restart=`, so each `*:02/5:17` fire is a new `InactiveEnterTimestamp` and the unit watchdog pages P1. The error row is the visibility signal. The next successful cycle clears it.
+- **Discriminating check:** the health message is `research transaction transport failed: TimeoutError` (or the same wrapper with another transport type), not `PDF archive deferred: preview_quota` or `PDF archive deferred: download_quota`. Article and dropbox rows are not this unit. `Result=exit-code`, not `signal` or exit 143. A statement error such as `no such table`, or a `DbHttpError` whose text mentions a timeout but has no chained transport cause, still exits 1. `/health/lite` `database=down` alone is the 0.35s dependency deadline. A Python Turso `SELECT 1` failure in the same minute is a platform outage: stand down, do not restart-flap. This host could not read `/etc/radon/env` or the API process environment; the 05:37 cycle completing through the same worker is the substitute canary.
+- **Remediation (code):** a chained Turso wire error (`TimeoutError`, reset, broken pipe, SSL EOF, `URLError`, `RemoteDisconnected`, HTTP 502/503/504) still keeps the error row and the oneshot exits 0. Stderr prints `cycle transport non-fatal` and the cause type only. The next timer retries. Do not retry the ambiguous transaction inside the failed process. Do not `reset-failed` as the fix. The 05:37 timer already recovered this page.
+- **Regression:** `scripts/tests/test_marketdesk_pdf_job.py::test_db_transport_blip_keeps_error_and_exits_zero`, `test_transport_message_without_cause_still_fails_the_oneshot`, `test_statement_db_error_still_fails_the_oneshot`, `test_runtime_error_chained_from_timeout_still_fails_the_oneshot`.
+- **Code:** `scripts/research/marketdesk_pdf_job.py` (`_is_db_transport`, `main`). The owner doc is `docs/marketdesk-research.md`.
+
+---
+
+---
+
+## uw-research-rate-limit-oneshot
+
+**`radon-uw-research.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when every section of a finished cycle is `rate_limited`.**
+
+- **Observed:** page `0c27f461b3c55272cbe1825fa1c97a7a` at 2026-10-28T15:10:00Z. The hourly timer is `OnCalendar=*-*-* *:07:00` plus up to 120s delay. The 15:07:41Z AAPL archive is `status=unavailable`, `request_count=5`, and every default section is `stale` / `rate_limited`. The 14:07 archive was `partial` (company and seasonality still `ok`). 16:07 through 20:07 repeated the same unavailable rate-limit archive. 21:08 recovered `ok`. The live unit later showed `Result=success` from the 23:08 fire. Journald was not readable from this user (`sudo` is blocked by no-new-privileges). Edge `/api/service-health` and `:8321/health/lite` returned anonymous 401, which is the auth perimeter. `requires_ib` is false. This is not a Turso platform outage: the local snapshot was written.
+- **Mechanism:** `Type=oneshot` has no `Restart=`. `main` returns 0 for `ok` and `partial`, and 1 for `unavailable`. `_status` is `unavailable` only when zero sections are `ok` or `empty`. Short-TTL sections refresh every hour. Company and seasonality last 86400s, so they expire together about a day after the last good collect. On that hour a provider 429 on every call marks each section `stale` with `error_code=rate_limited`, keeps the prior payload and `observed_at`, and persists the snapshot. The process then exits 1. Each later fire has a new `InactiveEnterTimestamp`, so the unit watchdog treats it as a fresh P1 until a cycle exits 0. The non-ok health row is the designed P2 signal.
+- **Discriminating check:** the archive for that fire has `status=unavailable` and every section `error_code=rate_limited`. A `partial` archive (at least one `ok` or `empty` section) already exits 0. `configuration_or_schema_invalid`, `entitlement_denied`, `authentication_required`, `request_budget_exhausted`, and `upstream_unavailable` still exit 1, including when mixed with `rate_limited`. `Result=signal` or exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`. A Python Turso `SELECT 1` failure in the same minute is a platform outage: stand down, do not restart-flap. Do not print or copy provider error bodies.
+- **Remediation (code):** a finished scheduled cycle whose every section failed only as `rate_limited` still prints the unavailable snapshot, still records the non-ok health row, and exits 0. Other section failures and exceptions still exit 1. Do not `reset-failed` as the fix. The provider quota itself remains until the next successful collect.
+- **Regression:** `scripts/tests/test_uw_advanced_research.py::test_scheduled_rate_limit_keeps_observations_and_exits_zero`, `test_scheduled_schema_failure_with_retained_rows_still_exits_one`, `test_scheduled_mixed_rate_limit_and_schema_failure_still_exits_one`.
+- **Code:** `scripts/uw_research.py` (`_rate_limit_only`, `_scheduled_cycle_ok`, `main`). The owner doc is `docs/uw-advanced-research.md`.
+
+---
+
+## marketdesk-summary-deadline-oneshot
+
+**`radon-marketdesk.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when the only article failure is `no_summary`.**
+
+- **Observed:** page `d1d7c1bdcd60158b96f79b87ea3d82f1` at 2026-10-29T09:00:00Z. The oneshot started 2026-10-29T08:59:41Z and went inactive at 2026-10-29T08:59:47Z, `ExecMainStatus=1`, `NRestarts=0`. `marketdesk-research` `last_error` was `1 of 1 articles failed; last error: no_summary`. `marketdesk-dropbox` stayed `ok`. `marketdesk-pdf` was `ok` on its 09:02Z fire. Edge `/status` was `up` and `/sign-in` was HTTP 200. The health read succeeded, so this was not a Turso platform outage. IB gateway was down and is unused by this job. No deploy was in progress: the green marker was `e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9` at 02:11Z. Journal text was not readable from this account. The pending row's provider time was 2026-10-29T02:55:14Z, first seen 02:59Z, and this was attempt 1, just past the 6 hour wait. A newer sibling was still `summary_pending` with zero attempts. The 09:04Z and 09:09Z fires failed the same way. At 09:09:48Z the health message was `2 of 2 articles failed; last error: no_summary`, with attempts 3 and 2. Both rows were still `pending`.
+- **Mechanism:** an item with an empty summary is parked as `summary_pending` and spends no attempt. After `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6) it is `no_summary`, spends an attempt, and `ArticlesFailed` is raised when nothing else published. `service_cycle` writes the error row, then `main` returned 1. The timer is `*:04/5:41`, so each fire is a new `InactiveEnterTimestamp`. The unit watchdog treats that as a fresh P1. The error row is the designed visibility signal. The P2 error bucket fires through hysteresis. Five attempts retire the row to `failed`.
+- **Discriminating check:** the health message ends in `last error: no_summary`, the oneshot span is a few seconds rather than `TimeoutStartSec`, and `marketdesk-dropbox` is `ok`. A younger item still on `summary_pending` is the same provider delay and is not an error. `Result=signal` or exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`. A copy failure, transport error, listing gap, parked outage, or a mix of those with `no_summary` still exits 1. A Turso read failure in the same minute is a platform outage: stand down, do not restart-flap.
+- **Remediation (code):** a cycle whose only article failures are `no_summary` still logs the message and keeps the error row, and the oneshot exits 0. Other failures still exit 1. Do not `reset-failed` as the fix. The provider summary itself is unchanged. After five attempts the ledger row stays `failed`.
+- **Regression:** `scripts/tests/test_marketdesk_job.py::test_summary_deadline_keeps_error_and_exits_zero`, `test_repeated_summary_deadline_exits_zero_until_retired`, `test_copy_failure_still_fails_the_oneshot`, `test_summary_deadline_does_not_hide_another_article_failure`, `test_listing_gap_still_fails_the_oneshot_beside_a_summary_deadline`.
+- **Code:** `scripts/research/marketdesk_job.py` (`SUMMARY_DEADLINE`, `_summary_deadline_only`, `main`). The owner doc is `docs/marketdesk-research.md`.

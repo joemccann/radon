@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. Other download failures still exit 1.
+The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. A Turso wire failure while seeding, selecting, or acknowledging a PDF does the same: the error row stays and the oneshot exits 0 so the next timer can retry. The classifier uses the chained exception type, including a timeout, a connection reset, and HTTP 502, 503, or 504. A statement error, including a missing table, still exits 1. Other download failures still exit 1.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
@@ -158,9 +158,10 @@ fetched with a cookie-less opener that never follows redirects.
    source facts, certify the exact final copy, publish, record. An item MarketDesk has not summarised yet is parked as
    `summary_pending` (no attempt spent, not a failure, not counted against
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
-   than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). One bad item never fails
-   the cycle. No new item starts after 150 seconds of the cycle; the rest wait
-   for the next one.
+   than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). That deadline spends an
+   attempt and writes the `marketdesk-research` error row, and the oneshot
+   exits 0. One other bad item never aborts the rest of the cycle. No new item
+   starts after 150 seconds of the cycle; the rest wait for the next one.
 7. Drain the outbox again when something was just published, held or dropped and write the
    `marketdesk-dropbox` row (the worse of the two outbox runs).
 
@@ -197,6 +198,12 @@ later cycle.
   it `failed`. A hung cycle still fails as `Result=timeout`, and the
   `marketdesk-research` health row still records the SIGTERM as `error`. Not
   75: `radon-app-runtime run` exits 75 for a surviving orphan container.
+- A cycle whose only article failures are `no_summary` keeps that error row
+  and exits 0. The row is the P2 signal. Exit 1 made every 5-minute timer
+  fire a new `InactiveEnterTimestamp` and a P1 page. A parked outage, a
+  listing gap, a copy or transport failure, and any mix of those with
+  `no_summary` still exit 1. Do not `reset-failed` for the deadline. After
+  five attempts the row is `failed` and is not retried.
   Managed cancellation bypasses provider exception handlers, so interrupted
   requests do not advance the model ladder; cleanup and the error heartbeat
   still run before exit 143.
@@ -321,7 +328,7 @@ research assets are served by the same authenticated route.
 
 | Row | Writer | Window | States |
 |---|---|---|---|
-| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. |
+| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. A `no_summary` deadline still writes this error row, and the oneshot exits 0. |
 | `marketdesk-dropbox` | `record_service_health`, continuous bucket | 15m | `ok` after a cycle with write credentials and no upload failure; `paused` when all three write credentials are absent (a warning, never the error bucket); `error` when an upload failed (retried next cycle) or when only some write credentials are set. |
 
 Both rows are registered in `scripts/watchdog/services.py` and
@@ -352,6 +359,13 @@ journalctl -u radon-marketdesk.service -n 50
 
 ## Runbook
 
+- **Symptom:** `radon-marketdesk.service` is `Result=exit-code` and the
+  `marketdesk-research` message is `N of N articles failed; last error: no_summary`.
+  The provider still had no bullet summary after `MARKETDESK_SUMMARY_WAIT_HOURS`
+  (default 6). The ledger `last_error` is `no_summary` and one attempt is spent.
+  After this fix the oneshot exits 0 and the error row remains the signal.
+  Other article failures still exit 1. Do not `reset-failed` as the fix.
+  A summary that arrives while the row is still `pending` publishes on a later cycle.
 - **Symptom:** `marketdesk-research` is `error` or stale.
   - Read `journalctl -u radon-marketdesk.service -n 100`. `MarketDeskAuthError`
     means the refresh token and the password fallback both failed: rerun the
