@@ -13,7 +13,11 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from credential_redaction import scrub_credential_text  # noqa: E402
 
 PUBLIC = 'joemccann/radon'
 PRIVATE = 'joemccann/radon-security-reports'
@@ -28,7 +32,11 @@ FEEDBACK_STATUSES = frozenset(('private-checks-failed', 'private-review-rejected
 
 
 def _redact_feedback(value, limit=2048):
-    text = str(value)
+    # The canonical tokenizer runs FIRST: the single-line rules below consume a
+    # value's opening delimiter, which destroys the quoting the tokenizer needs
+    # to recognise a continuation line and left the tail of a multiline value
+    # in feedback (DS-2026-10-29-05 rescan).
+    text = scrub_credential_text(str(value))
     text = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*', '[REDACTED PRIVATE KEY]', text)
     text = re.sub(r'(?i)\bBearer\s+[^\s`"\']+', 'Bearer [REDACTED]', text)
     text = re.sub(r'\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,}|(?:AKIA|ASIA)[A-Z0-9]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)', '[REDACTED]', text)
