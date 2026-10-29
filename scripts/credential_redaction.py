@@ -378,6 +378,18 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
                     # A `+` carries the expression onto the next line
                     # (DS-2026-10-27-13).
                     following += 1
+                elif text[following] in "\r\n":
+                    # The operator may instead OPEN the continuation line
+                    # (DS-2026-10-29-02). Cross the break only when one really
+                    # follows, so an unrelated next statement still ends the
+                    # value here.
+                    probe = following
+                    while probe < length and text[probe] in " \t\r\n":
+                        probe += 1
+                    if probe >= length or text[probe] != "+":
+                        break
+                    joined = True
+                    following = probe + 1
                 elif text.startswith(("\\\n", "\\\r\n"), following):
                     # A backslash line continuation joins the next line's literal.
                     following = text.index("\n", following) + 1
@@ -394,6 +406,17 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
     cursor = index
     while cursor < length and not text[cursor].isspace():
         cursor += 1
+    # A shell word may start unquoted and only then open a quoted segment
+    # (`PASSWORD=pre"first` + continuation). The whitespace walk above ends it
+    # at the first line break, so the continuation survived both redaction and
+    # detection; the quoted part runs to its real close instead.
+    if not (heredoc and text.startswith("$(", index)):
+        for probe in range(index, cursor):
+            if text[probe] in "\"'`":
+                _, inner_end, _ = _scan_value(text, probe, heredoc=False)
+                if inner_end > cursor:
+                    return index, inner_end, ""
+                break
     if heredoc and text.startswith("$(", index):
         operators = []
         operator = _HEREDOC_OPERATOR.match(text, index)

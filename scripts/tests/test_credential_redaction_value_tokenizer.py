@@ -705,3 +705,43 @@ def test_userinfo_is_masked_through_the_last_at_sign():
 def test_union_annotation_is_skipped_to_the_initializer(text):
     assert find_secret_assignments(text) == ["[redacted-secret]"]
     assert _clean(scrub_credential_text(text))
+
+
+# DS-2026-10-29-02: the gap walk crossed a line break only once a `+` had
+# already been seen on the first line, so an operator that OPENS the
+# continuation line ended the value at the first literal. The trailing
+# placement above is redacted; both placements are one expression.
+_RESCAN12_SHAPES = {
+    "leading-operator-concatenation": f'const password = ""\n  + "{OPAQUE}{TAIL}";\n',
+    "leading-operator-python": f'PASSWORD = (\n    "a"\n    + "{OPAQUE}{TAIL}"\n)\n',
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN12_SHAPES.values(), ids=_RESCAN12_SHAPES.keys())
+def test_rescan12_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) or find_credential_shapes(text), text
+
+
+# Remediate rescan of the fix above: a shell word that starts UNQUOTED and only
+# then opens a quoted segment took the whitespace-terminated branch, so the
+# value ended at the first line break and its continuation escaped both the
+# scrubber and the detector.
+_RESCAN13_SHAPES = {
+    "unquoted-prefix-then-quoted": f'PASSWORD=pre"first\n{OPAQUE}{TAIL}"\n',
+    "unquoted-prefix-then-triple": f'PASSWORD=x"""first\n{OPAQUE}{TAIL}"""\n',
+    "unquoted-prefix-then-backtick": f'PASSWORD=pre`first\n{OPAQUE}{TAIL}`\n',
+}
+
+
+@pytest.mark.parametrize("text", _RESCAN13_SHAPES.values(), ids=_RESCAN13_SHAPES.keys())
+def test_rescan13_shape_is_scrubbed_and_detected(text):
+    out = scrub_credential_text(text)
+    assert _clean(out), out
+    assert find_secret_assignments(text) or find_credential_shapes(text), text
+
+
+def test_leading_operator_walk_keeps_the_next_statement():
+    out = scrub_credential_text(f'PASSWORD = "{OPAQUE}"\nSYMBOL = "SPY"\n')
+    assert OPAQUE not in out and 'SYMBOL = "SPY"' in out, out
