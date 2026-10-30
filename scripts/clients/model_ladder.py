@@ -7,6 +7,11 @@ unavailable:
   2. nvidia (API key OK)
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
+``RADON_MODEL_LADDER_ORDER`` overrides that list (comma-separated known names).
+Cerebras stays last. An HTTP error or timeout on one rung does not stop the
+ladder while a later keyed rung remains. MarketDesk also fails over an
+unreadable or incomplete reply.
+
 Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
 **subscription credentials only**: Claude Max OAuth, Grok device-auth,
 ChatGPT+Codex OAuth, the Antigravity CLI's own Google sign-in. Prepaid console
@@ -32,6 +37,7 @@ override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
 from __future__ import annotations
 
 import base64
+import contextvars
 import shutil
 import subprocess
 import json
@@ -42,7 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-from . import prepaid_denylist
+from . import prepaid_denylist, provider_cooldown
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +124,28 @@ _OPTIONAL_LADDER_ENV = (
     "RADON_LADDER_NO_AUTH_FILES",
     "ANTIGRAVITY_CLI",
     "ANTIGRAVITY_MODEL",
+    "RADON_MODEL_LADDER_ORDER",
+    "RADON_PROVIDER_COOLDOWN_STATE",
+    "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S",
+    "CEREBRAS_MAX_IMAGES",
+    "CEREBRAS_MAX_REQUEST_BYTES",
     "RADON_SLM_TAGGER_URL",
     "RADON_SLM_TAGGER_MODE",
     "RADON_SLM_TAGGER_TIMEOUT_S",
     "RADON_SLM_TAGGER_THREADS",
+)
+
+# Documented Llama 3.2 vision ceiling (NVIDIA NIM). Larger values are a 400.
+_NVIDIA_MAX_OUTPUT_TOKENS = 8192
+_NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+_NVIDIA_MODEL_ID = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}(?:/[A-Za-z0-9][A-Za-z0-9._:-]{0,80})?$"
+)
+# Cerebras shared inference: 10 images and 10 MiB per request (qwen-3.8-27b).
+_CEREBRAS_MAX_IMAGES_DEFAULT = 10
+_CEREBRAS_MAX_BYTES_DEFAULT = 10 * 1024 * 1024
+_RESPONSE_HEADERS: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "model_ladder_response_headers", default={}
 )
 
 _CREDIT_MARKERS = (
@@ -228,11 +252,30 @@ def _first_env_model(env: Mapping[str, str], *names: str, default: str) -> str:
     return _env_get(env, *names) or default
 
 
+def ladder_order(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
+    """Provider order. ``RADON_MODEL_LADDER_ORDER`` is a comma list of known rungs.
+
+    Unknown names are ignored. An empty or all-unknown value keeps the default.
+    Cerebras is still forced last by ``_last_resort_last``.
+    """
+    src = env if env is not None else os.environ
+    raw = (src.get("RADON_MODEL_LADDER_ORDER") or "").strip()
+    if not raw:
+        return MODEL_LADDER_ORDER
+    known = set(MODEL_LADDER_ORDER)
+    chosen: list[str] = []
+    for part in raw.split(","):
+        name = part.strip().lower()
+        if name in known and name not in chosen:
+            chosen.append(name)
+    return tuple(chosen) if chosen else MODEL_LADDER_ORDER
+
+
 def wired_providers(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
     """Return ladder providers that have a real HTTP path and a credential."""
     src = env if env is not None else os.environ
     wired: list[str] = []
-    for name in MODEL_LADDER_ORDER:
+    for name in ladder_order(src):
         if name == "cursor":
             continue
         if _auth_for(name, src) is not None:
@@ -543,8 +586,21 @@ def _anthropic_system(system: str, *, subscription: bool) -> Any:
     return blocks
 
 
+def _model_id_rejected(body: str) -> bool:
+    lowered = body.lower()
+    if "model" not in lowered:
+        return False
+    return any(token in lowered for token in ("not found", "unknown", "does not exist", "unrecognized", "invalid model"))
+
+
 def _classify_http_failure(status: int, body: str) -> str:
     lowered = body.lower()
+    if status == 413:
+        return "request_too_large"
+    if status == 404 or (status == 400 and _model_id_rejected(lowered)):
+        return "model_not_found"
+    if status == 415 and "image" in lowered:
+        return "image_unsupported"
     if "credit balance" in lowered or "credit_balance" in lowered or "too low" in lowered:
         return "credit_balance"
     if any(marker in lowered for marker in _CREDIT_MARKERS):
@@ -674,11 +730,185 @@ def _strip_fences(text: str) -> str:
     return cleaned.strip()
 
 
-def _text_from_anthropic(payload: dict[str, Any]) -> str:
-    for block in payload.get("content") or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            return str(block.get("text") or "")
+def _coerce_text(value: Any) -> str:
+    """Visible assistant text. Thinking blocks are not part of the answer."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(_coerce_text(part.get("text") if isinstance(part, dict) else part) for part in value)
+    if isinstance(value, dict):
+        inner = value.get("text")
+        if isinstance(inner, str):
+            return inner
+        content = value.get("content")
+        return content if isinstance(content, str) else ""
     return ""
+
+
+def _text_from_anthropic(payload: dict[str, Any]) -> str:
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") not in {"text", "output_text"}:
+            continue
+        parts.append(_coerce_text(block.get("text")))
+    return "".join(parts)
+
+
+def _anthropic_message_from_sse(text: str) -> dict[str, Any] | None:
+    """Rebuild a Messages object from an SSE body. None when it is not that stream."""
+    if "data:" not in (text or ""):
+        return None
+    blocks: list[dict[str, Any]] = []
+    stop_reason = None
+    usage = None
+    message: dict[str, Any] = {}
+    saw = False
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        saw = True
+        kind = event.get("type")
+        if kind == "message_start" and isinstance(event.get("message"), dict):
+            message = dict(event["message"])
+            content = message.get("content")
+            if isinstance(content, list):
+                blocks = [dict(block) for block in content if isinstance(block, dict)]
+        elif kind == "content_block_start" and isinstance(event.get("content_block"), dict):
+            blocks.append(dict(event["content_block"]))
+        elif kind == "content_block_delta" and isinstance(event.get("delta"), dict):
+            index = event.get("index")
+            delta = event["delta"]
+            if isinstance(index, int) and 0 <= index < len(blocks):
+                if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+                    blocks[index]["text"] = _coerce_text(blocks[index].get("text")) + delta["text"]
+                elif delta.get("type") == "thinking_delta" and isinstance(delta.get("thinking"), str):
+                    blocks[index]["thinking"] = str(blocks[index].get("thinking") or "") + delta["thinking"]
+        elif kind == "message_delta" and isinstance(event.get("delta"), dict):
+            if isinstance(event["delta"].get("stop_reason"), str):
+                stop_reason = event["delta"]["stop_reason"]
+            if isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+    if not saw:
+        return None
+    payload = dict(message)
+    payload["content"] = blocks
+    payload.setdefault("type", "message")
+    if stop_reason is not None:
+        payload["stop_reason"] = stop_reason
+    if usage is not None:
+        payload["usage"] = usage
+    return payload
+
+
+def _payload_from_text(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        recovered = _anthropic_message_from_sse(text)
+        if recovered is None:
+            raise
+        return recovered
+
+
+def _remember_headers(resp: Any) -> None:
+    raw = getattr(resp, "headers", None)
+    headers: dict[str, str] = {}
+    if raw is not None and hasattr(raw, "items"):
+        try:
+            headers = {str(key).lower(): str(value) for key, value in raw.items()}
+        except Exception:
+            headers = {}
+    _RESPONSE_HEADERS.set(headers)
+
+
+def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = (env.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _image_count(body: Mapping[str, Any]) -> int:
+    count = 0
+    for message in body.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        count += sum(1 for part in content if isinstance(part, dict) and part.get("type") == "image_url")
+    return count
+
+
+def _cerebras_too_large(body: Mapping[str, Any], env: Mapping[str, str]) -> bool:
+    """True when the request cannot fit Cerebras shared-inference limits."""
+    if _image_count(body) > _env_int(env, "CEREBRAS_MAX_IMAGES", _CEREBRAS_MAX_IMAGES_DEFAULT):
+        return True
+    raw = json.dumps(body, separators=(",", ":"))
+    return len(raw.encode("utf-8")) > _env_int(env, "CEREBRAS_MAX_REQUEST_BYTES", _CEREBRAS_MAX_BYTES_DEFAULT)
+
+
+def _nvidia_invoke_url(model: str) -> str | None:
+    if not _NVIDIA_MODEL_ID.fullmatch(model or ""):
+        return None
+    return "https://integrate.api.nvidia.com/v1/" + model
+
+
+def _nvidia_request(
+    post: Callable[..., Any],
+    api_key: str,
+    model: str,
+    body: dict[str, Any],
+    *,
+    timeout: float | tuple[float, float],
+    max_bytes: int,
+) -> tuple[int, str, Any]:
+    """Chat-completions call, then the documented per-model URL on a route miss.
+
+    A retired or misplaced model id is HTTP 404 on ``/v1/chat/completions``
+    and sometimes HTTP 400. The NIM reference posts that id as its own path.
+    """
+    payload_body = body
+    max_tokens = payload_body.get("max_tokens")
+    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > _NVIDIA_MAX_OUTPUT_TOKENS:
+        payload_body = {**payload_body, "max_tokens": _NVIDIA_MAX_OUTPUT_TOKENS}
+    headers = {
+        "authorization": f"Bearer {api_key}",
+        "content-type": "application/json",
+        "accept": "application/json",
+    }
+    status, raw, parsed = _request(
+        post, _NVIDIA_CHAT_URL, headers, payload_body,
+        timeout=timeout, stream=True, max_bytes=max_bytes,
+    )
+    body_text = raw if isinstance(raw, str) else ""
+    alternate = _nvidia_invoke_url(model)
+    if alternate is None or not (status == 404 or (status == 400 and _model_id_rejected(body_text))):
+        return status, raw, parsed
+    logger.warning(
+        "nvidia model=%s chat/completions status=%s; retrying documented model url",
+        model, status,
+    )
+    return _request(
+        post, alternate, headers, payload_body,
+        timeout=timeout, stream=True, max_bytes=max_bytes,
+    )
 
 
 def _text_from_openai(payload: dict[str, Any]) -> str:
@@ -757,6 +987,7 @@ def _request(
         resp = post(url, **kwargs)
     except Exception as exc:  # noqa: BLE001 — network is a hard provider fail
         raise RuntimeError(f"network:{type(exc).__name__}") from exc
+    _remember_headers(resp)
 
     stream_iter = getattr(resp, "iter_content", None) or getattr(resp, "iter_bytes", None)
     if stream and max_bytes and callable(stream_iter):
@@ -775,7 +1006,7 @@ def _request(
             except Exception as exc:  # noqa: BLE001 — a streamed body can fail after headers
                 raise RuntimeError(f"network:{type(exc).__name__}") from exc
             text = raw.decode("utf-8", errors="replace")
-            payload = None if raw_text_only else json.loads(text)
+            payload = None if raw_text_only else _payload_from_text(text)
             status = int(getattr(resp, "status_code", 0) or 0)
         finally:
             close = getattr(resp, "close", None)
@@ -1114,6 +1345,7 @@ def _call_vision_provider(
     post: Callable[..., Any],
     *,
     max_response_bytes: int = 2_000_000,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[int, str, Any]:
     api_key = auth.token
     if name == "anthropic":
@@ -1154,19 +1386,18 @@ def _call_vision_provider(
     if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
-        return _request(
+        return _nvidia_request(
             post,
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-            {
-                "authorization": f"Bearer {api_key}",
-                "content-type": "application/json",
-            },
+            api_key,
+            model,
             _openai_vision_body(model, b64, prompt, extra=_nvidia_request_extras(model)),
             timeout=120.0,
-            stream=True,
             max_bytes=max_response_bytes,
         )
     if name == "cerebras":
+        body = _openai_vision_body(model, b64, prompt, extra=_CEREBRAS_REQUEST_EXTRAS)
+        if _cerebras_too_large(body, env if env is not None else os.environ):
+            raise RuntimeError("request_too_large")
         return _request(
             post,
             "https://api.cerebras.ai/v1/chat/completions",
@@ -1174,7 +1405,7 @@ def _call_vision_provider(
                 "authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
-            _openai_vision_body(model, b64, prompt, extra=_CEREBRAS_REQUEST_EXTRAS),
+            body,
             timeout=120.0,
             stream=True,
             max_bytes=max_response_bytes,
@@ -1348,22 +1579,28 @@ def _call_text_provider(
     if name == "antigravity":
         return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
-        return _request(
+        return _nvidia_request(
             post,
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-            {
-                "authorization": f"Bearer {api_key}",
-                "content-type": "application/json",
-            },
+            api_key,
+            model,
             _openai_multimodal_body(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens,
                 extra=_nvidia_request_extras(model),
             ),
             timeout=read_timeout,
-            stream=True,
             max_bytes=max_response_bytes,
         )
     if name == "cerebras":
+        body = _openai_multimodal_body(
+            model,
+            system,
+            instruction,
+            labeled_b64,
+            max_tokens=max_tokens,
+            extra=_CEREBRAS_REQUEST_EXTRAS,
+        )
+        if _cerebras_too_large(body, env if env is not None else os.environ):
+            raise RuntimeError("request_too_large")
         return _request(
             post,
             "https://api.cerebras.ai/v1/chat/completions",
@@ -1371,14 +1608,7 @@ def _call_text_provider(
                 "authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
-            _openai_multimodal_body(
-                model,
-                system,
-                instruction,
-                labeled_b64,
-                max_tokens=max_tokens,
-                extra=_CEREBRAS_REQUEST_EXTRAS,
-            ),
+            body,
             timeout=read_timeout,
             stream=True,
             max_bytes=max_response_bytes,
@@ -1476,6 +1706,16 @@ def _refresh_subscription_token(name: str) -> None:
         logger.warning("subscription refresh provider=%s failed: %s", name, type(exc).__name__)
 
 
+def _note_rate_limit(name: str, body: str, env: Mapping[str, str]) -> None:
+    """Codex account limits cool down across oneshots. Other 429s stay per call."""
+    if name != "codex":
+        return
+    seconds = provider_cooldown.reset_seconds(body, _RESPONSE_HEADERS.get())
+    if seconds is None:
+        seconds = provider_cooldown.fallback_seconds(env)
+    provider_cooldown.note(name, seconds, env)
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
@@ -1488,11 +1728,13 @@ def _run_ladder(
     providers: Sequence[str] | None = None,
     nvidia_vision: bool = False,
     refresh_token: Callable[[str], None] | None = None,
+    failover_response_errors: bool = False,
+    cooldown_timeouts: bool = False,
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     refresh_token = refresh_token or _refresh_subscription_token
     attempted: list[str] = []
     skipped: list[str] = []
-    order = _last_resort_last(providers or MODEL_LADDER_ORDER)
+    order = _last_resort_last(ladder_order(env) if providers is None else providers)
 
     for name in order:
         if name == "cursor":
@@ -1502,6 +1744,15 @@ def _run_ladder(
         auth = _auth_for(name, env)
         if auth is None:
             skipped.append(f"{name}:no_key")
+            continue
+        if provider_cooldown.rate_limited(name, env):
+            attempted.append(f"{name}:rate_limited_cooldown")
+            logger.warning("%s provider=%s skipped: rate-limit cooldown", log_prefix, name)
+            continue
+        held = provider_cooldown.process_reason(name)
+        if held:
+            attempted.append(f"{name}:{held}")
+            logger.warning("%s provider=%s skipped: %s", log_prefix, name, held)
             continue
         logger.info(
             "%s try provider=%s auth=%s mechanism=%s",
@@ -1532,10 +1783,28 @@ def _run_ladder(
                 break
             try:
                 status, raw, payload = call_provider(name, auth, model)
-            except ModelResponseError:
-                raise
+            except ModelResponseError as exc:
+                if not failover_response_errors:
+                    raise
+                attempted.append(f"{name}:{exc.code}")
+                logger.warning(
+                    "%s provider=%s model=%s %s", log_prefix, name, model, safe_error_message(exc)
+                )
+                continue
+            except json.JSONDecodeError:
+                if not failover_response_errors:
+                    raise
+                attempted.append(f"{name}:response_unreadable")
+                logger.warning(
+                    "%s provider=%s model=%s response_unreadable", log_prefix, name, model
+                )
+                continue
             except RuntimeError as exc:
                 code = str(exc) or "network"
+                if code == "request_too_large":
+                    provider_cooldown.skip_process(name, "request_too_large")
+                elif cooldown_timeouts and "Timeout" in code:
+                    provider_cooldown.skip_process(name, "timeout_cooldown")
                 attempted.append(f"{name}:{code}")
                 logger.warning(
                     "%s provider=%s model=%s failed %s", log_prefix, name, model, code
@@ -1604,6 +1873,10 @@ def _run_ladder(
                     status,
                     _body_snippet(body_text) if status != 200 else "",
                 )
+                if status == 429:
+                    _note_rate_limit(name, body_text, env)
+                if status == 413:
+                    provider_cooldown.skip_process(name, "request_too_large")
                 if status == 429 and name == "nvidia":
                     break
                 continue
@@ -1617,8 +1890,14 @@ def _run_ladder(
 
             try:
                 parsed, text = parse_success(name, payload)
-            except ModelResponseError:
-                raise
+            except ModelResponseError as exc:
+                if not failover_response_errors:
+                    raise
+                attempted.append(f"{name}:{exc.code}")
+                logger.warning(
+                    "%s provider=%s model=%s %s", log_prefix, name, model, safe_error_message(exc)
+                )
+                continue
             except (ValueError, TypeError, KeyError):
                 attempted.append(f"{name}:unparseable")
                 logger.warning(
@@ -1660,7 +1939,7 @@ def _run_ladder(
     if not attempted:
         raise ModelLadderExhausted(
             f"Model ladder exhausted: no keyed provider. "
-            f"order={' -> '.join(MODEL_LADDER_ORDER)}; skipped={skip}."
+            f"order={' -> '.join(order)}; skipped={skip}."
         )
     raise ModelLadderExhausted(
         f"Model ladder exhausted after trying every keyed provider. "
@@ -1681,7 +1960,10 @@ def extract_via_vision(
     b64 = base64.b64encode(png_bytes).decode("utf-8")
 
     def call_provider(name: str, auth: AuthMaterial, model: str) -> tuple[int, str, Any]:
-        return _call_vision_provider(name, auth, model, b64, prompt, sender, max_response_bytes=max_response_bytes)
+        return _call_vision_provider(
+            name, auth, model, b64, prompt, sender,
+            max_response_bytes=max_response_bytes, env=src,
+        )
 
     def parse_success(name: str, payload: dict[str, Any]) -> tuple[Any, str]:
         text = _extract_text(name, payload)
@@ -1721,6 +2003,8 @@ def complete_multimodal_json(
     accept: Callable[[Any], bool] | None = None,
     log_prefix: str = "research",
     providers: Sequence[str] | None = None,
+    failover_response_errors: bool = False,
+    cooldown_timeouts: bool = False,
 ) -> LadderResult:
     """Run multimodal JSON completion through the shared ladder."""
     src = env if env is not None else os.environ
@@ -1779,6 +2063,8 @@ def complete_multimodal_json(
         model_override=model_override,
         nvidia_vision=bool(labeled_b64),
         providers=providers,
+        failover_response_errors=failover_response_errors,
+        cooldown_timeouts=cooldown_timeouts,
     )
     return LadderResult(
         data=parsed,
@@ -1817,6 +2103,8 @@ def complete_text_json(
     accept: Callable[[Any], bool] | None = None,
     log_prefix: str = "text",
     providers: Sequence[str] | None = None,
+    failover_response_errors: bool = False,
+    cooldown_timeouts: bool = False,
 ) -> LadderResult:
     """Text-only JSON completion through the shared ladder. Cerebras is last."""
     return complete_multimodal_json(
@@ -1834,6 +2122,8 @@ def complete_text_json(
         accept=accept,
         log_prefix=log_prefix,
         providers=providers,
+        failover_response_errors=failover_response_errors,
+        cooldown_timeouts=cooldown_timeouts,
     )
 
 

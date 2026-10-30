@@ -714,8 +714,8 @@ def test_certify_lets_a_malformed_review_fall_to_the_next_rung() -> None:
     assert accept({"findings": []}) is False
 
 
-def test_copy_with_images_skips_grok() -> None:
-    """grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27)."""
+def test_copy_with_images_uses_the_shared_ladder_and_fails_over() -> None:
+    """One slow grok is cooled down in-process; it stays in the shared order."""
     seen = {}
 
     def fake(instruction, **kwargs):
@@ -723,8 +723,9 @@ def test_copy_with_images_skips_grok() -> None:
         return LadderResult(data=clean(), text="{}", provider="p", model="m")
 
     _call(fake)
-    assert "grok" not in seen["providers"] and seen["providers"][:2] == ("anthropic", "cursor")
-    assert "codex" in seen["providers"]
+    assert seen.get("providers") is None
+    assert seen["failover_response_errors"] is True
+    assert seen["cooldown_timeouts"] is True
 
 
 def test_captions_follow_the_numeric_firewall() -> None:
