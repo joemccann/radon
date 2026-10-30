@@ -3373,6 +3373,8 @@ row past its freshness window. So:
   Register the cadence. Do not restart the unit.
 - **writer-down:** raw DB `state=error`, non-null `last_error`, or `updated_at`
   never / far past the real cadence. Inspect the unit and logs.
+- **retired watcher:** raw DB `service=dropbox-research` with `state=error` is
+  not writer-down. See [retired dropbox research health](#retired-dropbox-research-health).
 
 The classifier suppresses EXPECTED states (2026-08-04 false-P2): `stale` rows
 while the market is closed (RTH-only writers quiet off-hours), and `error` rows
@@ -4880,7 +4882,22 @@ already contained the 2026-10-28 display-name fix.
 2026-10-16 ordered-merge reconciliation: combined head08540ee2, CI38968880813 / job117208493390 reproduced four legacy nonfatal-read assertions (1599 other tests passed). Preserve the later stricter policy: a recovered check must prove persisted coverage; repeated disconnects/timeouts remain unverified and fail. Keep no-replay, real-gap, statement-error and exhausted-budget controls. Existing activity NAV repair remains an idempotent saved-statement repair, not cash/journal replay.
 
 
+## retired-dropbox-research-health
+
+**A stored `dropbox-research` error is the retired shared-folder watcher, not a live database incident.**
+
+- **Symptom:** Turso `service_health` still has `dropbox-research` in `error`, often with an old `DbHttpError`. A knowledge note may repeat that stored text. The row is not a page.
+- **Prerequisites:** read-only checks. Do not start units, write Turso, clear stage health, or requeue research work.
+- **Blast radius:** starting `radon-research.service` runs the retired Dropbox watcher and can publish from the old queue. `State.requeue_with_note` spends model review on a feed that is no longer the source. The unit watchdog does not page that unit, so a running watcher can stay silent.
+- **Safe diagnosis:** compare the stored row with the presented row. `build_status` runs `present_service_health_section` before `/status` returns `service_health`. A leftover `dropbox-research` row is copied with `state` `retired`, `retired` true, `last_error` null, `unit` `radon-research.service`, and `succeeded_by` `marketdesk-research` and `marketdesk-pdf`. Its `review_stage.runs_on` is empty. `/api/service-health` drops the row from applicable services and sets `research.review_stage.retired` with `runs_on` empty. `is_service_monitored("dropbox-research")` is false, and the unit check skips `radon-research.service`. Live research health is `marketdesk-research` and `marketdesk-pdf`.
+- **Stop conditions:** do not `systemctl start` or enable `radon-research.service`. Do not clear `health-review.json` as a repair. Do not call `State.requeue_with_note`. Do not treat the stored `DbHttpError` as a current Turso outage. If `systemctl is-active radon-research.service` is `active`, stop and use the retire path in [Private Dropbox research runtime](operations.md#private-dropbox-research-runtime). If `marketdesk-research` or `marketdesk-pdf` is `error`, use that row's own runbook.
+- **Verification:** the presented `/status` row is `retired` with `last_error` null, and the two live research rows are the ones evaluated. A raw stored error with no presented `retired` marker means this reader is not the build that marks it.
+- **Rollback:** none. This is a read of the retired-row presentation. Do not re-enable the watcher to make the stored row look current.
+- **Escalation:** if `/status` still shows `dropbox-research` as `error` with a non-null `last_error` on a build that contains `scripts/health_service/retired.py`, stop. Do not start the unit while that result is unknown.
+
 ## research-idle-review-stale-db-error
+
+**Do not execute this repair.** `radon-research.service` is retired. A leftover review-health `DbHttpError` is [retired dropbox research health](#retired-dropbox-research-health). The steps below record the 2026-10-17 incident only.
 
 **Research review remains red after database recovery; database failures exhaust document attempts.**
 
