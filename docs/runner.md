@@ -32,6 +32,17 @@ uses gateway inference. DeepSec process/revalidate commands use the bridge
 adapter, whose temporary loopback credential selects the pinned SDK's custom
 Responses provider without reading local subscription grants.
 
+The root runner updater still requires the latest exact-main CI run and its
+production deployment to succeed, including release tagging. Image and tag
+selection share the validated build identity; unavailable rewritten history uses
+the existing package label without changing the original version baseline.
+That fallback does not restore monotonic version numbers. Model transport/client
+bootstrap alone does not update installed runner code. After the root runner
+refresh, the old hourly native-updater job remains scheduled but its installed
+helper performs no vendor updates; immutable model-client promotion belongs to
+the gateway's root updater. Active runner/native-update maintenance gates remain
+required during installation.
+
 ## Safety boundary
 
 Safety is where the runner runs, not what the script checks:
@@ -145,11 +156,12 @@ RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway/gateway.sock \
 
 The result identifies wired providers and service capabilities. A failed
 connection stops model work; it never creates local provider settings or
-credentials. `agent_cli_bootstrap.sh` performs the same status check. The old
-bot-side NVIDIA/Cerebras env, native login files and fx proxy are retired.
-Only known bot model grants are quarantined by the privileged cutover after
-canonical gateway grants are verified; personal operator CLI logins are not
-part of that migration.
+credentials. `agent_cli_bootstrap.sh` performs the same status check. Model
+execution no longer uses the bot-side NVIDIA/Cerebras env, native login files
+or fx proxy. Quarantining known bot model grants is a separate, explicit
+operator step after canonical gateway grants and real native transport are
+verified; the installer does not automate it. Personal operator CLI logins
+remain untouched.
 
 ### 7. GitHub machine account (operator, browser)
 

@@ -254,7 +254,10 @@ jobs:
           fetch-depth: 0
       - name: Derive release version
         id: release
-        run: echo "version=$(python3 scripts/release_version.py)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA")"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Validate public build environment
         env:
           # NEXT_PUBLIC_* are COMPILE-TIME inlined by the Next build, so an

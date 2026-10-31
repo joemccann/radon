@@ -1240,10 +1240,17 @@ gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
 `gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
-the history fold from `scripts/release_version.py`. The `release-tag` job
-pushes it after that deploy succeeds, including when earlier test jobs were
-skipped. Root and web `package.json` version fields are a fallback when that
-history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
+the shared build identity from `scripts/release_version.py --ci-version
+--expected-sha "$GITHUB_SHA"`. Both image selection and `release-tag` validate
+canonical semver and the exact checkout SHA; selector failure stops the step
+before output or tagging. The tag job runs after deployment succeeds, including
+when earlier test jobs were skipped, and never moves an existing tag.
+
+The original 0.7.0 history baseline remains unchanged. When that history is
+missing or disconnected after a history rewrite, the existing web `package.json`
+fallback labels both the built app and its tag. Package fields can lag earlier
+tags; this fallback does not reconstruct monotonic semver or restore purged
+objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.
