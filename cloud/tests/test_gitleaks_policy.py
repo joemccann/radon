@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -240,3 +244,49 @@ def test_literal_rule_still_ignores_interpolation(value: str) -> None:
     rules = _config_rules()
     literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
     assert not literal.search("TWS_" + "PASSWORD" + "=" + value), value
+
+
+GITLEAKS_BIN = os.environ.get("RADON_GITLEAKS_BIN", "gitleaks")
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_the_commit_exceptions_still_resolve_over_the_whole_history(tmp_path) -> None:
+    """The baselines above are keyed by commit SHA, so a history rewrite
+    renames every vetted commit and the exceptions quietly stop matching. The
+    mirrored sets still agree with the config while a real scan reports hits,
+    which is how the full-history baseline stopped being zero twice. Only a
+    scan over the actual history catches that, so this asserts the scan is
+    empty rather than that the lists look right.
+    """
+    if shutil.which(GITLEAKS_BIN) is None:
+        pytest.skip("gitleaks is not on PATH; the CI secret-scan job owns this gate")
+    if _git("rev-parse", "--is-shallow-repository") == "true":
+        pytest.skip("shallow clone: the vetted commits are not present to scan")
+    report = tmp_path / "gitleaks.json"
+    result = subprocess.run(
+        [
+            GITLEAKS_BIN, "detect",
+            "--source", str(REPO_ROOT),
+            "--config", str(GITLEAKS_CONFIG),
+            "--redact", "--no-banner",
+            "--exit-code", "0",
+            "--report-format", "json",
+            "--report-path", str(report),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    findings = json.loads(report.read_text(encoding="utf-8") or "[]")
+    # Rule, short commit and path only: a redacted value is still not ours to
+    # print, and the location is what a re-anchor needs.
+    assert [
+        f"{f['RuleID']} {f['Commit'][:12]} {f['File']}:{f['StartLine']}"
+        for f in findings
+    ] == []
