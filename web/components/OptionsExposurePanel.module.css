@@ -119,8 +119,10 @@
   transition: var(--transition-controls);
 }
 
-.field select:hover {
-  border-color: var(--text-muted);
+@media (hover: hover) and (pointer: fine) {
+  .field select:hover {
+    border-color: var(--text-muted);
+  }
 }
 
 .field select:focus-visible,
@@ -169,12 +171,14 @@
   white-space: nowrap;
 }
 
-.segmented button:hover,
-.levelToggles button:hover,
-.expirations button:hover,
-.retry:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--signal-core) 8%, var(--bg-panel));
+@media (hover: hover) and (pointer: fine) {
+  .segmented button:hover,
+  .levelToggles button:hover,
+  .expirations button:hover,
+  .retry:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--signal-core) 8%, var(--bg-panel));
+  }
 }
 
 .segmented button[aria-pressed="true"],
@@ -280,8 +284,10 @@
   border-bottom: 0;
 }
 
-.table tbody tr:hover {
-  background: color-mix(in srgb, var(--signal-core) 4%, transparent);
+@media (hover: hover) and (pointer: fine) {
+  .table tbody tr:hover {
+    background: color-mix(in srgb, var(--signal-core) 4%, transparent);
+  }
 }
 
 .strikeCell {
@@ -613,9 +619,11 @@
   transition: border-color var(--dur-fast, 150ms), color var(--dur-fast, 150ms);
 }
 
-.exportButton:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
-  color: var(--text-primary);
+@media (hover: hover) and (pointer: fine) {
+  .exportButton:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
+    color: var(--text-primary);
+  }
 }
 
 .exportButton:disabled {

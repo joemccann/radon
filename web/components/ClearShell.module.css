@@ -32,7 +32,9 @@
 .primary { display: flex; align-items: stretch; height: 100%; gap: 26px; }
 .primaryLink { display: flex; align-items: center; min-height: 44px; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 550; white-space: nowrap; text-decoration: none; color: var(--text-secondary); }
 .primaryLink[aria-current="page"] { color: var(--signal-core-text); border-color: var(--signal-core-text); }
-.primaryLink:hover { color: var(--text-primary); }
+@media (hover: hover) and (pointer: fine) {
+  .primaryLink:hover { color: var(--text-primary); }
+}
 .more { position: relative; flex: none; }
 .moreTrigger { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 2px; border: 0; background: transparent; font: 500 13px var(--font-sans); color: var(--text-secondary); cursor: pointer; }
 .moreTrigger[aria-expanded="true"] { color: var(--signal-core-text); }
@@ -41,7 +43,9 @@
 .menuHeading { color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: .025em; padding: 0 10px 7px; }
 .menuLink { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border-radius: 6px; color: var(--text-secondary); font-size: 13px; text-decoration: none; }
 .menuLink svg { flex: none; }
-.menuLink:hover { background: var(--bg-hover); color: var(--text-primary); }
+@media (hover: hover) and (pointer: fine) {
+  .menuLink:hover { background: var(--bg-hover); color: var(--text-primary); }
+}
 .menuLink[aria-current="page"] { color: var(--signal-core-text); background: color-mix(in srgb, var(--signal-core) 8%, var(--bg-base)); }
 .avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; margin-left: auto; border: 1px solid var(--border-dim); border-radius: 50%; color: var(--text-primary); background: var(--bg-panel); font: 600 12px var(--font-sans); text-decoration: none; overflow: hidden; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -152,8 +156,10 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:hover,
   .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[aria-expanded="true"] { background: var(--bg-hover); }
+  @media (hover: hover) and (pointer: fine) {
+    .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:hover { background: var(--bg-hover); }
+  }
   .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="warn"] { color: var(--warn-text); }
   .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="dead"] { color: var(--fault); }
   .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:focus-visible {
