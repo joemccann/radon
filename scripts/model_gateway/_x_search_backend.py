@@ -21,8 +21,7 @@ def _xai_token() -> str:
     Resolved through the shared ladder: ~/.grok/auth.json only. A prepaid
     xAI key is never read.
     """
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from model_gateway import engine as model_ladder
+    from . import engine as model_ladder
 
     auth = model_ladder.subscription_auth("grok")
     return auth.token if auth is not None else ""

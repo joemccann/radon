@@ -8,7 +8,7 @@ CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN from the process environment
 API error logs one line and leaves the ladder date unchanged.
 """
 from __future__ import annotations
-from model_gateway.contracts import ClairicError, MissingCredentials
+from .contracts import ClairicError, MissingCredentials
 
 import json
 import re

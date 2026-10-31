@@ -159,9 +159,11 @@ PY
 
 RUN --network=none python scripts/ci/check_model_cli_transport.py --network-isolated --clients-root /opt/radon-clis
 # Capability proof only: downloading weights is a bounded runtime operation.
-RUN python - <<'PY_FORECAST'
+RUN --network=none python - <<'PY_FORECAST'
 import importlib.metadata
 import chronos, torch
+from scripts.model_gateway import server
+assert server.Gateway
 assert importlib.metadata.version("chronos-forecasting") == "2.3.0"
 assert torch.__version__ == "2.12.1+cpu"
 assert torch.version.cuda is None

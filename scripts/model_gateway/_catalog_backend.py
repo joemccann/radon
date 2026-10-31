@@ -125,8 +125,7 @@ _LADDER_PROVIDER = {"anthropic": "anthropic", "openai": "codex", "xai": "grok"}
 
 
 def _ladder():
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from model_gateway import engine as model_ladder
+    from . import engine as model_ladder
 
     return model_ladder
 

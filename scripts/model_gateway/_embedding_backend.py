@@ -226,7 +226,7 @@ def resolve_query_vector(
 
 
 def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[float]]:
-    from model_gateway.engine import (
+    from .engine import (
         _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request,
         safe_error_message,
     )

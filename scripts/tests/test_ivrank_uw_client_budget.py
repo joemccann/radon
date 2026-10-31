@@ -9,6 +9,8 @@ the way internals skew does (PERF-014).
 from __future__ import annotations
 
 import sys
+
+import pytest
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
@@ -41,10 +43,29 @@ class _CountingUWClient:
         return {"data": [{"date": date, "volatility": "0.15"}]}
 
 
-def test_ivrank_five_uw_gets_open_one_client(monkeypatch):
+class _PreviousJobClient:
+    closed = False
+
+    def close(self):
+        self.closed = True
+
+    def get(self, *args, **kwargs):
+        raise AssertionError("cached previous job leaked into isolated session budget")
+
+
+@pytest.mark.parametrize("warm_cache", [False, True], ids=["cold-cache", "warm-cache"])
+def test_ivrank_five_uw_gets_open_one_client(monkeypatch, warm_cache):
     import clients.uw_client as uw_mod
     import fetch_ivrank as iv
 
+    stale = _PreviousJobClient() if warm_cache else None
+    if stale is not None:
+        iv.close_uw_session()
+        iv._uw_session = stale
+
+    # This budget measures a fresh job, regardless of earlier test jobs.
+    # Replacing the constructor cannot replace an already cached client.
+    iv.close_uw_session()
     _CountingUWClient.inits = 0
     _CountingUWClient.gets = 0
     monkeypatch.setenv("UW_TOKEN", "synthetic-test-token")
@@ -59,6 +80,7 @@ def test_ivrank_five_uw_gets_open_one_client(monkeypatch):
         assert iv._real_uw_iv_for_date("2026-10-17") == 0.15
         assert iv._real_uw_iv_for_date("2026-10-20") == 0.15
         assert iv._real_uw_check() == {"date": "2026-10-20", "iv_rank": 12.5}
+        assert stale is None or stale.closed
         assert _CountingUWClient.gets == 5
         assert _CountingUWClient.inits == 1, (
             f"UWClient constructions {_CountingUWClient.inits} "

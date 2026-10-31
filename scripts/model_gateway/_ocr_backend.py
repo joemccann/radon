@@ -77,7 +77,7 @@ class _CapturingPost:
         return response
 
 def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline):
-    from model_gateway.engine import (
+    from .engine import (
         _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request, acquire_model_slot, scoped_timeout,
     )
 
@@ -201,7 +201,7 @@ def _meaningful(text: str) -> bool:
     return bool(cleaned.strip())
 
 def _openai_text(payload: dict) -> str:
-    from model_gateway.engine import _text_from_openai
+    from .engine import _text_from_openai
     return _text_from_openai(payload)
 
 def _retry_after(headers: dict):
