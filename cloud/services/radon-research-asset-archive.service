@@ -1,0 +1,33 @@
+[Unit]
+Description=Radon daily research asset and download archive to Backblaze B2 (confirm, then prune)
+After=network-online.target
+Wants=network-online.target
+# DUR-02 pattern: park a crash loop as failed instead of restarting forever.
+# The research-asset-archive service_health heartbeat (48h window) surfaces a
+# parked or silent archive on the dashboard and the watchdog daily bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+Environment=RADON_RESEARCH_DIR=/var/lib/radon/research
+Environment=RADON_DB_NO_REPLICA=1
+# The private research root is readable only inside the research container,
+# so the runtime-container.conf drop-in replaces this ExecStart with
+# radon-app-runtime (rw bind of /var/lib/radon-private/research). Off-box
+# copy required: RADON_ARCHIVE_S3_* (Backblaze B2). The job fails closed
+# without them and never deletes a file B2 has not confirmed.
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/research/asset_archive.py
+StandardOutput=journal
+StandardError=journal
+# First run backfills ~7G (20 GiB per-run ceiling, 2h deadline in
+# asset_archive.py); 3h bounds a wedged B2 transfer.
+TimeoutStartSec=10800
+
+[Install]
+WantedBy=multi-user.target

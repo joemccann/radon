@@ -2117,6 +2117,19 @@ def test_research_archive_runtime_gets_only_the_private_research_bind(tmp_path):
     assert "CREDENTIALS_DIRECTORY" not in log
 
 
+def test_research_asset_archive_runtime_gets_only_the_private_research_bind(tmp_path):
+    result = _run(tmp_path, ["run", "radon-research-asset-archive.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text()
+    assert "radon-python:" in log and "python scripts/research/asset_archive.py" in log
+    assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:rw" in log
+    assert ":/var/lib/radon/media" not in log
+    assert ":/home/radon/radon/data" not in log
+    assert ":/var/lib/radon/ib-lease" not in log
+    assert "/.claude:" not in log and "/.codex:" not in log
+    assert "CREDENTIALS_DIRECTORY" not in log
+
+
 def test_api_research_mount_is_read_only(tmp_path):
     result = _run(tmp_path, ["run", "radon-api.service"])
     assert result.returncode == 0, result.stderr

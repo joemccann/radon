@@ -51,6 +51,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-portfolio-archive.timer",
     "radon-research-archive.service",
     "radon-research-archive.timer",
+    "radon-research-asset-archive.service",
+    "radon-research-asset-archive.timer",
     "radon-marketdesk.service",
     "radon-marketdesk.timer",
     "radon-marketdesk-pdf.service",
@@ -657,6 +659,31 @@ class TestResearchArchive:
         dropin = (services_dir / "radon-research-archive.service.d" / "runtime-container.conf").read_text()
         assert "Type=oneshot" in dropin.splitlines()
         assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in dropin.splitlines()
+
+
+class TestResearchAssetArchive:
+    """Daily research asset/download archive to B2, confirm-before-prune."""
+
+    def test_oneshot_runs_the_asset_archive_with_a_bounded_budget(self, unit):
+        svc = unit("radon-research-asset-archive.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon" and svc["umask"] == "0077"
+        assert svc["environmentfile"] == "/etc/radon/env"
+        assert svc["execstart"] == (
+            "/home/radon/radon/.venv/bin/python "
+            "/home/radon/radon/scripts/research/asset_archive.py"
+        )
+        assert 3600 <= int(svc["timeoutstartsec"]) <= 4 * 3600
+
+    def test_timer_fires_daily_after_disk_cleanup_before_the_evidence_run(self, unit):
+        timer = unit("radon-research-asset-archive.timer")["Timer"]
+        assert timer["oncalendar"] == "*-*-* 03:40:00 UTC"
+        assert timer["persistent"] == "true"
+        assert 0 < int(timer["randomizeddelaysec"]) <= 900
+
+    def test_runs_in_the_container_that_owns_the_private_bind(self, services_dir):
+        dropin = (services_dir / "radon-research-asset-archive.service.d" / "runtime-container.conf").read_text()
+        assert dropin == (services_dir / "radon-research-archive.service.d" / "runtime-container.conf").read_text()
 
 
 class TestMarketDeskResearch:

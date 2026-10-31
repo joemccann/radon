@@ -9,7 +9,10 @@ settled ones off-box.
 
 Scope is evidence only. ``assets/`` is served live to subscribers
 (``/api/newsfeed/research/files/``) and ``downloads/`` holds the cached PDFs
-that queued reviews hash-check, so neither is touched.
+that queued reviews hash-check. Neither is touched here: their archive and
+prune is ``research.asset_archive`` (daily), which only became safe once
+``research.assets.read_asset`` learned to read a pruned asset back from B2
+and the downloads pass learned to skip files that pending work still needs.
 
 A directory is a candidate only when:
   * every entry is a regular file or directory (no symlinks or specials),
@@ -126,15 +129,16 @@ def s3_config_from_env(env: dict | None = None) -> dict | None:
     return cfg
 
 
-def _s3_client(cfg: dict):
+def _s3_client(cfg: dict, *, connect_timeout: float = S3_CONNECT_TIMEOUT,
+               read_timeout: float = S3_READ_TIMEOUT, max_attempts: int = S3_MAX_ATTEMPTS):
     import boto3  # lazy: tests and dry runs never import it
     from botocore.config import Config
 
     return boto3.client(
         "s3", endpoint_url=cfg["endpoint_url"], aws_access_key_id=cfg["access_key"],
         aws_secret_access_key=cfg["secret_key"], region_name=cfg["region"],
-        config=Config(connect_timeout=S3_CONNECT_TIMEOUT, read_timeout=S3_READ_TIMEOUT,
-                      retries={"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+        config=Config(connect_timeout=connect_timeout, read_timeout=read_timeout,
+                      retries={"max_attempts": max_attempts, "mode": "standard"},
                       max_pool_connections=DEFAULT_WORKERS,
                       # Content-MD5 is the integrity check; skip the optional
                       # CRC trailer so only headers B2 documents are sent.
