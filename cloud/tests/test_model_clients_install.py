@@ -99,9 +99,9 @@ def test_refuses_any_release_identity_except_an_exact_sha(tmp_path, sha):
 
 def test_root_helper_promotes_clients_before_starting_the_gateway():
     helper = (CLOUD / "scripts/deploy-root-helper.sh").read_text()
-    for verb in ("restart-managed", "recover"):
+    for verb,action in (("restart-managed", "install-model-clients"), ("recover", "recover-model-clients")):
         body = helper.split(f"  {verb})\n", 1)[1].split("    ;;", 1)[0]
-        assert body.index("install-model-clients") < body.index('"${CORE_SERVICES[@]}"')
+        assert body.index(action) < body.index('"${CORE_SERVICES[@]}"')
     bootstrap = (CLOUD / "scripts/bootstrap-control-plane.sh").read_text()
     assert "scripts/model_clients.py" in bootstrap
     assert "/usr/local/lib/radon/model_clients.py" in bootstrap

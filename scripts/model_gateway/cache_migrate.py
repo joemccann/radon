@@ -1,6 +1,7 @@
 """Copy only CI-pinned model bytes, executed inside the gateway image as UID1000."""
 from __future__ import annotations
 import hashlib
+import errno
 import fcntl
 import math
 import json
@@ -71,9 +72,13 @@ def migrate(source,destination,revision,files):
             os.rename(stage,final)
     refs=destination/'refs';_private_parent(refs)
     if (refs/'main').is_symlink():raise ValueError('unsafe model reference')
-    with tempfile.NamedTemporaryFile(mode='w',prefix='.ref-',dir=refs,delete=False) as stream:
-        temporary=Path(stream.name);stream.write(revision);stream.flush();os.fsync(stream.fileno())
-    temporary.chmod(0o600);os.replace(temporary,refs/'main')
+    temporary=None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w',prefix='.ref-',dir=refs,delete=False) as stream:
+            temporary=Path(stream.name);stream.write(revision);stream.flush();os.fsync(stream.fileno())
+        temporary.chmod(0o600);os.replace(temporary,refs/'main')
+    finally:
+        if temporary is not None:temporary.unlink(missing_ok=True)
     return {'revision':revision,'files':files}
 
 _PACING_TIMES = frozenset({'next_at', 'cooldown_until', 'tripped_until', 'last_429_at'})
@@ -249,8 +254,12 @@ def main():
     print(json.dumps({'verified_models':sorted(proofs),'verified_file_count':sum(len(row['files']) for row in proofs.values()),'pacing_sources':pacing['source_count'],'pacing_preserved_deadline':pacing['preserved_deadline']},sort_keys=True))
     return 0
 
-if __name__=='__main__':
-    try:raise SystemExit(main())
+def cli():
+    try:return main()
     except Exception as exc:
-        print('model cache migration refused: '+type(exc).__name__,file=sys.stderr)
-        raise SystemExit(78)
+        reason=errno.errorcode.get(exc.errno) if isinstance(exc,OSError) else None
+        print('model cache migration refused: '+type(exc).__name__+(' errno='+reason if reason else ''),file=sys.stderr)
+        return 78
+
+if __name__=='__main__':
+    raise SystemExit(cli())

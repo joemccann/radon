@@ -2985,12 +2985,13 @@ case "$1" in
       rollback_rc=0
       "$SESSION_PYTHON" -I /usr/local/lib/radon/model_gateway_rollback.py restore || rollback_rc=$?
       if (( rollback_rc == 0 )); then
+        systemctl_bounded daemon-reload
         exec "$SELF" recover
       elif (( rollback_rc != 3 )); then
         exit "$rollback_rc"
       fi
     fi
-    "$MODEL_CLIENT_RUNTIME" install-model-clients
+    "$MODEL_CLIENT_RUNTIME" recover-model-clients
     reset_core_failures
     systemctl_bounded --no-block start "${CORE_SERVICES[@]}"
     for unit in "${CORE_SERVICES[@]}"; do

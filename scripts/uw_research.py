@@ -450,7 +450,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.scheduled:
             _record_health("ok" if all(r["status"] == "ok" for r in results) else "partial")
         print(json.dumps(payload, allow_nan=False))
-        return 0 if all(_scheduled_cycle_ok(r) for r in results) else 1
+        # Exit 0 on an all-section 429 is the hourly oneshot only. `--ticker`
+        # is the operator refresh: a zero exit would look complete and start
+        # the success cooldown while every section stayed stale.
+        if args.scheduled and all(_scheduled_cycle_ok(r) for r in results):
+            return 0
+        return 0 if all(r["status"] in {"ok", "partial"} for r in results) else 1
     except Exception:
         if args.scheduled:
             _record_health("unavailable")

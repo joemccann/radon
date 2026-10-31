@@ -229,7 +229,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull [<sha>]|prune|install-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 

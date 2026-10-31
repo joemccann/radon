@@ -91,9 +91,17 @@ Only the gateway writes its persistent model cache under the root-owned
 `/var/lib/radon/model-cache`; HF and FastEmbed use separate children.
 
 The gateway starts before its consumers and has a bounded Unix-socket health
-probe. It participates in the normal exact-SHA deploy, restart, stability and
+probe. The managed runtime supplies its status identity through gateway-only
+`RADON_DEPLOY_SHA`, derived from the already-resolved, validated exact gateway
+image reference. Caller/env-file values and a second checkout lookup cannot
+replace that identity; mutable, digest-only or foreign image references refuse
+before container launch. It participates in the normal exact-SHA deploy, restart, stability and
 rollback contracts. CLI/model dependency upgrades remain pinned source changes,
 image smokes and green CI; no mutable runtime auto-updater is introduced.
+Preparatory cache-migration and CLI-export containers discard inherited
+`NOTIFY_SOCKET`; only the foreground runtime's filtered notify proxy may
+notify systemd. This prevents a completed preparation container from replacing
+the service's main PID with its short-lived Podman conmon.
 `model_clients.py` promotes the exact image's CLI payload and consumer-only
 helpers atomically under `/opt/radon-model-clients/<SHA>`, with version/hash
 receipts. It does not execute host installers, provider login, or image tools
@@ -104,7 +112,21 @@ receipt under `/opt/radon-provision/model-gateway-cutover` before privileged
 helpers change. It verifies the observed API/Next image SHA and installed
 artifact bytes against the trusted previous Git commit. Recovery restores that
 exact previous helper/runtime/fleet contract before running the old helper's
-normal recovery; the control-plane floor never decreases. Other targets,
+normal recovery, with a daemon reload before invoking that helper. Application
+HEAD metadata is read as UID1000. The failed target must match root's pinned
+main and no committed-release marker may exist; the independent control-plane
+floor is preserved byte-for-byte even across rewritten history. The exact
+root-owned sticky `root:1000` `/etc/radon` directory is temporarily sealed via
+its pinned FD while artifacts are replaced, then its original `01770` mode is
+restored. A private receipt-side `config-parent-mode.json` intent is fsynced
+before chmod; kill/reboot retry validates exact directory identity before
+restoring permissions. Only the successful fsynced restoration removes that
+marker; its presence blocks receipt reuse or archival. A later capture first proves the previous release is serving and its
+entire installed baseline still matches the receipt, then atomically archives
+the completed attempt under a unique target-named root-private directory.
+Pending receipts are never discarded. Legacy units absent from the old
+manifest are retained only after exact previous-Git, owner and mode checks.
+Other targets,
 modified receipts, unrecognized paths and unverified source bytes are refused.
 
 ## MarketDesk deferred PDF archive
@@ -914,6 +936,33 @@ and executable hashes, and atomically selects an immutable
 `current/bin`; they never run a vendor installer or change the selected payload.
 The manifest carries the exact release, provider versions and SHA256 evidence.
 A refused export retains the previous client selector and fails deployment.
+
+`radon-app-runtime check-model-space` is a fixed, read-only root action with
+no caller paths, thresholds or environment bypass. Deployment checks it after
+exact-image pulls, before creating a staged worktree and immediately before
+teardown; a prestage refusal never falls through to a host build. It groups
+fixed destinations by filesystem and uses `f_bavail`, not root-reserved free
+blocks. Sequential CLI archive/tree peaks derive from the enforced 2GiB
+export bounds and 100000-member allocation overhead. Pinned model-file sizes
+are root-owned constants contract-tested against the image manifest. Each
+filesystem must also have sufficient `f_favail` for bounded members/cache
+metadata; unknown or unbounded inode metadata refuses. The serving checkout
+filesystem retains an explicit 1GiB/1024-inode operational and recovery margin.
+A shared 4KiB filesystem requires 8881176576 writable bytes and 201161 inodes
+after pulls. This is admission evidence, not a reservation against later writes.
+Promotion repeats the check before allocation. Recovery instead uses
+`recover-model-clients` to verify existing exact immutable Linux/helper and
+Darwin bundle receipts/hashes and reselect the Linux payload without export or
+payload copying; Darwin publication remains commit-only. Missing or corrupt
+recovery bytes fail closed. Legacy two-image recovery remains unchanged.
+Model-cache reference write/fsync/replace failures remove temporary refs,
+retain the prior canonical ref and report only a safe errno name with exit78.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
 
 
 ### Root export and Mac model transport

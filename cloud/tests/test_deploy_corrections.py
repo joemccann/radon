@@ -1940,6 +1940,7 @@ exec /bin/rm "$@"
 set -euo pipefail
 source {DEPLOY!s}
 wait_for_gateway_ready() {{ return 0; }}
+preflight_model_disk() {{ return 0; }}
 sudo() {{
   printf '%s\\n' "$*" >> {calls!s}
   [[ "$*" != *" stop-clean" ]]
@@ -3222,6 +3223,7 @@ raise SystemExit(0)
         shell = f"""
 set -euo pipefail
 source {DEPLOY!s}
+preflight_model_disk() {{ return 0; }}
 create_staged_worktree() {{
   STAGED_RELEASE_DIR="$(mktemp -d {tmp_path!s}/stage.XXXXXX)"
 }}
@@ -3256,6 +3258,7 @@ build_staged_release {'b' * 40}
         shell = f"""
 set -euo pipefail
 source {DEPLOY!s}
+preflight_model_disk() {{ return 0; }}
 create_staged_worktree() {{ STAGED_RELEASE_DIR={stage!s}; }}
 build_nextjs_at() {{ return 0; }}
 prepare_python_wheels() {{ return 61; }}
@@ -3380,6 +3383,7 @@ build_staged_release() {{
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 deploy_gate() {{ printf 'gate\\n' >> {calls!s}; return 0; }}
 short_log() {{ printf 'log\\n'; }}
+sudo() {{ [[ "$*" == "-n -l -- $APP_RUNTIME_HELPER check-model-space" ]]; }}
 RADON_DEPLOY_STAGE=1 main {sha}
 """
         result = subprocess.run(

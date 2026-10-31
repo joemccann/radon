@@ -644,6 +644,7 @@ source {DEPLOY}
 prepare_release_transition() {{ return 0; }}
 activate_staged_release() {{ printf 'activate\\n' >> {calls}; }}
 wait_for_gateway_ready() {{ return 0; }}
+preflight_model_disk() {{ return 0; }}
 sudo() {{
   printf '%s\\n' "$*" >> {calls}
   [[ "$*" == *install-units ]] && return 0

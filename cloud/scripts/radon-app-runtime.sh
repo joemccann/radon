@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|install-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -412,6 +412,11 @@ cmd_capture_model_pacing() {
   fi
 }
 
+cmd_check_model_space() {
+  # Read-only fixed-filesystem admission; accepts no destination or threshold.
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py check-space
+}
+
 cmd_install_model_clients() {
   # Fixed destination/export policy lives in the root-owned control plane.
   # No caller-provided path, executable, registry or moving image tag.
@@ -419,6 +424,12 @@ cmd_install_model_clients() {
   tag="$(image_tag)" || return $?
   image="$(model_gateway_image)" || return $?
   "$PYTHON" -I /usr/local/lib/radon/model_clients.py "$DOCKER" "$image" "$tag"
+}
+
+cmd_recover_model_clients() {
+  local tag
+  tag="$(image_tag)" || return $?
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py recover "$tag"
 }
 
 cmd_commit_model_clients() {
@@ -1087,12 +1098,14 @@ migrate_model_cache() {
   (( found == 1 )) || return 0
   # All copying, digest checks and promotion run as the application UID in
   # the exact CI image. Host root neither imports nor executes app modules.
-  "$@" "$image" -I /home/radon/radon/scripts/model_gateway/cache_migrate.py
+  # Preparatory Podman runs must not replace systemd's MAINPID with their
+  # short-lived conmon. Keep the foreground service's notify proxy intact.
+  /usr/bin/env -u NOTIFY_SOCKET "$@" "$image" -I /home/radon/radon/scripts/model_gateway/cache_migrate.py
 }
 
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir rendered_env
+  local ids image workdir rendered_env gateway_release=""
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -1103,7 +1116,14 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-model-gateway.service) image="$(model_gateway_image)" ;;
+    radon-model-gateway.service)
+      image="$(model_gateway_image)" || return $?
+      [[ "$image" =~ ^ghcr\.io/joemccann/radon-model-gateway:([0-9a-f]{40})$ ]] || {
+        echo "radon-app-runtime: gateway image must carry an exact release SHA" >&2
+        return 69
+      }
+      gateway_release="${BASH_REMATCH[1]}"
+      ;;
     radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
@@ -1202,6 +1222,13 @@ cmd_run() {
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
+
+  if is_model_gateway "$unit"; then
+    # Bind status/activation identity to the image already selected above.
+    # Caller environment, env-file values and a second HEAD lookup cannot
+    # describe a different release from the bytes this process will execute.
+    set -- "$@" --env "RADON_DEPLOY_SHA=${gateway_release}"
+  fi
 
   if [[ "$ENGINE" == podman ]]; then
     # REL-087: conmon and the container join the unit's own cgroup (the unit
@@ -1484,6 +1511,10 @@ cmd_run() {
 
 [[ $# -ge 1 ]] || usage
 case "$1" in
+  check-model-space)
+    [[ $# -eq 1 ]] || usage
+    cmd_check_model_space
+    ;;
   capture-model-pacing)
     [[ $# -eq 1 ]] || usage
     cmd_capture_model_pacing
@@ -1491,6 +1522,10 @@ case "$1" in
   install-model-clients)
     [[ $# -eq 1 ]] || usage
     cmd_install_model_clients
+    ;;
+  recover-model-clients)
+    [[ $# -eq 1 ]] || usage
+    cmd_recover_model_clients
     ;;
   commit-model-clients)
     [[ $# -eq 1 ]] || usage

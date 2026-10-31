@@ -7,6 +7,7 @@ provider authentication, user-selected destination, or shell interpolation.
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 from pathlib import Path
@@ -22,11 +23,93 @@ import time
 
 ROOT = Path("/opt/radon-model-clients")
 EXPORT_ROOT = Path("/var/lib/radon-model-export")
+MODEL_CACHE_ROOT = Path("/var/lib/radon-private/model-gateway")
+RECOVERY_ROOT = Path("/home/radon/radon")
 MAX_BYTES = 2 * 1024 * 1024 * 1024
 MAX_MEMBERS = 100_000
+# Root-owned admission authority, contract-tested against the exact image's
+# model-artifacts.json. Never import or trust a mutable application manifest.
+PINNED_MODEL_FILE_BYTES = (1067, 477930472, 706, 66465124, 695, 711396, 1242)
+# Explicit operational margin beyond the bounded preparation allocations:
+# journal/log growth, runtime writes and the previous release's recovery.
+RUNTIME_RESERVE_BYTES = 1024 * 1024 * 1024
+RUNTIME_RESERVE_INODES = 1024
 EXPORT_NAME = "radon-model-client-export"
 HELPERS = ("__init__.py", "client.py", "cli.py", "cli_bridge.py")
 PACKAGES = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "grok": "@xai-official/grok"}
+
+
+def _space_probe(path: Path) -> tuple[int, int, int, int]:
+    """Read the destination filesystem without creating installation paths."""
+    anchor = path
+    while True:
+        try:
+            descriptor = os.open(anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            break
+        except FileNotFoundError:
+            if anchor == anchor.parent:
+                raise
+            anchor = anchor.parent
+    try:
+        info = os.fstat(descriptor)
+        volume = os.fstatvfs(descriptor)
+        block = volume.f_frsize or volume.f_bsize
+        if block <= 0 or volume.f_bavail < 0:
+            raise ValueError("unknown model filesystem capacity")
+        # The supported production ext4 volumes report finite inode counts.
+        # f_files=0 or f_favail=-1 may mean an unbounded/unknown filesystem;
+        # neither is proof of usable inodes, so unsupported metadata refuses.
+        if volume.f_files <= 0 or volume.f_favail < 0:
+            raise ValueError("unknown model filesystem inode capacity")
+        # f_bfree includes the root-only reserved pool. The model process runs
+        # as UID1000, so only f_bavail is admission evidence even in this helper.
+        return info.st_dev, block, volume.f_bavail * block, volume.f_favail
+    finally:
+        os.close(descriptor)
+
+
+def check_model_space() -> dict:
+    """Admit the peak of the fixed sequential preparation stages per device."""
+    paths = (ROOT, EXPORT_ROOT, MODEL_CACHE_ROOT, RECOVERY_ROOT)
+    probes = {path: _space_probe(path) for path in paths}
+    volumes = {}
+    for device, block, available, inodes in probes.values():
+        previous = volumes.setdefault(device, {"block": block, "available": available, "inodes": inodes, "stages": [0, 0], "inode_stages": [0, 0]})
+        if block <= 0 or available < 0 or inodes < 0 or previous["block"] != block:
+            raise ValueError("inconsistent model filesystem capacity")
+        previous["available"] = min(previous["available"], available)
+        previous["inodes"] = min(previous["inodes"], inodes)
+
+    def add(path, first, second, first_inodes, second_inodes):
+        volume = volumes[probes[path][0]]
+        volume["stages"][0] += first
+        volume["stages"][1] += second
+        volume["inode_stages"][0] += first_inodes
+        volume["inode_stages"][1] += second_inodes
+
+    linux_block = probes[ROOT][1]
+    # Each bounded member gets a padding block plus a directory/metadata block;
+    # reserve additional blocks for our generated manifest and stage parents.
+    linux_tree = MAX_BYTES + (2 * MAX_MEMBERS + 32) * linux_block
+    linux_inodes = 2 * MAX_MEMBERS + 32
+    add(ROOT, MAX_BYTES + linux_tree, linux_tree, linux_inodes, linux_inodes)
+    # Linux's stream is closed before Darwin's stream and published copy coexist.
+    add(EXPORT_ROOT, 0, 2 * MAX_BYTES + 32 * probes[EXPORT_ROOT][1], 0, 32)
+    cache_block = probes[MODEL_CACHE_ROOT][1]
+    model_bytes = sum((size + cache_block - 1) // cache_block * cache_block for size in PINNED_MODEL_FILE_BYTES)
+    # Fixed cache parents/refs plus bounded pacing state and import receipts.
+    model_bytes += 64 * cache_block + 2 * 65536
+    model_inodes = 64 + len(PINNED_MODEL_FILE_BYTES) + 2
+    add(MODEL_CACHE_ROOT, model_bytes, model_bytes, model_inodes, model_inodes)
+    add(RECOVERY_ROOT, RUNTIME_RESERVE_BYTES, RUNTIME_RESERVE_BYTES, RUNTIME_RESERVE_INODES, RUNTIME_RESERVE_INODES)
+    rows = []
+    for device, volume in sorted(volumes.items()):
+        required = max(volume["stages"])
+        required_inodes = max(volume["inode_stages"])
+        if volume["available"] < required or volume["inodes"] < required_inodes:
+            raise OSError(errno.ENOSPC, "model preparation capacity insufficient")
+        rows.append({"device": device, "available_bytes": volume["available"], "required_bytes": required, "available_inodes": volume["inodes"], "required_inodes": required_inodes})
+    return {"filesystems": rows, "runtime_reserve_bytes": RUNTIME_RESERVE_BYTES, "runtime_reserve_inodes": RUNTIME_RESERVE_INODES}
 
 
 def _trusted_root(root: Path, owner_uid: int) -> None:
@@ -216,7 +299,11 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
     else:
         command += ["-C", "/opt/radon-clis", ".", "-C", "/usr/local/bin", "node", "-C", "/home/radon/radon/scripts", *("model_gateway/" + name for name in HELPERS)]
     subprocess.run([engine, "rm", "-f", EXPORT_NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    # Export is preparation, never the systemd service's main process. Podman
+    # otherwise adopts the inherited socket and publishes its conmon MAINPID.
+    export_env = os.environ.copy()
+    export_env.pop("NOTIFY_SOCKET", None)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=export_env)
     deadline = time.monotonic() + 60
     received = 0
     try:
@@ -322,15 +409,7 @@ def publish_darwin_bundle(stream, root: Path, release: str, *, owner_uid: int = 
 
 def activate_darwin_export(root: Path, release: str, *, owner_uid: int = 0) -> None:
     root=Path(root);_trusted_root(root,owner_uid)
-    if not isinstance(release,str) or not re.fullmatch(r"[0-9a-f]{40}",release):raise ValueError("invalid Darwin release")
-    folder=root/release
-    for path in (folder,folder/"manifest.json",folder/"bundle.tar"):
-        info=path.lstat()
-        if info.st_uid!=owner_uid or stat.S_ISLNK(info.st_mode) or info.st_mode&0o222:
-            raise ValueError("Darwin export is not immutable and root-owned")
-    proof=json.loads((folder/"manifest.json").read_text())
-    if proof.get("release_sha")!=release or proof.get("platform")!="darwin-arm64" or proof.get("sha256")!=_digest(folder/"bundle.tar") or proof.get("size")!=(folder/"bundle.tar").stat().st_size:
-        raise ValueError("Darwin export proof mismatch")
+    _verify_darwin_export(root,release,owner_uid)
     _activate(root,release)
     candidates=[]
     for entry in root.iterdir():
@@ -344,9 +423,70 @@ def activate_darwin_export(root: Path, release: str, *, owner_uid: int = 0) -> N
         _remove_stage(stale)
 
 
+def _verify_darwin_export(root: Path, release: str, owner_uid: int) -> None:
+    if not isinstance(release,str) or not re.fullmatch(r"[0-9a-f]{40}",release):raise ValueError("invalid Darwin release")
+    folder=root/release
+    _immutable_tree(folder,owner_uid)
+    for path in (folder,folder/"manifest.json",folder/"bundle.tar"):
+        info=path.lstat()
+        if info.st_uid!=owner_uid or stat.S_ISLNK(info.st_mode) or info.st_mode&0o222:
+            raise ValueError("Darwin export is not immutable and root-owned")
+    proof=json.loads((folder/"manifest.json").read_text())
+    if proof.get("release_sha")!=release or proof.get("platform")!="darwin-arm64" or proof.get("sha256")!=_digest(folder/"bundle.tar") or proof.get("size")!=(folder/"bundle.tar").stat().st_size:
+        raise ValueError("Darwin export proof mismatch")
+
+
+def recover_clients(release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> None:
+    """Reuse a verified release; recovery never allocates another native bundle."""
+    if not isinstance(release,str) or not re.fullmatch(r"[0-9a-f]{40}",release):
+        raise ValueError("invalid recovery release")
+    root=ROOT if root is None else Path(root)
+    exports=EXPORT_ROOT if exports is None else Path(exports)
+    # These roots must already exist: no mkdir/export/retention during recovery.
+    for parent in (root,exports,exports/"releases"):
+        if not parent.is_dir() or parent.is_symlink():raise ValueError("missing recovery client root")
+        _trusted_root(parent,owner_uid)
+    folder=root/release
+    _immutable_tree(folder,owner_uid)
+    receipt=folder/"manifest.json"
+    if receipt.is_symlink():raise ValueError("unsafe recovery receipt")
+    proof=json.loads(receipt.read_text())
+    if not isinstance(proof,dict) or set(proof)!={"version","release_sha","cli_versions","sha256","helper_sha256"} or type(proof["version"]) is not int or proof["version"]!=1 or proof["release_sha"]!=release:
+        raise ValueError("recovery client receipt mismatch")
+    versions=proof["cli_versions"]
+    if not isinstance(versions,dict) or set(versions)!={*PACKAGES,"agy"} or any(not isinstance(value,str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",value) for value in versions.values()):
+        raise ValueError("recovery client versions are not pinned")
+    binaries=proof["sha256"];helpers=proof["helper_sha256"]
+    if not isinstance(binaries,dict) or set(binaries)!={*PACKAGES,"agy","node"} or not isinstance(helpers,dict) or set(helpers)!={"model_gateway/"+name for name in HELPERS}:
+        raise ValueError("recovery client hash inventory mismatch")
+    for hashes,parent in ((binaries,folder/"bin"),(helpers,folder/"lib")):
+        for name,expected in hashes.items():
+            if not isinstance(expected,str) or not re.fullmatch(r"[0-9a-f]{64}",expected) or _digest(parent/name)!=expected:
+                raise ValueError("recovery client digest mismatch")
+    _verify_darwin_export(exports/"releases",release,owner_uid)
+    if not (root/"current").is_symlink() or os.readlink(root/"current")!=release:
+        _activate(root,release)
+
+
 def main(args: list[str]) -> int:
     if os.geteuid() != 0:
         return 64
+    if args == ["check-space"]:
+        try:
+            print(json.dumps(check_model_space(), sort_keys=True))
+        except Exception as exc:
+            reason = errno.errorcode.get(exc.errno) if isinstance(exc, OSError) else None
+            print("model disk admission failed: " + type(exc).__name__ + (" errno=" + reason if reason else ""), file=sys.stderr)
+            return 78
+        return 0
+    if len(args)==2 and args[0]=="recover":
+        try:
+            recover_clients(args[1])
+        except Exception as exc:
+            print("model client recovery verification failed: "+type(exc).__name__,file=sys.stderr)
+            return 78
+        print("model clients recovered from exact immutable receipts")
+        return 0
     if len(args)==2 and args[0]=="commit":
         try:
             activate_darwin_export(EXPORT_ROOT/"releases",args[1])
@@ -360,6 +500,7 @@ def main(args: list[str]) -> int:
     if engine not in ("/usr/bin/podman", "/usr/bin/docker") or image != "ghcr.io/joemccann/radon-model-gateway:" + release or not re.fullmatch(r"[0-9a-f]{40}", release):
         return 64
     try:
+        check_model_space()
         _trusted_root(ROOT, 0)
         with tempfile.TemporaryFile(dir=ROOT) as stream:
             export_from_image(engine, image, stream)
