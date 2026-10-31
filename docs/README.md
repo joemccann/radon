@@ -74,7 +74,8 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
 | iPhone app direction (foundation; not shipping) | [`docs/mobile/iphone-app-direction.md`](mobile/iphone-app-direction.md) |
 | Short locate / borrow playbook | [`docs/short-locate-borrow.md`](short-locate-borrow.md) |
-| OAuth subscription auth | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
+| Standalone AI service: app/pipeline and coding-agent interfaces, private auth, renewal and immutable upgrades | [`docs/model-gateway.md`](model-gateway.md) |
+| OAuth subscription auth and Antigravity-first shared model ladder | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
 
 ## Glossary
 

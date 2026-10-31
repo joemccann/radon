@@ -1,3 +1,15 @@
+# 2026-10-31: model deployment resource admission
+
+- Use the canonical pytest temporary root for full gates. On macOS an explicit /tmp base can inherit group wheel instead of the process group and invalidate permission fixtures; reproduce with the canonical root before changing production guards or assertions.
+- Root-reserved free blocks do not establish writable capacity for UID1000. Check fixed destinations with f_bavail and finite f_favail, include archive/tree peaks, and repeat after image pulls and before teardown. A refused image preflight must not fall through to host compilation.
+- Preserve recovery under resource pressure: reuse verified existing immutable payloads without allocating another release, retain exact prior control-plane receipts, and never lower a resource guard to make deployment proceed.
+- A restored old release returning HTTP 200 proves recovery only. Keep the new service pending until its exact deployment and real consumer flow are verified.
+
+# 2026-10-30: tracked source and prior-release fixtures
+
+- Stage intended new source before tracked-file policy guards; untracked files can hide violations from otherwise green full suites.
+- Pin historical runtime test inputs by bytes and hash. `HEAD` changes after commit and is not a stable previous-release fixture.
+
 # Equity research eligibility is mandatory across newsfeed sources (2026-10-28)
 
 - User correction: no company-focused equity research unless its subject company is in the current portfolio or watchlist. This applies to MarketDesk and Dropbox; broad-source admission never overrides this rule.
@@ -1380,3 +1392,21 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
 - Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
 - Verify mobile toolbar geometry after feedback confirmation appears, not just before opening panels. Screenshot named panels that retain a layout box when wrapper elements use display: contents.
+
+
+## 2026-10-30: Distinguish a provider failure from ladder exhaustion
+
+A Grok402 spending-limit log is one rung failure. Inspect the complete attempted cascade and available credentials before reporting it as the cause of a failed article. Exhaustion must advance through every configured capable provider while preserving source accuracy and final Humanizer gates. User default: Antigravity first, then the remaining ladder in its existing order.
+
+## 2026-10-30: standalone AI includes the explicitly requested control plane
+
+When the user includes coding and incident-response agents, inventory their inference, credential probes and upgrade paths too. Keep tool/repository/approval authority in the existing agent boundary while routing model traffic and credential lifecycle through the shared service. Unsupported CLI protocols remain unfinished work; failing them closed is not migration completion.
+
+## 2026-10-30: shared model deadlines include admission and every streamed chunk
+
+Start the request clock before credential-lock and broker I/O admission. Every provider attempt, local acceptance continuation and native protocol must share that original deadline and cancellation signal. A per-read timeout is not a total budget; test a real tiny-chunk stream that keeps resetting reads. Moving a limiter into a container also requires durable pacing state and preservation of existing cooldown maxima before old containers disappear.
+
+
+## 2026-10-31: preparations cannot own service notifications
+
+Strip `NOTIFY_SOCKET` from preparatory Podman children and preserve the foreground proxy. Reproduce readiness followed by process exit with real systemd/Podman; a successful health reply alone does not prove service survival. First-cutover rollback must preserve legacy installed artifacts absent from older manifests, read application metadata under its owner UID, keep the privileged floor independent of the failed target, and retain receipts until verified recovery.

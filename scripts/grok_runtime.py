@@ -8,6 +8,7 @@ incident invocation so only the upgrader may change the binary.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
+from model_gateway.client import request as gateway_request
+
+MANAGED_CLIENT_ROOT = Path("/opt/radon-model-clients")
 Runner = Callable[..., object]
 
 DEFAULT_LKG_PATH = Path(
@@ -82,6 +86,112 @@ class ResolvedRuntime:
     warning: Optional[str]
     refused: bool
     source: str
+
+
+def managed_manifest(root: Path = MANAGED_CLIENT_ROOT, *, owner_uid: int = 0, release_sha: str | None = None) -> dict:
+    """Verify the CI-installed immutable release before executing a model client.
+
+    The fixed production root is not environment controlled. Test fixtures may
+    supply an isolated root/UID; callers executing clients use the defaults.
+    """
+    root = Path(root)
+    def protected(path, *, immutable=False, regular=False):
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise GrokRuntimeError("managed client path missing") from exc
+        if info.st_uid not in {0, owner_uid} or stat.S_ISLNK(info.st_mode):
+            raise GrokRuntimeError("managed client path is not trusted")
+        if regular and not stat.S_ISREG(info.st_mode):
+            raise GrokRuntimeError("managed client file is not regular")
+        if not regular and not stat.S_ISDIR(info.st_mode):
+            raise GrokRuntimeError("managed client ancestor is not a directory")
+        if info.st_mode & (0o222 if immutable else 0o022):
+            raise GrokRuntimeError("managed client path is not immutable" if immutable else "managed client ancestor is writable")
+    if not root.is_absolute() or ".." in root.parts:
+        raise GrokRuntimeError("managed client root is not canonical")
+    # Fixed /opt production ancestry must be root-owned and protected. Isolated
+    # fixtures verify their supplied root downward using an explicit test UID.
+    if owner_uid == 0:
+        for ancestor in reversed(root.parents):
+            protected(ancestor)
+    protected(root)
+    if release_sha is None:
+        selector = root / "current"
+        try:
+            info = selector.lstat()
+            release_sha = os.readlink(selector)
+        except OSError as exc:
+            raise GrokRuntimeError("managed client selector missing") from exc
+        if info.st_uid != owner_uid or not stat.S_ISLNK(info.st_mode):
+            raise GrokRuntimeError("managed client selector is untrusted")
+    if not isinstance(release_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", release_sha):
+        raise GrokRuntimeError("managed client selector escapes release")
+    release = root / release_sha
+    protected(release, immutable=True)
+    manifest = release / "manifest.json"
+    protected(manifest, immutable=True, regular=True)
+    try:
+        if manifest.stat().st_size > 65_536:
+            raise ValueError("oversize manifest")
+        proof = json.loads(manifest.read_text())
+        if proof.get("version") != 1 or proof.get("release_sha") != release_sha:
+            raise ValueError("release mismatch")
+        version = proof["cli_versions"]["grok"]
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+            raise ValueError("invalid version")
+        hashes = proof["sha256"]
+        helpers = proof["helper_sha256"]
+        required_helpers = {"model_gateway/" + name for name in ("__init__.py", "client.py", "cli.py", "cli_bridge.py")}
+        if (not isinstance(hashes, dict) or not {"grok", "node"} <= hashes.keys()
+                or set(hashes) - {"grok", "node", "claude", "codex", "agy"}
+                or not isinstance(helpers, dict) or set(helpers) != required_helpers):
+            raise ValueError("missing executable proof")
+        for name, digest in {**{("bin/" + key): value for key, value in hashes.items()}, **{("lib/" + key): value for key, value in helpers.items()}}.items():
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError("invalid hash")
+            lexical = release / name
+            target = lexical.resolve(strict=True)
+            if not target.is_relative_to(release):
+                raise ValueError("executable escapes release")
+            for ancestor in reversed(target.parent.relative_to(release).parents):
+                protected(release / ancestor, immutable=True)
+            protected(target.parent, immutable=True)
+            protected(target, immutable=True, regular=True)
+            with target.open("rb") as stream:
+                observed = hashlib.file_digest(stream, "sha256").hexdigest()
+            if observed != digest:
+                raise GrokRuntimeError("managed client hash mismatch")
+    except GrokRuntimeError:
+        raise
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        raise GrokRuntimeError("managed client manifest is invalid") from exc
+    return proof
+
+
+def _gateway_managed_runtime(grok_bin: str) -> ResolvedRuntime:
+    path = Path(grok_bin)
+    relative = path.relative_to(MANAGED_CLIENT_ROOT)
+    release = relative.parts[0] if relative.parts and relative.parts[0] != "current" else None
+    proof = managed_manifest(release_sha=release)
+    catalog = gateway_request("models", {}, timeout_seconds=20)
+    rows = catalog.get("models")
+    if not isinstance(rows, list):
+        raise GrokRuntimeError("gateway model inventory is malformed")
+    choices = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("provider") not in {"xai", "grok"}:
+            continue
+        model = row.get("id")
+        if isinstance(model, str) and re.fullmatch(r"grok-[0-9]+(?:\.[0-9]+)?", model):
+            choices.append((float(model.removeprefix("grok-")), model))
+    if not choices:
+        raise GrokRuntimeError("gateway has no supported Grok model metadata")
+    model = max(choices)[1]
+    binary = MANAGED_CLIENT_ROOT / proof["release_sha"] / "bin/grok"
+    if path.name != "grok" or relative.parts[-2:] != ("bin", "grok"):
+        raise GrokRuntimeError("managed client binary selection is invalid")
+    return ResolvedRuntime(model, reasoning_effort(), proof["cli_versions"]["grok"], str(binary), False, None, False, "gateway-manifest")
 
 
 def reasoning_effort() -> str:
@@ -188,6 +298,14 @@ def lkg_binary_problem(
     as written, its parent, and the resolved target).
     """
     raw = str(binary_path or "").strip()
+    if raw and Path(raw).is_relative_to(MANAGED_CLIENT_ROOT):
+        try:
+            relative = Path(raw).relative_to(MANAGED_CLIENT_ROOT)
+            managed_manifest(release_sha=None if relative.parts[0] == "current" else relative.parts[0])
+            if relative.parts[-2:] != ("bin", "grok"):
+                return "managed binary is not grok"
+        except (GrokRuntimeError, IndexError):
+            return "managed client manifest is untrusted"
     if not raw or not os.path.isabs(raw):
         return "not an absolute path"
     written = Path(raw)
@@ -261,6 +379,11 @@ def resolve_latest(
 ) -> ResolvedRuntime:
     """Resolve the live default model and always return an explicit ``-m`` id."""
     try:
+        if Path(grok_bin).is_absolute() and Path(grok_bin).is_relative_to(MANAGED_CLIENT_ROOT):
+            try:
+                return _gateway_managed_runtime(grok_bin)
+            except Exception as exc:
+                raise GrokRuntimeError("managed client or model service unavailable") from exc
         installed, default, available = probe_cli(grok_bin, runner=runner)
     except GrokRuntimeError as exc:
         if lkg is None:

@@ -1,0 +1,2936 @@
+#!/bin/bash
+set -euo pipefail
+
+# Installed root-owned at /usr/local/sbin/radon-deploy-root. The deploy user may
+# invoke only the fixed actions listed in config/sudoers.d/radon-deploy.
+readonly CORE_SERVICES=(
+  radon-nextjs.service
+  radon-api.service
+  radon-relay.service
+  radon-monitor.service
+  radon-newsfeed.service
+)
+readonly PREHELD_UNIT=radon-ib-gateway-preheld-restart.service
+readonly -a CONTROL_PLANE_SOURCES=(
+  scripts/deploy-root-helper.sh
+  scripts/ib-gateway-control.sh
+  scripts/ib-operator-hold.sh
+  repo/scripts/utils/ib_operator_hold.py
+  scripts/operator-radon.sh
+  scripts/drift_audit.py
+  scripts/disk_cleanup.py
+  scripts/radon-app-runtime.sh
+  scripts/radon-docker-gw.sh
+  scripts/radon-ib-gateway-credential.py
+  docker-compose.yml
+  config/sudoers.d/radon-deploy
+  config/sudoers.d/radon-monitor
+  config/sudoers.d/radon-ops
+  config/sudoers.d/radon-caddy
+  config/polkit/50-radon-services.rules
+  config/seccomp/chromium.json
+  services/radon-health.service
+  services/radon-ib-gateway-preheld-restart.service
+  services/radon-ib-watchdog.service
+  services/radon-ib-watchdog.timer
+  services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
+  services/radon-api.service
+  services/radon-monitor.service
+  services/radon-uw-stream.service
+  services/radon-uw-research.service
+  services/radon-uw-research.timer
+  services/radon-relay.service
+  services/radon-portfolio-sync.service
+  services/radon-portfolio-sync.timer
+  services/radon-refresh.service
+  services/radon-refresh.timer
+  services/radon-db-backup.service
+  services/radon-db-backup.timer
+  services/radon-disk-cleanup.service
+  services/radon-disk-cleanup.timer
+  services/radon-drift-audit.service
+  services/radon-drift-audit.timer
+  services/radon-nextjs-db-watchdog.service
+  services/radon-nextjs-db-watchdog.timer
+  services/radon-api.service.d/runtime-container.conf
+  services/radon-nextjs.service.d/runtime-container.conf
+  services/radon-relay.service.d/runtime-container.conf
+  services/radon-monitor.service.d/runtime-container.conf
+  services/radon-uw-stream.service.d/runtime-container.conf
+  services/radon-uw-research.service.d/runtime-container.conf
+  services/radon-newsfeed.service.d/runtime-container.conf
+  services/radon-research.service
+  services/radon-research.service.d/runtime-container.conf
+  services/radon-subscription-vault.service
+  services/radon-subscription-vault.service.d/runtime-container.conf
+  services/radon-ai-cycle.service.d/runtime-container.conf
+  services/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  services/radon-aa-frontier-refresh.service.d/runtime-container.conf
+  services/radon-research-archive.service.d/runtime-container.conf
+  services/radon-marketdesk.service.d/runtime-container.conf
+  services/radon-marketdesk-pdf.service.d/runtime-container.conf
+  scripts/subscription_service_env.py
+  scripts/media_publish.py
+  services/radon-media-publish.service
+  services/radon-media-publish.path
+  services/radon-media-publish.timer
+  config/tmpfiles.d/radon-deploy.conf
+)
+readonly -a CONTROL_PLANE_TARGETS=(
+  /usr/local/sbin/radon-deploy-root
+  /usr/local/bin/radon-ib-gateway-control
+  /usr/local/sbin/radon-ib-hold
+  /usr/local/lib/radon/ib_operator_hold.py
+  /usr/local/bin/radon
+  /usr/local/lib/radon/drift_audit.py
+  /usr/local/lib/radon/disk_cleanup.py
+  /usr/local/sbin/radon-app-runtime
+  /usr/local/sbin/radon-docker-gw
+  /usr/local/sbin/radon-ib-gateway-credential
+  /etc/radon/ib-gateway-compose.yml
+  /etc/sudoers.d/radon-deploy
+  /etc/sudoers.d/radon-monitor
+  /etc/sudoers.d/radon-ops
+  /etc/sudoers.d/radon-caddy
+  /etc/polkit-1/rules.d/50-radon-services.rules
+  /etc/radon/seccomp/chromium.json
+  /etc/systemd/system/radon-health.service
+  /etc/systemd/system/radon-ib-gateway-preheld-restart.service
+  /etc/systemd/system/radon-ib-watchdog.service
+  /etc/systemd/system/radon-ib-watchdog.timer
+  /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
+  /etc/systemd/system/radon-api.service
+  /etc/systemd/system/radon-monitor.service
+  /etc/systemd/system/radon-uw-stream.service
+  /etc/systemd/system/radon-uw-research.service
+  /etc/systemd/system/radon-uw-research.timer
+  /etc/systemd/system/radon-relay.service
+  /etc/systemd/system/radon-portfolio-sync.service
+  /etc/systemd/system/radon-portfolio-sync.timer
+  /etc/systemd/system/radon-refresh.service
+  /etc/systemd/system/radon-refresh.timer
+  /etc/systemd/system/radon-db-backup.service
+  /etc/systemd/system/radon-db-backup.timer
+  /etc/systemd/system/radon-disk-cleanup.service
+  /etc/systemd/system/radon-disk-cleanup.timer
+  /etc/systemd/system/radon-drift-audit.service
+  /etc/systemd/system/radon-drift-audit.timer
+  /etc/systemd/system/radon-nextjs-db-watchdog.service
+  /etc/systemd/system/radon-nextjs-db-watchdog.timer
+  /etc/systemd/system/radon-api.service.d/runtime-container.conf
+  /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
+  /etc/systemd/system/radon-relay.service.d/runtime-container.conf
+  /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf
+  /etc/systemd/system/radon-uw-research.service.d/runtime-container.conf
+  /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research.service
+  /etc/systemd/system/radon-research.service.d/runtime-container.conf
+  /etc/systemd/system/radon-subscription-vault.service
+  /etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf
+  /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
+  /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /etc/systemd/system/radon-marketdesk.service.d/runtime-container.conf
+  /etc/systemd/system/radon-marketdesk-pdf.service.d/runtime-container.conf
+  /usr/local/lib/radon/subscription_service_env.py
+  /usr/local/lib/radon/media_publish.py
+  /etc/systemd/system/radon-media-publish.service
+  /etc/systemd/system/radon-media-publish.path
+  /etc/systemd/system/radon-media-publish.timer
+  /usr/lib/tmpfiles.d/radon-deploy.conf
+)
+readonly -a CONTROL_PLANE_MODES=(
+  755
+  755
+  755
+  644
+  755
+  644
+  644
+  755
+  755
+  755
+  644
+  440
+  440
+  440
+  440
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+)
+
+if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
+  # Test mode substitutes systemctl, rm, sync, the session python and setpriv
+  # with paths taken from the environment, and relaxes the root-ownership
+  # expectation to `id -u`. This helper is a NOPASSWD root chokepoint, so the
+  # mode is refused outright as root: a future sudoers edit adding SETENV or an
+  # RADON_* env_keep would otherwise turn an environment variable into root
+  # code execution. The guard sits ahead of the first RADON_TEST_* read so no
+  # substitution has happened when it fires.
+  if (( EUID == 0 )); then
+    printf 'deploy-root-helper: test mode is refused when running as root\n' >&2
+    exit 64
+  fi
+  readonly HELPER_TEST_MODE=1
+  readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
+  readonly LEGACY_STATE_DIR="${RADON_TEST_LEGACY_STATE_DIR:-}"
+  readonly SYSTEMCTL="${RADON_TEST_SYSTEMCTL:?test systemctl is required}"
+  readonly SYSTEMD_ANALYZE="${RADON_TEST_SYSTEMD_ANALYZE:-}"
+  readonly RM="${RADON_TEST_RM:?test rm is required}"
+  readonly SYNC="${RADON_TEST_SYNC:?test sync is required}"
+  readonly ACTIVE_STATE_FILE="${RADON_TEST_ACTIVE_STATE_FILE}"
+  readonly FLOCK="${RADON_TEST_FLOCK:-/usr/bin/true}"
+  readonly ROOT_LOCK_FILE="${RADON_TEST_ROOT_LOCK_FILE:-${ACTIVE_STATE_FILE}.lock}"
+  readonly TIMEOUT="${RADON_TEST_TIMEOUT:-}"
+  readonly ROOT_MUTATION_ACTION_TIMEOUT="${RADON_TEST_ROOT_MUTATION_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-180}}"
+  readonly ROOT_PUBLISH_CADDY_ACTION_TIMEOUT="${RADON_TEST_ROOT_PUBLISH_CADDY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
+  readonly ROOT_VERIFY_ACTION_TIMEOUT="${RADON_TEST_ROOT_VERIFY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
+  readonly ROOT_COMMIT_ACTION_TIMEOUT="${RADON_TEST_ROOT_COMMIT_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
+  readonly ROOT_SYNC_ACTION_TIMEOUT="${RADON_TEST_ROOT_SYNC_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
+  readonly ROOT_KILL_AFTER="${RADON_TEST_ROOT_KILL_AFTER:-5}"
+  readonly ROOT_LOCK_WAIT="${RADON_TEST_ROOT_LOCK_WAIT:-190}"
+  readonly SESSION_PYTHON="${RADON_TEST_SESSION_PYTHON:-$(command -v python3)}"
+  readonly SETPRIV="${RADON_TEST_SETPRIV:-setpriv}"
+  readonly INSTALL="${RADON_TEST_INSTALL:-$(command -v install)}"
+  readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
+  readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
+  readonly MCP_ENV_SOURCE="${RADON_TEST_MCP_ENV_SOURCE:-}"
+  readonly MCP_ENV_TARGET="${RADON_TEST_MCP_ENV_TARGET:-}"
+  readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
+  readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
+  readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
+  readonly TAR="${RADON_TEST_TAR:-$(command -v tar)}"
+  readonly BOOTSTRAP_RUNNER="${RADON_TEST_BOOTSTRAP_RUNNER:-/bin/bash}"
+  readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
+  readonly UNIT_REMOTE="${RADON_TEST_UNIT_REMOTE:-}"
+  readonly PROVISION_ROOT="${RADON_TEST_PROVISION_ROOT:-${STATE_DIR}/provision}"
+  readonly SYSTEMD_DIR="${RADON_TEST_SYSTEMD_DIR:-}"
+  readonly FORCE_GITHUB_REMOTE_CHECK="${RADON_TEST_FORCE_GITHUB_REMOTE_CHECK:-0}"
+  readonly TEST_SYSTEMCTL_TIMEOUT="${RADON_TEST_SYSTEMCTL_TIMEOUT:-1}"
+  readonly STATE_WAIT_SECONDS="${RADON_TEST_STATE_WAIT_SECONDS:-0}"
+  readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
+  readonly SLEEP="${RADON_TEST_SLEEP:-/bin/sleep}"
+  readonly CONTROL_PLANE_ROOT="${RADON_TEST_CONTROL_PLANE_ROOT:-}"
+  readonly CLOUD_SOURCE="${RADON_TEST_CLOUD_SOURCE:-${RADON_TEST_CLOUD_ROOT:-}}"
+  readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
+  readonly VISUDO="${RADON_TEST_VISUDO:-$(command -v visudo)}"
+  readonly NODE="${RADON_TEST_NODE:-$(command -v node || true)}"
+  readonly DOCKER="${RADON_TEST_DOCKER:-}"
+  test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
+  readonly REPLICA_FILES=(
+    "$test_replica_prefix"
+    "${test_replica_prefix}-wal"
+    "${test_replica_prefix}-shm"
+    "${test_replica_prefix}-info"
+  )
+else
+  readonly HELPER_TEST_MODE=0
+  if (( EUID != 0 )); then
+    echo "radon-deploy-root must run as root" >&2
+    exit 77
+  fi
+  readonly SYSTEMCTL=/usr/bin/systemctl
+  readonly SYSTEMD_ANALYZE=/usr/bin/systemd-analyze
+  readonly RM=/usr/bin/rm
+  readonly SYNC=/usr/bin/sync
+  readonly INSTALL=/usr/bin/install
+  # Under root-owned /var/lib, never radon-owned /var/lib/radon: radon could
+  # rename a child of its own directory and substitute one it controls.
+  readonly STATE_DIR=/var/lib/radon-deploy
+  readonly LEGACY_STATE_DIR=/var/lib/radon/deploy
+  readonly ACTIVE_STATE_FILE="${STATE_DIR}/active-units"
+  readonly FLOCK=/usr/bin/flock
+  readonly TIMEOUT=/usr/bin/timeout
+  readonly ROOT_LOCK_FILE=/run/radon-deploy-root.lock
+  readonly STATE_WAIT_SECONDS=60
+  readonly RESEARCH_STOP_WAIT_SECONDS=150
+  readonly PREHELD_WAIT_SECONDS=120
+  readonly SLEEP=/usr/bin/sleep
+  readonly CONTROL_PLANE_ROOT=""
+  readonly CLOUD_SOURCE=/home/radon/radon/cloud
+  readonly SHA256SUM=/usr/bin/sha256sum
+  readonly VISUDO=/usr/sbin/visudo
+  readonly NODE=/usr/bin/node
+  readonly DOCKER=/usr/bin/docker
+  readonly ROOT_MUTATION_ACTION_TIMEOUT=180
+  readonly ROOT_PUBLISH_CADDY_ACTION_TIMEOUT=300
+  readonly ROOT_VERIFY_ACTION_TIMEOUT=30
+  readonly ROOT_COMMIT_ACTION_TIMEOUT=30
+  readonly ROOT_SYNC_ACTION_TIMEOUT=300
+  readonly ROOT_KILL_AFTER=5
+  readonly ROOT_LOCK_WAIT=190
+  readonly SESSION_PYTHON=/usr/bin/python3.13
+  readonly SETPRIV=/usr/bin/setpriv
+  readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
+  readonly CADDY_CONFIG=/etc/caddy/Caddyfile
+  readonly MCP_ENV_SOURCE=/etc/radon/env
+  readonly MCP_ENV_TARGET=/etc/radon/mcp.env
+  readonly CADDY_BIN=/usr/bin/caddy
+  readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
+  readonly GIT=/usr/bin/git
+  readonly TAR=/usr/bin/tar
+  readonly BOOTSTRAP_RUNNER=/bin/bash
+  readonly RADON_GIT_DIR=/home/radon/radon/.git
+  readonly UNIT_REMOTE=https://github.com/joemccann/radon.git
+  readonly PROVISION_ROOT=/opt/radon-provision
+  readonly SYSTEMD_DIR=/etc/systemd/system
+  readonly FORCE_GITHUB_REMOTE_CHECK=1
+  readonly REPLICA_FILES=(
+    /home/radon/radon/data/replica.db
+    /home/radon/radon/data/replica.db-wal
+    /home/radon/radon/data/replica.db-shm
+    /home/radon/radon/data/replica.db-info
+  )
+fi
+readonly RESTORED_STATE_FILE="${ACTIVE_STATE_FILE}.restored"
+readonly INVENTORY_FILE="${ACTIVE_STATE_FILE}.inventory"
+readonly UNITS_TRANSACTION_FILE="${STATE_DIR}/installed-units.transaction"
+readonly UNIT_BACKUP_PREFIX="${STATE_DIR}/unit-backup."
+readonly CONTROL_PLANE_MANIFEST="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-manifest.sha256"
+readonly CONTROL_PLANE_READY="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-ready"
+readonly GATEWAY_TRANSITION_FILE="${CONTROL_PLANE_ROOT}/var/lib/radon/ib-gateway-transition.json"
+readonly LOGICAL_CONTROL_PLANE_MANIFEST="/var/lib/radon/control-plane-manifest.sha256"
+# Root's own bare clone of UNIT_REMOTE: the only git store privileged bytes are
+# read from. RADON_GIT_DIR (the radon-owned checkout) supplies the HEAD commit
+# id and nothing else.
+readonly PROVISION_GIT_DIR="${PROVISION_ROOT}/radon.git"
+# The newest main commit whose privileged control plane root has installed.
+# Root never installs a privileged body from an older commit: the radon
+# account can point the checkout HEAD at any older main commit.
+readonly CONTROL_PLANE_FLOOR_FILE="${PROVISION_ROOT}/control-plane-floor"
+
+# Where control-plane bytes are read from. refresh_control_plane repoints this
+# at a root-owned staging copy of the git blobs for the deployed commit, so the
+# radon-writable checkout is never the source of a root install.
+CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
+
+[[ "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_TARGETS[@]}" && \
+   "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_MODES[@]}" ]] || {
+  echo "internal control-plane contract is inconsistent" >&2
+  exit 70
+}
+
+prepare_state_dir() {
+  if (( HELPER_TEST_MODE == 1 )); then
+    [[ -L "$STATE_DIR" ]] || mkdir -p "$STATE_DIR"
+  else
+    [[ -L "$STATE_DIR" ]] || "$INSTALL" -d -m 0700 -o root -g root "$STATE_DIR"
+  fi
+  if ! directory_is_root_owned "$STATE_DIR"; then
+    echo "deploy state directory is not a root-owned directory: $STATE_DIR" >&2
+    exit 77
+  fi
+  [[ -n "$LEGACY_STATE_DIR" ]] && migrate_legacy_state
+  return 0
+}
+
+# One-time move of a transition journaled under the pre-move state directory,
+# so a helper upgraded between stop-clean and restart-managed still restores
+# it. The legacy parent is radon-owned: read only through a pinned
+# O_NOFOLLOW fd of a root-owned, non-writable directory, and only root-owned
+# regular files. Nothing moves once the new directory holds state.
+migrate_legacy_state() {
+  "$SESSION_PYTHON" -I - "$LEGACY_STATE_DIR" "$STATE_DIR" "$HELPER_TEST_MODE" <<'PY_MIGRATE_STATE'
+import os, re, secrets, stat, sys
+legacy, target, test = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+owner = os.getuid() if test else 0
+names = re.compile(r"^(active-units(\.inventory|\.restored)?|installed-units\.transaction|unit-backup\.radon-[A-Za-z0-9@_.-]+)$")
+try:
+    sfd = os.open(legacy, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+except (FileNotFoundError, NotADirectoryError):
+    sys.exit(0)
+except OSError as exc:
+    if exc.errno == 40:  # ELOOP: a link where the directory was
+        sys.exit(0)
+    raise
+tfd = os.open(target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    info = os.fstat(sfd)
+    if info.st_uid != owner or info.st_mode & 0o022:
+        sys.exit(0)
+    if any(names.match(entry) for entry in os.listdir(tfd)):
+        sys.exit(0)
+    for entry in sorted(os.listdir(sfd)):
+        if not names.match(entry):
+            continue
+        fd = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sfd)
+        try:
+            meta = os.fstat(fd)
+            if not stat.S_ISREG(meta.st_mode) or meta.st_uid != owner:
+                continue
+            chunks = []
+            while chunk := os.read(fd, 65536):
+                chunks.append(chunk)
+        finally:
+            os.close(fd)
+        tmp = f".{entry}.{secrets.token_hex(8)}"
+        out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=tfd)
+        try:
+            view = memoryview(b"".join(chunks))
+            while view:
+                view = view[os.write(out, view):]
+            os.fchmod(out, stat.S_IMODE(meta.st_mode) & 0o644)
+            os.fsync(out)
+        finally:
+            os.close(out)
+        os.rename(tmp, entry, src_dir_fd=tfd, dst_dir_fd=tfd)
+        os.fsync(tfd)
+        os.unlink(entry, dir_fd=sfd)
+finally:
+    os.close(sfd)
+    os.close(tfd)
+PY_MIGRATE_STATE
+}
+
+if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  exit 64
+fi
+
+file_mode() {
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$mode"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+
+# A directory root writes into must be a real root-owned one: /etc/radon is
+# radon-writable, so a subdirectory there can be radon's, or a link.
+directory_is_root_owned() {
+  local owner expected=0
+  (( HELPER_TEST_MODE == 1 )) && expected="$(id -u)"
+  [[ -d "$1" && ! -L "$1" ]] || return 1
+  owner="$(stat -c '%u' "$1" 2>/dev/null)" || owner="$(stat -f '%u' "$1")"
+  [[ "$owner" == "$expected" ]]
+}
+
+root_ownership_matches() {
+  local ownership
+  (( HELPER_TEST_MODE == 1 )) && return 0
+  if ownership="$(stat -c '%U:%G' "$1" 2>/dev/null)"; then
+    [[ "$ownership" == "root:root" ]]
+  else
+    [[ "$(stat -f '%Su:%Sg' "$1")" == "root:root" ]]
+  fi
+}
+
+broker_control_plane_source() {
+  case "$1" in
+    scripts/deploy-root-helper.sh|scripts/ib-gateway-control.sh|\
+    scripts/ib-operator-hold.sh|scripts/operator-radon.sh|\
+    repo/scripts/utils/ib_operator_hold.py|\
+    scripts/radon-docker-gw.sh|scripts/radon-ib-gateway-credential.py|\
+    docker-compose.yml|config/tmpfiles.d/radon-deploy.conf|\
+    services/radon-ib-gateway.service|services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|services/radon-ib-watchdog.timer|\
+    services/radon-ib-gateway-remote.service) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${RADON_DEPLOY_ENV_FILE:-${CONTROL_PLANE_ROOT}/etc/radon/env}"
+  if [[ -z "$role" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *)
+      # REL-221 (R-590): fail-closed but never silent — an app host with a
+      # corrupt env file stops skipping gateway units and the later
+      # verify_control_plane failure reads as "target unavailable".
+      if [[ -f "$envf" ]]; then
+        echo "read_host_role: ${envf} exists but RADON_HOST_ROLE parsed to '${role}'; falling back to combined" >&2
+      fi
+      printf 'combined\n'
+      ;;
+  esac
+}
+
+app_skips_control_plane_source() {
+  role_skips_control_plane_source "$1"
+}
+
+role_skips_control_plane_source() {
+  local role
+  role="$(read_host_role)"
+  if [[ "$role" == "broker" ]] && ! broker_control_plane_source "$1"; then
+    return 0
+  fi
+  case "$1" in
+    scripts/ib-gateway-control.sh|scripts/ib-operator-hold.sh|repo/scripts/utils/ib_operator_hold.py|\
+    scripts/radon-ib-gateway-credential.py|\
+    services/radon-ib-gateway.service|\
+    services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|\
+    services/radon-ib-watchdog.timer)
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
+    services/radon-ib-gateway-remote.service)
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+verify_control_plane() {
+  local line expected_hash source_rel logical_target installed_target installed_hash
+  local index=0 contract_index role manifest_rows legacy_app_manifest=0
+  local -a contract_sources=() contract_targets=() contract_modes=()
+  role="$(read_host_role)"
+  # Older app bootstraps wrote the combined manifest while refresh removed
+  # broker files. Accept that exact historical contract until the next sync;
+  # new app manifests contain only their required artifacts.
+  if [[ "$role" == app && -f "$CONTROL_PLANE_MANIFEST" && ! -L "$CONTROL_PLANE_MANIFEST" ]]; then
+    manifest_rows="$(wc -l < "$CONTROL_PLANE_MANIFEST")"
+    if (( manifest_rows == ${#CONTROL_PLANE_SOURCES[@]} )); then
+      legacy_app_manifest=1
+    elif (( manifest_rows == ${#CONTROL_PLANE_SOURCES[@]} - 2 )); then
+      legacy_app_manifest=2
+    fi
+  fi
+  for contract_index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    if [[ "$role" == "broker" ]] && ! broker_control_plane_source "${CONTROL_PLANE_SOURCES[$contract_index]}"; then
+      continue
+    fi
+    if [[ "$legacy_app_manifest" == 2 ]]; then
+      case "${CONTROL_PLANE_SOURCES[$contract_index]}" in
+        scripts/ib-operator-hold.sh|repo/scripts/utils/ib_operator_hold.py) continue ;;
+      esac
+    fi
+    if [[ "$role" == app && "$legacy_app_manifest" == 0 ]] && role_skips_control_plane_source "${CONTROL_PLANE_SOURCES[$contract_index]}"; then
+      continue
+    fi
+    contract_sources+=("${CONTROL_PLANE_SOURCES[$contract_index]}")
+    contract_targets+=("${CONTROL_PLANE_TARGETS[$contract_index]}")
+    contract_modes+=("${CONTROL_PLANE_MODES[$contract_index]}")
+  done
+
+  [[ -x "$SHA256SUM" && -f "$CONTROL_PLANE_MANIFEST" && \
+     ! -L "$CONTROL_PLANE_MANIFEST" ]] || {
+    echo "control-plane manifest is unavailable or unsafe" >&2
+    return 1
+  }
+  while IFS= read -r line; do
+    if (( index >= ${#contract_targets[@]} )) || \
+       [[ ! "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)[[:space:]]-\>[[:space:]](/.+)$ ]]; then
+      echo "control-plane manifest contract is malformed" >&2
+      return 1
+    fi
+    expected_hash="${BASH_REMATCH[1]}"
+    source_rel="${BASH_REMATCH[2]}"
+    logical_target="${BASH_REMATCH[3]}"
+    if [[ "$source_rel" != "${contract_sources[$index]}" || \
+          "$logical_target" != "${contract_targets[$index]}" ]]; then
+      echo "control-plane manifest does not match the fixed target contract" >&2
+      return 1
+    fi
+    installed_target="${CONTROL_PLANE_ROOT}${logical_target}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+        index=$((index + 1))
+        continue
+      fi
+    fi
+    if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+      echo "installed control-plane target is unavailable or unsafe: ${logical_target}" >&2
+      return 1
+    fi
+    if ! installed_hash="$("$SHA256SUM" "$installed_target" 2>/dev/null | awk '{print $1}')"; then
+      echo "installed control-plane target is unreadable: ${logical_target}" >&2
+      return 1
+    fi
+    if [[ "$installed_hash" != "$expected_hash" || \
+          "$(file_mode "$installed_target")" != "${contract_modes[$index]}" ]] || \
+       ! root_ownership_matches "$installed_target"; then
+      echo "installed control-plane target drifted: ${logical_target}" >&2
+      return 1
+    fi
+    index=$((index + 1))
+  done < "$CONTROL_PLANE_MANIFEST"
+  if (( index != ${#contract_targets[@]} )); then
+    echo "control-plane manifest is incomplete" >&2
+    return 1
+  fi
+}
+
+systemctl_bounded() {
+  if (( HELPER_TEST_MODE == 1 )); then
+    if [[ -n "$TIMEOUT" ]]; then
+      "$TIMEOUT" --signal=TERM --kill-after=1s "${TEST_SYSTEMCTL_TIMEOUT}s" \
+        "$SYSTEMCTL" "$@"
+    else
+      "$SYSTEMCTL" "$@"
+    fi
+  else
+    "$TIMEOUT" --signal=TERM --kill-after=2s 5s "$SYSTEMCTL" "$@"
+  fi
+}
+
+wait_for_unit_state() {
+  local unit="$1"
+  local desired="$2"
+  local wait_seconds="$STATE_WAIT_SECONDS"
+  # Research permits 120s for systemd shutdown, followed by ExecStopPost
+  # container cleanup. Keep this stop-only allowance below the 180s root
+  # supervisor budget; starts and test-mode waits retain their usual bounds.
+  if (( HELPER_TEST_MODE == 0 )) && \
+     [[ "$unit" == radon-research.service && "$desired" == inactive ]]; then
+    wait_seconds="$RESEARCH_STOP_WAIT_SECONDS"
+  fi
+  local deadline=$((SECONDS + wait_seconds))
+  local state
+  while :; do
+    state="$(active_state "$unit")" || return 69
+    [[ "$state" == "$desired" ]] && return 0
+    if [[ "$desired" == inactive && "$state" == failed ]]; then
+      return 0
+    fi
+    (( SECONDS >= deadline )) && break
+    "$SLEEP" 1
+  done
+  echo "timed out waiting for ${unit} to become ${desired}" >&2
+  return 71
+}
+
+unit_is_excluded() {
+  local unit="$1"
+  [[ "$unit" == radon-beta-* ]] && return 0
+  [[ "$unit" == radon-ib-gateway.service || "$unit" == "$PREHELD_UNIT" ]]
+}
+
+# nextjs and newsfeed are CORE_SERVICES (stopped during install-units) but
+# they are not control-plane and not the Gateway. Skipping them left
+# EnvironmentFile/ExecStart edits as a root hand-copy. install-units now
+# copies them while they are stopped; restart-managed starts the new file.
+# api/relay/monitor remain bootstrap/refresh-owned via control_plane_unit_name.
+unit_is_release_managed() {
+  return 1
+}
+
+list_transition_units() {
+  local unit file_units loaded_units candidates transient
+  file_units="$(systemctl_bounded list-unit-files 'radon-*.service' 'radon-*.timer' --no-legend --no-pager)" \
+    || return 1
+  loaded_units="$(systemctl_bounded list-units --all 'radon-*.service' 'radon-*.timer' --no-legend --no-pager --plain)" \
+    || return 1
+  candidates="$(printf '%s\n%s\n' "$file_units" "$loaded_units" \
+    | awk '{print $1}' \
+    | while IFS= read -r unit; do
+        [[ "$unit" =~ ^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$ ]] || continue
+        unit_is_excluded "$unit" && continue
+        printf '%s\n' "$unit"
+      done \
+    | sort -u)"
+  [[ -n "$candidates" ]] || return 0
+  transient="$(transient_units $candidates)"
+  while IFS= read -r unit; do
+    grep -qxF -- "$unit" <<< "$transient" && continue
+    printf '%s\n' "$unit"
+  done <<< "$candidates"
+}
+
+# A `systemd-run` unit is discarded by systemd once stopped, so a release
+# transition that stops it can never start it again (2026-09-28: an operator's
+# radon-forktest.timer failed a deploy and its rollback). Leave such units
+# alone. One batched query; if it fails, every unit stays in the transition.
+transient_units() {
+  systemctl_bounded show --property=Id,Transient -- "$@" 2>/dev/null \
+    | awk 'BEGIN { RS = ""; FS = "\n" }
+      { id = ""; t = ""
+        for (i = 1; i <= NF; i++) {
+          split($i, kv, "=")
+          if (kv[1] == "Id") id = kv[2]
+          if (kv[1] == "Transient") t = kv[2]
+        }
+        if (t == "yes" && id != "") print id }' \
+    || true
+}
+
+active_state() {
+  systemctl_bounded show "$1" --property=ActiveState --value 2>/dev/null
+}
+
+unit_result() {
+  systemctl_bounded show "$1" --property=Result --value 2>/dev/null
+}
+
+unit_type() {
+  if [[ "$1" == *.timer ]]; then
+    printf 'timer\n'
+  else
+    systemctl_bounded show "$1" --property=Type --value 2>/dev/null
+  fi
+}
+
+snapshot_line_is_valid() {
+  local unit="$1"
+  local type="$2"
+  [[ "$unit" =~ ^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$ ]] || return 1
+  unit_is_excluded "$unit" && return 1
+  [[ "$type" =~ ^(timer|simple|notify|forking|exec|dbus|idle|oneshot)$ ]]
+}
+
+inventory_unit_is_valid() {
+  [[ "$1" =~ ^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$ ]] || return 1
+  ! unit_is_excluded "$1"
+}
+
+validate_inventory() {
+  local unit core found count=0
+  [[ -f "$INVENTORY_FILE" ]] || return 1
+  while IFS= read -r unit; do
+    [[ -n "$unit" ]] || continue
+    inventory_unit_is_valid "$unit" || return 1
+    count=$((count + 1))
+  done < "$INVENTORY_FILE"
+  (( count > 0 )) || return 1
+  for core in "${CORE_SERVICES[@]}"; do
+    found=0
+    while IFS= read -r unit; do
+      [[ "$unit" == "$core" ]] && found=1
+    done < "$INVENTORY_FILE"
+    (( found == 1 )) || return 1
+  done
+}
+
+ensure_inventory() {
+  local units temporary
+  if [[ -f "$INVENTORY_FILE" ]]; then
+    validate_inventory
+    return
+  fi
+  units="$(list_transition_units)" || {
+    echo "could not enumerate release consumer units" >&2
+    return 68
+  }
+  temporary="$(mktemp "${INVENTORY_FILE}.tmp.XXXXXX")"
+  printf '%s\n' "$units" > "$temporary"
+  chmod 0600 "$temporary"
+  "$SYNC" -f "$temporary"
+  mv -f "$temporary" "$INVENTORY_FILE"
+  if ! validate_inventory; then
+    "$RM" -f "$INVENTORY_FILE"
+    echo "release consumer inventory is empty or missing a core service" >&2
+    return 68
+  fi
+  "$SYNC" -f "$INVENTORY_FILE"
+  "$SYNC" -f "$(dirname "$INVENTORY_FILE")"
+}
+
+validate_active_snapshot() {
+  local unit type extra
+  [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
+  while IFS=$'\t' read -r unit type extra; do
+    [[ -n "$unit" && -z "$extra" ]] || return 1
+    snapshot_line_is_valid "$unit" "$type" || return 1
+  done < "$ACTIVE_STATE_FILE"
+}
+
+wait_for_preheld_restart() {
+  local deadline=$((SECONDS + PREHELD_WAIT_SECONDS))
+  local state
+  while :; do
+    if ! state="$(active_state "$PREHELD_UNIT")"; then
+      echo "could not verify ${PREHELD_UNIT} state" >&2
+      return 69
+    fi
+    case "$state" in
+      ""|inactive|failed) return 0 ;;
+    esac
+    (( SECONDS >= deadline )) && break
+    "$SLEEP" 1
+  done
+  echo "refusing release transition while ${PREHELD_UNIT} is ${state:-unknown}" >&2
+  return 66
+}
+
+snapshot_active_units() {
+  local unit state type temporary
+  if [[ -f "$ACTIVE_STATE_FILE" && ! -f "$INVENTORY_FILE" ]]; then
+    echo "active-unit snapshot exists without its inventory" >&2
+    return 68
+  fi
+  ensure_inventory || return $?
+  if [[ -f "$ACTIVE_STATE_FILE" ]]; then
+    validate_active_snapshot
+    return
+  fi
+  temporary="$(mktemp "${ACTIVE_STATE_FILE}.tmp.XXXXXX")"
+  while IFS= read -r unit; do
+    if ! state="$(active_state "$unit")"; then
+      "$RM" -f "$temporary"
+      echo "could not read active state for ${unit}" >&2
+      return 69
+    fi
+    case "$state" in
+      active|activating|reloading)
+        if ! type="$(unit_type "$unit")"; then
+          "$RM" -f "$temporary"
+          echo "could not read service type for ${unit}" >&2
+          return 69
+        fi
+        snapshot_line_is_valid "$unit" "$type" || {
+          "$RM" -f "$temporary"
+          return 1
+        }
+        printf '%s\t%s\n' "$unit" "$type" >> "$temporary"
+        ;;
+    esac
+  done < "$INVENTORY_FILE"
+  chmod 0600 "$temporary"
+  "$SYNC" -f "$temporary"
+  mv -f "$temporary" "$ACTIVE_STATE_FILE"
+  "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
+  "$RM" -f "$RESTORED_STATE_FILE"
+}
+
+stop_inventory_units() {
+  (( $# > 0 )) || return 0
+  # Keep the normal batched stop unchanged. A retired unit in the durable
+  # inventory can reject the batch even though it has nothing left to stop.
+  systemctl_bounded --no-block stop "$@" && return 0
+  local unit load state fragment
+  local loaded=()
+  for unit in "$@"; do
+    load="$(systemctl_bounded show "$unit" --property=LoadState --value 2>/dev/null)" || return 69
+    case "$load" in
+      loaded) loaded+=("$unit") ;;
+      not-found)
+        state="$(active_state "$unit")" || return 69
+        fragment="$(systemctl_bounded show "$unit" --property=FragmentPath --value 2>/dev/null)" || return 69
+        if [[ "$state" != inactive || -n "$fragment" ]]; then
+          echo "could not prove absent inventory unit ${unit} is inactive" >&2
+          return 69
+        fi
+        ;;
+      *)
+        echo "could not verify load state for ${unit}" >&2
+        return 69
+        ;;
+    esac
+  done
+  # Loaded units still require a successful stop; never mask their failures.
+  (( ${#loaded[@]} == 0 )) || systemctl_bounded --no-block stop "${loaded[@]}"
+}
+
+stop_release_consumers() {
+  local unit state
+  local timers=()
+  local services=()
+  validate_inventory || return 68
+  while IFS= read -r unit; do
+    [[ -n "$unit" ]] || continue
+    if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
+  done < "$INVENTORY_FILE"
+  (( ${#timers[@]} == 0 )) || stop_inventory_units "${timers[@]}"
+  # bash 3.2 + set -u: an empty array is unbound. The child uses #!/bin/bash.
+  for unit in ${timers[@]+"${timers[@]}"}; do
+    wait_for_unit_state "$unit" inactive || return $?
+  done
+  wait_for_preheld_restart
+  (( ${#services[@]} == 0 )) || stop_inventory_units "${services[@]}"
+  for unit in ${services[@]+"${services[@]}"}; do
+    wait_for_unit_state "$unit" inactive || return $?
+  done
+  wait_for_preheld_restart
+}
+
+is_core_service() {
+  local candidate="$1"
+  local core
+  for core in "${CORE_SERVICES[@]}"; do
+    [[ "$candidate" == "$core" ]] && return 0
+  done
+  return 1
+}
+
+# Retired units are never replayed from the active snapshot and never required
+# to be restored by it. The first retiring deploy snapshots a still-running
+# radon-research.service; replaying it would let its heartbeat recreate the
+# dropbox-research service_health row that migration 0102 deleted (the
+# migration never runs again), and verify-restored would then fail the release
+# once retire_research_watcher stops it. stop-clean already stopped it under its
+# stop-only budget, so retire below only has to disable an inactive unit.
+is_retired_unit() {
+  [[ "$1" == radon-research.service ]]
+}
+
+# The shared-folder Dropbox watcher is retired: radon-marketdesk.timer is the
+# research source now (docs/marketdesk-research.md). The unit file stays
+# installed so this can turn it off; a deploy disables an enabled watcher
+# and stops one that was started by hand or replayed from the active
+# snapshot. Idempotent and never fatal: a refusal here must not roll back a
+# release that is otherwise green.
+retire_research_watcher() {
+  local enabled_state="" state=""
+  enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || true
+  state="$(active_state radon-research.service)" || true
+  if [[ "$enabled_state" == "enabled" || "$enabled_state" == "enabled-runtime" ]]; then
+    systemctl_bounded --no-block disable --now radon-research.service || {
+      echo "warning: could not disable retired radon-research.service" >&2
+      return 0
+    }
+  elif [[ "$state" == "active" || "$state" == "activating" || "$state" == "reloading" ]]; then
+    systemctl_bounded --no-block stop radon-research.service || {
+      echo "warning: could not stop retired radon-research.service" >&2
+      return 0
+    }
+  else
+    return 0
+  fi
+  wait_for_unit_state radon-research.service inactive || \
+    echo "warning: retired radon-research.service is still stopping" >&2
+  return 0
+}
+
+reset_core_failures() {
+  systemctl_bounded reset-failed "${CORE_SERVICES[@]}"
+}
+
+verify_restored_state() {
+  local unit type extra state
+  [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
+  validate_active_snapshot || return 1
+  [[ -f "$RESTORED_STATE_FILE" ]] || return 1
+  while IFS=$'\t' read -r unit type extra; do
+    [[ "$type" == oneshot ]] && continue
+    is_retired_unit "$unit" && continue
+    state="$(active_state "$unit")" || return 69
+    [[ "$state" == active ]] || {
+      echo "snapshotted unit is not restored: ${unit} (${state:-unknown})" >&2
+      return 67
+    }
+  done < "$ACTIVE_STATE_FILE"
+}
+
+resume_active_snapshot() {
+  local unit type extra state
+  local services=()
+  local timers=()
+  local backups=()
+  local terminated=()
+  local already_resumed=0
+  [[ -f "$ACTIVE_STATE_FILE" ]] || return 0
+  validate_active_snapshot || return 1
+  [[ -f "$RESTORED_STATE_FILE" ]] && already_resumed=1
+  while IFS=$'\t' read -r unit type extra; do
+    is_core_service "$unit" && continue
+    is_retired_unit "$unit" && continue
+    if [[ "$type" == oneshot ]]; then
+      if [[ "$unit" == radon-db-backup.service ]]; then
+        if [[ "$already_resumed" == 0 ]]; then
+          state="$(active_state "$unit")" || return 69
+          if [[ "$state" != active && "$state" != activating ]]; then
+            backups+=("$unit")
+          fi
+        fi
+        continue
+      fi
+      # stop-clean SIGTERMed this run; systemd records Result=signal and the
+      # unit watchdog pages a failure the deploy caused. Clear it without
+      # replaying the job (the next timer runs it on the new release); an
+      # exit-code failure stays visible.
+      state="$(active_state "$unit")" || return 69
+      if [[ "$state" == failed && "$(unit_result "$unit")" == signal ]]; then
+        terminated+=("$unit")
+      fi
+      continue
+    fi
+    state="$(active_state "$unit")" || return 69
+    [[ "$state" == active ]] && continue
+    if [[ "$type" == timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
+  done < "$ACTIVE_STATE_FILE"
+  (( ${#services[@]} == 0 )) || systemctl_bounded --no-block start "${services[@]}"
+  # bash 3.2 + set -u: an empty array is unbound. The child uses #!/bin/bash.
+  for unit in ${services[@]+"${services[@]}"}; do
+    wait_for_unit_state "$unit" active || return $?
+  done
+  (( ${#timers[@]} == 0 )) || systemctl_bounded --no-block start "${timers[@]}"
+  for unit in ${timers[@]+"${timers[@]}"}; do
+    wait_for_unit_state "$unit" active || return $?
+  done
+  # Only the interrupted backup is replay-safe: publication is atomic and
+  # incomplete dumps remain private .tmp files. A successful job submission
+  # restores its execution; eventual dump/upload health belongs to its writer,
+  # never the app deployment gate. The marker prevents duplicate submissions.
+  if (( ${#backups[@]} > 0 )); then
+    systemctl_bounded --no-block start "${backups[@]}" || return $?
+  fi
+  if (( ${#terminated[@]} > 0 )); then
+    systemctl_bounded reset-failed "${terminated[@]}" || return $?
+  fi
+  : > "$RESTORED_STATE_FILE"
+  chmod 0600 "$RESTORED_STATE_FILE"
+  "$SYNC" -f "$RESTORED_STATE_FILE"
+  verify_restored_state
+}
+
+commit_transition() {
+  verify_restored_state
+  close_unit_transaction
+  "$RM" -f "$RESTORED_STATE_FILE" "$ACTIVE_STATE_FILE" "$INVENTORY_FILE"
+  "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
+}
+
+# Sized above the Caddyfile's grace_period (10s), which is what bounds how long
+# the old servers take to drain. 15s left no headroom: the reload was still in
+# flight when the timeout fired, the publish read that as a failure, and the
+# rollback's second reload hit the same wall and left the admin endpoint wedged
+# (2026-08-11). The ceiling still exists so a genuinely hung reload cannot stall
+# the deploy lock forever.
+reload_caddy() {
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$SYSTEMCTL" reload caddy
+  else
+    # Detect a wedged Type=notify `reloading` quickly. 180s filled the
+    # publish-caddy supervisor budget so restart_caddy never ran
+    # (11a0575d, 868ee0f2). grace_period is 20s; 30s is enough headroom.
+    "$TIMEOUT" --signal=TERM --kill-after=2s 30s "$SYSTEMCTL" reload caddy
+  fi
+}
+
+restart_caddy() {
+  # TERMing a hung reload leaves Type=notify in `reloading`. Later reloads
+  # wait out the helper timeout (HTTP-only mcp.radon.run still hung 180s
+  # on 3866d693). Restart unwedes and loads whatever is in CADDY_CONFIG.
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$SYSTEMCTL" restart caddy
+  else
+    "$TIMEOUT" --signal=TERM --kill-after=2s 60s "$SYSTEMCTL" restart caddy
+  fi
+}
+
+# Staged 0600, never 0644. radon owns the source directory, so it can race the
+# regular-file check below by flipping the source to `ln -sf /etc/shadow`
+# between the test and this copy: install dereferences the symlink, and a
+# world-readable candidate inside the radon-traversable /etc/caddy would then be
+# readable during the validate window. 0600 makes the race unprofitable even
+# when it is won.
+# Same trust boundary as the control-plane refresh: the edge config decides
+# which proxy and fetch-metadata headers survive on the way to the API's
+# local-trust check, and `radon` both owns CADDY_SOURCE and holds a NOPASSWD
+# grant for publish-caddy. `caddy validate` only proves the candidate parses,
+# not that it preserves those headers, so the bytes must come from the commit
+# GitHub reports as main rather than from the writable checkout.
+stage_caddy_candidate() {
+  local candidate="$1"
+  local tip
+
+  tip="$(resolve_fetched_main_tip)" || return $?
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$INSTALL" -m 0600 /dev/null "$candidate" || return $?
+  else
+    "$INSTALL" -m 0600 -o root -g root /dev/null "$candidate" || return $?
+  fi
+  provision_git cat-file blob \
+    "${tip}:cloud/caddy/Caddyfile" > "$candidate"
+}
+
+# fchmod through an O_NOFOLLOW fd: a by-name chmod on an entry in a
+# radon-owned directory follows whatever link radon swapped in.
+chmod_dir_nofollow() {
+  "$SESSION_PYTHON" -I - "$1" "$2" <<'PY_CHMOD_DIR'
+import os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fchmod(fd, int(sys.argv[2], 8))
+finally:
+    os.close(fd)
+PY_CHMOD_DIR
+}
+
+# DS-2026-09-25-06: give caddy media without group radon (env is 0640 root:radon).
+# Parent /var/lib/radon stays 0750 radon:radon; radon-media gets traverse-only
+# ACL there and r-x on media/. A user ACL on caddy bridges the running
+# process so a group retarget does not 403 media.radon.run before restart.
+# Supplementary groups apply at process start: the caller restarts when
+# GRANT_CADDY_NEEDS_RESTART=1.
+grant_caddy_media_access() {
+  local parent="${RADON_MEDIA_PARENT:-/var/lib/radon}"
+  local media="${RADON_MEDIA_DIR:-${parent}/media}"
+  local env_file="${RADON_CANONICAL_ENV_FILE:-${ENV_FILE:-/etc/radon/env}}"
+  local need_restart=0
+  local groups=""
+  GRANT_CADDY_NEEDS_RESTART=0
+
+  if ! getent group radon-media >/dev/null 2>&1; then
+    groupadd --system radon-media
+  fi
+
+  # radon owns the parent and media/, so it can swap any name under media
+  # between a check and root's use of it (DS-2026-09-27-01). ACLs inside
+  # media are set as radon, the owner; root only acts on media itself
+  # through an O_NOFOLLOW fd (chown --no-dereference never follows).
+  local -a as_owner=()
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    as_owner=("$SETPRIV" --reuid=radon --regid=radon --clear-groups --)
+  fi
+  if [[ -d "$media" && ! -L "$media" ]]; then
+    if command -v setfacl >/dev/null 2>&1; then
+      if id caddy >/dev/null 2>&1; then
+        setfacl -m u:caddy:--x "$parent"
+        "${as_owner[@]}" setfacl -R -P -m u:caddy:r-X "$media"
+      fi
+      setfacl -m g:radon-media:--x "$parent"
+      "${as_owner[@]}" setfacl -m g:radon-media:r-x "$media"
+      "${as_owner[@]}" setfacl -d -m g:radon-media:r-X "$media"
+      "${as_owner[@]}" setfacl -R -P -m g:radon-media:r-X "$media"
+    else
+      chmod 0711 "$parent"
+      chmod_dir_nofollow "$media" 0755
+    fi
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown --no-dereference radon:radon-media "$media"
+      if command -v setfacl >/dev/null 2>&1; then
+        chmod_dir_nofollow "$media" 2750
+      fi
+    fi
+  fi
+
+  if id caddy >/dev/null 2>&1; then
+    # grep -w radon also matches radon-media (hyphen is a word boundary).
+    groups=" $(id -nG caddy 2>/dev/null) "
+    if [[ "$groups" != *" radon-media "* ]]; then
+      usermod -aG radon-media caddy
+      need_restart=1
+    fi
+    if [[ "$groups" == *" radon "* ]]; then
+      gpasswd -d caddy radon
+      need_restart=1
+    fi
+  fi
+
+  if [[ -e "$env_file" ]]; then
+    if [[ -L "$env_file" || ! -f "$env_file" ]]; then
+      echo "Refusing ${env_file}: not a regular file (missing or a symlink)" >&2
+      return 1
+    fi
+    chmod 0640 "$env_file"
+    if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+      chown root:radon "$env_file"
+    fi
+  fi
+
+  GRANT_CADDY_NEEDS_RESTART="$need_restart"
+}
+
+# Called only from the fixed edge publish action, before its candidate is live.
+# A deferred batch persists its root-owned index and resumes on the next pass.
+prepare_public_media_publication() {
+  # Directory bursts can exhaust the service start limit and latch the path.
+  # Retain its artifact for rollback, but use only bounded timer scheduling.
+  "$SYSTEMCTL" disable --now radon-media-publish.path || return 1
+  local attempt status
+  local -a publisher=(/usr/bin/python3 -I /usr/local/lib/radon/media_publish.py)
+  if (( HELPER_TEST_MODE == 1 )); then
+    publisher=("$SESSION_PYTHON" -I "${RADON_TEST_MEDIA_PUBLISHER:?isolated publisher required}")
+  fi
+  for ((attempt=0; attempt<20; attempt++)); do
+    status=0
+    "${publisher[@]}" || status=$?
+    if (( status == 0 )); then
+      "$SYSTEMCTL" reset-failed radon-media-publish.service || return 1
+      # systemd unloads the disabled path unit, so its reset-failed is hygiene only.
+      "$SYSTEMCTL" reset-failed radon-media-publish.path 2>/dev/null || true
+      "$SYSTEMCTL" enable --now radon-media-publish.timer
+      return $?
+    fi
+    (( status == 75 )) || return "$status"
+  done
+  echo "Media backfill remains incomplete; retaining the current edge configuration" >&2
+  return 75
+}
+
+# radon publishes Caddy config only through this fixed action. The retired
+# `cp <checkout Caddyfile> /etc/caddy/Caddyfile` sudoers rule followed a
+# symlinked source, so radon could read any root-only file out of the 0644
+# destination, and it installed edge config that no validator ever saw.
+publish_caddy() {
+  local candidate rollback=""
+
+  [[ -n "$CADDY_SOURCE" && -n "$CADDY_CONFIG" && -n "$CADDY_BIN" ]] || {
+    echo "caddy publish paths are not configured" >&2
+    return 78
+  }
+  [[ -f "$CADDY_SOURCE" && ! -L "$CADDY_SOURCE" ]] || {
+    echo "caddy source is missing or is not a regular file: ${CADDY_SOURCE}" >&2
+    return 66
+  }
+  if [[ -e "$CADDY_CONFIG" || -L "$CADDY_CONFIG" ]] && \
+     [[ ! -f "$CADDY_CONFIG" || -L "$CADDY_CONFIG" ]]; then
+    echo "live caddy configuration is not a regular file: ${CADDY_CONFIG}" >&2
+    return 74
+  fi
+
+  candidate="$(mktemp "${CADDY_CONFIG}.candidate.XXXXXX")"
+  if ! stage_caddy_candidate "$candidate"; then
+    "$RM" -f "$candidate"
+    echo "could not stage the caddy candidate" >&2
+    return 73
+  fi
+  # Both streams are discarded on purpose. The caller is unprivileged and the
+  # candidate is radon-writable, so a caddyfile adapter error -- which quotes
+  # the offending token -- would relay the contents of anything the candidate
+  # imported (`import /etc/shadow`) back to radon. The verdict is the output.
+  if ! "$CADDY_BIN" validate --config "$candidate" --adapter caddyfile >/dev/null 2>&1; then
+    "$RM" -f "$candidate"
+    echo "caddy candidate validation failed; live configuration is unchanged" >&2
+    return 65
+  fi
+
+  if (( HELPER_TEST_MODE == 0 )) || [[ "${RADON_TEST_PUBLISH_MEDIA:-0}" == "1" ]]; then
+    if ! prepare_public_media_publication; then
+      "$RM" -f "$candidate"
+      echo "Media publication is not ready; live edge configuration is unchanged" >&2
+      return 75
+    fi
+  fi
+
+  if [[ -f "$CADDY_CONFIG" ]]; then
+    rollback="$(mktemp "${CADDY_CONFIG}.rollback.XXXXXX")"
+    cp -a -- "$CADDY_CONFIG" "$rollback"
+    "$SYNC" -f "$rollback"
+  fi
+  # Widened to the live config's own mode only now, after validation: caddy runs
+  # unprivileged and must read this file. Content that failed validate never
+  # reaches this line, so a symlinked-source race cannot publish /etc/shadow.
+  chmod 0644 "$candidate"
+  mv -f -- "$candidate" "$CADDY_CONFIG"
+  "$SYNC" -f "$CADDY_CONFIG"
+
+  # Existing hosts still have caddy in group radon from the 2026-08-23 media
+  # cutover. Converge membership and media ACLs here so the next deploy
+  # drops that gid without a setup-vps re-run. Skipped in helper test mode
+  # unless a test opts in: groupadd/usermod must not mutate the runner.
+  if (( HELPER_TEST_MODE == 0 )) || [[ "${RADON_TEST_GRANT_CADDY_MEDIA:-0}" == "1" ]]; then
+    grant_caddy_media_access || return $?
+  fi
+  if [[ "${GRANT_CADDY_NEEDS_RESTART:-0}" == "1" ]]; then
+    if restart_caddy; then
+      [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+      return 0
+    fi
+  elif reload_caddy; then
+    [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+    return 0
+  fi
+  # Candidate is already live on disk. Restart the wedged unit so it
+  # actually loads it instead of rolling back and leaving the old
+  # Caddyfile in a still-reloading process.
+  if restart_caddy; then
+    [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+    echo "caddy reload timed out; restarted caddy onto the candidate" >&2
+    return 0
+  fi
+  if [[ -n "$rollback" ]]; then
+    mv -f -- "$rollback" "$CADDY_CONFIG"
+    "$SYNC" -f "$CADDY_CONFIG"
+    restart_caddy || echo "known-good caddy restart reconciliation also failed" >&2
+  else
+    "$RM" -f "$CADDY_CONFIG"
+  fi
+  echo "caddy candidate reload failed; restored the known-good configuration" >&2
+  return 75
+}
+
+# The timer-owned units the deploy is allowed to (re)install. The manifest
+# digest is the review gate: a unit whose checkout content does not hash to
+# its committed entry is unreviewed and is NOT installed -- that is exactly
+# the pending-install window config/drift-allowlist.conf acknowledges.
+# Control-plane units stay bootstrap-owned (listed in CONTROL_PLANE_SOURCES);
+# gateway and beta units stay excluded. `enable --now` is issued for NEWLY
+# installed timers only, never for a timer-owned .service: enabling both made
+# every scheduled job fire at once (setup-vps.sh, enable_services).
+#
+# Same hardening as publish_caddy: root-side constant paths, a symlinked source
+# is refused, the candidate is staged 0600 and its hash is checked against the
+# manifest digest before promotion, so a radon-side swap of the source between
+# the regular-file test and the copy can never land in /etc/systemd/system.
+file_sha256() {
+  local digest
+  digest="$("$SHA256SUM" -- "$1")" || return 1
+  printf '%s\n' "${digest%% *}"
+}
+
+stage_unit_candidate() {
+  local source="$1" candidate="$2"
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$INSTALL" -m 0600 "$source" "$candidate"
+  else
+    "$INSTALL" -m 0600 -o root -g root "$source" "$candidate"
+  fi
+}
+
+# Installs the timer-owned units recorded in installed-units.sha256. Both the
+# manifest and every unit body come from git objects at the GitHub main tip --
+# never from /home/radon/radon, which anything running as `radon` can write
+# (R-084). A unit that is not reachable from that tip is refused even when its
+# digest matches; the checkout manifest is not evidence of review.
+# `systemd-analyze verify` on the staged body, mirroring publish_caddy's
+# `caddy validate` gate. The unit has to carry its real name for the
+# verifier to parse it as that unit type.
+unit_candidate_verifies() {
+  local candidate="$1" unit="$2" scratch rc=0
+  # REL-221 (R-589): "verifier unavailable" (no systemd-analyze on this host)
+  # is a logged, documented proceed — the manifest-hash gate still stands.
+  # A FAILED scratch setup is not: soft-passing it installed the candidate
+  # unverified, so it skips the unit instead.
+  if [[ -z "$SYSTEMD_ANALYZE" || ! -x "$SYSTEMD_ANALYZE" ]]; then
+    echo "unit-verify: systemd-analyze unavailable; installing ${unit} on the manifest gate alone" >&2
+    return 0
+  fi
+  if ! scratch="$(mktemp -d "${SYSTEMD_UNIT_DIR}/.verify.XXXXXX")"; then
+    echo "unit-verify: scratch setup failed under ${SYSTEMD_UNIT_DIR}; refusing ${unit}" >&2
+    return 1
+  fi
+  if cat -- "$candidate" > "${scratch}/${unit}"; then
+    if [[ -n "${TIMEOUT:-}" ]]; then
+      "$TIMEOUT" --signal=TERM --kill-after=2s 10s \
+        "$SYSTEMD_ANALYZE" verify "${scratch}/${unit}" || rc=$?
+    else
+      "$SYSTEMD_ANALYZE" verify "${scratch}/${unit}" || rc=$?
+    fi
+  else
+    rc=1
+  fi
+  "$RM" -rf "$scratch"
+  return "$rc"
+}
+
+# T-104: install-units journals every unit it promotes so a rollback can put
+# /etc/systemd/system back exactly. install-units cannot re-run against the
+# restored SHA (it reads the GitHub main tip and refuses a HEAD behind it),
+# and a unit absent from the restored manifest would never be revisited, so a
+# Persistent=true timer enabled by a gate-failing deploy fired 203/EXEC
+# forever. commit-transition closes the journal; revert-units consumes it.
+begin_unit_transaction() {
+  "$RM" -f -- "${UNIT_BACKUP_PREFIX}"*
+  : > "$UNITS_TRANSACTION_FILE"
+  chmod 0600 "$UNITS_TRANSACTION_FILE"
+}
+
+record_unit_change() {
+  printf '%s\t%s\n' "$1" "$2" >> "$UNITS_TRANSACTION_FILE"
+  "$SYNC" -f "$UNITS_TRANSACTION_FILE"
+}
+
+close_unit_transaction() {
+  "$RM" -f -- "$UNITS_TRANSACTION_FILE" "${UNIT_BACKUP_PREFIX}"*
+}
+
+revert_installed_units() {
+  local verb unit target backup
+  local -a timers=() services=()
+  local restored=0 changed=0
+  local unit_re='^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$'
+
+  [[ -f "$UNITS_TRANSACTION_FILE" ]] || {
+    printf 'revert-units: nothing to revert\n'
+    return 0
+  }
+  while IFS=$'\t' read -r verb unit; do
+    [[ "$unit" =~ $unit_re ]] || continue
+    case "$verb" in
+      installed)
+        if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
+        ;;
+      updated)
+        backup="${UNIT_BACKUP_PREFIX}${unit}"
+        [[ -f "$backup" ]] || {
+          echo "revert-units: no saved body for ${unit}" >&2
+          continue
+        }
+        target="${SYSTEMD_UNIT_DIR}/${unit}"
+        mv -f -- "$backup" "$target" || return 73
+        chmod 0644 "$target"
+        "$SYNC" -f "$target"
+        restored=$((restored + 1))
+        changed=1
+        ;;
+    esac
+  done < "$UNITS_TRANSACTION_FILE"
+
+  # Timers first so a newly armed timer cannot re-queue the service it owns
+  # while that service is being stopped.
+  for unit in ${timers[@]+"${timers[@]}"}; do
+    systemctl_bounded disable --now "$unit" || true
+  done
+  for unit in ${services[@]+"${services[@]}"}; do
+    systemctl_bounded stop "$unit" || true
+  done
+  for unit in ${timers[@]+"${timers[@]}"} ${services[@]+"${services[@]}"}; do
+    "$RM" -f -- "${SYSTEMD_UNIT_DIR}/${unit}"
+    changed=1
+  done
+  if (( changed )); then
+    systemctl_bounded daemon-reload || return $?
+  fi
+  if (( ${#timers[@]} + ${#services[@]} > 0 )); then
+    # A removed unit that already failed 203/EXEC stays listed as failed
+    # after the reload; clearing it is what stops the pages.
+    systemctl_bounded reset-failed ${timers[@]+"${timers[@]}"} ${services[@]+"${services[@]}"} || true
+  fi
+  close_unit_transaction
+  printf 'revert-units: removed=%d restored=%d\n' \
+    $(( ${#timers[@]} + ${#services[@]} )) "$restored"
+}
+
+# DS-2026-10-17-16: the isolated responder executes this tree, never the
+# writable clone. Bytes come from the same trusted main tip as the units.
+# A tip that predates the installer (unit-install fixtures included) skips.
+install_grok_responder_code_from_tip() {
+  local tip="$1"
+  local target="${RADON_GROK_RESPONDER_CODE:-/usr/local/lib/radon/grok-responder}"
+  local stage installer have_code=0 have_installer=0 rc=0
+
+  provision_git cat-file -e "${tip}:scripts/grok_page_responder.py" >/dev/null 2>&1 && have_code=1
+  provision_git cat-file -e "${tip}:cloud/scripts/install-grok-responder-code.sh" >/dev/null 2>&1 && have_installer=1
+  if (( have_code == 0 && have_installer == 0 )); then
+    return 0
+  fi
+  if (( have_code == 0 || have_installer == 0 )); then
+    echo "install-units: grok responder code and installer must be installed together" >&2
+    return 66
+  fi
+  stage="$(mktemp -d "${STATE_DIR}/grok-responder-code.XXXXXX")" || return 73
+  installer="${stage}/install-grok-responder-code.sh"
+  if ! provision_git cat-file blob "${tip}:cloud/scripts/install-grok-responder-code.sh" > "$installer"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not read the grok responder installer" >&2
+    return 66
+  fi
+  chmod 0700 "$installer"
+  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" scripts > "${stage}/scripts.tar"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not read the grok responder scripts tree" >&2
+    return 66
+  fi
+  if ! "$TAR" -x -f "${stage}/scripts.tar" -C "$stage"; then
+    "$RM" -rf -- "$stage"
+    echo "install-units: could not unpack the grok responder scripts tree" >&2
+    return 66
+  fi
+  if (( HELPER_TEST_MODE == 1 )); then
+    RADON_HELPER_SKIP_CHOWN=1
+  fi
+  RADON_HELPER_SKIP_CHOWN="${RADON_HELPER_SKIP_CHOWN:-0}" \
+    /bin/bash "$installer" "${stage}/scripts" "$target" || rc=$?
+  "$RM" -rf -- "$stage"
+  if (( rc != 0 )); then
+    echo "install-units: grok responder code install failed" >&2
+    return "$rc"
+  fi
+  printf 'install-units: grok responder code refreshed at %s\n' "$target"
+  return 0
+}
+
+install_manifest_units() {
+  local tip manifest line digest unit target candidate actual was_present backup
+  local -a new_timers=() skipped=()
+  local installed=0 updated=0 unchanged=0 changed=0 entry
+  local manifest_line_re='^([0-9a-f]{64})[[:space:]][[:space:]](radon-[a-zA-Z0-9_.@-]+\.(service|timer))$'
+
+  [[ -n "$SYSTEMD_UNIT_DIR" ]] || {
+    echo "unit install paths are not configured" >&2
+    return 78
+  }
+  [[ -d "$SYSTEMD_UNIT_DIR" && ! -L "$SYSTEMD_UNIT_DIR" ]] || {
+    echo "systemd unit directory is missing: ${SYSTEMD_UNIT_DIR}" >&2
+    return 66
+  }
+
+  tip="$(resolve_trusted_main_tip)" || return $?
+  manifest="$(provision_git cat-file blob \
+    "${tip}:cloud/config/installed-units.sha256")" || {
+    echo "installed-units manifest is missing at main tip" >&2
+    return 66
+  }
+  begin_unit_transaction
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    if [[ ! "$line" =~ $manifest_line_re ]]; then
+      echo "install-units: ignoring malformed manifest line" >&2
+      continue
+    fi
+    digest="${BASH_REMATCH[1]}"
+    unit="${BASH_REMATCH[2]}"
+    if control_plane_unit_name "$unit"; then
+      skipped+=("${unit} (control-plane)")
+      continue
+    fi
+    unit_is_excluded "$unit" && continue
+    if unit_is_release_managed "$unit"; then
+      skipped+=("${unit} (release-managed)")
+      continue
+    fi
+
+    target="${SYSTEMD_UNIT_DIR}/${unit}"
+    if [[ -L "$target" ]]; then
+      skipped+=("${unit} (symlinked-target)")
+      continue
+    fi
+
+    candidate="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.candidate.XXXXXX")"
+    chmod 0600 "$candidate"
+    if ! provision_git cat-file blob \
+         "${tip}:cloud/services/${unit}" > "$candidate"; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (not-at-main-tip)")
+      continue
+    fi
+    actual="$(file_sha256 "$candidate")"
+    if [[ "$actual" != "$digest" ]]; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (manifest-mismatch)")
+      continue
+    fi
+
+    was_present=0
+    if [[ -f "$target" ]]; then
+      was_present=1
+      if [[ "$(file_sha256 "$target")" == "$digest" ]]; then
+        "$RM" -f "$candidate"
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+    fi
+
+    chmod 0644 "$candidate"
+    if ! unit_candidate_verifies "$candidate" "$unit"; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (verify-failed)")
+      continue
+    fi
+    # daemon-reload never fails on a malformed unit body, and
+    # restore_release_backup does not reinstall unit files, so the only
+    # recovery from a bad promotion is a root SSH. Keep the live body and
+    # put it back if anything below fails.
+    backup=""
+    if (( was_present )); then
+      backup="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.backup.XXXXXX")"
+      if ! cat -- "$target" > "$backup"; then
+        "$RM" -f "$backup" "$candidate"
+        skipped+=("${unit} (snapshot-failed)")
+        continue
+      fi
+    fi
+    if ! mv -f -- "$candidate" "$target"; then
+      [[ -n "$backup" ]] && mv -f -- "$backup" "$target"
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (promote-failed)")
+      continue
+    fi
+    "$SYNC" -f "$target"
+    changed=1
+    if (( was_present )); then
+      mv -f -- "$backup" "${UNIT_BACKUP_PREFIX}${unit}"
+      record_unit_change updated "$unit"
+      updated=$((updated + 1))
+    else
+      record_unit_change installed "$unit"
+      installed=$((installed + 1))
+      [[ "$unit" == *.timer ]] && new_timers+=("$unit")
+    fi
+  done <<< "$manifest"
+
+  if (( changed )); then
+    systemctl_bounded daemon-reload || return $?
+  fi
+  # ${arr[@]+"${arr[@]}"}: an empty array is an unbound variable under set -u
+  # on bash 3.2 (the test host).
+  # R-184: `|| return $?` on the first failure silently skipped every LATER
+  # new timer, and neither the deploy nor the drift audit noticed the ones
+  # that were never attempted. Try them all, name the failures, then fail.
+  local enable_failures=0
+  for unit in ${new_timers[@]+"${new_timers[@]}"}; do
+    if ! systemctl_bounded enable --now "$unit"; then
+      printf 'install-units: enable failed %s\n' "$unit" >&2
+      enable_failures=$((enable_failures + 1))
+      continue
+    fi
+  done
+  printf 'install-units: installed=%d updated=%d unchanged=%d skipped=%d\n' \
+    "$installed" "$updated" "$unchanged" "${#skipped[@]}"
+  for entry in ${skipped[@]+"${skipped[@]}"}; do
+    printf 'install-units: skipped %s\n' "$entry"
+  done
+  install_grok_responder_code_from_tip "$tip" || return $?
+  if (( enable_failures )); then
+    printf 'install-units: %d timer(s) failed to enable\n' "$enable_failures" >&2
+    return 1
+  fi
+  return 0
+}
+
+github_origin_is_allowed() {
+  case "$1" in
+    git@github.com:joemccann/radon|git@github.com:joemccann/radon.git) return 0 ;;
+    ssh://git@github.com/joemccann/radon|ssh://git@github.com/joemccann/radon.git) return 0 ;;
+    https://github.com/joemccann/radon|https://github.com/joemccann/radon.git) return 0 ;;
+    https://*@github.com/joemccann/radon|https://*@github.com/joemccann/radon.git) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+control_plane_unit_name() {
+  local name="$1" target base
+  for target in "${CONTROL_PLANE_TARGETS[@]}"; do
+    base="$(basename -- "$target")"
+    [[ "$base" == "$name" ]] && return 0
+    # The timer that schedules a control-plane service is control-plane too:
+    # rewriting radon-drift-audit.timer hides an installed unit, and the same
+    # trick on radon-ib-watchdog.timer disarms gateway supervision.
+    [[ "$name" == *.timer && "${name%.timer}.service" == "$base" ]] && return 0
+  done
+  return 1
+}
+
+# RADON_GIT_DIR is radon-owned, so every object/ancestry rewrite it can hold
+# is ignored: replace refs, grafts and the commit-graph cache.
+git_bounded() {
+  if [[ -n "${TIMEOUT:-}" ]]; then
+    GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null \
+      "$TIMEOUT" --signal=TERM --kill-after=2s 20s "$GIT" -c core.commitGraph=false "$@"
+  else
+    GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null \
+      "$GIT" -c core.commitGraph=false "$@"
+  fi
+}
+
+# The checkout store is radon-owned: radon can rewrite its loose or packed
+# object files or add alternates, and a git read does not re-hash an object.
+# So every privileged byte comes from PROVISION_GIT_DIR, a root-owned bare
+# clone whose objects arrive only by fetch from UNIT_REMOTE (hashed by
+# index-pack, checked by fsck). No system or global git config applies.
+provision_git() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    git_bounded --git-dir="$PROVISION_GIT_DIR" "$@"
+}
+
+# The tip read names no repository, so it runs from / with no system or
+# global config: sudo keeps the caller's cwd, and radon owns every repo it
+# can cd into. Protocol v1 for the reason given at the install-units read.
+remote_main_sha() {
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    GIT_CEILING_DIRECTORIES=/ \
+    git_bounded -C / -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}'
+}
+
+provision_fetch() {
+  local -a bound=()
+  [[ -n "${TIMEOUT:-}" ]] && bound=("$TIMEOUT" --signal=TERM --kill-after=5s 120s)
+  # Protocol v1 for the same reason as the ls-remote reads below.
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    ${bound[@]+"${bound[@]}"} "$GIT" --git-dir="$PROVISION_GIT_DIR" \
+    -c protocol.version=1 -c fetch.fsckObjects=true -c transfer.fsckObjects=true \
+    -c gc.autoDetach=false -c maintenance.autoDetach=false \
+    fetch --quiet --no-tags --no-recurse-submodules \
+    "$UNIT_REMOTE" "+refs/heads/main:refs/remotes/pinned/main"
+}
+
+# Owned by root (the invoking user in test mode), not a link, and writable by
+# nobody else.
+provision_dir_is_private() {
+  local mode
+  directory_is_root_owned "$1" || return 1
+  mode="$(file_mode "$1")" || return 1
+  (( (8#$mode & 8#022) == 0 ))
+}
+
+# First run creates the store; every run refuses one radon could write.
+ensure_provision_store() {
+  if [[ ! -e "$PROVISION_ROOT" && ! -L "$PROVISION_ROOT" ]]; then
+    if (( HELPER_TEST_MODE == 1 )); then
+      "$INSTALL" -d -m 0755 "$PROVISION_ROOT" || return 73
+    else
+      "$INSTALL" -d -m 0755 -o root -g root "$PROVISION_ROOT" || return 73
+    fi
+  fi
+  provision_dir_is_private "$PROVISION_ROOT" || {
+    echo "root provision store is not a root-only directory: ${PROVISION_ROOT}" >&2
+    return 74
+  }
+  if [[ ! -e "$PROVISION_GIT_DIR" && ! -L "$PROVISION_GIT_DIR" ]]; then
+    ( umask 022 && provision_git init --quiet --bare ) >/dev/null || {
+      echo "could not create the root provision store: ${PROVISION_GIT_DIR}" >&2
+      return 73
+    }
+  fi
+  provision_dir_is_private "$PROVISION_GIT_DIR" && \
+    provision_dir_is_private "${PROVISION_GIT_DIR}/objects" || {
+    echo "root provision store is not a root-only directory: ${PROVISION_GIT_DIR}" >&2
+    return 74
+  }
+}
+
+# Makes $1, the commit the pinned remote just reported as main, readable from
+# the root store. Already present means no network round trip: only fetches
+# from UNIT_REMOTE ever write that store. Unreachable remote: fail closed.
+provision_store_has_tip() {
+  local tip="$1"
+  ensure_provision_store || return $?
+  provision_git cat-file -e "${tip}^{commit}" 2>/dev/null && return 0
+  provision_fetch || {
+    echo "could not fetch the GitHub main tip into the root provision store" >&2
+    return 69
+  }
+  provision_git cat-file -e "${tip}^{commit}" 2>/dev/null || {
+    echo "the root provision store does not carry the GitHub main tip ${tip}" >&2
+    return 69
+  }
+}
+
+# True when $1 is the recorded floor commit or descends from it, decided in
+# the root store. No record yet: any main commit. An unreadable record: none.
+control_plane_commit_meets_floor() {
+  local commit="$1" floor=""
+  [[ -e "$CONTROL_PLANE_FLOOR_FILE" || -L "$CONTROL_PLANE_FLOOR_FILE" ]] || return 0
+  [[ -f "$CONTROL_PLANE_FLOOR_FILE" && ! -L "$CONTROL_PLANE_FLOOR_FILE" ]] || return 1
+  IFS= read -r floor < "$CONTROL_PLANE_FLOOR_FILE" || true
+  [[ "$floor" =~ ^[0-9a-f]{40}$ ]] || return 1
+  provision_git merge-base --is-ancestor "$floor" "$commit" 2>/dev/null
+}
+
+# Moves the floor to $1 after root installed that commit's privileged set.
+# Never lowers it.
+record_control_plane_floor() {
+  local commit="$1" tmp
+  control_plane_commit_meets_floor "$commit" || return 0
+  tmp="$(mktemp "${CONTROL_PLANE_FLOOR_FILE}.XXXXXX")" || return 73
+  if printf '%s\n' "$commit" > "$tmp" && chmod 0644 "$tmp" && \
+     mv -f -- "$tmp" "$CONTROL_PLANE_FLOOR_FILE"; then
+    "$SYNC" -f "$CONTROL_PLANE_FLOOR_FILE" || true
+    return 0
+  fi
+  "$RM" -f -- "$tmp"
+  echo "could not record the installed control-plane commit in ${CONTROL_PLANE_FLOOR_FILE}" >&2
+  return 73
+}
+
+# Allowlisted non-control-plane units only. Content comes from git objects at
+# the GitHub main tip -- never from the radon-writable checkout -- and must
+# match installed-units.sha256. Install is 0644 root:root plus one
+# daemon-reload. No start/stop/enable.
+# The one trust anchor for anything that installs a unit file: HEAD must be
+# the GitHub main tip, and the tip commit must be in the local object store so
+# every subsequent `cat-file blob` reads reviewed content.
+resolve_trusted_main_tip() {
+  local remote_sha local_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "unit trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "unit remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  # Protocol v1: the refs arrive in the info/refs GET. From this host an
+  # unauthenticated v2 ls-refs POST against the public repo answers 401
+  # ("could not read Username"), which failed every deploy at the first real
+  # sync-control-plane run (2026-09-02).
+  remote_sha="$(remote_main_sha)" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  local_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || {
+    echo "could not read local HEAD" >&2
+    return 66
+  }
+  [[ "$local_sha" == "$remote_sha" ]] || {
+    echo "HEAD is not the GitHub main tip; refusing unit install" >&2
+    return 76
+  }
+  provision_store_has_tip "$remote_sha" || return $?
+  printf '%s\n' "$remote_sha"
+}
+
+# The GitHub main tip, required to be present in the local object store (the
+# deploy job fetches it as radon before asking). Unlike
+# resolve_trusted_main_tip this does NOT require HEAD to be the tip: it runs
+# before promote, while HEAD is still the previous release.
+resolve_fetched_main_tip() {
+  local remote_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "control-plane trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "control-plane remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  # Protocol v1: the refs arrive in the info/refs GET. From this host an
+  # unauthenticated v2 ls-refs POST against the public repo answers 401
+  # ("could not read Username"), which failed every deploy at the first real
+  # sync-control-plane run (2026-09-02).
+  remote_sha="$(remote_main_sha)" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  provision_store_has_tip "$remote_sha" || return $?
+  printf '%s\n' "$remote_sha"
+}
+
+# Installs the control-plane bundle (helpers, sudoers, polkit, control-plane
+# units and drop-ins) at the GitHub main tip by running that tip's own
+# bootstrap-control-plane.sh from a root-owned extraction. Same trust anchor
+# as install-units: content is read through the commit that GitHub reports as
+# main, never from the radon-writable working tree. Bootstrap owns the deploy
+# lock, refuses pending transitions, validates every artifact, installs
+# atomically, and rewrites the readiness manifest; a bundle that is already
+# current is a no-op. Before this verb every helper/sudoers/polkit edit, and
+# every root hot-patch of a drop-in, blocked all deploys at preflight until
+# a human ran bootstrap over SSH (2026-08-21, 2026-08-29). R-430.
+# Refuse an automatic downgrade to a bundle whose inline interpreter calls
+# again accept the invoking account's import paths. This runs before any
+# candidate bootstrap code and also gates privileged in-place refreshes.
+python_inline_is_isolated() {
+  "$SESSION_PYTHON" -I - "$1" <<'PY_INLINE_ISOLATION'
+from pathlib import Path
+import re
+import shlex
+import sys
+
+# Inspect logical shell lines without evaluating candidate code. Accept the
+# canonical isolated option before inline code, including variable expansion,
+# literal interpreter paths and continued shell commands.
+text = Path(sys.argv[1]).read_text(encoding="utf-8").replace("\\\n", " ")
+interpreter = re.compile(
+    r"^\s*(?:(?:exec|if|elif|then|!)\s+)*(?:[\"']?)(?:\$\{[^}\n]*python[^}\n]*\}"
+    r"|\$[a-z_]*python[a-z_0-9]*|(?:/[a-z0-9_.+-]+)*/?python(?:[0-9]+(?:\.[0-9]+)*)?)"
+    r"(?:[\"']?)(?=[ \t])", re.IGNORECASE)
+for line in text.splitlines():
+    if line.lstrip().startswith("#"):
+        continue
+    for match in interpreter.finditer(line):
+        try:
+            lexer = shlex.shlex(line[match.end():], posix=True)
+            lexer.whitespace_split = True
+            isolated = False
+            for arg in lexer:
+                if arg == "-I":
+                    isolated = True
+                if arg == "-" or arg.startswith("-c"):
+                    if not isolated:
+                        raise ValueError("unisolated inline interpreter")
+                    break  # Do not parse inline code or multiline code quotes.
+        except ValueError:
+            print("control-plane interpreter isolation is missing", file=sys.stderr)
+            raise SystemExit(76)
+
+PY_INLINE_ISOLATION
+}
+
+# radon-mcp.service terminates anonymous internet traffic and loads this file
+# for its Clerk verification inputs and operator allowlist, so it is the PUBLIC
+# MCP auth boundary. Both unprivileged writers used to publish it radon:radon
+# 0600, which let the account radon-mcp runs as -- holding a sudoers restart
+# grant -- decide who the public endpoint trusts with no root step
+# (DS-2026-10-18-04). Root derives it here instead: both paths are constants,
+# the caller supplies nothing, and the result is root:radon 0640 so the service
+# still reads it through group radon. Same key set as deploy.sh:MCP_ENV_KEYS
+# and setup-vps.sh:write_mcp_env; cloud/tests/test_mcp_env_ownership.py pins
+# the three copies together.
+readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
+
+publish_mcp_env() {
+  local staged mode
+
+  [[ -n "$MCP_ENV_SOURCE" && -n "$MCP_ENV_TARGET" ]] || {
+    echo "mcp env paths are not configured" >&2
+    return 78
+  }
+  # The canonical env is root-owned 0640; a symlink or a group/other-writable
+  # file there is the same substitution this verb exists to close.
+  [[ -f "$MCP_ENV_SOURCE" && ! -L "$MCP_ENV_SOURCE" ]] || {
+    echo "canonical env is missing or is not a regular file" >&2
+    return 78
+  }
+  mode="$(file_mode "$MCP_ENV_SOURCE")"
+  if (( (8#$mode & 8#022) != 0 )); then
+    echo "canonical env is group- or world-writable; refusing to derive from it" >&2
+    return 78
+  fi
+  # /etc/radon is radon-writable, so the destination can be a radon-planted
+  # symlink. Refuse anything present that is not a regular file, then publish
+  # by staging a sibling in the same directory and renaming over it, so the
+  # write never follows the destination path.
+  if [[ -L "$MCP_ENV_TARGET" || ( -e "$MCP_ENV_TARGET" && ! -f "$MCP_ENV_TARGET" ) ]]; then
+    echo "live mcp env is not a regular file" >&2
+    return 74
+  fi
+  staged="$(mktemp "${MCP_ENV_TARGET}.XXXXXX")" || {
+    echo "could not stage the mcp env" >&2
+    return 73
+  }
+  chmod 0600 "$staged"
+  if ! grep -E "$MCP_ENV_KEYS" "$MCP_ENV_SOURCE" > "$staged"; then
+    # An env carrying none of the keys is a real state (grep exits 1), not an
+    # error: radon-mcp then fails its own startup checks rather than reading a
+    # file this verb left behind half-written.
+    :
+  fi
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    if ! chown root:radon "$staged"; then
+      "$RM" -f "$staged"
+      echo "could not set ownership on the staged mcp env" >&2
+      return 73
+    fi
+  fi
+  # Widened only after the content is complete and owned: radon-mcp reads it.
+  chmod 0640 "$staged"
+  # -T: a directory link raced into the destination is replaced, not entered.
+  mv -T -f "$staged" "$MCP_ENV_TARGET"
+  "$SYNC" -f "$MCP_ENV_TARGET" 2>/dev/null || true
+  printf 'publish-mcp-env: published %s\n' "$MCP_ENV_TARGET"
+}
+
+sync_control_plane() {
+  local tip workdir bootstrap rc host_role expected="${1:-}"
+
+  tip="$(resolve_fetched_main_tip)" || return $?
+  if [[ -n "$expected" && "$expected" != "$tip" ]]; then
+    echo "expected control-plane SHA is no longer the GitHub main tip" >&2
+    return 76
+  fi
+  workdir="$(mktemp -d "${PROVISION_ROOT}/control-plane-sync.XXXXXX")" || {
+    echo "could not create a root-owned control-plane staging tree" >&2
+    return 73
+  }
+  if ! provision_git -c tar.umask=022 archive --format=tar "$tip" cloud scripts/utils/ib_operator_hold.py \
+      | "$TAR" -x -C "$workdir"; then
+    "$RM" -rf "$workdir"
+    echo "could not extract cloud/ at the GitHub main tip ${tip}" >&2
+    return 66
+  fi
+  bootstrap="${workdir}/cloud/scripts/bootstrap-control-plane.sh"
+  if [[ ! -f "$bootstrap" || -L "$bootstrap" ]]; then
+    "$RM" -rf "$workdir"
+    echo "GitHub main tip ${tip} ships no control-plane bootstrap" >&2
+    return 66
+  fi
+  local candidate_script
+  for candidate_script in deploy-root-helper.sh bootstrap-control-plane.sh operator-radon.sh ib-gateway-control.sh radon-app-runtime.sh; do
+    if [[ ! -f "${workdir}/cloud/scripts/${candidate_script}" || -L "${workdir}/cloud/scripts/${candidate_script}" ]]; then
+      "$RM" -rf "$workdir"
+      echo "control-plane isolation-check script is missing" >&2
+      return 76
+    fi
+    if ! python_inline_is_isolated "${workdir}/cloud/scripts/${candidate_script}"; then
+      "$RM" -rf "$workdir"
+      return 76
+    fi
+  done
+  host_role="$(read_host_role)"
+  printf 'sync-control-plane: reconciling the installed control plane with %s\n' "$tip"
+  if [[ -n "$expected" && "$(remote_main_sha)" != "$expected" ]]; then
+    "$RM" -rf "$workdir"
+    echo "GitHub main moved while staging the expected control-plane SHA" >&2
+    return 76
+  fi
+  if RADON_BOOTSTRAP_CLOUD_ROOT="${workdir}/cloud" RADON_BOOTSTRAP_HOST_ROLE="$host_role" "$BOOTSTRAP_RUNNER" "$bootstrap"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  "$RM" -rf "$workdir"
+  if (( rc == 0 )); then
+    record_control_plane_floor "$tip" || rc=$?
+    if (( rc == 0 )) && [[ -n "$expected" && "$(remote_main_sha)" != "$expected" ]]; then
+      echo "GitHub main moved before the expected control-plane receipt" >&2
+      rc=76
+    fi
+    if (( rc == 0 )); then
+      printf 'sync-control-plane: installed_sha=%s host_role=%s\n' "$tip" "$host_role"
+    fi
+  fi
+  return "$rc"
+}
+
+sync_scheduled_units() {
+  local remote_sha allowlist manifest unit expected actual live
+  local tmp dest installed=0
+
+  [[ -n "$SYSTEMD_DIR" ]] || {
+    echo "scheduled unit sync paths are not configured" >&2
+    return 78
+  }
+  remote_sha="$(resolve_trusted_main_tip)" || return $?
+
+  allowlist="$(provision_git cat-file blob \
+    "${remote_sha}:cloud/config/auto-sync-units.txt")" || {
+    echo "auto-sync unit allowlist is missing at main tip" >&2
+    return 66
+  }
+  manifest="$(provision_git cat-file blob \
+    "${remote_sha}:cloud/config/installed-units.sha256")" || {
+    echo "installed-units manifest is missing at main tip" >&2
+    return 66
+  }
+
+  mkdir -p "$SYSTEMD_DIR"
+  while IFS= read -r unit || [[ -n "$unit" ]]; do
+    unit="${unit%%#*}"
+    unit="${unit#"${unit%%[![:space:]]*}"}"
+    unit="${unit%"${unit##*[![:space:]]}"}"
+    [[ -n "$unit" ]] || continue
+
+    [[ "$unit" =~ ^radon-[a-z0-9][a-z0-9.-]*\.(service|timer)$ ]] || {
+      echo "refusing unsafe scheduled unit name: ${unit}" >&2
+      return 64
+    }
+    if control_plane_unit_name "$unit"; then
+      echo "refusing to sync a control-plane unit: ${unit}" >&2
+      return 64
+    fi
+
+    expected="$(printf '%s\n' "$manifest" | awk -v n="$unit" '
+      $2 == n { print $1; found = 1 }
+      END { exit(found ? 0 : 1) }
+    ')" || {
+      echo "allowlisted unit is missing from the install manifest: ${unit}" >&2
+      return 66
+    }
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "invalid manifest digest for ${unit}" >&2
+      return 66
+    }
+
+    dest="${SYSTEMD_DIR}/${unit}"
+    if [[ -e "$dest" || -L "$dest" ]] && [[ ! -f "$dest" || -L "$dest" ]]; then
+      echo "live unit path is not a regular file: ${dest}" >&2
+      return 74
+    fi
+
+    tmp="$(mktemp "${PROVISION_ROOT}/scheduled-unit.XXXXXX")"
+    if ! provision_git cat-file blob \
+         "${remote_sha}:cloud/services/${unit}" > "$tmp"; then
+      "$RM" -f "$tmp"
+      echo "allowlisted unit blob is missing at main tip: ${unit}" >&2
+      return 66
+    fi
+    chmod 0600 "$tmp"
+    actual="$("$SHA256SUM" "$tmp" | awk '{print $1}')"
+    if [[ "$actual" != "$expected" ]]; then
+      "$RM" -f "$tmp"
+      echo "allowlisted unit does not match the install manifest: ${unit}" >&2
+      return 65
+    fi
+
+    if [[ -f "$dest" ]]; then
+      live="$("$SHA256SUM" "$dest" | awk '{print $1}')"
+      if [[ "$live" == "$actual" ]]; then
+        "$RM" -f "$tmp"
+        continue
+      fi
+    fi
+
+    if (( HELPER_TEST_MODE == 1 )); then
+      "$INSTALL" -m 0644 "$tmp" "$dest" || { "$RM" -f "$tmp"; return 73; }
+    else
+      "$INSTALL" -m 0644 -o root -g root "$tmp" "$dest" || { "$RM" -f "$tmp"; return 73; }
+    fi
+    "$RM" -f "$tmp"
+    installed=1
+  done <<< "$allowlist"
+
+  if (( installed == 1 )); then
+    systemctl_bounded daemon-reload || {
+      echo "daemon-reload failed after scheduled unit sync" >&2
+      return 75
+    }
+  fi
+  return 0
+}
+
+# Drop-in content gate. Mirrors the `dropin` validator in
+# bootstrap-control-plane.sh; cloud/tests/test_rel133_control_plane_recovery.py
+# pins the two against each other so they cannot drift. R-394.
+dropin_body_is_valid() {
+  local path="$1" label="${2:-$1}"
+  grep -qE '^Type=(simple|notify|oneshot)$' "$path" || {
+    echo "drop-in must set Type=simple, Type=notify or Type=oneshot: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$path" || {
+    echo "drop-in must ExecStart radon-app-runtime: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStartPre=$' "$path" || {
+    echo "drop-in must reset ExecStartPre: ${label}" >&2
+    return 1
+  }
+  if grep -q 'radon-ib-gateway' "$path"; then
+    echo "drop-in must not mention radon-ib-gateway: ${label}" >&2
+    return 1
+  fi
+  if grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$path"; then
+    echo "drop-in must not execute from /home/radon: ${label}" >&2
+    return 1
+  fi
+  return 0
+}
+
+refresh_install_file() {
+  local source="$1"
+  local dest="$2"
+  local mode="$3"
+  local dest_dir candidate
+  dest_dir="$(dirname -- "$dest")"
+  mkdir -p "$dest_dir" || return 73
+  if ! directory_is_root_owned "$dest_dir"; then
+    echo "live control-plane directory is not a root-owned directory: ${dest_dir}" >&2
+    return 74
+  fi
+  if [[ -e "$dest" || -L "$dest" ]] && [[ ! -f "$dest" || -L "$dest" ]]; then
+    echo "live control-plane path is not a regular file: ${dest}" >&2
+    return 74
+  fi
+  candidate="$(mktemp "${dest_dir}/.radon-refresh.XXXXXX")"
+  if (( HELPER_TEST_MODE == 1 )); then
+    if ! "$INSTALL" -m "$mode" "$source" "$candidate"; then
+      "$RM" -f "$candidate"
+      return 73
+    fi
+  else
+    if ! "$INSTALL" -m "$mode" -o root -g root "$source" "$candidate"; then
+      "$RM" -f "$candidate"
+      return 73
+    fi
+  fi
+  case "$dest" in
+    */sudoers.d/*)
+      if [[ -z "$VISUDO" ]] || ! "$VISUDO" -cf "$candidate" >/dev/null; then
+        echo "sudoers validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */radon-deploy-root|*/radon-ib-gateway-control|*/radon-ib-hold|*/usr/local/bin/radon|*/radon-app-runtime|*/radon-docker-gw)
+      if ! bash -n "$candidate" || ! python_inline_is_isolated "$candidate"; then
+        echo "shell syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The arms below mirror bootstrap-control-plane.sh's KINDS table. This
+    # path runs on every deploy with the app tier STOPPED and used to install
+    # the app runtime, polkit rules, python helpers and control-plane units
+    # unvalidated; test_refresh_control_plane pins one arm per target. R-437.
+    # The Gateway compose body root acts on. It is a control-plane file for
+    # exactly one reason: radon-docker-gw runs it as root, so it must not be
+    # readable out of the radon-writable checkout. Same shape as publish_caddy's
+    # `caddy validate` gate.
+    */ib-gateway-compose.yml)
+      # `docker compose config` would have to resolve env_file and the whole
+      # variable set, which is not available at install time. Gate on the two
+      # things that make this body safe for root to run instead: it declares
+      # the pinned container, and it does not ask for privilege or the host
+      # filesystem. Provenance (the git blob at the deployed commit) is the
+      # real integrity gate.
+      if ! compose_body_is_valid "$candidate" "$dest"; then
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */polkit-1/rules.d/*.rules)
+      if [[ -z "$NODE" || ! -x "$NODE" ]] || ! "$NODE" --check < "$candidate"; then
+        echo "polkit syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The newsfeed Chromium seccomp filter. Mirrors bootstrap's seccomp kind:
+    # it must parse and deny by default, or root's engine loads a no-op filter.
+    */radon/seccomp/*.json)
+      if ! "$SESSION_PYTHON" -I -c 'import json, sys; sys.exit(json.load(open(sys.argv[1], encoding="utf-8")).get("defaultAction") != "SCMP_ACT_ERRNO")' "$candidate"; then
+        echo "seccomp profile validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */tmpfiles.d/radon-deploy.conf)
+      if ! "$SESSION_PYTHON" -I -c 'import pathlib,sys; lines=[x.strip() for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip() and not x.lstrip().startswith("#")]; sys.exit(lines != ["d /var/lib/radon-lock 0750 root radon -", "f /var/lib/radon-lock/deploy.lock 0640 root radon -"])' "$candidate"; then
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The broker's Gateway credential writer: Python with no .py suffix, so
+    # neither the shell arm (`bash -n` refuses Python) nor the lib arm matches.
+    */radon-ib-gateway-credential|*/lib/radon/*.py)
+      # Parse only; importing would execute candidate code as root.
+      if ! "$SESSION_PYTHON" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
+        echo "python syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */systemd/system/radon-*.service|*/systemd/system/radon-*.timer|*/systemd/system/radon-*.path)
+      if ! unit_candidate_verifies "$candidate" "$(basename -- "$dest")"; then
+        echo "systemd unit validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */radon-*.service.d/*.conf)
+      # An operator who followed the (now deleted) .conf.example instructions
+      # and hand-copied a drop-in to this exact path has it overwritten with no
+      # backup and no journal entry, unlike install_manifest_units'
+      # UNIT_BACKUP_PREFIX snapshot. Record what was replaced so the change is
+      # at least attributable in the deploy log. R-420.
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        local previous
+        previous="$(file_sha256 "$dest" 2>/dev/null || echo unknown)"
+        if [[ "$previous" != "$(file_sha256 "$candidate" 2>/dev/null || echo unknown)" ]]; then
+          echo "replacing drop-in ${dest} (previous digest ${previous})" >&2
+        fi
+      fi
+      # The same rules bootstrap-control-plane.sh enforces. That path almost
+      # never runs; THIS one installs the drop-in on every deploy, out of the
+      # radon-writable /home/radon/radon/cloud, and had no arm at all. A drop-in
+      # is the root-run unit definition of all five app services. R-394.
+      if ! dropin_body_is_valid "$candidate" "$dest"; then
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+  esac
+  if ! mv -f -- "$candidate" "$dest"; then
+    "$RM" -f "$candidate"
+    return 73
+  fi
+  "$SYNC" -f "$dest"
+}
+
+# Root runs this compose body. It must name the Gateway container and must
+# not request privilege, a host mount, or a widened runtime. Kept byte-for-
+# byte identical in deploy-root-helper.sh, bootstrap-control-plane.sh and
+# setup-vps.sh; cloud/tests/test_rel234_compose_gate.py pins the copies
+# against each other. Deny-list first (deterministic, no tooling), then a
+# render check where docker compose is available. R-635.
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+  local body render_env
+
+  # Comments must never satisfy or trip a structural gate.
+  body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
+
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  # The Gateway body's only volume is the named ib-config volume, so any
+  # short-form entry whose source is an absolute host path (quoted or not)
+  # is a host mount root must not perform. There is no allowlist.
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} binds an absolute host path" >&2
+    return 1
+  fi
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
+    return 1
+  fi
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
+    return 1
+  fi
+  if grep -q 'docker\.sock' <<< "$body"; then
+    echo "compose validation failed: ${dest} mounts the docker socket" >&2
+    return 1
+  fi
+  # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
+  # userns_mode, uts and cgroup widen the container's runtime the same way.
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
+    echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests host networking" >&2
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
+    echo "compose validation failed: ${dest} adds capabilities or devices" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
+    echo "compose validation failed: ${dest} runs as root in the container" >&2
+    return 1
+  fi
+  # security_opt may only tighten: block form, no-new-privileges:true entries
+  # and nothing else. The inline form is refused outright.
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
+    echo "compose validation failed: ${dest} uses inline security_opt" >&2
+    return 1
+  fi
+  if ! awk '
+    /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
+    inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
+      entry = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      gsub(/[" \t]/, "", entry)
+      if (entry != "no-new-privileges:true") { bad = 1; exit }
+      next
+    }
+    inso == 1 { inso = 0 }
+    END { exit bad }
+  ' <<< "$body"; then
+    echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
+    return 1
+  fi
+  # Render check where the tooling exists (the deploy host has it; a test
+  # host may not). RADON_COMPOSE_ENV_FILE is pointed at an empty file so the
+  # env_file directive resolves without reading production secrets.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose version >/dev/null 2>&1; then
+    render_env="$(mktemp)" || {
+      echo "compose validation failed: ${dest} render env could not be created" >&2
+      return 1
+    }
+    if ! RADON_COMPOSE_ENV_FILE="$render_env" docker compose \
+        -f "$candidate" --project-name radon-compose-validate \
+        config --quiet >/dev/null 2>&1; then
+      rm -f -- "$render_env"
+      echo "compose validation failed: ${dest} does not render with docker compose config" >&2
+      return 1
+    fi
+    rm -f -- "$render_env"
+  fi
+  return 0
+}
+
+# The state dir is radon-owned, so a temp or target name in it can be swapped
+# for a link between root's create and a by-name write/chmod/rename
+# (DS-2026-09-27-01). Create, write, own and mode through one O_NOFOLLOW fd,
+# then rename relative to a pinned directory fd.
+install_state_file() {
+  "$SESSION_PYTHON" -I - "$1" "$2" "$3" "$HELPER_TEST_MODE" <<'PY_STATE_FILE'
+import os, secrets, sys
+source, target, mode, test = sys.argv[1], sys.argv[2], int(sys.argv[3], 8), sys.argv[4] == "1"
+parent, name = os.path.split(target)
+with open(source, "rb") as handle:
+    data = handle.read()
+dfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    tmp = f".{name}.{secrets.token_hex(8)}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        if not test:
+            os.fchown(fd, 0, 0)
+        os.fchmod(fd, mode)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except OSError:
+        os.unlink(tmp, dir_fd=dfd)
+        raise
+    os.fsync(dfd)
+finally:
+    os.close(dfd)
+PY_STATE_FILE
+}
+
+write_control_plane_manifest_and_ready() {
+  local index source_rel dest digest tmp_manifest tmp_ready state_dir
+  state_dir="$(dirname -- "$CONTROL_PLANE_MANIFEST")"
+  mkdir -p "$state_dir" || return 73
+  # Staged in root's private temp dir, never in the radon-owned state dir.
+  tmp_manifest="$(mktemp)"
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel" && \
+       [[ ! -f "$dest" || -L "$dest" ]]; then
+      digest="$(file_sha256 "${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}")" || {
+        "$RM" -f "$tmp_manifest"
+        return 73
+      }
+      printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
+        >> "$tmp_manifest"
+      continue
+    fi
+    if [[ ! -f "$dest" || -L "$dest" ]]; then
+      # Same rollback shape as the skip in refresh_control_plane: a drop-in that
+      # this checkout does not ship, and that was never installed, is not a
+      # manifest entry. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          [[ -f "${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}" ]] || continue
+          ;;
+      esac
+      "$RM" -f "$tmp_manifest"
+      echo "installed control-plane target is unavailable after refresh: ${CONTROL_PLANE_TARGETS[$index]}" >&2
+      return 73
+    fi
+    digest="$(file_sha256 "$dest")" || {
+      "$RM" -f "$tmp_manifest"
+      return 73
+    }
+    printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
+      >> "$tmp_manifest"
+  done
+  tmp_ready="$(mktemp)"
+  printf '%s  %s\n' "$(file_sha256 "$tmp_manifest")" \
+    "$LOGICAL_CONTROL_PLANE_MANIFEST" > "$tmp_ready"
+  local rc=0
+  install_state_file "$tmp_manifest" "$CONTROL_PLANE_MANIFEST" 0644 && \
+    install_state_file "$tmp_ready" "$CONTROL_PLANE_READY" 0644 || rc=$?
+  "$RM" -f "$tmp_manifest" "$tmp_ready"
+  return "$rc"
+}
+
+# The commit whose control-plane bytes this host may install: the local HEAD,
+# required to be reachable from the GitHub main tip. Unlike
+# resolve_trusted_main_tip this does NOT demand HEAD == tip, because a rollback
+# deliberately runs an older release and must install THAT release's control
+# plane, not the newest one. What it refuses is a commit GitHub main has never
+# contained -- a local commit, an amended history, a rewritten branch -- which
+# is what keeps the radon-writable checkout from being an input to a root
+# install.
+resolve_deployed_control_plane_commit() {
+  local remote_sha local_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "control-plane trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "control-plane remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  remote_sha="$(remote_main_sha)" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  local_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || {
+    echo "could not read local HEAD" >&2
+    return 66
+  }
+  [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid local HEAD" >&2
+    return 66
+  }
+  # Ancestry is decided in the root store, which holds main's history. A HEAD
+  # it does not carry was never on main.
+  provision_store_has_tip "$remote_sha" || return $?
+  provision_git merge-base --is-ancestor "$local_sha" "$remote_sha" 2>/dev/null || {
+    echo "HEAD is not reachable from the GitHub main tip; refusing control-plane refresh" >&2
+    return 76
+  }
+  printf '%s\n' "$local_sha"
+}
+
+# Materializes every control-plane source as a root-owned copy of the git blob
+# at $commit. The checkout working tree is never read: the radon account can
+# write it, and these bytes become /etc/sudoers.d, /usr/local/sbin and unit
+# files. R-084, which install_manifest_units has always honoured and this path
+# did not.
+stage_control_plane_sources() {
+  local commit="$1" staging="$2"
+  local index source_rel staged git_path
+
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    staged="${staging}/${source_rel}"
+    mkdir -p "$(dirname -- "$staged")" || return 73
+    # A source absent at this commit stays absent, so the existing
+    # missing-source arms (drop-in rollback, app-role skip) still decide.
+    git_path="cloud/${source_rel}"
+    [[ "$source_rel" != repo/* ]] || git_path="${source_rel#repo/}"
+    if ! provision_git cat-file blob \
+      "${commit}:${git_path}" > "$staged" 2>/dev/null; then
+      /bin/rm -f -- "$staged"
+      continue
+    fi
+    chmod 0600 "$staged" || return 73
+  done
+}
+
+# Unit-only refresh during deploy. Must not exec bootstrap-control-plane.sh:
+# bootstrap refuses the in-flight app transition journal and the deploy lock.
+# Pending Gateway transition is the only transition that blocks this path.
+refresh_control_plane() {
+  local privileged=0
+  local commit staging rc=0
+
+  [[ "${1:-}" == "privileged" ]] && privileged=1
+
+  [[ -n "$CLOUD_SOURCE" && -d "$CLOUD_SOURCE" ]] || {
+    echo "control-plane source tree is not configured" >&2
+    return 78
+  }
+
+  if [[ -e "$GATEWAY_TRANSITION_FILE" || -L "$GATEWAY_TRANSITION_FILE" ]]; then
+    echo "refusing control-plane refresh while a gateway transition is pending" >&2
+    return 75
+  fi
+
+  commit="$(resolve_deployed_control_plane_commit)" || return $?
+  staging="$(mktemp -d "${PROVISION_ROOT}/control-plane-src.XXXXXX")" || return 73
+  chmod 0700 "$staging"
+  CONTROL_PLANE_SOURCE_ROOT="$staging"
+  stage_control_plane_sources "$commit" "$staging" || rc=$?
+  if (( rc == 0 )); then
+    refresh_control_plane_staged "$privileged" "$commit" || rc=$?
+  fi
+  if (( rc == 0 && privileged == 1 )); then
+    record_control_plane_floor "$commit" || rc=$?
+  fi
+  /bin/rm -rf -- "$staging"
+  CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
+  return "$rc"
+}
+
+refresh_control_plane_staged() {
+  local privileged="$1" commit="$2"
+  local index source_rel source dest installed_hash source_hash mode
+  local -a unit_indexes=()
+  local -a privileged_indexes=()
+
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        "$RM" -f "$dest" || {
+          echo "failed to strip app-role gateway artifact: ${dest}" >&2
+          return 73
+        }
+      fi
+      continue
+    fi
+    if [[ ! -f "$source" || -L "$source" ]]; then
+      # A drop-in source is absent from every checkout before 702ae26a, and the
+      # INSTALLED helper is always the newest one, so a rollback enumerates
+      # sources the restored tree does not have. Aborting here left all five app
+      # units stopped with no path back; skip and warn instead. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          echo "control-plane source absent, leaving installed copy in place: ${source_rel}" >&2
+          continue
+          ;;
+      esac
+      echo "control-plane source is missing or is not a regular file: ${source_rel}" >&2
+      return 66
+    fi
+    source_hash="$(file_sha256 "$source")" || {
+      echo "control-plane source is unreadable: ${source_rel}" >&2
+      return 66
+    }
+    installed_hash=""
+    if [[ -f "$dest" && ! -L "$dest" ]]; then
+      installed_hash="$(file_sha256 "$dest")" || installed_hash=""
+    fi
+    [[ "$source_hash" == "$installed_hash" ]] && continue
+    case "$source_rel" in
+      services/*) unit_indexes+=("$index") ;;
+      *) privileged_indexes+=("$index") ;;
+    esac
+  done
+
+  if (( ${#privileged_indexes[@]} > 0 )) && (( privileged == 0 )); then
+    echo "refresh-control-plane: privileged control-plane diffs require refresh-control-plane-privileged" >&2
+    return 78
+  fi
+
+  if (( ${#privileged_indexes[@]} > 0 )) && \
+     ! control_plane_commit_meets_floor "$commit"; then
+    echo "refresh-control-plane: ${commit} is older than the installed privileged control plane (${CONTROL_PLANE_FLOOR_FILE}); refusing to install its privileged files" >&2
+    return 76
+  fi
+
+  if (( ${#unit_indexes[@]} == 0 && ${#privileged_indexes[@]} == 0 )); then
+    printf 'refresh-control-plane: control-plane is current/unchanged\n'
+    return 0
+  fi
+
+  for index in ${unit_indexes[@]+"${unit_indexes[@]}"}; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    refresh_install_file "$source" "$dest" 0644 || return $?
+    if [[ "$(file_sha256 "$dest")" != "$(file_sha256 "$source")" ]]; then
+      echo "control-plane install verification failed: ${source_rel}" >&2
+      return 73
+    fi
+  done
+
+  if (( privileged == 1 )); then
+    for index in ${privileged_indexes[@]+"${privileged_indexes[@]}"}; do
+      source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+      source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
+      dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+      mode="${CONTROL_PLANE_MODES[$index]}"
+      refresh_install_file "$source" "$dest" "$mode" || return $?
+      if [[ "$(file_sha256 "$dest")" != "$(file_sha256 "$source")" ]]; then
+        echo "control-plane install verification failed: ${source_rel}" >&2
+        return 73
+      fi
+    done
+  fi
+
+  write_control_plane_manifest_and_ready || return $?
+  systemctl_bounded daemon-reload || {
+    echo "daemon-reload failed after control-plane refresh" >&2
+    return 75
+  }
+  return 0
+}
+
+cancel_radon_jobs() {
+  local jobs id unit
+  local job_ids=()
+  jobs="$(systemctl_bounded list-jobs --all --no-legend --no-pager --plain)" || return 1
+  while read -r id unit _rest; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    inventory_unit_is_valid "$unit" || continue
+    job_ids+=("$id")
+  done <<< "$jobs"
+  (( ${#job_ids[@]} == 0 )) || systemctl_bounded cancel "${job_ids[@]}"
+}
+
+root_group_has_running_processes() {
+  local pgid="$1"
+  ps -axo pgid=,stat= | awk -v target="$pgid" '
+    $1 == target && $2 !~ /^Z/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
+resolve_root_action_group() {
+  local candidate
+  local attempt=1
+  while (( attempt <= 100 )); do
+    candidate="$(ps -o pgid= -p "$ROOT_ACTION_PID" 2>/dev/null | tr -d ' ')"
+    if [[ "$candidate" == "$ROOT_ACTION_PID" ]]; then
+      ROOT_ACTION_PGID="$candidate"
+      return 0
+    fi
+    kill -0 "$ROOT_ACTION_PID" 2>/dev/null || return 1
+    attempt=$((attempt + 1))
+    "$SLEEP" 0.01
+  done
+  return 1
+}
+
+terminate_root_action_group() {
+  local deadline
+  [[ -n "${ROOT_ACTION_PID:-}" ]] || return 0
+  [[ -n "${ROOT_ACTION_PGID:-}" ]] || resolve_root_action_group || true
+  if [[ -n "${ROOT_ACTION_PGID:-}" ]]; then
+    kill -TERM -- "-${ROOT_ACTION_PGID}" 2>/dev/null || true
+    deadline=$((SECONDS + ROOT_KILL_AFTER))
+    while root_group_has_running_processes "$ROOT_ACTION_PGID" \
+      && (( SECONDS < deadline )); do
+      "$SLEEP" 0.1
+    done
+    if root_group_has_running_processes "$ROOT_ACTION_PGID"; then
+      kill -KILL -- "-${ROOT_ACTION_PGID}" 2>/dev/null || true
+    fi
+  else
+    kill -KILL "$ROOT_ACTION_PID" 2>/dev/null || true
+  fi
+  wait "$ROOT_ACTION_PID" 2>/dev/null || true
+  ROOT_ACTION_PID=""
+  ROOT_ACTION_PGID=""
+}
+
+# Only the release-lifecycle actions queue systemd jobs for radon-* units, so
+# only their failures leave torn jobs worth cancelling (install-units joins
+# them: `enable --now` on a new timer queues a start job). publish-caddy and
+# sync-scheduled-units are reachable by the unprivileged account, so cancelling
+# on a rejected Caddyfile or allowlist (exit 65) would let radon tear down an
+# unrelated deploy's in-flight restarts.
+action_queues_radon_jobs() {
+  case "${1:-}" in
+    stop-clean|restart-managed|recover|install-units|revert-units) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cancel_radon_jobs_for_action() {
+  action_queues_radon_jobs "${ROOT_ACTION_NAME:-}" || return 0
+  cancel_radon_jobs || true
+}
+
+handle_root_supervisor_signal() {
+  local signal_name="$1"
+  local exit_code=143
+  [[ "$signal_name" == INT ]] && exit_code=130
+  [[ "$signal_name" == HUP ]] && exit_code=129
+  trap '' TERM INT HUP
+  terminate_root_action_group
+  cancel_radon_jobs_for_action
+  exit "$exit_code"
+}
+
+root_action_timeout() {
+  case "$1" in
+    stop-clean|restart-managed|recover)
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    publish-caddy)
+      # Must outlast reload_caddy + restart_caddy. Shared 180s mutation
+      # budget was consumed by a wedged reload, so restart never ran.
+      printf '%s\n' "$ROOT_PUBLISH_CADDY_ACTION_TIMEOUT"
+      ;;
+    sync-scheduled-units)
+      # Bounded like a mutation (stage/install/reload) but deliberately
+      # outside the release-lifecycle job-cancel class above. A rejected
+      # allowlist or hash mismatch must not cancel an in-flight deploy.
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    install-units|revert-units)
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    refresh-control-plane|refresh-control-plane-privileged)
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    sync-control-plane)
+      # git archive + bootstrap validation (systemd-analyze, visudo, node,
+      # py_compile) for the whole bundle; not in the job-cancel class.
+      printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
+      ;;
+    publish-mcp-env|publish-subscription-env)
+      # One grep and one rename over a constant path; nothing to wait on.
+      printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
+      ;;
+    verify-restored|verify-control-plane)
+      printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
+      ;;
+    commit-transition)
+      printf '%s\n' "$ROOT_COMMIT_ACTION_TIMEOUT"
+      ;;
+    *)
+      return 64
+      ;;
+  esac
+}
+
+supervise_root_action() {
+  local action_timeout
+  action_timeout="$(root_action_timeout "$1")" || return $?
+  [[ "$action_timeout" =~ ^[1-9][0-9]*$ ]] || return 64
+  local deadline=$((SECONDS + action_timeout))
+  local exit_code=0
+
+  ROOT_ACTION_PID=""
+  ROOT_ACTION_PGID=""
+  ROOT_ACTION_NAME="$1"
+  trap 'handle_root_supervisor_signal TERM' TERM
+  trap 'handle_root_supervisor_signal INT' INT
+  trap 'handle_root_supervisor_signal HUP' HUP
+  "$SESSION_PYTHON" -I -c '
+import os
+import sys
+os.setsid()
+os.environ["RADON_DEPLOY_ROOT_INTERNAL"] = "1"
+os.execv(sys.argv[2], sys.argv[2:])
+' -- "$0" "$@" &
+  ROOT_ACTION_PID=$!
+  resolve_root_action_group || true
+  while kill -0 "$ROOT_ACTION_PID" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      terminate_root_action_group
+      cancel_radon_jobs_for_action
+      trap - TERM INT HUP
+      return 124
+    fi
+    "$SLEEP" 0.1
+  done
+  if wait "$ROOT_ACTION_PID"; then exit_code=0; else exit_code=$?; fi
+  ROOT_ACTION_PID=""
+  ROOT_ACTION_PGID=""
+  if (( exit_code != 0 )); then cancel_radon_jobs_for_action; fi
+  trap - TERM INT HUP
+  return "$exit_code"
+}
+
+if [[ "${RADON_DEPLOY_ROOT_INTERNAL:-0}" != "1" ]]; then
+  prepare_state_dir
+  exec 8>"$ROOT_LOCK_FILE"
+  if ! "$FLOCK" -w "$ROOT_LOCK_WAIT" 8; then
+    echo "timed out waiting for the root deploy lifecycle lock" >&2
+    exit 70
+  fi
+  supervise_root_action "$@"
+  exit $?
+fi
+
+case "$1" in
+  stop-clean)
+    snapshot_active_units
+    stop_release_consumers
+    "$RM" -f "${REPLICA_FILES[@]}"
+    ;;
+  restart-managed)
+    reset_core_failures
+    systemctl_bounded --no-block restart "${CORE_SERVICES[@]}"
+    for unit in "${CORE_SERVICES[@]}"; do
+      wait_for_unit_state "$unit" active
+    done
+    resume_active_snapshot
+    retire_research_watcher
+    ;;
+  recover)
+    reset_core_failures
+    systemctl_bounded --no-block start "${CORE_SERVICES[@]}"
+    for unit in "${CORE_SERVICES[@]}"; do
+      wait_for_unit_state "$unit" active
+    done
+    resume_active_snapshot
+    retire_research_watcher
+    ;;
+  verify-restored)
+    verify_restored_state
+    ;;
+  verify-control-plane)
+    verify_control_plane
+    ;;
+  commit-transition)
+    commit_transition
+    ;;
+  publish-caddy)
+    publish_caddy
+    ;;
+  install-units)
+    install_manifest_units
+    ;;
+  revert-units)
+    revert_installed_units
+    ;;
+  sync-scheduled-units)
+    sync_scheduled_units
+    ;;
+  publish-mcp-env)
+    publish_mcp_env
+    ;;
+  publish-subscription-env)
+    "$SESSION_PYTHON" -I /usr/local/lib/radon/subscription_service_env.py /etc/radon/env /etc/radon/subscription-tokens/env
+    ;;
+  sync-control-plane)
+    sync_control_plane "${2:-}"
+    ;;
+  refresh-control-plane)
+    refresh_control_plane
+    ;;
+  refresh-control-plane-privileged)
+    refresh_control_plane privileged
+    ;;
+  *)
+    echo "unknown deploy-root action" >&2
+    exit 64
+    ;;
+esac

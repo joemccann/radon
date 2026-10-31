@@ -113,6 +113,9 @@ try:
 except ImportError:
     pass
 
+from model_gateway.client import scrub_model_secrets
+scrub_model_secrets()
+
 logger = logging.getLogger("radon.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -921,7 +924,10 @@ async def lifespan(app: FastAPI):
 
     # Stored credentials next, same contract: exported into os.environ so
     # every subprocess inherits them; store wins over the deployed .env.
-    exported = await asyncio.to_thread(bootstrap_credentials)
+    try:
+        exported = await asyncio.to_thread(bootstrap_credentials)
+    finally:
+        scrub_model_secrets()
     if exported:
         logger.info("Credentials loaded from secret store: %d", len(exported))
 
@@ -1003,6 +1009,8 @@ app.include_router(streaks_router)
 app.include_router(research_router)
 app.include_router(tradingview_router)
 app.include_router(ai_cycle_router)
+from api.routes.model_gateway import router as model_gateway_router
+app.include_router(model_gateway_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale

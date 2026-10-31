@@ -1,6 +1,7 @@
 [Unit]
+After=radon-model-gateway.service network.target radon-ib-gateway.service
+Wants=radon-model-gateway.service
 Description=Radon FastAPI server
-After=network.target radon-ib-gateway.service
 # Ordering only: deploy/app starts must not pull an inactive Gateway while the
 # shared deploy lock is held. Both units are enabled at boot, and API remains
 # available for recovery even when Gateway cannot start.

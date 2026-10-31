@@ -1,47 +1,5 @@
 #!/usr/bin/env python3
-"""LLM model catalog - one frontier chat model per provider, daily.
-
-Keeps the chat model picker honest: it lists exactly the providers whose
-subscription grant is present in this deployment, at whatever model each
-provider is currently shipping as its frontier. A provider with no grant
-is skipped silently - absence is a supported state, not a
-misconfiguration. Prepaid console keys are never read (subscriptions only,
-operator policy 2026-10-26).
-
-Sources, each gated by its own subscription grant (clients/model_ladder.py):
-  anthropic  GET https://api.anthropic.com/v1/models?limit=100
-             Claude Max grant: Bearer + oauth beta
-  xai        GET https://api.x.ai/v1/language-models (Bearer), falling
-             back to /v1/models - only the former carries modalities.
-             SuperGrok grant (~/.grok/auth.json)
-  openai     never polled: the ChatGPT grant cannot list models
-             (api.openai.com answers 403 "Missing scopes: api.model.read")
-
-Operator overrides (each wins over discovery, so a bad heuristic is
-recoverable without a deploy): ANTHROPIC_MODEL, OPENAI_MODEL,
-XAI_MODEL / GROK_MODEL. These are the same variables web/lib/llm/
-provider.ts already reads, so pinning one pins both halves.
-
-Selection is a pure filter -> sort -> head per provider (see each
-``select_*_frontier``); the HTTP call is a thin shell around it. Nothing
-is ever written that a live response did not contain, except an explicit
-operator override. A provider that errors, times out or rate-limits
-keeps its EXISTING row - a failed poll never blanks a good one - but the
-run's heartbeat is ``error`` naming the carried-forward providers, so a
-key that 401s nightly pages instead of aging silently behind an ``ok``.
-The previous row comes from Turso first, the JSON cache second.
-
-Each provider poll has its own wall-clock budget (PROVIDER_BUDGET_S) and
-Anthropic's cursor walk is capped (ANTHROPIC_MAX_PAGES), so one slow or
-looping provider cannot consume the unit's TimeoutStartSec.
-
-Output is dual-written to Turso llm_model_catalog + scan_snapshots and
-data/llm_models.json (the fallback GET /api/models reads).
-
-Usage:
-    python3 scripts/refresh_model_catalog.py             # summary (stderr)
-    python3 scripts/refresh_model_catalog.py --json      # JSON to stdout
-"""
+"""Model-catalog job: native discovery lives in the gateway; app persistence stays here."""
 from __future__ import annotations
 
 import argparse
@@ -62,13 +20,7 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-try:
-    from dotenv import load_dotenv  # type: ignore[import-untyped]
-    load_dotenv(_PROJECT_DIR / ".env")
-    load_dotenv(_PROJECT_DIR / "web" / ".env")
-except Exception:
-    pass
-
+from model_gateway.client import request as gateway_request, scrub_model_secrets
 from db import writer
 from utils.ipv4_first import prefer_ipv4
 
@@ -86,9 +38,6 @@ PROVIDER_OVERRIDE_ENV: dict[str, tuple[str, ...]] = {
     "xai": ("XAI_MODEL", "GROK_MODEL"),
 }
 
-ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
-XAI_LANGUAGE_MODELS_URL = "https://api.x.ai/v1/language-models"
-XAI_MODELS_URL = "https://api.x.ai/v1/models"
 
 USER_AGENT = "radon/2.0"
 FETCH_TIMEOUT_S = 30
@@ -112,119 +61,29 @@ def _iso_utc_now() -> str:
 
 # -- environment ---------------------------------------------------
 
-def _first_env(names: tuple[str, ...]) -> Optional[str]:
-    """First non-blank value among ``names``.
-
-    Two-argument ``.get`` deliberately: cloud/tests/test_env_contract_parity.py
-    treats a one-argument read as a required key, and every one of these is
-    optional by design.
-    """
-    for name in names:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return None
 
 
 _LADDER_PROVIDER = {"anthropic": "anthropic", "openai": "codex", "xai": "grok"}
 
 
-def _ladder():
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from clients import model_ladder
-
-    return model_ladder
 
 
-def provider_auth(provider: str):
-    """Resolved subscription credential for ``provider`` (subscriptions only).
-
-    The ChatGPT grant cannot list models (api.openai.com answers 403 "Missing
-    scopes: api.model.read"), so OpenAI never lights up here.
-    """
-    if provider == "openai":
-        return None
-    return _ladder().subscription_auth(_LADDER_PROVIDER[provider])
 
 
-def provider_key(provider: str) -> Optional[str]:
-    """Credential token for ``provider``, or None when this deployment has none."""
-    auth = provider_auth(provider)
-    return auth.token if auth is not None else None
 
 
-def provider_override(provider: str) -> Optional[str]:
-    """Operator-pinned model id for ``provider``, or None."""
-    return _first_env(PROVIDER_OVERRIDE_ENV[provider])
 
 
-def preferred_provider() -> str:
-    """Default-model precedence, mirroring provider.ts resolveProvider():
-    xAI whenever its key is set, Anthropic otherwise."""
-    return "xai" if provider_key("xai") else "anthropic"
 
 
 # -- HTTP transport ------------------------------------------------
 
-def _http_get_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
-    from urllib.request import Request, urlopen
-
-    request = Request(url, headers={"User-Agent": USER_AGENT, **headers})
-    with urlopen(request, timeout=FETCH_TIMEOUT_S) as response:
-        return json.loads(response.read().decode("utf-8", "replace"))
 
 
-@contextmanager
-def _provider_budget() -> Iterator[None]:
-    """Raise TimeoutError inside the block once PROVIDER_BUDGET_S elapses.
-
-    SIGALRM, because it is the only bound that reaches into a blocking
-    urlopen read (PEP 475 aborts the syscall when the handler raises). Main
-    thread only - which this oneshot always is - and a no-op elsewhere.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def _expire(signum: int, frame: Any) -> None:
-        raise TimeoutError(f"poll exceeded its {PROVIDER_BUDGET_S:g}s budget")
-
-    restore = signal.signal(signal.SIGALRM, _expire)
-    signal.setitimer(signal.ITIMER_REAL, PROVIDER_BUDGET_S)
-    try:
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, restore)
 
 
-def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
-    """Every page of GET /v1/models - the list is cursor-paginated."""
-    ladder = _ladder()
-    headers = ladder.anthropic_request_headers(
-        ladder.AuthMaterial(api_key, "subscription", "catalog")
-    )
-    models: list[dict[str, Any]] = []
-    url = f"{ANTHROPIC_MODELS_URL}?limit=100"
-    for _ in range(ANTHROPIC_MAX_PAGES):
-        payload = _http_get_json(url, headers)
-        models.extend(payload.get("data") or [])
-        if not payload.get("has_more") or not payload.get("last_id"):
-            return models
-        url = f"{ANTHROPIC_MODELS_URL}?limit=100&after_id={payload['last_id']}"
-    raise RuntimeError(f"still has_more after {ANTHROPIC_MAX_PAGES} pages; cursor not advancing")
 
 
-def fetch_xai_models(api_key: str) -> list[dict[str, Any]]:
-    """/v1/language-models first - it is the only endpoint carrying
-    modalities; /v1/models mixes image, video and voice SKUs into one
-    list with no field to tell them apart."""
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        return list(_http_get_json(XAI_LANGUAGE_MODELS_URL, headers).get("models") or [])
-    except Exception as exc:  # noqa: BLE001 - the id predicates still hold
-        _log(f"xai: language-models unavailable ({exc}); falling back to /v1/models")
-        return list(_http_get_json(XAI_MODELS_URL, headers).get("data") or [])
 
 
 # -- frontier selection (pure) -------------------------------------
@@ -504,45 +363,13 @@ def _row(provider: str, model_id: str, scan_time: str) -> dict[str, Any]:
     }
 
 
-def resolve_provider_row(
-    provider: str, key: str, scan_time: str, previous: dict[str, dict[str, Any]]
-) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """One provider's catalog row: operator override, else discovery, else
-    the previous row untouched. Returns ``(row, failure)``: ``row`` is None
-    only on a cold-start failure; ``failure`` names why the row was carried
-    forward instead of polled live, None when the poll succeeded."""
-    override = provider_override(provider)
-    if override:
-        _log(f"{provider}: operator override {override}")
-        return _row(provider, override, scan_time), None
-    try:
-        with _provider_budget():
-            models = FETCHERS[provider](key)
-    except Exception as exc:  # noqa: BLE001 - a bad poll must never blank a row
-        _log(f"{provider}: model list failed ({exc}); keeping the existing row")
-        return previous.get(provider), f"model list failed ({exc})"
-    selected = SELECTORS[provider](models)
-    if selected is None:
-        _log(f"{provider}: {len(models)} models, none frontier; keeping the existing row")
-        return previous.get(provider), f"{len(models)} models, none frontier"
-    return _row(provider, str(selected["id"]), scan_time), None
 
 
 def run(scan_time: Optional[str] = None) -> dict[str, Any]:
-    scan_time = scan_time or _iso_utc_now()
-    previous = load_previous()
-    rows: list[dict[str, Any]] = []
-    failed: dict[str, str] = {}
-    for provider in PROVIDERS:
-        key = provider_key(provider)
-        if not key:
-            continue
-        row, failure = resolve_provider_row(provider, key, scan_time, previous)
-        if row is not None:
-            rows.append(row)
-        if failure is not None:
-            failed[provider] = failure
-    payload = build_output(rows=rows, scan_time=scan_time, preferred=preferred_provider())
+    scrub_model_secrets()
+    stamp = scan_time or _iso_utc_now()
+    reply = gateway_request("refresh-catalog", {"scan_time": stamp, "previous": load_previous()}, timeout_seconds=240)
+    payload, rows, failed = reply["catalog"], reply["rows"], reply["failed"]
     persist_result(payload, rows, failed)
     return payload
 

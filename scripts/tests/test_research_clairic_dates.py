@@ -331,3 +331,12 @@ def test_cloudflare_keys_stay_out_of_required_env_mcp_and_newsfeed():
     for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLAIRIC_DATES_ENABLED", "CLAIRIC_DATE_SANITY_ENABLED"):
         assert name in example
         assert name in cloud_example
+
+
+@pytest.fixture(autouse=True)
+def _native_clairic_domain_boundary(monkeypatch):
+    """Existing date-grounding suites inject the native provider operation."""
+    from model_gateway import _clairic_backend as backend
+    monkeypatch.setattr(clairic, "fetch_report_date", backend.fetch_report_date)
+    # Preserve bounded native HTTP fixture capture without any consumer transport.
+    monkeypatch.setattr(clairic, "urllib", backend.urllib, raising=False)

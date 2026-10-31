@@ -229,7 +229,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull [<sha>]|prune|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
@@ -303,6 +303,7 @@ def test_pull_with_matching_digests_skips_layer_pulls_and_prunes_stale_pairs(tmp
     assert removed == sorted([
         f"rmi ghcr.io/joemccann/radon-node:{stale}",
         f"rmi ghcr.io/joemccann/radon-python:{stale}",
+        f"rmi ghcr.io/joemccann/radon-model-gateway:{stale}",
     ])
     assert "gnzsnz" not in "\n".join(lines) and "ib-gateway" not in "\n".join(lines)
 
@@ -328,6 +329,7 @@ exit 0
 
 _NODE = "ghcr.io/joemccann/radon-node"
 _PY = "ghcr.io/joemccann/radon-python"
+_MODEL = "ghcr.io/joemccann/radon-model-gateway"
 _CUR, _PREV, _STALE1, _STALE2 = "a" * 40, "b" * 40, "c" * 40, "e" * 40
 
 
@@ -361,7 +363,7 @@ def _prune(tmp_path: Path, *, green: str | None, tags: str, running: str | None 
 
 
 def _rmi(*shas: str) -> list[str]:
-    return sorted(f"rmi {repo}:{sha}" for sha in shas for repo in (_NODE, _PY))
+    return sorted(f"rmi {repo}:{sha}" for sha in shas for repo in (_NODE, _PY, _MODEL))
 
 
 def test_prune_keeps_running_and_previous_green_and_removes_every_stale_tag(tmp_path: Path) -> None:
@@ -384,7 +386,7 @@ def test_prune_never_removes_an_image_a_running_container_uses(tmp_path: Path) -
         running=f"{_NODE}:{_STALE1} {_PY}:{_CUR}",
     )
     assert result.returncode == 0, result.stderr
-    assert removed == [f"rmi {_PY}:{_STALE1}"]
+    assert removed == sorted([f"rmi {_PY}:{_STALE1}", f"rmi {_MODEL}:{_STALE1}"])
 
 
 def test_prune_removes_nothing_while_the_deploy_lock_is_held(tmp_path: Path) -> None:
@@ -631,7 +633,7 @@ fi
 if [[ "$1" == "pull" ]]; then
   touch "${{RADON_STUB_PULL_DIR}}/${{2##*/}}"
   for _ in $(seq 1 80); do
-    [[ "$(find "${{RADON_STUB_PULL_DIR}}" -type f | wc -l | tr -d ' ')" == "2" ]] && exit 0
+    [[ "$(find "${{RADON_STUB_PULL_DIR}}" -type f | wc -l | tr -d ' ')" == "3" ]] && exit 0
     sleep 0.025
   done
   exit 42
@@ -640,7 +642,7 @@ exit 0
 """
 
 
-def test_missing_release_pair_pulls_both_images_concurrently(tmp_path: Path) -> None:
+def test_missing_release_set_pulls_all_images_concurrently(tmp_path: Path) -> None:
     target = "a" * 40
     pull_dir = tmp_path / "pull-sync"
     pull_dir.mkdir()
@@ -879,10 +881,12 @@ def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) 
     # Directory provisioning also uses Python; fail only the notify proxy.
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    model_socket_dir = shlex.quote(str(tmp_path / 'state' / 'model-gateway'))
+    model_control_dir = shlex.quote(str(tmp_path / 'state' / 'model-control'))
     data_dir = shlex.quote(str(tmp_path / 'data'))
     media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} || "${{3:-}}" == {model_socket_dir} || "${{3:-}}" == {model_control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     # The injected proxy never binds. Exercise all admission polls without
     # paying their sleep delay on the shared runner; keep the timeout intact.
     _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
@@ -1381,11 +1385,13 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    model_socket_dir = shlex.quote(str(tmp_path / 'state' / 'model-gateway'))
+    model_control_dir = shlex.quote(str(tmp_path / 'state' / 'model-control'))
     control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
     data_dir = shlex.quote(str(tmp_path / 'data'))
     media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {model_socket_dir} || "${{3:-}}" == {model_control_dir} || "${{3:-}}" == {control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -1865,7 +1871,6 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     assert rendered.read_text(encoding="utf-8") == (
         "NODE_ENV=production\n"
         "# comment stays\n"
-        "CEREBRAS_API_KEY=csk-abc$1\n"
         + UNQUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS=it''s\n"
         "PLAIN=unquoted\n"
@@ -1903,7 +1908,8 @@ def test_run_strips_prepaid_provider_keys_from_every_container_env(
     rendered = Path(match.group(1)).read_text(encoding="utf-8")
     assert "prepaid-" not in rendered
     keys = {line.split("=", 1)[0] for line in rendered.splitlines() if "=" in line}
-    assert {"NODE_ENV", "CLAUDE_CODE_OAUTH_TOKEN", "CEREBRAS_API_KEY"} <= keys
+    assert "NODE_ENV" in keys
+    assert not {"CLAUDE_CODE_OAUTH_TOKEN", "CEREBRAS_API_KEY"} & keys
     assert "prepaid-" in host_env.read_text(encoding="utf-8")  # host file untouched
 
 
@@ -1958,10 +1964,6 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "NODE_ENV",
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "ANTIGRAVITY_MODEL",
-        "NVIDIA_API_KEY",
-        "CEREBRAS_API_KEY",
         "RADON_PYTHON_BIN",
         "RADON_NEWSFEED_HEADLESS",
         "RADON_MEDIA_REMOTE",
@@ -1992,7 +1994,7 @@ def test_run_newsfeed_env_file_preserves_explicit_nvidia_model_controls(
     )
     original = host_env.read_text(encoding="utf-8")
     result = _run(
-        tmp_path, ["run", "radon-newsfeed.service"],
+        tmp_path, ["run", "radon-model-gateway.service"],
         extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
     )
     assert result.returncode == 0, result.stderr + result.stdout
@@ -2004,7 +2006,7 @@ def test_run_newsfeed_env_file_preserves_explicit_nvidia_model_controls(
         for line in rendered.read_text(encoding="utf-8").splitlines()
         if "=" in line and not line.startswith("#")
     )
-    assert values == {"NODE_ENV": "production", **model_values}
+    assert values == model_values
     assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
     assert host_env.read_text(encoding="utf-8") == original
 
@@ -2166,17 +2168,7 @@ def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
     assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")
 
 
-# -- subscription credential binds (2026-09-18) ------------------------------
-#
-# The operator's subscription grants (~/.grok/auth.json, ~/.codex/auth.json,
-# ~/.claude/.credentials.json) are what the model ladders must meter against,
-# never the prepaid API keys. radon-subscription-tokens keeps those files live
-# on the HOST, but no app container could see them, so every container-side
-# ladder rung silently fell back to prepaid keys (the xAI team then ran out of
-# credits and the newsfeed voice rewrite died). Bind each dir read-only when it
-# exists and pin HOME so both Path.home() and os.homedir() land on it. Next.js
-# hosts /api/newsfeed/share and /api/assistant, so it is an LLM consumer too.
-# Relay still gets no binds.
+# -- the gateway is the sole subscription credential owner -------------------
 
 
 def _subscription_home(tmp_path: Path) -> Path:
@@ -2199,27 +2191,22 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    # agy refreshes its grant and writes logs/state on every run (live
-    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
-    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
-        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
-    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:" not in log
-    assert ".claude:" not in log  # absent on this host: not mounted
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
-@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".local/bin"))
+@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".codex"))
 def test_run_refuses_a_symlinked_subscription_bind_source(tmp_path: Path, cred_dir: str) -> None:
     """Subscription dirs sit in radon's home; a link there is refused, not bound."""
     home = _subscription_home(tmp_path)
     _swap_for_link(home / cred_dir, tmp_path / "subscription-elsewhere")
     result = _run(
         tmp_path,
-        ["run", "radon-nextjs.service"],
+        ["run", "radon-model-gateway.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 78, result.stderr
@@ -2235,15 +2222,11 @@ def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    # agy refreshes its grant and writes logs/state on every run (live
-    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
-    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
-        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
-    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:" not in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
@@ -2257,9 +2240,11 @@ def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) 
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
@@ -2283,14 +2268,12 @@ def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    # Newsfeed renders third-party content: it gets no read-write grant the
-    # host shares with other units, so the antigravity dirs stay unmounted.
-    assert ".gemini" not in log
-    for bind in log.split():
-        if bind.startswith(f"{home}/"):
-            assert bind.endswith(":ro"), bind
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
+    assert "HOME=/home/radon" in log
 
 
 def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
@@ -2591,9 +2574,6 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
     assert {
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "NVIDIA_API_KEY",
-        "CEREBRAS_API_KEY",
         "THEMARKETEAR_EMAIL",
         "THEMARKETEAR_PASSWORD",
         "MARKETDESK_FIREBASE_REFRESH_TOKEN",
@@ -2638,12 +2618,9 @@ def test_marketdesk_binds_read_only_ladder_grants_only(tmp_path: Path) -> None:
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    for cred in (".grok", ".codex", ".claude"):
-        assert f"{home}/{cred}:/home/radon/{cred}:ro" in log
-    # Third-party Chromium content: no writable grant the host shares, so the
-    # ladder falls past antigravity here, as on the newsfeed.
-    assert f"{home}/.gemini" not in log
-    # The Python image ships pinned provider CLIs.
-    assert f"{home}/.local/bin:" not in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log

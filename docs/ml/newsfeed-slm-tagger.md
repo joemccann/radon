@@ -93,7 +93,7 @@ scripts/newsfeed/index.js  (radon-newsfeed.service, Hetzner, 120 s loop)
         │                └─ clients.model_ladder.complete_text_json(accept=accept_tags_payload,
         │                                                            log_prefix="newsfeed-tagger")
         │                      _run_ladder over MODEL_LADDER_ORDER:
-        │                        anthropic -> grok -> cursor(unwired) -> codex -> antigravity -> nvidia -> cerebras
+        │                        antigravity -> anthropic -> grok -> cursor(unwired) -> codex -> nvidia -> cerebras
         │                      subscription creds only for the first band (never prepaid keys)
         │       normaliseTags(parsed.tags).slice(0,3); exactly 3 or null
         └─ visionTagger = createVisionTagger(...)      OUT OF SCOPE (Anthropic direct)

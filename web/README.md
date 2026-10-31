@@ -117,13 +117,10 @@ cp .env.example .env
 
 **Required:**
 - `UW_TOKEN` - Unusual Whales API key
-- Anthropic / OpenAI / xAI run on CLI subscription grants only (`claude`, `codex`, `grok` logins); prepaid API keys are never read
+- `RADON_API_URL` points to the authenticated FastAPI service. Its private model gateway owns model credentials and refresh; Next.js receives no provider grants.
 
 **Optional:**
-- `ANTHROPIC_MODEL` - Model override
-- `ANTHROPIC_API_URL` - API endpoint override
-- `CEREBRAS_API_KEY` - Last rung of the shared model ladder for Market Ear **text** tagging (subscription providers and NVIDIA are tried first).
-- The Market Ear **vision** tagger (`claude-haiku-4-5`) uses the Claude Max grant (`~/.claude/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`) for posts with images. Without a grant, vision tagging is skipped (scraping continues).
+- `RADON_SERVICE_TOKEN` - Application authentication for deployments outside the trusted local topology.
 - `IB_REALTIME_WS_URL` - Server-side websocket URL used by `/api/prices` for one-time snapshots (default: `ws://localhost:8765`)
 - `NEXT_PUBLIC_IB_REALTIME_WS_URL` - Browser websocket URL for direct realtime subscriptions (default: `ws://localhost:8765`)
 

@@ -1,94 +1,10 @@
-// Vision tagger — Anthropic Claude with image input. Used when a post has a
-// local image; the chart often *is* the post and the text-only Cerebras tagger
-// can't see it.
-//
-// Cost reference (claude-haiku-4-5): ~$0.003 / post, ~$4.40/mo at 50 posts/day.
-// Cost reference (claude-sonnet-4-6): ~$0.009 / post, ~$13.90/mo at 50 posts/day.
-//
-// Network: undici defaults to IPv6, but api.anthropic.com's AAAA route is
-// EHOSTUNREACH from residential IPv6 here (same as api.cerebras.ai). Force IPv4.
-
+// Image and caption classification through the same standalone model service
+// as text tagging. Credentials and capability-aware provider traversal stay there.
 import fs from "node:fs";
 import path from "node:path";
-import { Agent, setGlobalDispatcher } from "undici";
-
+import { completeJson as gatewayCompleteJson } from "../model_gateway/client.js";
 import { __buildSystemPrompt as buildSystemPrompt, __normaliseTags as normaliseTags } from "./tagger.js";
 import { enrichWithParentTags } from "./tag_hierarchy.js";
-
-let dispatcherConfigured = false;
-function ensureIpv4Dispatcher() {
-  if (dispatcherConfigured) return;
-  setGlobalDispatcher(new Agent({ connect: { family: 4 } }));
-  dispatcherConfigured = true;
-}
-
-const ENDPOINT = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
-// Subscriptions only (2026-09-18): the Claude Max grant Claude Code writes to
-// ~/.claude/.credentials.json (or CLAUDE_CODE_OAUTH_TOKEN). It is sent as a
-// Bearer with the oauth beta and the Claude Code identity block leading
-// `system`; the Messages API answers a bare 429 without that block and a 401
-// when the grant is sent as x-api-key. Prepaid console keys are never read or
-// sent (operator policy 2026-10-26); a set one is ignored with one warning
-// naming it. The deny list is shared with the Python ladder.
-const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
-const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
-const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140";
-
-const IGNORED_PREPAID_ENV = JSON.parse(
-  fs.readFileSync(new URL("../clients/prepaid_denylist.json", import.meta.url), "utf8"),
-);
-const warnedPrepaid = new Set();
-
-function warnIgnoredPrepaid(env) {
-  for (const name of IGNORED_PREPAID_ENV) {
-    if (warnedPrepaid.has(name) || !String(env[name] ?? "").trim()) continue;
-    warnedPrepaid.add(name);
-    console.warn(`[radon] ignoring ${name}: prepaid keys are never used (subscriptions only)`);
-  }
-}
-
-/** { token, kind: "subscription" } or null. Subscription grants only. */
-export function resolveAnthropicAuth(env = process.env) {
-  warnIgnoredPrepaid(env);
-  const fromEnv = (env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim();
-  if (fromEnv) return { token: fromEnv, kind: "subscription" };
-  const dir = (env.CLAUDE_CONFIG_DIR ?? "").trim() || (env.HOME ? path.join(env.HOME, ".claude") : "");
-  if (dir) {
-    try {
-      const doc = JSON.parse(fs.readFileSync(path.join(dir, ".credentials.json"), "utf8"));
-      const oauth = doc && typeof doc === "object" ? doc.claudeAiOauth : null;
-      const token = typeof oauth?.accessToken === "string" ? oauth.accessToken.trim() : "";
-      const expired = typeof oauth?.expiresAt === "number" && oauth.expiresAt <= Date.now();
-      if (token && !expired) return { token, kind: "subscription" };
-    } catch {
-      // missing, unreadable or malformed: no grant
-    }
-  }
-  return null;
-}
-
-function anthropicHeaders(auth) {
-  return {
-    "anthropic-version": ANTHROPIC_VERSION,
-    "content-type": "application/json",
-    authorization: `Bearer ${auth.token}`,
-    "anthropic-beta": ANTHROPIC_OAUTH_BETA,
-    "user-agent": CLAUDE_CODE_USER_AGENT,
-  };
-}
-
-function anthropicSystem(_auth, systemPrompt) {
-  return [
-    { type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX },
-    { type: "text", text: systemPrompt },
-  ];
-}
-const DEFAULT_MODEL = "claude-haiku-4-5";
-// Bound on ONE model call. Without it a half-open connection to the API held
-// `hydrateTagsDual` (and the whole scrape cycle behind it) until kernel
-// keepalive gave up; the timeout is a per-post tagging failure, never a cycle
-// abort. R-466.
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 const VISION_INSTRUCTION = [
@@ -143,52 +59,6 @@ function buildUserPrompt(post) {
   const title = post.title || "(untitled)";
   const content = (post.content || "").slice(0, 1500);
   return `Title: ${title}\nBody: ${content}`;
-}
-
-function isRetryable(status) {
-  return status === 429 || status >= 500;
-}
-
-async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, auth, timeoutMs }) {
-  ensureIpv4Dispatcher();
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: anthropicHeaders(auth),
-    body: JSON.stringify({
-      model,
-      max_tokens: 512,
-      system: anthropicSystem(auth, systemPrompt),
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: imageB64 } },
-            { type: "text", text: `${VISION_INSTRUCTION}\n\n${userPrompt}\n\nReturn STRICT JSON: {"tags":["...","...","..."]}. No prose.` },
-          ],
-        },
-      ],
-    }),
-  });
-
-  if (isRetryable(res.status)) {
-    const err = new Error(`vision-tagger ${model} ${res.status}`);
-    err.retryable = true;
-    throw err;
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`vision-tagger ${model} ${res.status} ${body.slice(0, 200)}`);
-  }
-
-  const json = await res.json();
-  const text = json?.content?.find((c) => c.type === "text")?.text;
-  if (typeof text !== "string") throw new Error("vision-tagger empty content");
-
-  const parsed = parseTagsFromText(text);
-  if (!parsed) throw new Error("vision-tagger non-JSON response");
-  if (!Array.isArray(parsed.tags)) throw new Error("vision-tagger missing tags array");
-  return parsed.tags;
 }
 
 // Walks the text and returns the first balanced {...} block. Tracks string
@@ -250,52 +120,41 @@ function parseTagsFromText(text) {
 }
 
 export function createVisionTagger({
-  auth = resolveAnthropicAuth(),
-  model = DEFAULT_MODEL,
-  mediaDir,
-  getTaxonomySnapshot,
-  readImage = (p) => fs.promises.readFile(p),
+  mediaDir, getTaxonomySnapshot,
+  readImage = p => fs.promises.readFile(p),
+  completeJson = gatewayCompleteJson,
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 } = {}) {
-  if (!auth) {
-    throw new Error("createVisionTagger: no Anthropic subscription (log Claude Code in: ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN)");
-  }
-  if (!mediaDir) {
-    throw new Error("createVisionTagger: mediaDir is required");
-  }
-  if (typeof getTaxonomySnapshot !== "function") {
-    throw new Error("createVisionTagger: getTaxonomySnapshot callback is required");
-  }
-
+  if (!mediaDir) throw new Error("createVisionTagger: mediaDir is required");
+  if (typeof getTaxonomySnapshot !== "function") throw new Error("createVisionTagger: getTaxonomySnapshot callback is required");
   async function tagPost(post) {
     const imgPath = resolveImageAbsolutePath(post, mediaDir);
     if (!imgPath) return null;
     const mediaType = detectMediaType(imgPath);
     if (!mediaType) return null;
-
-    let buf;
+    let timer;
+    const controller = new AbortController();
     try {
-      buf = await readImage(imgPath);
-    } catch (err) {
-      console.warn(`[vision-tagger] missing image ${imgPath}: ${err.message}`);
-      return null;
-    }
-    const imageB64 = Buffer.isBuffer(buf) ? buf.toString("base64") : Buffer.from(buf).toString("base64");
-
-    const taxonomy = await getTaxonomySnapshot();
-    const systemPrompt = buildSystemPrompt(taxonomy);
-    const userPrompt = buildUserPrompt(post);
-
-    try {
-      const raw = await callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, auth, timeoutMs });
-      const tags = normaliseTags(raw).slice(0, 3);
+      const image = await readImage(imgPath);
+      const bytes = Buffer.isBuffer(image) ? image : Buffer.from(image);
+      if (!bytes.length || bytes.length > 8 * 1024 * 1024) return null;
+      const taxonomy = await getTaxonomySnapshot();
+      const data = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error("vision tagger deadline exceeded")); }, timeoutMs);
+        Promise.resolve(completeJson({
+          system: buildSystemPrompt(taxonomy),
+          instruction: `${VISION_INSTRUCTION}\n\n${buildUserPrompt(post)}\n\nReturn STRICT JSON: {"tags":["...","...","..."]}. No prose.`,
+          images: [{ label: "newsfeed-chart", data: bytes.toString("base64"), media_type: mediaType }],
+          accept: "tags", max_tokens: 512, read_timeout: Math.max(1, timeoutMs / 1000),
+        }, { timeoutMs, signal: controller.signal, accept: value => normaliseTags(value?.tags).slice(0, 3).length === 3 })).then(resolve, reject);
+      });
+      const tags = normaliseTags(data?.tags).slice(0, 3);
       return tags.length === 3 ? tags : null;
-    } catch (err) {
-      console.warn(`[vision-tagger] ${model} error: ${err.message}`);
+    } catch {
+      console.warn("[vision-tagger] shared model request failed");
       return null;
-    }
+    } finally { clearTimeout(timer); }
   }
-
   return { tagPost };
 }
 
@@ -313,8 +172,8 @@ function unionTags(textTags, visionTags) {
 
 // Runs BOTH taggers per post (text + vision), in parallel, and stamps three
 // fields on each post:
-//   - tags_text   : exactly 3 from the Cerebras text tagger
-//   - tags_vision : exactly 3 from the Anthropic vision tagger (only when a local image exists)
+//   - tags_text   : exactly 3 from the shared text tagger
+//   - tags_vision : exactly 3 from the shared image tagger (only when a local image exists)
 //   - tags        : union of the two, deduped, preserving order (text first)
 //
 // Cursor semantics:
@@ -322,7 +181,7 @@ function unionTags(textTags, visionTags) {
 //   - force=true : always re-run both classifiers.
 //
 // Throttle is applied between posts (not within a post). Within-post text and
-// vision calls run in parallel since they hit different providers.
+// vision calls use the same service, which owns provider selection.
 export async function hydrateTagsDual(
   posts,
   { textTagger, visionTagger, force = false, throttleMs = 0, onNewTags } = {},

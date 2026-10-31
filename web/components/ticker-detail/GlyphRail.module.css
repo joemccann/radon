@@ -52,5 +52,8 @@
   text-align: left;
   cursor: pointer;
 }
-.more button:hover, .more button[aria-pressed="true"] { background: var(--bg-hover); color: var(--signal-core-text); }
+.more button[aria-pressed="true"] { background: var(--bg-hover); color: var(--signal-core-text); }
+@media (hover: hover) and (pointer: fine) {
+  .more button:hover { background: var(--bg-hover); color: var(--signal-core-text); }
+}
 .mobile button:focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: -2px; }

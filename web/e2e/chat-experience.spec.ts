@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
+import type { LlmMessage } from "../lib/llm/provider";
 
 type AssistantRequest = {
   model?: string;
@@ -15,24 +16,31 @@ test("repetitive provider output is repaired before the chart answer reaches the
   const repeated = "Now. Go. OK. Yes. Fine. End. Wait. Rank. ".repeat(80);
   const answer = "Signal: semiconductor volatility has reset. Structure: compare a long call and a call debit spread. " +
     "Decision: no sized trade until live pricing and institutional edge are verified.";
-  const requests: Array<{ messages: unknown[] }> = [];
+  const requests: Array<{ messages: LlmMessage[] }> = [];
+  const paths: string[] = [];
+  const chart = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1cAAAAASUVORK5CYII=";
   const server = createServer(async (request, response) => {
+    paths.push(`${request.method} ${request.url}`);
+    if (request.method !== "POST" || request.url !== "/model-gateway/chat") {
+      response.writeHead(404).end();
+      return;
+    }
     let body = "";
     for await (const chunk of request) body += chunk;
     requests.push(JSON.parse(body));
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({
+      provider: "xai",
       model: "grok-4.7",
-      choices: [{ message: { content: requests.length === 1 ? repeated : answer }, finish_reason: "stop" }],
+      text: requests.length === 1 ? repeated : answer,
+      stopReason: "stop",
     }));
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
   const overrides = {
     ASSISTANT_MOCK: "0",
-    XAI_OAUTH_TOKEN: "fixture-only",
-    XAI_BASE_URL: "http://127.0.0.1:" + address.port,
-    LLM_FALLBACK_PROVIDER: "xai",
+    RADON_API_URL: "http://127.0.0.1:" + address.port,
   };
   const saved = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
   Object.assign(process.env, overrides);
@@ -63,14 +71,19 @@ test("repetitive provider output is repaired before the chart answer reaches the
       "The setup has improved just as the price of expressing the upside has come down. Use the convexity.";
     await dialog.locator('input[type="file"]').setInputFiles({
       name: "chart.png", mimeType: "image/png",
-      buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1cAAAAASUVORK5CYII=", "base64"),
+      buffer: Buffer.from(chart, "base64"),
     });
     await dialog.getByRole("textbox", { name: "Ask Radon" }).fill(prompt);
     await dialog.getByRole("textbox", { name: "Ask Radon" }).press("Enter");
     await expect(dialog.getByTestId("chat-message-assistant").last()).toContainText(answer);
     await expect(dialog).not.toContainText("Now. Go. OK.");
     expect(requests).toHaveLength(2);
-    expect(JSON.stringify(requests[1].messages)).toContain("data:image/png;base64,");
+    expect(paths).toEqual(["POST /model-gateway/chat", "POST /model-gateway/chat"]);
+    for (const request of requests) {
+      const images = request.messages.flatMap(message => Array.isArray(message.content)
+        ? message.content.filter(block => block.type === "image") : []);
+      expect(images).toEqual([{ type: "image", source: { type: "base64", media_type: "image/png", data: chart } }]);
+    }
     expect(JSON.stringify(requests[1].messages)).not.toContain(repeated);
     expect(mutations).toEqual(["/api/assistant"]);
     await page.screenshot({ path: testInfo.outputPath("chat-experience-repetition-recovered.png") });
