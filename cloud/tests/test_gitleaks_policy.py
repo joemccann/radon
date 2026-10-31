@@ -35,6 +35,9 @@ LITERAL_TWS_BASELINE_COMMITS = {
     # 2026-08-30: PR #184's env-file fixture spelled a fake gateway password;
     # vetted as test data, rewritten to runtime construction afterwards.
     "020865adeff48b7182b7eb81d74a01fc70d00c82",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "6d9429aba132a4783b5a5d0e9987b84d6ff7a35c",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
@@ -54,6 +57,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # prove the redactor scrubs env values; merged before the scan ran. The
     # fixture was rewritten to runtime construction afterwards.
     "38eeecb91eedb3b90966821bff12d5b240d89708",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "d90efb238831202ef3aa954d9f9893391eeb4cc8",
     # 2026-09-02 (PR #125): the secret-store tests spelled fake sample values
     # next to *_TOKEN/*_KEY identifiers; rewritten to runtime construction in
     # the follow-up commit.
@@ -65,6 +71,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # described the secret-store design and trips generic-api-key; the line
     # no longer exists at HEAD.
     "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "8efc012df3c96131ca605f69d8f5a2dcae7dca2e",
     # 2026-10-01 (PR #837): runner Pushover SENTINEL fixtures next to a
     # token identifier; rewritten to runtime construction afterwards.
     "5643de1d495a887c0d71d7cdc29a27b4ab291c1a",

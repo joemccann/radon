@@ -161,3 +161,25 @@ def test_serve_replaces_a_stale_socket_but_never_a_regular_file(tmp_path):
     with pytest.raises(SystemExit):
         sv.serve(str(target), st.Vault(Store()), stop=threading.Event(), ready=threading.Event())
     assert target.read_text() == "not a socket"
+
+
+def test_the_broker_refuses_a_peer_outside_the_service_account(broker, monkeypatch):
+    path, store = broker
+    monkeypatch.setattr(sv, "_peer_uid", lambda _conn: os.getuid() + 1)
+    for request in (
+        {"op": "ping"},
+        {"op": "get", "provider": "anthropic"},
+        {"op": "model-key", "provider": "nvidia"},
+        {"op": "seal", "provider": "anthropic", "value": "written-by-a-foreign-peer"},
+    ):
+        assert _raw(path, json.dumps(request).encode()) == {"ok": False, "error": "unauthorized peer"}
+    assert store.rows["SUBSCRIPTION_TOKEN_ANTHROPIC"] == "sealed-anthropic"
+
+
+def test_the_admitted_peer_still_reads_and_writes(broker):
+    path, store = broker
+    assert _raw(path, b'{"op": "ping"}') == {"ok": True}
+    reply = _raw(path, json.dumps({"op": "get", "provider": "anthropic"}).encode())
+    assert reply == {"ok": True, "value": "sealed-anthropic"}
+    assert _raw(path, json.dumps({"op": "seal", "provider": "codex", "value": "{}"}).encode()) == {"ok": True}
+    assert store.rows["SUBSCRIPTION_TOKEN_CODEX"] == "{}"
