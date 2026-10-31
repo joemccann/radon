@@ -333,6 +333,10 @@ Both rows are registered in `scripts/watchdog/services.py` and
 `web/lib/serviceHealthWindows.ts`, and both map to `radon-marketdesk.service` in
 `scripts/api/service_log_units.json` for the admin log view.
 
+A stored `dropbox-research` row is not one of these writers. Readers mark it
+retired and the watchdog does not page it. The operator stop is
+[retired dropbox research health](incident-runbook.md#retired-dropbox-research-health).
+
 ## Operator steps before enabling in production
 
 1. Sign in to marketdesk.ai with Google in a Chrome started with
