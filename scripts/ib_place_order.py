@@ -11,6 +11,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import json
 import math
 import sys
@@ -268,7 +269,8 @@ def _bind_future_multiplier(params: dict, contract) -> str | None:
     return None
 
 
-def _broker_close_violation(params: dict, client, contract, admitted_as_close: bool) -> dict | None:
+def _broker_close_violation(params: dict, client, contract, admitted_as_close: bool,
+                            hold: contextlib.ExitStack) -> dict | None:
     """The admission refusal for a store-proven close the broker does not confirm.
 
     The close exemptions read the latest portfolio snapshot, which still shows
@@ -280,17 +282,25 @@ def _broker_close_violation(params: dict, client, contract, admitted_as_close: b
     ``admitted_as_close``: admission proved a store close. The store can move
     before transmit, so a re-read that no longer shows the close must not
     skip the broker (DS-2026-10-25-01).
+
+    ``hold``: keeps this symbol's close-admission claim for the caller, so the
+    live book read below and the transmit that follows it are one exclusive
+    cross-process window (DS-2026-10-24-02 residual).
     """
     from bankroll_guard import (
+        CLOSE_ADMISSION_BUSY,
         _load_latest_snapshot,
         broker_book,
         check_if_enforced_on_all_paths,
+        close_admission_claim,
         is_close_out,
         read_broker_book,
     )
 
     if not admitted_as_close and not is_close_out(params, _load_latest_snapshot()):
         return None
+    if not hold.enter_context(close_admission_claim(params.get("symbol"))):
+        return dict(CLOSE_ADMISSION_BUSY)
     from kelly import kelly_config
     from kelly_guard import check_kelly_ticket
     from order_limits import check_placement_limits
@@ -446,6 +456,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     # indeterminate-outcome error (order may be live) instead of a generic
     # failure that invites a duplicate re-place.
     _transmitted: dict = {"done": False, "trade": None}
+
+    # DS-2026-10-24-02 residual: holds this symbol's close-admission claim from
+    # the live-book read until the order is acknowledged, closed in the finally.
+    close_admission = contextlib.ExitStack()
 
     try:
         # Build contract
@@ -669,7 +683,9 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
 
         # DS-2026-10-24-02: a close exempted against the store is re-admitted
         # against the broker's live book before it transmits.
-        close_violation = _broker_close_violation(params, client, contract, admitted_as_close)
+        close_violation = _broker_close_violation(
+            params, client, contract, admitted_as_close, close_admission
+        )
         if close_violation:
             return {
                 "status": "error",
@@ -820,6 +836,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         return {"status": "error", "message": str(e)}
 
     finally:
+        close_admission.close()
         timer.mark("done")
         timer.emit()
         client.disconnect()
