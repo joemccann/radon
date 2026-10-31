@@ -414,6 +414,12 @@ def test_entrypoint_prestage_refuses_inode_replacement_after_open(tmp_path):
     assert canonical.is_symlink(), "the isolated race sensor must actually replace the name"
 
 
+# Once both locks are held, the supervisor's lock-held image prune checks its
+# sudo grant before the bounded child starts. The fake sudo refuses (exit 98),
+# so the prune is skipped and the child still runs.
+LOCKED_PRUNE_PROBE = ["helper"]
+
+
 @requires_flock
 @pytest.mark.parametrize("selector", ["custom", "custom-with-legacy"])
 def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path, selector):
@@ -422,7 +428,7 @@ def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path
     )
     if selector == "custom":
         assert result.returncode == 97, result.stdout + result.stderr
-        assert calls == ["child"], "custom standalone lock must reach the bounded child sensor"
+        assert calls == LOCKED_PRUNE_PROBE + ["child"], "custom standalone lock must reach the bounded child sensor"
         assert selected.is_file()
     else:
         assert result.returncode != 0
@@ -434,4 +440,4 @@ def test_entrypoint_custom_lock_override_keeps_existing_creation_policy(tmp_path
 def test_entrypoint_ready_canonical_locks_reach_bounded_child_sensor(tmp_path):
     result, calls, _, _ = _probe_deploy_entrypoint(tmp_path, state="regular", journal_present=False)
     assert result.returncode == 97, result.stdout + result.stderr
-    assert calls == ["child"], "the fixture must detect real work when both locks are ready"
+    assert calls == LOCKED_PRUNE_PROBE + ["child"], "the fixture must detect real work when both locks are ready"
