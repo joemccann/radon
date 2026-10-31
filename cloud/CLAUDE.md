@@ -166,7 +166,7 @@ Production is three planes. Do not collapse them.
   `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
   after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune` and `prune-locked <sha>` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.
@@ -918,7 +918,7 @@ Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
 
-Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `deploy.sh` calls `radon-app-runtime prune` after a green deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; both prunes skip while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `pull <sha>` prunes before it fetches layers. Inside the deploy lock, the supervisor runs `radon-app-runtime prune-locked <sha>` with its held FD 9 as stdin before the inner deploy builds, pulls or runs model disk admission, so a refused deploy's images cannot ratchet the disk. `deploy.sh` calls `radon-app-runtime prune` after a green or failed deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; every prune skips while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
 
 ### SPX breadth scheduled comparison
 
@@ -964,14 +964,21 @@ no caller paths, thresholds or environment bypass. Deployment checks it after
 exact-image pulls, before creating a staged worktree and immediately before
 teardown; a prestage refusal never falls through to a host build. It groups
 fixed destinations by filesystem and uses `f_bavail`, not root-reserved free
-blocks. Sequential CLI archive/tree peaks derive from the enforced 2GiB
-export bounds and 100000-member allocation overhead. Pinned model-file sizes
-are root-owned constants contract-tested against the image manifest. Each
+blocks. Sequential CLI archive/tree peaks derive from pinned per-release bounds
+(`LINUX_MAX_PAYLOAD_BYTES`/`LINUX_MAX_MEMBERS`/`LINUX_MAX_STREAM_BYTES`,
+`DARWIN_MAX_EXPORT_BYTES`, ~25% over the observed release) that export and
+extraction also enforce; app-images runs `scripts/ci/check_model_client_bounds.py`
+on the exact built image so a bigger bundle fails CI. Pinned model-file
+paths/sizes/digests are root-owned constants contract-tested against the image
+manifest; files already present at their digest are not charged. Each
 filesystem must also have sufficient `f_favail` for bounded members/cache
 metadata; unknown or unbounded inode metadata refuses. The serving checkout
 filesystem retains an explicit 1GiB/1024-inode operational and recovery margin.
-A shared 4KiB filesystem requires 8881176576 writable bytes and 201161 inodes
-after pulls. This is admission evidence, not a reservation against later writes.
+A shared 4KiB filesystem requires 5144893312 writable bytes (+545128448 when
+the model cache is absent) and 3209 inodes after pulls. This is admission
+evidence, not a reservation against later writes. A client payload identical to
+the selected release is hardlinked into the new SHA (receipt rewritten, never a
+symlink); retention keeps the selected release plus the previous one.
 Promotion repeats the check before allocation. Recovery instead uses
 `recover-model-clients` to verify existing exact immutable Linux/helper and
 Darwin bundle receipts/hashes and reselect the Linux payload without export or

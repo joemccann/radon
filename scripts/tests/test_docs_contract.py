@@ -2163,6 +2163,28 @@ class TestDocumentation20261012:
         assert "docs/operations.md#app-image-prune" in claude
         assert "exact local image during registry outages" in claude
 
+    def test_lock_held_prune_and_order_are_documented(self):
+        """2026-10-31: refused deploys ratcheted the 75G app disk because the
+        only prune ran after a green deploy. The owner docs must state the
+        lock-held verb, where it runs, and the failure-path prune."""
+        runtime = (_ROOT / "cloud/scripts/radon-app-runtime.sh").read_text()
+        assert "cmd_prune_locked" in runtime
+        deploy = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        assert 'prune-locked "$target_sha" 0<&9' in deploy
+        section = _markdown_heading("docs/operations.md", "App image prune")
+        assert "`prune-locked [<sha>]`" in section
+        assert "held lock descriptor as stdin" in section
+        assert "Deploy order: `prune-locked`" in section
+        assert "prunes before it fetches any layer" in section
+        assert "after a failed one" in section
+        assert "disk_cleanup.py" in section
+        claude = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "`prune-locked <sha>` via sudoers" in claude
+        assert "after a green or failed deploy" in claude
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "KEEP_IMAGE_PAIRS" not in cloud
+        assert "`app-images` (delegated to `radon-app-runtime prune-locked`" in cloud
+
     def test_retired_beta_units_stay_out_of_the_deploy_transition(self):
         helper = (_ROOT / "cloud/scripts/deploy-root-helper.sh").read_text()
         assert '[[ "$unit" == radon-beta-* ]] && return 0' in helper

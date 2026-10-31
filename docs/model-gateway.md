@@ -47,9 +47,15 @@ Before allocating prestage worktrees, after exact image pulls and immediately
 before stopping consumers, deployment runs the root-owned, read-only
 `sudo /usr/local/sbin/radon-app-runtime check-model-space` action. Its fixed
 per-filesystem budget uses non-root `f_bavail` and available inodes, includes
-bounded simultaneous CLI archives/trees, pinned model-cache bytes and member
-metadata, and retains a declared 1GiB/1024-inode operational/recovery margin.
-The shared 4KiB filesystem budget is 8881176576 writable bytes and 201161 inodes.
+bounded simultaneous CLI archives/trees, pinned model-cache bytes not already
+present at their pinned digest, member metadata, and retains a declared
+1GiB/1024-inode operational/recovery margin. The CLI bounds are pinned per
+release in `cloud/scripts/model_clients.py` (Linux payload 2030000000 bytes /
+1024 members, Darwin export 880000000 bytes, about 25% over the observed
+release); export and extraction refuse anything larger, and app-images runs
+`scripts/ci/check_model_client_bounds.py` against the exact built image so a
+bigger bundle fails CI. The shared 4KiB filesystem budget is 5144893312
+writable bytes (plus 545128448 when the model cache must be fetched) and 3209 inodes.
 Unknown inode capacity refuses; root-reserved blocks never satisfy the check.
 There is no threshold override or automatic data deletion. A rejected prestage
 or capacity probe cannot fall back to a host compile. Promotion rechecks before
@@ -57,7 +63,7 @@ writing; concurrent disk growth can still cause a later refusal.
 
 Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
 bundle when the local engine reports the same image id for another exact
-`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag. It copies those bytes,
+`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag. It hardlinks those bytes,
 rewrites only the release SHA, re-checks every hash, and activates the Linux
 selector. It does not move the Darwin selector; that still happens at commit.
 A tree that already exists for the deploying SHA is not proof, because the
@@ -145,8 +151,11 @@ The private Mac socket is `/Library/Radon/model-gateway/gateway.sock`;
 Root launchd supervises SSH and retries it after disconnects; a separate
 30-minute job verifies and promotes only the latest successfully committed
 root export. Keep four prior client receipts and every release demoted within two hours
-for bounded active sessions. Linux client releases and root exports use the
-same retention floor; no unbounded per-deploy CLI archive is kept.
+for bounded active sessions. On the VPS, Linux client releases and root
+exports keep only the selected release plus the newest demoted one (the
+rollback target); older ones are pruned once demoted for two hours. A payload
+byte-identical to the selected release is hardlinked (never symlinked) into the
+new SHA, so an unchanged deploy costs a receipt, not another 1.6G/0.7G copy.
 
 This one-time root installation is separate from successful source/CI
 verification. Do not report the Mac service deployed until its launchd job,

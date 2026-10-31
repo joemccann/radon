@@ -32,23 +32,98 @@ def test_reserved_root_blocks_are_not_available_to_model_uid(tmp_path, monkeypat
     assert not (tmp_path / 'not-created').exists()
 
 
+def linux_tree(api, block=4096):
+    return api.LINUX_MAX_PAYLOAD_BYTES + (2 * api.LINUX_MAX_MEMBERS + 32) * block
+
+
+def linux_stream(api, block=4096):
+    return -(-api.LINUX_MAX_STREAM_BYTES // block) * block + 32 * block
+
+
+def darwin_stage(api, block=4096):
+    return 2 * -(-api.DARWIN_MAX_EXPORT_BYTES // block) * block + 32 * block
+
+
+def absent_model_bytes(api, block=4096):
+    return sum((size + block - 1) // block * block for size in api.PINNED_MODEL_FILE_BYTES)
+
+
+MODEL_OVERHEAD = 64 * 4096 + 2 * 65536
+
+
 def test_same_filesystem_uses_maximum_sequential_peak_not_sum(monkeypatch):
     api = setup_volumes(monkeypatch)
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: False)
     proof = api.check_model_space()
-    block = 4096
-    linux_tree = api.MAX_BYTES + (2 * api.MAX_MEMBERS + 32) * block
-    model = sum((size + block - 1) // block * block for size in api.PINNED_MODEL_FILE_BYTES) + 64 * block + 2 * 65536
-    peak = max(api.MAX_BYTES + linux_tree, linux_tree + 2 * api.MAX_BYTES + 32 * block)
-    assert proof['filesystems'] == [{'device': 1, 'available_bytes': 100 * 1024**3, 'required_bytes': peak + model + api.RUNTIME_RESERVE_BYTES, 'available_inodes':1000000, 'required_inodes':201161}]
+    peak = max(linux_stream(api) + linux_tree(api), linux_tree(api) + darwin_stage(api))
+    assert proof['filesystems'] == [{'device': 1, 'available_bytes': 100 * 1024**3, 'required_bytes': peak + absent_model_bytes(api) + MODEL_OVERHEAD + api.RUNTIME_RESERVE_BYTES, 'available_inodes':1000000, 'required_inodes':2*api.LINUX_MAX_MEMBERS+32+32+64+len(api.PINNED_MODEL_FILE_BYTES)+2+api.RUNTIME_RESERVE_INODES}]
+
+
+def test_present_verified_model_cache_is_not_charged_again(monkeypatch):
+    api = setup_volumes(monkeypatch)
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: True)
+    required = api.check_model_space()['filesystems'][0]['required_bytes']
+    peak = max(linux_stream(api) + linux_tree(api), linux_tree(api) + darwin_stage(api))
+    assert required == peak + MODEL_OVERHEAD + api.RUNTIME_RESERVE_BYTES
+
+
+def test_production_shaped_volume_admits_with_cache_present_and_old_bound_did_not(monkeypatch):
+    # radon-app 2026-10-31: 6721466368 bytes available to UID1000 on a shared
+    # 4KiB ext4 root; the generic 2GiB/100000-member bound demanded 8881176576.
+    api = setup_volumes(monkeypatch, available=6_721_466_368)
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: True)
+    row = api.check_model_space()['filesystems'][0]
+    assert row['required_bytes'] == 5_144_893_312
+    assert row['required_bytes'] < 6_721_466_368 < 8_881_176_576
+
+
+def test_model_cache_credit_requires_exact_size_and_digest(tmp_path, monkeypatch):
+    import hashlib
+    api = module()
+    good = b'pinned weights'
+    (tmp_path / 'hub').mkdir()
+    (tmp_path / 'hub/model.bin').write_bytes(good)
+    monkeypatch.setattr(api, 'MODEL_CACHE_ROOT', tmp_path)
+    digest = hashlib.sha256(good).hexdigest()
+    assert api._model_file_present('hub/model.bin', len(good), digest)
+    assert not api._model_file_present('hub/model.bin', len(good) + 1, digest)
+    assert not api._model_file_present('hub/model.bin', len(good), '0' * 64)
+    assert not api._model_file_present('hub/missing.bin', len(good), digest)
+    (tmp_path / 'hub/link.bin').symlink_to(tmp_path / 'hub/model.bin')
+    assert not api._model_file_present('hub/link.bin', len(good), digest)
 
 
 def test_separate_filesystems_each_reserve_their_own_peak(monkeypatch):
     api = setup_volumes(monkeypatch, devices=(1, 2, 3, 4))
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: False)
     rows = {row['device']: row for row in api.check_model_space()['filesystems']}
-    assert rows[1]['required_bytes'] == 2 * api.MAX_BYTES + (2 * api.MAX_MEMBERS + 32) * 4096
-    assert rows[2]['required_bytes'] == 2 * api.MAX_BYTES + 32 * 4096
+    assert rows[1]['required_bytes'] == linux_stream(api) + linux_tree(api)
+    assert rows[2]['required_bytes'] == darwin_stage(api)
     assert rows[3]['required_bytes'] > sum(api.PINNED_MODEL_FILE_BYTES)
     assert rows[4]['required_bytes'] == api.RUNTIME_RESERVE_BYTES == 1024**3
+
+
+def test_admission_budget_is_derived_from_the_enforced_bounds(monkeypatch):
+    api = setup_volumes(monkeypatch, devices=(1, 2, 3, 4))
+    before = {row['device']: row['required_bytes'] for row in api.check_model_space()['filesystems']}
+    monkeypatch.setattr(api, 'LINUX_MAX_PAYLOAD_BYTES', api.LINUX_MAX_PAYLOAD_BYTES + 4096)
+    monkeypatch.setattr(api, 'LINUX_MAX_STREAM_BYTES', api.LINUX_MAX_STREAM_BYTES + 4096)
+    monkeypatch.setattr(api, 'DARWIN_MAX_EXPORT_BYTES', api.DARWIN_MAX_EXPORT_BYTES + 4096)
+    after = {row['device']: row['required_bytes'] for row in api.check_model_space()['filesystems']}
+    assert after[1] - before[1] == 2 * 4096
+    assert after[2] - before[2] == 2 * 4096
+
+
+def test_pinned_bounds_keep_headroom_over_observed_production_release():
+    api = module()
+    # Observed on radon-app for 38154af: Linux payload/members/stream and the
+    # Darwin bundle.tar. Bounds stay within ~20-30% so admission is not generic.
+    linux_payload, linux_members, linux_stream_bytes, darwin = 1_621_817_729, 148, 1_621_964_800, 700_866_560
+    for observed, bound in ((linux_payload, api.LINUX_MAX_PAYLOAD_BYTES), (linux_stream_bytes, api.LINUX_MAX_STREAM_BYTES), (darwin, api.DARWIN_MAX_EXPORT_BYTES)):
+        assert 1.20 * observed <= bound <= 1.30 * observed
+    assert linux_members * 4 <= api.LINUX_MAX_MEMBERS <= 2048
+    assert api.LINUX_MAX_STREAM_BYTES == api.LINUX_MAX_PAYLOAD_BYTES + api.LINUX_MAX_MEMBERS * 2048 + 10240
+    assert not hasattr(api, 'MAX_BYTES') and not hasattr(api, 'MAX_MEMBERS')
 
 
 def test_any_low_space_volume_refuses_even_with_root_reserve(monkeypatch):
@@ -89,6 +164,13 @@ def test_fixed_cache_budget_matches_image_pinned_manifest():
     api = module()
     manifest = json.loads((CLOUD.parent / 'scripts/model_gateway/model-artifacts.json').read_text())
     assert sorted(api.PINNED_MODEL_FILE_BYTES) == sorted(entry['size'] for name in ('chronos', 'embedding') for entry in manifest[name]['files'].values())
+    # HF_HOME=<cache>/huggingface and FASTEMBED_CACHE_PATH=<cache>/fastembed.
+    expected = set()
+    for kind, base in (('chronos', 'huggingface/hub'), ('embedding', 'fastembed')):
+        record = manifest[kind]
+        folder = base + '/models--' + record['repo'].replace('/', '--') + '/snapshots/' + record['revision']
+        expected |= {(folder + '/' + name, entry['size'], entry['sha256']) for name, entry in record['files'].items()}
+    assert set(api.PINNED_MODEL_FILES) == expected
 
 
 @pytest.mark.parametrize('args', [['check-space', '/tmp/override'], ['check-space', '0']])
@@ -197,7 +279,7 @@ def test_inode_peak_counts_members_and_metadata_per_device(monkeypatch):
     monkeypatch.setattr(api,'_space_probe',lambda path:(1,4096,100*1024**3,1000000))
     row=api.check_model_space()['filesystems'][0]
     assert row['available_inodes']==1000000
-    assert row['required_inodes']==2*api.MAX_MEMBERS+32+32+64+len(api.PINNED_MODEL_FILE_BYTES)+2+api.RUNTIME_RESERVE_INODES
+    assert row['required_inodes']==2*api.LINUX_MAX_MEMBERS+32+32+64+len(api.PINNED_MODEL_FILE_BYTES)+2+api.RUNTIME_RESERVE_INODES
 
 
 @pytest.mark.parametrize('mode',['exit-trap','conditional'])
@@ -262,3 +344,17 @@ main {'a'*40}
     assert not marker.exists()
     assert (calls.read_text().splitlines() if calls.exists() else [])==(['checked'] if grant else [])
     if not grant:assert 'deferr' in result.stdout.lower()
+
+
+def test_documented_admission_figures_match_the_computed_budget(monkeypatch):
+    api = setup_volumes(monkeypatch)
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: True)
+    present = api.check_model_space()['filesystems'][0]
+    monkeypatch.setattr(api, '_model_file_present', lambda *args: False)
+    absent = api.check_model_space()['filesystems'][0]
+    figures = (str(present['required_bytes']), str(absent['required_bytes'] - present['required_bytes']), str(present['required_inodes']))
+    for doc in (CLOUD / 'CLAUDE.md', CLOUD.parent / 'docs/operations.md', CLOUD.parent / 'docs/model-gateway.md'):
+        text = doc.read_text()
+        assert '8881176576' not in text and '201161' not in text, doc
+        for figure in figures:
+            assert figure in text, (doc, figure)

@@ -178,6 +178,7 @@ def _run(
     extra_env: dict[str, str] | None = None,
     docker_body: str | None = None,
     timeout: float = 10,
+    stdin=None,
 ) -> subprocess.CompletedProcess[str]:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
@@ -208,6 +209,7 @@ exit 0
         capture_output=True,
         text=True,
         timeout=timeout,
+        stdin=stdin,
     )
     result.docker_log = docker_log  # type: ignore[attr-defined]
     result.proxy_dir = env["RADON_TEST_NOTIFY_PROXY_DIR"]  # type: ignore[attr-defined]
@@ -229,7 +231,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
@@ -453,6 +455,244 @@ def test_prune_takes_no_argument(tmp_path: Path) -> None:
     result = _run(tmp_path, ["prune", _STALE1])
     assert result.returncode != 0
     assert "usage:" in result.stderr
+
+
+# --- Lock-held prune (prune-locked) -------------------------------------------
+# A refused deploy left its pulled set on disk forever: the only prune ran after
+# a green deploy, and an in-deploy prune took a SECOND open of the deploy lock
+# and conflicted with the lock its own caller held (#1012). `prune-locked`
+# takes the caller's held deploy-lock descriptor as stdin and proves it owns it.
+
+
+def _prune_locked(tmp_path: Path, *, green: str | None, tags: str, args: list[str],
+                  stdin_mode: str = "held", running: str | None = None,
+                  journal: str | None = None):
+    import fcntl
+    _runtime_env(tmp_path)
+    lock = tmp_path / "state" / "deploy.lock"
+    marker = tmp_path / "prune-green"
+    journal_file = tmp_path / "prune-transition.json"
+    marker.unlink(missing_ok=True)
+    journal_file.unlink(missing_ok=True)
+    if green is not None:
+        marker.write_text(green)
+    if journal is not None:
+        journal_file.write_text(journal)
+    log = tmp_path / "docker.log"
+    log.unlink(missing_ok=True)
+    holder = open(lock, "r")
+    other = None
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if stdin_mode == "held":
+            stdin = holder
+        elif stdin_mode == "foreign":
+            # Somebody else holds the lock; the caller only opened the file.
+            other = open(lock, "r")
+            stdin = other
+        elif stdin_mode == "not-the-lock":
+            other = open(tmp_path / "env", "r")
+            stdin = other
+        else:
+            raise AssertionError(stdin_mode)
+        result = _run(
+            tmp_path,
+            ["prune-locked", *args],
+            extra_env={
+                "RADON_TEST_GREEN_MARKER": str(marker),
+                "RADON_TEST_TRANSITION_JOURNAL": str(journal_file),
+                "RADON_STUB_TAGS": tags,
+                "RADON_STUB_RUNNING": running if running is not None else f"{_NODE}:{_CUR} {_PY}:{_CUR}",
+            },
+            docker_body=_PRUNE_DOCKER,
+            stdin=stdin,
+        )
+        # The caller still owns its lock after the pruner exits.
+        probe = open(lock, "r")
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            probe.close()
+    finally:
+        if other is not None:
+            other.close()
+        holder.close()
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, sorted(line for line in lines if line.startswith("rmi "))
+
+
+_TARGET = "f" * 40
+
+
+def test_prune_locked_under_the_callers_deploy_lock_keeps_running_previous_and_target(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"latest {_CUR} {_PREV} {_TARGET} {_STALE1} {_STALE2} weird-tag",
+        args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert "image prune skipped" not in result.stderr
+    assert removed == _rmi(_STALE1, _STALE2)
+
+
+def test_prune_locked_removes_a_refused_deploys_set(tmp_path: Path) -> None:
+    # Production 2026-10-31: live 38154af, refused 707c642 still local. The next
+    # deploy's prune must drop the refused set before it pulls or admits.
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_STALE1}",
+        args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_with_a_target_does_not_need_a_previous_release(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n", tags=f"{_CUR} {_TARGET} {_STALE1}", args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_without_a_target_keeps_both_green_lines(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_PREV} {_STALE1}", args=[],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_without_a_target_skips_without_a_previous_release(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n", tags=f"{_CUR} {_STALE1}", args=[],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped" in result.stderr
+
+
+def test_prune_locked_never_removes_an_image_a_running_container_uses(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_STALE1}",
+        args=[_TARGET],
+        running=f"{_NODE}:{_STALE1} {_PY}:{_CUR}",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == sorted([f"rmi {_PY}:{_STALE1}", f"rmi {_MODEL}:{_STALE1}"])
+
+
+def test_prune_locked_with_a_pending_transition_protects_both_journal_shas(tmp_path: Path) -> None:
+    journal = json.dumps({"version": 1, "requested_sha": _STALE1, "previous_sha": _PREV})
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n",
+        tags=f"{_CUR} {_PREV} {_STALE1} {_STALE2} {_TARGET}",
+        args=[_TARGET],
+        running=f"{_NODE}:{_PREV} {_PY}:{_PREV}",
+        journal=journal,
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_CUR, _STALE2)
+
+
+def test_prune_locked_refuses_a_lock_held_by_someone_else(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        stdin_mode="foreign",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped" in result.stderr
+
+
+def test_prune_locked_refuses_stdin_that_is_not_the_deploy_lock(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        stdin_mode="not-the-lock",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped: stdin is not the held deploy lock" in result.stderr
+
+
+def test_prune_locked_skips_while_another_pull_holds_the_pull_lock(tmp_path: Path) -> None:
+    import fcntl
+    held = _hold(_pull_lock(tmp_path), fcntl.LOCK_SH)
+    try:
+        result, removed = _prune_locked(
+            tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        )
+    finally:
+        held.close()
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped: app image pull in progress" in result.stderr
+
+
+@pytest.mark.parametrize("bad", ["abc", "F" * 40, "g" * 40, "a" * 41])
+def test_prune_locked_takes_only_a_40_hex_sha(tmp_path: Path, bad: str) -> None:
+    result = _run(tmp_path, ["prune-locked", bad])
+    assert result.returncode == 64
+    log = result.docker_log  # type: ignore[attr-defined]
+    assert not log.exists() or "rmi " not in log.read_text(encoding="utf-8")
+
+
+def test_prune_locked_takes_at_most_one_argument(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["prune-locked", _TARGET, _TARGET])
+    assert result.returncode == 64
+    assert "usage:" in result.stderr
+
+
+# `pull <sha>` prunes BEFORE fetching layers: the CI prepull pulled 3.4G into a
+# full disk first and only then pruned (2026-10-31 Caddy ENOSPC).
+_PULL_AFTER_PRUNE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+case "$1 $2" in
+  "manifest inspect") exit 0 ;;
+  "image inspect") [[ -f "${{RADON_STUB_PULL_DIR}}/${{3##*/}}" ]]; exit $? ;;
+  "ps --format")
+    for image in ${{RADON_STUB_RUNNING:-}}; do printf '%s\\n' "$image"; done
+    ;;
+  "images --format")
+    for t in ${{RADON_STUB_TAGS:-}}; do printf '%s:%s\\n' "$4" "$t"; done
+    ;;
+esac
+if [[ "$1" == "pull" ]]; then
+  touch "${{RADON_STUB_PULL_DIR}}/${{2##*/}}"
+fi
+exit 0
+"""
+
+
+def test_pull_prunes_stale_sets_before_fetching_any_layer(tmp_path: Path) -> None:
+    pull_dir = tmp_path / "pulled"
+    pull_dir.mkdir()
+    marker = tmp_path / "pull-green"
+    marker.write_text(f"{_CUR}\n{_PREV}\n")
+    result = _run(
+        tmp_path,
+        ["pull", _TARGET],
+        extra_env={
+            "RADON_STUB_PULL_DIR": str(pull_dir),
+            "RADON_TEST_GREEN_MARKER": str(marker),
+            "RADON_TEST_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
+            "RADON_STUB_TAGS": f"{_CUR} {_STALE1}",
+            "RADON_STUB_RUNNING": f"{_NODE}:{_CUR} {_PY}:{_CUR}",
+        },
+        docker_body=_PULL_AFTER_PRUNE_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+    rmis = [i for i, line in enumerate(lines) if line.startswith("rmi ")]
+    pulls = [i for i, line in enumerate(lines) if line.startswith("pull ")]
+    assert sorted(lines[i] for i in rmis) == _rmi(_STALE1)
+    assert pulls and max(rmis) < min(pulls), lines
 
 
 # --- Pull lock (PR #1020 follow-up) -------------------------------------------
@@ -1754,8 +1994,13 @@ def test_sudoers_grants_exact_pull_not_run() -> None:
     assert "/usr/local/sbin/radon-app-runtime pull [0-9a-f]*" in text
     assert "radon-app-runtime pull *" not in text
     # Post-deploy cleanup verb: listed in full, no argument, no wildcard.
-    assert "/usr/local/sbin/radon-app-runtime prune" in text
+    assert "/usr/local/sbin/radon-app-runtime prune," in text
     assert "radon-app-runtime prune *" not in text
+    # The lock-held prune takes the release SHA only, like `pull`; root's
+    # weekly sweep calls the no-SHA form directly, never through sudo.
+    assert "/usr/local/sbin/radon-app-runtime prune-locked [0-9a-f]*" in text
+    assert "radon-app-runtime prune-locked *" not in text
+    assert "radon-app-runtime prune-locked," not in text
     assert "radon-app-runtime run" not in text
     assert "radon-app-runtime *" not in text
     assert "docker.sock" not in text

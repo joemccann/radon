@@ -133,5 +133,5 @@ def test_release_retention_bounds_old_payloads_without_pruning_recently_demoted_
     for number in range(1,8):
         old=time.time()-20000+number;os.utime(root/f'{number:040x}',(old,old))
     api.install_from_tar(payload(),root,f'{8:040x}',owner_uid=os.getuid())
-    assert {p.name for p in root.iterdir() if len(p.name)==40}=={f'{n:040x}' for n in range(4,9)}
+    assert {p.name for p in root.iterdir() if len(p.name)==40}=={f'{n:040x}' for n in range(7,9)}
     assert (root/'current').resolve()==root/f'{8:040x}'

@@ -2294,6 +2294,10 @@ supervise_deploy_command() {
     return 0
   fi
 
+  # Before the inner deploy pulls or admits anything, and before prepull's
+  # target set can tip a full disk into ENOSPC.
+  prune_app_images_before_admission "${DEPLOY_TARGET_SHA:-}"
+
   local exit_code=0
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
     "${DEPLOY_TIMEOUT}s" "$@" 8>&- 9>&- &
@@ -2315,11 +2319,31 @@ supervise_deploy_command() {
   trap - TERM INT HUP
   exec 8>&- 9>&-
   # Prestage leaves the green marker alone, and the unlocked prepull job may
-  # be pulling the target pair right now; pruning here removed it.
-  if (( exit_code == 0 )) && [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
+  # be pulling the target pair right now; pruning here removed it. A failed
+  # deploy prunes too: it leaves the green marker alone, so the prune drops
+  # the refused target's set instead of stranding it on disk.
+  if [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
     prune_app_images_after_deploy
   fi
   return "$exit_code"
+}
+
+# Runs while FD 9 holds the deploy lock. A second open of the lock would
+# conflict with that hold and skip every time (#1012), so the held FD is the
+# pruner's stdin, which it verifies. It keeps the running pair (green line 1),
+# the rollback pair (line 2), the target pair and anything a running container
+# uses. Best effort; a skipped or ungranted prune never fails a deploy.
+prune_app_images_before_admission() {
+  local target_sha="$1"
+  [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" prune-locked "$target_sha" >/dev/null 2>&1; then
+    log_warn "Lock-held app image prune is not granted yet; skipping"
+    return 0
+  fi
+  if ! timeout 120 sudo -n "$APP_RUNTIME_HELPER" prune-locked "$target_sha" 0<&9; then
+    log_warn "Lock-held app image prune failed; stale release images remain"
+  fi
+  return 0
 }
 
 # Runs only after FD 9 is closed: the pruner takes the deploy lock itself and
@@ -2344,6 +2368,8 @@ run_bounded_deploy() {
   fi
 
   export RADON_DEPLOY_INTERNAL=1
+  # main() refuses anything but a 40-hex SHA; the supervisor's prune skips one.
+  DEPLOY_TARGET_SHA="${1:-${RADON_DEPLOY_SHA:-}}"
   supervise_deploy_command bash "$0" "$@"
 }
 

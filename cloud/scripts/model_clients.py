@@ -25,11 +25,34 @@ ROOT = Path("/opt/radon-model-clients")
 EXPORT_ROOT = Path("/var/lib/radon-model-export")
 MODEL_CACHE_ROOT = Path("/var/lib/radon-private/model-gateway")
 RECOVERY_ROOT = Path("/home/radon/radon")
-MAX_BYTES = 2 * 1024 * 1024 * 1024
-MAX_MEMBERS = 100_000
+# Pinned per-release payload bounds. Admission charges exactly these and the
+# export/extraction code refuses anything larger, so the two cannot diverge.
+# app-images.yml runs scripts/ci/check_model_client_bounds.py against the
+# exact built gateway image: a bigger real bundle fails CI, not production.
+# Observed for 38154af (2026-10-31): Linux payload 1621817729 bytes in ~148
+# members (tar stream 1621964800); Darwin bundle.tar 700866560. ~+25% headroom.
+LINUX_MAX_PAYLOAD_BYTES = 2_030_000_000
+LINUX_MAX_MEMBERS = 1024
+# Per member: header, data padding, GNU long-name header and name block.
+LINUX_MAX_STREAM_BYTES = LINUX_MAX_PAYLOAD_BYTES + LINUX_MAX_MEMBERS * 2048 + 10240
+DARWIN_MAX_EXPORT_BYTES = 880_000_000
+DARWIN_MAX_MEMBERS = 32
 # Root-owned admission authority, contract-tested against the exact image's
 # model-artifacts.json. Never import or trust a mutable application manifest.
-PINNED_MODEL_FILE_BYTES = (1067, 477930472, 706, 66465124, 695, 711396, 1242)
+# Paths are relative to MODEL_CACHE_ROOT (HF_HOME=huggingface,
+# FASTEMBED_CACHE_PATH=fastembed inside the gateway container).
+_CHRONOS = "huggingface/hub/models--amazon--chronos-2/snapshots/29ec3766d36d6f73f0696f85560a422f50e8498c/"
+_EMBEDDING = "fastembed/models--qdrant--bge-small-en-v1.5-onnx-q/snapshots/52398278842ec682c6f32300af41344b1c0b0bb2/"
+PINNED_MODEL_FILES = (
+    (_CHRONOS + "config.json", 1067, "ef1143bfdc9c0376d9a056eefca46cb4b1ec3d0ffacd541ff56feb40fb708031"),
+    (_CHRONOS + "model.safetensors", 477930472, "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42"),
+    (_EMBEDDING + "config.json", 706, "13582bcf2effc85b7bf3d3f5532e686bc1c9ce86bb009d10f0ec33cbe92299dd"),
+    (_EMBEDDING + "model_optimized.onnx", 66465124, "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431"),
+    (_EMBEDDING + "special_tokens_map.json", 695, "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"),
+    (_EMBEDDING + "tokenizer.json", 711396, "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"),
+    (_EMBEDDING + "tokenizer_config.json", 1242, "0b29c7bfc889e53b36d9dd3e686dd4300f6525110eaa98c76a5dafceb2029f53"),
+)
+PINNED_MODEL_FILE_BYTES = tuple(size for _path, size, _digest in PINNED_MODEL_FILES)
 # Explicit operational margin beyond the bounded preparation allocations:
 # journal/log growth, runtime writes and the previous release's recovery.
 RUNTIME_RESERVE_BYTES = 1024 * 1024 * 1024
@@ -68,6 +91,29 @@ def _space_probe(path: Path) -> tuple[int, int, int, int]:
         os.close(descriptor)
 
 
+def _model_file_present(relative: str, size: int, sha256: str) -> bool:
+    """A pinned model file already at its exact digest is never rewritten."""
+    try:
+        # UID1000 owns this tree: never follow a link or block on a FIFO.
+        descriptor = os.open(MODEL_CACHE_ROOT / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+            return False
+        with os.fdopen(os.dup(descriptor), "rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest() == sha256
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+
+
+def _round(size: int, block: int) -> int:
+    return -(-size // block) * block
+
+
 def check_model_space() -> dict:
     """Admit the peak of the fixed sequential preparation stages per device."""
     paths = (ROOT, EXPORT_ROOT, MODEL_CACHE_ROOT, RECOVERY_ROOT)
@@ -90,13 +136,18 @@ def check_model_space() -> dict:
     linux_block = probes[ROOT][1]
     # Each bounded member gets a padding block plus a directory/metadata block;
     # reserve additional blocks for our generated manifest and stage parents.
-    linux_tree = MAX_BYTES + (2 * MAX_MEMBERS + 32) * linux_block
-    linux_inodes = 2 * MAX_MEMBERS + 32
-    add(ROOT, MAX_BYTES + linux_tree, linux_tree, linux_inodes, linux_inodes)
+    linux_tree = LINUX_MAX_PAYLOAD_BYTES + (2 * LINUX_MAX_MEMBERS + 32) * linux_block
+    linux_inodes = 2 * LINUX_MAX_MEMBERS + 32
+    # Stage 0: the exported stream file and the extracted tree coexist.
+    linux_stream = _round(LINUX_MAX_STREAM_BYTES, linux_block) + 32 * linux_block
+    add(ROOT, linux_stream + linux_tree, linux_tree, linux_inodes, linux_inodes)
     # Linux's stream is closed before Darwin's stream and published copy coexist.
-    add(EXPORT_ROOT, 0, 2 * MAX_BYTES + 32 * probes[EXPORT_ROOT][1], 0, 32)
+    # Dedupe against an identical previous release is decided only after the
+    # export, so admission never discounts it.
+    export_block = probes[EXPORT_ROOT][1]
+    add(EXPORT_ROOT, 0, 2 * _round(DARWIN_MAX_EXPORT_BYTES, export_block) + 32 * export_block, 0, 32)
     cache_block = probes[MODEL_CACHE_ROOT][1]
-    model_bytes = sum((size + cache_block - 1) // cache_block * cache_block for size in PINNED_MODEL_FILE_BYTES)
+    model_bytes = sum(_round(size, cache_block) for path, size, digest in PINNED_MODEL_FILES if not _model_file_present(path, size, digest))
     # Fixed cache parents/refs plus bounded pacing state and import receipts.
     model_bytes += 64 * cache_block + 2 * 65536
     model_inodes = 64 + len(PINNED_MODEL_FILE_BYTES) + 2
@@ -193,11 +244,66 @@ def _prune_releases(root: Path, release: str, owner_uid: int) -> None:
         if re.fullmatch(r"[0-9a-f]{40}",entry.name) and entry.name!=release:
             if entry.is_symlink() or not entry.is_dir():raise ValueError("unsafe stale client release")
             candidates.append(entry)
+    _prune_stale(candidates,owner_uid)
+
+
+def _prune_stale(candidates: list[Path], owner_uid: int) -> None:
+    """Keep the selected release plus the newest demoted one (the rollback
+    target). Older ones go once demoted for two hours: native sessions may
+    still resolve modules under a just-demoted tree."""
     cutoff=time.time()-7200
-    for stale in sorted(candidates,key=lambda item:item.stat().st_mtime,reverse=True)[4:]:
+    for stale in sorted(candidates,key=lambda item:item.stat().st_mtime,reverse=True)[1:]:
         if stale.stat().st_mtime>=cutoff:continue
         _immutable_tree(stale,owner_uid)
         _remove_stage(stale)
+
+
+def _tree_entries(root: Path) -> dict:
+    """Relative path -> (kind, permission bits, size or link target)."""
+    entries={}
+    for folder, dirs, files in os.walk(root, followlinks=False):
+        parent=Path(folder)
+        for name in (*dirs,*files):
+            path=parent/name;info=path.lstat();relative=path.relative_to(root).as_posix()
+            if stat.S_ISLNK(info.st_mode):entries[relative]=("link",0,os.readlink(path))
+            elif stat.S_ISDIR(info.st_mode):entries[relative]=("dir",0,0)
+            elif stat.S_ISREG(info.st_mode):entries[relative]=("file",stat.S_IMODE(info.st_mode),info.st_size)
+            else:raise ValueError("unsupported client tree entry")
+    return entries
+
+
+def _same_bytes(left: Path, right: Path) -> bool:
+    with left.open("rb") as one, right.open("rb") as two:
+        while True:
+            first=one.read(1048576);second=two.read(1048576)
+            if first!=second:return False
+            if not first:return True
+
+
+def _link_identical_release(root: Path, stage: Path, release: str, owner_uid: int) -> bool:
+    """Swap staged files for hardlinks into the selected release when every
+    entry except our receipt is byte-identical. Files are root-owned 0444/0555
+    inodes inside 0555 trees; a link is a second name for an immutable inode,
+    so removing either release never alters the other. Never a symlink."""
+    current=root/"current"
+    if not current.is_symlink():return False
+    donor_name=os.readlink(current)
+    if not re.fullmatch(r"[0-9a-f]{40}",donor_name) or donor_name==release:return False
+    donor=root/donor_name
+    try:
+        _verify_linux_release(root,donor_name,owner_uid)
+        staged=_tree_entries(stage);previous=_tree_entries(donor)
+        staged.pop("manifest.json",None);previous.pop("manifest.json",None)
+        if staged!=previous:return False
+        files=[name for name,(kind,_mode,_size) in staged.items() if kind=="file"]
+        if not all(_same_bytes(stage/name,donor/name) for name in files):return False
+    except (OSError,ValueError,json.JSONDecodeError,KeyError,TypeError):
+        return False
+    for name in files:
+        temporary=(stage/name).with_name(".link-"+os.urandom(8).hex())
+        os.link(donor/name,temporary)
+        os.replace(temporary,stage/name)
+    return True
 
 
 def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) -> Path:
@@ -215,7 +321,7 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) ->
                 count += 1
                 size += max(0, member.size)
                 name = Path(member.name)
-                if count > MAX_MEMBERS or size > MAX_BYTES:
+                if count > LINUX_MAX_MEMBERS or size > LINUX_MAX_PAYLOAD_BYTES:
                     raise ValueError("client archive exceeds bounds")
                 if name.is_absolute() or ".." in name.parts or not (member.isdir() or member.isfile() or member.issym()):
                     raise ValueError("unsafe client archive member")
@@ -268,8 +374,13 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) ->
                 if not path.is_symlink():
                     mode = path.stat().st_mode
                     os.chmod(path, 0o555 if mode & 0o111 else 0o444)
+        existing = target.exists() or target.is_symlink()
+        if not existing:
+            # Content-addressed: an unchanged payload costs a receipt, not 1.6G.
+            _link_identical_release(root, stage, release, owner_uid)
+        for folder, _dirs, _files in os.walk(stage, followlinks=False):
             os.chmod(folder, 0o555)
-        if target.exists() or target.is_symlink():
+        if existing:
             info = target.lstat()
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner_uid or info.st_mode & 0o222:
                 raise ValueError("untrusted existing client release")
@@ -318,7 +429,7 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
             if not chunk:
                 break
             received += len(chunk)
-            if received > MAX_BYTES:
+            if received > (DARWIN_MAX_EXPORT_BYTES if darwin else LINUX_MAX_STREAM_BYTES):
                 raise ValueError("client export exceeds bounds")
             target.write(chunk)
         if process.wait(timeout=5) != 0:
@@ -345,14 +456,14 @@ def _darwin_payload(stream):
     with tarfile.open(fileobj=stream,mode="r|") as archive:
         for member in archive:
             count += 1
-            if count > 32: raise ValueError("Darwin client archive exceeds bounds")
+            if count > DARWIN_MAX_MEMBERS: raise ValueError("Darwin client archive exceeds bounds")
             name = Path(member.name).as_posix().removeprefix("./")
             if member.isdir() and name in {".","bin","model_gateway"}:
                 continue
             if name not in DARWIN_FILES or name in files or not member.isfile():
                 raise ValueError("Darwin archive contains an unrecognized member")
             total += member.size
-            if count > 32 or total > MAX_BYTES or member.size <= 0:
+            if total > DARWIN_MAX_EXPORT_BYTES or member.size <= 0:
                 raise ValueError("Darwin client archive exceeds bounds")
             source = archive.extractfile(member)
             if source is None: raise ValueError("Darwin client payload is missing")
@@ -378,17 +489,26 @@ def publish_darwin_bundle(stream, root: Path, release: str, *, owner_uid: int = 
         raise ValueError("exact Darwin release SHA required")
     root=Path(root);_trusted_root(root,owner_uid)
     files,versions=_darwin_payload(stream)
+    size=stream.seek(0,os.SEEK_END)
+    if size>DARWIN_MAX_EXPORT_BYTES:raise ValueError("Darwin export exceeds bounds")
+    stream.seek(0)
+    digest=hashlib.file_digest(stream,"sha256").hexdigest()
     stream.seek(0)
     stage=Path(tempfile.mkdtemp(prefix=".darwin-",dir=root));target=root/release
     try:
         bundle=stage/"bundle.tar"
         received=0
-        with bundle.open("xb") as output:
-            while raw:=stream.read(65536):
-                received+=len(raw)
-                if received>MAX_BYTES:raise ValueError("Darwin export exceeds bounds")
-                output.write(raw)
-            output.flush();os.fsync(output.fileno())
+        donor=None if (target.exists() or target.is_symlink()) else _identical_darwin_donor(root,release,digest,size,owner_uid)
+        if donor is not None:
+            # Content-addressed: the same bytes keep one immutable inode.
+            os.link(donor/"bundle.tar",bundle);received=size
+        else:
+            with bundle.open("xb") as output:
+                while raw:=stream.read(65536):
+                    received+=len(raw)
+                    if received>DARWIN_MAX_EXPORT_BYTES:raise ValueError("Darwin export exceeds bounds")
+                    output.write(raw)
+                output.flush();os.fsync(output.fileno())
         proof={"version":1,"platform":"darwin-arm64","release_sha":release,"sha256":_digest(bundle),"size":received,"files":files,"cli_versions":versions}
         manifest=stage/"manifest.json"
         with manifest.open("x") as output:
@@ -407,6 +527,26 @@ def publish_darwin_bundle(stream, root: Path, release: str, *, owner_uid: int = 
         _remove_stage(stage)
 
 
+def _identical_darwin_donor(root: Path, release: str, digest: str, size: int, owner_uid: int) -> Path | None:
+    """A verified export whose receipt proves the same bundle bytes."""
+    names=[]
+    current=root/"current"
+    if current.is_symlink():names.append(os.readlink(current))
+    names+=sorted(entry.name for entry in root.iterdir() if entry.name not in names)
+    for name in names:
+        if name==release or not re.fullmatch(r"[0-9a-f]{40}",name):continue
+        folder=root/name
+        try:
+            if folder.is_symlink() or not folder.is_dir():continue
+            proof=json.loads((folder/"manifest.json").read_text())
+            if not isinstance(proof,dict) or proof.get("sha256")!=digest or proof.get("size")!=size:continue
+            _verify_darwin_export(root,name,owner_uid)
+            return folder
+        except (OSError,ValueError,json.JSONDecodeError):
+            continue
+    return None
+
+
 def activate_darwin_export(root: Path, release: str, *, owner_uid: int = 0) -> None:
     root=Path(root);_trusted_root(root,owner_uid)
     _verify_darwin_export(root,release,owner_uid)
@@ -417,10 +557,7 @@ def activate_darwin_export(root: Path, release: str, *, owner_uid: int = 0) -> N
             info=entry.lstat()
             if info.st_uid!=owner_uid or info.st_mode&0o222:raise ValueError("unsafe stale Darwin export")
             candidates.append(entry)
-    for stale in sorted(candidates,key=lambda item:item.stat().st_mtime,reverse=True)[4:]:
-        if stale.stat().st_mtime>=time.time()-7200:continue
-        _immutable_tree(stale,owner_uid)
-        _remove_stage(stale)
+    _prune_stale(candidates,owner_uid)
 
 
 def _verify_darwin_export(root: Path, release: str, owner_uid: int) -> None:
@@ -490,8 +627,13 @@ def _copy_verified_tree(source: Path, stage: Path) -> None:
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("client file is not reusable")
             destination=target/name
-            destination.write_bytes(path.read_bytes())
-            os.chmod(destination,0o555 if info.st_mode&0o111 else 0o444)
+            if relative==Path(".") and name=="manifest.json":
+                # The receipt is rewritten for the new SHA: never share it.
+                destination.write_bytes(path.read_bytes())
+                os.chmod(destination,0o555 if info.st_mode&0o111 else 0o444)
+            else:
+                # Verified immutable payload: a second name, not a second copy.
+                os.link(path,destination)
     for folder, _dirnames, _filenames in os.walk(stage, followlinks=False):
         os.chmod(folder,0o555)
 
