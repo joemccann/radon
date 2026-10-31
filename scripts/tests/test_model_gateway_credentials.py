@@ -119,13 +119,15 @@ def test_credential_lock_wait_observes_cancellation(monkeypatch):
     monkeypatch.setattr(credentials,'connect_vault',lambda *a,**k:pytest.fail('cancelled request reached broker'))
     lock=threading.Lock();lock.acquire();monkeypatch.setattr(credentials,'_LOCK',lock)
     cancel=threading.Event();abort=threading.Timer(.04,cancel.set);abort.start()
-    release=threading.Timer(.35,lock.release);release.start()
-    started=time.monotonic()
+    released=threading.Event()
+    def let_go():
+        lock.release();released.set()
+    release=threading.Timer(.35,let_go);release.start()
     try:
-        with engine.attempt_scope(deadline=started+1,seen=set(),cancelled=cancel.is_set):
+        with engine.attempt_scope(deadline=time.monotonic()+1,seen=set(),cancelled=cancel.is_set):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert error.value.code=='cancelled'
-        assert time.monotonic()-started < .2
+        assert not released.is_set()
     finally:abort.join();release.join()
 
 
@@ -141,23 +143,22 @@ def test_real_stalled_vault_stops_at_request_deadline_or_disconnect(monkeypatch,
     import subscription_vault
     folder=Path(tempfile.mkdtemp(prefix='mgv-',dir='/tmp'));path=folder/'s'
     listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);listener.bind(str(path));listener.listen(1)
-    entered=threading.Event();stop=threading.Event();abort=threading.Event()
+    entered=threading.Event();stop=threading.Event();abort=threading.Event();finished=threading.Event()
     def stalled():
         with listener.accept()[0] as connection:
-            connection.recv(4096);entered.set();stop.wait(1)
+            connection.recv(4096);entered.set();stop.wait(1);finished.set()
     worker=threading.Thread(target=stalled,daemon=True);worker.start()
     monkeypatch.setenv('RADON_SUBSCRIPTION_VAULT_SOCKET',str(path))
     monkeypatch.setattr(subscription_vault,'IO_TIMEOUT_SECONDS',.35)
     monkeypatch.setenv('NVIDIA_API_KEY','old-key')
     timer=threading.Timer(.04,abort.set) if cancelled else None
     if timer:timer.start()
-    started=time.monotonic()
     try:
-        with engine.attempt_scope(deadline=started+(1 if cancelled else .06),seen=set(),cancelled=abort.is_set):
+        with engine.attempt_scope(deadline=time.monotonic()+(1 if cancelled else .06),seen=set(),cancelled=abort.is_set):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert entered.is_set()
         assert error.value.code==('cancelled' if cancelled else 'deadline_exceeded')
-        assert time.monotonic()-started < .2
+        assert not finished.is_set()
         assert os.environ['NVIDIA_API_KEY']=='old-key'  # Failed lookup never publishes partial/stale success.
     finally:
         stop.set();worker.join(1);listener.close();path.unlink();folder.rmdir()

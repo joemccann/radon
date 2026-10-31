@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import pytest
 
 
@@ -48,15 +49,39 @@ def test_unknown_cli_cannot_execute_arbitrary_gateway_commands(tmp_path):
             pass
 
 
-def test_runner_agent_entrypoints_have_no_private_provider_cli_escape():
+def test_runner_agent_entrypoints_have_no_private_provider_cli_escape(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    source = (root / 'scripts/runner/run_loop.sh').read_text()
-    launch = source.split('launch_agent() {', 1)[1].split('# pid<TAB>', 1)[0]
-    assert 'model_gateway/cli.py' in launch
-    assert 'exec agy ' not in launch
-    assert 'exec fx ' not in launch
-    assert 'nvidia_rate_limit.py' not in launch
-    assert 'CLAUDE_OAUTH' not in source
+    python = tmp_path / 'python'
+    record = tmp_path / 'argv'
+    python.write_text('#!/bin/sh\nprintf \'%s\\n\' "$0" "$@" > "$RECORD"\nexit 0\n')
+    python.chmod(0o755)
+    prompt = tmp_path / 'prompt.md'
+    prompt.write_text('task\n')
+    clients = tmp_path / 'clients'
+    (clients / 'bin').mkdir(parents=True)
+    for name in ('claude', 'codex', 'agy', 'fx', 'grok'):
+        binary = clients / 'bin' / name
+        binary.write_text('#!/bin/sh\necho DIRECT > "$RECORD"\nexit 86\n')
+        binary.chmod(0o755)
+    (tmp_path / 'home').mkdir()
+    expected = {'claude': 'claude', 'codex': 'codex', 'agy': 'codex', 'fx': 'codex', 'grok': 'grok'}
+    for agent, kind in expected.items():
+        record.write_text('')
+        result = subprocess.run(
+            ['/bin/bash', str(root / 'scripts/runner/run_loop.sh'), '--launch', agent, ''],
+            env={
+                'PATH': '/usr/bin:/bin',
+                'HOME': str(tmp_path / 'home'),
+                'RECORD': str(record),
+                'PROMPT_FILE': str(prompt),
+                'RADON_RUNNER_PYTHON': str(python),
+                'RADON_MODEL_CLIENTS_ROOT': str(clients),
+            },
+            capture_output=True, text=True, timeout=10,
+        )
+        argv = record.read_text().splitlines()
+        assert argv[:5] == [str(python), '-I', str(clients / 'lib/model_gateway/cli.py'), 'launch', kind], argv
+        assert result.returncode == 0, result.stderr
 
 
 def test_incident_execution_adapter_keeps_hardened_child_environment():
