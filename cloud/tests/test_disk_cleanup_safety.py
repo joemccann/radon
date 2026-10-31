@@ -492,6 +492,10 @@ class TestDanglingLayersUseEveryInstalledEngine:
 
 
 def test_the_docstring_states_the_current_backup_retention():
+    import re
+
     doc = disk_cleanup.__doc__
-    assert "RETENTION_DAYS=30" not in doc
-    assert "RETENTION_DAYS=7" in doc and "B2" in doc
+    source = (pathlib.Path(disk_cleanup.__file__).parent / "db_backup.py").read_text(encoding="utf-8")
+    live = re.search(r"^RETENTION_DAYS = (\d+)$", source, re.M).group(1)
+    assert re.findall(r"RETENTION_DAYS=(\d+)", doc) == [live]
+    assert "B2" in doc

@@ -14,7 +14,7 @@ cloud/ or scripts/:
   * journald (1.0G).
 
 DELIBERATELY OUT OF SCOPE: /home/radon/radon-cloud/backups/db. Retention there
-is db_backup.py's RETENTION_DAYS=7 locally, after its B2 off-box copy (kept a
+is db_backup.py's RETENTION_DAYS=2 locally, after its B2 off-box copy (kept a
 year) has landed; changing either window is an operator policy call. It is in
 PROTECTED_PATHS so no category here can reach it.
 
