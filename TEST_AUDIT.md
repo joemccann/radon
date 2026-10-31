@@ -12008,3 +12008,39 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy 2.11.7. Roo
 | 3 | 19,366 passed / 12 skipped / 63 subtests (186.89s) | 5 failed / 11,662 passed / 21 skipped / 1,176 files (179.70s) | 42 failed / 3,484 passed / 31 skipped (913.54s) | 0 added / 0 removed |
 
 Base cloud at `e3b77881` on this Mac: 42 failed / 3,484 passed / 31 skipped (949.13s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
+
+## Delta audit 2026-10-30
+
+The newest trusted checkpoint on issue #83 is `audited-through: e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9`. That commit is not an ancestor of `origin/main` after a history rewrite. The same subject and author date on `origin/main` is `2c130201bf4a8a670fc4dadd5e1d35169eefb5fd`. Those two trees differ by eight deleted PNGs and zero line changes. The range read is `2c130201..3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964`: 97 commits, 94 paths. No open `testing/` pull request. Numbering continues at T-574. The checkpoint carried no open verified finding.
+
+`ci.yml`, `vitest.config.ts`, and the coverage thresholds are unchanged in that range. No new `skip` or `xfail`. Re-triaged `TEST_LOG.md` and `NEW_FINDINGS`: T-492, T-493, and T-495 have later DONE rows. Other source in the range already has an executing test (relay listener, signals refresh timeouts, earnings cache, retired research health, marketdesk jobs, credential redaction). Not filed. Codemap import edges miss some of those importers; `rg` confirmed the imports.
+
+Not filed: the five `await import("../next.config.mjs")` Vitest cases still time out at 5000ms. Together they still timed out at 60000ms (5 failed / 24 passed). A direct import of `web/next.config.mjs` measured 72006ms. `robots-noindex.test.ts` alone passed 7 tests at a 120s ceiling in 74.83s. The committed ceiling was not raised. `cloud/tests` on this Mac matches the base SHA (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`). Caddy is on PATH. Linux CI is the authority for that suite.
+
+Delta tests, three times: 18 root Python files, 932 passed each time; `cloud/tests/test_app_image_runner_disk.py`, 5 passed each time; 9 web files, 153 passed each time.
+
+### T-574 — P1 — a rate-limited ticker refresh exits 0
+
+`scripts/uw_research.py` returned 0 from `_scheduled_cycle_ok` for every CLI mode. `POST /uw/research/refresh` runs `["--ticker", symbol]` (`scripts/api/routes/uw_research.py:108`) and treats `returncode == 0` as success (`scripts/api/subprocess.py:492`, `scripts/api/routes/uw_research.py:118`). A finished cycle whose every section is `rate_limited` then looked complete and started the 60s success cooldown while the retained snapshot stayed stale. The hourly oneshot is the caller that passes `--scheduled`. Existing tests only passed `--scheduled`. `docs/uw-advanced-research.md` described the exit-0 rule without limiting it to that flag.
+
+Acceptance: `main(["--ticker", "SPY", "--json"])` exits 1 when every section is `rate_limited`, does not record scheduled health, keeps the retained observation timestamps, and does not print the provider body. The same cycle with `--scheduled` still exits 0 and records partial health. Schema and mixed failures still exit 1.
+
+Audited through: 3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964 on 2026-10-30 — 1 new finding
+
+## Remediation 2026-10-30
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-574 | DONE | Before the guard, `test_ticker_refresh_stays_failed_when_every_section_is_rate_limited` failed `assert 0 == 1` on `main(["--ticker", "SPY", "--json"])` (1 failed in 1.02s). Exit 0 for an all-section rate limit now requires `args.scheduled` (`scripts/uw_research.py:456`). `scripts/tests/test_uw_advanced_research.py` passed 42. That file plus `scripts/api/tests/test_uw_research_routes.py` passed 59 twice. Owner doc `docs/uw-advanced-research.md` and the oneshot runbook say the same. |
+
+### Closing gates 2026-10-30
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `next.config.mjs` imports (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. Those five still timed out together at 60000ms. One of them passed 7 tests alone at a 120s ceiling. Cloud exit 1 each round on the same 42 nodes as each other and as `2c130201` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `2c130201` |
+|---|---|---|---|---|
+| 1 | 19,422 passed / 12 skipped / 63 subtests (126.47s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (147.16s) | 42 failed / 3,486 passed / 31 skipped (876.21s) | 0 added / 0 removed |
+| 2 | 19,422 passed / 12 skipped / 63 subtests (186.29s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (366.23s) | 42 failed / 3,486 passed / 31 skipped (1165.28s) | 0 added / 0 removed |
+| 3 | 19,422 passed / 12 skipped / 63 subtests (201.06s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (272.85s) | 42 failed / 3,486 passed / 31 skipped (848.75s) | 0 added / 0 removed |
+
+Base cloud at `2c130201` on this Mac: 42 failed / 3,484 passed / 31 skipped (1211.63s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Head passed two more tests than the base and added no failure. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.

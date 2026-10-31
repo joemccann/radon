@@ -1082,3 +1082,8 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-336 / R-747 | DONE | RED 2 failed (`TimeoutError` on the order-executor probe and on the third bridge call). GREEN 23 passed in `scripts/api/tests/test_model_gateway_route.py` (`-n auto`). Catalog parity 15 passed. Permanent drills 120 passed, 1 warning. | Model chat and forecast run on a two-thread `radon-model-bridge` pool. A third call returns 503 `saturated` and does not start another gateway request. The default executor stays free for order preflight and the working-order read. No catch was widened and no retry was added. |
+## Nightly remediation 2026-10-30
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-335 / R-746 | DONE | RED 1 failed, 4 passed in `test_earnings_cache_budget.py` (`days_until` stayed 40). GREEN 16 passed across `test_earnings_cache_budget.py` and `test_earnings_route.py`; focused `-n auto` rerun 24 passed including service registration. Catalog parity 13 passed. Permanent drills 120 passed, 1 warning. | A live earnings miss now recomputes `days_until` and `within_dte` from `report_date` for the request. A missing marker is unchanged. A batch whose every ticker missed cache still returns 502. No catch was widened and no retry was added. |

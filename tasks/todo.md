@@ -10609,3 +10609,18 @@ CI inventory repair: PR #1355 initial head 7b0b8f95d reproduced the same curatio
 Release completion receipt: exact-head CI and Pushover delivery are tracked in output/animation-implementation-2026-10-30/verification.json after push.
 
 Review: Implemented only opacity presence for Feedback/Share (160ms entry, 120ms exit) and Columns (125ms entry, 100ms exit), reusing --ease-out. Keyboard/assistive activation and Escape remain immediate; reduced motion remains suppressed. Exits become inert/aria-hidden at logical close, rapid reopen cancels removal, and share export generations prevent stale downloads or busy-state changes. Red baseline: 20 failed / 1 passed before implementation. Focused component regressions: 64 passed; hook coverage 100% lines/functions, 97.67% statements and 96.29% branches. WebKit and Chromium each passed 11 real pointer/touch, keyboard, reduced-motion and frame-step cases; screenshots inspected at 10%, 50% and settled entry with unchanged geometry. React component/lifecycle review completed. The first production share regression found stale edited captions on rapid reopen; a failing unit regression confirmed it, and logical reopening now resets caption/preview while preserving edits through ordinary post refresh. Another failing unit regression confirmed late clipboard status could reach a new opening; generation checks now suppress it. Final full web: 11,127 passed / 10 skipped across 1,117 files. Typecheck passed; production build/output audit passed (235 manifests). Combined production browser regressions passed 35/35. The curation guard failed for the new unclassified spec, then passed 6/6 after its 11-case production preflight and registration. git diff --check clean. CI and notification are the remaining release steps, tracked in the completion receipt. No new dependencies or motion on financial data, navigation, layout or column changes. Hardware feel remains unverified; no physical phone/tablet is connected.
+
+
+## MarketDesk publication transport (2026-10-31)
+
+- [x] HP1 depends_on: [] Identify the actual publication transport and reproduce the stale pooled socket with a managed UID 1000 read-only transaction.
+- [x] HP2 depends_on: [HP1] Reproduce publication batching after idle with a failing regression; retain read pooling and no ambiguous write replay.
+- [x] HP3 depends_on: [HP2] Retire connections before non-read pipelines, update owner docs/runbook, and obtain independent review.
+- [ ] HP4 depends_on: [HP3] Run focused and full required gates; publish a focused PR, verify exact-head CI, accepted notification and authorized admin merge.
+- [ ] HP5 depends_on: [HP4] Verify the normal deployment and an actual new MarketDesk publication without changing retries, policy or provider pacing.
+
+Review:
+- Live `3ce7f24` SELECT 1 succeeds, a read-only transaction after 18s idle fails RemoteDisconnected inside the 30s API pool lifetime, and a fresh SELECT1 succeeds. Real publisher imports api.db_http; the separate daemon pool already expires after 5s. No model, broker, credential or cooldown changes.
+
+- Three true red regressions and three controls; 207 focused tests passed in 21.85s. Independent review found no blocking issues. Documentation contract: 195 passed. Full infrastructure: 3,792 passed, 16 skipped. Web: 11,592 passed, 21 skipped; TypeScript passed.
+- Full Python: 19,740 passed, 12 skipped, 63 subtests, with the unchanged credential-cancellation timing failure also observed before this repair (0.352s versus 0.2s). Its complete module passed separately: 11 passed. The assertion and credential code were not changed. Exact-head CI and production verification remain pending.

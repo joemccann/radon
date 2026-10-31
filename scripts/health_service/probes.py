@@ -501,8 +501,9 @@ def build_status(probes: dict, units: dict, generated_at: str,
     """Assemble the always-200 /status body. Degraded sources are fields, never
     error codes (per feedback_http_status_for_real_errors.md).
 
-    `service_health` is the Turso-table section (raw rows + per-row age); a
-    Turso outage degrades it to state 'unknown'. `external_probe` is the freshest
+    `service_health` is the Turso-table section after retired-research
+    presentation, plus per-row age. A Turso outage degrades it to state
+    'unknown'. `external_probe` is the freshest
     Tier-3 off-box probe row (dict) or None when there is none / no creds. Both
     degrade without touching the response code or the rest of the body.
     """

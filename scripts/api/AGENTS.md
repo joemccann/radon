@@ -10,6 +10,10 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Do not return 4xx for legitimate empty/pending states; return 200 with a payload flag such as `missing: true`.
 - `/api/pi` and `/pi/exec` script allowlists are security-sensitive. Do not expand without review.
 
+## Hrana transport
+
+API Hrana pooling applies only to proven SELECT pipelines. Writes, mixed SQL and transaction batches start on a fresh connection before any SQL is sent; never resend an ambiguous write after a transport failure. Keep the 30-second read-pool lifetime and one safe-read retry. This also governs research publication through `api.db_http.hrana_transaction`; the separate daemon transport has its own policy.
+
 ## Auth
 
 - FastAPI routes are JWT-protected by default.
