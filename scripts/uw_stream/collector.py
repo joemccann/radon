@@ -92,7 +92,9 @@ def mirror_compact(snapshot: dict) -> None:
     try:
         from db.writer import upsert_scan_snapshot, record_service_health
         payload = {k: snapshot.get(k) for k in ("schema_version", "source", "status", "updated_at", "connection", "channels", "metrics")}
-        upsert_scan_snapshot("uw-stream", snapshot["updated_at"], payload)
+        # Socket-bounded Hrana: sync libsql has no timeout and holds the GIL,
+        # so a hung Turso call froze reader, writer and logging together.
+        upsert_scan_snapshot("uw-stream", snapshot["updated_at"], payload, bounded=True)
         status = "ok" if snapshot["status"] in {"live", "disabled"} else "error"
         record_service_health("uw-stream", status, finished_at=snapshot["updated_at"], error=None if status == "ok" else {"message": "Research stream incomplete; retained observations may be stale"})
     except Exception:
