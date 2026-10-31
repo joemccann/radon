@@ -3154,6 +3154,12 @@ async def _heartbeat_portfolio_sync_miss(reason: str) -> None:
     the stale bucket can still join ib-gateway-grouped.
     """
     text = _portfolio_sync_miss_reason(reason)
+    if (reason or "").strip() == _IB_COOLDOWN_SKIP_ERROR:
+        # ib_sync.py never ran, so this is not a writer miss. Stamping it
+        # overwrites the real reason from an earlier ib_sync failure and
+        # flags ERROR for a 15s skip while the gateway is healthy.
+        logger.warning("portfolio-sync miss left silent for IB cooldown skip")
+        return
     if not await _portfolio_gateway_allows_miss_heartbeat():
         logger.warning(
             "portfolio-sync miss left silent for gateway grouping: %s",
@@ -6373,6 +6379,9 @@ _IB_CONN_REFUSED_PATTERNS = (
 # subsequent attempts for this many seconds to avoid churn.
 _IB_SCRIPT_COOLDOWN_SECS = 15.0
 _ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
+# Returned when the cooldown skips a spawn. The script never ran, so callers
+# must not record it as a writer failure.
+_IB_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying shortly."
 
 # Scripts that transmit orders are NOT idempotent: a connection-flavored
 # failure can surface after placeOrder already reached IB, so the automatic
@@ -6457,10 +6466,7 @@ async def _run_ib_script_with_recovery(
             "Skipping %s — IB cooldown active (%.1fs since last failure, %ds cooldown)",
             script, elapsed, _IB_SCRIPT_COOLDOWN_SECS,
         )
-        return ScriptResult(
-            ok=False,
-            error="IB Gateway connection recently failed. Retrying shortly.",
-        )
+        return ScriptResult(ok=False, error=_IB_COOLDOWN_SKIP_ERROR)
 
     # Layer 2: Pre-flight pool check
     if not _pool_has_any_connection():

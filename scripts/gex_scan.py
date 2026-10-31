@@ -45,6 +45,14 @@ TRADING_DAYS_PER_YEAR = 252
 # cap because the UW-only snapshot is already on disk + DB before the
 # Playwright call runs.
 MQ_FETCH_TIMEOUT_SECONDS = 10
+# radon-refresh runs this on the :00/:15/:30/:45 marks shared with
+# radon-vol-cone-intraday, which fills the governor's standard minute window in
+# seconds; a provider 429 adds a 60s Retry-After embargo. The UWClient 5s
+# default turned either into "UW admission is busy", exit 1 and an error row
+# that the closed-market cache gate never cleared (2026-10-30 20:00Z). 70s
+# covers one minute window or one 60s embargo inside data_refresh's 120s child
+# budget.
+GEX_ADMISSION_WAIT_S = 70.0
 
 
 # ── DB / IO bindings — module-level so tests can patch ────────────
@@ -86,7 +94,7 @@ def _bucket_size_for(ticker: str, spot: float) -> int:
 
 def _get_uw_client():
     from clients.uw_client import UWClient
-    return UWClient()
+    return UWClient(admission_timeout=GEX_ADMISSION_WAIT_S)
 
 
 def fetch_strike_gex(client, ticker: str) -> List[Dict[str, Any]]:

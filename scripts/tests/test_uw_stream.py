@@ -219,3 +219,47 @@ def test_disabled_daemon_never_opens_transport(tmp_path):
         raise AssertionError("disabled collector opened provider socket")
     run(config(tmp_path), stop=stop, connect=forbidden, mirror=lambda _: None)
     assert read_snapshot(tmp_path / "uw" / "snapshot.json")["status"] == "disabled"
+
+
+def test_reconnect_after_historical_gap_returns_to_live(tmp_path):
+    """Cumulative gaps persist across restarts; they must not pin status degraded.
+
+    Production 2026-10-31: connection.gaps=106 after restarts, every channel
+    acknowledged on a fresh connection, yet status stayed degraded forever.
+    """
+    cfg = config(tmp_path)
+    store = Store(cfg)
+    store.model = ready(*cfg.channels)
+    store.flush([("flow-alerts", {"id": "persisted", "ticker": "SPY"}, NOW)], NOW)
+    store.close()
+    restarted = Store(cfg)
+    assert restarted.model.state["connection"]["gaps"] >= 1
+    later = NOW + 10_000_000  # the restart gap is stamped with wall time; connect after it
+    frames = [("__control__", {"event": "connect"}, later)]
+    frames += [(c, {"response": {}, "status": "ok"}, later) for c in cfg.channels]
+    restarted.flush(frames, later)
+    assert restarted.model.state["status"] == "live"
+    assert restarted.model.state["connection"]["gaps"] >= 1
+    restarted.close()
+
+
+def test_gap_during_current_connection_keeps_degraded_after_acks():
+    model = Materializer(("market_tide", "interval_flow"))
+    model.connect(NOW)
+    model.apply("market_tide", {"response": {}, "status": "ok"}, NOW + 1, 1)
+    model.gap(NOW + 2, "input-queue-overflow")
+    model.apply("interval_flow", {"response": {}, "status": "ok"}, NOW + 3, 2)
+    assert model.state["status"] == "degraded"
+
+
+def test_compact_mirror_uses_socket_bounded_turso_writes(monkeypatch):
+    """Sync libsql holds the GIL with no client timeout. A hung Turso call
+    froze the whole collector on 2026-10-31 09:05Z: no flush, no mirror, the
+    UW socket left in CLOSE-WAIT, the unit still active."""
+    import db.writer as writer
+    from uw_stream.collector import mirror_compact
+    calls = []
+    monkeypatch.setattr(writer, "upsert_scan_snapshot", lambda *a, **kw: calls.append(kw))
+    monkeypatch.setattr(writer, "record_service_health", lambda *a, **kw: None)
+    mirror_compact({"status": "live", "updated_at": "2026-10-31T09:05:51Z"})
+    assert calls == [{"bounded": True}]

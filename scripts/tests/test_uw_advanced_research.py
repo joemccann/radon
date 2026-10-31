@@ -358,6 +358,31 @@ def test_scheduled_mixed_rate_limit_and_schema_failure_still_exits_one(monkeypat
     assert "daily quota body" not in text
 
 
+def test_scheduled_bounded_multileg_truncation_alone_reports_healthy(monkeypatch, capsys, tmp_path):
+    """A declared multi-leg page bound is coverage disclosure, not a failed dataset.
+
+    2026-10-29 16:08Z onward: AAPL filled both 50-row pages every cycle and
+    every section was ok, yet `coverage.truncated` made status partial and the
+    uw-research writer reported ERROR on every hourly run.
+    """
+    full = FakeClient({"get_multi_leg": lambda *a, **kw: {"data": [{"id": f"s-{kw['offset'] + i}", "net_price": "1.0"} for i in range(50)]},
+                       "get_multi_leg_legs": {"data": []}})
+    uw_research, heartbeat, _seed_at, _seeded = _scheduled_universe(monkeypatch, tmp_path, full)
+    assert uw_research.main(["--scheduled", "--json", "--force"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "partial"
+    assert payload["sections"]["multi_leg"]["data"]["coverage"]["truncated"] is True
+    heartbeat.assert_called_once_with("ok")
+
+
+def test_scheduled_unavailable_legs_still_reports_incomplete(monkeypatch, capsys, tmp_path):
+    failing = FakeClient({"get_multi_leg": {"data": [{"id": "s-1", "net_price": "1.0"}]},
+                          "get_multi_leg_legs": UWRateLimitError("quota", status_code=429)})
+    uw_research, heartbeat, _seed_at, _seeded = _scheduled_universe(monkeypatch, tmp_path, failing)
+    uw_research.main(["--scheduled", "--json", "--force"])
+    heartbeat.assert_called_once_with("partial")
+
+
 def test_futures_rejects_reassigned_security_id_before_reading_blocks(tmp_path):
     fake = FakeClient({"get_futures_display_factor": {"data": {"security_id": 123, "symbol": "ESU6", "display_factor": "0.01"}}})
     result = collect_research("SPY", sections=["futures"], client=fake, now=NOW, data_dir=tmp_path, futures_contract="ESZ6", security_id=123)

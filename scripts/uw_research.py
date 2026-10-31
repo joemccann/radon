@@ -419,6 +419,27 @@ def _rate_limit_only(result: dict) -> bool:
     return True
 
 
+def _health_complete(result: dict) -> bool:
+    """Writer health: every section observed and every requested leg fetched.
+
+    `coverage.truncated` is the declared page bound (two 50-row multi-leg
+    pages). A liquid ticker exceeds it every session, so it stays disclosed in
+    the snapshot status and coverage but is not a failed dataset.
+    """
+    if result.get("status") == "ok":
+        return True
+    sections = result.get("sections")
+    if result.get("status") != "partial" or not isinstance(sections, dict) or not sections:
+        return False
+    for section in sections.values():
+        if not isinstance(section, dict) or section.get("state") not in {"ok", "empty"}:
+            return False
+        data = section.get("data")
+        if isinstance(data, dict) and any(isinstance(t, dict) and t.get("legs_state") == "unavailable" for t in data.get("trades", [])):
+            return False
+    return True
+
+
 def _scheduled_cycle_ok(result: dict) -> bool:
     return result.get("status") in {"ok", "partial"} or _rate_limit_only(result)
 
@@ -448,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
                    futures_contract=args.futures_contract, security_id=args.security_id, force=args.force) for ticker in tickers]
         payload = results[0] if len(results) == 1 else {"status": "ok" if all(r["status"] == "ok" for r in results) else "partial", "results": results}
         if args.scheduled:
-            _record_health("ok" if all(r["status"] == "ok" for r in results) else "partial")
+            _record_health("ok" if all(_health_complete(r) for r in results) else "partial")
         print(json.dumps(payload, allow_nan=False))
         # Exit 0 on an all-section 429 is the hourly oneshot only. `--ticker`
         # is the operator refresh: a zero exit would look complete and start

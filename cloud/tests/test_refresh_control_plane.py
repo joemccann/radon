@@ -1163,3 +1163,84 @@ exec {shlex.quote(str(real_chmod))} "$@"
     assert oct(box.manifest.stat().st_mode & 0o777) == "0o644"
     leftovers = [p.name for p in box.manifest.parent.iterdir() if p.name.startswith(".")]
     assert leftovers == []
+
+
+# --- fleet-wide prefix drop-in (2026-10-31 config-drift) ----------------------
+
+FLEET_DROPIN_SOURCE = "services/radon-.service.d/common.conf"
+FLEET_DROPIN_TARGET = "/etc/systemd/system/radon-.service.d/common.conf"
+BOOTSTRAP_TEXT = (CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh").read_text(encoding="utf-8")
+
+
+def test_fleet_dropin_is_a_control_plane_artifact_in_helper_and_bootstrap() -> None:
+    """setup-vps.sh was the only installer of the fleet drop-in, so a repo edit
+    to it never reached an existing host: production ran the pre-gateway blob
+    and the daily audit reported `file-mismatch:fleet-dropin` indefinitely."""
+    index = CONTROL_PLANE_SOURCES.index(FLEET_DROPIN_SOURCE)
+    assert CONTROL_PLANE_TARGETS[index] == FLEET_DROPIN_TARGET
+    assert CONTROL_PLANE_MODES[index] == "644"
+    boot_sources = _bash_string_array(BOOTSTRAP_TEXT, "SOURCES")
+    boot_targets = _bash_string_array(BOOTSTRAP_TEXT, "LOGICAL_TARGETS")
+    boot_kinds = _bash_string_array(BOOTSTRAP_TEXT, "KINDS")
+    # The helper verifies the manifest bootstrap writes row by row.
+    assert boot_sources == CONTROL_PLANE_SOURCES
+    assert boot_targets == CONTROL_PLANE_TARGETS
+    assert boot_kinds[boot_sources.index(FLEET_DROPIN_SOURCE)] == "fleet-dropin"
+
+
+def test_gateway_rollback_allowlist_matches_the_forward_contract() -> None:
+    """The first-cutover rollback restored common.conf while no forward path
+    installed it. Rollback and refresh must cover the same targets."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "gateway_rollback_contract", CLOUD_ROOT / "scripts" / "model_gateway_rollback.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert set(module.ALLOWLIST) == set(CONTROL_PLANE_TARGETS)
+    for source_rel, target in zip(CONTROL_PLANE_SOURCES, CONTROL_PLANE_TARGETS, strict=True):
+        expected = source_rel.removeprefix("repo/") if source_rel.startswith("repo/") else f"cloud/{source_rel}"
+        assert module.ALLOWLIST[target]["source"] == expected, target
+
+
+def test_refresh_reinstalls_a_stale_fleet_dropin(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    installed = box.rootfs / FLEET_DROPIN_TARGET.lstrip("/")
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_text("[Service]\nEnvironment=RADON_DB_NO_REPLICA=1\n", encoding="utf-8")
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = (box.cloud / FLEET_DROPIN_SOURCE).read_bytes()
+    assert installed.read_bytes() == expected
+    assert f"{_sha256_bytes(expected)}  {FLEET_DROPIN_SOURCE} -> {FLEET_DROPIN_TARGET}" in (
+        box.manifest.read_text(encoding="utf-8")
+    )
+    assert box.systemctl_calls().count("daemon-reload") == 1
+
+
+@pytest.mark.parametrize(
+    "directive",
+    ["ExecStart=/bin/sh -c id", "ExecStartPre=/bin/true", "User=root", "Type=simple", "[Unit]"],
+)
+def test_refresh_refuses_a_fleet_dropin_that_changes_execution(tmp_path: Path, directive: str) -> None:
+    box = Sandbox(tmp_path)
+    installed = box.installed_path(FLEET_DROPIN_SOURCE)
+    before = installed.read_bytes()
+    path = box.cloud / FLEET_DROPIN_SOURCE
+    path.write_text(path.read_text(encoding="utf-8") + directive + "\n", encoding="utf-8")
+    box.commit_sources()
+
+    result = box.run()
+
+    assert result.returncode != 0
+    assert "fleet drop-in" in result.stderr
+    assert installed.read_bytes() == before
+
+
+def test_fleet_dropin_gate_is_identical_in_helper_and_bootstrap() -> None:
+    assert function_body(HELPER_TEXT, "fleet_dropin_body_is_valid") == function_body(
+        BOOTSTRAP_TEXT, "fleet_dropin_body_is_valid"
+    )
