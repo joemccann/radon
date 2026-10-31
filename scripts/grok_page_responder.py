@@ -892,8 +892,9 @@ def _harden_controller_against_child() -> None:
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     _harden_controller_against_child()
-    return subprocess.run(
-        cmd,
+    from model_gateway.cli import run
+    return run(
+        "grok", cmd,
         capture_output=True,
         text=True,
         timeout=kwargs.get("timeout", GROK_TIMEOUT_SECS),

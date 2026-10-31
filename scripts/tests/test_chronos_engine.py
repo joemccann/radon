@@ -7,7 +7,7 @@ lazily and the model-API-specific call is monkeypatched out here.
 import numpy as np
 import pytest
 
-from forecasting.chronos_engine import (
+from model_gateway._forecast_backend import (
     DEFAULT_MODEL_ID,
     DEFAULT_QUANTILE_LEVELS,
     ChronosUnavailable,
@@ -22,7 +22,7 @@ SERIES = [10.0, 11.0, 12.0, 11.5, 13.0, 12.5, 14.0, 13.5, 15.0, 14.5]
 def _patch_raw(monkeypatch, matrix):
     """Force the engine to use a deterministic raw forecast and to think the
     chronos package is available (without it actually being installed)."""
-    import forecasting.chronos_engine as engine
+    import model_gateway._forecast_backend as engine
 
     monkeypatch.setattr(engine, "is_available", lambda: True)
     monkeypatch.setattr(engine, "_load_pipeline", lambda model_id, device: object())
@@ -141,7 +141,7 @@ def test_raises_on_non_numeric_series():
 
 
 def test_raises_chronos_unavailable_when_package_missing(monkeypatch):
-    import forecasting.chronos_engine as engine
+    import model_gateway._forecast_backend as engine
 
     monkeypatch.setattr(engine, "is_available", lambda: False)
     with pytest.raises(ChronosUnavailable):

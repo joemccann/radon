@@ -245,7 +245,8 @@ class TestImageBuildCarriesPublicEnv:
         jobs = parsed["jobs"]
         assert "python-image" in jobs
         assert "node-image" in jobs
-        assert "needs" not in jobs["python-image"]
+        assert jobs["python-image"].get("needs") == "darwin-clients"
+        assert "node-image" not in jobs["python-image"].get("needs", [])
         assert "needs" not in jobs["node-image"]
         concurrency = parsed.get("concurrency") or jobs["python-image"].get("concurrency")
         assert concurrency
@@ -367,9 +368,14 @@ class TestImageBuildUsesRemoteCache:
         setup_steps = [step for step in steps if step.get("uses") == SETUP_BUILDX_ACTION]
         build_steps = [step for step in steps if step.get("uses") == BUILD_PUSH_ACTION]
         assert len(setup_steps) == 1
-        assert len(build_steps) == 1
-
-        config = build_steps[0]["with"]
+        assert len(build_steps) == (2 if job_name == "python-image" else 1)
+        ordinary = [step for step in build_steps if step["with"].get("target") != "model-gateway"]
+        assert len(ordinary) == 1
+        if job_name == "python-image":
+            gateway = [step for step in build_steps if step["with"].get("target") == "model-gateway"]
+            assert len(gateway) == 1
+            assert "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}" in gateway[0]["with"]["tags"]
+        config = ordinary[0]["with"]
         assert config["context"] == "."
         assert config["file"] == dockerfile
         assert config["platforms"] == "linux/amd64"

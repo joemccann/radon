@@ -11,7 +11,7 @@ const post = {
     documentDate: "2026-09-04", folderDate: "2026-09-04", pages: [1], figures: [], fileId: "id:fixture", revision: "r1", contentHash: sourceHash },
 };
 
-async function setup(page: Page, surface: Surface, stepFrames = false) {
+async function setup(page: Page, surface: Surface, stepFrames = false, delayTransitionEvents = false) {
   const token = process.env.RADON_AUTHLESS_TEST_TOKEN;
   if (token) await page.setExtraHTTPHeaders({ "x-radon-authless-test": token });
   await installClearFixtures(page);
@@ -19,27 +19,52 @@ async function setup(page: Page, surface: Surface, stepFrames = false) {
   await page.routeWebSocket(/\/ws(?:\?|$)|:8765/, socket => {
     socket.send(JSON.stringify({ type: "status", ib_connected: true, market_data_degraded: false, subscriptions: [] }));
   });
-  await page.addInitScript(({ stepFrames }) => {
+  await page.addInitScript(({ stepFrames, delayTransitionEvents }) => {
     const records: unknown[] = [];
-    Object.assign(window, { __pointerFadeRecords: records });
-    document.addEventListener("transitionrun", event => {
-      const panel = event.target;
-      if (!(panel instanceof HTMLElement) || !panel.matches(".pointer-fade") || event.propertyName !== "opacity") return;
-      const style = getComputedStyle(panel);
+    const delayedEvents: string[] = [];
+    Object.assign(window, { __pointerFadeRecords: records, __pointerFadeDelayedEvents: delayedEvents });
+    const recordPanel = (panel: HTMLElement, style: CSSStyleDeclaration) => {
       records.push({
         surface: panel.closest("[data-research-feedback]") ? "feedback" : panel.closest("[data-newsfeed-share]") ? "share" : "columns",
         phase: panel.dataset.fadeState, duration: Math.round(parseFloat(style.transitionDuration) * 1000),
         curve: style.transitionTimingFunction, property: style.transitionProperty,
         inert: panel.inert, hidden: panel.getAttribute("aria-hidden"),
       });
-      if (stepFrames && panel.dataset.fadeState === "open") {
-        for (const animation of panel.getAnimations()) {
-          animation.pause();
-          animation.currentTime = parseFloat(style.transitionDuration) * 100;
+    };
+    if (stepFrames) {
+      const observed = new WeakSet<Animation>();
+      // Observe native transition creation before asynchronous transitionrun
+      // delivery: a busy renderer can deliver that event after the fade ends.
+      new MutationObserver(() => {
+        for (const panel of document.querySelectorAll<HTMLElement>(".pointer-fade")) {
+          const style = getComputedStyle(panel);
+          for (const animation of panel.getAnimations()) {
+            if (!(animation instanceof CSSTransition) || animation.transitionProperty !== "opacity" || observed.has(animation)) continue;
+            observed.add(animation);
+            if (panel.dataset.fadeState === "open") {
+              animation.pause();
+              animation.currentTime = parseFloat(style.transitionDuration) * 100;
+            }
+            recordPanel(panel, style);
+          }
         }
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-fade-state", "data-fade-motion"] });
+    }
+    const recordTransition = (event: TransitionEvent) => {
+      const panel = event.target;
+      if (!stepFrames && panel instanceof HTMLElement && panel.matches(".pointer-fade") && event.propertyName === "opacity") {
+        recordPanel(panel, getComputedStyle(panel));
       }
+    };
+    document.addEventListener("transitionrun", event => {
+      // Delay observation of the actual native event beyond the entry duration.
+      if (delayTransitionEvents) setTimeout(() => {
+        recordTransition(event);
+        delayedEvents.push(event.propertyName);
+      }, 250);
+      else recordTransition(event);
     });
-  }, { stepFrames });
+  }, { stepFrames, delayTransitionEvents });
   await page.goto(surface === "columns" ? "/portfolio" : "/dashboard");
   const root = surface === "columns" ? page.locator(".columns-toggle").first()
     : page.getByTestId("news-feed-item").filter({ hasText: post.title }).locator(surface === "feedback" ? "[data-research-feedback]" : "[data-newsfeed-share]");
@@ -54,6 +79,16 @@ async function records(page: Page) {
 
 test.describe("pointer opacity presence", () => {
   test.use({ hasTouch: false, isMobile: false, viewport: { width: 1440, height: 1000 } });
+  test("native opacity sampling survives delayed transition events", async ({ page }, testInfo) => {
+    const { trigger, panel } = await setup(page, "share", true, true);
+    await trigger.click();
+    await expect.poll(async () => (await records(page)).find(record => record.phase === "open")?.duration).toBe(160);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __pointerFadeDelayedEvents: string[] }).__pointerFadeDelayedEvents)).toContain("opacity");
+    const opacity = await panel.evaluate(el => Number(getComputedStyle(el).opacity));
+    expect(opacity).toBeGreaterThan(0);
+    expect(opacity).toBeLessThan(1);
+    await page.screenshot({ path: testInfo.outputPath("delayed-event-entry-10pct.png") });
+  });
   for (const surface of ["feedback", "share", "columns"] as const) {
     test(`${surface}: only opacity transitions; exits are inert and keyboard activation is immediate`, async ({ page }, testInfo) => {
       const { trigger, panel } = await setup(page, surface, true);

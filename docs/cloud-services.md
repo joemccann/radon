@@ -646,7 +646,7 @@ available; portfolio and media archives cover only their respective data.
 
 ## Subscription tokens (agent CLIs)
 
-`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`, `RandomizedDelaySec=60`). The refresh lead that keeps a one-hour access token from expiring between those fires is owned by [subscription-tokens.md](subscription-tokens.md). The oneshot seals, refreshes and restores the anthropic / codex / grok / antigravity (`agy`) credential files through the existing encrypted secret store. Raw-bearer logins are proved with one real model call a day. AGY is proved with `agy models` on every run and does not use a token endpoint. The unit heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`, `RandomizedDelaySec=60`). Its secret-free host client submits and polls a bounded refresh job on the private model gateway. The managed gateway owns native credential probes, refresh, restoration, provider grants and pinned CLIs; it reaches only the provider-scoped slots through the separate subscription-vault broker, never the store master key. The existing `subscription-tokens` health row, safe re-authentication prompts and original refresh-lock/run budgets remain authoritative. Runbook: [subscription-tokens.md](subscription-tokens.md).
 
 ---
 
@@ -1474,3 +1474,25 @@ independent upgrade timer remain unstarted until the explicit handover in
 is pinned by the optional upgrade unit; the existing keeper upgrade path
 keeps its normal runtime when the variable is absent. Rollback restores the
 previous timers through the same recorded handover procedure.
+
+
+### Private model gateway
+
+`radon-model-gateway.service` serves HTTP only through the UID1000 Unix socket
+`/run/radon-model-gateway/gateway.sock` (0700 directory, 0600 socket by default).
+Management uses a separate `/run/radon-model-control/control.sock`, exposed only
+to keeper/catalog jobs and the privileged API. An optional dedicated SSH tunnel
+UID/GID may access allowlisted inference via a 0710 directory and 0660 socket;
+it receives neither management nor vault access. Application
+containers receive only a read-only socket-directory bind; isolated browser
+workers retain bridge networks. Host timer jobs use the same private interface.
+Provider credentials terminate at the gateway, which has a model-only filtered
+environment and no application data, broker grants or secret-store master key.
+Its separate encrypted vault broker remains the only persistence-key holder.
+
+The gateway joins startup ordering and normal deploy readiness, stability,
+restart and rollback checks. A gateway-only image target preserves the existing
+optional CPU Chronos capability without adding Torch to the ordinary API image.
+All three exact-release images must pass CI and pre-pull admission. CLI upgrades
+remain pinned source changes and immutable image deployments. Model weights and
+embedding assets persist only in the private gateway cache.

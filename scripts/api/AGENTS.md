@@ -13,6 +13,7 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 ## Auth
 
 - FastAPI routes are JWT-protected by default.
+- The demo service token cannot access `/model-gateway` inference or status. Its only gateway exception is exact `GET /model-gateway/models` for the demo picker; operator JWT and trusted-local lanes retain their existing access.
 - Localhost bypass covers server-to-server development traffic.
 - Auth-exempt: `/health`, `/ws-ticket/validate`, `/demo/trial-expiry`, and all `*/share` routes.
 - `/docs` and `/openapi.json` are not publicly exempt; they require the trusted-local bypass so the endpoint map is not exposed through Caddy.

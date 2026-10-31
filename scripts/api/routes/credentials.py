@@ -65,6 +65,8 @@ router = APIRouter()
 # Names exported from the store into os.environ this process lifetime.
 # Distinguishes live exports from .env-file fallbacks after a delete (R-541).
 _SESSION_EXPORTED: set[str] = set()
+# Persisted model keys belong to the model gateway, never the app's process env.
+from model_gateway.client import MODEL_SECRET_ENV as _GATEWAY_MODEL_FIELDS, scrub_model_secrets
 
 UPDATED_BY_MAX_LEN = 64
 
@@ -526,6 +528,9 @@ async def put_credentials(service_id: str, request: Request):
         # leave a half-stored, half-exported service (R-539).
         store.set_secrets(submitted, actor=actor)
         for name, value in submitted.items():
+            if name in _GATEWAY_MODEL_FIELDS:
+                os.environ.pop(name, None)
+                continue
             try:
                 os.environ[name] = value
             except (ValueError, UnicodeEncodeError) as exc:
@@ -617,6 +622,7 @@ def bootstrap_exported_names() -> list:
     Only registry names are ever touched.
     """
     global _BOOTSTRAP_FAILURE
+    scrub_model_secrets()
     exported = []
     try:
         store = _store()
@@ -637,6 +643,9 @@ def bootstrap_exported_names() -> list:
         return exported
     _BOOTSTRAP_FAILURE = None
     for name in credentials_registry.all_field_names():
+        if name in _GATEWAY_MODEL_FIELDS:
+            os.environ.pop(name, None)
+            continue
         if name not in stored:
             continue
         try:

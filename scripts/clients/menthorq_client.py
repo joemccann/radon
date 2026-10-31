@@ -24,7 +24,7 @@ Credentials (project root .env, loaded via a local fallback loader):
     MENTHORQ_PASS  -- MenthorQ password
 
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
-    anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity
+    antigravity -> anthropic -> grok -> cursor (unwired skip) -> codex
     -> nvidia (free) -> cerebras (last).
     Subscription grants only for the first band (see clients/model_ladder.py);
     NVIDIA_API_KEY, CEREBRAS_API_KEY for the last two.
@@ -1491,7 +1491,7 @@ class MenthorQClient:
     ) -> Optional[List[Dict[str, Any]]]:
         """Send a screenshot through the CTA vision cascade.
 
-        Order: anthropic -> grok -> cursor (unwired) -> codex -> antigravity
+        Order: antigravity -> anthropic -> grok -> cursor (unwired) -> codex
         -> nvidia -> cerebras. Credit/billing/quota/hard provider fails
         fall through; the winner is logged.
         """

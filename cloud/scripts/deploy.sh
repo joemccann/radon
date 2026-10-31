@@ -102,7 +102,7 @@ readonly BUN_VERSION="1.4.4"
 
 # Optional research collector joins subsequent release transactions only once
 # activated. A first deploy installs its code/unit before channel admission.
-SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+SERVICES=(radon-model-gateway radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
 UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
@@ -606,7 +606,7 @@ load_transition_journal() {
   JOURNAL_PHASE="${values[4]}"
   if [[ ! "$JOURNAL_REQUESTED_SHA" =~ ^[0-9a-f]{40}$ \
       || ! "$JOURNAL_PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ \
-      || ! "$JOURNAL_PHASE" =~ ^(prepared|backup_started|backup_complete|promoting|target_unverified|verified)$ \
+      || ! "$JOURNAL_PHASE" =~ ^(prepared|backup_started|backup_complete|promoting|target_unverified|verified|finalization_pending)$ \
       ]] || ! release_dir_is_managed "$JOURNAL_STAGE_DIR" \
       || ! release_dir_is_managed "$JOURNAL_BACKUP_DIR"; then
     log_error "Transition journal failed path, SHA, or phase validation"
@@ -1282,6 +1282,40 @@ recover_pending_transition() {
   RELEASE_BACKUP_DIR="$JOURNAL_BACKUP_DIR"
   PREVIOUS_RELEASE_SHA="$JOURNAL_PREVIOUS_SHA"
 
+  if [[ "$JOURNAL_PHASE" == "verified" || "$JOURNAL_PHASE" == "finalization_pending" ]]; then
+    local committed_sha="" commit_status=0
+    committed_sha="$(sudo "$DEPLOY_ROOT_HELPER" verify-committed)" || commit_status=$?
+    if (( commit_status != 0 && commit_status != 3 )); then
+      log_error "Cannot establish root commit state; refusing rollback"
+      return "$commit_status"
+    fi
+    if [[ "$committed_sha" == "$JOURNAL_REQUESTED_SHA" ]]; then
+      [[ "$(current_commit)" == "$JOURNAL_REQUESTED_SHA" ]] || {
+        log_error "Committed release identity changed; manual recovery required"
+        return 78
+      }
+      write_transition_phase finalization_pending || return 1
+      # Export publication and retired timer cleanup are idempotent. Service
+      # health changing after root commit cannot revive discarded snapshots.
+      sudo "$DEPLOY_ROOT_HELPER" commit-transition || return $?
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed after a committed release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed after a committed release; the next deploy will republish it"
+      DEPLOY_RELEASE_UNVERIFIED=0
+      finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
+      log_success "Finalized committed release ${JOURNAL_REQUESTED_SHA:0:7}"
+      notify_release_live "$JOURNAL_REQUESTED_SHA"
+      return 0
+    elif [[ -n "$committed_sha" ]]; then
+      log_error "Root commit receipt differs from the journal; refusing rollback"
+      return 78
+    elif [[ "$JOURNAL_PHASE" == "finalization_pending" ]]; then
+      log_error "Committed journal lacks its exact root receipt; refusing rollback"
+      return 78
+    fi
+  fi
+
   if [[ "$JOURNAL_PHASE" == "verified" ]]; then
     if [[ "$(current_commit)" == "$JOURNAL_REQUESTED_SHA" ]] \
       && validate_rollback_artifacts "$RADON_DIR" \
@@ -1606,6 +1640,17 @@ check_release_topology_restored() {
   return 1
 }
 
+check_model_gateway() {
+  if curl -sf --max-time "$HEALTH_CURL_TIMEOUT" \
+      --unix-socket /run/radon-model-gateway/gateway.sock \
+      http://localhost/health >/dev/null 2>&1; then
+    log_success "[gate] private model gateway responding"
+    return 0
+  fi
+  log_error "[gate] private model gateway unavailable"
+  return 1
+}
+
 check_health_lite() {
   local attempt=1
   while (( attempt <= HEALTH_RETRIES )); do
@@ -1701,6 +1746,7 @@ deploy_gate() {
   check_release_topology_restored || gate_rc=1
   snapshot_unit_restarts || gate_rc=1
   check_health_lite || gate_rc=1
+  check_model_gateway || gate_rc=1
   check_nextjs_http || gate_rc=1
   check_relay_listener || gate_rc=1
   check_relay_http || gate_rc=1

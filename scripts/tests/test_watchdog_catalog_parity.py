@@ -45,6 +45,11 @@ WEB_CATALOG = REPO / "web" / "lib" / "serviceHealthWindows.ts"
 # staleness-checked. Each needs a stated reason, so the exemption is a
 # decision rather than an oversight.
 EXEMPT: dict[str, str] = {}
+# Retained unit files support exact old-release rollback; successful gateway
+# cutover disables these mutable installers. CLI upgrades belong to immutable CI.
+RETIRED_UNITS = {"radon-grok-upgrade", "radon-grok-responder-upgrade"}
+# This fixed RPC client delegates actual durable writes to the gateway keeper.
+HEALTH_DELEGATES = {"scripts/model_gateway/refresh_cli.py": "scripts/subscription_tokens.py"}
 
 
 def _timer_backed_services() -> set[str]:
@@ -52,7 +57,7 @@ def _timer_backed_services() -> set[str]:
     names: set[str] = set()
     for timer in SERVICES_DIR.glob("*.timer"):
         unit = timer.with_suffix(".service")
-        if unit.exists():
+        if unit.exists() and unit.stem not in RETIRED_UNITS:
             names.add(unit.stem)
     return names
 
@@ -172,6 +177,9 @@ def _health_names_written_by(unit_stem: str) -> set[str]:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         names |= _names_in(text)
+        delegate = HEALTH_DELEGATES.get(path.relative_to(REPO).as_posix())
+        if delegate:
+            names |= _names_in((REPO / delegate).read_text(encoding="utf-8"))
         if path.suffix == ".sh":
             # Comments FIRST. `run_flow_refresh.sh` mentions
             # `scripts/api/server.py` in a comment about a shed marker, which
@@ -484,3 +492,17 @@ class TestEveryTimerBackedUnitIsAccountedFor:
         assert not unresolved, (
             f"ExecStart targets that resolve to no file in-tree: {unresolved}"
         )
+
+
+def test_rpc_keeper_delegates_to_existing_catalogued_durable_health_writer():
+    assert _health_names_written_by("radon-subscription-tokens") == {"subscription-tokens"}
+    assert "subscription-tokens" in services_mod.SCHEDULED_SERVICES
+    assert _web_category("subscription-tokens") == "scheduled"
+
+
+def test_mutable_cli_upgrader_is_explicitly_retired_from_scheduled_health():
+    assert "radon-grok-upgrade" not in _timer_backed_services()
+    assert "grok-upgrade" not in services_mod.SCHEDULED_SERVICES
+    assert "grok-responder-upgrade" not in services_mod.SCHEDULED_SERVICES
+    assert _web_category("grok-upgrade") is None
+    assert "commit-model-clients" in (REPO/"cloud/scripts/deploy-root-helper.sh").read_text()

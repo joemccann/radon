@@ -686,7 +686,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 16:20 ET | SPX pct above 50d MA over pct above 200d MA (20 min after the close, across DST). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 16:40 ET | SPX pct of members with Wilder RSI(14) strictly below 30 (40 min after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
@@ -1240,10 +1240,17 @@ gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
 `gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
-the history fold from `scripts/release_version.py`. The `release-tag` job
-pushes it after that deploy succeeds, including when earlier test jobs were
-skipped. Root and web `package.json` version fields are a fallback when that
-history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
+the shared build identity from `scripts/release_version.py --ci-version
+--expected-sha "$GITHUB_SHA"`. Both image selection and `release-tag` validate
+canonical semver and the exact checkout SHA; selector failure stops the step
+before output or tagging. The tag job runs after deployment succeeds, including
+when earlier test jobs were skipped, and never moves an existing tag.
+
+The original 0.7.0 history baseline remains unchanged. When that history is
+missing or disconnected after a history rewrite, the existing web `package.json`
+fallback labels both the built app and its tag. Package fields can lag earlier
+tags; this fallback does not reconstruct monotonic semver or restore purged
+objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.

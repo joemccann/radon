@@ -202,6 +202,14 @@ ARTIFACTS = (
     Artifact("services/radon-media-publish.path", "/etc/systemd/system/radon-media-publish.path", 0o644),
     Artifact("services/radon-media-publish.timer", "/etc/systemd/system/radon-media-publish.timer", 0o644),
     Artifact("config/tmpfiles.d/radon-deploy.conf", "/usr/lib/tmpfiles.d/radon-deploy.conf", 0o644),
+    Artifact("services/radon-model-gateway.service", "/etc/systemd/system/radon-model-gateway.service", 0o644),
+    Artifact("services/radon-model-gateway.service.d/runtime-container.conf", "/etc/systemd/system/radon-model-gateway.service.d/runtime-container.conf", 0o644),
+    Artifact("services/radon-subscription-tokens.service", "/etc/systemd/system/radon-subscription-tokens.service", 0o644),
+    Artifact("scripts/model_clients.py", "/usr/local/lib/radon/model_clients.py", 0o644),
+    Artifact("scripts/model_gateway_rollback.py", "/usr/local/lib/radon/model_gateway_rollback.py", 0o644),
+    Artifact("scripts/model_transport.py", "/usr/local/lib/radon/model_transport.py", 0o644),
+    Artifact("scripts/mac_model_gateway.py", "/usr/local/lib/radon/mac_model_gateway.py", 0o644),
+    Artifact("scripts/model_pacing.py", "/usr/local/lib/radon/model_pacing.py", 0o644),
 )
 
 

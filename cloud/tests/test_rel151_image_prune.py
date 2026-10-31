@@ -110,4 +110,4 @@ def test_changed_registry_digest_refreshes_the_local_release_pair(tmp_path):
 def test_matching_digests_keep_cached_images_without_pulling_layers(tmp_path):
     calls = lines(_run(tmp_path, ["pull", TARGET], extra_env=env(tmp_path), docker_body=DOCKER))
     assert not any(s.startswith("pull ") for s in calls)
-    assert sum(s.startswith("buildx imagetools inspect ") for s in calls) == 2
+    assert sum(s.startswith("buildx imagetools inspect ") for s in calls) == 3
