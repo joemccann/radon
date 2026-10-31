@@ -161,3 +161,15 @@ describe("assistant catalog freshness", () => {
     expect(ops.find((item) => item.path === "/quote/{ticker}")?.operatorOnly).toBeFalsy();
   });
 });
+
+it("never advertises model gateway operations even if a future pin becomes callable", () => {
+  const sources = fixtureSources(`
+    ("GET", "/model-gateway/models"): "read"
+    ("GET", "/model-gateway/status"): "read"
+    ("POST", "/model-gateway/{operation}"): "read.spawn"
+    ("POST", "/model-gateway/chat"): "mutate.workspace"
+  `, [{ routeId: "model-gateway/chat", source: 'export const radonCapability = "read.spawn"; export async function POST() {}' }]);
+  expect(buildRuntimeCatalog(sources).filter(item => item.path.includes("model-gateway"))).toEqual([]);
+  expect(authorize("POST", "/model-gateway/chat").ok).toBe(false);
+  expect(authorize("GET", "/model-gateway/models").ok).toBe(false);
+});

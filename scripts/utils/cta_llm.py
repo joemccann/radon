@@ -16,6 +16,7 @@ API error degrades to the template. The share is never blocked.
 """
 
 from __future__ import annotations
+from model_gateway.client import request as gateway_request
 
 import json
 import os
@@ -196,46 +197,13 @@ def build_prompt(facts: dict, draft: str) -> str:
     )
 
 
-def _anthropic_caller(
-    *, system: str, user: str, model: str, env: dict, post: Optional[Callable[..., object]] = None,
-    timeout: float = REQUEST_TIMEOUT_SECONDS,
-) -> str:
-    """Claude Max subscription call (subscriptions only, 2026-09-18).
-
-    Credentials come from the shared ladder resolver: the Claude Code grant in
-    ``~/.claude/.credentials.json`` / ``CLAUDE_CODE_OAUTH_TOKEN``. A prepaid key
-    is never read, and never the Anthropic SDK with an API key.
-    """
-    from clients import model_ladder  # lazy: the deterministic path must not need it
-
-    auth = model_ladder.subscription_auth("anthropic", env)
-    if auth is None:
-        raise RuntimeError("Anthropic subscription is not available (no Claude Code grant)")
-
-    if post is None:
-        import httpx
-
-        post = httpx.post
-    response = post(
-        "https://api.anthropic.com/v1/messages",
-        headers=model_ladder.anthropic_request_headers(auth),
-        json={
-            "model": model,
-            "max_tokens": MAX_TOKENS,
-            "system": model_ladder.anthropic_request_system(auth, system),
-            "messages": [{"role": "user", "content": user}],
-        },
-        timeout=timeout,
-    )
-    status = int(getattr(response, "status_code", 0) or 0)
-    if status < 200 or status >= 300:
-        raise RuntimeError(f"Anthropic HTTP {status}")
-    payload = response.json()
-    return "".join(
-        str(block.get("text") or "")
-        for block in (payload.get("content") or [])
-        if isinstance(block, dict) and block.get("type") == "text"
-    )
+def _anthropic_caller(*, system: str, user: str, model: str, env: dict, post=None,
+                       timeout: float = REQUEST_TIMEOUT_SECONDS) -> str:
+    """Compatibility name; provider selection and credentials belong to the gateway."""
+    reply = gateway_request("chat", {"system": system,
+        "messages": [{"role": "user", "content": user}],
+        "maxTokens": MAX_TOKENS}, timeout_seconds=timeout)
+    return str(reply.get("text") or "")
 
 
 def generate_share_copy(

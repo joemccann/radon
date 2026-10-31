@@ -1,6 +1,7 @@
 [Unit]
+After=radon-model-gateway.service network.target radon-ib-gateway.service radon-api.service
+Wants=radon-model-gateway.service
 Description=Radon monitor daemon
-After=network.target radon-ib-gateway.service radon-api.service
 # Ordering only. Do not PartOf= the Gateway: a broker restart must not
 # cascade-stop the monitor. Monitor reconnects after Gateway recovery;
 # deploy/app starts must not pull Gateway while holding the shared deploy lock.

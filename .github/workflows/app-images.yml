@@ -22,11 +22,18 @@ concurrency:
 
 jobs:
   python-image:
+    needs: darwin-clients
     name: Build python image
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify model-only SSH and read-only export boundary
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openssh-server
+          sudo env GITHUB_ACTIONS=true python3 -I cloud/scripts/check_model_transport.py
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
       # Private 7.7GB runners still ENOSPC while Docker loads the image
@@ -174,6 +181,67 @@ jobs:
             exit 0
           fi
 
+      - name: Reuse identical model gateway image
+        id: reuse-gateway
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          hash="${{ steps.pyimage.outputs.hash }}"
+          if ! printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source="ghcr.io/joemccann/radon-model-gateway:ihash-${hash}"
+          target="ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
+          if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          docker buildx imagetools create -t "$target" -t ghcr.io/joemccann/radon-model-gateway:latest "$source"
+          target_raw="$(docker buildx imagetools inspect "$target" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          test -n "$source_raw" && test "$source_raw" = "$target_raw"
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+      - name: Build and publish model gateway image
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: docker/app/Dockerfile.python
+          target: model-gateway
+          platforms: linux/amd64
+          load: true
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          tags: |
+            ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}
+            ghcr.io/joemccann/radon-model-gateway:latest
+          cache-from: |
+            type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache
+            type=registry,ref=ghcr.io/joemccann/radon-python:buildcache
+            type=gha,scope=radon-model-gateway
+            type=gha,scope=radon-python
+          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache,mode=max' || 'type=gha,mode=max,scope=radon-model-gateway' }}
+          provenance: false
+      - name: Smoke model gateway runtime
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          docker run --rm --pull=never --init --user 1000:1000 --network none \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python \
+            ghcr.io/joemccann/radon-model-gateway:${{ github.sha }} \
+            -c "import importlib.metadata; import chronos, torch; from scripts.model_gateway import server; assert importlib.metadata.version('chronos-forecasting') == '2.3.0'; assert torch.__version__ == '2.12.1+cpu'; assert torch.version.cuda is None"
+      - name: Record model gateway image input hash
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          hash="${{ steps.pyimage.outputs.hash }}"
+          if ! printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{64}$'; then exit 0; fi
+          if ! docker buildx imagetools create \
+              -t "ghcr.io/joemccann/radon-model-gateway:ihash-${hash}" \
+              "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"; then
+            echo "::warning title=model gateway image index::the next identical commit will rebuild"
+          fi
+
   node-image:
     name: Build node image
     runs-on: ubuntu-24.04
@@ -285,3 +353,32 @@ jobs:
           cache-from: ${{ steps.image-cache.outputs.cache_from }}
           cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
+
+
+  # The same native bytes exported by the gateway image must execute with
+  # streaming/tool protocol compatibility on their actual target platform.
+  darwin-clients:
+    name: Verify Darwin model clients
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Materialize locked native clients
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          cd docker/app/vendor-clis
+          npm ci --ignore-scripts --include=optional --os=darwin --cpu=arm64 --no-audit --no-fund
+          node install-darwin.cjs --helpers "$GITHUB_WORKSPACE/scripts/model_gateway" --output "$RUNNER_TEMP/radon-darwin"
+      - name: Verify native signatures and offline model transport
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/radon-darwin"
+          for cli in claude codex grok rg; do
+            codesign --verify --strict --all-architectures "$payload/bin/$cli"
+          done
+          /usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))' \
+            "$(command -v python3)" scripts/ci/check_model_cli_transport.py \
+            --network-isolated --clients-root "$payload" --versions-file "$payload/package.json"

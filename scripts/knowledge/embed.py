@@ -20,7 +20,7 @@ turns the 2048 write off.
 nvidia/llama-3.2-nv-embedqa-1b-v1 is not used: this account gets 404
 Function not found, and the model caps input at 512 tokens.
 
-get_embedder() is the local singleton. It returns None when
+get_embedder() returns the private gateway callable; no model is loaded in consumers. It returns None when
 RADON_KB_EMBED_DISABLED=1 or fastembed is missing/broken, and ingest then
 writes FTS-only rows (embedding NULL). The ONNX model (~67 MB) downloads
 once into FASTEMBED_CACHE_PATH, defaulted here to ~/.cache/fastembed.
@@ -44,7 +44,7 @@ VECTOR_INDEX_V1 = "idx_knowledge_embedding"
 DISABLE_ENV = "RADON_KB_EMBED_DISABLED"
 BACKEND_ENV = "RADON_KB_EMBED_BACKEND"
 DUAL_WRITE_ENV = "RADON_KB_EMBED_DUAL_WRITE"
-NVIDIA_EMBED_URL = "https://integrate.api.nvidia.com/v1/embeddings"
+from model_gateway.client import request as gateway_request
 NVIDIA_EMBED_BATCH = 16
 CONTENT_HEAD_CHARS = 2000
 # fastembed defaults to 256: a 200-chunk catch-up peaked at 4.3 GiB RSS.
@@ -80,38 +80,11 @@ def embedding_text(title: str | None, summary: str | None, content: str | None) 
     return f"{title}\n{body}".strip() if title else body.strip()
 
 
-def _import_text_embedding():
-    from fastembed import TextEmbedding  # noqa: PLC0415 — deliberate lazy import
-
-    return TextEmbedding
 
 
 def _build_embedder() -> Embedder | None:
-    # fastembed's default cache lives under tempfile.gettempdir() — ephemeral
-    # on the VPS, so a process without an explicit FASTEMBED_CACHE_PATH (the
-    # FastAPI server) would re-download the model instead of finding the copy
-    # the ingest unit already has. setdefault keeps explicit unit env winning.
-    os.environ.setdefault(
-        "FASTEMBED_CACHE_PATH", os.path.expanduser("~/.cache/fastembed")
-    )
-    try:
-        text_embedding_class = _import_text_embedding()
-        model = text_embedding_class(EMBEDDING_MODEL)
-    except Exception as exc:  # noqa: BLE001 — degrade to FTS-only ingest
-        print(
-            f"[knowledge-embed] embeddings unavailable ({exc}) — "
-            "ingest degrades to FTS-only rows",
-            file=sys.stderr,
-        )
-        return None
-
-    def embed_texts(texts: Sequence[str]) -> list[list[float]]:
-        return [
-            [float(value) for value in vector]
-            for vector in model.embed(list(texts), batch_size=EMBEDDING_BATCH_SIZE)
-        ]
-
-    return embed_texts
+    # Native model loading occurs once inside the gateway, not in each consumer.
+    return _gateway_local_embed
 
 
 def embed_backend() -> str:
@@ -224,92 +197,39 @@ def resolve_query_vector(
     return [float(value) for value in vector]
 
 
-def _nvidia_embed(texts: Sequence[str], *, input_type: str, post) -> list[list[float]]:
-    from clients.model_ladder import (
-        _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request,
-        safe_error_message,
-    )
-    from credential_redaction import scrub_credential_text
-
-    if input_type not in {"query", "passage"}:
-        raise ValueError("input_type must be query or passage")
-    pending = [scrub_credential_text(text) for text in texts]
-    if not pending:
+def _nvidia_embed(texts: Sequence[str], *, input_type: str, post=None) -> list[list[float]]:
+    if not texts:
         return []
-    key = os.environ.get("NVIDIA_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("missing NVIDIA_API_KEY")
-    headers = {"authorization": f"Bearer {key}", "content-type": "application/json"}
-    sender = post or _default_post
-    vectors: list[list[float]] = []
-    for start in range(0, len(pending), NVIDIA_EMBED_BATCH):
-        chunk = pending[start:start + NVIDIA_EMBED_BATCH]
-        body = {
-            "model": EMBEDDING_MODEL_V2,
-            "input": chunk,
-            "input_type": input_type,
-            "dimensions": EMBEDDING_DIM_V2,
-            "encoding_format": "float",
-        }
-        payload = _embed_with_retries(
-            sender, headers, body, _request, _classify_http_failure, safe_error_message,
-            limiter=_nvidia_limiter(os.environ, sender), max_wait=_nvidia_max_wait(os.environ),
-        )
-        vectors.extend(_vectors_from_payload(payload, len(chunk)))
+    vectors = []
+    items = list(texts)
+    for offset in range(0, len(items), NVIDIA_EMBED_BATCH):
+        batch = items[offset:offset + NVIDIA_EMBED_BATCH]
+        response = gateway_request("embed", {"texts": batch, "dimensions": EMBEDDING_DIM_V2,
+            "input_type": input_type}, timeout_seconds=120)
+        vectors.extend(_validate_gateway_vectors(response.get("vectors"), len(batch), EMBEDDING_DIM_V2))
     return vectors
 
 
-def _embed_with_retries(post, headers, body, request, classify, safe_message, *, limiter=None, max_wait=15.0):
-    # The NVIDIA key is rate limited per key and shared with the ladder and the
-    # nightly fx loops: every attempt takes a host-wide slot (scripts/nvidia_rate_limit.py).
-    retries = 2
-    delay = 0.5
-    last = "empty"
-    for attempt in range(retries + 1):
-        if limiter is not None and not limiter.acquire(max_wait):
-            raise RuntimeError("rate_limited_local")
-        try:
-            status, text, payload = request(post, NVIDIA_EMBED_URL, headers, body, timeout=30.0)
-        except RuntimeError as exc:
-            last = safe_message(exc)
-            if attempt >= retries:
-                raise RuntimeError(last) from exc
-            time.sleep(min(delay, 8.0))
-            delay = min(delay * 2, 8.0)
-            continue
-        if limiter is not None:
-            if status == 429:
-                limiter.note_429(None)
-            elif status in (401, 403):
-                limiter.note_auth_failure(status)
-            elif status == 200:
-                limiter.note_success()
-        if status == 429:
-            last = "http_429"
-        elif status == 200 and isinstance(payload, dict):
-            return payload
-        else:
-            last = classify(status, text or "")
-            if status in (401, 403):
-                logger.error("NVIDIA AUTHORIZATION FAILED status=%s (embeddings); not retried body=%r",
-                             status, safe_message(RuntimeError(text or ""), max_len=200))
-        retryable = last == "http_429" or last.startswith("http_5")
-        if attempt >= retries or not retryable:
-            raise RuntimeError(last)
-        time.sleep(min(delay, 8.0))
-        delay = min(delay * 2, 8.0)
-    raise RuntimeError(last)
+def _validate_gateway_vectors(vectors, count, dimensions):
+    import math
+    if not isinstance(vectors, list) or len(vectors) != count:
+        raise RuntimeError("gateway embedding batch length mismatch")
+    for vector in vectors:
+        if not isinstance(vector, list) or len(vector) != dimensions:
+            raise RuntimeError("gateway embedding dimension mismatch")
+        if any(type(value) not in (float, int) or not math.isfinite(value) for value in vector):
+            raise RuntimeError("gateway embedding contains non-finite values")
+    return vectors
 
 
-def _vectors_from_payload(payload: dict, expected: int) -> list[list[float]]:
-    rows = list(payload.get("data") or [])
-    rows.sort(key=lambda row: row.get("index", 0))
+def _gateway_local_embed(texts: Sequence[str]) -> list[list[float]]:
+    if not texts:
+        return []
     vectors = []
-    for row in rows:
-        vector = row.get("embedding")
-        if not isinstance(vector, list) or len(vector) != EMBEDDING_DIM_V2:
-            raise RuntimeError("nvidia embedding payload is not 2048-d")
-        vectors.append([float(value) for value in vector])
-    if len(vectors) != expected:
-        raise RuntimeError("nvidia embedding batch length mismatch")
+    items = list(texts)
+    for offset in range(0, len(items), EMBEDDING_BATCH_SIZE):
+        batch = items[offset:offset + EMBEDDING_BATCH_SIZE]
+        response = gateway_request("embed", {"texts": batch, "dimensions": EMBEDDING_DIM,
+            "input_type": "passage"}, timeout_seconds=120)
+        vectors.extend(_validate_gateway_vectors(response.get("vectors"), len(batch), EMBEDDING_DIM))
     return vectors

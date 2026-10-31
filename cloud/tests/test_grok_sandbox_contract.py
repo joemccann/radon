@@ -85,7 +85,6 @@ def test_responder_cannot_write_executables_or_radon_state(path):
 
 @pytest.mark.parametrize("path", [
     "/home/radon/radon-page-responder/scripts/x.py",
-    "/home/radon/.grok/sessions/s.json",
     RUNTIME_DIR + "/grok-runtime.lock",
 ])
 def test_responder_still_writes_what_it_needs(path):
@@ -168,12 +167,10 @@ TOKENS_ENV_FILE = "/etc/radon/subscription-tokens/env"
 
 def test_token_keeper_cannot_read_its_own_env_file_at_runtime():
     text = (SERVICES / TOKENS).read_text(encoding="utf-8")
-    assert f"EnvironmentFile={TOKENS_ENV_FILE}" in text
-    assert "/etc/radon/env" in _paths(TOKENS, "InaccessiblePaths")
-    assert TOKENS_ENV_FILE in _paths(TOKENS, "InaccessiblePaths"), (
-        "the agent CLIs this unit launches could read the production env file "
-        "directly; systemd has already loaded it by then"
-    )
+    assert "EnvironmentFile=" not in text
+    assert "scripts.model_gateway.refresh_cli" in text
+    assert "RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock" in text
+
 
 
 def test_token_keeper_restricts_procfs_to_its_own_user():
@@ -201,5 +198,12 @@ def test_subscription_vault_socket_is_inaccessible(unit):
 
 
 def test_token_keeper_keeps_the_vault_socket():
-    assert VAULT_RUNTIME_DIR not in _paths(TOKENS, "InaccessiblePaths")
-    assert f"{VAULT_RUNTIME_DIR}/vault.sock" in (SERVICES / TOKENS).read_text(encoding="utf-8")
+    assert VAULT_RUNTIME_DIR in _paths(TOKENS, "InaccessiblePaths")
+    assert f"{VAULT_RUNTIME_DIR}/vault.sock" not in (SERVICES / TOKENS).read_text(encoding="utf-8")
+
+
+def test_responder_denies_all_provider_grants_and_uses_immutable_client():
+    text=(SERVICES/RESPONDER).read_text()
+    assert "/home/radon/.grok" in _paths(RESPONDER,"InaccessiblePaths")
+    assert "GROK_BIN=/opt/radon-model-clients/current/bin/grok" in text
+    assert not _writable(RESPONDER,"/home/radon/.grok/sessions/s.json")

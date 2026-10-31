@@ -686,7 +686,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 16:20 ET | SPX pct above 50d MA over pct above 200d MA (20 min after the close, across DST). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 16:40 ET | SPX pct of members with Wilder RSI(14) strictly below 30 (40 min after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |

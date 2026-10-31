@@ -1,3 +1,8 @@
+# 2026-10-30: tracked source and prior-release fixtures
+
+- Stage intended new source before tracked-file policy guards; untracked files can hide violations from otherwise green full suites.
+- Pin historical runtime test inputs by bytes and hash. `HEAD` changes after commit and is not a stable previous-release fixture.
+
 # Equity research eligibility is mandatory across newsfeed sources (2026-10-28)
 
 - User correction: no company-focused equity research unless its subject company is in the current portfolio or watchlist. This applies to MarketDesk and Dropbox; broad-source admission never overrides this rule.
@@ -1380,3 +1385,16 @@ When an operator asks for automated release or updater recovery, ship the durabl
 - Verify feedback, Explain and Share together at mobile widths; nested action wrappers must not stack the toolbar.
 - Before pushing a changed held-out Playwright spec, add a dated browser-verification receipt to ci-curation-ledger.txt and run its committed-diff curation guard; uncommitted local suites do not exercise that branch-diff check.
 - Verify mobile toolbar geometry after feedback confirmation appears, not just before opening panels. Screenshot named panels that retain a layout box when wrapper elements use display: contents.
+
+
+## 2026-10-30: Distinguish a provider failure from ladder exhaustion
+
+A Grok402 spending-limit log is one rung failure. Inspect the complete attempted cascade and available credentials before reporting it as the cause of a failed article. Exhaustion must advance through every configured capable provider while preserving source accuracy and final Humanizer gates. User default: Antigravity first, then the remaining ladder in its existing order.
+
+## 2026-10-30: standalone AI includes the explicitly requested control plane
+
+When the user includes coding and incident-response agents, inventory their inference, credential probes and upgrade paths too. Keep tool/repository/approval authority in the existing agent boundary while routing model traffic and credential lifecycle through the shared service. Unsupported CLI protocols remain unfinished work; failing them closed is not migration completion.
+
+## 2026-10-30: shared model deadlines include admission and every streamed chunk
+
+Start the request clock before credential-lock and broker I/O admission. Every provider attempt, local acceptance continuation and native protocol must share that original deadline and cancellation signal. A per-read timeout is not a total budget; test a real tiny-chunk stream that keeps resetting reads. Moving a limiter into a container also requires durable pacing state and preservation of existing cooldown maxima before old containers disappear.

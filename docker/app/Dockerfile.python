@@ -11,22 +11,26 @@ RUN npm ci --ignore-scripts --include=optional --no-audit --no-fund
 COPY docker/app/vendor-clis/install-native.cjs ./
 RUN node install-native.cjs
 
+# Cross-build the minimal macOS client bundle from the same integrity-locked
+# optional packages. No Darwin executable runs inside the Linux build.
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS vendor-clis-darwin
+WORKDIR /opt/radon-clis
+COPY docker/app/vendor-clis/package.json docker/app/vendor-clis/package-lock.json ./
+RUN npm ci --ignore-scripts --include=optional --os=darwin --cpu=arm64 --no-audit --no-fund
+COPY docker/app/vendor-clis/install-darwin.cjs ./
+COPY scripts/model_gateway/__init__.py scripts/model_gateway/client.py scripts/model_gateway/cli.py scripts/model_gateway/cli_bridge.py /opt/public-model-gateway/
+RUN node install-darwin.cjs --helpers /opt/public-model-gateway --output /opt/radon-darwin
+
 FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS chart-runtime
 WORKDIR /opt/radon-charts
 COPY docker/app/chart-runtime/package.json docker/app/chart-runtime/package-lock.json ./
 RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund
 
-FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
+FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
 
-COPY --from=vendor-clis /usr/local/bin/node /usr/local/bin/node
-COPY --from=vendor-clis /opt/radon-clis /opt/radon-clis
+COPY --from=chart-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=chart-runtime /opt/radon-charts /opt/radon-charts
 COPY web/public/fonts/Inter-Variable.woff2 web/public/fonts/IBMPlexMono-400.woff2 /opt/radon-charts/fonts/
-COPY docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/install-antigravity.py /opt/radon-clis/
-RUN python /opt/radon-clis/install-antigravity.py \
-    && for cli in claude codex grok agy; do ln -s /opt/radon-clis/bin/$cli /usr/local/bin/$cli; done \
-    && chmod -R a-w /opt/radon-clis
-ENV DISABLE_AUTOUPDATER=1
 
 RUN groupadd --gid 1000 radon \
     && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
@@ -73,27 +77,6 @@ RUN install -d -o radon -g radon -m 0755 /home/radon/radon/logs
 
 USER radon
 
-# Run by GitHub's image build: verify real native payloads and root ownership.
-RUN python - <<'PY'
-import os
-import subprocess
-import mmap
-import re
-from pathlib import Path
-
-for cli, version in {"claude": "2.1.311", "codex": "0.160.1", "grok": "1.0.46", "agy": "1.3.1"}.items():
-    executable = Path("/usr/local/bin", cli).resolve()
-    assert executable.stat().st_uid == 0, executable
-    assert not os.access(executable, os.W_OK), executable
-    assert not os.access(executable.parent, os.W_OK), executable.parent
-    result = subprocess.run([cli, "--version"], capture_output=True, text=True, timeout=30, check=True)
-    assert version in result.stdout + result.stderr, (cli, result.stdout, result.stderr)
-    if cli == "claude":
-        with executable.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as binary:
-            bundled_bun = {tuple(map(int, match.groups())) for match in re.finditer(rb"Bun v([0-9]+)\.([0-9]+)\.([0-9]+)", binary)}
-        assert bundled_bun and all(version >= (1, 4, 4) for version in bundled_bun), bundled_bun
-PY
-
 # Monitor log permissions smoke: fail the build before an unwritable image ships.
 RUN python - <<'PY'
 import logging
@@ -137,3 +120,53 @@ with tempfile.TemporaryDirectory() as folder:
 PY
 
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1", "--timeout-keep-alive", "75"]
+
+# Optional local AI runtimes belong only to the private gateway, never to API,
+# monitor or archive images. Both targets share the exact same trusted base.
+FROM runtime AS model-gateway
+USER root
+COPY --from=vendor-clis /opt/radon-clis /opt/radon-clis
+COPY docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/install-antigravity.py /opt/radon-clis/
+RUN python /opt/radon-clis/install-antigravity.py \
+    && for cli in claude codex grok agy; do ln -s /opt/radon-clis/bin/$cli /usr/local/bin/$cli; done \
+    && chmod -R a-w /opt/radon-clis
+ENV DISABLE_AUTOUPDATER=1
+
+COPY --from=vendor-clis-darwin /opt/radon-darwin /opt/radon-darwin
+RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.12.1+cpu" \
+    && python -m pip install --no-cache-dir "chronos-forecasting==2.3.0" "scipy==1.17.1"
+USER radon
+# Run by GitHub's image build: verify real native payloads and root ownership.
+RUN python - <<'PY'
+import os
+import subprocess
+import mmap
+import re
+from pathlib import Path
+
+for cli, version in {"claude": "2.1.311", "codex": "0.160.1", "grok": "1.0.70", "agy": "1.3.1"}.items():
+    executable = Path("/usr/local/bin", cli).resolve()
+    assert executable.stat().st_uid == 0, executable
+    assert not os.access(executable, os.W_OK), executable
+    assert not os.access(executable.parent, os.W_OK), executable.parent
+    result = subprocess.run([cli, "--version"], capture_output=True, text=True, timeout=30, check=True)
+    assert version in result.stdout + result.stderr, (cli, result.stdout, result.stderr)
+    if cli == "claude":
+        with executable.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as binary:
+            bundled_bun = {tuple(map(int, match.groups())) for match in re.finditer(rb"Bun v([0-9]+)\.([0-9]+)\.([0-9]+)", binary)}
+        assert bundled_bun and all(version >= (1, 4, 4) for version in bundled_bun), bundled_bun
+PY
+
+RUN --network=none python scripts/ci/check_model_cli_transport.py --network-isolated --clients-root /opt/radon-clis
+# Capability proof only: downloading weights is a bounded runtime operation.
+RUN python - <<'PY_FORECAST'
+import importlib.metadata
+import chronos, torch
+assert importlib.metadata.version("chronos-forecasting") == "2.3.0"
+assert torch.__version__ == "2.12.1+cpu"
+assert torch.version.cuda is None
+PY_FORECAST
+
+# Keep the default Docker build target lean for all ordinary application units.
+FROM runtime AS python
+USER radon

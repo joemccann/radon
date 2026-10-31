@@ -1,3 +1,27 @@
+# Unified standalone AI model gateway (2026-10-30)
+
+- [x] MG1 depends_on: [] Inventory app/pipeline and coding/incident clients; establish native interfaces and pre-refactor full baselines.
+- [x] MG2 depends_on: [MG1] Build private standalone gateway, normalized operations, capability routing, deadlines and credential lifecycle.
+- [x] MG3 depends_on: [MG1] Migrate Python/Node consumers, preserving accept callbacks, specialized outputs and model-space invariants; prevent bypasses.
+- [x] MG4 depends_on: [MG1] Migrate web chat/catalog/vision/Explain through the gateway without changing caller interfaces.
+- [ ] MG5 depends_on: [MG1] Install isolated managed gateway, route keeper refresh through it, remove model grants from consumers, gate immutable upgrades and deployment health.
+- [ ] MG6 depends_on: [MG2,MG3,MG4,MG5] Integration/full gates, PR, exact-head green, accepted Pushover, administrator merge and live production verification.
+
+## Review
+
+Mechanism-specific red/green regressions and independent reviews passed. Real pinned Linux and Darwin Claude/Codex/Grok clients preserve 11/10/26 native tools; final exported-helper canaries pass. Full tracked-source Python after CI repairs: 19,714 passed, 12 skipped, 63 subtests. Full cloud: 3,699 passed, 16 skipped. Full web after integration with main 885f068ae: 11,592 passed, 21 skipped; CI-contract replay 21 passed. TypeScript compiler exit 0. Gateway plus API route statement/branch coverage measured 74%; the 95% target has not been reached. Current-main integration is clean. Initial PR #1356 CI found four blockers; exact AST credential ownership, a pinned legacy helper fixture, narrow public-field scan annotations and real OpenSSH-compatible inference mounts passed their focused/full repairs. Real Ubuntu/OpenSSH validates read-only chroot mounts, reuse/rebind, dedicated UID and TCP/control denial; independent review is clean. Repaired exact-head CI and production verification remain pending. One-time root Mac installation requires local administrator authentication; personal interactive grants remain untouched. Do not count canaries as deployed recovery or skip publication, Humanizer, quota, trading, native schema/tool or embedding-space gates.
+
+# Antigravity-first shared model ladder (2026-10-30)
+
+- [x] AL1 depends_on: [] Verify live provider wiring and reproduce default order / exhaustion fallback with red tests.
+- [x] AL2 depends_on: [AL1] Put Antigravity first, retain remaining order and all accuracy, subscription, image and publication gates.
+- [ ] AL3 depends_on: [AL2] Focused/full tests, owner documentation, exact-head CI and green notification.
+- [ ] AL4 depends_on: [AL3] Administrator merge, verify deployment and live model fallback / MarketDesk cycle.
+
+## Review
+
+Pending. Live Grok402 is not by itself full-ladder exhaustion; preserve independent factual verification. Antigravity passed managed and isolated-grant canaries; the MarketDesk worker needs a read-only seed and disposable CLI state. Images remain attached and proceed to a capable provider.
+
 # MarketDesk requested PDF backlog priority (2026-10-28)
 
 - [x] MP1 depends_on: [] Freeze the requested 32 IDs; verify live retry-time ordering and current policy separately.

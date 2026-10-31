@@ -97,6 +97,8 @@ Provider references: [Dropbox change detection](https://developers.dropbox.com/d
 
 ### Model ladder (shared HTTP)
 
+Default text order: Antigravity, Anthropic, Grok, Cursor, Codex, NVIDIA, Cerebras. Quota or unavailable-provider responses advance to the next available rung. Image requests retain their images and skip the text-only Antigravity CLI.
+
 New multimodal or text-JSON model callers must use `scripts/clients/model_ladder.py` (import `complete_text_json`, `complete_multimodal_json`, or `extract_via_vision`). Text-JSON and CTA vision HTTP responses stream through a 2,000,000-byte cap and close before parsing on Anthropic, Grok, Codex, NVIDIA, and Cerebras. The Antigravity CLI refuses images, so vision skips that rung, and its text stdout is not under this HTTP cap. Do not add a third cascade. `scripts/clients/vision_cascade.py` is a thin re-export for CTA/MenthorQ. The newsfeed text tagger reaches the same helper through `scripts/clients/model_ladder_cli.py`. Nightly CLI sessions are owned separately by the [agent runner](runner.md).
 
 A rung fails over on a non-2xx status or on a 2xx body that is a provider error envelope (top-level `error`, or `type: "error"`). Credit, quota and billing markers are matched only against that envelope or a non-2xx body, never against a successful answer: research and distill copy routinely says "capacity", "quota" or "billing", and matching it once failed every rung on the same document.
