@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 import pytest
 
+# The interrupt tests assert that a wait ends early, not that it ends by a
+# fixed clock. Holder and bound scale together, so a loaded host cannot invert
+# the comparison while a broken interrupt still blows past the bound.
+HOLD_SECONDS = 5.0
+INTERRUPT_BOUND_SECONDS = 1.0
+
 
 def test_vault_broker_exposes_only_fixed_model_key_slots():
     import subscription_vault
@@ -100,13 +106,13 @@ def test_credential_lock_wait_respects_shared_deadline(monkeypatch):
     monkeypatch.setenv('RADON_SUBSCRIPTION_VAULT_SOCKET','/private/socket')
     monkeypatch.setattr(credentials,'connect_vault',lambda *a,**k:pytest.fail('expired request reached broker'))
     lock=threading.Lock();lock.acquire();monkeypatch.setattr(credentials,'_LOCK',lock)
-    release=threading.Timer(.35,lock.release);release.start()
+    release=threading.Timer(HOLD_SECONDS,lock.release);release.start()
     started=time.monotonic()
     try:
         with engine.attempt_scope(deadline=started+.05,seen=set()):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert error.value.code=='deadline_exceeded'
-        assert time.monotonic()-started < .2
+        assert time.monotonic()-started < INTERRUPT_BOUND_SECONDS
     finally:release.join()
 
 
@@ -122,12 +128,14 @@ def test_credential_lock_wait_observes_cancellation(monkeypatch):
     released=threading.Event()
     def let_go():
         lock.release();released.set()
-    release=threading.Timer(.35,let_go);release.start()
+    release=threading.Timer(HOLD_SECONDS,let_go);release.start()
+    started=time.monotonic()
     try:
         with engine.attempt_scope(deadline=time.monotonic()+1,seen=set(),cancelled=cancel.is_set):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert error.value.code=='cancelled'
         assert not released.is_set()
+        assert time.monotonic()-started < INTERRUPT_BOUND_SECONDS
     finally:abort.join();release.join()
 
 
@@ -146,20 +154,22 @@ def test_real_stalled_vault_stops_at_request_deadline_or_disconnect(monkeypatch,
     entered=threading.Event();stop=threading.Event();abort=threading.Event();finished=threading.Event()
     def stalled():
         with listener.accept()[0] as connection:
-            connection.recv(4096);entered.set();stop.wait(1);finished.set()
+            connection.recv(4096);entered.set();stop.wait(HOLD_SECONDS);finished.set()
     worker=threading.Thread(target=stalled,daemon=True);worker.start()
     monkeypatch.setenv('RADON_SUBSCRIPTION_VAULT_SOCKET',str(path))
-    monkeypatch.setattr(subscription_vault,'IO_TIMEOUT_SECONDS',.35)
+    monkeypatch.setattr(subscription_vault,'IO_TIMEOUT_SECONDS',HOLD_SECONDS)
     monkeypatch.setenv('NVIDIA_API_KEY','old-key')
     timer=threading.Timer(.04,abort.set) if cancelled else None
     if timer:timer.start()
+    started=time.monotonic()
     try:
         with engine.attempt_scope(deadline=time.monotonic()+(1 if cancelled else .06),seen=set(),cancelled=abort.is_set):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert entered.is_set()
         assert error.value.code==('cancelled' if cancelled else 'deadline_exceeded')
         assert not finished.is_set()
+        assert time.monotonic()-started < INTERRUPT_BOUND_SECONDS
         assert os.environ['NVIDIA_API_KEY']=='old-key'  # Failed lookup never publishes partial/stale success.
     finally:
-        stop.set();worker.join(1);listener.close();path.unlink();folder.rmdir()
+        stop.set();worker.join(HOLD_SECONDS);listener.close();path.unlink();folder.rmdir()
         if timer:timer.join()
