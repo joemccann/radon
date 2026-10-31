@@ -436,16 +436,9 @@ def _verify_darwin_export(root: Path, release: str, owner_uid: int) -> None:
         raise ValueError("Darwin export proof mismatch")
 
 
-def recover_clients(release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> None:
-    """Reuse a verified release; recovery never allocates another native bundle."""
+def _verify_linux_release(root: Path, release: str, owner_uid: int) -> None:
     if not isinstance(release,str) or not re.fullmatch(r"[0-9a-f]{40}",release):
         raise ValueError("invalid recovery release")
-    root=ROOT if root is None else Path(root)
-    exports=EXPORT_ROOT if exports is None else Path(exports)
-    # These roots must already exist: no mkdir/export/retention during recovery.
-    for parent in (root,exports,exports/"releases"):
-        if not parent.is_dir() or parent.is_symlink():raise ValueError("missing recovery client root")
-        _trusted_root(parent,owner_uid)
     folder=root/release
     _immutable_tree(folder,owner_uid)
     receipt=folder/"manifest.json"
@@ -463,6 +456,164 @@ def recover_clients(release: str, *, root: Path | None = None, exports: Path | N
         for name,expected in hashes.items():
             if not isinstance(expected,str) or not re.fullmatch(r"[0-9a-f]{64}",expected) or _digest(parent/name)!=expected:
                 raise ValueError("recovery client digest mismatch")
+
+
+def _image_id(engine: str, image: str) -> str:
+    if engine not in ("/usr/bin/podman","/usr/bin/docker"):
+        raise ValueError("unsupported container engine")
+    if not re.fullmatch(r"ghcr\.io/joemccann/radon-model-gateway:[0-9a-f]{40}",image):
+        raise ValueError("refusing an image that is not an exact gateway SHA")
+    result=subprocess.run([engine,"image","inspect","--format","{{.Id}}",image],capture_output=True,text=True,timeout=20,check=False)
+    if result.returncode!=0:
+        raise ValueError("gateway image id unavailable")
+    image_id=result.stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{64}",image_id):
+        image_id="sha256:"+image_id
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}",image_id):
+        raise ValueError("gateway image id is not a sha256 digest")
+    return image_id
+
+
+def _copy_verified_tree(source: Path, stage: Path) -> None:
+    for folder, dirnames, filenames in os.walk(source, followlinks=False):
+        parent=Path(folder)
+        relative=parent.relative_to(source)
+        target=stage/relative
+        target.mkdir(parents=True, exist_ok=True)
+        for name in dirnames:
+            info=(parent/name).lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                raise ValueError("client directory is not reusable")
+        for name in filenames:
+            path=parent/name
+            info=path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("client file is not reusable")
+            destination=target/name
+            destination.write_bytes(path.read_bytes())
+            os.chmod(destination,0o555 if info.st_mode&0o111 else 0o444)
+    for folder, _dirnames, _filenames in os.walk(stage, followlinks=False):
+        os.chmod(folder,0o555)
+
+
+def _clone_verified_release(root: Path, exports: Path, donor: str, release: str, owner_uid: int) -> None:
+    """Copy one verified image's receipts onto a new exact SHA without exporting."""
+    _verify_linux_release(root,donor,owner_uid)
+    _verify_darwin_export(exports,donor,owner_uid)
+    if (root/release).exists() or (exports/release).exists():
+        raise ValueError("release clients already exist")
+    linux_parent=darwin_parent=None
+    linux_moved=darwin_moved=False
+    try:
+        linux_parent=Path(tempfile.mkdtemp(prefix=".reuse-",dir=root))
+        darwin_parent=Path(tempfile.mkdtemp(prefix=".reuse-",dir=exports))
+        linux_stage=linux_parent/release
+        _copy_verified_tree(root/donor,linux_stage)
+        proof=json.loads((linux_stage/"manifest.json").read_text())
+        proof["release_sha"]=release
+        manifest=linux_stage/"manifest.json"
+        manifest.chmod(0o644)
+        with manifest.open("w") as output:
+            json.dump(proof,output,sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        manifest.chmod(0o444)
+        os.chmod(linux_stage,0o555)
+        _verify_linux_release(linux_parent,release,owner_uid)
+        # macOS refuses to rename a directory that is not owner-writable.
+        os.chmod(linux_stage,0o700)
+        darwin_stage=darwin_parent/release
+        _copy_verified_tree(exports/donor,darwin_stage)
+        darwin_proof=json.loads((darwin_stage/"manifest.json").read_text())
+        darwin_proof["release_sha"]=release
+        bundle=darwin_stage/"bundle.tar"
+        if _digest(bundle)!=darwin_proof["sha256"] or bundle.stat().st_size!=darwin_proof["size"]:
+            raise ValueError("cloned Darwin bundle does not match its receipt")
+        darwin_manifest=darwin_stage/"manifest.json"
+        darwin_manifest.chmod(0o644)
+        with darwin_manifest.open("w") as output:
+            json.dump(darwin_proof,output,sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        darwin_manifest.chmod(0o444)
+        os.chmod(darwin_stage,0o555)
+        _verify_darwin_export(darwin_parent,release,owner_uid)
+        os.chmod(darwin_stage,0o700)
+        os.rename(linux_stage,root/release)
+        linux_moved=True
+        os.chmod(root/release,0o555)
+        os.rename(darwin_stage,exports/release)
+        darwin_moved=True
+        os.chmod(exports/release,0o555)
+        _verify_linux_release(root,release,owner_uid)
+        _verify_darwin_export(exports,release,owner_uid)
+        _activate(root,release)
+        _prune_releases(root,release,owner_uid)
+    except Exception:
+        # A half-moved tree would make the export fallback refuse the release.
+        # Leave a tree alone once current already names it.
+        if linux_moved and not ((root/"current").is_symlink() and os.readlink(root/"current")==release):
+            _remove_stage(root/release)
+        if darwin_moved and not ((exports/"current").is_symlink() and os.readlink(exports/"current")==release):
+            _remove_stage(exports/release)
+        raise
+    finally:
+        for path in (linux_parent,darwin_parent):
+            if path is not None:
+                try:
+                    _remove_stage(path)
+                except OSError:
+                    pass
+
+
+def reuse_identical_image_clients(engine: str, image: str, release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> bool:
+    """Reuse clients already verified for this image id. A miss exports as before."""
+    root=ROOT if root is None else Path(root)
+    exports=EXPORT_ROOT/"releases" if exports is None else Path(exports)
+    try:
+        if not re.fullmatch(r"[0-9a-f]{40}",release) or image!="ghcr.io/joemccann/radon-model-gateway:"+release:
+            return False
+        _trusted_root(root,owner_uid)
+        _trusted_root(exports,owner_uid)
+        # An existing tree for this SHA is not proof. The registry tag is
+        # mutable, so a rebuilt image must fall through to export and compare.
+        if (root/release).exists() or (exports/release).exists():
+            return False
+        requested=_image_id(engine,image)
+        donors=[]
+        for entry in root.iterdir():
+            if entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
+                continue
+            donor_image="ghcr.io/joemccann/radon-model-gateway:"+entry.name
+            try:
+                if _image_id(engine,donor_image)==requested:
+                    donors.append(entry.name)
+            except (OSError,ValueError,subprocess.SubprocessError):
+                continue
+        for donor in sorted(donors):
+            try:
+                _clone_verified_release(root,exports,donor,release,owner_uid)
+                return True
+            except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
+                continue
+        return False
+    except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
+        return False
+
+
+def recover_clients(release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> None:
+    """Reuse a verified release; recovery never allocates another native bundle."""
+    if not isinstance(release,str) or not re.fullmatch(r"[0-9a-f]{40}",release):
+        raise ValueError("invalid recovery release")
+    root=ROOT if root is None else Path(root)
+    exports=EXPORT_ROOT if exports is None else Path(exports)
+    # These roots must already exist: no mkdir/export/retention during recovery.
+    for parent in (root,exports,exports/"releases"):
+        if not parent.is_dir() or parent.is_symlink():raise ValueError("missing recovery client root")
+        _trusted_root(parent,owner_uid)
+    _verify_linux_release(root,release,owner_uid)
     _verify_darwin_export(exports/"releases",release,owner_uid)
     if not (root/"current").is_symlink() or os.readlink(root/"current")!=release:
         _activate(root,release)
@@ -502,10 +653,17 @@ def main(args: list[str]) -> int:
     try:
         check_model_space()
         _trusted_root(ROOT, 0)
+        _trusted_root(EXPORT_ROOT, 0)
+        # A retagged image still has the clients exported for its previous SHA.
+        # Reusing those verified bytes avoids two cold starts of the gateway
+        # image during the deploy outage. Any miss keeps the export below.
+        if reuse_identical_image_clients(engine, image, release):
+            print("reused verified model clients for identical image")
+            print("model clients promoted from exact CI image")
+            return 0
         with tempfile.TemporaryFile(dir=ROOT) as stream:
             export_from_image(engine, image, stream)
             install_from_tar(stream, ROOT, release)
-        _trusted_root(EXPORT_ROOT,0)
         with tempfile.TemporaryFile(dir=EXPORT_ROOT) as stream:
             export_from_image(engine,image,stream,darwin=True)
             publish_darwin_bundle(stream,EXPORT_ROOT/"releases",release)

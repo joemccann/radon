@@ -1359,6 +1359,11 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-572 | DONE | A comment containing `void dispatchClientMessage(client, data);` plus a direct `handleClientMessage` call left the old text search green (9 passed). The syntax-tree case failed `expected [] to have a length of 1 but got +0`. Restored `scripts/ib_realtime_server.js`. `web/tests/relay-message-dispatch-rejection.test.ts` passed 9 on three runs. Product source unchanged. |
 | T-573 | DONE | `String()` in `parseActionMessage` left the helper cases green and threw `TypeError` in the new case (1 failed / 9 passed). Restored the `normalizeSymbols` call. The file passed 10 on three runs. Product source unchanged. Closing rounds: root pytest 19,366 passed / 12 skipped / 63 subtests each round. Vitest 5 failed / 11,662 passed / 21 skipped / 1,176 files each round (five `next.config.mjs` imports over 5s; those five passed 29 tests at a 60s ceiling). Cloud 42 failed / 3,484 passed / 31 skipped each round, 0 added / 0 removed against `e3b77881` (42 failed / 3,484 passed / 31 skipped, 949.13s). |
 
+## 2026-10-30
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-574 | DONE | Before the scheduled-only guard, `test_ticker_refresh_stays_failed_when_every_section_is_rate_limited` failed `assert 0 == 1` on `main(["--ticker", "SPY", "--json"])` (1 failed in 1.02s). `scripts/uw_research.py` now returns 0 for an all-section rate limit only when `--scheduled`. The research file passed 42, then 59 with the route file, twice. Closing rounds: root pytest 19,422 passed / 12 skipped / 63 subtests each round. Vitest 5 failed / 11,613 passed / 21 skipped / 1,174 files each round (five `next.config.mjs` imports over 5s; together they still timed out at 60s; `robots-noindex.test.ts` alone passed 7 at a 120s ceiling). Cloud 42 failed / 3,486 passed / 31 skipped each round, 0 added / 0 removed against `2c130201` (42 failed / 3,484 passed / 31 skipped, 1211.63s). |
 ## 2026-10-31
 
 | ID | Status | Evidence |
