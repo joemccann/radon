@@ -4,7 +4,7 @@ All Radon inference goes through `scripts/model_gateway`. App processes keep the
 
 ## Interfaces
 
-Python app callers use `clients.model_ladder` for text/vision JSON and its local acceptance callback. A rejected result resumes a single-use service continuation under the original deadline. Node pipeline callers use `scripts/model_gateway/client.js`; Next.js uses `web/lib/llm/provider.ts` through the authenticated FastAPI `/model-gateway` bridge. New consumers use these same adapters.
+Python app callers use `clients.model_ladder` for text/vision JSON and its local acceptance callback. A rejected result resumes a single-use service continuation under the original deadline. Node pipeline callers use `scripts/model_gateway/client.js`; Next.js uses `web/lib/llm/provider.ts` through the authenticated FastAPI `/model-gateway` bridge. That bridge runs on its own two-thread pool and returns 503 `saturated` when both workers are busy, so a chat or forecast cannot occupy the default executor that order preflight and the working-order read share (R-747). New consumers use these same adapters.
 
 Fixed operations cover normalized chat with tools/images, JSON, vision extraction, explicit 384/2048-dimensional embedding spaces, OCR, X search, Chronos forecasting, and Clairic dates. Inputs cannot supply upstream URLs, headers, credentials, paths, or arbitrary commands. Existing publication, Humanizer, portfolio, source, trading and provider pacing rules remain in their owning pipelines.
 
