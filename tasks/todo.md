@@ -1,3 +1,15 @@
+# Host cleanup documentation (2026-10-31)
+
+Dependency graph: T1 -> T2 -> T3.
+
+- [x] T1 depends_on: [] Inspect repository state and confirm the recorded cleanup scope and verification.
+- [x] T2 depends_on: [T1] Document the guarded cleanup process, read-only verification, retained paths and recovery limits in the operations runbook.
+- [x] T3 depends_on: [T2] Validate documentation and embedded commands for the documentation commit.
+
+## Review
+
+Documentation only. The earlier authorized cleanup removed 10 named files and 71 files under data/jvm_forensics; subsequent verification found all 11 targets absent. No additional host deletion is part of this task. Documentation contracts: 198 passed. Embedded Python AST and bash/zsh heredoc syntax passed; the exact documented read-only command confirmed 11/11 targets absent, zero tracked cleanup paths, and the same six unrelated untracked paths retained. Whitespace check passed. Delivery branch: docs/host-cleanup-process.
+
 # MarketDesk model-ladder provider failures (2026-10-30)
 
 - [x] T1 depends_on: [] Root-cause Anthropic unreadable replies, Codex 429, NVIDIA 400/404, Cerebras 413 on the shared ladder.

@@ -2,6 +2,118 @@
 
 Live-trading operational concerns: IB Gateway connection modes, background services, watchdogs, deploy flow. The authoritative developer runbook is [`CLAUDE.md`](../CLAUDE.md). The cloud-services architecture deep dive is [`docs/cloud-services.md`](cloud-services.md).
 
+## Scoped host artifact cleanup
+
+### Scope and safeguards
+
+Cleanup is an operator-approved, one-time operation, not a scheduled retention
+job. The 2026-10-31 cleanup targeted only the ten files and one directory listed
+in the verification command below, under `/home/radon/radon` on `radon-app`.
+Do not generalize that list into wildcard deletions, `git clean`, or removal of
+all untracked files. If a target reappears, investigate its current writer before
+reusing the old approval.
+
+Before a new cleanup, review each target's purpose, retention needs and Git
+tracking status; preserve any needed recovery copy outside the deletion scope.
+Untracked does not mean disposable. In particular, database, WAL, SHM and lock
+files require checking the owning application, not just their age or filename.
+
+The executed cleanup followed this sequence:
+
+1. Connect as `radon` with SSH, `cd /home/radon/radon`, and use
+   `.venv/bin/python -` with a quoted, multiline heredoc. Refuse execution when
+   the resolved working directory differs from the expected repository root or
+   `fuser` is unavailable.
+2. Build the explicit file allowlist. Report missing entries as `ABSENT`; refuse
+   symlinks, non-regular files and symlinked parents. Inspect
+   `data/jvm_forensics` separately, refusing symlinks and special entries anywhere
+   in its tree. Collect regular files and directories before deleting anything.
+3. Run `fuser -s` on each regular file in the flattened list
+   `[*targets, *jvm_files]`. Exit 0 means busy and refuses the entire deletion
+   phase; exit 1 is the no-match result; other exit codes also refuse cleanup.
+4. Only after preflight succeeds, unlink the allowlisted files and collected
+   forensic files. Remove collected directories deepest first, then the forensic
+   root. Print each top-level removal and the forensic file count.
+5. Run the separate read-only verification below and inspect Git status. Commit
+   only intentional tracked documentation or source changes, not runtime data.
+
+These checks are not an atomic filesystem transaction. `fuser` visibility is
+limited by user permissions and process namespaces, and it cannot prevent a
+writer from opening a file after the check. Establish that relevant writers are
+inactive before a future cleanup; if ownership or visibility is uncertain, stop
+for operator review rather than treating no match as proof of safety. A failure
+during deletion can leave partial results, so verify each path before retrying.
+
+### Heredoc and Python formatting
+
+Keep the Python body on the lines after `<<'PY'`, preserve indentation, and put
+the closing `PY` alone at column one. Do not flatten the command into one line.
+The quoted delimiter prevents the local shell from expanding the Python body.
+Unpack `jvm_files` in the `fuser` input list; passing the list itself checks its
+string representation instead of each file. Use `rglob("*")`, not `rglob("")`,
+to collect descendants, and sort directories by path depth descending.
+
+### Read-only verification
+
+This command does not delete anything. It reports all eleven targets, checks
+whether Git tracks any of them, prints remote status, and exits nonzero if any
+target remains (including a dangling symlink) or a Git command fails.
+
+```bash
+ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -' <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path('/home/radon/radon').resolve()
+if Path.cwd().resolve() != root:
+    sys.exit('refusing: cwd is not /home/radon/radon')
+
+files = [
+    'data/.nav_history.jsonl.bnr2vbk6',
+    'data/.tmp.20260610_225711.212230b9-3bb7-4271-99b2-b6577061d101',
+    'data/.write_probe',
+    'data/leap_write_test',
+    'data/newsfeed-storage.json.bak.20260517-144336',
+    'data/trade_log.json.corrupt.20260623T161442Z',
+    'radon',
+    'radon-info',
+    'radon-shm',
+    'radon-wal',
+    'data/jvm_forensics',
+]
+remaining = []
+for rel in files:
+    path = root / rel
+    present = path.exists() or path.is_symlink()
+    print(f'{"PRESENT" if present else "ABSENT"} {rel}', flush=True)
+    if present:
+        remaining.append(rel)
+
+print(f'VERIFICATION: {len(files) - len(remaining)}/{len(files)} targets absent',
+      flush=True)
+print('TRACKED CLEANUP PATHS:', flush=True)
+subprocess.run(['git', '--no-pager', 'ls-files', '--', *files], check=True)
+print('REMOTE GIT STATUS:', flush=True)
+subprocess.run(['git', '--no-pager', 'status', '--short', '--branch'], check=True)
+sys.exit(1 if remaining else 0)
+PY
+```
+
+### Recorded outcome: 2026-10-31
+
+- Removed all ten named files and `data/jvm_forensics` containing 71 regular files.
+- Subsequent verification reported **11/11 targets absent**; `git ls-files`
+  returned no tracked cleanup paths. The local working tree was clean.
+- Remote `main` retained six unrelated untracked paths:
+  `data/equibles_13f/`, `data/equibles_filing_forensics/`, `data/flow_reports/`,
+  `data/informed_flow/`, `data/nav_history.jsonl.lock`, and
+  `data/uw_governor.sqlite3`. They were not approved for deletion.
+- No artifact-deletion commit was possible because the removed paths were
+  untracked. This documentation records the operation; it does not restore the
+  deleted files. No backup creation or recovered-byte measurement was recorded.
+  Recovery would require a separately retained backup, not `git restore`.
+
 ## Environment Variables
 
 ### Web app (`web/.env`)
