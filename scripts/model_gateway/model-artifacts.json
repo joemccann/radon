@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "chronos": {
+    "repo": "amazon/chronos-2",
+    "revision": "29ec3766d36d6f73f0696f85560a422f50e8498c",
+    "files": {
+      "config.json": {"sha256": "ef1143bfdc9c0376d9a056eefca46cb4b1ec3d0ffacd541ff56feb40fb708031", "size": 1067},
+      "model.safetensors": {"sha256": "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42", "size": 477930472}
+    }
+  },
+  "embedding": {
+    "repo": "qdrant/bge-small-en-v1.5-onnx-q",
+    "revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+    "files": {
+      "config.json": {"sha256": "13582bcf2effc85b7bf3d3f5532e686bc1c9ce86bb009d10f0ec33cbe92299dd", "size": 706},
+      "model_optimized.onnx": {"sha256": "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431", "size": 66465124},
+      "special_tokens_map.json": {"sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a", "size": 695},
+      "tokenizer.json": {"sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66", "size": 711396},
+      "tokenizer_config.json": {"sha256": "0b29c7bfc889e53b36d9dd3e686dd4300f6525110eaa98c76a5dafceb2029f53", "size": 1242}
+    }
+  }
+}

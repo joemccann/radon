@@ -375,15 +375,9 @@ describe("GET /api/ticker/seasonality — extended", () => {
       ok: true,
       json: async () => ({ data: partialUW }),
     });
-    // Call 2: HEAD check for equityclock image
-    mockFetch.mockResolvedValueOnce({ ok: true });
-    // Call 3: Anthropic Vision API
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        content: [{ type: "text", text: JSON.stringify(visionMonths) }],
-      }),
-    });
+    mockFetch.mockResolvedValueOnce(new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } }));
+    mockRadonFetch.mockResolvedValueOnce({ provider: "anthropic", model: "vision", text: JSON.stringify(visionMonths) });
+    process.env.ASSISTANT_MOCK = "0";
 
     const { GET } = await import("../app/api/ticker/seasonality/route");
     const res = await GET(new Request("http://localhost/api/ticker/seasonality?ticker=MSFT"));
@@ -1596,21 +1590,13 @@ describe("POST /api/assistant — extended", () => {
     expect(body.error).toContain("last message must be from user");
   });
 
-  it("calls Anthropic API and returns response", async () => {
+  it("calls the standalone gateway and returns its verified response", async () => {
     process.env.ASSISTANT_MOCK = "0";
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-grant";
     process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
     process.env.LLM_PROVIDER = "anthropic";
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        model: "claude-sonnet-4-5-20250929",
-        content: [{ type: "text", text: "AAPL shows strong accumulation" }],
-        stop_reason: "end_turn",
-        usage: { input_tokens: 50, output_tokens: 20 },
-      }),
-    });
+    mockRadonFetch.mockResolvedValueOnce({ provider: "anthropic", model: "claude-sonnet-4-5-20250929", text: "AAPL shows strong accumulation", stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 20 } });
 
     const { POST } = await import("../app/api/assistant/route");
     const res = await POST(
@@ -1623,8 +1609,6 @@ describe("POST /api/assistant — extended", () => {
       }) as any,
     );
     expect(res.status).toBe(200);
-
-    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     const body = await assistantDonePayload<{ content: string; model: string }>(res);
     expect(body.content).toBe("AAPL shows strong accumulation");

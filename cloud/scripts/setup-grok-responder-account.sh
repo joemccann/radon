@@ -34,7 +34,7 @@ if [[ "$verb" == refresh ]]; then
   echo "Refreshed root-owned responder code and units. Timers and the clone were left in place."
   echo "Verify: systemctl show radon-grok-responder.service -p ExecStart -p ReadWritePaths --no-pager"
 else
-  echo "Native login: sudo -u $ACCOUNT -H $ACCOUNT_HOME/.local/bin/grok login --device-auth"
+  echo "Model readiness uses the private gateway and immutable CI clients; provider login belongs to the gateway."
   echo 'Finalize: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured'
   echo 'Rollback: /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py rollback'
 fi

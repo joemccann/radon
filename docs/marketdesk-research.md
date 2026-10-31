@@ -231,7 +231,7 @@ caption keys that do not match the attached images, structural humanize tells
 length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
-ladder is `scripts/clients/model_ladder.py`. The image copy call skips grok
+ladder is `scripts/clients/model_ladder.py`. Text-only editorial requests start with Antigravity, then Anthropic, Grok, Cursor, Codex, NVIDIA and Cerebras; quota failures fall through. The image copy call skips text-only Antigravity and grok
 (`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
 image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
@@ -317,9 +317,7 @@ app image through `radon-app-runtime`:
 - an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
   `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
   and Clerk secrets never enter the container;
-- read-only `.grok`, `.codex` and `.claude` ladder grants, and no writable
-  Antigravity grant (third-party content), so its ladder falls past
-  antigravity.
+- read-only `.grok`, `.codex`, `.claude` and `.gemini/antigravity-cli` grants. The runtime forces `RADON_ANTIGRAVITY_ISOLATED=1`: Antigravity copies only its token file into a private temporary HOME, runs in sandbox/plan mode with slash-command expansion disabled, and deletes that state after success or failure. No host Antigravity configuration/projects or shared writable grant enters this worker. The existing subscription refresh service remains the canonical grant writer.
 
 The radon-api container keeps its read-only research bind, so existing and new
 research assets are served by the same authenticated route.

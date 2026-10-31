@@ -1174,7 +1174,7 @@ class TestOperatorSafetyOwners:
         # Subscriptions only (2026-10-26): the prepaid opt-in flag is gone.
         assert "never fall back to a prepaid key" in binds
         assert "as the fallback" not in binds
-        for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
+        for path in ("scripts/model_gateway/engine.py",):
             assert "prepaid" in (_ROOT / path).read_text()
             assert "ALLOW_PREPAID" not in (_ROOT / path).read_text()
 
@@ -1379,8 +1379,16 @@ class TestModelLadderByteCapOwner:
     def test_extract_via_vision_cap_is_owned(self):
         rules = {r["id"]: r for r in _load_owners()["rules"]}
         rule = rules["model-ladder"]
-        assert rule["globs"] == ["scripts/clients/model_ladder.py"]
-        assert rule["owners"] == ["docs/dropbox-research.md"]
+        assert rule["globs"] == [
+            "scripts/clients/model_ladder.py", "scripts/model_gateway/**",
+            "scripts/ci/check_model_cli_transport.py", "scripts/api/routes/model_gateway.py",
+            "cloud/scripts/model_clients.py", "cloud/scripts/model_transport.py",
+            "cloud/scripts/model_pacing.py", "cloud/scripts/model_gateway_rollback.py",
+            "cloud/scripts/check_model_transport.py",
+            "cloud/scripts/mac_model_gateway.py", "cloud/services/radon-model-gateway*",
+            "docker/app/vendor-clis/**", "web/lib/llm/provider.ts",
+        ]
+        assert rule["owners"] == ["docs/dropbox-research.md", "docs/model-gateway.md"]
         doc = (_ROOT / "docs/dropbox-research.md").read_text(encoding="utf-8")
         ladder = doc.split("### Model ladder (shared HTTP)", 1)[1].split(
             "### Verified host placement", 1
@@ -1388,7 +1396,7 @@ class TestModelLadderByteCapOwner:
         assert "extract_via_vision" in ladder
         assert "2,000,000" in ladder
         assert "Antigravity" in ladder
-        source = (_ROOT / "scripts/clients/model_ladder.py").read_text(encoding="utf-8")
+        source = (_ROOT / "scripts/model_gateway/engine.py").read_text(encoding="utf-8")
         vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
         assert "max_response_bytes: int = 2_000_000" in vision
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
@@ -1553,11 +1561,15 @@ class TestSubscriptionRecoveryBillingOwner:
         assert "different store" in section and "decrypted key" in section
         assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
         unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
-        # DS-2026-10-05-05: the vault context is the broker socket, never the key.
-        assert "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=" in unit
+        # The timer requests renewal; only the model service holds vault access.
+        assert "Environment=RADON_MODEL_CONTROL_SOCKET=" in unit
+        assert "RADON_SUBSCRIPTION_VAULT_SOCKET" not in unit
         assert "LoadCredentialEncrypted" not in unit
         assert "radon-subscription-vault.service" in section
-        assert "-m scripts.subscription_tokens --once" in unit
+        assert "-m scripts.model_gateway.refresh_cli" in unit
+        gateway = (_ROOT / "cloud/services/radon-model-gateway.service").read_text()
+        assert "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=" in gateway
+        assert "LoadCredentialEncrypted" not in gateway
 
 
 class TestApiTimerOwner:
@@ -1643,11 +1655,15 @@ class TestRunnerRunbookRootWrites:
 
     def test_secret_copies_write_as_the_bot(self):
         doc = (_ROOT / "docs/runner.md").read_text()
-        for target in ("agent-cli/env", ".radon-runner.env", "pushover.env"):
+        for target in (".radon-runner.env", "pushover.env"):
             assert any(
                 "sudo -u _radonbot /bin/sh -c" in line and target in line and ">" in line
                 for line in doc.splitlines()
             ), target
+        assert not any(
+            "sudo -u _radonbot /bin/sh -c" in line and "agent-cli/env" in line
+            for line in doc.splitlines()
+        ), "Model credentials belong to the gateway, never a bot-side secret copy"
 
 
 class TestGatewayDailyCycleDocumentation:
@@ -2484,9 +2500,10 @@ class TestDocumentation20261018:
         assert "proves each login with one real model call a day" not in cloud
         section = cloud.split("## Subscription tokens (agent CLIs)", 1)[1]
         section = section.split("\n## ", 1)[0]
-        assert "agy models" in section
-        assert "one real model call a day" in section
-        assert "does not use a token endpoint" in section
+        assert "model gateway" in section.lower()
+        assert "subscription-tokens.md" in section
+        assert "agy models" in reauth
+        assert "no Google token-endpoint fallback" in reauth
 
     def test_vix_pc_migration_97_is_not_free(self):
         sql = (_ROOT / "scripts/db/migrations/0097_vix_pc.sql").read_text()

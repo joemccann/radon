@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from clients.model_ladder import MODEL_LADDER_ORDER, ModelLadderExhausted, complete_text_json
+from model_gateway.engine import MODEL_LADDER_ORDER, ModelLadderExhausted, complete_text_json
 from clients.vision_cascade import VISION_CASCADE_ORDER
 from newsfeed.slm.modes import SLM_PREFER_ORDER, SLM_PRIMARY_ORDER
 

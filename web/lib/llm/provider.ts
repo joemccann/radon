@@ -1,29 +1,8 @@
-/**
- * Provider-agnostic LLM layer.
- *
- * One async `chat()` entrypoint targets:
- *   - xAI Grok (OpenAI-compatible; preferred when a SuperGrok grant is present)
- *   - Anthropic (native Messages API; historical default)
- *   - OpenAI (ChatGPT subscription via chatgpt.com/backend-api/codex/responses)
- *
- * Request and response are normalized so call sites never see provider-specific
- * shapes. A configurable fallback provider is tried when the primary fails.
- * Honors ASSISTANT_MOCK for offline tests.
- *
- * SUBSCRIPTIONS ONLY (operator mandate 2026-09-18): Anthropic, xAI and
- * OpenAI calls authenticate with the operator's Claude Max, SuperGrok and
- * ChatGPT grants (lib/llm/subscriptionAuth.ts). Prepaid console keys are
- * never read or sent, under any flag (operator policy 2026-10-26), matching
- * scripts/clients/model_ladder.py. Google runs only through the Antigravity
- * CLI on the server ladder and is never served here.
+/** Server-side adapter to the standalone model gateway. Provider credentials,
+ * model defaults, capability selection and fallback belong to that service.
+ * No provider request or authentication material is resolved in Next.js.
  */
-
-import { DEFAULT_MODELS } from "./frontier";
-import {
-  resolveAnthropicSubscription,
-  resolveCodexSubscription,
-  resolveXaiSubscription,
-} from "./subscriptionAuth";
+import { radonFetch } from "@/lib/radonApi";
 
 export type LlmRole = "user" | "assistant";
 
@@ -46,7 +25,7 @@ export type LlmTool = {
 };
 
 /** `grok` is accepted as an alias of `xai`. */
-export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai";
+export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai" | "antigravity" | "cursor" | "nvidia" | "cerebras" | "slm-tagger";
 
 export type LlmToolChoice = "auto" | "none" | "required";
 export type LlmReasoningEffort = "low" | "medium" | "high";
@@ -62,11 +41,11 @@ export type LlmChatRequest = {
   model?: string;
   provider?: LlmProviderName;
   maxTokens?: number;
-  /** Override the 45s provider HTTP timeout (assistant tool rounds use 90s). */
+  /** Total service request budget, including provider fallback. Defaults to 45s. */
   timeoutMs?: number;
   /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
   signal?: AbortSignal;
-  /** false: a caller racing providers itself owns the retry, so skip the serial fallback. */
+  /** false: request no provider fallback; the gateway still enforces capabilities. */
   fallback?: boolean;
 };
 
@@ -91,660 +70,58 @@ export type LlmChatResponse = {
   usedFallback?: boolean;
 };
 
-const DEFAULT_MAX_TOKENS = 1200;
-const DEFAULT_PROVIDER: LlmProviderName = "anthropic";
-const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
-  "xai",
-  "grok",
-  "anthropic",
-  "openai",
-];
 
-/**
- * Model ids whose provider the web layer never serves. Google runs only
- * through the Antigravity CLI on the server ladder (operator, 2026-09-18), so
- * a stale `gemini-*` selection is a primary failure that goes to the
- * configured fallback with that provider's own default model.
- */
-const UNSERVED_MODEL_PREFIXES = ["gemini-"];
-const UNSERVED_MODEL_MESSAGE =
-  "Google is served only through the Antigravity CLI on the server ladder; not available in the web layer.";
-
-/** Claude Code OAuth grants need this beta and the Claude Code identity on Messages. */
-const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
-const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
-const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140";
-/** ChatGPT subscription endpoint the codex CLI uses; streaming only. */
-const CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
-
-/**
- * The model each provider is called with when nothing else names one: no
- * per-turn selection from the picker and no `<PROVIDER>_MODEL` env pin. Same
- * ids lib/llm/catalog.ts serves as BUILTIN_FRONTIER; see lib/llm/frontier.ts
- * for why they have to be one constant.
- */
-export { DEFAULT_MODELS };
-
-const isMockMode = () =>
-  process.env.ASSISTANT_MOCK === "1" ||
-  (process.env.NODE_ENV === "test" && process.env.ASSISTANT_MOCK !== "0");
-
-function envValue(key: string): string | undefined {
-  const value = process.env[key]?.trim();
-  return value ? value : undefined;
-}
-
-type AnthropicAuth = { kind: "subscription"; token: string };
-
-function resolveAnthropicAuth(): AnthropicAuth | undefined {
-  const grant = resolveAnthropicSubscription();
-  return grant ? { kind: "subscription", token: grant.token } : undefined;
-}
-
-/** Presence only: can this deployment serve Anthropic at all? */
-export function hasAnthropicAuth(): boolean {
-  return Boolean(resolveAnthropicAuth());
-}
-
-/** SuperGrok subscription grant: env override first, then ~/.grok/auth.json. */
-export function resolveXaiSubscriptionToken(): string | undefined {
-  return resolveXaiSubscription()?.token;
-}
-
-/** The SuperGrok subscription grant; prepaid keys are never read. */
-export function resolveXaiAuth(): string | undefined {
-  return resolveXaiSubscriptionToken();
-}
-
-/** Presence only: can this deployment serve OpenAI (ChatGPT grant) at all? */
-export function hasOpenAiAuth(): boolean {
-  return Boolean(resolveCodexSubscription());
-}
-
-function isKnownProvider(value: string | undefined): value is LlmProviderName {
-  return Boolean(value && (KNOWN_PROVIDERS as readonly string[]).includes(value));
-}
-
-/** Normalize aliases so dispatch only sees canonical names. */
+const PROVIDERS: readonly LlmProviderName[] = ["anthropic", "xai", "grok", "openai", "antigravity", "cursor", "nvidia", "cerebras", "slm-tagger"];
 export function normalizeProvider(name: LlmProviderName): Exclude<LlmProviderName, "grok"> {
   return name === "grok" ? "xai" : name;
 }
 
-/**
- * Which provider owns a model id. The picker sends a model, not a provider, so
- * a Grok selection has to reach xAI on a host whose default is Anthropic.
- * Prefix match only: xAI uses dots (`grok-4.6`), Anthropic dashes.
- */
+/** Pure ownership hint for explicit selections; routing remains service-owned. */
 export function providerForModel(model: string | undefined): Exclude<LlmProviderName, "grok"> | undefined {
   const id = model?.trim().toLowerCase();
   if (!id) return undefined;
   if (id.startsWith("claude-")) return "anthropic";
   if (id.startsWith("grok-")) return "xai";
   if (id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3")) return "openai";
+  if (id.startsWith("antigravity-")) return "antigravity";
   return undefined;
 }
 
-function isUnservedModel(model: string | undefined): boolean {
-  const id = model?.trim().toLowerCase();
-  return Boolean(id && UNSERVED_MODEL_PREFIXES.some((prefix) => id.startsWith(prefix)));
-}
-
-/**
- * Provider resolution order:
- * 1. Explicit request.provider
- * 2. The provider that owns request.model (a per-turn selection outranks host env)
- * 3. LLM_PROVIDER env
- * 4. Auto-prefer xAI when a Grok subscription grant is present (CMD+J → Grok)
- * 5. Anthropic fallback
- */
-export function resolveProvider(
-  request: Pick<LlmChatRequest, "provider" | "model"> = {},
-): Exclude<LlmProviderName, "grok"> {
-  if (isKnownProvider(request.provider)) {
-    return normalizeProvider(request.provider);
+function isResponse(value: unknown): value is LlmChatResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  if (!PROVIDERS.includes(r.provider as LlmProviderName) || typeof r.model !== "string" || typeof r.text !== "string") return false;
+  if (r.stopReason !== undefined && (typeof r.stopReason !== "string" || ["failed", "incomplete", "error"].includes(r.stopReason))) return false;
+  if (r.usedFallback !== undefined && typeof r.usedFallback !== "boolean") return false;
+  if (r.toolCalls !== undefined && (!Array.isArray(r.toolCalls) || r.toolCalls.some((call) =>
+    !call || typeof call !== "object" || typeof call.id !== "string" || !call.id ||
+    typeof call.name !== "string" || !call.name || !call.input || typeof call.input !== "object" || Array.isArray(call.input)))) return false;
+  if (r.usage !== undefined) {
+    const usage = r.usage as Record<string, unknown>;
+    if (!usage || typeof usage !== "object" || ![usage.inputTokens, usage.outputTokens].every(v => typeof v === "number" && Number.isFinite(v) && v >= 0)) return false;
   }
-  const byModel = providerForModel(request.model);
-  if (byModel) return byModel;
-
-  const requested = envValue("LLM_PROVIDER") as LlmProviderName | undefined;
-  if (isKnownProvider(requested)) {
-    return normalizeProvider(requested);
-  }
-  if (resolveXaiAuth()) {
-    return "xai";
-  }
-  return DEFAULT_PROVIDER === "grok" ? "xai" : DEFAULT_PROVIDER;
-}
-
-function resolveFallbackProvider(
-  primary: Exclude<LlmProviderName, "grok">,
-): Exclude<LlmProviderName, "grok"> | undefined {
-  const configured = envValue("LLM_FALLBACK_PROVIDER") as LlmProviderName | undefined;
-  if (!isKnownProvider(configured)) {
-    // xAI is only AUTO-preferred (resolution step 4). When nobody pinned a
-    // provider and nobody configured a fallback, losing xAI (2026-09-18: the
-    // team ran out of credits, 403 on every call) must degrade to the
-    // historical Anthropic default rather than fail every rewrite.
-    if (
-      primary === "xai" &&
-      !envValue("LLM_PROVIDER") &&
-      hasAnthropicAuth()
-    ) {
-      return "anthropic";
-    }
-    return undefined;
-  }
-  const normalized = normalizeProvider(configured);
-  if (normalized === primary) return undefined;
-  return normalized;
-}
-
-/**
- * The second subscription a latency-sensitive caller may race against
- * `primary`: the configured or default fallback, else the other of
- * xAI/Anthropic when it holds a grant. A pinned LLM_PROVIDER with no
- * configured fallback gets none, as with the serial fallback.
- */
-export function alternateProvider(
-  primary: Exclude<LlmProviderName, "grok">,
-): Exclude<LlmProviderName, "grok"> | undefined {
-  const fallback = resolveFallbackProvider(primary);
-  if (fallback || envValue("LLM_PROVIDER")) return fallback;
-  if (primary === "anthropic") return resolveXaiAuth() ? "xai" : undefined;
-  return primary !== "xai" && hasAnthropicAuth() ? "anthropic" : undefined;
-}
-
-function maxTokensFor(request: LlmChatRequest): number {
-  return request.maxTokens ?? DEFAULT_MAX_TOKENS;
-}
-
-function lastUserContent(messages: LlmMessage[]): string {
-  const lastUser = [...messages].reverse().find((message) => message.role === "user");
-  if (!lastUser) return "";
-  if (typeof lastUser.content === "string") return lastUser.content;
-  return lastUser.content
-    .filter((block): block is Extract<LlmContentBlock, { type: "text" }> => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-}
-
-function mockResponse(request: LlmChatRequest, provider: LlmProviderName): LlmChatResponse {
-  const prompt = lastUserContent(request.messages) || "No user message provided.";
-  return {
-    provider,
-    model: "mock",
-    text: `Mock ${provider} response: ${prompt}`,
-    stopReason: "end_turn",
-    usage: { inputTokens: 0, outputTokens: 0 },
-  };
-}
-
-async function readErrorDetail(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
-const LLM_REQUEST_TIMEOUT_MS = 45_000;
-
-function llmRequestSignal(request: Pick<LlmChatRequest, "signal" | "timeoutMs">): AbortSignal {
-  const timeout = AbortSignal.timeout(request.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS);
-  return request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
-}
-
-// --- Anthropic (native Messages API) -------------------------------------
-
-type AnthropicContentBlock = {
-  type: string;
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-};
-
-type AnthropicResponse = {
-  model?: string;
-  content?: AnthropicContentBlock[];
-  stop_reason?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
-};
-
-/**
- * Headers for the Anthropic Messages API. The Claude Max OAuth grant is sent
- * as a Bearer with the oauth beta; there is no x-api-key path.
- */
-export function anthropicHeaders(auth: AnthropicAuth): Record<string, string> {
-  return {
-    "anthropic-version": "2023-06-01",
-    "content-type": "application/json",
-    accept: "application/json",
-    authorization: `Bearer ${auth.token}`,
-    "anthropic-beta": ANTHROPIC_OAUTH_BETA,
-    "user-agent": CLAUDE_CODE_USER_AGENT,
-  };
-}
-
-/**
- * The OAuth grant is only honoured for Claude Code traffic: the Messages API
- * answers a bare 429 unless the system prompt opens with the Claude Code
- * identity block (verified live 2026-09-18). Prepend it; the caller's own
- * system text follows as a second block.
- */
-export function anthropicSystem(
-  auth: AnthropicAuth,
-  system: string | undefined,
-): string | Array<{ type: "text"; text: string }> | undefined {
-  const blocks: Array<{ type: "text"; text: string }> = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }];
-  if (system) blocks.push({ type: "text", text: system });
-  return blocks;
-}
-
-/** Shared by every direct Messages-API caller (seasonality vision, etc.). */
-export function anthropicRequestAuth(): { headers: Record<string, string>; system: (s?: string) => ReturnType<typeof anthropicSystem> } | undefined {
-  const auth = resolveAnthropicAuth();
-  if (!auth) return undefined;
-  return { headers: anthropicHeaders(auth), system: (s?: string) => anthropicSystem(auth, s) };
-}
-
-async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> {
-  const auth = resolveAnthropicAuth();
-  if (!auth) {
-    throw new Error(
-      "Missing Anthropic subscription. Log Claude Code in (~/.claude/.credentials.json) or set CLAUDE_CODE_OAUTH_TOKEN.",
-    );
-  }
-
-  const url = envValue("ANTHROPIC_API_URL") || "https://api.anthropic.com/v1/messages";
-  const model = request.model || envValue("ANTHROPIC_MODEL") || DEFAULT_MODELS.anthropic;
-
-  const body: Record<string, unknown> = {
-    model,
-    max_tokens: maxTokensFor(request),
-    messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
-  };
-  const system = anthropicSystem(auth, request.system);
-  if (system) body.system = system;
-  if (request.tools?.length) {
-    body.tools = request.tools;
-    if (request.toolChoice === "none") body.tool_choice = { type: "none" };
-    else if (request.toolChoice === "required") body.tool_choice = { type: "any" };
-    else if (request.toolChoice === "auto") body.tool_choice = { type: "auto" };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: anthropicHeaders(auth),
-    body: JSON.stringify(body),
-    signal: llmRequestSignal(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Anthropic request failed (${response.status}): ${await readErrorDetail(response)}`);
-  }
-
-  const data = (await response.json()) as AnthropicResponse;
-  const blocks = data.content ?? [];
-  const text = blocks
-    .filter((block) => block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text)
-    .join("");
-
-  const toolCalls = blocks
-    .filter((block) => block.type === "tool_use" && block.name)
-    .map((block) => ({ id: block.id ?? "", name: block.name as string, input: block.input ?? {} }));
-
-  return {
-    provider: "anthropic",
-    model: data.model ?? model,
-    text,
-    toolCalls: toolCalls.length ? toolCalls : undefined,
-    stopReason: data.stop_reason,
-    usage: normalizeUsage(data.usage?.input_tokens, data.usage?.output_tokens),
-  };
-}
-
-// --- OpenAI-compatible (xAI / OpenAI / Groq / DeepSeek / Ollama) ----------
-
-type OpenAiToolCall = {
-  id?: string;
-  type?: string;
-  function?: { name?: string; arguments?: string };
-};
-
-type OpenAiResponse = {
-  model?: string;
-  choices?: Array<{
-    message?: { content?: string | null; tool_calls?: OpenAiToolCall[] };
-    finish_reason?: string;
-  }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
-};
-
-type OpenAiContentPart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
-
-type OpenAiOutboundMessage =
-  | { role: string; content: string | OpenAiContentPart[] | null; tool_calls?: OpenAiToolCall[] }
-  | { role: "tool"; tool_call_id: string; content: string };
-
-function xaiConfig() {
-  return {
-    apiKey: resolveXaiAuth(),
-    baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
-    model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
-  };
-}
-
-/**
- * Map Anthropic-style structured tool turns onto OpenAI chat/completions
- * message roles so the multi-round assistant loop works on xAI/Grok.
- */
-export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage[] {
-  const messages: OpenAiOutboundMessage[] = [];
-  if (request.system) messages.push({ role: "system", content: request.system });
-
-  for (const message of request.messages) {
-    if (typeof message.content === "string") {
-      messages.push({ role: message.role, content: message.content });
-      continue;
-    }
-
-    const blocks = message.content;
-    const toolResults = blocks.filter(
-      (block): block is Extract<LlmContentBlock, { type: "tool_result" }> => block.type === "tool_result",
-    );
-    if (toolResults.length > 0) {
-      for (const result of toolResults) {
-        messages.push({
-          role: "tool",
-          tool_call_id: result.tool_use_id,
-          content: result.content,
-        });
-      }
-      continue;
-    }
-
-    const text = blocks
-      .filter((block): block is Extract<LlmContentBlock, { type: "text" }> => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-    const toolUses = blocks.filter(
-      (block): block is Extract<LlmContentBlock, { type: "tool_use" }> => block.type === "tool_use",
-    );
-    const hasImage = blocks.some((block) => block.type === "image");
-
-    if (toolUses.length > 0) {
-      messages.push({
-        role: "assistant",
-        content: text.length > 0 ? text : null,
-        tool_calls: toolUses.map((call) => ({
-          id: call.id,
-          type: "function",
-          function: {
-            name: call.name,
-            arguments: JSON.stringify(call.input ?? {}),
-          },
-        })),
-      });
-      continue;
-    }
-
-    if (hasImage) {
-      // Images force the array content shape; text-only turns stay plain
-      // strings so the provider-side prompt cache keeps hitting.
-      messages.push({
-        role: message.role,
-        content: blocks.flatMap((block): OpenAiContentPart[] => {
-          if (block.type === "text") return [{ type: "text", text: block.text }];
-          if (block.type === "image") {
-            return [{
-              type: "image_url",
-              image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
-            }];
-          }
-          return [];
-        }),
-      });
-      continue;
-    }
-
-    messages.push({ role: message.role, content: text });
-  }
-
-  return messages;
-}
-
-function toOpenAiTools(tools: LlmTool[] | undefined) {
-  if (!tools?.length) return undefined;
-  return tools.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      ...(tool.description ? { description: tool.description } : {}),
-      parameters: tool.input_schema,
-    },
-  }));
-}
-
-/**
- * ChatGPT subscription via the codex grant. chatgpt.com only streams, so the
- * SSE is folded here into the same envelope the other adapters return. Tool
- * turns are refused so the configured tool-capable provider takes them.
- */
-async function callChatGptSubscription(
-  request: LlmChatRequest,
-  grant: { token: string; accountId?: string },
-): Promise<LlmChatResponse> {
-  if (request.tools?.length) {
-    throw new Error("ChatGPT subscription turns do not carry tools; use a tool-capable provider.");
-  }
-  const model = request.model || envValue("OPENAI_MODEL") || DEFAULT_MODELS.openai;
-  const input = request.messages.map((message) => ({
-    role: message.role,
-    content: [
-      {
-        type: message.role === "assistant" ? "output_text" : "input_text",
-        text: typeof message.content === "string" ? message.content : lastUserContent([message]),
-      },
-    ],
-  }));
-  const body: Record<string, unknown> = { model, input, store: false, stream: true };
-  if (request.system) body.instructions = request.system;
-  if (request.reasoningEffort) body.reasoning = { effort: request.reasoningEffort };
-
-  const headers: Record<string, string> = {
-    authorization: `Bearer ${grant.token}`,
-    "content-type": "application/json",
-    accept: "text/event-stream",
-    "OpenAI-Beta": "responses=experimental",
-  };
-  if (grant.accountId) headers["chatgpt-account-id"] = grant.accountId;
-
-  const response = await fetch(envValue("CHATGPT_CODEX_RESPONSES_URL") || CHATGPT_CODEX_RESPONSES_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: llmRequestSignal(request),
-  });
-  if (!response.ok) {
-    throw new Error(`ChatGPT subscription request failed (${response.status}): ${await readErrorDetail(response)}`);
-  }
-
-  let text = "";
-  let stopReason: string | undefined;
-  let usage: LlmUsage | undefined;
-  for (const line of (await response.text()).split("\n")) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (data === "[DONE]") continue;
-    let event: { type?: string; delta?: string; response?: { status?: string; usage?: { input_tokens?: number; output_tokens?: number } } };
-    try {
-      event = JSON.parse(data);
-    } catch {
-      throw new Error("ChatGPT subscription stream is malformed.");
-    }
-    if (!event || typeof event !== "object" || Array.isArray(event)) {
-      throw new Error("ChatGPT subscription stream is malformed.");
-    }
-    if (["response.failed", "response.incomplete", "response.error", "error"].includes(event.type ?? "")) {
-      throw new Error("ChatGPT subscription stream did not complete successfully.");
-    }
-    if (event.type === "response.output_text.delta" && typeof event.delta === "string") text += event.delta;
-    if (event.type === "response.completed") {
-      if (event.response?.status !== "completed") {
-        throw new Error("ChatGPT subscription stream did not complete successfully.");
-      }
-      stopReason = "completed";
-      usage = normalizeUsage(event.response?.usage?.input_tokens, event.response?.usage?.output_tokens);
-    }
-  }
-  if (stopReason !== "completed") {
-    throw new Error("ChatGPT subscription stream ended without completion.");
-  }
-  return { provider: "openai", model, text, stopReason, usage };
-}
-
-async function callOpenAiCompatible(
-  request: LlmChatRequest,
-  provider: "xai" | "openai",
-): Promise<LlmChatResponse> {
-  if (provider === "openai") {
-    const grant = resolveCodexSubscription();
-    if (!grant) {
-      throw new Error("Missing ChatGPT subscription. Log the codex CLI in (~/.codex/auth.json) or set CODEX_OAUTH_TOKEN.");
-    }
-    return callChatGptSubscription(request, grant);
-  }
-  const config = xaiConfig();
-  if (!config.apiKey) {
-    throw new Error(
-      "Missing xAI subscription. Log the grok CLI in (~/.grok/auth.json) or set XAI_OAUTH_TOKEN.",
-    );
-  }
-
-  const url = `${config.baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const model = request.model || config.model;
-
-  const body: Record<string, unknown> = {
-    model,
-    max_tokens: maxTokensFor(request),
-    messages: toOpenAiMessages(request),
-  };
-  const tools = toOpenAiTools(request.tools);
-  if (tools) {
-    body.tools = tools;
-    if (request.toolChoice) body.tool_choice = request.toolChoice;
-  }
-  if (request.reasoningEffort) body.reasoning_effort = request.reasoningEffort;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config.apiKey}`,
-      "content-type": "application/json",
-      accept: "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: llmRequestSignal(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`xAI Grok request failed (${response.status}): ${await readErrorDetail(response)}`);
-  }
-
-  const data = (await response.json()) as OpenAiResponse;
-  const choice = data.choices?.[0];
-  const text = choice?.message?.content ?? "";
-
-  const toolCalls = (choice?.message?.tool_calls ?? [])
-    .filter((call) => call.function?.name)
-    .map((call) => ({
-      id: call.id ?? "",
-      name: call.function?.name as string,
-      input: parseToolArguments(call.function?.arguments),
-    }));
-
-  return {
-    provider,
-    model: data.model ?? model,
-    text,
-    toolCalls: toolCalls.length ? toolCalls : undefined,
-    stopReason: choice?.finish_reason,
-    usage: normalizeUsage(data.usage?.prompt_tokens, data.usage?.completion_tokens),
-  };
-}
-
-function parseToolArguments(raw: string | undefined): Record<string, unknown> {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function normalizeUsage(input: number | undefined, output: number | undefined): LlmUsage | undefined {
-  if (typeof input !== "number" && typeof output !== "number") return undefined;
-  return { inputTokens: input ?? 0, outputTokens: output ?? 0 };
-}
-
-function dispatch(
-  provider: Exclude<LlmProviderName, "grok">,
-  request: LlmChatRequest,
-): Promise<LlmChatResponse> {
-  if (isUnservedModel(request.model)) return Promise.reject(new Error(UNSERVED_MODEL_MESSAGE));
-  if (provider === "anthropic") return callAnthropic(request);
-  if (provider === "xai") return callOpenAiCompatible(request, "xai");
-  return callOpenAiCompatible(request, "openai");
-}
-
-/**
- * Thin adapter the assistant route (F7) consumes: takes the existing
- * `{ messages, system }` shape and returns just the completion text plus the
- * provider/model/usage envelope the route already serializes. Call sites stay
- * provider-agnostic; switching providers is an env change, not a code change.
- */
-export async function assistantChat(
-  messages: LlmMessage[],
-  system?: string,
-  options?: Pick<LlmChatRequest, "tools" | "toolChoice" | "reasoningEffort" | "model" | "provider" | "maxTokens" | "timeoutMs">,
-): Promise<LlmChatResponse> {
-  return chat({ messages, system, ...options });
+  return true;
 }
 
 export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
-  const provider = resolveProvider(request);
-
-  if (isMockMode()) {
-    return mockResponse(request, provider);
+  request.signal?.throwIfAborted();
+  if (process.env.ASSISTANT_MOCK === "1" || (process.env.NODE_ENV === "test" && process.env.ASSISTANT_MOCK !== "0")) {
+    const last = [...request.messages].reverse().find(message => message.role === "user");
+    const prompt = typeof last?.content === "string" ? last.content : last?.content.filter(block => block.type === "text").map(block => block.type === "text" ? block.text : "").join("") || "No user message provided.";
+    return { provider: request.provider ? normalizeProvider(request.provider) : providerForModel(request.model) ?? "antigravity", model: "mock", text: `Mock ${request.provider ?? "antigravity"} response: ${prompt}`, stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0 } };
   }
+  const { signal, ...payload } = request;
+  const result = await radonFetch<unknown>("/model-gateway/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload), timeout: request.timeoutMs ?? 45_000, signal,
+  });
+  if (!isResponse(result)) throw new Error("Model gateway response is malformed or incomplete");
+  return result;
+}
 
-  try {
-    return await dispatch(provider, request);
-  } catch (primaryError) {
-    const fallback = request.fallback === false ? undefined : resolveFallbackProvider(provider);
-    if (!fallback) throw primaryError;
-    console.warn(
-      `[llm] ${provider} failed, falling back to ${fallback}: ${
-        primaryError instanceof Error ? primaryError.message.slice(0, 300) : String(primaryError)
-      }`,
-    );
-
-    // The fallback provider gets its OWN default model. A per-turn selection
-    // is scoped to the provider that owns it, so handing "grok-4.6" to
-    // Anthropic 404s and converts a transient xAI blip into a hard turn
-    // failure - the exact outage the fallback exists to absorb. Dropping
-    // `provider` too keeps an explicit request.provider from pinning the
-    // retry back onto the endpoint that just failed.
-    const fallbackResult = await dispatch(fallback, {
-      ...request,
-      model: undefined,
-      provider: undefined,
-    });
-    return { ...fallbackResult, usedFallback: true };
-  }
+export async function assistantChat(
+  messages: LlmMessage[], system?: string,
+  options?: Pick<LlmChatRequest, "tools" | "toolChoice" | "reasoningEffort" | "model" | "provider" | "maxTokens" | "timeoutMs">,
+): Promise<LlmChatResponse> {
+  return chat({ messages, system, ...options });
 }

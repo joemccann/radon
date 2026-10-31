@@ -87,20 +87,20 @@ def test_research_uses_image_clis_even_when_host_executables_exist(tmp_path):
     run = _run_line(result)
     assert f"{home}/.local/bin:" not in run
     assert "HOME=/home/radon" in run
-    for grant in (".grok", ".codex"):
-        assert f"{home}/{grant}:/home/radon/{grant}:ro" in run
-    for grant in (".gemini/antigravity-cli", ".gemini/config"):
-        assert f"{home}/{grant}:/home/radon/{grant}:rw" in run
+    assert "/run/radon-model-gateway:ro" in run
+    for grant in (".grok", ".codex", ".claude", ".gemini"):
+        assert f"{home}/{grant}" not in run
 
 
 @pytest.mark.parametrize("unit", ("radon-newsfeed.service", "radon-nextjs.service"))
-def test_node_consumers_retain_their_existing_cli_mount(tmp_path, unit):
+def test_node_consumers_use_gateway_without_host_cli_mounts(tmp_path, unit):
     home = _subscription_home(tmp_path)
     result = _run(tmp_path, ["run", unit], extra_env={
         "RADON_SUBSCRIPTION_HOME": str(home), "NOTIFY_SOCKET": "",
     })
     assert result.returncode == 0, result.stderr
-    assert f"{home}/.local/bin:/home/radon/.local/bin:ro" in _run_line(result)
+    assert f"{home}/.local/bin:" not in _run_line(result)
+    assert "/run/radon-model-gateway:ro" in _run_line(result)
 
 
 @pytest.mark.parametrize("unit", STORE_UNITS)

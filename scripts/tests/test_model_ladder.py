@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,8 @@ import pytest
 # T-498: file-backed subscriptions are opt-in synthetic fixtures.
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
-from clients import model_ladder
-from clients.model_ladder import (
+from model_gateway import engine as model_ladder
+from model_gateway.engine import (
     MODEL_LADDER_ORDER,
     MODEL_LADDER_TIERS,
     ModelLadderExhausted,
@@ -165,11 +166,11 @@ class _StreamingResponse:
 class TestLadderContract:
     def test_order_is_joes_exact_bands(self):
         assert MODEL_LADDER_ORDER == (
+            "antigravity",
             "anthropic",
             "grok",
             "cursor",
             "codex",
-            "antigravity",
             "nvidia",
             "cerebras",
         )
@@ -609,7 +610,7 @@ class TestCompleteTextJson:
 
 class TestCerebrasModelId:
     def test_default_is_not_archived_scout(self):
-        from clients.model_ladder import _model_for
+        from model_gateway.engine import _model_for
 
         vision = _model_for("cerebras", {}, kind="vision")
         text = _model_for("cerebras", {}, kind="text")
@@ -640,7 +641,7 @@ class TestCerebrasModelId:
 
 class TestSubscriptionAuthPreference:
     def test_anthropic_oauth_preferred_over_prepaid_api_key(self):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         auth = _auth_for(
             "anthropic",
@@ -658,7 +659,7 @@ class TestSubscriptionAuthPreference:
         assert "anthropic" in wired_providers({"CLAUDE_CODE_OAUTH_TOKEN": "oauth"})
 
     def test_codex_auth_json_preferred_over_openai_api_key(self, tmp_path):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         codex_home = tmp_path / "codex"
         codex_home.mkdir()
@@ -675,7 +676,7 @@ class TestSubscriptionAuthPreference:
         assert auth.token == "codex-sub-token"
 
     def test_grok_auth_json_preferred_over_xai_api_key(self, tmp_path):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         home = tmp_path / "home"
         (home / ".grok").mkdir(parents=True)
@@ -982,6 +983,113 @@ class TestAntigravityRungRunsThroughTheCli:
         prompt = argv[argv.index("-p") + 1]
         assert "You are Radon." in prompt and "evaluate" in prompt
 
+    def test_default_prefers_antigravity_over_available_anthropic(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path)
+        import subprocess as sp
+        monkeypatch.setattr(model_ladder.subprocess, "run", lambda argv, **kwargs:
+                            sp.CompletedProcess(argv, 0, stdout=json.dumps(
+                                {"status": "SUCCESS", "response": '{"ok": true}'}), stderr=""))
+        router = _Router({"api.anthropic.com": _anthropic_obj_ok()})
+        result = complete_text_json("evaluate", env={"HOME": str(home), "CLAUDE_CODE_OAUTH_TOKEN": "a"}, post=router)
+        assert result.provider == "antigravity"
+        assert result.attempted == ("antigravity:ok",)
+        assert router.calls == []
+
+    @pytest.mark.parametrize("failure", ["RESOURCE_EXHAUSTED", "quota exceeded", "unavailable"])
+    def test_antigravity_exhaustion_advances_to_anthropic(self, tmp_path, monkeypatch, failure):
+        home = self._home(tmp_path)
+        import subprocess as sp
+        monkeypatch.setattr(model_ladder.subprocess, "run", lambda argv, **kwargs:
+                            sp.CompletedProcess(argv, 1, stdout="", stderr=failure))
+        result = complete_text_json("evaluate", env={"HOME": str(home), "CLAUDE_CODE_OAUTH_TOKEN": "a"},
+                                    post=_Router({"api.anthropic.com": _anthropic_obj_ok()}))
+        assert result.provider == "anthropic"
+        assert result.attempted[0].startswith("antigravity:")
+        assert result.attempted[-1] == "anthropic:ok"
+
+    @pytest.mark.parametrize("winner", ["codex", "nvidia", "cerebras"])
+    def test_default_cascade_continues_after_grok_spending_limit(self, monkeypatch, winner):
+        calls = []
+        monkeypatch.setattr(model_ladder, "_auth_for", lambda name, env:
+                            model_ladder.AuthMaterial("synthetic", "subscription", "fixture"))
+        def call(name, *args, **kwargs):
+            calls.append(name)
+            if name == winner:
+                return 200, "", {"choices": [{"message": {"content": '{"ok": true}'}}]}
+            if name == "grok":
+                return 402, "personal-team-blocked:spending-limit", None
+            return 429, "quota exhausted", None
+        monkeypatch.setattr(model_ladder, "_call_text_provider", call)
+        result = complete_text_json("evaluate", env={})
+        expected = ["antigravity", "anthropic", "grok", "codex", "nvidia", "cerebras"]
+        assert calls == expected[:expected.index(winner)+1]
+        assert result.provider == winner
+        assert any(item.startswith("grok:") for item in result.attempted)
+        assert result.data == {"ok": True}
+
+    @pytest.mark.parametrize("failure", [False, True])
+    def test_isolated_antigravity_copies_only_grant_and_cleans_up(self, tmp_path, monkeypatch, failure):
+        import subprocess as sp
+        home = self._home(tmp_path)
+        original = (home / model_ladder._ANTIGRAVITY_TOKEN_RELPATH).read_bytes()
+        (home / ".gemini/antigravity-cli/host-project").write_text("must not be copied")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("RADON_ANTIGRAVITY_ISOLATED", "1")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "must-not-leak")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "host-config"))
+        seen = []
+
+        def fake_run(argv, **kwargs):
+            private = Path(kwargs["env"]["HOME"])
+            seen.append(private)
+            assert private != home and kwargs["cwd"] == str(private)
+            assert (private / model_ladder._ANTIGRAVITY_TOKEN_RELPATH).read_bytes() == original
+            assert not (private / ".gemini/antigravity-cli/host-project").exists()
+            assert (private / model_ladder._ANTIGRAVITY_TOKEN_RELPATH).stat().st_mode & 0o777 == 0o600
+            assert "TURSO_AUTH_TOKEN" not in kwargs["env"]
+            assert kwargs["env"]["XDG_CONFIG_HOME"].startswith(str(private))
+            assert "--sandbox" in argv and "--disable-slash-commands" in argv
+            assert argv[argv.index("--mode") + 1] == "plan"
+            (private / model_ladder._ANTIGRAVITY_TOKEN_RELPATH).write_text("cli-refreshed-copy")
+            if failure:
+                raise sp.TimeoutExpired(argv, 1)
+            return sp.CompletedProcess(argv, 0, stdout=json.dumps({"response": '{"ok": true}'}), stderr="")
+
+        monkeypatch.setattr(model_ladder.subprocess, "run", fake_run)
+        if failure:
+            with pytest.raises(RuntimeError, match="network:TimeoutExpired"):
+                model_ladder._antigravity_complete("agy", {}, "", "", "evaluate", [])
+        else:
+            assert model_ladder._antigravity_complete("agy", {}, "", "", "evaluate", [])[0] == 200
+        assert seen and all(not private.exists() for private in seen)
+        assert (home / model_ladder._ANTIGRAVITY_TOKEN_RELPATH).read_bytes() == original
+
+    @pytest.mark.parametrize("invalid", ["empty", "oversized", "symlink", "missing", "directory", "fifo"])
+    def test_isolated_antigravity_refuses_invalid_seed(self, tmp_path, monkeypatch, invalid):
+        home = self._home(tmp_path)
+        seed = home / model_ladder._ANTIGRAVITY_TOKEN_RELPATH
+        if invalid == "empty":
+            seed.write_bytes(b"")
+        elif invalid == "oversized":
+            seed.write_bytes(b"x" * 65_537)
+        else:
+            seed.unlink()
+            if invalid == "directory":
+                seed.mkdir()
+            elif invalid == "fifo":
+                os.mkfifo(seed)
+            elif invalid == "symlink":
+                other = tmp_path / "other-grant"
+                other.write_text("must not be followed")
+                seed.symlink_to(other)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("RADON_ANTIGRAVITY_ISOLATED", "1")
+        monkeypatch.setattr(model_ladder.tempfile, "tempdir", str(tmp_path))
+        monkeypatch.setattr(model_ladder.subprocess, "run", lambda *args, **kwargs: pytest.fail("invalid seed reached CLI"))
+        with pytest.raises(RuntimeError, match="network:"):
+            model_ladder._antigravity_complete("agy", {}, "", "", "evaluate", [])
+        assert list(tmp_path.glob("radon-agy-*")) == []
+
     def test_gemini_is_not_a_rung_and_gemini_model_is_ignored(self, tmp_path, monkeypatch):
         assert "gemini" not in MODEL_LADDER_ORDER
         assert "gemini" not in MODEL_LADDER_TIERS
@@ -1079,7 +1187,7 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
 
 class TestNvidiaVisionDefaultAndFallback:
     def test_default_vision_model_is_90b(self):
-        from clients.model_ladder import _model_for, _nvidia_vision_models
+        from model_gateway.engine import _model_for, _nvidia_vision_models
 
         assert _model_for("nvidia", {}, kind="vision") == (
             "meta/llama-3.2-90b-vision-instruct"
@@ -1090,7 +1198,7 @@ class TestNvidiaVisionDefaultAndFallback:
         )
 
     def test_nvidia_vision_model_override_honored(self):
-        from clients.model_ladder import _nvidia_vision_models
+        from model_gateway.engine import _nvidia_vision_models
 
         models = _nvidia_vision_models(
             {"NVIDIA_VISION_MODEL": "meta/llama-3.2-11b-vision-instruct"}
@@ -1192,7 +1300,7 @@ class TestNoPrepaidByDefault:
         assert "nvidia" in wired
 
     def test_subscription_still_preferred_when_present_with_allow_prepaid(self):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         auth = _auth_for(
             "anthropic",
@@ -1209,7 +1317,7 @@ class TestNoPrepaidByDefault:
 
 class TestNvidiaTextDefault:
     def test_default_text_model_is_nemotron_super_not_stale_llama(self):
-        from clients.model_ladder import _DEFAULT_TEXT_MODELS, _model_for
+        from model_gateway.engine import _DEFAULT_TEXT_MODELS, _model_for
 
         assert "llama-3.3-70b" not in _DEFAULT_TEXT_MODELS["nvidia"]
         assert _model_for("nvidia", {}, kind="text") == (
@@ -1217,7 +1325,7 @@ class TestNvidiaTextDefault:
         )
 
     def test_nvidia_text_model_override_honored(self):
-        from clients.model_ladder import _model_for
+        from model_gateway.engine import _model_for
 
         assert (
             _model_for(
@@ -1237,7 +1345,7 @@ class TestNvidiaTextDefault:
         )
 
     def test_vision_defaults_unchanged_from_90b(self):
-        from clients.model_ladder import _model_for, _nvidia_vision_models
+        from model_gateway.engine import _model_for, _nvidia_vision_models
 
         assert _model_for("nvidia", {}, kind="vision") == (
             "meta/llama-3.2-90b-vision-instruct"
@@ -1276,7 +1384,7 @@ class TestNoAuthFilesFlag:
         return home
 
     def test_flag_blocks_all_home_auth_file_discovery(self, tmp_path):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         home = self._seeded_home(tmp_path)
         env = {"HOME": str(home), "RADON_LADDER_NO_AUTH_FILES": "1"}
@@ -1286,7 +1394,7 @@ class TestNoAuthFilesFlag:
         assert wired_providers(env) == ()
 
     def test_flag_blocks_explicit_file_paths_too(self, tmp_path):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         home = self._seeded_home(tmp_path)
         token_file = tmp_path / "oauth.txt"
@@ -1311,7 +1419,7 @@ class TestNoAuthFilesFlag:
         assert "anthropic" in wired
 
     def test_without_flag_file_discovery_unchanged(self, tmp_path):
-        from clients.model_ladder import _auth_for
+        from model_gateway.engine import _auth_for
 
         home = self._seeded_home(tmp_path)
         auth = _auth_for("grok", {"HOME": str(home)})
@@ -1337,7 +1445,7 @@ class TestSlmTaggerRung:
         assert "slm-tagger" not in wired
 
     def test_complete_without_providers_never_attempts_slm(self, monkeypatch):
-        from clients import model_ladder as ml
+        from model_gateway import engine as ml
 
         monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
         calls = []
@@ -1355,7 +1463,7 @@ class TestSlmTaggerRung:
         assert all("8331" not in url for url in calls)
 
     def test_providers_post_carries_contract(self, monkeypatch):
-        from clients import model_ladder as ml
+        from model_gateway import engine as ml
 
         monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
         captured = {}
@@ -1383,7 +1491,7 @@ class TestSlmTaggerRung:
         assert result.provider == "slm-tagger"
 
     def test_http_503_falls_through(self, monkeypatch):
-        from clients import model_ladder as ml
+        from model_gateway import engine as ml
 
         monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
 
@@ -1403,7 +1511,7 @@ class TestSlmTaggerRung:
         assert result.attempted == ("slm-tagger:http_503", "anthropic:ok")
 
     def test_accept_slm_tags_payload_and_fallthrough(self, monkeypatch):
-        from clients.model_ladder import accept_slm_tags_payload
+        from model_gateway.engine import accept_slm_tags_payload
         from newsfeed.slm.contract import classify_slm_tags
 
         tax = self.TAXONOMY
@@ -1415,7 +1523,7 @@ class TestSlmTaggerRung:
         assert classify_slm_tags({"tags": ["gamma", "GAMMA", "spx"]}, tax)[0] == "abstain:count"
         assert classify_slm_tags({"tags": ["GAMMA", "SPX", "NEW"]}, tax)[0] == "abstain:out_of_taxonomy"
 
-        from clients import model_ladder as ml
+        from model_gateway import engine as ml
 
         monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
 

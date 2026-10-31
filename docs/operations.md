@@ -200,6 +200,39 @@ notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
 including those mixed into an otherwise valid datagram. The proxy socket stays
 0600 and is owned by the container user.
 
+Gateway status receives `RADON_DEPLOY_SHA` only from the managed runtime
+after validating the already-selected gateway image repository and full SHA.
+Its reported version must match that immutable image; caller/host dotenv values
+and a later checkout lookup cannot replace the identity.
+
+Preparatory model-cache migration and CLI-export containers remove inherited
+`NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
+Podman conmon. The foreground runtime retains its filtered notify proxy.
+Before prestage allocation, after exact image pulls and just before teardown,
+`sudo /usr/local/sbin/radon-app-runtime check-model-space` checks fixed destination
+filesystems using UID1000-available bytes (`f_bavail`) and available inodes.
+Root-reserved blocks do not count. The conservative shared 4KiB-volume budget
+is 8881176576 bytes/201161 inodes, including bounded archive/tree peaks, pinned
+model-cache assets and an explicit 1GiB/1024-inode runtime/recovery margin.
+No threshold override or data pruning occurs; insufficient or unknown capacity
+refuses before stopping consumers and never triggers a fallback host build.
+Promotion repeats the capacity check. Recovery instead hash-verifies existing
+immutable clients/exports, without allocating another payload or applying the
+fresh-install threshold. Missing/corrupt recovery artifacts fail closed.
+Cache-ref failures remove temporary files, preserve canonical refs and report
+a safe errno name with exit78; they never reset provider pacing state.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+First-cutover model rollback preserves the independent privileged floor,
+canonical legacy files omitted from the old manifest, and pending recovery
+receipts. Temporary `/etc/radon` hardening has a root-owned, fsynced permission
+intent so kill/reboot retries recover its exact original mode without widening
+unrelated directories. See [model gateway rollback](model-gateway.md#upgrades-and-rollback).
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container
@@ -686,7 +719,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 16:20 ET | SPX pct above 50d MA over pct above 200d MA (20 min after the close, across DST). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 16:40 ET | SPX pct of members with Wilder RSI(14) strictly below 30 (40 min after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
@@ -1240,10 +1273,17 @@ gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
 `gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
-the history fold from `scripts/release_version.py`. The `release-tag` job
-pushes it after that deploy succeeds, including when earlier test jobs were
-skipped. Root and web `package.json` version fields are a fallback when that
-history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
+the shared build identity from `scripts/release_version.py --ci-version
+--expected-sha "$GITHUB_SHA"`. Both image selection and `release-tag` validate
+canonical semver and the exact checkout SHA; selector failure stops the step
+before output or tagging. The tag job runs after deployment succeeds, including
+when earlier test jobs were skipped, and never moves an existing tag.
+
+The original 0.7.0 history baseline remains unchanged. When that history is
+missing or disconnected after a history rewrite, the existing web `package.json`
+fallback labels both the built app and its tag. Package fields can lag earlier
+tags; this fallback does not reconstruct monotonic semver or restore purged
+objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.

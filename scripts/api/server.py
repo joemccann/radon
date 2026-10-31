@@ -113,6 +113,9 @@ try:
 except ImportError:
     pass
 
+from model_gateway.client import scrub_model_secrets
+scrub_model_secrets()
+
 logger = logging.getLogger("radon.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -921,7 +924,10 @@ async def lifespan(app: FastAPI):
 
     # Stored credentials next, same contract: exported into os.environ so
     # every subprocess inherits them; store wins over the deployed .env.
-    exported = await asyncio.to_thread(bootstrap_credentials)
+    try:
+        exported = await asyncio.to_thread(bootstrap_credentials)
+    finally:
+        scrub_model_secrets()
     if exported:
         logger.info("Credentials loaded from secret store: %d", len(exported))
 
@@ -1003,6 +1009,8 @@ app.include_router(streaks_router)
 app.include_router(research_router)
 app.include_router(tradingview_router)
 app.include_router(ai_cycle_router)
+from api.routes.model_gateway import router as model_gateway_router
+app.include_router(model_gateway_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
@@ -4934,6 +4942,23 @@ def _fresh_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
     return _refresh_earnings_payload(cached, dte)
 
 
+def _stored_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
+    """Last file for a live miss. Recompute the session window from report_date.
+
+    A frozen ``days_until`` answers an older session. The panel treats that
+    number as earnings risk, so a name can show "no earnings risk" after the
+    date has moved inside the structure window (REL-335 / R-746). A missing
+    marker has no date to recompute and stays as stored. A total live failure
+    with no fresh batch hit is still 502; this is only the fallback row.
+    """
+    cached = _read_cache(_EARNINGS_DATES_DIR / f"{ticker}.json")
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("missing") or not cached.get("report_date"):
+        return cached
+    return _refresh_earnings_payload(cached, dte)
+
+
 @app.get("/earnings")
 async def earnings_batch_get(
     tickers: str = Query(..., description="Comma-separated tickers (max 50)"),
@@ -4983,8 +5008,8 @@ async def earnings_batch_get(
         if live is not None:
             rows.append(live)
             continue
-        stale = _read_cache(_EARNINGS_DATES_DIR / f"{symbol}.json")
-        if isinstance(stale, dict):
+        stale = _stored_earnings_cache(symbol, dte)
+        if stale is not None:
             rows.append(stale)
             continue
         rows.append(_earnings_missing_payload(symbol, dte))
@@ -5025,8 +5050,8 @@ async def earnings_get(
     if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
         return result.data
 
-    cached = _read_cache(_EARNINGS_DATES_DIR / f"{upper}.json")
-    if cached and isinstance(cached, dict):
+    cached = _stored_earnings_cache(upper, dte)
+    if cached is not None:
         return cached
 
     if not result.ok:

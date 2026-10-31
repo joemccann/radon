@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-model-gateway.service radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -46,6 +46,10 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   CHROMIUM_SECCOMP_PROFILE="${RADON_TEST_SECCOMP_PROFILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/seccomp/chromium.json}"
   AI_CYCLE_DIR="${RADON_TEST_AI_CYCLE_DIR:-${STATE_DIR}/ai-cycle}"
   SUBSCRIPTION_VAULT_DIR="${RADON_TEST_SUBSCRIPTION_VAULT_DIR:-${STATE_DIR}/subscription-vault}"
+  MODEL_GATEWAY_DIR="${RADON_TEST_MODEL_GATEWAY_DIR:-${STATE_DIR}/model-gateway}"
+  MODEL_CONTROL_DIR="${RADON_TEST_MODEL_CONTROL_DIR:-${STATE_DIR}/model-control}"
+  MODEL_TRANSPORT_HELPER="${RADON_TEST_MODEL_TRANSPORT_HELPER:-/usr/local/lib/radon/model_transport.py}"
+  SUBSCRIPTION_STATE_DIR="${STATE_DIR}/subscription-tokens"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -98,9 +102,15 @@ else
   AI_CYCLE_DIR=/home/radon/.radon/ai-cycle
   # Broker socket directory; /run is root-owned, so the anchor is trusted.
   SUBSCRIPTION_VAULT_DIR=/run/radon-subscription-vault
+  MODEL_GATEWAY_DIR=/run/radon-model-gateway
+  MODEL_CONTROL_DIR=/run/radon-model-control
+  MODEL_TRANSPORT_HELPER=/usr/local/lib/radon/model_transport.py
+  SUBSCRIPTION_STATE_DIR=/var/lib/radon/subscription-tokens
 fi
 readonly AI_CYCLE_DIR_IN_CONTAINER=/home/radon/.radon/ai-cycle
 readonly SUBSCRIPTION_VAULT_DIR_IN_CONTAINER=/run/radon-subscription-vault
+readonly MODEL_GATEWAY_DIR_IN_CONTAINER=/run/radon-model-gateway
+readonly MODEL_CONTROL_DIR_IN_CONTAINER=/run/radon-model-control
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
 # R-619. The container runs --user radon, so a staged key owned by uid radon
@@ -114,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -128,6 +138,10 @@ in_list() {
 
 uses_secret_store() { in_list "$1" "$SECRET_STORE_UNITS"; }
 is_store_job() { in_list "$1" "$STORE_JOB_UNITS"; }
+is_model_gateway() { [[ "$1" == radon-model-gateway.service ]]; }
+# PDF archiving and the master-key broker have no inference capability.
+# Every other app container uses the same private service interface.
+is_model_consumer() { ! is_model_gateway "$1" && [[ "$1" != radon-marketdesk-pdf.service && "$1" != radon-subscription-vault.service ]]; }
 # Units that own the private research bind read-write and nothing else.
 is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
 # Units whose Chromium renders third-party web content. Each gets an isolated
@@ -324,6 +338,10 @@ node_image() {
   resolve_image 'ghcr.io/joemccann/radon-node'
 }
 
+model_gateway_image() {
+  resolve_image 'ghcr.io/joemccann/radon-model-gateway'
+}
+
 is_app_unit() { in_list "$1" "$APP_UNITS"; }
 
 refuse_host_plane() {
@@ -383,8 +401,45 @@ while True:
 PYCODE
 }
 
+cmd_capture_model_pacing() {
+  local ids cache
+  ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
+  cache="$(prepare_research_dir "$ids" model-gateway)" || return $?
+  prepare_private_dir "$ids" "$cache/pacing-imports" "model pacing imports"
+  "$PYTHON" -I /usr/local/lib/radon/model_pacing.py "$DOCKER"
+  if [[ -n "$LEGACY_DOCKER" && "$LEGACY_DOCKER" != "$DOCKER" ]]; then
+    "$PYTHON" -I /usr/local/lib/radon/model_pacing.py "$LEGACY_DOCKER"
+  fi
+}
+
+cmd_check_model_space() {
+  # Read-only fixed-filesystem admission; accepts no destination or threshold.
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py check-space
+}
+
+cmd_install_model_clients() {
+  # Fixed destination/export policy lives in the root-owned control plane.
+  # No caller-provided path, executable, registry or moving image tag.
+  local tag image
+  tag="$(image_tag)" || return $?
+  image="$(model_gateway_image)" || return $?
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py "$DOCKER" "$image" "$tag"
+}
+
+cmd_recover_model_clients() {
+  local tag
+  tag="$(image_tag)" || return $?
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py recover "$tag"
+}
+
+cmd_commit_model_clients() {
+  local tag
+  tag="$(image_tag)" || return $?
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py commit "$tag"
+}
+
 cmd_pull() {
-  local target="${1:-}" tag python_ref node_ref python_pid node_pid
+  local target="${1:-}" tag python_ref node_ref gateway_ref python_pid node_pid gateway_pid
   local status=0
   if [[ -n "$target" ]]; then
     [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
@@ -397,6 +452,7 @@ cmd_pull() {
   fi
   python_ref="ghcr.io/joemccann/radon-python:${tag}"
   node_ref="ghcr.io/joemccann/radon-node:${tag}"
+  gateway_ref="ghcr.io/joemccann/radon-model-gateway:${tag}"
   acquire_pull_lock || return $?
 
   # The gated prepull job and the deploy both call this exact verb. When the
@@ -405,26 +461,33 @@ cmd_pull() {
   if [[ -n "$target" ]] \
     && image_in_local_store "$python_ref" \
     && image_in_local_store "$node_ref" \
+    && image_in_local_store "$gateway_ref" \
     && image_matches_registry "$python_ref" \
-    && image_matches_registry "$node_ref"; then
-    printf 'exact release image pair already local: %s\n' "$tag" >&2
+    && image_matches_registry "$node_ref" \
+    && image_matches_registry "$gateway_ref"; then
+    printf 'exact release image set already local: %s\n' "$tag" >&2
   else
     "$DOCKER" pull "$python_ref" 9>&- &
     python_pid=$!
     "$DOCKER" pull "$node_ref" 9>&- &
     node_pid=$!
+    "$DOCKER" pull "$gateway_ref" 9>&- &
+    gateway_pid=$!
     if ! wait "$python_pid"; then
       status=1
     fi
     if ! wait "$node_pid"; then
       status=1
     fi
+    if ! wait "$gateway_pid"; then
+      status=1
+    fi
     if (( status != 0 )); then
       echo "radon-app-runtime: exact release image pull failed" >&2
       return 69
     fi
-    if ! image_in_local_store "$python_ref" || ! image_in_local_store "$node_ref"; then
-      echo "radon-app-runtime: exact release image pair is incomplete after pull" >&2
+    if ! image_in_local_store "$python_ref" || ! image_in_local_store "$node_ref" || ! image_in_local_store "$gateway_ref"; then
+      echo "radon-app-runtime: exact release image set is incomplete after pull" >&2
       return 69
     fi
   fi
@@ -507,7 +570,7 @@ try:
                 if len(green) < 2 or not sha(green[1]):
                     skip("green marker records no previous release")
                 protected.add(green[1])
-        repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python")
+        repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python", "ghcr.io/joemccann/radon-model-gateway")
         in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
                   if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
         if not in_use:
@@ -576,6 +639,23 @@ cmd_halt() {
   [[ -n "$unit" && "$grace" =~ ^[0-9]+$ ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || exit 64
+  if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" != 1 ]]; then
+    local ids cache
+    ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
+    cache="$(prepare_research_dir "$ids" model-gateway)" || return $?
+    prepare_private_dir "$ids" "$cache/pacing-imports" "model pacing imports"
+    case " $APP_UNITS " in
+      *" $unit "*)
+        # Recheck account clocks immediately before stop removes the last
+        # chance to read an ephemeral source. The global capture already
+        # prepared the private import directory and captured host state.
+        "$PYTHON" -I /usr/local/lib/radon/model_pacing.py "$DOCKER" "$unit"
+        if [[ -n "$LEGACY_DOCKER" && "$LEGACY_DOCKER" != "$DOCKER" ]]; then
+          "$PYTHON" -I /usr/local/lib/radon/model_pacing.py "$LEGACY_DOCKER" "$unit"
+        fi
+        ;;
+    esac
+  fi
   "$DOCKER" container inspect "$unit" >/dev/null 2>&1 || return 0
   "$DOCKER" stop --time "$grace" "$unit" >/dev/null && return 0
   if "$DOCKER" container inspect "$unit" >/dev/null 2>&1; then
@@ -717,7 +797,7 @@ render_env_file() {
     # login, and the WRITE-scoped Dropbox app only: never the read-only
     # research reader (DROPBOX_APP_KEY...), B2, IB or Clerk secrets.
     if [[ "$unit" == "radon-marketdesk.service" ]]; then
-      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_RESEARCH_MODEL|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
+      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_NVIDIA_RPM|RADON_NVIDIA_TRIP_AFTER_429S|RADON_NVIDIA_TRIP_SECS|RADON_NVIDIA_AUTH_BLOCK_SECS|RADON_RESEARCH_MODEL|RADON_RESEARCH_PARSE_[A-Z0-9_]+|CLAIRIC_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
@@ -732,6 +812,21 @@ render_env_file() {
       [[ "$status" -le 1 ]] || exit 71
       mv "${temporary}.filtered" "$temporary" || exit 71
     fi
+    if is_model_gateway "$unit"; then
+      # The gateway never receives operator DB, broker, Clerk or source logins.
+      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_NVIDIA_RPM|RADON_NVIDIA_TRIP_AFTER_429S|RADON_NVIDIA_TRIP_SECS|RADON_NVIDIA_AUTH_BLOCK_SECS|RADON_RESEARCH_MODEL|RADON_RESEARCH_PARSE_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_API_TOKEN|CLAIRIC_[A-Z0-9_]+|TURSO_DB_URL|TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN|PUSHOVER_USER|PUSHOVER_TOKEN|RADON_MODEL_GATEWAY_[A-Z0-9_]+|RADON_MODEL_TUNNEL_UID|RADON_MODEL_TUNNEL_GID|RADON_MODEL_CLIENT_UIDS|RADON_SLM_TAGGER_[A-Z0-9_]+)=)' \
+        "$temporary" > "${temporary}.filtered"
+      status=$?
+      [[ "$status" -le 1 ]] || exit 71
+      sed 's/^TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN=/TURSO_AUTH_TOKEN=/' "${temporary}.filtered" > "$temporary" || exit 71
+      rm -f "${temporary}.filtered"
+    else
+      # Provider credentials and direct-provider configuration terminate here.
+      # Application/source/broker credentials keep their established scope.
+      sed -E '/^(ANTHROPIC_[A-Z0-9_]+|CLAUDE_[A-Z0-9_]+|CODEX_[A-Z0-9_]+|GROK_[A-Z0-9_]+|XAI_[A-Z0-9_]+|OPENAI_[A-Z0-9_]+|ANTIGRAVITY_[A-Z0-9_]+|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_API_KEY|GEMINI_API_KEY|NVIDIA_[A-Z0-9_]+|CEREBRAS_[A-Z0-9_]+|CURSOR_API_KEY|CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_API_TOKEN|TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN)=/d' \
+        "$temporary" > "${temporary}.filtered" || exit 71
+      mv "${temporary}.filtered" "$temporary" || exit 71
+    fi
   ) || { rm -f "$temporary" "${temporary}.filtered"; return 71; }
   mv "$temporary" "$out" || { rm -f "$temporary"; return 71; }
   printf '%s\n' "$out"
@@ -741,9 +836,9 @@ render_env_file() {
 # Once its root-owned ancestor chain is verified, radon cannot exchange the
 # child for a symlink between provisioning and the Docker bind operation.
 prepare_research_dir() {
-  local ids="$1" anchor=/var/lib/radon-private
+  local ids="$1" name="${2:-research}" anchor=/var/lib/radon-private
   [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]] && anchor="${STATE_DIR}/private"
-  "$PYTHON" -I - "$anchor" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_RESEARCH'
+  "$PYTHON" -I - "$anchor" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$name" <<'PY_RESEARCH'
 import os, stat, sys
 from pathlib import Path
 anchor = Path(sys.argv[1])
@@ -770,7 +865,10 @@ try:
     except FileExistsError:
         pass
     trusted(anchor, owner, 0o700)
-    child = anchor / 'research'
+    name = sys.argv[4]
+    if name not in {'research', 'model-gateway'}:
+        raise ValueError('Invalid private directory')
+    child = anchor / name
     try:
         child.mkdir(mode=0o700)
         os.chown(child, uid, gid, follow_symlinks=False)
@@ -789,8 +887,8 @@ PY_RESEARCH
 # component and the fd-based fchown/fchmod cannot be retargeted between check
 # and use. Shared chokepoint for the secret store and the 2FA lease dir.
 prepare_private_dir() {
-  local ids="$1" dir="$2" label="$3"
-  "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
+  local ids="$1" dir="$2" label="$3" mode="${4:-700}"
+  "$PYTHON" -I - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" "$mode" <<'PY_PRIVATE_DIR' || exit 78
 import os, sys
 from pathlib import Path
 path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]
@@ -814,7 +912,10 @@ try:
     fd = os.open(parts[-1], flags, dir_fd=parent_fd)
     try:
         os.fchown(fd, uid, gid)
-        os.fchmod(fd, 0o700)
+        mode = int(sys.argv[5], 8)
+        if mode not in {0o700, 0o710}:
+            raise OSError('invalid private directory mode')
+        os.fchmod(fd, mode)
     finally:
         os.close(fd)
 except OSError:
@@ -969,9 +1070,42 @@ finally:
 PY_SECCOMP_PROFILE
 }
 
+migrate_model_cache() {
+  local ids="$1" image="$2" cache="$3" model home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
+  # Only model-specific subtrees are mounted. HF_HOME may contain access tokens.
+  local chronos="${home}/.cache/huggingface/hub/models--amazon--chronos-2"
+  local embedding="${home}/.cache/fastembed/models--qdrant--bge-small-en-v1.5-onnx-q"
+  set -- "$DOCKER" run --rm --pull=never --network none --user "$ids" \
+    --cap-drop ALL --security-opt no-new-privileges --entrypoint python \
+    -v "${cache}:/cache:rw"
+  local found=0
+  for model in "$chronos" "$embedding"; do
+    if [[ -e "$model" || -L "$model" ]]; then
+      require_bind_source "$ids" "$model"
+      if [[ "$model" == "$chronos" ]]; then
+        set -- "$@" -v "${model}:/source/chronos:ro"
+      else
+        set -- "$@" -v "${model}:/source/embedding:ro"
+      fi
+      found=1
+    fi
+  done
+  if [[ -d "$cache/pacing-imports" ]]; then
+    require_bind_source "$ids" "$cache/pacing-imports"
+    set -- "$@" -v "$cache/pacing-imports:/source/nvidia-pacing:ro"
+    found=1
+  fi
+  (( found == 1 )) || return 0
+  # All copying, digest checks and promotion run as the application UID in
+  # the exact CI image. Host root neither imports nor executes app modules.
+  # Preparatory Podman runs must not replace systemd's MAINPID with their
+  # short-lived conmon. Keep the foreground service's notify proxy intact.
+  /usr/bin/env -u NOTIFY_SOCKET "$@" "$image" -I /home/radon/radon/scripts/model_gateway/cache_migrate.py
+}
+
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir rendered_env
+  local ids image workdir rendered_env gateway_release=""
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -982,6 +1116,14 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
+    radon-model-gateway.service)
+      image="$(model_gateway_image)" || return $?
+      [[ "$image" =~ ^ghcr\.io/joemccann/radon-model-gateway:([0-9a-f]{40})$ ]] || {
+        echo "radon-app-runtime: gateway image must carry an exact release SHA" >&2
+        return 69
+      }
+      gateway_release="${BASH_REMATCH[1]}"
+      ;;
     radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
@@ -1000,7 +1142,7 @@ cmd_run() {
     require_trusted_seccomp_profile "$CHROMIUM_SECCOMP_PROFILE" || exit 78
   fi
 
-  if ! is_research_unit "$unit" && ! is_store_job "$unit"; then
+  if ! is_research_unit "$unit" && ! is_store_job "$unit" && ! is_model_gateway "$unit"; then
     require_bind_source "$ids" "$DATA_DIR"
     require_bind_source "$ids" "$MEDIA_DIR"
   fi
@@ -1055,7 +1197,7 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  if ! is_research_unit "$unit" && ! is_store_job "$unit" && [[ "$unit" != "radon-uw-stream.service" ]]; then
+  if ! is_research_unit "$unit" && ! is_store_job "$unit" && ! is_model_gateway "$unit" && [[ "$unit" != "radon-uw-stream.service" ]]; then
     prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
 
@@ -1081,6 +1223,13 @@ cmd_run() {
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
 
+  if is_model_gateway "$unit"; then
+    # Bind status/activation identity to the image already selected above.
+    # Caller environment, env-file values and a second HEAD lookup cannot
+    # describe a different release from the bytes this process will execute.
+    set -- "$@" --env "RADON_DEPLOY_SHA=${gateway_release}"
+  fi
+
   if [[ "$ENGINE" == podman ]]; then
     # REL-087: conmon and the container join the unit's own cgroup (the unit
     # delegates it), so KillMode reaches them. Podman must not consume
@@ -1092,7 +1241,25 @@ cmd_run() {
     set -- "$@" --cgroup-parent=system.slice
   fi
 
-  if is_store_job "$unit"; then
+  if is_model_gateway "$unit"; then
+    local model_cache
+    model_cache="$(prepare_research_dir "$ids" model-gateway)" || exit $?
+    require_bind_source "$ids" "$model_cache"
+    if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" != 1 ]]; then
+      migrate_model_cache "$ids" "$image" "$model_cache" || exit $?
+    fi
+    set -- "$@" -v "${model_cache}:/var/lib/radon/model-cache:rw" \
+      --env HF_HOME=/var/lib/radon/model-cache/huggingface \
+      --env FASTEMBED_CACHE_PATH=/var/lib/radon/model-cache/fastembed \
+      --env RADON_NVIDIA_RATE_STATE=/var/lib/radon/model-cache/nvidia-rate.json \
+      --env OMP_NUM_THREADS=2 --env TOKENIZERS_PARALLELISM=false
+    prepare_private_dir "$ids" "$SUBSCRIPTION_VAULT_DIR" "subscription vault socket"
+    prepare_private_dir "$ids" "$SUBSCRIPTION_STATE_DIR" "subscription refresh state"
+    set -- "$@" \
+      -v "${SUBSCRIPTION_VAULT_DIR}:${SUBSCRIPTION_VAULT_DIR_IN_CONTAINER}:rw" \
+      -v "${SUBSCRIPTION_STATE_DIR}:/var/lib/radon/subscription-tokens:rw" \
+      --env "RADON_SUBSCRIPTION_VAULT_SOCKET=${SUBSCRIPTION_VAULT_DIR_IN_CONTAINER}/vault.sock"
+  elif is_store_job "$unit"; then
     # DS-2026-10-05-05: the store and nothing else of data/.
     set -- "$@" -v "${DATA_DIR}/secret_store:/home/radon/radon/data/secret_store"
     case "$unit" in
@@ -1127,50 +1294,56 @@ cmd_run() {
       -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
   fi
 
-  # Subscription grants (2026-09-18). The model ladders meter against the
-  # operator's subscriptions, never prepaid keys, and read the CLI credential
-  # files under ~radon (kept live by radon-subscription-tokens on the HOST).
-  # No container could see them, so every container-side rung silently fell
-  # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
-  # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
-  # and os.homedir() resolve to the mount. Never the whole home directory.
-  # Next.js hosts /api/newsfeed/share and /api/assistant, so it is an LLM
-  # consumer (2026-09-19: excluding it 502'd every share rewrite with
-  # "Missing Anthropic subscription"). Relay still gets no binds.
-  local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
-  local cred_dir
-  case "$unit" in
-    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service|radon-marketdesk.service)
-      for cred_dir in .grok .codex .claude; do
-        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
-          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
-          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
-        fi
-      done
-      # Antigravity (agy) keeps its grant and state under ~/.gemini (Google's
-      # fixed path) and must write them: it refreshes the token, logs and
-      # creates projects on every run (read-only -> "not logged into
-      # Antigravity", live 2026-10-02). Sharing the host dirs keeps one
-      # rotating token store. The rest of ~/.gemini (the retired Gemini CLI's
-      # oauth_creds.json) stays unmounted. Newsfeed renders third-party
-      # content, so it never gets a writable grant the host and the other
-      # units consume; its ladder falls past antigravity.
-      for cred_dir in .gemini/antigravity-cli .gemini/config; do
-        is_chromium_unit "$unit" && continue
-        if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
-          require_bind_source "$ids" "${subscription_home}/${cred_dir}"
-          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
-        fi
-      done
-      # Python API and research images carry pinned, image-owned provider CLIs.
-      # Provider grants above retain their established HOME and refresh paths.
-      if [[ "$unit" != "radon-api.service" && "$unit" != "radon-research.service" && "$unit" != "radon-marketdesk.service" ]] \
-        && [[ -L "${subscription_home}/.local/bin" || -d "${subscription_home}/.local/bin" ]]; then
-        require_bind_source "$ids" "${subscription_home}/.local/bin"
-        set -- "$@" -v "${subscription_home}/.local/bin:/home/radon/.local/bin:ro"
+  # Only the gateway owns provider grants and executes image-pinned CLIs.
+  # Consumers receive a read-only socket-directory bind, including bridge
+  # isolated workers; inference never needs a public/host-network listener.
+  if is_model_gateway "$unit" || is_model_consumer "$unit"; then
+    # Only this narrow group can traverse inference for the model-only SSH UID.
+    # Never grant it the vault or management directories.
+    local tunnel_gid tunnel_uid client_uids inference_ids="$ids" inference_mode=700
+    tunnel_gid="$(awk -F= '/^RADON_MODEL_TUNNEL_GID=/{v=$2} END{print v}' "$ENV_FILE")"
+    tunnel_uid="$(awk -F= '/^RADON_MODEL_TUNNEL_UID=/{v=$2} END{print v}' "$ENV_FILE")"
+    client_uids="$(awk -F= '/^RADON_MODEL_CLIENT_UIDS=/{v=$2} END{print v}' "$ENV_FILE")"
+    if [[ -n "$tunnel_gid" || -n "$tunnel_uid" || -n "$client_uids" ]]; then
+      [[ "$tunnel_gid" =~ ^[1-9][0-9]*$ && "$tunnel_gid" != "${ids##*:}" ]] || exit 78
+      if [[ -n "$tunnel_uid" ]]; then
+        [[ "$tunnel_uid" =~ ^[1-9][0-9]*$ && "$tunnel_uid" != "${ids%%:*}" ]] || exit 78
       fi
-      ;;
-  esac
+      if [[ -n "$client_uids" ]]; then
+        [[ "$client_uids" =~ ^[1-9][0-9]*(,[1-9][0-9]*){0,15}$ ]] || exit 78
+      fi
+      inference_ids="${ids%%:*}:${tunnel_gid}"
+      inference_mode=710
+      is_model_gateway "$unit" && set -- "$@" --group-add "$tunnel_gid"
+    fi
+    prepare_private_dir "$inference_ids" "$MODEL_GATEWAY_DIR" "model gateway socket" "$inference_mode"
+    if is_model_gateway "$unit" && [[ -n "$tunnel_uid" ]]; then
+      "$PYTHON" -I "$MODEL_TRANSPORT_HELPER" bind-inference || exit 78
+    fi
+    local gateway_mode=ro
+    is_model_gateway "$unit" && gateway_mode=rw
+    set -- "$@" \
+      -v "${MODEL_GATEWAY_DIR}:${MODEL_GATEWAY_DIR_IN_CONTAINER}:${gateway_mode}" \
+      --env "RADON_MODEL_GATEWAY_SOCKET=${MODEL_GATEWAY_DIR_IN_CONTAINER}/gateway.sock"
+    is_model_gateway "$unit" || set -- "$@" --env RADON_MODEL_GATEWAY_REQUIRED=1
+  fi
+  if is_model_gateway "$unit" || [[ "$unit" == radon-api.service ]]; then
+    prepare_private_dir "$ids" "$MODEL_CONTROL_DIR" "model management socket"
+    local management_mode=ro
+    is_model_gateway "$unit" && management_mode=rw
+    set -- "$@" -v "${MODEL_CONTROL_DIR}:${MODEL_CONTROL_DIR_IN_CONTAINER}:${management_mode}" \
+      --env "RADON_MODEL_CONTROL_SOCKET=${MODEL_CONTROL_DIR_IN_CONTAINER}/control.sock"
+  fi
+  if is_model_gateway "$unit"; then
+    local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}" cred_dir
+    for cred_dir in .grok .codex .claude .gemini/antigravity-cli .gemini/config; do
+      if [[ -L "${subscription_home}/${cred_dir}" || -d "${subscription_home}/${cred_dir}" ]]; then
+        require_bind_source "$ids" "${subscription_home}/${cred_dir}"
+        set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:rw"
+      fi
+    done
+    # Provider CLIs are immutable image payloads, never host ~/.local/bin.
+  fi
   set -- "$@" --env HOME=/home/radon
   if is_research_unit "$unit" || [[ "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
@@ -1277,6 +1450,9 @@ cmd_run() {
 
   set -- "$@" "$image"
   case "$unit" in
+    radon-model-gateway.service)
+      set -- "$@" python -m scripts.model_gateway.server
+      ;;
     radon-api.service)
       set -- "$@" sh -c 'python scripts/db/migrate.py --boot && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75'
       ;;
@@ -1335,6 +1511,26 @@ cmd_run() {
 
 [[ $# -ge 1 ]] || usage
 case "$1" in
+  check-model-space)
+    [[ $# -eq 1 ]] || usage
+    cmd_check_model_space
+    ;;
+  capture-model-pacing)
+    [[ $# -eq 1 ]] || usage
+    cmd_capture_model_pacing
+    ;;
+  install-model-clients)
+    [[ $# -eq 1 ]] || usage
+    cmd_install_model_clients
+    ;;
+  recover-model-clients)
+    [[ $# -eq 1 ]] || usage
+    cmd_recover_model_clients
+    ;;
+  commit-model-clients)
+    [[ $# -eq 1 ]] || usage
+    cmd_commit_model_clients
+    ;;
   stop)
     [[ $# -eq 2 ]] || usage
     cmd_stop "$2"

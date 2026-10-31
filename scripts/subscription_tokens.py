@@ -601,6 +601,12 @@ class Vault:
                 return secret
         return None
 
+    def model_key(self, provider: str) -> Optional[str]:
+        fields = {"nvidia": "NVIDIA_API_KEY", "cerebras": "CEREBRAS_API_KEY", "cloudflare-token": "CLOUDFLARE_API_TOKEN", "cloudflare-account": "CLOUDFLARE_ACCOUNT_ID"}
+        if provider not in fields:
+            raise ValueError("unknown model credential provider")
+        return self._store.get_secret(fields[provider])
+
     def seal(self, provider: str, value: str) -> None:
         self._store.set_secret(
             PROVIDERS[provider].secret_name, value, SERVICE_NAME

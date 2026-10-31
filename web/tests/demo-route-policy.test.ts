@@ -146,7 +146,6 @@ const LEGITIMATELY_EMPTY: Record<string, string> = {
     "Operator research labels are never copied to demo; the posts query strips them for non-operators.",
   service_health:
     "The mirrors heartbeat into the PROD database; the route renders a synthetic turso-db row when empty.",
-  llm_model_catalog: "The model picker falls back to the built-in DEFAULT_MODELS catalog.",
 };
 
 // ── assertions ──────────────────────────────────────────────────────────────

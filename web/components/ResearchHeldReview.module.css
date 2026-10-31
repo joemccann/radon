@@ -22,12 +22,16 @@
 .ruleCopy { display: grid; gap: 2px; min-width: 0; }
 .ruleActions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .ruleButton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid var(--line-grid); border-radius: 4px; background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; transition-property: background-color, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
-.ruleButton:hover { background: var(--bg-panel-raised); }
+@media (hover: hover) and (pointer: fine) {
+  .ruleButton:hover { background: var(--bg-panel-raised); }
+}
 .ruleButton:active:not(:disabled) { transform: scale(0.96); }
 .ruleButton:disabled { cursor: default; opacity: .5; }
 .ruleButton:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 .ruleButtonPrimary { background: var(--signal-core); color: var(--text-on-accent); border-color: transparent; }
-.ruleButtonPrimary:hover { background: var(--signal-strong); }
+@media (hover: hover) and (pointer: fine) {
+  .ruleButtonPrimary:hover { background: var(--signal-strong); }
+}
 @media (prefers-reduced-motion: reduce) {
   .ruleButton { transition-property: background-color; }
   .ruleButton:active:not(:disabled) { transform: none; }

@@ -1,7 +1,7 @@
 [Unit]
+After=radon-model-gateway.service network-online.target
+Wants=radon-model-gateway.service network-online.target
 Description=Radon newsfeed scraper (themarketear.com headless Playwright loop)
-After=network-online.target
-Wants=network-online.target
 
 # DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)

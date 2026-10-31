@@ -593,7 +593,7 @@ def test_main_exits_tempfail_when_sigterm_stops_the_cycle(monkeypatch, capsys):
 def test_sigterm_during_real_model_transport_never_advances_ladder(world, db, monkeypatch, phase):
     """Production stop: the HTTP catch must not relabel cancellation as a network error."""
     import signal
-    from clients import model_ladder
+    from model_gateway import engine as model_ladder
 
     world.refs = [make_ref("StopHttp001", title="Stop during model I/O")]
     deps = build_deps(world)
