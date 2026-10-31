@@ -160,7 +160,11 @@ Production is three planes. Do not collapse them.
   still has the base `User=radon` `ExecStart`; waiting for the first
   control-plane refresh to supply the drop-in handed `radon` the decrypted
   secret-store master key for that window. `install_fleet_dropin` still
-  installs only `common.conf`. [The runtime owner](../docs/cloud-services.md#runtime-planes)
+  installs only `common.conf`. Every control-plane refresh and bootstrap
+  (app and combined roles) also reinstalls `common.conf` through
+  `CONTROL_PLANE_SOURCES`, and refuses a drop-in carrying anything but
+  `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
+  after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
   `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
