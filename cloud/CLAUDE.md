@@ -91,7 +91,11 @@ Only the gateway writes its persistent model cache under the root-owned
 `/var/lib/radon/model-cache`; HF and FastEmbed use separate children.
 
 The gateway starts before its consumers and has a bounded Unix-socket health
-probe. It participates in the normal exact-SHA deploy, restart, stability and
+probe. The managed runtime supplies its status identity through gateway-only
+`RADON_DEPLOY_SHA`, derived from the already-resolved, validated exact gateway
+image reference. Caller/env-file values and a second checkout lookup cannot
+replace that identity; mutable, digest-only or foreign image references refuse
+before container launch. It participates in the normal exact-SHA deploy, restart, stability and
 rollback contracts. CLI/model dependency upgrades remain pinned source changes,
 image smokes and green CI; no mutable runtime auto-updater is introduced.
 Preparatory cache-migration and CLI-export containers discard inherited

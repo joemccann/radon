@@ -1105,7 +1105,7 @@ migrate_model_cache() {
 
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir rendered_env
+  local ids image workdir rendered_env gateway_release=""
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -1116,7 +1116,14 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-model-gateway.service) image="$(model_gateway_image)" ;;
+    radon-model-gateway.service)
+      image="$(model_gateway_image)" || return $?
+      [[ "$image" =~ ^ghcr\.io/joemccann/radon-model-gateway:([0-9a-f]{40})$ ]] || {
+        echo "radon-app-runtime: gateway image must carry an exact release SHA" >&2
+        return 69
+      }
+      gateway_release="${BASH_REMATCH[1]}"
+      ;;
     radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
@@ -1215,6 +1222,13 @@ cmd_run() {
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
+
+  if is_model_gateway "$unit"; then
+    # Bind status/activation identity to the image already selected above.
+    # Caller environment, env-file values and a second HEAD lookup cannot
+    # describe a different release from the bytes this process will execute.
+    set -- "$@" --env "RADON_DEPLOY_SHA=${gateway_release}"
+  fi
 
   if [[ "$ENGINE" == podman ]]; then
     # REL-087: conmon and the container join the unit's own cgroup (the unit
