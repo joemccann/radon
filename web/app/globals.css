@@ -6752,6 +6752,24 @@ tr.leg-row td {
 
 /* ── Modal ── */
 
+/* Pointer-only presence for research panels and the Columns menu. The hidden
+   exit is inert immediately; keyboard activation never starts a transition. */
+.pointer-fade { opacity: 1; transition: none; }
+.pointer-fade[data-fade-motion="pointer"] {
+  transition: opacity var(--pointer-fade-enter) var(--ease-out);
+}
+.pointer-fade[data-fade-state="exiting"] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: var(--pointer-fade-exit);
+}
+@starting-style {
+  .pointer-fade[data-fade-motion="pointer"][data-fade-state="open"] { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pointer-fade { transition: none !important; }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
