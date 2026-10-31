@@ -314,10 +314,13 @@ app image through `radon-app-runtime`:
   (`/etc/radon/seccomp/chromium.json`, refused if missing or untrusted) and a
   512m `/dev/shm`, the same isolation as the newsfeed. The job no longer runs a
   browser; the isolation stays because it still parses third-party content;
-- an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
-  `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
-  and Clerk secrets never enter the container;
-- read-only `.grok`, `.codex`, `.claude` and `.gemini/antigravity-cli` grants. The runtime forces `RADON_ANTIGRAVITY_ISOLATED=1`: Antigravity copies only its token file into a private temporary HOME, runs in sandbox/plan mode with slash-command expansion disabled, and deletes that state after success or failure. No host Antigravity configuration/projects or shared writable grant enters this worker. The existing subscription refresh service remains the canonical grant writer.
+- an env allowlist: Turso, `THEMARKETEAR_*`, `MARKETDESK_*` and
+  `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB, Clerk secrets,
+  provider tokens and model API keys never enter the container;
+- the private inference socket, read-only, with `RADON_MODEL_GATEWAY_REQUIRED=1`.
+  No subscription grant directory is mounted here. Antigravity isolation runs
+  inside `radon-model-gateway`, which owns the canonical grants. See
+  [the model gateway](model-gateway.md).
 
 The radon-api container keeps its read-only research bind, so existing and new
 research assets are served by the same authenticated route.
