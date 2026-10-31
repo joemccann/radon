@@ -999,6 +999,62 @@ def resolve_scan_inputs(explicit_tickers=None, preset=None):
     return list(load_preset(preset).tickers), universe
 
 
+def load_prior_scan(cache_path: Path, universe: str) -> Optional[dict]:
+    """The last run's payload when it scanned this same preset universe.
+
+    Explicit ticker scans never rotate: their universe is whatever was typed.
+    """
+    if not universe.startswith("preset:"):
+        return None
+    try:
+        prior = json.loads(cache_path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(prior, dict) or prior.get("universe") != universe:
+        return None
+    return prior
+
+
+def rotate_deferred_first(tickers: List[str], prior: Optional[dict]) -> List[str]:
+    """Queue the names the last run deferred ahead of the rest.
+
+    The pool submits in list order, so a budget stop always defers the
+    tail of the preset. Without this the same tail is never rescanned.
+    """
+    if not prior:
+        return list(tickers)
+    wanted = set(tickers)
+    first = [t for t in (prior.get("deferred_tickers") or []) if t in wanted]
+    head = set(first)
+    return first + [t for t in tickers if t not in head]
+
+
+def carry_forward_rows(
+    prior: Optional[dict], deferred: List[str]
+) -> tuple[List[dict], List[str]]:
+    """Last run's FRESH rows for names deferred now, and the names left uncovered.
+
+    A row the last run itself carried is two runs old and is not carried
+    again: that name is uncovered, and the run stays an error (R-744).
+    """
+    rows_by_ticker: Dict[str, dict] = {}
+    scan_time = ""
+    if prior:
+        scan_time = str(prior.get("scan_time") or "")
+        for row in prior.get("results") or []:
+            if isinstance(row, dict) and row.get("ticker") and "carried_from" not in row:
+                rows_by_ticker[row["ticker"]] = row
+    carried: List[dict] = []
+    uncovered: List[str] = []
+    for ticker in deferred:
+        row = rows_by_ticker.get(ticker)
+        if row is None or not scan_time:
+            uncovered.append(ticker)
+            continue
+        carried.append({**row, "carried_from": scan_time})
+    return carried, uncovered
+
+
 def best_leap_payload(leap: Optional[LeapOption], hv_20: float) -> Optional[dict]:
     """Serialize the headline contract for the dashboard's order deep-link."""
     if leap is None:
@@ -1124,8 +1180,9 @@ def main():
     failed_tickers = []
     provider_failures: List[str] = []
     deferred_tickers: List[str] = []
+    prior_scan = load_prior_scan(DASHBOARD_CACHE_PATH, universe) if args.json else None
     results = scan_universe(
-        tickers,
+        rotate_deferred_first(tickers, prior_scan),
         args.min_gap,
         workers=args.workers,
         failed_tickers=failed_tickers,
@@ -1138,7 +1195,11 @@ def main():
     # R-095 green banner: the dashboard serves whatever did finish as the
     # daily scan (REL-333 / R-744).
     budget_spent = bool(deferred_tickers)
-    
+    # Rotation makes a budget stop a designed partial: a deferred name
+    # scanned fresh by the last run keeps that row (stamped carried_from)
+    # and goes first next run. Only names nothing covers are the R-744 hole.
+    carried_rows, uncovered = carry_forward_rows(prior_scan, deferred_tickers)
+
     # Summary
     print(f"\n{'='*60}")
     print("SCAN COMPLETE")
@@ -1164,12 +1225,14 @@ def main():
     json_data = None
     if args.json:
         json_data = build_json_payload(results, args.min_gap, universe, tickers)
+        json_data["results"].extend(carried_rows)
         json_data["failed_tickers"] = failed_tickers
         json_data["provider_failures"] = provider_failures
-        json_data["status"] = "degraded" if (exhausted or budget_spent) else "ok"
+        json_data["status"] = "degraded" if (exhausted or uncovered) else "ok"
         if deferred_tickers:
             json_data["scan_budget_spent"] = True
             json_data["deferred_tickers"] = deferred_tickers
+            json_data["carried_tickers"] = [row["ticker"] for row in carried_rows]
 
         # Canonical path first. The radon-api image ships /home/radon/radon as
         # root-owned with no reports/ dir; mkdir(reports) raised PermissionError
@@ -1200,11 +1263,12 @@ def main():
                 ),
                 "class": "provider_exhausted",
             }
-        elif budget_spent:
+        elif uncovered:
             health_error = {
                 "message": (
                     f"leap-scan budget spent: {len(deferred_tickers)} names "
-                    f"deferred vs {len(results)} results"
+                    f"deferred, {len(uncovered)} uncovered by the last run, "
+                    f"vs {len(results)} results"
                 ),
                 "class": "scan_budget_spent",
             }
@@ -1232,13 +1296,19 @@ def main():
             file=sys.stderr,
         )
         return 1
-    if budget_spent:
+    if uncovered:
         print(
-            f"✗ leap-scan budget spent: {len(deferred_tickers)} names deferred "
-            f"vs {len(results)} results",
+            f"✗ leap-scan budget spent: {len(deferred_tickers)} names deferred, "
+            f"{len(uncovered)} uncovered by the last run, vs {len(results)} results",
             file=sys.stderr,
         )
         return 1
+    if budget_spent:
+        print(
+            f"leap-scan budget spent: {len(deferred_tickers)} names deferred, "
+            "carried from the last run and queued first next run",
+            file=sys.stderr,
+        )
 
     # Names without LEAPs are expected on a largecaps universe. A nonempty
     # failed_tickers list is recorded in the payload; only zero valid results
