@@ -713,18 +713,18 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
-The subscription keeper loads the root-private derived environment
-`/etc/radon/subscription-tokens/env`. Setup derives it before installing units;
-each ordinary deploy refreshes it through the fixed `publish-subscription-env`
-root verb after environment preflight and the job's pinned control-plane sync.
-Prestage precedes that sync and skips this publisher. The keeper's UID, native
-credential paths and vault socket are unchanged. Lifecycle and rollback ownership:
+Setup still derives the root-private `/etc/radon/subscription-tokens/env`
+before installing units, and each ordinary deploy refreshes it through
+`publish-subscription-env` after environment preflight and the job's pinned
+control-plane sync. Prestage precedes that sync and skips this publisher.
+The timer does not load that file. The gateway container reads the keeper
+token from its filtered copy of `/etc/radon/env`. Lifecycle and rollback:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md#service-environment-lifecycle).
 
-`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
-and heals the agent-CLI subscription credentials (claude, codex, grok,
-Antigravity `agy`) from the encrypted secret store, with a daily keepalive
-probe; a dead codex or grok grant pages a one-tap login link. Runbook:
+`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`).
+Its oneshot only requests and polls a gateway-owned refresh job. Native probes,
+rotation and sealing run inside the gateway image. A dead codex or grok grant
+still pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
 **Secret-store key units (DS-2026-10-05-05).** Every unit that loads
@@ -733,16 +733,17 @@ control-plane `radon-subscription-vault.service` (base unit and drop-in), and
 the `Type=oneshot` drop-ins for `radon-ai-cycle`, `radon-ai-cycle-backfill`
 and `radon-aa-frontier-refresh`. Both drop-in gates therefore accept
 `Type=simple|notify|oneshot`. `radon-subscription-tokens` stays `User=radon`
-with no key and reaches the vault through the broker socket
-(`/run/radon-subscription-vault/vault.sock`); its `Wants=` starts the broker.
+with no key. Its `InaccessiblePaths` include the vault socket, and it does not
+`Wants=` the broker. `radon-model-gateway` wants the broker and is the process
+that mounts `/run/radon-subscription-vault/vault.sock`.
 `install-units` never enables a `.service`, so an existing host needs one
 `systemctl enable radon-subscription-vault.service` for boot start. Host
 cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
 key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
 The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
-(`docker/app/vendor-clis/`), so `radon-api` and `radon-research` never mount host
-`~/.local/bin`. Provider credential directories and `HOME=/home/radon` remain
-unchanged; Antigravity retains its existing writable refresh/state directories. Root `prepare_private_dir` pins
+(`docker/app/vendor-clis/`). Only `radon-model-gateway` mounts the provider
+grant directories, read-write, with `HOME=/home/radon`. Do not mount those
+directories into `radon-api` or `radon-research`. Root `prepare_private_dir` pins
 every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
 every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
 
@@ -805,7 +806,8 @@ bootstrap, helper and manifest lists) runs `scripts/research/marketdesk_job.py`
 in the Python image as a research unit (rw private research bind, no data,
 media or lease binds) with the newsfeed's Chromium isolation: bridge network,
 the seccomp profile (start refused without it), 512m `/dev/shm`, an env
-allowlist and read-only ladder grants. Heartbeats `marketdesk-research` and
+allowlist and the read-only inference socket. Provider grants stay on the
+model gateway. Heartbeats `marketdesk-research` and
 `marketdesk-dropbox` (15m). `radon-research.service` is retired:
 `restart-managed` and `recover` run `retire_research_watcher` (disable --now an
 enabled watcher, stop a hand-started one, never fatal) in place of the old

@@ -3111,3 +3111,62 @@ class TestDocumentation20261030:
         watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
         assert 'if service == "dropbox-research":' in watchdog
         assert "return False" in watchdog.split('if service == "dropbox-research":', 1)[1][:240]
+class TestDocumentation20261031:
+    """Provider grants stay on the model gateway, not on app consumers."""
+
+    def test_consumer_pages_do_not_mount_provider_grants(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        binds = ops.split("**Subscription credential binds", 1)[1]
+        binds = binds.split("\n**Secret-store key cutover", 1)[0]
+        assert "land at\n" not in binds
+        assert "gap stays open" not in binds
+        assert "radon-model-gateway" in binds
+        assert "do not mount provider grants" in binds
+        newsfeed = ops.split("**Newsfeed least privilege.**", 1)[1].split("**App startup", 1)[0]
+        assert "Claude grant token" not in newsfeed
+        assert "never provider tokens" in newsfeed
+        marketdesk = ops.split("### MarketDesk research ingest", 1)[1].split("### Research evidence archive", 1)[0]
+        assert "env allowlist (Turso, ladder," not in marketdesk
+        assert "inference socket" in marketdesk
+        nvidia = ops.split("## NVIDIA model settings", 1)[1].split("## Subscription keeper", 1)[0]
+        assert "into `radon-newsfeed.service`" not in nvidia
+        assert "radon-model-gateway" in nvidia
+
+        desk = (_ROOT / "docs/marketdesk-research.md").read_text()
+        runtime = desk.split("## Runtime", 1)[1].split("## Health", 1)[0]
+        assert "model ladder keys" not in runtime
+        assert ".gemini/antigravity-cli" not in runtime
+        assert "RADON_ANTIGRAVITY_ISOLATED=1" not in runtime
+        assert "inference socket" in runtime
+
+        oauth = (_ROOT / "docs/oauth-subscription-auth.md").read_text()
+        assert "MarketDesk receives only a read-only Antigravity grant" not in oauth
+        assert "inference socket" in oauth
+
+        services = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "read-only ladder grants" not in services
+
+        pilot = (_ROOT / "docs/nemotron-super-vl-pilot.md").read_text()
+        assert "restricted newsfeed environment now permits" not in pilot
+        assert "radon-model-gateway.service" in pilot
+
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "Anthropic → Grok → Cursor (unwired) → Codex → Antigravity" not in research
+        assert "~/.radon/nvidia-rate.json" not in research
+        assert "/var/lib/radon/model-cache/nvidia-rate.json" in research
+
+        tokens = (_ROOT / "docs/subscription-tokens.md").read_text()
+        assert "The host unit reads `/etc/radon/subscription-tokens/env`" not in tokens
+        assert "still read `TURSO_AUTH_TOKEN` from" not in tokens
+        assert "No current unit loads it" in tokens
+        assert "--once` is the mode the timer runs" not in tokens
+        assert "the daemon, which runs the third-party CLIs, reaches the vault" not in tokens
+        assert "refresh_cli" in tokens
+        assert "InaccessiblePaths" in tokens
+        assert "does not open the vault" in tokens
+
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        drift = cloud.split("## Systemd And Drift", 1)[1].split("## Verification", 1)[0]
+        assert "reaches the vault through the broker socket" not in drift
+        assert "read-only ladder grants" not in drift
+        assert "The subscription keeper loads the root-private derived environment" not in drift
