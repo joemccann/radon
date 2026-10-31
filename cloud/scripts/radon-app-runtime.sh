@@ -1087,7 +1087,9 @@ migrate_model_cache() {
   (( found == 1 )) || return 0
   # All copying, digest checks and promotion run as the application UID in
   # the exact CI image. Host root neither imports nor executes app modules.
-  "$@" "$image" -I /home/radon/radon/scripts/model_gateway/cache_migrate.py
+  # Preparatory Podman runs must not replace systemd's MAINPID with their
+  # short-lived conmon. Keep the foreground service's notify proxy intact.
+  /usr/bin/env -u NOTIFY_SOCKET "$@" "$image" -I /home/radon/radon/scripts/model_gateway/cache_migrate.py
 }
 
 cmd_run() {

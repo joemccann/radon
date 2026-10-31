@@ -1,3 +1,14 @@
+# Gateway startup notification isolation (2026-10-31)
+
+- [x] SN1 depends_on: [] Verify failed production cutover, process identity and automatic recovery without changing the broker or throttles.
+- [x] SN2 depends_on: [SN1] Reproduce inherited-notification failure; isolate preparatory model containers from systemd notifications while preserving foreground supervision.
+- [ ] SN3 depends_on: [SN2] Run focused and full required gates; publish a focused PR, verify exact-head CI, notify once and administrator merge.
+- [ ] SN4 depends_on: [SN3] Verify successful main deployment, exact gateway identity, native inference, model capabilities, renewal and a new live MarketDesk publication; retain Mac OS activation boundary.
+
+## Review
+
+Main release 705c4ca22 failed deploy run 41167569790. Actual disposable Ubuntu/systemd/Podman and cross-owner Git reproductions confirmed preparation MAINPID replacement and rollback metadata ownership failures. The notification/recovery combined gate passed 105 tests before the final CLI guard; the final rollback replay passed 48, including actual SIGKILL/fresh-process recovery under ordinary and restrictive umasks, malformed/null/ownership/mode/identity failures, legacy keeper capture and both capture entry-point exits. Independent review found no remaining P1/P2. Bounded operator recovery restored exact previous release 885f068ae, passed verify-restored and recovery-only journal cleanup, preserved the original floor and broker, and archived the buggy old receipt without changing its bytes. Signed-in dashboard reload and API HTTP 200 verified restored production. Full canonical web: 11,592 passed, 21 skipped; TypeScript exit 0. Initial full Python found only the two exact owner-doc omissions, now repaired. Fresh full infrastructure: 3,747 passed, 16 skipped. Final full Python: 19,735 passed, 12 skipped, 63 subtests passed. Replacement PR and actual deployment remain pending. Focused whole-module coverage is below the 95% target; no claim of target attainment is made.
+
 # Unified standalone AI model gateway (2026-10-30)
 
 - [x] MG1 depends_on: [] Inventory app/pipeline and coding/incident clients; establish native interfaces and pre-refactor full baselines.

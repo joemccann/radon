@@ -2985,6 +2985,7 @@ case "$1" in
       rollback_rc=0
       "$SESSION_PYTHON" -I /usr/local/lib/radon/model_gateway_rollback.py restore || rollback_rc=$?
       if (( rollback_rc == 0 )); then
+        systemctl_bounded daemon-reload
         exec "$SELF" recover
       elif (( rollback_rc != 3 )); then
         exit "$rollback_rc"
