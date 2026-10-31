@@ -33,6 +33,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - `docs/cloud-services.md` — Hetzner runbook (services, schedulers, deploy)
 - `docs/grok-page-responder.md` — VPS P1 auto-fix + live-deploy Pushover
 - `docs/unusual_whales_api.md` — UW endpoint surface
+- `docs/quant-strategies.md` — systematic sleeve (quants.md ports): engine, registry, CLI, storage; runs outside the Four Gates
 
 ---
 

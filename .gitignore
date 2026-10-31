@@ -307,3 +307,5 @@ data/schema_version.*
 /data/uw_research/
 # UW budget history sidecar (runtime-owned by scripts/utils/uw_budget.py)
 data/uw_budget_history.jsonl
+# quant sleeve disk fallback (Turso is the source of truth)
+data/quant/

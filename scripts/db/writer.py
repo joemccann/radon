@@ -3672,3 +3672,73 @@ def get_newsfeed_explanation(post_id: str, content_hash: str) -> Optional[dict[s
         "created_at": row[6],
     }
 
+
+
+# ── Quant sleeve (docs/quant-strategies.md, migration 0106) ──────────────────
+
+QUANT_RUN_UPSERT_SQL = """
+INSERT INTO quant_runs
+  (strategy, run_at, mode, since, until, n_sessions, n_rebalances,
+   ann_return, ann_vol, sharpe, max_drawdown, payload)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, run_at) DO UPDATE SET
+  mode         = excluded.mode,
+  since        = excluded.since,
+  until        = excluded.until,
+  n_sessions   = excluded.n_sessions,
+  n_rebalances = excluded.n_rebalances,
+  ann_return   = excluded.ann_return,
+  ann_vol      = excluded.ann_vol,
+  sharpe       = excluded.sharpe,
+  max_drawdown = excluded.max_drawdown,
+  payload      = excluded.payload
+"""
+
+QUANT_TARGET_UPSERT_SQL = """
+INSERT INTO quant_targets (strategy, as_of, symbol, weight, notional, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, as_of, symbol) DO UPDATE SET
+  weight      = excluded.weight,
+  notional    = excluded.notional,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_quant_run(strategy: str, run_at: str, summary: dict[str, Any], payload: dict[str, Any]) -> None:
+    """One backtest run per (strategy, run_at); the summary columns are what
+    the UI lists, payload is the full result JSON."""
+    db = get_db()
+    db.execute(
+        QUANT_RUN_UPSERT_SQL,
+        (
+            strategy,
+            run_at,
+            summary["mode"],
+            summary.get("since"),
+            summary.get("until"),
+            int(summary["n_sessions"]),
+            int(summary["n_rebalances"]),
+            summary.get("ann_return"),
+            summary.get("ann_vol"),
+            summary.get("sharpe"),
+            summary.get("max_drawdown"),
+            json.dumps(payload),
+        ),
+    )
+    db.commit()
+
+
+def upsert_quant_targets(
+    strategy: str, as_of: str, rows: list[dict[str, Any]], recorded_at: Optional[str] = None
+) -> None:
+    """Current target weights per symbol, idempotent on (strategy, as_of, symbol).
+    A universe is at most a dozen names, so per-row statements stay well under
+    the Hrana bound."""
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            QUANT_TARGET_UPSERT_SQL,
+            (strategy, as_of, row["symbol"], float(row["weight"]), row.get("notional"), stamp),
+        )
+    db.commit()
