@@ -838,6 +838,8 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/mobile-price-format.spec.ts
           e2e/mobile-search-focus.spec.ts
+          e2e/mobile-native-platform.spec.ts
+          e2e/mobile-pointer-fades.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/portfolio-orders-polling.spec.ts
           e2e/portfolio-request-cadence.spec.ts

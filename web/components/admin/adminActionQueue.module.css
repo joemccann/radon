@@ -42,8 +42,15 @@
 .reviewButton, .showAll, .inspectButton, .headerActions button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--touch-min); padding: var(--space-2) var(--space-4); border: 1px solid var(--line-grid); border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: 550 var(--text-label)/1.5 var(--font-sans); cursor: pointer; transition: var(--transition-controls); }
 .reviewButton { margin-top: var(--space-4); }
 .primaryButton { background: var(--signal-core); border-color: var(--signal-core); color: var(--text-on-accent); }
-.reviewButton:hover, .showAll:hover, .inspectButton:hover, .headerActions button:hover { background: var(--bg-panel-raised); }
-.primaryButton:hover { background: var(--signal-strong, var(--signal-core)); }
+@media (hover: hover) and (pointer: fine) {
+  .reviewButton:hover,
+  .showAll:hover,
+  .inspectButton:hover,
+  .headerActions button:hover { background: var(--bg-panel-raised); }
+}
+@media (hover: hover) and (pointer: fine) {
+  .primaryButton:hover { background: var(--signal-strong, var(--signal-core)); }
+}
 .reviewButton:disabled { cursor: default; opacity: 0.55; }
 .primaryActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin-top: var(--space-5); }
 .primaryActions :global(.admin-btn) { min-height: var(--touch-min); }
@@ -106,7 +113,9 @@
 }
 
 .tradingTrigger { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--touch-min); padding: var(--space-2) var(--space-4); border: 1px solid var(--line-grid); border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: 550 var(--text-label)/1.5 var(--font-sans); cursor: pointer; }
-.tradingTrigger:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .tradingTrigger:hover { background: var(--bg-subtle); }
+}
 .tradingBackdrop { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: color-mix(in srgb, var(--bg-canvas) 75%, transparent); }
 .tradingBackdrop[hidden] { display: none; }
 .tradingPanel { width: min(100%, 660px); max-height: calc(100dvh - var(--space-6)); overflow-y: auto; padding: var(--space-5); border: 1px solid var(--line-grid); border-radius: var(--radius-lg); background: var(--bg-panel); }

@@ -10522,3 +10522,32 @@ Review:
 - PR #1347 initial head 8bfc09131: scripts-df rejected the stale held-out mobile-spec ledger stamp. Reproduced locally (1 failed/5 passed); added the dated receipt for the existing 12-case iPhone Safari run without changing CI membership or any test gate.
 - Curation repair verification: 200/200 curation and documentation tests passed; runtime implementation and its independent review digest remain unchanged.
 - Browser CI repair: named feedback regions replace screenshots of flattened wrappers; actual Saved-status 320px wrap reproduced at 48px and repaired by giving confirmation its own row. Independent review approved; full web 11,091 passed/10 skipped and combined browser 36 passed, including unchanged actual voting payload/down-hide/up-stay assertions. Runtime retirement and original-copy flow remain unchanged.
+
+
+## Mobile native platform pass (2026-10-30)
+
+- [x] MN1 depends_on: [] Audit viewport, touch capabilities, inputs, scrolling and safe areas against mobile-native and scoped web rules.
+- [x] MN2 depends_on: [MN1] Add failing regressions for verified defects, then apply minimal platform fixes.
+- [x] MN3 depends_on: [MN2] Run focused Vitest, mobile/desktop Playwright and screenshot verification; document real-device limitations.
+
+- [x] MN4 depends_on: [MN3] Isolate only mobile-native changes on current main and verify the resulting branch.
+- [x] MN5 depends_on: [MN4] Commit, push and create the requested PR with the required body.
+- [x] MN6 depends_on: [MN5] Confirm exact-head checks are green and deliver the required Pushover notification.
+
+Review: Applied mobile-native to shared web platform styles and all 20 authored CSS files containing ungated hover. Red: both authored/Tailwind hover contracts failed; WebKit reproduced missing keyboard viewport metadata and the 1024px touch-tablet search input at 14px. Green: 192 original ungated hover rules covered via 189 wrappers and three strengthened media gates; mixed keyboard-focus/selected selectors preserved. Shared control press feedback, control-only selection suppression, capability-based 16px input floor, landscape text sizing, vertical overscroll policy, viewport-bounded dvh surfaces, pinch zoom in modal scrollers and Next interactiveWidget metadata applied. Full web 11,076 passed / 10 skipped across 1,113 files. WebKit 27 passed; Chromium 3 passed. Phone/tablet/desktop screenshots inspected. Existing selector/declaration audit: 5822 compared, zero unexpected changes. Typecheck reports four errors in files untouched by this pass (DashboardNewsFeed.tsx, sameOrigin.ts); no new errors in changed files. git diff --check clean. No supported phone/tablet appeared in USB inventory: real keyboard, browser chrome, safe areas/rotation and installed-PWA feel remain unverified, as required by the skill. No application dependencies or trading logic changed; PR creation is now authorized. Evidence: output/mobile-native-iztzjg24/verification.json.
+
+PR preparation review: Current origin/main base 3cb47c7c5; 25 owned files isolated with a three-way merge against the pre-pass CSS snapshot, preserving unrelated original-checkout edits. Fresh worktree full web: 11,099 passed / 10 skipped across 1,116 files; typecheck passed. Fresh branch browser verification: WebKit 27 passed and Chromium 3 passed, screenshots inspected. PR checks pending.
+
+CI inventory repair: PR #1355 initial head 7b0b8f95d reproduced the same curation failure in two jobs. Production build/output audit passed (235 manifests) and next-start preflight passed 5/5 platform/search cases before adding mobile-native-platform.spec.ts to the existing curated CI list. Focused curation guard failed first, then passed 6/6. Required checks, deployment dependencies and branch protections are unchanged.
+
+
+## Audit animation implementation (2026-10-30)
+
+- [x] AM1 depends_on: [] Verify the two approved opacity recipes and existing component lifecycles.
+- [x] AM2 depends_on: [AM1] Add failing presence, input-modality and lifecycle regressions; implement cancellable CSS opacity presence across the three components.
+- [x] AM3 depends_on: [AM2] Verify keyboard immediacy, inert exits, rapid reversal, reduced motion, and real pointer/touch behavior in unit/browser tests; inspect screenshots.
+- [x] AM4 depends_on: [AM3] Run full web/typecheck/production verification and prepare the PR #1355 update.
+
+Release completion receipt: exact-head CI and Pushover delivery are tracked in output/animation-implementation-2026-10-30/verification.json after push.
+
+Review: Implemented only opacity presence for Feedback/Share (160ms entry, 120ms exit) and Columns (125ms entry, 100ms exit), reusing --ease-out. Keyboard/assistive activation and Escape remain immediate; reduced motion remains suppressed. Exits become inert/aria-hidden at logical close, rapid reopen cancels removal, and share export generations prevent stale downloads or busy-state changes. Red baseline: 20 failed / 1 passed before implementation. Focused component regressions: 64 passed; hook coverage 100% lines/functions, 97.67% statements and 96.29% branches. WebKit and Chromium each passed 11 real pointer/touch, keyboard, reduced-motion and frame-step cases; screenshots inspected at 10%, 50% and settled entry with unchanged geometry. React component/lifecycle review completed. The first production share regression found stale edited captions on rapid reopen; a failing unit regression confirmed it, and logical reopening now resets caption/preview while preserving edits through ordinary post refresh. Another failing unit regression confirmed late clipboard status could reach a new opening; generation checks now suppress it. Final full web: 11,127 passed / 10 skipped across 1,117 files. Typecheck passed; production build/output audit passed (235 manifests). Combined production browser regressions passed 35/35. The curation guard failed for the new unclassified spec, then passed 6/6 after its 11-case production preflight and registration. git diff --check clean. CI and notification are the remaining release steps, tracked in the completion receipt. No new dependencies or motion on financial data, navigation, layout or column changes. Hardware feel remains unverified; no physical phone/tablet is connected.
