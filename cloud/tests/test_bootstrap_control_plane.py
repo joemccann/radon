@@ -210,6 +210,11 @@ ARTIFACTS = (
     Artifact("scripts/model_transport.py", "/usr/local/lib/radon/model_transport.py", 0o644),
     Artifact("scripts/mac_model_gateway.py", "/usr/local/lib/radon/mac_model_gateway.py", 0o644),
     Artifact("scripts/model_pacing.py", "/usr/local/lib/radon/model_pacing.py", 0o644),
+    # The fleet-wide systemd PREFIX drop-in. setup-vps.sh installed it once and
+    # nothing on an existing host ever re-installed it, so the model-gateway
+    # contract it gained in 54b7482d4 never reached production (config-drift
+    # `file-mismatch:fleet-dropin`, 2026-10-31).
+    Artifact("services/radon-.service.d/common.conf", "/etc/systemd/system/radon-.service.d/common.conf", 0o644),
 )
 
 
@@ -228,6 +233,9 @@ def _dropin_base_units() -> tuple[str, ...]:
         source = Path(artifact.source)
         # `config/sudoers.d/*` is a .d directory too, and has no base unit.
         if source.parent.parent.name != "services" or source.parent.suffix != ".d":
+            continue
+        # `radon-.service.d` is a systemd PREFIX drop-in: no base unit exists.
+        if source.parent.name == "radon-.service.d":
             continue
         base = f"services/{source.parent.name.removesuffix('.d')}"
         if base not in bases:
@@ -951,3 +959,48 @@ def test_app_verifier_accepts_the_pre_hold_legacy_manifest(tmp_path):
     (sandbox.rootfs / 'etc/radon/env').write_text('RADON_HOST_ROLE=app\n')
     verified = _run_root_control_plane_verifier(sandbox)
     assert verified.returncode == 0, verified.stdout + verified.stderr
+
+
+FLEET_DROPIN = Artifact(
+    "services/radon-.service.d/common.conf",
+    "/etc/systemd/system/radon-.service.d/common.conf",
+    0o644,
+)
+
+
+def test_bootstrap_installs_the_fleet_dropin_over_a_stale_copy(tmp_path):
+    """2026-10-31 config-drift: the installed fleet drop-in was the pre-gateway
+    blob while the repo carried RADON_MODEL_GATEWAY_* and the credential
+    UnsetEnvironment list; no control-plane path ever re-installed it."""
+    sandbox = _sandbox(tmp_path)
+    stale = _installed_path(sandbox.rootfs, FLEET_DROPIN)
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("[Service]\nEnvironment=RADON_DB_NO_REPLICA=1\n", encoding="utf-8")
+    expected = [a for a in ARTIFACTS if a.source not in APP_EXCLUDED_SOURCES]
+
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="app",
+                         RADON_BOOTSTRAP_TEST_EXPECTED_TARGETS="\n".join(
+                             str(_installed_path(sandbox.rootfs, a)) for a in expected))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stale.read_bytes() == (CLOUD_ROOT / FLEET_DROPIN.source).read_bytes()
+    rows = _manifest_path(sandbox.rootfs).read_text(encoding="utf-8").splitlines()
+    assert any(row.endswith(f"  {FLEET_DROPIN.source} -> {FLEET_DROPIN.target}") for row in rows)
+
+
+@pytest.mark.parametrize(
+    "directive",
+    ["ExecStart=/bin/sh -c id", "ExecStartPre=/bin/true", "User=root", "Type=simple", "[Unit]"],
+)
+def test_bootstrap_refuses_a_fleet_dropin_that_changes_execution(tmp_path, directive):
+    """The prefix drop-in reaches every radon-* unit, root-run ones included:
+    it may only carry environment, never execution, identity or new sections."""
+    sandbox = _sandbox(tmp_path)
+    source = _source_path(sandbox.source, FLEET_DROPIN.source)
+    source.write_text(source.read_text(encoding="utf-8") + directive + "\n", encoding="utf-8")
+
+    result = sandbox.run(RADON_BOOTSTRAP_HOST_ROLE="app")
+
+    assert result.returncode != 0
+    assert "fleet drop-in" in result.stderr
+    assert not _installed_path(sandbox.rootfs, FLEET_DROPIN).exists()

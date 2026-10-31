@@ -86,6 +86,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/model_transport.py
   scripts/mac_model_gateway.py
   scripts/model_pacing.py
+  services/radon-.service.d/common.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -160,6 +161,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/lib/radon/model_transport.py
   /usr/local/lib/radon/mac_model_gateway.py
   /usr/local/lib/radon/model_pacing.py
+  /etc/systemd/system/radon-.service.d/common.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
   755
@@ -177,6 +179,7 @@ readonly -a CONTROL_PLANE_MODES=(
   440
   440
   440
+  644
   644
   644
   644
@@ -2220,6 +2223,24 @@ sync_scheduled_units() {
   return 0
 }
 
+# The fleet-wide PREFIX drop-in (radon-.service.d/common.conf) applies to
+# every radon-* unit, root-run ones included, so it may carry environment and
+# nothing else: no Exec*, User=, Type= or other section. Kept byte-for-byte
+# identical in deploy-root-helper.sh and bootstrap-control-plane.sh;
+# cloud/tests/test_refresh_control_plane.py pins the two copies.
+fleet_dropin_body_is_valid() {
+  local path="$1" label="${2:-$1}"
+  grep -qx '\[Service\]' "$path" || {
+    echo "fleet drop-in must declare [Service]: ${label}" >&2
+    return 1
+  }
+  if grep -vE '^[[:space:]]*(#.*)?$|^\[Service\]$|^(Environment|UnsetEnvironment)=' "$path" >/dev/null; then
+    echo "fleet drop-in may carry only Environment= and UnsetEnvironment=: ${label}" >&2
+    return 1
+  fi
+  return 0
+}
+
 # Drop-in content gate. Mirrors the `dropin` validator in
 # bootstrap-control-plane.sh; cloud/tests/test_rel133_control_plane_recovery.py
 # pins the two against each other so they cannot drift. R-394.
@@ -2345,6 +2366,14 @@ refresh_install_file() {
     */systemd/system/radon-*.service|*/systemd/system/radon-*.timer|*/systemd/system/radon-*.path)
       if ! unit_candidate_verifies "$candidate" "$(basename -- "$dest")"; then
         echo "systemd unit validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # Before the per-unit arm: `radon-*.service.d` also matches the prefix
+    # directory `radon-.service.d`, whose drop-in has no ExecStart to check.
+    */systemd/system/radon-.service.d/common.conf)
+      if ! fleet_dropin_body_is_valid "$candidate" "$dest"; then
         "$RM" -f "$candidate"
         return 73
       fi

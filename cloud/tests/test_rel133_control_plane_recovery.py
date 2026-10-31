@@ -289,13 +289,13 @@ def _manifested_dropins() -> list[str]:
     """`services/*.service.d/*.conf` entries in the bootstrap manifest.
 
     Not a glob over the tree: `services/radon-.service.d/common.conf` is the
-    systemd prefix-glob fleet drop-in that `setup-vps.sh` copies directly, and
-    it never reaches this gate.
+    systemd prefix-glob fleet drop-in; it has its own `fleet-dropin` gate.
     """
     bootstrap = (CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh").read_text(
         encoding="utf-8"
     )
-    return sorted(set(re.findall(r"^\s*(services/\S+\.service\.d/\S+\.conf)\s*$", bootstrap, re.M)))
+    found = re.findall(r"^\s*(services/\S+\.service\.d/\S+\.conf)\s*$", bootstrap, re.M)
+    return sorted(set(found) - {"services/radon-.service.d/common.conf"})
 
 
 @pytest.mark.parametrize("relative", _manifested_dropins(), ids=lambda r: r.split("/")[1])

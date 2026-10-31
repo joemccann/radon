@@ -270,6 +270,7 @@ readonly -a SOURCES=(
   scripts/model_transport.py
   scripts/mac_model_gateway.py
   scripts/model_pacing.py
+  services/radon-.service.d/common.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -344,6 +345,7 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/lib/radon/model_transport.py
   /usr/local/lib/radon/mac_model_gateway.py
   /usr/local/lib/radon/model_pacing.py
+  /etc/systemd/system/radon-.service.d/common.conf
 )
 readonly -a MODES=(
   0755
@@ -361,6 +363,7 @@ readonly -a MODES=(
   0440
   0440
   0440
+  0644
   0644
   0644
   0644
@@ -492,6 +495,7 @@ readonly -a KINDS=(
   python
   python
   python
+  fleet-dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -661,6 +665,24 @@ rollback_bundle() {
     # drop-ins. R-440.
     restore_target "$ready_index" "$READY_PATH"
   fi
+}
+
+# The fleet-wide PREFIX drop-in (radon-.service.d/common.conf) applies to
+# every radon-* unit, root-run ones included, so it may carry environment and
+# nothing else: no Exec*, User=, Type= or other section. Kept byte-for-byte
+# identical in deploy-root-helper.sh and bootstrap-control-plane.sh;
+# cloud/tests/test_refresh_control_plane.py pins the two copies.
+fleet_dropin_body_is_valid() {
+  local path="$1" label="${2:-$1}"
+  grep -qx '\[Service\]' "$path" || {
+    echo "fleet drop-in must declare [Service]: ${label}" >&2
+    return 1
+  }
+  if grep -vE '^[[:space:]]*(#.*)?$|^\[Service\]$|^(Environment|UnsetEnvironment)=' "$path" >/dev/null; then
+    echo "fleet drop-in may carry only Environment= and UnsetEnvironment=: ${label}" >&2
+    return 1
+  fi
+  return 0
 }
 
 # Shared with deploy-root-helper.sh and setup-vps.sh, byte-for-byte;
@@ -895,6 +917,10 @@ for index in "${!BUNDLE_SOURCES[@]}"; do
       else
         die "drop-in has no base unit to verify against: $relative_source"
       fi
+      ;;
+    fleet-dropin)
+      fleet_dropin_body_is_valid "$staged_path" "$relative_source" || \
+        die "fleet drop-in validation failed: $relative_source"
       ;;
     *)
       die "unknown validator for: $relative_source"

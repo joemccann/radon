@@ -169,8 +169,10 @@ cb09556b2a06dda7a685727f293494124b1722220cd7a9be45876d7a66eaaaee  radon-dispersi
 # "radon-.service.d/" to every unit named radon-*, so this one file's blast
 # radius is the whole fleet, and it was the only installed artifact under
 # services/ with no sha256 pin. Installed by setup-vps.sh:install_fleet_dropin
-# (NOT by the per-release install-units verb, whose manifest regex matches bare
-# radon-*.{service,timer} names only and ignores this line by design); the
+# on a fresh host and, since 2026-10-31, re-installed by the control plane
+# (CONTROL_PLANE_SOURCES; bootstrap kind `fleet-dropin`) on every refresh. NOT
+# by the per-release install-units verb, whose manifest regex matches bare
+# radon-*.{service,timer} names only and ignores this line by design; the
 # daily drift audit compares it live as `fleet-dropin`.
 978e2b698985575a7f91ed5fe2be4e5cb1e548f50d5b8c204a5fa7a18d09daee  radon-.service.d/common.conf
 16216320abceaa8c51854570e1f42841378e9516fa432bf9b0886f10ecb85abb  radon-api.service.d/runtime-container.conf
