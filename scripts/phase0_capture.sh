@@ -50,6 +50,9 @@ redact() {
     }
     {
       cur=$0
+      # A comment never continues, in systemd or dotenv; joining one
+      # printed the next physical line raw under the comment rule.
+      if (buf == "" && cur ~ /^[[:space:]]*#/) { print cur; next }
       if (buf != "") { raw=raw "\n" cur; sub(/^[[:space:]]+/, "", cur); line=buf " " cur }
       else { raw=cur; line=cur }
       if (continued(line)) { sub(/\\$/, "", line); buf=line; next }

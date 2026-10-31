@@ -108,3 +108,86 @@ def test_public_unauthenticated_call_stops_at_real_perimeter(monkeypatch,verb,pa
 @pytest.mark.parametrize('operation,payload,expected',[('forecast',{},305),('x-search',{},305),('ocr',{'timeout_seconds':240},245),('clairic',{},17)])
 def test_api_budget_matches_specialized_service_contract(operation,payload,expected):
     assert module()._budget(operation,payload)==expected
+
+
+class _Stay:
+    async def is_disconnected(self):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_inflight_bridge_leaves_the_order_executor_free(monkeypatch):
+    """R-747: a live model call must not occupy the default executor.
+
+    Order preflight (`check_ib_gateway`) and the working-order read before
+    modify both wait on that executor. On the 2-vCPU host it is only
+    `min(32, cpu+4)` threads. Holding one with the bridge has to leave a
+    preflight probe able to start.
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    m = module()
+    loop = asyncio.get_running_loop()
+    order_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="order-preflight")
+    loop.set_default_executor(order_pool)
+    started = threading.Event()
+    release = threading.Event()
+
+    def send(*args, **kwargs):
+        started.set()
+        release.wait(3)
+        return {"ok": True}
+
+    monkeypatch.setattr(m.gateway, "request", send)
+    bridge = asyncio.create_task(m._send(_Stay(), "forecast", {}))
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.02)
+        assert started.is_set()
+        # A thread that is free returns in 50ms. Queued behind the bridge, this times out.
+        ran = await asyncio.wait_for(asyncio.to_thread(threading.Event().wait, 0.05), timeout=0.4)
+        assert ran is False
+    finally:
+        release.set()
+        await asyncio.wait_for(bridge, timeout=2)
+        workers = min(32, (os.cpu_count() or 1) + 4)
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=workers))
+        order_pool.shutdown(wait=False, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_bridge_fails_closed_when_its_own_workers_are_full(monkeypatch):
+    """Extra model calls refuse instead of taking another order-path thread."""
+    m = module()
+    entered = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+    lock = threading.Lock()
+
+    def send(*args, **kwargs):
+        with lock:
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                entered.set()
+        release.wait(2)
+        return {"ok": True}
+
+    monkeypatch.setattr(m.gateway, "request", send)
+    held = [asyncio.create_task(m._send(_Stay(), "chat", {})) for _ in range(2)]
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.02)
+        assert entered.is_set()
+        assert calls["n"] == 2
+        third = await asyncio.wait_for(m._send(_Stay(), "chat", {}), timeout=0.5)
+        assert third.status_code == 503
+        assert json.loads(third.body)["error"]["code"] == "saturated"
+        assert calls["n"] == 2
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*held), timeout=3)
