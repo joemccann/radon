@@ -626,10 +626,10 @@ LEAP_SCAN_BUDGET_S = 3300.0
 # requests one name at a time. 15s times a largecaps universe does not fit
 # in LEAP_SCAN_BUDGET_S. A short miss falls through to Robinhood, then UW.
 LEAP_IB_HISTORY_TIMEOUT_S = 3.0
-# 70s covers a 60s Retry-After, the governor default when the header is
-# missing. One wait per ticker overlaps across the worker pool, so a
-# minute-scale embargo on a 518-name largecaps scan stays inside the curl
-# budget. A longer embargo is the daily reset and must still fail the oneshot.
+# 70s covers a 60s provider Retry-After (a header-less 429 embargoes only
+# uw_governor.MISSING_RETRY_AFTER_SECONDS). One wait per ticker overlaps
+# across the worker pool, so a minute-scale embargo on a 518-name largecaps
+# scan stays inside the curl budget. A longer embargo is the daily reset and must still fail the oneshot.
 LEAP_ADMISSION_WAIT_S = 70.0
 _LEAP_ADMISSION_POLL_S = 8.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
