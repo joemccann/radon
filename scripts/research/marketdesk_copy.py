@@ -115,6 +115,10 @@ HUMANIZE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 TITLE_MAX = 180
 CONTENT_MAX = 2500
 CAPTION_MAX = 180
+# Image and text copy both use the shared ladder order (grok included). A read
+# timeout cools that provider down for the rest of this process, so one slow
+# grok-4.6 image call (153s or the 120s cap on 2026-10-27) is not repeated for
+# every article in the 270s cycle.
 # grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27), which spends most of
 # the cycle's 270s budget before codex answers. It still answers text-only calls (the humanizer) in 30-45s.
 # Antigravity's CLI accepts text only; retain every image for a capable rung.
@@ -521,7 +525,8 @@ def write_copy(
             require_end_turn=True,
             accept=accept,
             log_prefix="marketdesk",
-            providers=IMAGE_PROVIDERS if images else None,
+            failover_response_errors=True,
+            cooldown_timeouts=True,
         )
 
     try:
@@ -619,7 +624,8 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
     def ask(instruction: str) -> Any:
         reply = complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
                          accept=lambda reply: humanizer.reply_ok(instruction, reply),
-                         log_prefix="marketdesk-humanizer").data
+                         log_prefix="marketdesk-humanizer", failover_response_errors=True,
+                         cooldown_timeouts=True).data
         if isinstance(reply, dict) and set(reply) == {"title", "content"}:
             # The next Humanizer pass reviews and hashes these exact normalized
             # strings. Never change copy after the final review certificate.
@@ -646,7 +652,8 @@ def certify(post: dict, copy: FeedCopy, *, complete: Callable[..., Any] = comple
                                      'source_text': copy.source_text,
                                      'revised': {'title': texts[0], 'content': texts[1]}}, ensure_ascii=False))
         verdict = complete(instruction, max_tokens=3000, read_timeout=120.0, require_end_turn=True,
-                           accept=verdict_ok, log_prefix='marketdesk-humanizer-verify').data
+                           accept=verdict_ok, log_prefix='marketdesk-humanizer-verify',
+                           failover_response_errors=True, cooldown_timeouts=True).data
         return verdict_ok(verdict) and all(verdict[key] is True for key in _REWRITE_GATES)
 
     try:

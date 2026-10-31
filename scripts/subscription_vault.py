@@ -27,6 +27,7 @@ import math
 import os
 import socket
 import stat
+import struct
 import sys
 import threading
 import time
@@ -112,8 +113,44 @@ _TOO_LARGE = object()
 _MALFORMED = object()
 
 
+def _peer_uid(conn: socket.socket) -> int:
+    """The connected peer's uid, resolved as the model gateway resolves it."""
+    if hasattr(socket, "SO_PEERCRED"):
+        _pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        return uid
+    if hasattr(conn, "getpeereid"):
+        return conn.getpeereid()[0]
+    return os.getuid()  # Private filesystem permissions on development platforms.
+
+
+def _discard_request(conn: socket.socket) -> None:
+    """Drain what a refused peer already sent, bounded, then half-close.
+
+    A socket closed while inbound data is still unread is reset by the kernel,
+    which discards the refusal just written; the peer sees a connection error
+    instead of the error class. Nothing read here is parsed.
+    """
+    try:
+        conn.shutdown(socket.SHUT_WR)
+        discarded = 0
+        while discarded <= 4 * MAX_REQUEST_BYTES:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return
+            discarded += len(chunk)
+    except OSError:
+        return
+
+
 def _serve_one(conn: socket.socket, vault: Any) -> None:
     conn.settimeout(IO_TIMEOUT_SECONDS)
+    # Admission is the peer identity, not the socket mode alone: a request is
+    # not read, let alone answered with a credential, for any other account.
+    if _peer_uid(conn) != os.getuid():
+        log.warning("vault connection refused: peer uid is not the service account")
+        conn.sendall(json.dumps(_error("unauthorized peer")).encode())
+        _discard_request(conn)
+        return
     request = _read_request(conn)
     if request is _TOO_LARGE:
         reply = _error("request too large")

@@ -1,3 +1,13 @@
+# MarketDesk model-ladder provider failures (2026-10-30)
+
+- [x] T1 depends_on: [] Root-cause Anthropic unreadable replies, Codex 429, NVIDIA 400/404, Cerebras 413 on the shared ladder.
+- [x] T2 depends_on: [T1] Fail over per rung, cool down Codex 429, skip oversized Cerebras, retry NVIDIA's documented model URL.
+- [x] T3 depends_on: [T1] Keep Grok in the MarketDesk chain. Antigravity stays the documented agy CLI, not a new HTTP client.
+- [ ] T4 depends_on: [T2, T3] Draft PR, focused tests green, CI on the head.
+
+## Review
+
+Pending CI on the draft PR. No production host, env file, or live provider call.
 # Gateway exact release status identity (2026-10-31)
 
 - [x] RI1 depends_on: [] Reproduce missing gateway release identity and reject stale/caller-controlled or mutable resolved-image identity with regressions.

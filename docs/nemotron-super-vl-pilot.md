@@ -35,15 +35,17 @@ References: [hosted API](https://docs.api.nvidia.com/nim/reference/nvidia-nemotr
 4. Require zero observed critical numeric errors, no coverage regression and
    no increase in research false approvals; human-review disagreements. These
    are sample acceptance gates, not a guarantee of error-free production.
-5. After passing those gates, apply the vision setting to one consumer,
-   regenerate its runtime environment using the existing runtime deployment
-   procedure, restart that consumer and confirm sanitized winner/model logs.
-   Existing provider ordering still determines whether NVIDIA is called.
+5. After passing those gates, set `NVIDIA_VISION_MODEL` in `/etc/radon/env`,
+   regenerate the runtime environment using the existing deployment procedure,
+   and restart `radon-model-gateway.service`. Confirm sanitized winner/model
+   logs from the gateway. Existing provider ordering still determines whether
+   NVIDIA is called.
 
-The restricted newsfeed environment now permits `NVIDIA_VISION_MODEL`,
-`NVIDIA_TEXT_MODEL`, and `NVIDIA_MODEL` explicitly. It does not permit arbitrary
-`NVIDIA_*` settings. Editing a host environment file alone does not update an
-already running process or a previously rendered container environment.
+The gateway environment admits `NVIDIA_VISION_MODEL`, `NVIDIA_TEXT_MODEL`, and
+`NVIDIA_MODEL`. It does not admit arbitrary `NVIDIA_*` settings, and the
+newsfeed container does not receive those names. Editing a host environment
+file alone does not update an already running process or a previously rendered
+container environment.
 
 Text remains a separate evaluation. If needed, explicitly set
 `NVIDIA_TEXT_MODEL` to the same hosted ID in an evaluation environment, then

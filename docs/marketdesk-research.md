@@ -231,6 +231,11 @@ caption keys that do not match the attached images, structural humanize tells
 length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
+ladder is `scripts/clients/model_ladder.py`. Image and text copy use that
+shared order, grok included. One provider's unreadable or incomplete reply
+fails over to the next rung. A read timeout cools that provider down for the
+rest of the process, so the 2026-10-27 grok-4.6 image timeouts (153s, or the
+120s cap) are not repeated for every article in the 270s cycle. Captions obey the same
 ladder is `scripts/clients/model_ladder.py`. Text-only editorial requests start with Antigravity, then Anthropic, Grok, Cursor, Codex, NVIDIA and Cerebras; quota failures fall through. The image copy call skips text-only Antigravity and grok
 (`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
 image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
@@ -314,10 +319,13 @@ app image through `radon-app-runtime`:
   (`/etc/radon/seccomp/chromium.json`, refused if missing or untrusted) and a
   512m `/dev/shm`, the same isolation as the newsfeed. The job no longer runs a
   browser; the isolation stays because it still parses third-party content;
-- an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
-  `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
-  and Clerk secrets never enter the container;
-- read-only `.grok`, `.codex`, `.claude` and `.gemini/antigravity-cli` grants. The runtime forces `RADON_ANTIGRAVITY_ISOLATED=1`: Antigravity copies only its token file into a private temporary HOME, runs in sandbox/plan mode with slash-command expansion disabled, and deletes that state after success or failure. No host Antigravity configuration/projects or shared writable grant enters this worker. The existing subscription refresh service remains the canonical grant writer.
+- an env allowlist: Turso, `THEMARKETEAR_*`, `MARKETDESK_*` and
+  `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB, Clerk secrets,
+  provider tokens and model API keys never enter the container;
+- the private inference socket, read-only, with `RADON_MODEL_GATEWAY_REQUIRED=1`.
+  No subscription grant directory is mounted here. Antigravity isolation runs
+  inside `radon-model-gateway`, which owns the canonical grants. See
+  [the model gateway](model-gateway.md).
 
 The radon-api container keeps its read-only research bind, so existing and new
 research assets are served by the same authenticated route.

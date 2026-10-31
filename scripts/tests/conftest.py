@@ -31,8 +31,11 @@ def _stub_bankroll_snapshot(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
     """Credential discovery may read only this test's explicit auth fixtures."""
+    from clients import model_ladder
+    import clients.provider_cooldown as provider_cooldown
     from model_gateway import engine as model_ladder
 
+    provider_cooldown.clear_process_state()
     for name in ("_json_load_object", "_read_secret_file"):
         original = getattr(model_ladder, name)
         empty = None if name == "_json_load_object" else ""
