@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from db import writer
+
 from model_gateway._catalog_backend import (
     PROVIDERS,
     build_output,
@@ -320,15 +322,15 @@ def persist_calls(tmp_path, monkeypatch, turso_catalog):
 
     calls: list[tuple] = []
     monkeypatch.setattr(mod, "LLM_MODELS_JSON", tmp_path / "llm_models.json")
-    monkeypatch.setattr(mod.writer, "get_llm_model_catalog_rows",
+    monkeypatch.setattr(writer, "get_llm_model_catalog_rows",
                         lambda: [dict(row) for row in turso_catalog], raising=False)
-    monkeypatch.setattr(mod.writer, "ensure_no_replica_for_writers",
+    monkeypatch.setattr(writer, "ensure_no_replica_for_writers",
                         lambda: calls.append(("guard",)))
-    monkeypatch.setattr(mod.writer, "upsert_llm_model_catalog_rows",
+    monkeypatch.setattr(writer, "upsert_llm_model_catalog_rows",
                         lambda rows, refreshed_at=None: calls.append(("rows", len(rows))))
-    monkeypatch.setattr(mod.writer, "upsert_scan_snapshot",
+    monkeypatch.setattr(writer, "upsert_scan_snapshot",
                         lambda service, scan_time, payload: calls.append(("snapshot", service)))
-    monkeypatch.setattr(mod.writer, "record_service_health",
+    monkeypatch.setattr(writer, "record_service_health",
                         lambda service, state, **kw: calls.append(
                             ("health", service, state, kw.get("error"))))
     return calls
@@ -563,7 +565,7 @@ class TestRun:
         def turso_down(rows, refreshed_at=None):
             raise ConnectionError("Hrana stream closed")
 
-        clean_env.setattr(mod.writer, "upsert_llm_model_catalog_rows", turso_down)
+        clean_env.setattr(writer, "upsert_llm_model_catalog_rows", turso_down)
 
         assert mod.main([]) == 1
 
@@ -630,7 +632,7 @@ class TestRun:
         def turso_down():
             raise ConnectionError("Hrana stream closed")
 
-        clean_env.setattr(mod.writer, "get_llm_model_catalog_rows", turso_down)
+        clean_env.setattr(writer, "get_llm_model_catalog_rows", turso_down)
         mod.LLM_MODELS_JSON.write_text(json.dumps({
             "models": [{"provider": "xai", "model_id": "grok-4.5",
                         "display_name": "GROK 4.5", "refreshed_at": "json-stamp"}],

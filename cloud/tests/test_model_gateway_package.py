@@ -11,6 +11,26 @@ ROOT=Path(__file__).resolve().parents[2]
 
 @pytest.mark.parametrize('operation',[
     'assert server.Gateway',
+    '''import importlib.abc
+class RejectApplicationDatabase(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"db", "scripts.db", "libsql_experimental"} or fullname.startswith(("db.", "scripts.db.")):
+            raise ImportError("native catalog must not import the application database")
+sys.meta_path.insert(0, RejectApplicationDatabase())
+from scripts.model_gateway import _catalog_backend, specialized
+assert _catalog_backend._ladder() is server.engine
+_catalog_backend.provider_key=lambda provider: None
+assert specialized.refresh_catalog({})["rows"]==[]
+assert isinstance(specialized.model_inventory(refresh=False), dict)
+_catalog_backend.LLM_MODELS_JSON=Path.home()/"absent-catalog.json"
+assert _catalog_backend.load_previous()=={}
+try:
+    _catalog_backend.persist_result({"scan_time":"2026-10-31T00:00:00Z"}, [])
+except ImportError:
+    pass
+else:
+    raise AssertionError("DB persistence must fail closed when its SDK is unavailable")
+assert "db" not in sys.modules and "libsql_experimental" not in sys.modules''',
     '''from scripts.model_gateway import _ocr_backend
 server.engine._text_from_openai=lambda value: "same engine"
 assert _ocr_backend._openai_text({})=="same engine"''',

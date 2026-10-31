@@ -64,7 +64,6 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from db import writer
 from utils.ipv4_first import prefer_ipv4
 
 prefer_ipv4()
@@ -445,6 +444,9 @@ def load_previous() -> dict[str, dict[str, Any]]:
         if model.get("provider") in PROVIDERS:
             previous[model["provider"]] = dict(model)
     try:
+        # Native service discovery does not need the application's DB SDK.
+        # Only this legacy read/persistence path resolves the writer.
+        from db import writer
         turso_rows = writer.get_llm_model_catalog_rows()
     except Exception as exc:  # noqa: BLE001 - the JSON tier carries a Turso outage
         _log(f"llm_model_catalog read failed ({exc}); seeding from the JSON cache only")
@@ -490,6 +492,8 @@ def persist_result(
     ``ok`` with today's finished_at would satisfy the 26h alarm while the
     catalog silently aged. Keyless providers are not failures.
     """
+    from db import writer
+
     scan_time = payload["scan_time"]
     error = _carry_forward_error(failed or {})
     state = "error" if error else "ok"
@@ -509,6 +513,7 @@ def _record_cycle_failure(scan_time: str, exc: BaseException) -> None:
     that never appears is invisible until the 26h window; best-effort, so a
     broken writer cannot mask the original failure."""
     try:
+        from db import writer
         writer.record_service_health(
             SERVICE,
             "error",
