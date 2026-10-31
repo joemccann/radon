@@ -159,3 +159,18 @@ def test_a_backtick_quoted_multiline_value_does_not_leak():
     out = _redact_input(TWS_PW_KEY + "=`first\nsecond_line_NOTREALsecret`\nRADON_MODE=hetzner")
     assert "second_line_NOTREALsecret" not in out, out
     assert "RADON_MODE=hetzner" in out, out
+
+
+# A comment never continues: neither systemd nor dotenv joins a comment line
+# that ends in a backslash with the next line. Assembling it as one logical
+# line matched the comment rule and printed the next physical line raw.
+def test_a_comment_ending_in_a_backslash_does_not_swallow_the_next_line():
+    out = _redact_input("# note \\\nUW_TOKEN=live_NOTREAL123\nRADON_MODE=hetzner")
+    assert "live_NOTREAL123" not in out, out
+    assert "# note \\" in out, out
+    assert "RADON_MODE=hetzner" in out, out
+
+
+def test_a_semicolon_line_is_still_keyed_and_redacted():
+    out = _redact_input("; UW_TOKEN=live_NOTREAL123 \\\nRADON_MODE=hetzner")
+    assert "live_NOTREAL123" not in out, out

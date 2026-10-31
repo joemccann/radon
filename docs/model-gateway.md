@@ -4,7 +4,7 @@ All Radon inference goes through `scripts/model_gateway`. App processes keep the
 
 ## Interfaces
 
-Python app callers use `clients.model_ladder` for text/vision JSON and its local acceptance callback. A rejected result resumes a single-use service continuation under the original deadline. Node pipeline callers use `scripts/model_gateway/client.js`; Next.js uses `web/lib/llm/provider.ts` through the authenticated FastAPI `/model-gateway` bridge. New consumers use these same adapters.
+Python app callers use `clients.model_ladder` for text/vision JSON and its local acceptance callback. A rejected result resumes a single-use service continuation under the original deadline. Node pipeline callers use `scripts/model_gateway/client.js`; Next.js uses `web/lib/llm/provider.ts` through the authenticated FastAPI `/model-gateway` bridge. That bridge runs on its own two-thread pool and returns 503 `saturated` when both workers are busy, so a chat or forecast cannot occupy the default executor that order preflight and the working-order read share (R-747). New consumers use these same adapters.
 
 Fixed operations cover normalized chat with tools/images, JSON, vision extraction, explicit 384/2048-dimensional embedding spaces, OCR, X search, Chronos forecasting, and Clairic dates. Inputs cannot supply upstream URLs, headers, credentials, paths, or arbitrary commands. Existing publication, Humanizer, portfolio, source, trading and provider pacing rules remain in their owning pipelines.
 
@@ -54,6 +54,15 @@ Unknown inode capacity refuses; root-reserved blocks never satisfy the check.
 There is no threshold override or automatic data deletion. A rejected prestage
 or capacity probe cannot fall back to a host compile. Promotion rechecks before
 writing; concurrent disk growth can still cause a later refusal.
+
+Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
+bundle when the local engine reports the same image id for another exact
+`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag. It copies those bytes,
+rewrites only the release SHA, re-checks every hash, and activates the Linux
+selector. It does not move the Darwin selector; that still happens at commit.
+A tree that already exists for the deploying SHA is not proof, because the
+registry tag can move. A missing tag, a different image id, a corrupt donor,
+or an inspect failure exports from the image as before.
 
 Gateway-era recovery verifies and reuses the already-installed exact Linux
 executables/helpers and Darwin bundle using immutable receipts and hashes. It
