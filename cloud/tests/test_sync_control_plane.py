@@ -336,12 +336,20 @@ supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
         assert (tmp_path / "recovered").exists()
         assert (tmp_path / "deployed").exists()
 
-    def _post_deploy_prune(self, tmp_path, *, deploy_rc: int, granted: bool = True, stage: str = "0"):
+    TARGET = "f" * 40
+
+    def _post_deploy_prune(self, tmp_path, *, deploy_rc: int, granted: bool = True, stage: str = "0",
+                           target: str = TARGET):
         log = tmp_path / "sudo.log"
         lock = tmp_path / "deploy.lock"
         probe = (
             "import fcntl,sys; f=open(sys.argv[1],'r+'); "
             "fcntl.flock(f, fcntl.LOCK_EX|fcntl.LOCK_NB); print('free')"
+        )
+        # The lock-held pruner must receive the supervisor's locked FD 9 as stdin.
+        stdin_probe = (
+            "import os,sys; a=os.fstat(0); b=os.stat(sys.argv[1]); "
+            "print('stdin=lock' if (a.st_dev,a.st_ino)==(b.st_dev,b.st_ino) else 'stdin=other')"
         )
         shell = f"""
 set -euo pipefail
@@ -351,13 +359,17 @@ timeout() {{ if [[ "$1" == --signal=* ]]; then shift 3; else shift; fi; "$@"; }}
 sudo() {{
   printf '%s\\n' "$*" >> {log}
   if [[ "$1" == "-n" && "$2" == "-l" ]]; then return {0 if granted else 1}; fi
-  # The pruner must find the deploy lock free (FD 9 closed).
+  # The post-release pruner must find the deploy lock free (FD 9 closed).
   if [[ "$*" == *" prune" ]]; then
     {sys.executable} -c {shlex.quote(probe)} {lock} >> {log} 2>&1 || echo held >> {log}
   fi
+  if [[ "$*" == *" prune-locked "* ]]; then
+    {sys.executable} -c {shlex.quote(stdin_probe)} {lock} >> {log} 2>&1
+  fi
   return 0
 }}
-supervise_deploy_command bash -c 'exit {deploy_rc}'
+DEPLOY_TARGET_SHA={shlex.quote(target)}
+supervise_deploy_command bash -c 'echo inner >> {log}; exit {deploy_rc}'
 """
         result = subprocess.run(
             ["bash", "-c", shell],
@@ -382,10 +394,39 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
         assert body.rindex("exec 8>&- 9>&-") < body.index("prune_app_images_after_deploy")
         del fcntl
 
-    def test_failed_deploy_does_not_prune(self, tmp_path):
+    def test_supervisor_prunes_under_its_held_lock_before_the_inner_deploy(self, tmp_path):
+        """2026-10-31: a deploy pulled 3.4G and then failed model disk admission;
+        the only prune ran after a green deploy, so each refused SHA's set
+        stayed. The supervisor now prunes BEFORE the inner deploy pulls or
+        admits anything, handing its locked FD 9 to the pruner as stdin."""
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0)
+        assert result.returncode == 0, result.stdout + result.stderr
+        call = f"-n /usr/local/sbin/radon-app-runtime prune-locked {self.TARGET}"
+        assert call in lines
+        assert lines[lines.index(call) + 1] == "stdin=lock"
+        assert lines.index(call) < lines.index("inner")
+        body = function_body(DEPLOY.read_text(encoding="utf-8"), "supervise_deploy_command")
+        # Inside the lock: after the lock is taken, before the inner deploy.
+        assert body.index('log_success "Acquired production deploy lock"') \
+            < body.index("prune_app_images_before_admission") < body.index('"${DEPLOY_TIMEOUT}s" "$@"')
+        assert "0<&9" in function_body(DEPLOY.read_text(encoding="utf-8"), "prune_app_images_before_admission")
+
+    def test_a_missing_target_sha_skips_the_lock_held_prune(self, tmp_path):
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, target="")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not any("prune-locked" in line for line in lines)
+        assert "inner" in lines
+
+    def test_failed_deploy_prunes_after_releasing_the_deploy_lock(self, tmp_path):
+        """A refused or rolled-back deploy leaves the green marker alone, so
+        the no-argument prune drops the failed target's set and keeps the
+        running and rollback pairs."""
         result, lines = self._post_deploy_prune(tmp_path, deploy_rc=3)
         assert result.returncode == 3
-        assert not any("prune" in line for line in lines)
+        post = "-n /usr/local/sbin/radon-app-runtime prune"
+        assert post in lines
+        assert lines.index("inner") < lines.index(post)
+        assert "free" in lines and "held" not in lines
 
     def test_green_prestage_does_not_prune(self, tmp_path):
         """2026-10-11, CI runs for 964a58a1 and 4262b4c8: prestage and the
@@ -396,12 +437,18 @@ supervise_deploy_command bash -c 'exit {deploy_rc}'
         a deploy prunes."""
         result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, stage="1")
         assert result.returncode == 0, result.stdout + result.stderr
-        assert not any("prune" in line for line in lines)
+        assert not any(line.endswith("radon-app-runtime prune") for line in lines)
+        (tmp_path / "failed").mkdir()
+        failed, failed_lines = self._post_deploy_prune(tmp_path / "failed", deploy_rc=3, stage="1")
+        assert failed.returncode == 3
+        assert not any(line.endswith("radon-app-runtime prune") for line in failed_lines)
 
     def test_ungranted_prune_is_skipped_without_failing_the_deploy(self, tmp_path):
         result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, granted=False)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "-n /usr/local/sbin/radon-app-runtime prune" not in lines
+        assert f"-n /usr/local/sbin/radon-app-runtime prune-locked {self.TARGET}" not in lines
+        assert "inner" in lines
         assert "not granted" in result.stdout + result.stderr
 
     def _green(self, tmp_path, existing: str | None, sha: str) -> str:

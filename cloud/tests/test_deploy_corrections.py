@@ -200,6 +200,15 @@ recover_pending_transition
 """
 
 
+def _no_recovery_calls(log: Path) -> bool:
+    """Only the best-effort post-release image prune may call sudo here; a
+    failed deploy now prunes the refused target set (no-argument `prune`)."""
+    if not log.exists():
+        return True
+    calls = log.read_text(encoding="utf-8").splitlines()
+    return all(call.endswith("/usr/local/sbin/radon-app-runtime prune") for call in calls)
+
+
 @pytest.mark.parametrize("ignore_term", [False, True], ids=["term", "forced-kill"])
 def test_supervisor_kills_descendants_without_recovery_before_transition(
     tmp_path: Path, ignore_term: bool
@@ -251,7 +260,7 @@ exit "$exit_code"
         time.sleep(0.05)
     assert not _process_is_running(pid), f"descendant {pid} survived deploy timeout"
     assert forced_kill.exists() is ignore_term
-    assert not recovery_log.exists()
+    assert _no_recovery_calls(recovery_log)
     with lock_file.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
@@ -282,7 +291,7 @@ exit "$exit_code"
         timeout=3,
     )
     assert result.returncode == 23
-    assert not recovery_log.exists()
+    assert _no_recovery_calls(recovery_log)
 
 
 @pytest.mark.skipif(

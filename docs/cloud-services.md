@@ -663,8 +663,8 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 | Piece | Where | What |
 |---|---|---|
 | `radon-disk-cleanup.timer` | VPS | Weekly **Sun 03:20 UTC**, `RandomizedDelaySec=300`, `Persistent=true`. Clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). |
-| `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only docker socket + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
-| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: stale app images, dangling layers, leaked release worktrees, npm/pip caches, journald. |
+| `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only container engines + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
+| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: `app-images` (delegated to `radon-app-runtime prune-locked` with the job's held deploy lock as stdin, on whichever engine the runtime uses), `dangling-images` (`image prune -f` on podman and docker when installed), leaked release worktrees, npm/pip caches, journald. |
 
 ### Demo mirror (`radon-demo-mirror.timer`)
 
@@ -676,9 +676,9 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):
 
-- `KEEP_IMAGE_PAIRS = 2` — keeps the `radon-node` / `radon-python` pair matching
-  the live checkout's HEAD **plus** the two newest pairs. An unresolvable HEAD
-  prunes nothing.
+- App images: no constant here. The keep-set is the runtime's
+  [app image prune](operations.md#app-image-prune) (green lines 1 and 2, journal
+  SHAs, any image a running container uses).
 - `RELEASE_MAX_AGE_DAYS = 3` — removes `stage.<sha>.XXXXXX` / `backup.<sha>.XXXXXX`
   worktrees older than that, then drops their stale `.git/worktrees/<name>`
   records by filesystem op (root never runs `git` inside a repo the radon

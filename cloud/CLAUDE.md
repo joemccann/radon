@@ -166,7 +166,7 @@ Production is three planes. Do not collapse them.
   `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
   after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune` and `prune-locked <sha>` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.
@@ -918,7 +918,7 @@ Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
 
-Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `deploy.sh` calls `radon-app-runtime prune` after a green deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; both prunes skip while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `pull <sha>` prunes before it fetches layers. Inside the deploy lock, the supervisor runs `radon-app-runtime prune-locked <sha>` with its held FD 9 as stdin before the inner deploy builds, pulls or runs model disk admission, so a refused deploy's images cannot ratchet the disk. `deploy.sh` calls `radon-app-runtime prune` after a green or failed deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; every prune skips while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
 
 ### SPX breadth scheduled comparison
 

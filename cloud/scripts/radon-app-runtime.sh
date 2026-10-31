@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -453,6 +453,13 @@ cmd_pull() {
   python_ref="ghcr.io/joemccann/radon-python:${tag}"
   node_ref="ghcr.io/joemccann/radon-node:${tag}"
   gateway_ref="ghcr.io/joemccann/radon-model-gateway:${tag}"
+  # Prune BEFORE fetching layers. The prepull job used to pull a whole new set
+  # into a full disk and prune only afterwards (2026-10-31 Caddy ENOSPC). This
+  # prune takes the pull lock itself, so it runs before this pull's shared hold.
+  if [[ -n "$target" ]]; then
+    mkdir -p -m 0755 "${PULL_LOCK_FILE%/*}" 2>/dev/null || true
+    prune_stale_app_images "$target" 0 || true
+  fi
   acquire_pull_lock || return $?
 
   # The gated prepull job and the deploy both call this exact verb. When the
@@ -491,28 +498,46 @@ cmd_pull() {
       return 69
     fi
   fi
-  [[ -n "$target" ]] && prune_stale_app_images "$target" 1
   return 0
 }
 
-# `prune` (no argument) is the post-deploy cleanup. deploy.sh calls it only
-# after a green deploy, never when RADON_DEPLOY_STAGE=1, after the supervisor
-# closes the lock fd. `pull` from deploy.sh holds that lock, so its prune
-# skips. The CI prepull job runs `pull` without the lock, so its prune runs
-# and protects the target SHA plus green line 1, not line 2. Either prune
-# skips while another process holds the pull lock (see acquire_pull_lock).
+# `prune` (no argument) is the post-deploy cleanup. deploy.sh calls it after
+# the supervisor closes the lock fd, on success and on failure, never when
+# RADON_DEPLOY_STAGE=1. `pull <sha>` prunes before it fetches: from deploy.sh
+# that prune skips (the deploy lock is held). The CI prepull job runs `pull`
+# without the lock, so its prune runs and protects the target SHA plus green
+# line 1, not line 2. Every prune skips while another process holds the pull
+# lock (see acquire_pull_lock).
 cmd_prune() {
   mkdir -p -m 0755 "${PULL_LOCK_FILE%/*}" 2>/dev/null || true
   prune_stale_app_images "" 0
 }
 
-# $2 is 1 when the caller already holds the pull lock shared on fd 9.
+# `prune-locked [<sha>]` runs INSIDE a deploy-lock holder: deploy.sh's
+# supervisor before the inner deploy pulls or admits anything, and root's
+# weekly disk_cleanup. The caller hands over its own held deploy-lock
+# descriptor as stdin; a second open of the lock would conflict with that hold
+# and skip every time (#1012). It keeps the target, green lines 1 and 2 (or
+# both journal SHAs) and any image a running container uses.
+cmd_prune_locked() {
+  local target="${1:-}"
+  if [[ -n "$target" && ! "$target" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "radon-app-runtime: prune-locked takes a 40-hex release SHA" >&2
+    exit 64
+  fi
+  mkdir -p -m 0755 "${PULL_LOCK_FILE%/*}" 2>/dev/null || true
+  # The pruner's own script arrives on stdin; the lock descriptor moves to 7.
+  exec 7<&0
+  prune_stale_app_images "$target" 1
+}
+
+# $2 is 1 when fd 7 is the caller's held deploy-lock descriptor.
 prune_stale_app_images() {
   "$PYTHON" -I - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" "$PULL_LOCK_FILE" "$2" "$LEGACY_DEPLOY_LOCK_FILE" <<'PYCODE'
 import fcntl, json, os, re, stat, subprocess, sys
 from pathlib import Path
 
-docker, target, lock_path, green_path, journal_path, pull_lock_path, pull_lock_held, legacy_lock_path = sys.argv[1:]
+docker, target, lock_path, green_path, journal_path, pull_lock_path, held_deploy, legacy_lock_path = sys.argv[1:]
 def skip(reason):
     print(f"radon-app-runtime: image prune skipped: {reason}", file=sys.stderr)
     raise SystemExit(0)
@@ -523,13 +548,9 @@ def sha(value):
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
 
 # Exclusive and non-blocking: another pull's shared hold means a tag may be
-# mid-pull or unverified. Inside `pull <sha>` this converts our own shared
-# hold on the inherited fd. It never waits, so it cannot deadlock.
+# mid-pull or unverified. It never waits, so it cannot deadlock.
 try:
-    if pull_lock_held == "1":
-        pull_fd = 9
-    else:
-        pull_fd = os.open(pull_lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    pull_fd = os.open(pull_lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     if not stat.S_ISREG(os.fstat(pull_fd).st_mode):
         skip("pull lock is not a regular file")
     fcntl.flock(pull_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -539,10 +560,24 @@ except OSError as exc:
     skip(f"pull lock unavailable ({type(exc).__name__})")
 
 try:
-    # Do not create a root-owned lock that would prevent radon from deploying.
-    fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, "r") as lock:
-        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+    if held_deploy == "1":
+        # fd 7 is the caller's own open of the deploy lock. Same inode, and our
+        # flock on that shared descriptor succeeds only if the caller holds it
+        # (or nobody does); a lock held through any other open refuses.
+        try:
+            held, named = os.fstat(7), os.lstat(lock_path)
+        except OSError:
+            skip("stdin is not the held deploy lock")
+        if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            skip("stdin is not the held deploy lock")
+        try:
+            fcntl.flock(7, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            skip("deploy lock is held by another process")
+    else:
+        # Do not create a root-owned lock that would prevent radon from deploying.
+        lock = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(lock).st_mode):
             skip("deploy lock is not a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if legacy_lock_path and legacy_lock_path != lock_path:
@@ -551,44 +586,47 @@ try:
             if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
                 skip("compatibility deploy lock changed")
             fcntl.flock(legacy_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        protected = {target} if target else set()
-        journal = Path(journal_path)
-        if journal.exists() or journal.is_symlink():
-            state = json.loads(journal.read_text())
-            if not isinstance(state, dict) or state.get("version") != 1 or not all(
-                sha(state.get(key)) for key in ("requested_sha", "previous_sha")
-            ):
-                skip("invalid transition journal")
-            protected.update((state["requested_sha"], state["previous_sha"]))
-        else:
-            green = Path(green_path).read_text().splitlines()
-            if not green or not sha(green[0]):
-                skip("invalid green marker")
-            protected.add(green[0])
-            if not target:
-                # Line 1 is the running release; line 2 is the rollback pair.
-                if len(green) < 2 or not sha(green[1]):
-                    skip("green marker records no previous release")
-                protected.add(green[1])
-        repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python", "ghcr.io/joemccann/radon-model-gateway")
-        in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
-                  if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
-        if not in_use:
-            skip("no running app containers")
-        stale = []
-        for repo in repos:
-            for image in command("images", "--format", "{{.Repository}}:{{.Tag}}", repo):
-                prefix, separator, tag = image.rpartition(":")
-                if prefix == repo and sha(tag) and tag not in protected and image not in in_use:
-                    stale.append(image)
-        # One rmi per tag: an image carrying several stale tags is deleted when
-        # its last tag goes. A refused rmi (image still referenced) keeps the
-        # rest of the sweep going.
-        for image in stale:
-            try:
-                command("rmi", image)
-            except subprocess.SubprocessError as exc:
-                print(f"radon-app-runtime: rmi {image} failed ({type(exc).__name__})", file=sys.stderr)
+    protected = {target} if target else set()
+    journal = Path(journal_path)
+    if journal.exists() or journal.is_symlink():
+        state = json.loads(journal.read_text())
+        if not isinstance(state, dict) or state.get("version") != 1 or not all(
+            sha(state.get(key)) for key in ("requested_sha", "previous_sha")
+        ):
+            skip("invalid transition journal")
+        protected.update((state["requested_sha"], state["previous_sha"]))
+    else:
+        green = Path(green_path).read_text().splitlines()
+        if not green or not sha(green[0]):
+            skip("invalid green marker")
+        protected.add(green[0])
+        if not target:
+            # Line 1 is the running release; line 2 is the rollback pair.
+            if len(green) < 2 or not sha(green[1]):
+                skip("green marker records no previous release")
+            protected.add(green[1])
+        elif held_deploy == "1" and len(green) > 1 and sha(green[1]):
+            # A deploy keeps its rollback pair while it pulls the target.
+            protected.add(green[1])
+    repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python", "ghcr.io/joemccann/radon-model-gateway")
+    in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
+              if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
+    if not in_use:
+        skip("no running app containers")
+    stale = []
+    for repo in repos:
+        for image in command("images", "--format", "{{.Repository}}:{{.Tag}}", repo):
+            prefix, separator, tag = image.rpartition(":")
+            if prefix == repo and sha(tag) and tag not in protected and image not in in_use:
+                stale.append(image)
+    # One rmi per tag: an image carrying several stale tags is deleted when
+    # its last tag goes. A refused rmi (image still referenced) keeps the
+    # rest of the sweep going.
+    for image in stale:
+        try:
+            command("rmi", image)
+        except subprocess.SubprocessError as exc:
+            print(f"radon-app-runtime: rmi {image} failed ({type(exc).__name__})", file=sys.stderr)
 except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
     skip(f"deploy lock or rollback state unavailable ({type(exc).__name__})")
 PYCODE
@@ -1549,6 +1587,10 @@ case "$1" in
   prune)
     [[ $# -eq 1 ]] || usage
     cmd_prune
+    ;;
+  prune-locked)
+    [[ $# -eq 1 || $# -eq 2 ]] || usage
+    cmd_prune_locked "${2:-}"
     ;;
   run)
     [[ $# -eq 2 ]] || usage

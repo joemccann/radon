@@ -269,82 +269,6 @@ class TestTheSweepTakesTheDeployLock:
         assert "/home/radon" not in exec_start
 
 
-# ── R-342: the registry-outage fallback tag is never pruned ────────────────
-
-def _image(repo: str, tag: str, created: float, size: int = 1):
-    return disk_cleanup.Image(
-        repository=repo, tag=tag, image_id="sha256:x",
-        created_at=created, size_bytes=size,
-    )
-
-
-class TestFallbackTagIsKept:
-    REPO = "ghcr.io/joemccann/radon-node"
-    HEAD = "a" * 40
-
-    def test_latest_is_never_selected_for_removal(self):
-        images = [
-            _image(self.REPO, self.HEAD, 500.0),
-            _image(self.REPO, "b" * 40, 400.0),
-            _image(self.REPO, "c" * 40, 300.0),
-            _image(self.REPO, "d" * 40, 200.0),
-            _image(self.REPO, "latest", 1.0),
-        ]
-        tags = {i.tag for i in disk_cleanup.select_prunable_images(images, self.HEAD)}
-        assert "latest" not in tags, (
-            "radon-app-runtime.sh resolve_image falls back to "
-            "RADON_APP_IMAGE_FALLBACK_TAG when the pinned SHA manifest probe "
-            "fails; deleting it leaves no local copy for the next GHCR outage"
-        )
-        assert "d" * 40 in tags, "genuinely stale SHA pairs are still prunable"
-
-    def test_the_keep_set_honours_the_configured_fallback_tag(self, monkeypatch):
-        monkeypatch.setenv("RADON_APP_IMAGE_FALLBACK_TAG", "stable")
-        images = [
-            _image(self.REPO, self.HEAD, 500.0),
-            _image(self.REPO, "b" * 40, 400.0),
-            _image(self.REPO, "c" * 40, 300.0),
-            _image(self.REPO, "stable", 1.0),
-            _image(self.REPO, "d" * 40, 200.0),
-        ]
-        tags = {i.tag for i in disk_cleanup.select_prunable_images(images, self.HEAD)}
-        assert "stable" not in tags
-
-
-# ── R-371: one undeletable image must not abort the loop ───────────────────
-
-class TestImageRemovalIsPerImage:
-    def test_a_failing_rm_does_not_skip_the_remaining_images(self, monkeypatch):
-        repo = "ghcr.io/joemccann/radon-node"
-        head = "a" * 40
-        # KEEP_IMAGE_PAIRS retains the two newest, so six tags leave four prunable.
-        images = [_image(repo, chr(98 + i) * 40, 100.0 - i, size=10) for i in range(6)]
-        monkeypatch.setattr(
-            disk_cleanup, "resolve_head_sha", lambda _p: head
-        )
-        monkeypatch.setattr(disk_cleanup, "parse_image_lines", lambda _o: images)
-
-        calls: list[str] = []
-
-        def _run(argv):
-            if argv[:2] == [disk_cleanup.DOCKER_BIN, "image"] and argv[2] == "rm":
-                calls.append(argv[3])
-                if len(calls) == 2:
-                    raise RuntimeError("image is referenced by a stopped container")
-                return ""
-            return ""
-
-        monkeypatch.setattr(disk_cleanup, "_run", _run)
-        reclaimed, note = disk_cleanup.cleanup_docker_images()
-
-        assert len(calls) == 4, (
-            "check=True aborted the loop on the first failure, so a single "
-            f"referenced image meant zero reclaimed week after week; {calls}"
-        )
-        assert reclaimed == 30, "only the three that actually went are counted"
-        assert "1 failed" in note or "failed" in note
-
-
 # ── R-368: a ceiling and a dry run ─────────────────────────────────────────
 
 class TestReclaimCeiling:
@@ -459,3 +383,115 @@ class TestAncestorSwapAfterCheckCannotRedirect:
     def test_a_vanished_leaf_reclaims_nothing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(disk_cleanup, "PROTECTED_PATHS", ())
         assert disk_cleanup.remove_tree(tmp_path / "absent") == 0
+
+
+# ── app images: delegate to radon-app-runtime under the held deploy lock ────
+# Since 6298d6806 the runtime prefers /usr/bin/podman, but this sweep still
+# listed and removed images through /usr/bin/docker, so it never saw the
+# podman store that holds every release set. The image keep-set now lives in
+# one place, `radon-app-runtime prune-locked`, which this job calls with its
+# own held deploy-lock descriptor as stdin (a second open would conflict with
+# that lock and skip, #1012).
+
+_FAKE_RUNTIME = """#!{python}
+import fcntl, os, sys
+lock = os.environ["FAKE_LOCK"]
+a, b = os.fstat(0), os.stat(lock)
+same = (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+fcntl.flock(0, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the caller's own lock: succeeds
+fresh = open(lock)
+try:
+    fcntl.flock(fresh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    held = "free"
+except BlockingIOError:
+    held = "held"
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(" ".join(sys.argv[1:]) + f" stdin={{'lock' if same else 'other'}} {{held}}\\n")
+print("radon-app-runtime: image prune skipped: example", file=sys.stderr)
+"""
+
+
+class TestAppImagesDelegateToTheRuntime:
+    def _setup(self, tmp_path, monkeypatch):
+        import sys
+
+        lock = tmp_path / "deploy.lock"
+        lock.write_text("", encoding="utf-8")
+        log = tmp_path / "runtime.log"
+        runtime = tmp_path / "radon-app-runtime"
+        runtime.write_text(_FAKE_RUNTIME.format(python=sys.executable), encoding="utf-8")
+        runtime.chmod(0o755)
+        monkeypatch.setenv("FAKE_LOCK", str(lock))
+        monkeypatch.setenv("FAKE_LOG", str(log))
+        monkeypatch.setattr(disk_cleanup, "APP_RUNTIME_BIN", str(runtime))
+        return lock, log
+
+    def test_the_runtime_prunes_under_this_jobs_held_lock(self, tmp_path, monkeypatch):
+        lock, log = self._setup(tmp_path, monkeypatch)
+        with disk_cleanup.acquire_deploy_lock(path=lock, timeout_s=0.0) as held:
+            assert held
+            reclaimed, note = disk_cleanup.cleanup_app_images()
+        assert log.read_text(encoding="utf-8").splitlines() == ["prune-locked stdin=lock held"]
+        assert reclaimed >= 0
+        assert "image prune skipped: example" in note
+
+    def test_without_the_held_lock_the_runtime_is_never_called(self, tmp_path, monkeypatch):
+        _lock, log = self._setup(tmp_path, monkeypatch)
+        with pytest.raises(RuntimeError, match="deploy lock"):
+            disk_cleanup.cleanup_app_images()
+        assert not log.exists()
+
+    def test_a_dry_run_never_calls_the_runtime(self, tmp_path, monkeypatch):
+        lock, log = self._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(disk_cleanup, "DRY_RUN", True)
+        with disk_cleanup.acquire_deploy_lock(path=lock, timeout_s=0.0):
+            reclaimed, note = disk_cleanup.cleanup_app_images()
+        assert reclaimed == 0 and "dry run" in note
+        assert not log.exists()
+
+    def test_the_categories_name_no_engine_specific_image_sweep(self):
+        names = [name for name, _ in disk_cleanup.CATEGORIES]
+        assert names[:2] == ["app-images", "dangling-images"]
+        assert dict(disk_cleanup.CATEGORIES)["app-images"] is disk_cleanup.cleanup_app_images
+        assert not hasattr(disk_cleanup, "select_prunable_images"), (
+            "the image keep-set lives in radon-app-runtime; a second copy here drifted"
+        )
+
+    def test_the_root_runtime_path_is_the_control_plane_copy(self):
+        assert disk_cleanup.APP_RUNTIME_BIN == "/usr/local/sbin/radon-app-runtime"
+
+
+class TestDanglingLayersUseEveryInstalledEngine:
+    def _engine(self, path, log):
+        path.write_text(
+            f"#!/bin/bash\nprintf '%s %s\\n' \"${{0##*/}}\" \"$*\" >> {log}\n", encoding="utf-8"
+        )
+        path.chmod(0o755)
+
+    def test_podman_is_pruned_when_installed(self, tmp_path, monkeypatch):
+        log = tmp_path / "engines.log"
+        podman, docker = tmp_path / "podman", tmp_path / "docker"
+        self._engine(podman, log)
+        self._engine(docker, log)
+        monkeypatch.setattr(disk_cleanup, "PODMAN_BIN", str(podman))
+        monkeypatch.setattr(disk_cleanup, "DOCKER_BIN", str(docker))
+        _reclaimed, note = disk_cleanup.cleanup_dangling_images()
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            "podman image prune -f", "docker image prune -f",
+        ]
+        assert "podman" in note and "docker" in note
+
+    def test_a_missing_engine_is_skipped(self, tmp_path, monkeypatch):
+        log = tmp_path / "engines.log"
+        podman = tmp_path / "podman"
+        self._engine(podman, log)
+        monkeypatch.setattr(disk_cleanup, "PODMAN_BIN", str(podman))
+        monkeypatch.setattr(disk_cleanup, "DOCKER_BIN", str(tmp_path / "absent-docker"))
+        disk_cleanup.cleanup_dangling_images()
+        assert log.read_text(encoding="utf-8").splitlines() == ["podman image prune -f"]
+
+
+def test_the_docstring_states_the_current_backup_retention():
+    doc = disk_cleanup.__doc__
+    assert "RETENTION_DAYS=30" not in doc
+    assert "RETENTION_DAYS=7" in doc and "B2" in doc

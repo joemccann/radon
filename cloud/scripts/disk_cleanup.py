@@ -5,8 +5,8 @@ The watchdog `root-disk-usage` check paged P1 when root hit 98% (1.7 GiB free
 on a 75G disk). Four consumers had unbounded growth and no pruner anywhere in
 cloud/ or scripts/:
 
-  * per-SHA ``ghcr.io/joemccann/radon-{node,python}`` image pairs (~5.8G per
-    deploy) pulled by radon-app-runtime -- nothing ever ran `docker image rm`;
+  * per-SHA ``ghcr.io/joemccann/radon-{node,python,model-gateway}`` image
+    sets pulled by radon-app-runtime -- nothing ever removed them;
   * ``stage.<sha>.XXXXXX`` / ``backup.<sha>.XXXXXX`` deploy worktrees under
     /home/radon/.radon-releases -- deploy.sh's cleanup_staged_release_path is
     best-effort and logs "leaving for root cleanup" when it gives up;
@@ -14,20 +14,25 @@ cloud/ or scripts/:
   * journald (1.0G).
 
 DELIBERATELY OUT OF SCOPE: /home/radon/radon-cloud/backups/db. Retention there
-is db_backup.py's RETENTION_DAYS=30, it is real data with no offsite copy in
-that script, and shrinking it is an operator policy call. It is in
+is db_backup.py's RETENTION_DAYS=7 locally, after its B2 off-box copy (kept a
+year) has landed; changing either window is an operator policy call. It is in
 PROTECTED_PATHS so no category here can reach it.
 
-Every destructive decision is a PURE selector (tests/test_disk_cleanup.py), so
-the retention rules are provable without a live docker daemon. The running
-broker image (ghcr.io/gnzsnz/ib-gateway) and the autoheal sidecar are outside
-MANAGED_IMAGE_REPOSITORIES and additionally named in
-PROTECTED_IMAGE_REPOSITORIES -- the same belt-and-braces posture as
-radon-app-runtime.sh's refuse_host_plane(). /home/radon/radon (the live tree,
-the only non-detached entry in `git worktree list`) can never be selected as
-an orphaned release.
+App images are NOT selected here. Since 6298d6806 the runtime prefers
+/usr/bin/podman, so a docker-only sweep never saw the release sets. The
+`app-images` category hands its held deploy-lock descriptor to
+`radon-app-runtime prune-locked`, whose single keep-set (green lines 1 and 2,
+transition-journal SHAs, any image a running container uses) also serves
+deploy.sh. That verb only ever lists radon-{node,python,model-gateway} tags,
+so the broker (ghcr.io/gnzsnz/ib-gateway), the autoheal sidecar and the
+`latest` fallback tag are out of its reach. Dangling layers are pruned on
+every installed engine (podman, and docker while it is still present).
 
-This job runs as ROOT: the docker engine socket is root-only (radon is
+Every other destructive decision is a PURE selector (tests/test_disk_cleanup.py).
+/home/radon/radon (the live tree, the only non-detached entry in
+`git worktree list`) can never be selected as an orphaned release.
+
+This job runs as ROOT: the container engines are root-only (radon is
 deliberately not in group docker) and journald vacuuming is root-only. Root
 therefore executes the control-plane copy at /usr/local/lib/radon/, never the
 radon-writable checkout, and never runs `git` inside /home/radon/radon --
@@ -60,7 +65,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple, Optional
+from typing import Callable, Iterable, Optional
 
 SERVICE_NAME = "disk-cleanup"
 SUMMARY_CAP = 900
@@ -68,11 +73,13 @@ TURSO_TIMEOUT = 10
 SUBPROCESS_TIMEOUT = 300
 
 # Retention constants -- the only knobs an operator should need.
-KEEP_IMAGE_PAIRS = 2
 RELEASE_MAX_AGE_DAYS = 3
 JOURNAL_VACUUM_SIZE = "200M"
 
 DOCKER_BIN = "/usr/bin/docker"
+PODMAN_BIN = "/usr/bin/podman"
+# Root-owned control-plane copy; the app image keep-set lives there.
+APP_RUNTIME_BIN = "/usr/local/sbin/radon-app-runtime"
 JOURNALCTL_BIN = "/usr/bin/journalctl"
 
 LIVE_TREE = Path("/home/radon/radon")
@@ -83,14 +90,6 @@ WORKTREE_ADMIN_DIR = LIVE_TREE / ".git" / "worktrees"
 # rollback source `restore_release_backup` reads, and it is exactly the shape
 # `select_prunable_releases` matches on. R-340.
 TRANSITION_JOURNAL_FILE = Path("/home/radon/.radon-deploy-transition.json")
-
-# radon-app-runtime.sh:39 sets RADON_APP_IMAGE_FALLBACK_TAG (default `latest`)
-# and resolve_image falls back to it when the pinned SHA manifest probe fails.
-# It is not a 40-hex SHA so it is never head_tag, and being old it is never in
-# the newest pairs — so the sweep deleted the one copy that survives a GHCR
-# outage. Under RADON_RUNTIME=host no container holds it, so the daemon does
-# not refuse either. R-342.
-DEFAULT_IMAGE_FALLBACK_TAG = "latest"
 
 # Plausibility ceilings. A selector regression — a widened RELEASE_NAME_RE, a
 # PROTECTED_PATHS typo — used to reach production as an unrecoverable rmtree on
@@ -119,6 +118,8 @@ LEGACY_DEPLOY_LOCK_FILE = Path("/home/radon/.radon-deploy.lock")
 DEPLOY_LOCK_TIMEOUT_S = 600.0
 DEPLOY_LOCK_POLL_S = 5.0
 EX_TEMPFAIL = 75
+# The primary deploy-lock descriptor while acquire_deploy_lock holds it.
+_HELD_DEPLOY_LOCK_FD: Optional[int] = None
 
 
 @contextlib.contextmanager
@@ -128,6 +129,7 @@ def acquire_deploy_lock(path: Path = None, timeout_s: float = None, legacy_path:
     Acquire the provisioned primary first, then the compatibility inode used
     by older installed runners. Never create either file during cleanup.
     """
+    global _HELD_DEPLOY_LOCK_FD
     lock_path = DEPLOY_LOCK_FILE if path is None else path
     if legacy_path is None and lock_path == Path("/var/lib/radon-lock/deploy.lock"):
         legacy_path = LEGACY_DEPLOY_LOCK_FILE
@@ -169,26 +171,13 @@ def acquire_deploy_lock(path: Path = None, timeout_s: float = None, legacy_path:
                 except OSError:
                     yield False
                     return
+        _HELD_DEPLOY_LOCK_FD = descriptors[0] if descriptors else None
         yield True
     finally:
+        _HELD_DEPLOY_LOCK_FD = None
         for fd in reversed(descriptors):
             os.close(fd)
 
-
-def image_fallback_tag() -> str:
-    return os.environ.get("RADON_APP_IMAGE_FALLBACK_TAG") or DEFAULT_IMAGE_FALLBACK_TAG
-
-# Ours to prune: one pair per deployed SHA, pulled by radon-app-runtime.
-MANAGED_IMAGE_REPOSITORIES = (
-    "ghcr.io/joemccann/radon-node",
-    "ghcr.io/joemccann/radon-python",
-)
-# Never ours: the live broker container and its autoheal sidecar. Redundant
-# with the allowlist above on purpose (radon-app-runtime.sh:refuse_host_plane).
-PROTECTED_IMAGE_REPOSITORIES = (
-    "ghcr.io/gnzsnz/ib-gateway",
-    "willfarrell/autoheal",
-)
 
 CACHE_TARGETS = (
     Path("/home/radon/.npm/_cacache"),
@@ -212,108 +201,9 @@ PROTECTED_PATHS = (
 # `backup.<sha12>.XXXXXX`. Anything else under the releases dir is left alone.
 RELEASE_NAME_RE = re.compile(r"^(?:stage|backup)\.[0-9a-f]{7,40}\.[A-Za-z0-9]{6}$")
 
-_SIZE_UNITS = {
-    "b": 1,
-    "kb": 1_000,
-    "mb": 1_000_000,
-    "gb": 1_000_000_000,
-    "tb": 1_000_000_000_000,
-}
-_SIZE_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?b)$", re.IGNORECASE)
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-
-
-class Image(NamedTuple):
-    repository: str
-    tag: str
-    image_id: str
-    created_at: float
-    size_bytes: int
-
-
 # ---------------------------------------------------------------------------
 # Pure selectors and parsers (unit-tested in tests/test_disk_cleanup.py)
 # ---------------------------------------------------------------------------
-
-
-def parse_docker_size(text: str) -> int:
-    """``4.69GB`` -> bytes. Docker reports decimal units."""
-    match = _SIZE_RE.match((text or "").strip())
-    if not match:
-        return 0
-    return int(float(match.group(1)) * _SIZE_UNITS[match.group(2).lower()])
-
-
-def parse_reclaimed_space(output: str) -> int:
-    """Bytes from `docker image prune`'s ``Total reclaimed space:`` line."""
-    for line in (output or "").splitlines():
-        _, sep, tail = line.partition("Total reclaimed space:")
-        if sep:
-            return parse_docker_size(tail.strip())
-    return 0
-
-
-def parse_docker_created(text: str) -> float:
-    """``2026-08-20 03:11:22 +0000 UTC`` -> epoch seconds (0.0 if unparseable)."""
-    cleaned = re.sub(r"\s+[A-Z]{2,5}$", "", (text or "").strip())
-    try:
-        return datetime.strptime(cleaned, "%Y-%m-%d %H:%M:%S %z").timestamp()
-    except ValueError:
-        return 0.0
-
-
-def parse_image_lines(output: str) -> list[Image]:
-    """Tab-separated `docker image ls` rows; malformed rows are dropped."""
-    images = []
-    for line in (output or "").splitlines():
-        fields = line.split("\t")
-        if len(fields) != 5:
-            continue
-        repository, tag, image_id, created, size = (f.strip() for f in fields)
-        images.append(
-            Image(
-                repository=repository,
-                tag=tag,
-                image_id=image_id,
-                created_at=parse_docker_created(created),
-                size_bytes=parse_docker_size(size),
-            )
-        )
-    return images
-
-
-def select_prunable_images(
-    images: Iterable[Image], head_tag: str, keep_pairs: int = KEEP_IMAGE_PAIRS
-) -> list[Image]:
-    """Managed radon app images safe to remove.
-
-    Keeps the pair matching the live checkout's HEAD plus the ``keep_pairs``
-    newest pairs. An unresolvable HEAD prunes NOTHING: without it any tag
-    could be the one the running containers were started from.
-    """
-    if not head_tag:
-        return []
-    managed = [
-        image
-        for image in images
-        if image.repository in MANAGED_IMAGE_REPOSITORIES
-        and image.repository not in PROTECTED_IMAGE_REPOSITORIES
-        and image.tag
-        and image.tag != "<none>"
-    ]
-    newest_per_tag: dict[str, float] = {}
-    for image in managed:
-        newest_per_tag[image.tag] = max(
-            newest_per_tag.get(image.tag, image.created_at), image.created_at
-        )
-    ordered = sorted(newest_per_tag, key=lambda tag: (newest_per_tag[tag], tag), reverse=True)
-    keep = set(ordered[:keep_pairs])
-    keep.add(head_tag)
-    keep.add(image_fallback_tag())
-    return sorted(
-        (image for image in managed if image.tag not in keep),
-        key=lambda image: (image.repository, image.tag),
-    )
 
 
 def is_protected_path(path: Path) -> bool:
@@ -443,40 +333,6 @@ def select_stale_worktree_admin_dirs(
     return sorted(admin for admin, exists in entries if not exists)
 
 
-def resolve_head_sha(git_dir: Path) -> str:
-    """The live checkout's HEAD commit, read as DATA from .git.
-
-    Never shells out to git: repo-local config is radon-writable and git
-    honours it (aliases, core.fsmonitor) in a root process.
-    """
-    try:
-        head = (Path(git_dir) / "HEAD").read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-    if not head.startswith("ref: "):
-        return head if _SHA_RE.match(head) else ""
-    ref = head[len("ref: "):].strip()
-    loose = Path(git_dir) / ref
-    try:
-        candidate = loose.read_text(encoding="utf-8").strip()
-    except OSError:
-        candidate = ""
-    if not _SHA_RE.match(candidate):
-        candidate = ""
-        try:
-            packed = (Path(git_dir) / "packed-refs").read_text(encoding="utf-8")
-        except OSError:
-            packed = ""
-        for line in packed.splitlines():
-            if line.startswith("#") or line.startswith("^"):
-                continue
-            sha, _, name = line.partition(" ")
-            if name.strip() == ref:
-                candidate = sha.strip()
-                break
-    return candidate if _SHA_RE.match(candidate) else ""
-
-
 def human_bytes(count: int) -> str:
     value = float(count)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
@@ -577,46 +433,25 @@ def _rmtree_pinned(path: Path) -> None:
         os.close(fd)
 
 
-def cleanup_docker_images() -> tuple[int, str]:
-    head = resolve_head_sha(LIVE_TREE / ".git")
-    if not head:
-        return 0, "HEAD unresolvable; refused to prune any image"
-    images = parse_image_lines(
-        _run([
-            DOCKER_BIN, "image", "ls", "--no-trunc",
-            "--format", "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}",
-        ])
+def cleanup_app_images() -> tuple[int, str]:
+    """Run the runtime's lock-held prune with this job's held deploy lock."""
+    if DRY_RUN:
+        return 0, "dry run: radon-app-runtime prune-locked not called"
+    if _HELD_DEPLOY_LOCK_FD is None:
+        raise RuntimeError("deploy lock is not held; refusing to prune app images")
+    before = _free_space()
+    result = subprocess.run(
+        [APP_RUNTIME_BIN, "prune-locked"],
+        stdin=_HELD_DEPLOY_LOCK_FD,
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
+        check=True,
     )
-    prunable = select_prunable_images(images, head)
-    _enforce_ceiling("docker-images", len(prunable), sum(i.size_bytes for i in prunable))
-    reclaimed = 0
-    removed = 0
-    failed = 0
-    for image in prunable:
-        if DRY_RUN:
-            reclaimed += image.size_bytes
-            removed += 1
-            continue
-        try:
-            # `_run` uses check=True, so the FIRST failing rm used to abort the
-            # whole loop and discard the accounting: one image still referenced
-            # by a stopped container meant zero reclaimed, week after week, on
-            # a full root filesystem. R-371.
-            _run([DOCKER_BIN, "image", "rm", f"{image.repository}:{image.tag}"])
-        except Exception as exc:  # noqa: BLE001 - one image must not stop the sweep
-            failed += 1
-            print(
-                f"[disk-cleanup] image rm {image.repository}:{image.tag} failed: {exc}",
-                file=sys.stderr,
-            )
-            continue
-        reclaimed += image.size_bytes
-        removed += 1
-    suffix = f", {failed} failed" if failed else ""
-    return reclaimed, (
-        f"removed {removed} image(s){suffix}, keeping HEAD {head[:12]} + "
-        f"{KEEP_IMAGE_PAIRS} newest pairs + fallback {image_fallback_tag()}"
-    )
+    reclaimed = max(_free_space() - before, 0)
+    skipped = [line for line in result.stderr.splitlines() if "image prune skipped" in line]
+    return reclaimed, (skipped[-1] if skipped else
+                       "radon-app-runtime prune-locked kept green lines 1-2 and in-use images")
 
 
 def _enforce_ceiling(category: str, path_count: int, byte_count: int) -> None:
@@ -634,8 +469,16 @@ def _enforce_ceiling(category: str, path_count: int, byte_count: int) -> None:
 
 
 def cleanup_dangling_images() -> tuple[int, str]:
-    output = _run([DOCKER_BIN, "image", "prune", "-f"])
-    return parse_reclaimed_space(output), "dangling/untagged layers pruned"
+    """`image prune -f` (dangling layers only) on every installed engine."""
+    engines = [path for path in (PODMAN_BIN, DOCKER_BIN) if os.access(path, os.X_OK)]
+    if DRY_RUN:
+        return 0, f"dry run: dangling prune not run on {', '.join(engines) or 'no engine'}"
+    before = _free_space()
+    for engine in engines:
+        _run([engine, "image", "prune", "-f"])
+    return max(_free_space() - before, 0), (
+        f"dangling layers pruned on {', '.join(Path(e).name for e in engines) or 'no engine'}"
+    )
 
 
 def cleanup_release_worktrees() -> tuple[int, str]:
@@ -708,8 +551,8 @@ def cleanup_journal() -> tuple[int, str]:
 
 
 CATEGORIES: tuple[tuple[str, Callable[[], tuple[int, str]]], ...] = (
-    ("docker-images", cleanup_docker_images),
-    ("docker-dangling", cleanup_dangling_images),
+    ("app-images", cleanup_app_images),
+    ("dangling-images", cleanup_dangling_images),
     ("release-worktrees", cleanup_release_worktrees),
     ("caches", cleanup_caches),
     ("journal", cleanup_journal),
