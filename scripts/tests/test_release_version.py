@@ -106,3 +106,58 @@ def test_json_falls_back_to_package_json_without_the_base(tmp_path: Path, monkey
     assert identity["source"] == "package"
     assert identity["builtAt"] == ""
     assert identity["channel"] == "local"
+
+
+@pytest.mark.parametrize('history', ['missing', 'unrelated'])
+def test_ci_version_keeps_package_identity_when_original_history_is_unavailable(tmp_path, monkeypatch, history):
+    repo, _ = _repo(tmp_path)
+    _commit(repo, 'feat(web): synthetic runtime', {'web/example.ts': 'export {}\n'})
+    if history == 'unrelated':
+        _git(repo, 'checkout', '--orphan', 'unrelated')
+        _git(repo, 'commit', '-m', 'unrelated historical root')
+        unavailable = _git(repo, 'rev-parse', 'HEAD')
+        _git(repo, 'checkout', 'main')
+    else:
+        unavailable = 'a' * 40
+    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', unavailable)
+    sha = _git(repo, 'rev-parse', 'HEAD')
+    assert rv.ci_version(repo, sha) == '0.7.0'
+    assert rv.build_identity(repo, 'production')['source'] == 'package'
+
+
+@pytest.mark.parametrize('version', ['', 'v0.7.0', '0.7', '01.7.0', '0.7.0-extra', '0.7.0\ninjected'])
+def test_ci_version_refuses_malformed_package_fallback(tmp_path, monkeypatch, version):
+    repo, _ = _repo(tmp_path)
+    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', 'a' * 40)
+    (repo/'web/package.json').write_text(json.dumps({'version': version}))
+    with pytest.raises(ValueError):
+        rv.ci_version(repo, _git(repo, 'rev-parse', 'HEAD'))
+
+
+@pytest.mark.parametrize('sha', ['', 'abc1234', 'A' * 40, 'x' * 40, 'a' * 40 + '\ninjected'])
+def test_ci_version_refuses_malformed_expected_sha(tmp_path, sha):
+    repo, _ = _repo(tmp_path)
+    with pytest.raises(ValueError):
+        rv.ci_version(repo, sha)
+
+
+def test_ci_version_refuses_another_commit_even_with_a_valid_label(tmp_path):
+    repo, _ = _repo(tmp_path)
+    with pytest.raises(ValueError):
+        rv.ci_version(repo, 'b' * 40)
+
+
+def test_ci_cli_emits_only_the_validated_build_label(tmp_path, monkeypatch, capsys):
+    repo, _ = _repo(tmp_path)
+    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', 'a' * 40)
+    sha = _git(repo, 'rev-parse', 'HEAD')
+    assert rv.main(['--repo', str(repo), '--ci-version', '--expected-sha', sha]) == 0
+    assert capsys.readouterr().out == '0.7.0\n'
+
+
+def test_ci_version_refuses_an_unknown_baked_sha(tmp_path, monkeypatch):
+    repo, _ = _repo(tmp_path)
+    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', 'a' * 40)
+    monkeypatch.setattr(rv, 'git_sha', lambda repo: 'unknown')
+    with pytest.raises(ValueError, match='build identity'):
+        rv.ci_version(repo, _git(repo, 'rev-parse', 'HEAD'))

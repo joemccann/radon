@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -90,5 +91,6 @@ def test_transport(monkeypatch):
 ''')
     assert result.returncode == 1, result.stdout + result.stderr
     assert "UNSAFE TRANSPORT REACHED" not in result.stdout + result.stderr
-    assert "3 passed, 3 errors" in result.stdout, result.stdout + result.stderr
+    assert re.search(r"\b3 passed\b", result.stdout), result.stdout + result.stderr
+    assert re.search(r"\b3 errors\b", result.stdout), result.stdout + result.stderr
     assert "Pushover network delivery is forbidden in tests" in result.stdout

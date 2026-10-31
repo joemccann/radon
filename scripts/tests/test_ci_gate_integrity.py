@@ -407,8 +407,11 @@ def test_path_filter_only_queries_the_actions_api_on_push() -> None:
 # The VPS runs Ubuntu 24.04. `ubuntu-latest` rolled to the 26.04 image on
 # 2026-10-25 and the cloud suite went red on coreutils behaviour the host does
 # not have (`install -T /dev/null` onto a directory). CI must exercise the
-# production OS, so every workflow job names it.
+# production OS, so every production job names it. The single Darwin native
+# artifact verifier must execute the signed arm64 clients on their target OS;
+# its exact job identity, pinned runner and non-production purpose are guarded.
 PRODUCTION_RUNNER = "ubuntu-24.04"
+NATIVE_ARTIFACT_RUNNERS = {("app-images.yml", "darwin-clients"): "macos-15"}
 WORKFLOWS_DIR = WORKFLOW.parent
 
 
@@ -421,16 +424,53 @@ def _every_workflow_job() -> list[tuple[str, str, dict]]:
     return found
 
 
+def _workflow_runner_offenders(jobs: list[tuple[str, str, dict]]) -> list[str]:
+    return [
+        f"{file}:{name} runs-on {job.get('runs-on')!r}"
+        for file, name, job in jobs
+        if "runs-on" in job
+        and job["runs-on"] != NATIVE_ARTIFACT_RUNNERS.get((file, name), PRODUCTION_RUNNER)
+    ]
+
+
 def test_every_workflow_job_runs_on_the_production_os() -> None:
     jobs = _every_workflow_job()
     assert jobs, "no workflow jobs found"
-    floating = [
-        f"{file}:{name} runs-on {job.get('runs-on')!r}"
-        for file, name, job in jobs
-        if "runs-on" in job and job["runs-on"] != PRODUCTION_RUNNER
-    ]
+    floating = _workflow_runner_offenders(jobs)
     assert not floating, (
-        f"every job must pin `runs-on: {PRODUCTION_RUNNER}` (the VPS OS); "
-        "`ubuntu-latest` drifts to a newer image than production:\n  "
+        f"production jobs must pin `runs-on: {PRODUCTION_RUNNER}` (the VPS OS); "
+        "only the exact native Darwin artifact verifier may use its pinned Mac runner. "
+        "Floating runner labels are forbidden:\n  "
         + "\n  ".join(floating)
     )
+
+
+def test_darwin_runner_exception_only_verifies_native_consumer_artifacts() -> None:
+    workflow = yaml.load((WORKFLOWS_DIR / "app-images.yml").read_text(), Loader=yaml.BaseLoader)
+    jobs = workflow["jobs"]
+    native = jobs["darwin-clients"]
+    assert native["runs-on"] == "macos-15"
+    assert not _touches_production_host(native)
+    assert native["permissions"] == {"contents": "read"}
+    assert "darwin-clients" in _needs(jobs["python-image"])
+    commands = "\n".join(str(step.get("run", "")) for step in native["steps"])
+    for evidence in (
+        'test "$(uname -m)" = arm64',
+        "install-darwin.cjs",
+        "codesign --verify --strict --all-architectures",
+        "scripts/ci/check_model_cli_transport.py",
+        "--network-isolated",
+        "/usr/bin/sandbox-exec",
+    ):
+        assert evidence in commands, f"native artifact exception lost its required proof: {evidence}"
+
+
+def test_native_runner_exception_never_accepts_other_jobs_or_floating_labels() -> None:
+    for file, name, runner in (
+        ("another-workflow.yml", "darwin-clients", "macos-15"),
+        ("app-images.yml", "another-native-job", "macos-15"),
+        ("app-images.yml", "darwin-clients", "macos-latest"),
+        ("ci.yml", "deploy", "ubuntu-latest"),
+        ("ci.yml", "deploy", "macos-15"),
+    ):
+        assert _workflow_runner_offenders([(file, name, {"runs-on": runner})])

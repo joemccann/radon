@@ -737,7 +737,7 @@ def test_release_tag_script_tags_the_deployed_sha_and_pushes_only_that_ref(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     sha = "c" * 40
     assert lines == [
-        "python3 scripts/release_version.py",
+        f"python3 scripts/release_version.py --ci-version --expected-sha {'c' * 40}",
         "git rev-parse -q --verify refs/tags/v1.2.3",
         f"git tag v1.2.3 {sha}",
         "git push origin refs/tags/v1.2.3",
@@ -749,7 +749,7 @@ def test_release_tag_script_leaves_an_existing_tag_where_it_is(tmp_path: Path) -
     assert result.returncode == 0, result.stdout + result.stderr
     assert "already tagged" in result.stdout
     assert lines == [
-        "python3 scripts/release_version.py",
+        f"python3 scripts/release_version.py --ci-version --expected-sha {'c' * 40}",
         "git rev-parse -q --verify refs/tags/v1.2.3",
         "git rev-list -n 1 v1.2.3",
     ]

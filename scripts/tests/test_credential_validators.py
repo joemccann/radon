@@ -21,6 +21,9 @@ class _Response:
         self.text = text
         self._payload = payload
 
+    def close(self):
+        pass
+
     def json(self):
         if self._payload is None:
             raise ValueError("response has no JSON payload")
@@ -49,6 +52,10 @@ def http(monkeypatch):
 
     monkeypatch.setattr(cv.requests, "get", _get)
     monkeypatch.setattr(cv.requests, "post", _post)
+    # Candidate validation crosses the management socket; exercise the real
+    # gateway-native status/header adapter against this bounded fake transport.
+    from model_gateway import client, specialized
+    monkeypatch.setattr(client, "request", lambda operation, payload, **kw: specialized.dispatch(operation, payload))
     return SimpleNamespace(calls=calls, box=box)
 
 

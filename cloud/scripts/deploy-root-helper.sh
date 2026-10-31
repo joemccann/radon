@@ -1,9 +1,11 @@
 #!/bin/bash
 set -euo pipefail
+readonly SELF="${BASH_SOURCE[0]}"
 
 # Installed root-owned at /usr/local/sbin/radon-deploy-root. The deploy user may
 # invoke only the fixed actions listed in config/sudoers.d/radon-deploy.
 readonly CORE_SERVICES=(
+  radon-model-gateway.service
   radon-nextjs.service
   radon-api.service
   radon-relay.service
@@ -76,6 +78,14 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-media-publish.path
   services/radon-media-publish.timer
   config/tmpfiles.d/radon-deploy.conf
+  services/radon-model-gateway.service
+  services/radon-model-gateway.service.d/runtime-container.conf
+  services/radon-subscription-tokens.service
+  scripts/model_clients.py
+  scripts/model_gateway_rollback.py
+  scripts/model_transport.py
+  scripts/mac_model_gateway.py
+  scripts/model_pacing.py
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -142,6 +152,14 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-media-publish.path
   /etc/systemd/system/radon-media-publish.timer
   /usr/lib/tmpfiles.d/radon-deploy.conf
+  /etc/systemd/system/radon-model-gateway.service
+  /etc/systemd/system/radon-model-gateway.service.d/runtime-container.conf
+  /etc/systemd/system/radon-subscription-tokens.service
+  /usr/local/lib/radon/model_clients.py
+  /usr/local/lib/radon/model_gateway_rollback.py
+  /usr/local/lib/radon/model_transport.py
+  /usr/local/lib/radon/mac_model_gateway.py
+  /usr/local/lib/radon/model_pacing.py
 )
 readonly -a CONTROL_PLANE_MODES=(
   755
@@ -208,6 +226,14 @@ readonly -a CONTROL_PLANE_MODES=(
   644
   644
   644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
+  644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
@@ -223,6 +249,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
     exit 64
   fi
   readonly HELPER_TEST_MODE=1
+  readonly MODEL_CLIENT_RUNTIME="${RADON_TEST_MODEL_CLIENT_RUNTIME:-/usr/bin/true}"
   readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
   readonly LEGACY_STATE_DIR="${RADON_TEST_LEGACY_STATE_DIR:-}"
   readonly SYSTEMCTL="${RADON_TEST_SYSTEMCTL:?test systemctl is required}"
@@ -280,6 +307,7 @@ else
     echo "radon-deploy-root must run as root" >&2
     exit 77
   fi
+  readonly MODEL_CLIENT_RUNTIME=/usr/local/sbin/radon-app-runtime
   readonly SYSTEMCTL=/usr/bin/systemctl
   readonly SYSTEMD_ANALYZE=/usr/bin/systemd-analyze
   readonly RM=/usr/bin/rm
@@ -333,6 +361,7 @@ else
     /home/radon/radon/data/replica.db-info
   )
 fi
+readonly COMMITTED_STATE_FILE="${STATE_DIR}/committed-release"
 readonly RESTORED_STATE_FILE="${ACTIVE_STATE_FILE}.restored"
 readonly INVENTORY_FILE="${ACTIVE_STATE_FILE}.inventory"
 readonly UNITS_TRANSACTION_FILE="${STATE_DIR}/installed-units.transaction"
@@ -434,7 +463,7 @@ PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|verify-committed|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -1025,8 +1054,70 @@ resume_active_snapshot() {
   verify_restored_state
 }
 
+# A root-owned receipt is written BEFORE snapshots are destroyed. A crash
+# after this point permits only bounded finalization, never a rollback.
+committed_transition_receipt() {
+  local mode="$1" commit_sha
+  if [[ "$mode" != write ]]; then
+    commit_sha=""
+  elif (( HELPER_TEST_MODE == 1 )); then
+    commit_sha="${RADON_TEST_COMMIT_SHA:-0000000000000000000000000000000000000000}"
+  else
+    commit_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || return 78
+  fi
+  [[ "$mode" != write || "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || return 78
+  "$SESSION_PYTHON" -I - "$STATE_DIR" "$commit_sha" "$mode" "$HELPER_TEST_MODE" <<'PY_COMMIT_RECEIPT'
+import os, stat, sys, secrets, re
+folder, sha, mode, test = sys.argv[1:]
+owner = os.getuid() if test == '1' else 0
+fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    info = os.fstat(fd)
+    if info.st_uid != owner or info.st_mode & 0o022: raise SystemExit(78)
+    if mode == 'read':
+        try: source = os.open('committed-release', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+        except FileNotFoundError: raise SystemExit(3)
+        try:
+            meta = os.fstat(source)
+            if not stat.S_ISREG(meta.st_mode) or meta.st_uid != owner or meta.st_mode & 0o022 or meta.st_nlink != 1: raise SystemExit(78)
+            raw = os.read(source, 128)
+            if not re.fullmatch(rb'[0-9a-f]{40}\n', raw): raise SystemExit(78)
+            sha = raw.decode().strip()
+        finally: os.close(source)
+        print(sha)
+    elif mode == 'clear':
+        try: os.unlink('committed-release', dir_fd=fd)
+        except FileNotFoundError: pass
+        os.fsync(fd)
+    elif mode == 'write':
+        name = '.commit-'+secrets.token_hex(12)
+        out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+        try: os.write(out, (sha+'\n').encode()); os.fsync(out)
+        finally: os.close(out)
+        os.replace(name, 'committed-release', src_dir_fd=fd, dst_dir_fd=fd); os.fsync(fd)
+    else: raise SystemExit(64)
+finally: os.close(fd)
+PY_COMMIT_RECEIPT
+}
+
 commit_transition() {
-  verify_restored_state
+  local receipt_rc=0 stored_sha current_sha
+  stored_sha="$(committed_transition_receipt read)" || receipt_rc=$?
+  if (( HELPER_TEST_MODE == 1 )); then
+    current_sha="${RADON_TEST_COMMIT_SHA:-0000000000000000000000000000000000000000}"
+  else
+    current_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || return 78
+  fi
+  if (( receipt_rc == 0 )) && [[ "$stored_sha" != "$current_sha" ]]; then
+    echo "committed release identity changed; refusing finalization" >&2
+    return 78
+  fi
+  if (( receipt_rc == 3 )); then
+    verify_restored_state
+    committed_transition_receipt write
+  elif (( receipt_rc != 0 )); then
+    return "$receipt_rc"
+  fi
   close_unit_transaction
   "$RM" -f "$RESTORED_STATE_FILE" "$ACTIVE_STATE_FILE" "$INVENTORY_FILE"
   "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
@@ -2807,7 +2898,7 @@ root_action_timeout() {
       # One grep and one rename over a constant path; nothing to wait on.
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
-    verify-restored|verify-control-plane)
+    verify-restored|verify-control-plane|verify-committed)
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
     commit-transition)
@@ -2871,11 +2962,14 @@ fi
 
 case "$1" in
   stop-clean)
+    "$MODEL_CLIENT_RUNTIME" capture-model-pacing
+    committed_transition_receipt clear
     snapshot_active_units
     stop_release_consumers
     "$RM" -f "${REPLICA_FILES[@]}"
     ;;
   restart-managed)
+    "$MODEL_CLIENT_RUNTIME" install-model-clients
     reset_core_failures
     systemctl_bounded --no-block restart "${CORE_SERVICES[@]}"
     for unit in "${CORE_SERVICES[@]}"; do
@@ -2885,6 +2979,19 @@ case "$1" in
     retire_research_watcher
     ;;
   recover)
+    # A first-cutover rollback must restore the old two-image helpers before
+    # they start containers. This bounded receipt never lowers the floor.
+    if [[ "$HELPER_TEST_MODE" != 1 ]]; then
+      rollback_rc=0
+      "$SESSION_PYTHON" -I /usr/local/lib/radon/model_gateway_rollback.py restore || rollback_rc=$?
+      if (( rollback_rc == 0 )); then
+        systemctl_bounded daemon-reload
+        exec "$SELF" recover
+      elif (( rollback_rc != 3 )); then
+        exit "$rollback_rc"
+      fi
+    fi
+    "$MODEL_CLIENT_RUNTIME" recover-model-clients
     reset_core_failures
     systemctl_bounded --no-block start "${CORE_SERVICES[@]}"
     for unit in "${CORE_SERVICES[@]}"; do
@@ -2896,11 +3003,27 @@ case "$1" in
   verify-restored)
     verify_restored_state
     ;;
+  verify-committed)
+    committed_transition_receipt read
+    ;;
   verify-control-plane)
     verify_control_plane
     ;;
   commit-transition)
     commit_transition
+    "$MODEL_CLIENT_RUNTIME" commit-model-clients
+    if (( HELPER_TEST_MODE != 1 )); then
+      # Only a successful replacement release retires the mutable installers.
+      for retired in radon-grok-upgrade.timer radon-grok-responder-upgrade.timer; do
+        state="$(systemctl_bounded show --property=LoadState --value "$retired")" || exit 69
+        if [[ "$state" == loaded ]]; then
+          systemctl_bounded disable --now "$retired"
+          systemctl_bounded reset-failed "$retired" || true
+        elif [[ "$state" != not-found ]]; then
+          exit 69
+        fi
+      done
+    fi
     ;;
   publish-caddy)
     publish_caddy

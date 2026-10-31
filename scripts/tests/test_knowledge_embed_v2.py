@@ -16,7 +16,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from knowledge.backfill_v2 import backfill_missing_v2  # noqa: E402
-from knowledge.embed import (  # noqa: E402
+from model_gateway._embedding_backend import (  # noqa: E402
     EMBEDDING_DIM, EMBEDDING_DIM_V2, EMBEDDING_MODEL_V2, dual_write_enabled, embed_backend,
     embed_passages, embed_query, reset_v2_coverage_cache, resolve_query_vector,
     v2_coverage_ready,
@@ -447,7 +447,7 @@ class _Limiter:
 
 
 def _pace_with(monkeypatch, limiter):
-    import clients.model_ladder as ladder
+    import model_gateway.engine as ladder
     monkeypatch.setattr(ladder, "_nvidia_limiter", lambda env, post: limiter)
 
 

@@ -313,6 +313,33 @@ def test_scheduled_schema_failure_with_retained_rows_still_exits_one(monkeypatch
     assert all(section["error_code"] == "configuration_or_schema_invalid" for section in payload["sections"].values())
 
 
+def test_ticker_refresh_stays_failed_when_every_section_is_rate_limited(monkeypatch, capsys, tmp_path):
+    """Operator refresh is `--ticker`, not `--scheduled`.
+
+    POST /uw/research/refresh treats a zero exit as a completed refresh and
+    starts the success cooldown (`scripts/api/routes/uw_research.py`). The
+    hourly oneshot is the only caller that may exit 0 on an all-section 429.
+    The same retained snapshot on `--ticker` must stay exit 1.
+    """
+    limited = FakeClient({
+        "get_multi_leg": UWRateLimitError("daily quota body", status_code=429),
+        "get_options_pulse": UWRateLimitError("daily quota body", status_code=429),
+        "get_volatility_context": UWRateLimitError("daily quota body", status_code=429),
+        "get_company_profile": UWRateLimitError("daily quota body", status_code=429),
+        "get_monthly_seasonality": UWRateLimitError("daily quota body", status_code=429),
+    })
+    uw_research, heartbeat, _seed_at, seeded = _scheduled_universe(monkeypatch, tmp_path, limited)
+    assert uw_research.main(["--ticker", "SPY", "--json"]) == 1
+    heartbeat.assert_not_called()
+    text = capsys.readouterr().out
+    payload = json.loads(text)
+    assert payload["status"] == "unavailable"
+    for name, section in payload["sections"].items():
+        assert section["error_code"] == "rate_limited"
+        assert section["observed_at"] == seeded["sections"][name]["observed_at"]
+    assert "daily quota body" not in text
+
+
 def test_scheduled_mixed_rate_limit_and_schema_failure_still_exits_one(monkeypatch, capsys, tmp_path):
     mixed = FakeClient({
         "get_multi_leg": UWRateLimitError("daily quota body", status_code=429),

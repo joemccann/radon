@@ -10,9 +10,14 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Do not return 4xx for legitimate empty/pending states; return 200 with a payload flag such as `missing: true`.
 - `/api/pi` and `/pi/exec` script allowlists are security-sensitive. Do not expand without review.
 
+## Hrana transport
+
+API Hrana pooling applies only to proven SELECT pipelines. Writes, mixed SQL and transaction batches start on a fresh connection before any SQL is sent; never resend an ambiguous write after a transport failure. Keep the 30-second read-pool lifetime and one safe-read retry. This also governs research publication through `api.db_http.hrana_transaction`; the separate daemon transport has its own policy.
+
 ## Auth
 
 - FastAPI routes are JWT-protected by default.
+- The demo service token cannot access `/model-gateway` inference or status. Its only gateway exception is exact `GET /model-gateway/models` for the demo picker; operator JWT and trusted-local lanes retain their existing access.
 - Localhost bypass covers server-to-server development traffic.
 - Auth-exempt: `/health`, `/ws-ticket/validate`, `/demo/trial-expiry`, and all `*/share` routes.
 - `/docs` and `/openapi.json` are not publicly exempt; they require the trusted-local bypass so the endpoint map is not exposed through Caddy.

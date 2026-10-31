@@ -95,6 +95,7 @@ def test_green_exact_sha_updates_only_allowlisted_code_and_preserves_policy(inst
     assert set(refresh.FILES['radon-operator-releases']) == {
         'unattended_release.py', 'private_security_release.py',
         'operator_runtime_refresh.py', 'codex_capability_probe.py', 'ci/check_pr_body.py',
+        'model_gateway/__init__.py','model_gateway/client.py','model_gateway/cli.py','model_gateway/cli_bridge.py',
     }
     for name, base in bases.items():
         current = (base / 'current').resolve()

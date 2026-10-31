@@ -151,6 +151,9 @@ def git_sha(repo: Path) -> str:
 def build_identity(repo: Path, channel: str) -> dict[str, str]:
     sha = git_sha(repo)
     try:
+        # Rewritten history can leave an old object locally without making it
+        # an ancestor. Such a fold is no more authoritative than missing history.
+        _git(repo, "merge-base", "--is-ancestor", base_sha(), "HEAD")
         version = expected_version(repo)
         source = "history"
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
@@ -160,6 +163,22 @@ def build_identity(repo: Path, channel: str) -> dict[str, str]:
     if channel == "production" and sha != "unknown":
         built_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {"version": version, "sha": sha, "builtAt": built_at, "channel": channel, "source": source}
+
+
+def ci_version(repo: Path, expected_sha: str) -> str:
+    """The exact build/tag label, including the existing no-history fallback."""
+    if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+        raise ValueError("release identity requires a full lowercase SHA")
+    head = _git(repo, "rev-parse", "HEAD")
+    if head != expected_sha:
+        raise ValueError("release identity does not match the checked-out SHA")
+    identity = build_identity(repo, "production")
+    version = identity["version"]
+    if format_version(parse_version(version)) != version:
+        raise ValueError("release identity requires canonical semver")
+    if identity["sha"] != expected_sha[:12]:
+        raise ValueError("build identity does not match the checked-out SHA")
+    return version
 
 
 def check(repo: Path) -> str:
@@ -179,9 +198,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--ci-version", action="store_true", help="Validate the exact CI SHA and print the build/tag label.")
+    parser.add_argument("--expected-sha", help="Exact full checked-out SHA required by --ci-version.")
     parser.add_argument("--channel", choices=("local", "production"), default="local")
     args = parser.parse_args(argv)
     repo = Path(args.repo)
+    if args.ci_version:
+        if not args.expected_sha or args.check or args.write or args.json:
+            parser.error("--ci-version requires --expected-sha and cannot combine with another output mode")
+        print(ci_version(repo, args.expected_sha))
+        return 0
+    if args.expected_sha:
+        parser.error("--expected-sha requires --ci-version")
     if args.check:
         print(check(repo))
         return 0

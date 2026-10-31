@@ -33,6 +33,7 @@ def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
     """Credential discovery may read only this test's explicit auth fixtures."""
     from clients import model_ladder
     import clients.provider_cooldown as provider_cooldown
+    from model_gateway import engine as model_ladder
 
     provider_cooldown.clear_process_state()
     for name in ("_json_load_object", "_read_secret_file"):
@@ -305,3 +306,31 @@ def _isolate_health_dependency_probe(monkeypatch):
         module = sys.modules.get(name)
         if module is not None:
             monkeypatch.setattr(module, "health_dependencies", unknown)
+
+
+@pytest.fixture(autouse=True)
+def _research_provider_unit_boundary(request, monkeypatch):
+    """Provider protocol/domain suites inject the gateway engine as their unit seam.
+
+    Consumer wire behavior is independently covered by test_model_gateway_consumers;
+    these existing suites retain their synthetic provider HTTP/SSE fixtures.
+    """
+    if request.node.path.name not in {"test_research_runtime.py", "test_research_pipeline.py", "test_model_ladder.py", "test_rel265_codex_stream_completion.py"}:
+        return
+    from research import model
+    from model_gateway import engine
+    monkeypatch.setattr(model, "wired_providers", engine.wired_providers)
+    monkeypatch.setattr(model, "complete_text_json", engine.complete_text_json)
+    monkeypatch.setattr(model, "complete_multimodal_json", engine.complete_multimodal_json)
+
+
+@pytest.fixture(autouse=True)
+def _native_model_domain_test_seams(request, monkeypatch):
+    # These suites test provider parsing or orchestration with synthetic HTTP.
+    from model_gateway import engine
+    if request.node.path.name == "test_knowledge_pipeline.py":
+        from knowledge import distill as distill_module
+        monkeypatch.setattr(distill_module, "complete_text_json", engine.complete_text_json)
+    if request.node.path.name in {"test_vision_cascade.py", "test_menthorq_client.py"}:
+        from clients import menthorq_client
+        monkeypatch.setattr(menthorq_client, "wired_vision_providers", engine.wired_providers)

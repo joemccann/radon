@@ -20,11 +20,14 @@ answers one JSON object and closes. ``{"op": "ping"}``,
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import logging
+import math
 import os
 import socket
 import stat
+import struct
 import sys
 import threading
 import time
@@ -57,6 +60,15 @@ def handle(vault: Any, request: Any) -> dict:
     op = request.get("op")
     if op == "ping":
         return {"ok": True}
+    if op == "model-key":
+        provider = request.get("provider")
+        if set(request) != {"op", "provider"} or provider not in {"nvidia", "cerebras", "cloudflare-token", "cloudflare-account"}:
+            return _error("unknown model credential provider")
+        try:
+            return {"ok": True, "value": vault.model_key(provider)}
+        except Exception as exc:
+            log.error("model credential read failed: %s", type(exc).__name__)
+            return _error("model credential store unavailable")
     if op not in ("get", "seal"):
         return _error("unknown op")
     provider = request.get("provider")
@@ -101,8 +113,44 @@ _TOO_LARGE = object()
 _MALFORMED = object()
 
 
+def _peer_uid(conn: socket.socket) -> int:
+    """The connected peer's uid, resolved as the model gateway resolves it."""
+    if hasattr(socket, "SO_PEERCRED"):
+        _pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        return uid
+    if hasattr(conn, "getpeereid"):
+        return conn.getpeereid()[0]
+    return os.getuid()  # Private filesystem permissions on development platforms.
+
+
+def _discard_request(conn: socket.socket) -> None:
+    """Drain what a refused peer already sent, bounded, then half-close.
+
+    A socket closed while inbound data is still unread is reset by the kernel,
+    which discards the refusal just written; the peer sees a connection error
+    instead of the error class. Nothing read here is parsed.
+    """
+    try:
+        conn.shutdown(socket.SHUT_WR)
+        discarded = 0
+        while discarded <= 4 * MAX_REQUEST_BYTES:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return
+            discarded += len(chunk)
+    except OSError:
+        return
+
+
 def _serve_one(conn: socket.socket, vault: Any) -> None:
     conn.settimeout(IO_TIMEOUT_SECONDS)
+    # Admission is the peer identity, not the socket mode alone: a request is
+    # not read, let alone answered with a credential, for any other account.
+    if _peer_uid(conn) != os.getuid():
+        log.warning("vault connection refused: peer uid is not the service account")
+        conn.sendall(json.dumps(_error("unauthorized peer")).encode())
+        _discard_request(conn)
+        return
     request = _read_request(conn)
     if request is _TOO_LARGE:
         reply = _error("request too large")
@@ -166,21 +214,67 @@ def serve(
 class BrokerVault:
     """The ``Vault`` interface ``subscription_tokens`` uses, over the socket."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, timeout_seconds=None, cancelled=None) -> None:
         self._path = path
+        self._timeout = timeout_seconds if callable(timeout_seconds) else None
+        self._cancelled = cancelled
+        self._deadline = None
+        if timeout_seconds is not None and self._timeout is None:
+            if type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+                raise ValueError("invalid vault deadline")
+            self._deadline = time.monotonic() + timeout_seconds
+
+    def _remaining(self):
+        if self._cancelled is not None and self._cancelled():
+            raise VaultUnavailable("vault broker request cancelled")
+        remaining = IO_TIMEOUT_SECONDS
+        if self._deadline is not None:
+            remaining = min(remaining, self._deadline - time.monotonic())
+        if self._timeout is not None:
+            remaining = min(remaining, self._timeout())
+        if not math.isfinite(remaining) or remaining <= 0:
+            raise VaultUnavailable("vault broker deadline exceeded")
+        return remaining
 
     def _call(self, request: dict) -> dict:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                conn.settimeout(IO_TIMEOUT_SECONDS)
-                conn.connect(self._path)
-                conn.sendall(json.dumps(request).encode())
-                conn.shutdown(socket.SHUT_WR)
-                data = b""
-                while chunk := conn.recv(65536):
-                    data += chunk
-                    if len(data) > MAX_REPLY_BYTES:
-                        raise VaultUnavailable("vault broker reply too large")
+                conn.settimeout(self._remaining())
+                stopped = threading.Event()
+                failures = []
+                watcher = None
+                if self._timeout is not None or self._deadline is not None or self._cancelled is not None:
+                    # Preserve the caller's request context in the watchdog.
+                    # It interrupts silent connect/read as well as drip-fed replies.
+                    context = contextvars.copy_context()
+                    def watch():
+                        while not stopped.wait(.01):
+                            try:
+                                context.run(self._remaining)
+                            except Exception as exc:
+                                failures.append(exc)
+                                try: conn.shutdown(socket.SHUT_RDWR)
+                                except OSError: pass
+                                conn.close()
+                                return
+                    watcher = threading.Thread(target=watch, daemon=True)
+                    watcher.start()
+                try:
+                    conn.connect(self._path)
+                    self._remaining()
+                    conn.sendall(json.dumps(request).encode())
+                    conn.shutdown(socket.SHUT_WR)
+                    data = b""
+                    while chunk := conn.recv(65536):
+                        self._remaining()
+                        data += chunk
+                        if len(data) > MAX_REPLY_BYTES:
+                            raise VaultUnavailable("vault broker reply too large")
+                    self._remaining()
+                finally:
+                    stopped.set()
+                    if watcher is not None: watcher.join(.1)
+                    if failures: raise failures[0]
             reply = json.loads(data)
         except VaultUnavailable:
             raise
@@ -197,22 +291,29 @@ class BrokerVault:
             raise VaultUnavailable("vault broker returned a non-string value")
         return value
 
+    def model_key(self, provider: str) -> Optional[str]:
+        value = self._call({"op": "model-key", "provider": provider}).get("value")
+        if value is not None and not isinstance(value, str):
+            raise VaultUnavailable("vault broker returned an invalid model credential")
+        return value
+
     def seal(self, provider: str, value: str) -> None:
         self._call({"op": "seal", "provider": provider, "value": value})
 
 
-def connect_vault(path: str, wait_seconds: Optional[float] = None) -> BrokerVault:
+def connect_vault(path: str, wait_seconds: Optional[float] = None, *, timeout_seconds=None, cancelled=None) -> BrokerVault:
     """A pinged broker client, or VaultUnavailable after ``wait_seconds``."""
-    vault = BrokerVault(path)
+    vault = BrokerVault(path, timeout_seconds=timeout_seconds, cancelled=cancelled)
     deadline = time.monotonic() + (CONNECT_WAIT_SECONDS if wait_seconds is None else wait_seconds)
     while True:
         try:
             vault._call({"op": "ping"})
             return vault
         except VaultUnavailable:
+            vault._remaining()
             if time.monotonic() >= deadline:
                 raise
-            time.sleep(0.25)
+            time.sleep(min(.25, vault._remaining()))
 
 
 def main(argv: Optional[list[str]] = None) -> int:

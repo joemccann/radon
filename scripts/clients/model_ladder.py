@@ -1,4 +1,4 @@
-"""Shared HTTP model ladder for Radon multimodal and text JSON callers.
+"""Credential-free compatibility client for Radon's standalone model gateway.
 
 Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
@@ -33,6 +33,9 @@ override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
 ``meta/llama-3.2-90b-vision-instruct``, with automatic fallback to
 ``meta/llama-3.2-11b-vision-instruct`` on timeout/error (override
 ``NVIDIA_VISION_MODEL``). Inject keys via ``/etc/radon/env``; never commit secrets.
+Provider credentials, native model runtimes and provider failover belong to
+the service. Application-specific acceptance remains local; a
+rejected response resumes the server's opaque continuation.
 """
 from __future__ import annotations
 
@@ -43,10 +46,11 @@ import subprocess
 import json
 import logging
 import os
-import re
-from dataclasses import dataclass, field
+import json
+import time
+import mimetypes
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from . import prepaid_denylist, provider_cooldown
 
@@ -196,60 +200,26 @@ _SECRET_PATTERN = re.compile(
     r"(sk-[a-zA-Z0-9_-]{8,}|xai-[a-zA-Z0-9_-]{8,}|nvapi-[a-zA-Z0-9_-]{8,}|"
     r"csk-[a-zA-Z0-9_-]{8,}|Bearer\s+[a-zA-Z0-9._-]{8,})",
     re.IGNORECASE,
+from model_gateway.client import GatewayError, request as gateway_request
+from model_gateway.contracts import (
+    MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, LadderResult, ModelLadderExhausted,
+    ModelResponseError, VisionResult, accept_distill_payload, accept_tags_payload,
+    parse_json_object, parse_json_rows, safe_error_message,
 )
 
 
-class ModelLadderExhausted(RuntimeError):
-    """Every keyed ladder provider failed or none were keyed."""
-
-
-class ModelResponseError(RuntimeError):
-    """Non-failover response failure (truncation, oversize, malformed envelope)."""
-
-    def __init__(self, code: str, message: str):
-        self.code = code
-        super().__init__(message)
-
-
-@dataclass(frozen=True)
-class AuthMaterial:
-    """Resolved bearer/api credential for one ladder rung."""
-
-    token: str
-    kind: str  # "subscription" | "api_key"
-    mechanism: str  # env var name, auth file path label, etc.
-    account_id: str = ""  # ChatGPT account for the codex grant (chatgpt-account-id)
-
-
-@dataclass(frozen=True)
-class LadderResult:
-    """Successful ladder completion with parsed JSON payload."""
-
-    data: Any
-    text: str
-    provider: str
-    model: str
-    attempted: tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class VisionResult:
-    rows: list[dict[str, Any]]
-    provider: str
-    model: str
-    attempted: tuple[str, ...] = field(default_factory=tuple)
-
-
-def _env_get(env: Mapping[str, str], *names: str) -> str:
-    for name in names:
-        value = (env.get(name) or "").strip()
-        if value:
-            return value
-    return ""
-
-
-def _first_env_model(env: Mapping[str, str], *names: str, default: str) -> str:
-    return _env_get(env, *names) or default
+def _image(label: str, source: Path | bytes) -> dict[str, str]:
+    if isinstance(source, bytes):
+        raw, media = source, "image/png"
+    else:
+        raw = Path(source).read_bytes()
+        media = mimetypes.guess_type(str(source))[0] or "image/png"
+    if media not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+        raise ValueError("unsupported image media type")
+    if not raw or len(raw) > 5_000_000:
+        raise ValueError("image exceeds gateway byte limit")
+    return {"label": str(label), "media_type": media,
+            "data": base64.b64encode(raw).decode("ascii")}
 
 
 def ladder_order(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
@@ -281,289 +251,30 @@ def wired_providers(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
         if _auth_for(name, src) is not None:
             wired.append(name)
     return tuple(wired)
+    """Return gateway capability inventory; consumer environments carry no grants."""
+    result = gateway_request("status", {}, timeout_seconds=10)
+    return tuple(result.get("providers") or result.get("wired_providers") or ())
 
 
-def _home_dir(env: Mapping[str, str]) -> Path:
-    raw = (env.get("HOME") or "").strip()
-    return Path(raw) if raw else Path.home()
-
-
-def _auth_files_disabled(env: Mapping[str, str]) -> bool:
-    """``RADON_LADDER_NO_AUTH_FILES=1`` makes auth discovery env-var-only.
-
-    Credential-free loops scrub their env, but the implicit ``Path.home()``
-    fallback still discovered host auth files; the flag keeps their children
-    keyless.
-    """
-    raw = (env.get("RADON_LADDER_NO_AUTH_FILES") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _read_secret_file(path: Path) -> str:
-    try:
-        if not path.is_file():
-            return ""
-        return path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-
-
-def _json_load_object(path: Path) -> dict[str, Any] | None:
-    try:
-        if not path.is_file():
-            return None
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
-def _token_from_mapping(data: Mapping[str, Any], *paths: tuple[str, ...]) -> str:
-    for path in paths:
-        cur: Any = data
-        for key in path:
-            if not isinstance(cur, Mapping):
-                cur = None
-                break
-            cur = cur.get(key)
-        if isinstance(cur, str) and cur.strip():
-            return cur.strip()
-    return ""
-
-
-def _anthropic_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    token = _env_get(env, *_ANTHROPIC_SUBSCRIPTION_ENV)
-    if token:
-        return AuthMaterial(token, "subscription", "CLAUDE_CODE_OAUTH_TOKEN")
-    if _auth_files_disabled(env):
-        return None
-    file_env = (env.get("CLAUDE_CODE_OAUTH_TOKEN_FILE") or "").strip()
-    if file_env:
-        token = _read_secret_file(Path(file_env))
-        if token:
-            return AuthMaterial(token, "subscription", "CLAUDE_CODE_OAUTH_TOKEN_FILE")
-    config_dir = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
-    cred_path = (
-        Path(config_dir) / ".credentials.json"
-        if config_dir
-        else _home_dir(env) / ".claude" / ".credentials.json"
-    )
-    data = _json_load_object(cred_path)
-    if data:
-        token = _token_from_mapping(
-            data,
-            ("claudeAiOauth", "accessToken"),
-            ("claudeAiOauth", "access_token"),
-            ("accessToken",),
-            ("access_token",),
-        )
-        if token:
-            return AuthMaterial(
-                token, "subscription", f"claude_credentials:{cred_path.name}"
-            )
-    return None
-
-
-def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    if _auth_files_disabled(env):
-        return None
-    codex_home = (env.get("CODEX_HOME") or "").strip()
-    auth_path = (
-        Path(codex_home) / "auth.json"
-        if codex_home
-        else _home_dir(env) / ".codex" / "auth.json"
-    )
-    data = _json_load_object(auth_path)
-    if not data:
-        return None
-    if str(data.get("auth_mode", "")).lower() in {"apikey", "api_key"}:
-        return None  # a prepaid API-key login, not a ChatGPT subscription
-    token = _token_from_mapping(
-        data,
-        ("tokens", "access_token"),
-        ("tokens", "accessToken"),
-        ("access_token",),
-        ("accessToken",),
-    )
-    if token:
-        account_id = _token_from_mapping(data, ("tokens", "account_id"), ("account_id",))
-        return AuthMaterial(token, "subscription", "codex_auth.json", account_id)
-    return None
-
-
-def _rfc3339_expired(value: str) -> bool:
-    from datetime import datetime, timezone
-
-    try:
-        stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp <= datetime.now(timezone.utc)
-
-
-def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    if _auth_files_disabled(env):
-        return None
-    auth_path = _home_dir(env) / ".grok" / "auth.json"
-    data = _json_load_object(auth_path)
-    if not data:
-        return None
-    token = _token_from_mapping(
-        data,
-        ("access_token",),
-        ("accessToken",),
-        ("token",),
-        ("credentials", "access_token"),
-    )
-    if not token:
-        # The grok CLI's live shape (2026-09): one entry per "<issuer>::<client>",
-        # the OIDC access token under `key`, RFC 3339 `expires_at`. An expired
-        # entry is skipped so a stale file is "no grant", not a guaranteed 401.
-        for entry in data.values():
-            if not isinstance(entry, Mapping):
-                continue
-            candidate = entry.get("key")
-            if not isinstance(candidate, str) or not candidate.strip():
-                continue
-            expires_at = entry.get("expires_at")
-            if isinstance(expires_at, str) and _rfc3339_expired(expires_at):
-                continue
-            token = candidate.strip()
-            break
-    if token:
-        return AuthMaterial(token, "subscription", "grok_auth.json")
-    return None  # an api_key in auth.json is a prepaid key: never read
-
-
-def _antigravity_cli(env: Mapping[str, str]) -> str:
-    """Path of the Antigravity CLI when it and its grant are present, else ""."""
-    if _auth_files_disabled(env):
-        return ""
-    home = _home_dir(env)
-    if not (home / _ANTIGRAVITY_TOKEN_RELPATH).is_file():
-        return ""
-    explicit = (env.get("ANTIGRAVITY_CLI") or "").strip()
-    candidates = [explicit] if explicit else [str(home / ".local" / "bin" / "agy")]
-    for candidate in candidates:
-        if candidate and os.access(candidate, os.X_OK):
-            return candidate
-    # Only the caller's own PATH: a hermetic env with no PATH must not discover
-    # the host's ~/.local/bin/agy.
-    path = (env.get("PATH") or "").strip()
-    found = shutil.which("agy", path=path) if path else None
-    return found or ""
-
-
-def _antigravity_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    """Google via the Antigravity CLI only; the token is the CLI path."""
-    cli = _antigravity_cli(env)
-    if cli:
-        return AuthMaterial(cli, "subscription", "antigravity_cli")
-    return None
-
-
-_SUBSCRIPTION_AUTH: dict[str, Callable[[Mapping[str, str]], "AuthMaterial | None"]] = {
-    "anthropic": _anthropic_subscription_auth,
-    "grok": _grok_subscription_auth,
-    "codex": _codex_subscription_auth,
-    # Google: the Antigravity CLI only, no key and no OAuth token path.
-    "antigravity": _antigravity_subscription_auth,
-}
-
-
-def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
-    """Subscription credentials only for sub-tier rungs; prepaid keys never."""
-    if name in _SUBSCRIPTION_AUTH:
-        prepaid_denylist.warn_ignored(env)
-        return _SUBSCRIPTION_AUTH[name](env)
-    if name == "nvidia":
-        token = _env_get(env, *_NVIDIA_KEYS)
-        if token:
-            return AuthMaterial(token, "api_key", "NVIDIA_API_KEY")
-        return None
-    if name == "cerebras":
-        token = _env_get(env, *_CEREBRAS_KEYS)
-        if token:
-            return AuthMaterial(token, "api_key", "CEREBRAS_API_KEY")
-        return None
-    if name == "slm-tagger":
-        url = _env_get(env, "RADON_SLM_TAGGER_URL")
-        if url:
-            return AuthMaterial("", "local", "RADON_SLM_TAGGER_URL")
-        return None
-    return None
-
-
-def _key_for(name: str, env: Mapping[str, str]) -> str:
-    """Back-compat: token string only. Prefer ``_auth_for`` for kind/mechanism."""
-    auth = _auth_for(name, env)
-    return auth.token if auth is not None else ""
-
-
-def _model_for(
-    name: str, env: Mapping[str, str], *, kind: str = "vision", auth_kind: str = "api_key"
-) -> str:
-    defaults = _DEFAULT_VISION_MODELS if kind == "vision" else _DEFAULT_TEXT_MODELS
-    if name == "anthropic":
-        if kind == "text":
-            return _first_env_model(
-                env,
-                "RADON_RESEARCH_MODEL",
-                "ANTHROPIC_MODEL",
-                default=defaults["anthropic"],
-            )
-        return _first_env_model(
-            env, "ANTHROPIC_VISION_MODEL", "ANTHROPIC_MODEL", default=defaults["anthropic"]
-        )
-    if name == "grok":
-        return _first_env_model(env, "XAI_MODEL", "GROK_MODEL", default=defaults["grok"])
-    if name == "codex":
-        default = _CODEX_SUBSCRIPTION_MODEL if auth_kind == "subscription" else defaults["codex"]
-        if kind == "vision":
-            return _first_env_model(
-                env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=default
-            )
-        return _first_env_model(env, "OPENAI_MODEL", default=default)
-    if name == "antigravity":
-        return _first_env_model(env, "ANTIGRAVITY_MODEL", default=defaults["antigravity"])
-    if name == "nvidia":
-        if kind == "vision":
-            return _first_env_model(
-                env,
-                "NVIDIA_VISION_MODEL",
-                "NVIDIA_MODEL",
-                default=_NVIDIA_VISION_DEFAULT,
-            )
-        return _first_env_model(
-            env,
-            "NVIDIA_TEXT_MODEL",
-            "NVIDIA_MODEL",
-            default=_NVIDIA_TEXT_DEFAULT,
-        )
-    if name == "cerebras":
-        return _first_env_model(
-            env, "CEREBRAS_VISION_MODEL", "CEREBRAS_MODEL", default=defaults["cerebras"]
-        )
-    if name == "slm-tagger":
-        return defaults.get("slm-tagger", "radon-slm-tagger")
-    return name
-
-
-def _nvidia_vision_models(env: Mapping[str, str]) -> tuple[str, ...]:
-    """Primary NVIDIA vision id, then 11B fallback when distinct."""
-    primary = _model_for("nvidia", env, kind="vision")
-    models = [primary]
-    if primary != _NVIDIA_VISION_FALLBACK:
-        models.append(_NVIDIA_VISION_FALLBACK)
-    return tuple(models)
-
-
-def _anthropic_headers(api_key: str, *, subscription: bool) -> dict[str, str]:
-    headers = {
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+def complete_multimodal_json(
+    instruction: str, images: Sequence[tuple[str, Path | bytes]] = (), *, system: str = "",
+    env: Mapping[str, str] | None = None, post: Callable[..., Any] | None = None,
+    model_override: str | None = None, max_tokens: int = 6000,
+    stream_anthropic: bool = True, read_timeout: float = 120.0,
+    max_response_bytes: int = 2_000_000, require_end_turn: bool = True,
+    accept: Callable[[Any], bool] | None = None, log_prefix: str = "research",
+    providers: Sequence[str] | None = None,
+) -> LadderResult:
+    # env/post are legacy caller seams; neither credentials nor transports cross
+    # this boundary. Inject gateway_request in tests instead.
+    payload: dict[str, Any] = {
+        "instruction": instruction, "system": system,
+        "images": [_image(label, source) for label, source in images],
+        "providers": list(providers) if providers is not None else None,
+        "model": model_override, "max_tokens": max_tokens,
+        "read_timeout": read_timeout, "max_response_bytes": max_response_bytes,
+        "require_end_turn": require_end_turn, "stream_anthropic": stream_anthropic,
+        "log_prefix": log_prefix,
     }
     if not subscription:
         # Subscriptions only (2026-10-26): no x-api-key path exists.
@@ -690,13 +401,46 @@ def parse_json_rows(text: str) -> Optional[list[dict[str, Any]]]:
         end = cleaned.rfind("]")
         if start < 0 or end <= start:
             return None
+    seen: set[str] = set()
+    observed_attempts: list[str] = []
+    deadline = time.monotonic() + read_timeout + 10
+    for _ in range(32):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ModelLadderExhausted("Gateway request deadline exhausted")
         try:
-            parsed = json.loads(cleaned[start : end + 1])
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(parsed, list):
-        return None
-    return parsed
+            response = gateway_request("json", payload, timeout_seconds=remaining)
+        except GatewayError as exc:
+            if exc.code in {"exhausted", "deadline_exhausted"}:
+                attempts = observed_attempts + list(exc.attempted)
+                tried = " ".join(attempts) or "none"
+                raise ModelLadderExhausted(f"Model ladder exhausted. tried={tried};") from exc
+            if exc.code in {"incomplete", "oversize", "response_too_large", "request_too_large", "invalid_request", "malformed", "invalid_response"}:
+                raise ModelResponseError(exc.code, "Gateway returned an incomplete or invalid model response") from exc
+            raise ModelLadderExhausted("Model gateway unavailable") from exc
+        if (not isinstance(response, dict) or "data" not in response
+                or not isinstance(response.get("text"), str)
+                or not isinstance(response.get("provider"), str) or not response["provider"]
+                or not isinstance(response.get("model"), str)
+                or not isinstance(response.get("attempted", []), (list, tuple))
+                or any(not isinstance(item, str) for item in response.get("attempted", []))):
+            raise ModelResponseError("malformed", "Invalid model gateway result envelope")
+        result = LadderResult(data=response.get("data"), text=str(response.get("text") or ""),
+                              provider=str(response.get("provider") or ""),
+                              model=str(response.get("model") or ""),
+                              attempted=tuple(response.get("attempted") or ()))
+        if accept is None or accept(result.data):
+            return result
+        observed_attempts.extend(entry.removesuffix(":ok") + ":unparseable" if entry.endswith(":ok") else entry
+                                 for entry in result.attempted)
+        if not result.attempted:
+            observed_attempts.append(result.provider + ":unparseable")
+        continuation = response.get("continuation")
+        if not isinstance(continuation, str) or not continuation or continuation in seen:
+            raise ModelLadderExhausted("Model ladder exhausted. tried=" + " ".join(observed_attempts) + ";")
+        seen.add(continuation)
+        payload = {**payload, "continuation": continuation}
+    raise ModelLadderExhausted("Gateway continuation limit exhausted")
 
 
 def parse_json_object(text: str) -> Optional[dict[str, Any]]:
@@ -1041,287 +785,49 @@ def _request_raw(
     return _request(
         post, url, headers, body, timeout=timeout, stream=True,
         max_bytes=max_bytes or 2_000_000, raw_text_only=True,
+def complete_text_json(
+    instruction: str, *, system: str = "", env: Mapping[str, str] | None = None,
+    post: Callable[..., Any] | None = None, model_override: str | None = None,
+    max_tokens: int = 800, read_timeout: float = 30.0,
+    max_response_bytes: int = 2_000_000, require_end_turn: bool = False,
+    accept: Callable[[Any], bool] | None = None, log_prefix: str = "text",
+    providers: Sequence[str] | None = None,
+) -> LadderResult:
+    return complete_multimodal_json(
+        instruction, system=system, env=env, post=post, model_override=model_override,
+        max_tokens=max_tokens, read_timeout=read_timeout,
+        max_response_bytes=max_response_bytes, require_end_turn=require_end_turn,
+        accept=accept, log_prefix=log_prefix, providers=providers,
     )
 
 
-def _uses_max_completion_tokens(model: str) -> bool:
-    """OpenAI gpt-5.x / o-series chat completions reject max_tokens (HTTP 400)."""
-    lowered = (model or "").strip().lower()
-    return lowered.startswith("gpt-5") or lowered.startswith(("o1", "o3", "o4"))
-
-
-def _openai_token_field(model: str, max_tokens: int) -> dict[str, int]:
-    if _uses_max_completion_tokens(model):
-        return {"max_completion_tokens": max_tokens}
-    return {"max_tokens": max_tokens}
-
-
-def _anthropic_vision_body(
-    model: str, b64: str, prompt: str, *, subscription: bool = False
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        "max_tokens": 4096,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64,
-                        },
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-    }
-    if subscription:
-        body["system"] = _anthropic_system("", subscription=True)
-    return body
-
-
-def _openai_vision_body(
-    model: str,
-    b64: str,
-    prompt: str,
-    extra: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        **_openai_token_field(model, 4096),
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-    }
-    if extra:
-        body.update(extra)
-    return body
-
-
-def _labeled_images_to_b64(
-    images: Sequence[tuple[str, Path | bytes]],
-) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
-    for label, source in images:
-        raw = source if isinstance(source, bytes) else Path(source).read_bytes()
-        out.append((label, base64.b64encode(raw).decode("utf-8")))
-    return out
-
-
-def _anthropic_multimodal_body(
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-    *,
-    max_tokens: int,
-    subscription: bool = False,
-) -> dict[str, Any]:
-    content: list[dict[str, Any]] = []
-    for label, b64 in labeled_b64:
-        content.extend(
-            [
-                {"type": "text", "text": label},
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": b64,
-                    },
-                },
-            ]
-        )
-    content.append({"type": "text", "text": instruction})
-    body: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": content}],
-    }
-    if subscription:
-        body["system"] = _anthropic_system(system, subscription=True)
-    elif system:
-        body["system"] = system
-    return body
-
-
-def _chatgpt_responses_body(
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-) -> dict[str, Any]:
-    """Responses-API body for chatgpt.com's codex endpoint (streaming only)."""
-    content: list[dict[str, Any]] = []
-    for label, b64 in labeled_b64:
-        content.append({"type": "input_text", "text": label})
-        content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64}"})
-    content.append({"type": "input_text", "text": instruction})
-    body: dict[str, Any] = {
-        "model": model,
-        "input": [{"role": "user", "content": content}],
-        "store": False,
-        "stream": True,
-    }
-    if system:
-        body["instructions"] = system
-    return body
-
-
-def _chatgpt_headers(auth: AuthMaterial) -> dict[str, str]:
-    headers = {
-        "authorization": f"Bearer {auth.token}",
-        "content-type": "application/json",
-        "accept": "text/event-stream",
-        "OpenAI-Beta": "responses=experimental",
-    }
-    if auth.account_id:
-        headers["chatgpt-account-id"] = auth.account_id
-    return headers
-
-
-def _request_sse_responses(
-    post: Callable[..., Any],
-    url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
-    *,
-    timeout: float | tuple[float, float],
-    max_bytes: int,
-) -> tuple[int, str, Any]:
-    """Fold a Responses SSE stream into the chat-completions shape the ladder parses."""
-    status, raw_text, _payload = _request_raw(
-        post, url, headers, body, timeout=timeout, max_bytes=max_bytes
-    )
-    if status < 200 or status >= 300:
-        return status, raw_text, None
-    text_parts: list[str] = []
-    completed = False
-    for line in raw_text.splitlines():
-        if not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if data == "[DONE]":
-            continue
-        try:
-            event = json.loads(data)
-        except ValueError:
-            raise RuntimeError("invalid_response_stream") from None
-        if not isinstance(event, dict):
-            raise RuntimeError("invalid_response_stream")
-        kind = event.get("type")
-        if kind in {"response.failed", "response.incomplete", "response.error", "error"}:
-            # Never expose provider error payloads or partial reviewer JSON.
-            raise RuntimeError("incomplete_response_stream")
-        if kind == "response.output_text.delta" and isinstance(event.get("delta"), str):
-            text_parts.append(event["delta"])
-        elif kind == "response.completed":
-            response = event.get("response")
-            if not isinstance(response, dict) or response.get("status") != "completed":
-                raise RuntimeError("incomplete_response_stream")
-            completed = True
-    if not completed:
-        raise RuntimeError("incomplete_response_stream")
-    text = "".join(text_parts)
-    payload = {"choices": [{"message": {"content": text}, "finish_reason": "completed"}]}
-    return status, text, payload
-
-
-def _antigravity_complete(
-    cli: str,
-    env: Mapping[str, str],
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-) -> tuple[int, str, Any]:
-    """Google via `agy -p`; images are not supported, so that rung is skipped."""
-    if labeled_b64:
-        return 415, "antigravity_cli: image input unsupported", None
-    prompt = f"{system}\n\n{instruction}" if system else instruction
-    argv = [cli, "-p", prompt, "--output-format", "json"]
-    if model:
-        argv += ["--model", model]
-    # agy is an unpinned third-party CLI; services load /etc/radon/env, so a
-    # full os.environ passthrough would hand it every Radon secret. Same
-    # allowlist rationale as subscription_tokens.CLI_ENV_ALLOWLIST.
-    child_env = {
-        k: v
-        for k, v in os.environ.items()
-        if k in _ANTIGRAVITY_CLI_ENV_ALLOWLIST
-    }
-    child_env.update({k: v for k, v in env.items() if isinstance(v, str)})
+def extract_via_vision(png_bytes: bytes, prompt: str, *, env=None, post=None,
+                       max_response_bytes: int = 2_000_000) -> VisionResult:
     try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=_ANTIGRAVITY_CLI_TIMEOUT_SECONDS,
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"network:{type(exc).__name__}") from exc
-    if completed.returncode != 0:
-        return 502, (completed.stderr or completed.stdout or "")[:2000], None
-    try:
-        doc = json.loads(completed.stdout)
-    except ValueError:
-        return 502, "antigravity_cli: non-JSON output", None
-    response = doc.get("response") if isinstance(doc, dict) else None
-    if not isinstance(response, str) or str(doc.get("status", "")).upper() not in {"SUCCESS", ""}:
-        return 502, completed.stdout[:2000], None
-    payload = {"choices": [{"message": {"content": response}}]}
-    return 200, response, payload
+        reply = gateway_request("vision", {"image": base64.b64encode(png_bytes).decode("ascii"),
+                                "prompt": prompt, "max_response_bytes": max_response_bytes},
+                                timeout_seconds=130)
+    except GatewayError as exc:
+        if exc.code in {"exhausted", "deadline_exhausted"}:
+            raise ModelLadderExhausted("Model ladder exhausted. tried=" + (" ".join(exc.attempted) or "none") + ";") from exc
+        if exc.code in {"incomplete", "oversize", "response_too_large", "request_too_large", "invalid_request", "malformed", "invalid_response"}:
+            raise ModelResponseError(exc.code, "Gateway returned an incomplete or invalid vision response") from exc
+        raise ModelLadderExhausted("Model gateway unavailable") from exc
+    if (not isinstance(reply, dict) or not isinstance(reply.get("rows", reply.get("data")), list)
+            or any(not isinstance(row, dict) for row in reply.get("rows", reply.get("data", [])))
+            or not isinstance(reply.get("provider"), str) or not reply["provider"]
+            or not isinstance(reply.get("model"), str)
+            or not isinstance(reply.get("attempted", []), (list, tuple))
+            or any(not isinstance(item, str) for item in reply.get("attempted", []))):
+        raise ModelResponseError("malformed", "Invalid model gateway vision envelope")
+    return VisionResult(rows=reply.get("rows", reply.get("data")), provider=reply["provider"],
+                        model=reply["model"], attempted=tuple(reply.get("attempted", [])))
 
 
-def _openai_multimodal_body(
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-    *,
-    max_tokens: int,
-    extra: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    content: list[dict[str, Any]] = []
-    for label, b64 in labeled_b64:
-        content.extend(
-            [
-                {"type": "text", "text": label},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{b64}"},
-                },
-            ]
-        )
-    content.append({"type": "text", "text": instruction})
-    messages: list[dict[str, Any]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": content})
-    body: dict[str, Any] = {
-        "model": model,
-        **_openai_token_field(model, max_tokens),
-        "messages": messages,
-    }
-    if extra:
-        body.update(extra)
-    return body
+def accept_slm_tags_payload(obj: Any, taxonomy: Sequence[str] | None = None) -> bool:
+    from newsfeed.slm.contract import classify_slm_tags
+    code, _ = classify_slm_tags(obj, taxonomy if taxonomy is not None else _load_slm_taxonomy(os.environ))
+    return code == "ok"
 
 
 def _nvidia_request_extras(model: str) -> dict[str, Any]:
@@ -1424,6 +930,11 @@ def _slm_health_ok(url: str) -> bool:
             return 200 <= int(getattr(resp, "status", 200)) < 300
     except (urllib.error.URLError, TimeoutError, OSError):
         return False
+__all__ = ["MODEL_LADDER_ORDER", "MODEL_LADDER_TIERS", "LadderResult", "VisionResult",
+           "ModelLadderExhausted", "ModelResponseError", "complete_text_json",
+           "complete_multimodal_json", "extract_via_vision", "wired_providers",
+           "accept_distill_payload", "accept_tags_payload", "accept_slm_tags_payload",
+           "parse_json_object", "parse_json_rows", "safe_error_message"]
 
 
 def _load_slm_taxonomy(env: Mapping[str, str]) -> list[str]:

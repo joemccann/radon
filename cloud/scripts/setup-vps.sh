@@ -77,6 +77,7 @@ readonly SERVICE_FILES=(
   radon-subscription-tokens.service
   radon-subscription-tokens.timer
   radon-subscription-vault.service
+  radon-model-gateway.service
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
   radon-ib-gateway-remote.service
@@ -1406,6 +1407,8 @@ enable_services() {
     [[ "$svc" == "radon-research.service" ]] && continue
     # UW requires explicit entitlement/channel admission before activation.
     [[ "$svc" == radon-uw-stream.service || "$svc" == radon-uw-research.service || "$svc" == radon-uw-research.timer ]] && continue
+    # Mutable model upgrades are replaced by exact CI image promotion.
+    [[ "$svc" == radon-grok-upgrade.service || "$svc" == radon-grok-upgrade.timer ]] && continue
     # Installed for rollback only; media publication is timer-owned.
     [[ "$svc" == "radon-media-publish.path" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue

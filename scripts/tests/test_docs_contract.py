@@ -1174,7 +1174,7 @@ class TestOperatorSafetyOwners:
         # Subscriptions only (2026-10-26): the prepaid opt-in flag is gone.
         assert "never fall back to a prepaid key" in binds
         assert "as the fallback" not in binds
-        for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
+        for path in ("scripts/model_gateway/engine.py",):
             assert "prepaid" in (_ROOT / path).read_text()
             assert "ALLOW_PREPAID" not in (_ROOT / path).read_text()
 
@@ -1379,8 +1379,16 @@ class TestModelLadderByteCapOwner:
     def test_extract_via_vision_cap_is_owned(self):
         rules = {r["id"]: r for r in _load_owners()["rules"]}
         rule = rules["model-ladder"]
-        assert rule["globs"] == ["scripts/clients/model_ladder.py"]
-        assert rule["owners"] == ["docs/dropbox-research.md"]
+        assert rule["globs"] == [
+            "scripts/clients/model_ladder.py", "scripts/model_gateway/**",
+            "scripts/ci/check_model_cli_transport.py", "scripts/api/routes/model_gateway.py",
+            "cloud/scripts/model_clients.py", "cloud/scripts/model_transport.py",
+            "cloud/scripts/model_pacing.py", "cloud/scripts/model_gateway_rollback.py",
+            "cloud/scripts/check_model_transport.py",
+            "cloud/scripts/mac_model_gateway.py", "cloud/services/radon-model-gateway*",
+            "docker/app/vendor-clis/**", "web/lib/llm/provider.ts",
+        ]
+        assert rule["owners"] == ["docs/dropbox-research.md", "docs/model-gateway.md"]
         doc = (_ROOT / "docs/dropbox-research.md").read_text(encoding="utf-8")
         ladder = doc.split("### Model ladder (shared HTTP)", 1)[1].split(
             "### Verified host placement", 1
@@ -1388,7 +1396,7 @@ class TestModelLadderByteCapOwner:
         assert "extract_via_vision" in ladder
         assert "2,000,000" in ladder
         assert "Antigravity" in ladder
-        source = (_ROOT / "scripts/clients/model_ladder.py").read_text(encoding="utf-8")
+        source = (_ROOT / "scripts/model_gateway/engine.py").read_text(encoding="utf-8")
         vision = source.split("def extract_via_vision(", 1)[1].split("\ndef ", 1)[0]
         assert "max_response_bytes: int = 2_000_000" in vision
         call = source.split("def _call_vision_provider(", 1)[1].split("\ndef ", 1)[0]
@@ -1553,11 +1561,15 @@ class TestSubscriptionRecoveryBillingOwner:
         assert "different store" in section and "decrypted key" in section
         assert "operations.md#encrypted-credential-store-profile-credentials-tab" in section
         unit = (_ROOT / "cloud/services/radon-subscription-tokens.service").read_text()
-        # DS-2026-10-05-05: the vault context is the broker socket, never the key.
-        assert "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=" in unit
+        # The timer requests renewal; only the model service holds vault access.
+        assert "Environment=RADON_MODEL_CONTROL_SOCKET=" in unit
+        assert "RADON_SUBSCRIPTION_VAULT_SOCKET" not in unit
         assert "LoadCredentialEncrypted" not in unit
         assert "radon-subscription-vault.service" in section
-        assert "-m scripts.subscription_tokens --once" in unit
+        assert "-m scripts.model_gateway.refresh_cli" in unit
+        gateway = (_ROOT / "cloud/services/radon-model-gateway.service").read_text()
+        assert "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=" in gateway
+        assert "LoadCredentialEncrypted" not in gateway
 
 
 class TestApiTimerOwner:
@@ -1643,11 +1655,15 @@ class TestRunnerRunbookRootWrites:
 
     def test_secret_copies_write_as_the_bot(self):
         doc = (_ROOT / "docs/runner.md").read_text()
-        for target in ("agent-cli/env", ".radon-runner.env", "pushover.env"):
+        for target in (".radon-runner.env", "pushover.env"):
             assert any(
                 "sudo -u _radonbot /bin/sh -c" in line and target in line and ">" in line
                 for line in doc.splitlines()
             ), target
+        assert not any(
+            "sudo -u _radonbot /bin/sh -c" in line and "agent-cli/env" in line
+            for line in doc.splitlines()
+        ), "Model credentials belong to the gateway, never a bot-side secret copy"
 
 
 class TestGatewayDailyCycleDocumentation:
@@ -2484,9 +2500,10 @@ class TestDocumentation20261018:
         assert "proves each login with one real model call a day" not in cloud
         section = cloud.split("## Subscription tokens (agent CLIs)", 1)[1]
         section = section.split("\n## ", 1)[0]
-        assert "agy models" in section
-        assert "one real model call a day" in section
-        assert "does not use a token endpoint" in section
+        assert "model gateway" in section.lower()
+        assert "subscription-tokens.md" in section
+        assert "agy models" in reauth
+        assert "no Google token-endpoint fallback" in reauth
 
     def test_vix_pc_migration_97_is_not_free(self):
         sql = (_ROOT / "scripts/db/migrations/0097_vix_pc.sql").read_text()
@@ -3043,3 +3060,113 @@ class TestDocumentation20261029:
         contract = owner.split("## Order Placement Contract", 1)[1].split("## ", 1)[0]
         assert "Never advise splitting legs" in contract
         assert "does not prove IB discarded" in contract
+
+
+class TestDocumentation20261030:
+    """A leftover dropbox-research error is not a live review repair."""
+
+    def test_retired_dropbox_research_health_is_not_a_live_repair(self):
+        incident = (_ROOT / "docs/incident-runbook.md").read_text()
+        section = incident.split("## retired-dropbox-research-health", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        for label in (
+            "Symptom:",
+            "Prerequisites:",
+            "Blast radius:",
+            "Safe diagnosis:",
+            "Stop conditions:",
+            "Verification:",
+            "Rollback:",
+            "Escalation:",
+        ):
+            assert label in section
+        assert "marketdesk-research" in section
+        assert "marketdesk-pdf" in section
+        assert "present_service_health_section" in section
+        assert "do not `systemctl start`" in section
+        assert "State.requeue_with_note" in section
+        assert "runs_on" in section
+
+        old = incident.split("## research-idle-review-stale-db-error", 1)[1]
+        old_head = old.split("\n## ", 1)[0][:700]
+        assert "Do not execute this repair" in old_head
+        assert "retired-dropbox-research-health" in old_head
+
+        generic = incident.split("## service-health-degraded", 1)[1]
+        generic = generic.split("\n## ", 1)[0]
+        assert "not writer-down" in generic
+        assert "#retired-dropbox-research-health" in generic
+
+        health = (_ROOT / "docs/marketdesk-research.md").read_text()
+        health_section = health.split("## Health", 1)[1].split("## ", 1)[0]
+        assert "retired-dropbox-research-health" in health_section
+
+        owner = (_ROOT / "scripts/health_service/CLAUDE.md").read_text()
+        assert "present_service_health_section" in owner
+        assert "retired-dropbox-research-health" in owner
+
+        retired = (_ROOT / "scripts/health_service/retired.py").read_text()
+        assert 'marked["state"] = "retired"' in retired
+        assert 'marked["last_error"] = None' in retired
+        watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
+        assert 'if service == "dropbox-research":' in watchdog
+        assert "return False" in watchdog.split('if service == "dropbox-research":', 1)[1][:240]
+class TestDocumentation20261031:
+    """Provider grants stay on the model gateway, not on app consumers."""
+
+    def test_consumer_pages_do_not_mount_provider_grants(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        binds = ops.split("**Subscription credential binds", 1)[1]
+        binds = binds.split("\n**Secret-store key cutover", 1)[0]
+        assert "land at\n" not in binds
+        assert "gap stays open" not in binds
+        assert "radon-model-gateway" in binds
+        assert "do not mount provider grants" in binds
+        newsfeed = ops.split("**Newsfeed least privilege.**", 1)[1].split("**App startup", 1)[0]
+        assert "Claude grant token" not in newsfeed
+        assert "never provider tokens" in newsfeed
+        marketdesk = ops.split("### MarketDesk research ingest", 1)[1].split("### Research evidence archive", 1)[0]
+        assert "env allowlist (Turso, ladder," not in marketdesk
+        assert "inference socket" in marketdesk
+        nvidia = ops.split("## NVIDIA model settings", 1)[1].split("## Subscription keeper", 1)[0]
+        assert "into `radon-newsfeed.service`" not in nvidia
+        assert "radon-model-gateway" in nvidia
+
+        desk = (_ROOT / "docs/marketdesk-research.md").read_text()
+        runtime = desk.split("## Runtime", 1)[1].split("## Health", 1)[0]
+        assert "model ladder keys" not in runtime
+        assert ".gemini/antigravity-cli" not in runtime
+        assert "RADON_ANTIGRAVITY_ISOLATED=1" not in runtime
+        assert "inference socket" in runtime
+
+        oauth = (_ROOT / "docs/oauth-subscription-auth.md").read_text()
+        assert "MarketDesk receives only a read-only Antigravity grant" not in oauth
+        assert "inference socket" in oauth
+
+        services = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "read-only ladder grants" not in services
+
+        pilot = (_ROOT / "docs/nemotron-super-vl-pilot.md").read_text()
+        assert "restricted newsfeed environment now permits" not in pilot
+        assert "radon-model-gateway.service" in pilot
+
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        assert "Anthropic → Grok → Cursor (unwired) → Codex → Antigravity" not in research
+        assert "~/.radon/nvidia-rate.json" not in research
+        assert "/var/lib/radon/model-cache/nvidia-rate.json" in research
+
+        tokens = (_ROOT / "docs/subscription-tokens.md").read_text()
+        assert "The host unit reads `/etc/radon/subscription-tokens/env`" not in tokens
+        assert "still read `TURSO_AUTH_TOKEN` from" not in tokens
+        assert "No current unit loads it" in tokens
+        assert "--once` is the mode the timer runs" not in tokens
+        assert "the daemon, which runs the third-party CLIs, reaches the vault" not in tokens
+        assert "refresh_cli" in tokens
+        assert "InaccessiblePaths" in tokens
+        assert "does not open the vault" in tokens
+
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        drift = cloud.split("## Systemd And Drift", 1)[1].split("## Verification", 1)[0]
+        assert "reaches the vault through the broker socket" not in drift
+        assert "read-only ladder grants" not in drift
+        assert "The subscription keeper loads the root-private derived environment" not in drift

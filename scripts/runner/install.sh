@@ -25,7 +25,7 @@ GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 # and the gh guard run these, never the agent-writable clone's copies.
 LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly_green_base.py
   nightly_audit_context.py nightly_phase_status.py nightly_deliver.py credential_redaction.py security_claude_ladder.py claude_cli_env_drift.py
-  claude_cli_env_reviewed.txt nvidia_rate_limit.py ci/check_pr_body.py nightly_toolchain_update.py utils/atomic_io.py"
+  claude_cli_env_reviewed.txt model_gateway/__init__.py model_gateway/client.py model_gateway/cli.py model_gateway/cli_bridge.py ci/check_pr_body.py nightly_toolchain_update.py utils/atomic_io.py"
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of
@@ -118,6 +118,17 @@ print_plist() {
     <string>$BOT_HOME/radon-runner/launchd-$loop.log</string>
 </dict>
 </plist>
+EOF
+}
+
+# Nested native agent calls use the same private model bridge and root-owned
+# immutable clients. They inherit local tool policies and Git guards.
+print_model_shim() {
+  local kind="$1"
+  cat <<EOF
+#!/bin/bash
+set -euo pipefail
+exec $GUARD_PYTHON -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py launch $kind -- /Library/Radon/model-clients/current/bin/$kind "\$@"
 EOF
 }
 
@@ -357,12 +368,16 @@ install_runner() {
     atomic_install -o root -g wheel -m 644 "$file" "$PREFIX/loops/$(basename "$file")"
   done
   for file in $LIB_FILES; do
-    if [[ "$file" == utils/* ]]; then
-      install -d -o root -g wheel -m 755 "$PREFIX/lib/utils"
+    if [[ "$file" == utils/* || "$file" == model_gateway/* ]]; then
+      install -d -o root -g wheel -m 755 "$PREFIX/lib/${file%/*}"
       atomic_install -o root -g wheel -m 644 "$SRC/../$file" "$PREFIX/lib/$file"
     else
       atomic_install -o root -g wheel -m 755 "$SRC/../$file" "$PREFIX/lib/${file##*/}"
     fi
+  done
+  install -d -o root -g wheel -m 755 "$PREFIX/model-bin"
+  for file in claude codex grok; do
+    atomic_text "$PREFIX/model-bin/$file" 755 print_model_shim "$file"
   done
   write_dotenv_path
 }

@@ -76,7 +76,9 @@ def test_missing_libc_does_not_stop_the_agent_from_launching(monkeypatch, capsys
 
     responder._default_grok_runner(["grok", "--prompt-file", "p"])
 
-    assert launched == [["grok", "--prompt-file", "p"]]
+    assert len(launched) == 1
+    assert launched[0][:3] == ["grok", "--prompt-file", "p"]
+    assert launched[0][-2] == "--leader-socket"
     assert "libc.so.6 not found" in capsys.readouterr().err
 
 

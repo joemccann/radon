@@ -11,12 +11,13 @@ the fixer against `/home/radon/radon`. Cloud options that were rejected
 
 ## Isolated responder account migration
 
-The optional responder domain uses `radon-responder`, with its own native
-Grok login, clone, runtime lock, last-known-good state, cache and upgrader.
-The account has no membership in the production application group. Both
-optional units use `ProtectProc=invisible`, `ProtectHome=yes` and a strict
-filesystem write set. The canonical `radon-grok-upgrade` timer remains
-responsible for the subscription keeper's original Grok installation.
+The optional responder domain uses `radon-responder`, its own clone, runtime
+lock and cache, and the CI-managed clients under `/opt/radon-model-clients`.
+It joins only the narrow `radon-model-connect` inference group, with no
+production application or credential-vault group membership. Provider grants
+and renewal belong to the model gateway. Both optional units retain
+`ProtectProc=invisible`, `ProtectHome=yes` and a strict filesystem write set.
+Mutable native upgrade timers are retired.
 
 These units live under `cloud/services/responder-domain/`. A source deploy
 does not install or enable them and does not interrupt the existing responder.
@@ -42,22 +43,21 @@ STAGE="$(mktemp -d /opt/radon-provision/responder-account.XXXXXX)"
 git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
 bash "$STAGE/cloud/scripts/setup-grok-responder-account.sh"
 rm -rf "$STAGE"
-sudo -u radon-responder -H /var/lib/radon-responder/.local/bin/grok login --device-auth
 ```
 
-Approve the dedicated login. No production account credential file is copied.
-Preparation preserves the legacy clone and its branches. It derives a private
+Preparation verifies the immutable client manifest as the dedicated account;
+no provider credential file is copied. It preserves the legacy clone and its branches. It derives a private
 root-owned environment at `/etc/radon/grok-responder/env`, using the existing
 scoped responder Turso token and Pushover inputs. It preserves bounded operator
 controls, always forces `GROK_PAGE_AUTOPUSH=0`, and carries no GitHub token.
 Set `GROK_PAGE_RESPONDER=1` there explicitly if the inherited switch was off.
-The native CLI continues to own renewal of this separate login.
+Model readiness is checked through the private gateway socket.
 
 Preparation requires the standard root-installed Python, Node and Bun
-prerequisites. Dependency installation and the native CLI installer execute
-only as the dedicated account. The trusted stdlib upgrade controller is
-installed separately at `/usr/local/lib/radon/grok-responder-upgrade`; it
-does not replace the keeper's original controller or runtime.
+prerequisites and an already promoted model-client release. Dependency
+installation runs only as the dedicated account. Preparation never downloads,
+updates or logs into a provider CLI. The legacy upgrade service name remains
+a read-only gateway status check; its timer stays disabled.
 
 ### Root-owned responder code (DS-2026-10-17-16)
 
@@ -73,7 +73,7 @@ stdlib-only, so the unit does not use the clone's `.venv`.
 `setup-grok-responder-account.sh` publishes the unit that points at the tree.
 An already-finalized host (the `ready` marker exists) takes the refresh verb
 of that same script: it replaces the code and the installed unit files, and
-it does not rebuild the clone, the venv, the login, or the timers. Retry when
+it does not rebuild the clone, the venv, or the timers. Retry when
 it reports the workload is active.
 
 Until that refresh has been run on a host whose unit still executes
@@ -119,7 +119,7 @@ group, with group writes removed, and registers only the repository root and its
 exact `.git` path as Git safe directories for the pickup account. SSH upload-pack
 checks the `.git` path on servers that enforce ownership there; trust remains
 limited to these two exact paths. The responder is not added to `radon` or any
-privileged group. Native authentication and runtime directories remain private.
+privileged group. Model credentials remain outside the account; runtime state stays private.
 A fresh SSH connection is needed to pick up the new group membership. After a
 setup change deploys, rerun preparation from a trusted stage of that deployed
 commit before the ordinary `ls-remote` check above. Existing pickup push-policy
@@ -131,25 +131,24 @@ As root, explicitly acknowledge that Mac pickup is configured:
 
 ```bash
 /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured
-systemctl is-active radon-grok-responder.timer radon-grok-responder-upgrade.timer
+systemctl is-active radon-grok-responder.timer
+systemctl is-enabled radon-grok-responder-upgrade.timer   # disabled
 systemctl show radon-grok-responder.service -p User -p ProtectProc -p ProtectHome
 systemctl is-enabled radon-grok-page-responder.timer
 ```
 
 Finalization verifies the installed unit hashes and deployed action policy,
-proves the dedicated native login through the existing bounded CLI probe,
-seeds its own last-known-good state, checks pickup readability and refuses
-unmerged legacy work. Only then does it disable the legacy responder timer,
-publish the root-owned readiness marker and enable the new timers. An active
-legacy responder makes it stop before handover; retry after that run finishes.
-An enable failure restores the previous timer. The marker is outside the
-account's writable directories.
+the immutable native-client receipt and gateway readiness, then checks pickup
+readability and refuses unmerged legacy work. Only then does it disable the
+legacy responder timer, publish the root-owned readiness marker and enable
+`radon-grok-responder.timer`. An active legacy responder stops handover;
+retry after that run finishes. An enable failure restores the previous timer.
+The marker is outside the account's writable directories.
 
-The responder keeps the existing `grok-page-responder` heartbeat as its
-replacement owner. Its independent upgrader writes `grok-responder-upgrade`
-with a 26-hour freshness window; the keeper continues to write `grok-upgrade`.
-Finalization performs a native authentication probe and can consume one
-subscription response. Ordinary deploys and preparation do not run this probe.
+The responder keeps the existing `grok-page-responder` heartbeat. The optional
+`grok-responder-upgrade` health row is retired. Manifest and gateway status
+checks do not perform inference; a successful status check proves configured
+routing, not a successful provider response.
 
 ### Rollback the account migration
 
@@ -157,7 +156,7 @@ subscription response. Ordinary deploys and preparation do not run this probe.
 /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py rollback
 ```
 
-Rollback waits for an inactive new responder/upgrader, disables their timers,
+Rollback waits for inactive optional workloads, disables their timers,
 withdraws readiness and enables the legacy responder timer. It never copies
 authentication files or rewrites either clone. A failed legacy enable restores
 the new domain's readiness and timers. The optional upgrade health row is
@@ -166,10 +165,10 @@ fails after legacy restoration, rerun rollback to finish that operation.
 
 Restore the Mac pickup source to
 `ssh://radon@radon-app/home/radon/radon-page-responder` and reload its launch
-agent using the same commands above. The dedicated account, native login and
-disabled unit inventory remain available for a later retry. Preparation
-refuses an active readiness marker; use rollback before preparing a newer
-optional runtime. The canonical keeper upgrade timer is unchanged throughout.
+agent using the same commands above. The dedicated account and disabled unit
+inventory remain available for a later retry. Preparation refuses an active
+readiness marker; use rollback before preparing a newer optional runtime.
+Provider grants and CI-managed client promotion remain gateway-owned.
 
 Contracts: `cloud/tests/test_responder_service_account.py`.
 
@@ -222,14 +221,15 @@ STAGE="$(mktemp -d /opt/radon-provision/grok-setup.XXXXXX)"
 git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
 bash "$STAGE/cloud/scripts/setup-grok-page-responder.sh"
 rm -rf "$STAGE"
-sudo -u radon -H /home/radon/.local/bin/grok login --device-auth
-# approve the code on your phone
 /usr/local/sbin/radon-deploy-root sync-control-plane   # installs the unit
 systemctl enable --now radon-grok-page-responder.timer
 ```
 
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
-only). Auth: `/home/radon/.grok/auth.json` via device-code.
+only, plus fixed managed-client and inference-socket settings). Provider
+credentials remain in the gateway; local device-code login is not required.
+The installed unit overrides the client path and socket at `ExecStart` so a
+legacy environment file cannot redirect inference.
 
 Least-privilege Turso: the responder touches only `watchdog_pages`, `watchdog_page_attempts` and its
 `service_health` heartbeat (whose triggers append to `service_health_events`;
@@ -516,114 +516,57 @@ path uses the same validator. Pickup also folds in the `watchdog_pages`
 row (page id, severity, first-seen, result) when Turso is reachable, and
 adds CI run URLs on a later cycle once `gh run list` has them.
 
-## Grok model and CLI (track latest)
+## Grok model and CLI (CI managed)
 
-Default is the newest stable CLI and the live default model. The responder
-resolves the model id at run time from `grok models` (or the promoted
-last-known-good) and always passes it with `-m`. Every log line,
-`watchdog_pages.result`, commit body, and PR Test plan records
-`Ran <model> on CLI <version>`. `--no-auto-update` stays on at incident
-time so the CLI never upgrades itself mid-run.
+The responder verifies `/opt/radon-model-clients/current/manifest.json`,
+including protected ancestry, release selection, exact native versions and
+file hashes. It selects supported Grok model metadata from the gateway's
+cached inventory and runs the immutable release path through the private
+native-protocol bridge. Every log line, `watchdog_pages.result`, commit body
+and PR Test plan records `Ran <model> on CLI <version>`.
 
-Last-known-good is a machine-written state file owned by the daily
-upgrader: `/var/lib/radon/grok_lkg.json` (`cli_version`, `binary_path`,
-`model`, `promoted_at`, `smoke_result`). There is no checked-in pin.
+The bridge supplies temporary app-scoped authentication and preserves native
+tool schemas. Provider credentials and renewal stay in the gateway. A model
+missing from supported metadata or an untrusted client release fails closed;
+a queue state or a status check is not proof of a completed model response.
 
-If the current model or CLI errors at incident time (non-zero exit,
-model-unavailable, unparseable output with no `RESULT:` line), the
-responder retries once on last-known-good and alerts. A valid
-`RESULT: failed` line is not a retry.
+### CI-managed upgrades
 
-A shared flock (`/var/lib/radon/grok-runtime/grok-runtime.lock`) serializes the
-responder against a live promotion.
+Native versions are pinned in `docker/app/vendor-clis/package.json` and its
+lockfile. CI verifies payload integrity and actual native tool transport
+without provider network access. The root deployment controller stages the
+exact image's clients, verifies the manifest and promotes the release only
+through the protected commit protocol. Consumer processes cannot update the
+release tree. See [model-gateway.md](model-gateway.md) for promotion, rollback
+and the separate inference/control sockets.
 
-### Daily upgrade timer (enabled)
-
-`radon-grok-upgrade.{service,timer}` is installed and enabled. Daily
-07:40 UTC it runs `scripts/grok_upgrade.py` from the root-owned controller
-copy, not the responder clone (see Trusted promote step below): copy the resolved CLI into
-`<candidate>/downloads/grok-linux-x86_64` under the configured `--scratch`
-path (`/var/lib/radon/grok-upgrade` in the unit; `data/cache/grok_upgrade`
-when omitted) and point `<candidate>/bin/grok` at it with the installer
-symlink `../downloads/grok-linux-x86_64`. `grok update` on CLI 1.0.44 and
-newer readlinks that path to capture rollback; a regular file there exits
-22 before smoke. Run that private symlink's updater with isolated `HOME`
-and `GROK_HOME`. Probe its version,
-resolve the newest default model, then smoke a canned dry-run that must return `RESULT:` plus a Part 1
-validator-passing body. The smoke runs with `--output-format json`, so it
-validates the reply in the JSON `text` field (the same extraction
-`parse_grok_result` uses), from its first `## What broke` on: grok joins the
-messages of each turn with no separator, which can glue a pre-tool preamble
-to the first heading. The live executable is never the updater target
-(REL-292 / R-711).
-
-- Pass: prepare replacement links, atomically switch the canonical live symlink (`--live-bin`) and the explicit `--alias-bin` (`~/.grok/bin/grok` in the unit), and write LKG with the immutable candidate path. The upgrader never derives a path from HOME and refuses a candidate outside `--scratch`. Keep the promoted directory; a later attempt gets a new directory. No PR.
-- Fail: preserve the live/LKG executable and alert via Pushover / watchdog; remove an unpromoted candidate. Health diagnostics use the writer's structured `error.message` field (REL-293 / R-712).
-- Incident lock held: skip the promote and retry next fire.
-
-**Trusted promote step (DS-2026-09-29-07).** The promoted binary is what
-the secret-bearing `radon-subscription-tokens` unit executes, so the code
-that promotes it must be out of grok's reach. The unit runs
-`/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py`:
-a root-owned copy of `scripts/` on the system interpreter, with no venv and
-no site-packages (the upgrader's import closure is stdlib-only). The
-responder clone is in the unit's `InaccessiblePaths`, and its working
-directory is the upgrade scratch. `setup-grok-page-responder.sh` installs
-the copy from `scripts/` in its root-owned provision stage through
-`cloud/scripts/install-grok-upgrade-controller.sh` (refuses a linked target
-or parent, builds the new tree beside the old one, then renames it into
-place), and seeds LKG from the same copy. The copy changes only when setup
-reruns: a merged upgrader fix reaches the host on the next setup rerun, not
-on deploy. Contract: `cloud/tests/test_grok_upgrade_controller.py`.
-The two-rename controller install restores the previous tree on a failed
-publication or handled signal (R-724 / REL-305). If restoration itself fails,
-the error names the retained `.grok-upgrade.old.*/tree` backup; as root, move
-that exact directory back to `/usr/local/lib/radon/grok-upgrade` only while
-the target is absent. An unhandled power loss can leave the same backup.
-Install the repaired helper from a reviewed root-owned stage with
-`bash <stage>/cloud/scripts/install-grok-upgrade-controller.sh <stage>/scripts`;
-normal application deployment does not replace this installed code tree.
-
-
-```bash
-systemctl status radon-grok-upgrade.timer
-journalctl -u radon-grok-upgrade.service -n 50
-cat /var/lib/radon/grok_lkg.json
-```
-
-`cloud/scripts/setup-grok-page-responder.sh` installs the latest stable
-CLI and seeds LKG from the live default.
+`radon-grok-upgrade.timer` and `radon-grok-responder-upgrade.timer` remain
+disabled. Their service names provide a read-only gateway readiness check.
+The old root-owned controller under `/usr/local/lib/radon/grok-upgrade` and
+`cloud/scripts/install-grok-upgrade-controller.sh` are retained only for
+rollback compatibility; setup does not invoke an updater or seed mutable LKG.
+Its protected publication contract remains covered by
+`cloud/tests/test_grok_upgrade_controller.py`.
 
 ## Binary recovery
 
-**Symptom and prerequisites:** use this path when the configured Grok entry
-is missing or resolves to a discarded test candidate. Recovery belongs to the
-operator on the affected host, with the reviewed runtime/upgrader code and
-access to the existing LKG record. Repair affects both CLI entry links and
-incident response; it does not require restarting the trading stack.
+Stop automatic response when the selected release is missing, writable,
+hash-mismatched or lacks a trusted receipt. Do not execute or relink an unknown
+binary. `grok_runtime.lkg_binary_problem` retains legacy validation; managed
+releases must pass the stronger `managed_manifest` check.
 
-- **Safe diagnosis:** inspect the entry links and the LKG `binary_path` without
-  executing an unknown target. Validate the candidate as the unit user with
-  `grok_runtime.lkg_binary_problem`, including the responder checkout in
-  `extra_untrusted`. A JSON record alone is not proof of a usable executable.
-- **Stop conditions and repair:** stop if the target fails that check or its
-  promotion provenance cannot be established. Do not relink while an incident
-  or upgrade owns the shared runtime lock. Any operator relink must hold
-  `grok_runtime.exclusive_lock` on the configured lock and use the explicit
-  live/alias paths from the installed upgrade unit. Preserve the prior links
-  and candidate directories. The upgrader needs a working source binary
-  before it can check or install a candidate; restarting a dangling entry
-  cannot repair it.
-- **Verify:** inspect the resulting link targets, then verify the trusted
-  executable's version and the responder journal/health result. For an
-  upgrade, require its smoke and promotion result; a scheduled fire or exit
-  zero alone can mean `current` or `locked`. Read the LKG record after a
-  successful promotion, rather than assuming a particular version or file state.
-- **Rollback and escalation:** restore only a previously verified executable
-  under the same lock, retaining its candidate directory. If none is available,
-  leave automatic response disabled and escalate CLI installation/authentication
-  to the operator using [Install (VPS)](#install-vps). Do not substitute a temp
-  binary or delete a candidate still referenced by either entry link or LKG.
+Use the protected deployment controller to reinstall or rollback to a verified
+immutable client release from the exact CI image. Hold the existing
+`grok_runtime.exclusive_lock` when a manual legacy recovery changes an entry
+referenced by an incident. Retain the prior release and receipt; never replace
+a managed file in place or delete a release still selected by a running job.
+
+Verify the protected ancestry, manifest hashes, native version receipt and
+private gateway readiness, then verify an actual responder result separately.
+For rollback, restore a previously verified release through the same root
+commit protocol. If no trusted release is available, leave automatic response
+disabled and escalate installation to the operator using
+[Install (VPS)](#install-vps). No trading-stack restart is required.
 
 ## Push guard
 
@@ -718,15 +661,10 @@ real secrets off disk. Live production secrets are `/etc/radon/env`.
 `/home/radon/radon-cloud/.env` is retired. Both the retired checkout and
 `/etc/radon/env` are in `InaccessiblePaths`, as are
 `/var/lib/radon/flex-secrets` and `/var/lib/radon/rh-mcp`. `/home/radon` and `/var/lib/radon` are
-`ReadOnlyPaths`. The unit writes only the dedicated clone, `~/.grok` (session
-state) and `/var/lib/radon/grok-runtime` (the shared flock). `~/.grok/bin`,
-`~/.grok/hooks` and `~/.grok/downloads` stay read-only inside `~/.grok`,
-because `radon-subscription-tokens` runs `grok` and `agy` from `~/.grok/bin`
-and `~/.local/bin` with the production env. The upgrader installs candidates
-under `/var/lib/radon/grok-upgrade`, which the responder cannot write, so the
-promoted live symlink never points into a responder-writable path. The
-upgrader's own code runs from `/usr/local/lib/radon/grok-upgrade`, which is
-root-owned, so the responder cannot change what promotes either.
+`ReadOnlyPaths`. The unit writes only the dedicated clone and
+`/var/lib/radon/grok-runtime` (the shared flock). `/home/radon/.grok` and the
+provider/control sockets are inaccessible. Native clients remain in the
+root-owned immutable release tree; the bridge uses private temporary state.
 `ProtectHome=tmpfs` is deliberately NOT used: it would also hide the clone and
 the venv the unit executes from.
 
@@ -791,13 +729,13 @@ running` every 30 seconds.
 | `scripts/watchdog/grouping.py` | After grouped IB P1 2xx (creds required) |
 | `scripts/grok_page_responder.py` | Poller |
 | `scripts/ir_pr_description.py` | IR PR section validator |
-| `scripts/grok_runtime.py` | Model resolve, LKG IO, lock, fallback |
-| `scripts/grok_upgrade.py` | Daily smoke + auto-promote (runs from the root-owned copy) |
+| `scripts/grok_runtime.py` | Managed manifest verification, gateway inventory, lock, legacy LKG validation |
+| `scripts/grok_upgrade.py` | Retained legacy rollback controller; no scheduled updater |
 | `cloud/scripts/install-grok-upgrade-controller.sh` | Installs that copy under `/usr/local/lib/radon/grok-upgrade` |
-| `/var/lib/radon/grok_lkg.json` | Machine-written last-known-good |
+| `/opt/radon-model-clients/current/manifest.json` | Root-promoted immutable client receipt |
 | `cloud/services/radon-grok-page-responder.*` | VPS timer |
-| `cloud/services/radon-grok-upgrade.*` | Daily track-latest, installed enabled |
-| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + latest grok CLI |
+| `cloud/services/radon-grok-upgrade.*` | Read-only gateway readiness service; timer disabled |
+| `cloud/scripts/setup-grok-page-responder.sh` | Clone, stripped env and managed client verification |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 
@@ -806,11 +744,10 @@ A quiet healthy cycle prints `{"pending": 0}`.
 
 ### Account preparation and handover checks
 
-Preparation accepts the native installer output at `~/.grok/bin/grok` and
-creates `~/.local/bin/grok` as the dedicated account only when the canonical
-slot is absent. It validates the canonical executable before reporting the
-login command; a dangling link, non-executable file or directory is refused
-without replacing that slot. No authentication is copied from another account.
+Preparation verifies the protected managed manifest as the dedicated account.
+Existing mutable native slots remain unchanged; preparation never invokes an
+installer, provider login or inference probe. Authentication is not copied
+from another account. Finalization separately checks private gateway readiness.
 
 Both handover directions query `ActiveState` before and after disabling their
 source timers. `active`, `activating`, `deactivating` and `reloading` workloads

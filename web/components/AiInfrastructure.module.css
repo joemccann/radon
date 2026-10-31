@@ -6,7 +6,10 @@
 .eyebrow { display: block; color: var(--text-muted); font-size: 12px; }
 .note { color: var(--text-muted); margin: 8px 0 12px; }
 .workspace button, .drawer button { min-height: 44px; padding: 9px 14px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); cursor: pointer; font: inherit; font-size: 13px; }
-.workspace button:hover, .drawer button:hover { background: var(--bg-panel-raised); }
+@media (hover: hover) and (pointer: fine) {
+  .workspace button:hover,
+  .drawer button:hover { background: var(--bg-panel-raised); }
+}
 .workspace :is(button,a,summary,[tabindex]):focus-visible, .drawer :is(button,a):focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: 3px; }
 .workspace a, .drawer a { color: var(--signal-core-text); }
 .evidenceBar { margin: 25px 0; padding: 22px 24px; background: var(--bg-subtle); border: 1px solid var(--line-grid); border-radius: 8px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 30px; }
@@ -108,5 +111,5 @@
 .observationHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 44px; }
 .observationHeading > span:first-child { padding-block: 10px; overflow-wrap: anywhere; }
 .metrics .observationMeta { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
-@media (hover: hover) { .observationCard:hover { background: var(--bg-panel-raised); border-color: color-mix(in srgb, var(--signal-core-text) 45%, var(--line-grid)); } }
+@media (hover: hover) and (pointer: fine) { .observationCard:hover { background: var(--bg-panel-raised); border-color: color-mix(in srgb, var(--signal-core-text) 45%, var(--line-grid)); } }
 @media (prefers-reduced-motion: reduce) { .observationCard { transition: none; } }

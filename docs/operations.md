@@ -200,6 +200,39 @@ notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
 including those mixed into an otherwise valid datagram. The proxy socket stays
 0600 and is owned by the container user.
 
+Gateway status receives `RADON_DEPLOY_SHA` only from the managed runtime
+after validating the already-selected gateway image repository and full SHA.
+Its reported version must match that immutable image; caller/host dotenv values
+and a later checkout lookup cannot replace the identity.
+
+Preparatory model-cache migration and CLI-export containers remove inherited
+`NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
+Podman conmon. The foreground runtime retains its filtered notify proxy.
+Before prestage allocation, after exact image pulls and just before teardown,
+`sudo /usr/local/sbin/radon-app-runtime check-model-space` checks fixed destination
+filesystems using UID1000-available bytes (`f_bavail`) and available inodes.
+Root-reserved blocks do not count. The conservative shared 4KiB-volume budget
+is 8881176576 bytes/201161 inodes, including bounded archive/tree peaks, pinned
+model-cache assets and an explicit 1GiB/1024-inode runtime/recovery margin.
+No threshold override or data pruning occurs; insufficient or unknown capacity
+refuses before stopping consumers and never triggers a fallback host build.
+Promotion repeats the capacity check. Recovery instead hash-verifies existing
+immutable clients/exports, without allocating another payload or applying the
+fresh-install threshold. Missing/corrupt recovery artifacts fail closed.
+Cache-ref failures remove temporary files, preserve canonical refs and report
+a safe errno name with exit78; they never reset provider pacing state.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+First-cutover model rollback preserves the independent privileged floor,
+canonical legacy files omitted from the old manifest, and pending recovery
+receipts. Temporary `/etc/radon` hardening has a root-owned, fsynced permission
+intent so kill/reboot retries recover its exact original mode without widening
+unrelated directories. See [model gateway rollback](model-gateway.md#upgrades-and-rollback).
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container
@@ -223,39 +256,30 @@ replaced after validation. A symlink, an unexpected owner, or a generation
 mismatch exits 78 and does not start the container. A filesystem that does not
 implement the ioctl keeps the device and inode check.
 
-**Subscription credential binds (2026-09-18).** `radon-app-runtime` also
-binds the operator's CLI subscription grants, each read-only and only when the
-directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
-`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the antigravity
-rung shells out to) land at
-the same paths inside the containers whose unit
-runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
-`radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
-`os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/explain` and
-`/api/assistant`. The retired `/api/newsfeed/share` route returns `410` without
-a model call; the 2026-09-19 missing-subscription share incident is historical.
-Never the whole home directory, and never
-into the relay. `radon-api` holds the secret-store key group, so it never
-gets `~/.local/bin`: its antigravity rung runs the image's integrity-pinned
-`/usr/local/bin/agy` (`docker/app/vendor-clis/`). Antigravity is the one read-write grant: `agy` refreshes its
-token and writes logs and project state on every run, so
-`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
-fixed paths) are bound read-write into `radon-api`, `radon-research` and
-`radon-nextjs` and shared with the host, keeping one rotating
-token store. Newsfeed renders third-party content and gets no antigravity bind
-(its ladder falls past that rung). `radon-marketdesk` renders third-party
-content too: it gets the read-only `.grok`, `.codex` and `.claude` grants, no
-antigravity bind and no `~/.local/bin` (the Python image ships pinned CLIs). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
-The Python and Next.js model ladders use the
-[subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
-Those tiers never fall back to a prepaid key: the opt-in flag was removed
-(operator policy 2026-10-26), and `radon-app-runtime` strips prepaid Anthropic,
-xAI and OpenAI keys from every container env. Funding a prepaid wallet does
-not recover a missing subscription.
-NVIDIA and Cerebras have separate rung policies in that owner. Check subscription
-availability and the credential binds before changing billing policy.
-`radon-subscription-tokens`
-keeps the files live on the host ([subscription-tokens.md](subscription-tokens.md)).
+**Subscription credential binds.** Only `radon-model-gateway` receives the
+operator CLI grant directories, and only when each directory exists:
+`/home/radon/.grok`, `/home/radon/.codex`, `/home/radon/.claude`,
+`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config`.
+Those binds are read-write inside the gateway. `HOME=/home/radon` stays pinned.
+`radon-api`, `radon-newsfeed`, `radon-research`, `radon-nextjs` and
+`radon-marketdesk` do not mount provider grants. They receive the private
+inference socket read-only and `RADON_MODEL_GATEWAY_REQUIRED=1`. `radon-api`
+also receives the management socket read-only. Do not mount provider grants
+into a consumer to repair a model failure. Next.js still hosts
+`/api/newsfeed/explain` and `/api/assistant`, which call the gateway. The
+retired `/api/newsfeed/share` route returns `410` without a model call.
+Never the whole home directory, and never into the relay. Provider CLIs are
+the gateway image's pinned binaries, not a host `~/.local/bin` mount. The
+retired Gemini CLI `oauth_creds.json` is not a mounted grant.
+The shared model ladder must never fall back to a prepaid key: the opt-in flag was removed,
+and `radon-app-runtime` strips prepaid Anthropic, xAI and OpenAI keys from
+every container. It also strips provider tokens and model API keys from every
+container except the gateway. Funding a prepaid wallet does not recover a
+missing subscription. Billing policy stays in
+[the subscription auth owner](oauth-subscription-auth.md#radon-http-model-ladder-server).
+The gateway keeps the grant files live
+([subscription-tokens.md](subscription-tokens.md),
+[model-gateway.md](model-gateway.md)).
 
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
 directory, and the container is granted that gid at start with
@@ -275,13 +299,11 @@ bytes. Two things still do, and neither is closed by this channel. First, a
 plaintext copy of the master key at
 `/home/radon/radon/data/secret_store/secret_store.key`, owned by `radon`, named
 by `RADON_SECRET_STORE_KEY_FILE` in `/etc/radon/env` (the seed the credstore
-was encrypted from). Remove it with the cutover below. Second, the `radon-api`
-container gets a writable, radon-writable `~/.gemini/antigravity-cli` while it
-holds the key group. The `agy` binary itself is image-owned and
-integrity-pinned (host `~/.local/bin` is not mounted into the API), but agy
-state the host account can rewrite still reaches a key-holding process. That
-gap stays open until the API's agy rung moves out of the key-holding
-container.
+was encrypted from). Remove it with the cutover below. The writable Antigravity
+grant no longer shares the API container that holds the key group. That grant
+is on `radon-model-gateway`, which does not receive the secret-store master key.
+The vault broker remains the key holder. Do not put the Antigravity directory
+back on `radon-api`.
 
 **Secret-store key cutover (operator, once, after 16:00 ET and only once the
 DS-2026-10-05-05 deploy is green).** Before that deploy the four units still
@@ -454,9 +476,9 @@ If the host still refuses the sandbox at launch,
 `chromium sandbox unavailable`; `PLAYWRIGHT_CHROMIUM_SANDBOX=0` in
 `/etc/radon/env` forces that mode. Also,
 `radon-app-runtime` hands it a filtered env file — only the keys the
-newsfeed code reads (`NODE_ENV`, model-ladder keys: the Claude grant token, NVIDIA and `CEREBRAS_API_KEY` last,
-Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and
-`RADON_NEWSFEED_*`), never the full production secret set — and starts its
+newsfeed code reads (`NODE_ENV`, Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`,
+replica toggles, and `RADON_NEWSFEED_*`), never provider tokens or model API
+keys and never the full production secret set, and starts its
 container on an isolated bridge network (egress only) instead of the host
 stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
@@ -686,7 +708,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 16:20 ET | SPX pct above 50d MA over pct above 200d MA (20 min after the close, across DST). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 16:40 ET | SPX pct of members with Wilder RSI(14) strictly below 30 (40 min after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
@@ -1240,10 +1262,17 @@ gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
 `gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
-the history fold from `scripts/release_version.py`. The `release-tag` job
-pushes it after that deploy succeeds, including when earlier test jobs were
-skipped. Root and web `package.json` version fields are a fallback when that
-history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
+the shared build identity from `scripts/release_version.py --ci-version
+--expected-sha "$GITHUB_SHA"`. Both image selection and `release-tag` validate
+canonical semver and the exact checkout SHA; selector failure stops the step
+before output or tagging. The tag job runs after deployment succeeds, including
+when earlier test jobs were skipped, and never moves an existing tag.
+
+The original 0.7.0 history baseline remains unchanged. When that history is
+missing or disconnected after a history rewrite, the existing web `package.json`
+fallback labels both the built app and its tag. Package fields can lag earlier
+tags; this fallback does not reconstruct monotonic semver or restore purged
+objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.
@@ -1257,7 +1286,8 @@ restart-managed` and `recover` now run `retire_research_watcher`: an enabled
 watcher is `disable --now`ed, a hand-started one is stopped, and either
 outcome is non-fatal. The unit file, its drop-in, the 150s research stop wait
 and the read-only API research bind stay. The text below is the historical
-activation contract for the retired unit; do not re-enable it.
+activation contract for the retired unit; do not re-enable it. Current app
+containers do not receive those grant directories. Only `radon-model-gateway` does.
 
 The research worker executes the Python image's pinned `claude`, `codex`,
 `grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
@@ -1284,8 +1314,9 @@ The API credential staging/cleanup contract remains in force when research mount
 of the host state (no data, media or lease binds), plus the newsfeed's
 isolation (the job reads the marketdesk.ai JSON API over HTTPS, no
 browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
-without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
-`THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
+without it), `--shm-size 512m`, an env allowlist (Turso, `THEMARKETEAR_*`,
+`MARKETDESK_*`, `DROPBOX_WRITE_*`) and the read-only inference socket.
+Provider grants and model API keys stay on the gateway.
 `TimeoutStartSec=270`, `StartLimitBurst=10` per 1800s. Heartbeats
 `marketdesk-research` (`service_cycle`) and `marketdesk-dropbox` (`ok`, `paused`
 when write credentials are absent, `error`), both 15 minutes. Runbook:
@@ -1359,19 +1390,19 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 
 ## NVIDIA model settings in the restricted newsfeed runtime
 
-The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
+The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` into `radon-model-gateway`; arbitrary other `NVIDIA_*` keys stay excluded, and those three names do not reach `radon-newsfeed.service`. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart `radon-model-gateway.service`. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart the gateway to roll back.
 
 
 ## Subscription keeper environment publication
 
 `setup-vps.sh` installs the root-owned subscription environment publisher and seeds
-`/etc/radon/subscription-tokens/env` before activating the keeper. Each deploy
+`/etc/radon/subscription-tokens/env` before activating units. Each deploy
 refreshes that allowlist through `radon-deploy-root publish-subscription-env` after
 canonical environment validation and before builds or service changes. Publication
 failure aborts the deploy. The derived directory is root-private; see
 [subscription token operations](subscription-tokens.md) for its supported inputs
-and rollback. The keeper keeps its existing uid and native provider credential
-locations.
+and rollback. The timer and the gateway container do not load this derived file.
+The gateway's filtered copy of `/etc/radon/env` supplies the keeper token.
 
 ### Deploy lock transition
 

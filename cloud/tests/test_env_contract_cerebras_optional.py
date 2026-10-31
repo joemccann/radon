@@ -41,7 +41,7 @@ def test_the_ladder_skips_the_rung_without_the_key(monkeypatch):
 
     sys.path.insert(0, str(CLOUD.parent / "scripts"))
     try:
-        from clients import model_ladder
+        from scripts.model_gateway import engine as model_ladder
     finally:
         sys.path.pop(0)
     assert model_ladder._env_get({}, *model_ladder._CEREBRAS_KEYS) == ""

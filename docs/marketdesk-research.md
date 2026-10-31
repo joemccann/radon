@@ -236,6 +236,9 @@ shared order, grok included. One provider's unreadable or incomplete reply
 fails over to the next rung. A read timeout cools that provider down for the
 rest of the process, so the 2026-10-27 grok-4.6 image timeouts (153s, or the
 120s cap) are not repeated for every article in the 270s cycle. Captions obey the same
+ladder is `scripts/clients/model_ladder.py`. Text-only editorial requests start with Antigravity, then Anthropic, Grok, Cursor, Codex, NVIDIA and Cerebras; quota failures fall through. The image copy call skips text-only Antigravity and grok
+(`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
+image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
 the source text.
 
@@ -316,12 +319,13 @@ app image through `radon-app-runtime`:
   (`/etc/radon/seccomp/chromium.json`, refused if missing or untrusted) and a
   512m `/dev/shm`, the same isolation as the newsfeed. The job no longer runs a
   browser; the isolation stays because it still parses third-party content;
-- an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
-  `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
-  and Clerk secrets never enter the container;
-- read-only `.grok`, `.codex` and `.claude` ladder grants, and no writable
-  Antigravity grant (third-party content), so its ladder falls past
-  antigravity.
+- an env allowlist: Turso, `THEMARKETEAR_*`, `MARKETDESK_*` and
+  `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB, Clerk secrets,
+  provider tokens and model API keys never enter the container;
+- the private inference socket, read-only, with `RADON_MODEL_GATEWAY_REQUIRED=1`.
+  No subscription grant directory is mounted here. Antigravity isolation runs
+  inside `radon-model-gateway`, which owns the canonical grants. See
+  [the model gateway](model-gateway.md).
 
 The radon-api container keeps its read-only research bind, so existing and new
 research assets are served by the same authenticated route.
@@ -336,6 +340,10 @@ research assets are served by the same authenticated route.
 Both rows are registered in `scripts/watchdog/services.py` and
 `web/lib/serviceHealthWindows.ts`, and both map to `radon-marketdesk.service` in
 `scripts/api/service_log_units.json` for the admin log view.
+
+A stored `dropbox-research` row is not one of these writers. Readers mark it
+retired and the watchdog does not page it. The operator stop is
+[retired dropbox research health](incident-runbook.md#retired-dropbox-research-health).
 
 ## Operator steps before enabling in production
 
