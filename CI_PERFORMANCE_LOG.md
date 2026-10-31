@@ -2454,5 +2454,7 @@ attempt-1 success, not five. Status `VALIDATING`.
 failed: missing `reuse_identical_image_clients`) then green. A fifth test
 was red while an existing tree for the same SHA skipped the image-id check,
 then green once that path falls through to export. Install, recovery,
-Darwin, and disk-admission tests stayed green (61 passed). Full suites,
+Darwin, and disk-admission tests stayed green (61 passed). The first
+pull-request run failed the docs ownership gate: `model_clients.py` maps to
+`docs/model-gateway.md`, which now states the reuse rule. Full suites,
 Vitest, Docker builds, and workflow lint are left to PR CI.
