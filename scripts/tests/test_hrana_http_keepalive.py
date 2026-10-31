@@ -367,7 +367,7 @@ def test_lost_write_response_never_replays_the_statement(monkeypatch, sql, trans
         with pytest.raises(error):
             module.hrana_execute(sql)
         assert posts["n"] == 2, "unknown write outcome must not send another POST"
-        assert connections["n"] == 1
+        assert connections["n"] == (2 if module is db_http else 1)
     finally:
         _stop(server, thread, module)
 
@@ -397,7 +397,7 @@ def test_request_error_after_peer_received_write_never_replays(monkeypatch, sql,
         with pytest.raises(error):
             module.hrana_execute(sql)
         assert posts['n'] == 2 and requests['n'] == 2, 'an uncertain write must not be sent twice'
-        assert connections['n'] == 1
+        assert connections['n'] == (2 if module is db_http else 1)
         assert getattr(module._local, 'conn', None) is None
     finally:
         _stop(server, thread, module)
@@ -516,7 +516,7 @@ def test_pool_expires_idle_connections_before_sending_reads_or_writes(idle_pool,
         'exact': idle_s,
         'past': idle_s + 40.0,
     }[kind]
-    expired = kind in ('exact', 'past')
+    expired = kind in ('exact', 'past') or (module is db_http and not sql.startswith('SELECT '))
     request()
     clock.now += idle
     request(sql, timeout=2.0)
@@ -542,10 +542,10 @@ def test_pool_idle_age_starts_after_full_successful_response(idle_pool):
     idle_s = module._KEEPALIVE_IDLE_S
     under = 120.0 + idle_s - 0.001
     clock.now = under
-    request('UPDATE synthetic_counter SET value=value+1')
+    request('SELECT 1')
     assert len(connections) == 1, 'request duration is not idle age'
     clock.now = under + idle_s
-    request('UPDATE synthetic_counter SET value=value+1')
+    request('SELECT 1')
     assert len(connections) == 2, 'every full success refreshes the idle clock'
 
 
@@ -568,13 +568,15 @@ def test_pool_failure_retires_connection_and_clears_idle_clock(idle_pool, failur
                      if failure == 'headers' else FailedResponse())
     with pytest.raises((OSError, http.client.HTTPException)):
         request('UPDATE synthetic_counter SET value=value+1')
-    assert len(connections) == 1 and len(connections[0].requests) == 2
-    assert connections[0].closed
+    failed_connections = 2 if module is db_http else 1
+    assert len(connections) == failed_connections
+    assert sum(len(conn.requests) for conn in connections) == 2, 'no failed write replay'
+    assert all(conn.closed for conn in connections)
     assert getattr(module._local, 'conn', None) is None
     assert getattr(module._local, 'last_success', None) is None
     clock.now = 102.0
     request('UPDATE synthetic_counter SET value=value+1')
-    assert len(connections) == 2 and len(connections[-1].requests) == 1
+    assert len(connections) == failed_connections + 1 and len(connections[-1].requests) == 1
     assert module._local.last_success == 102.0
 
 
@@ -587,3 +589,174 @@ def test_pool_origin_change_retires_prior_connection_and_starts_fresh_idle_clock
     assert connections[0].closed, 'changing origins cannot retain an unreachable old pooled socket'
     assert connections[1].host == 'other-synthetic.invalid'
     assert module._local.last_success == 101.0
+
+
+@pytest.fixture
+def publication_peer(monkeypatch):
+    """Real HTTP/1.1 peer: stale reuse drops only its second request.
+
+    SQLite executes the real Hrana conditional transaction against posts and
+    provenance tables. A fresh connection remains usable after the copy gap.
+    """
+    import sqlite3
+    from types import SimpleNamespace
+
+    connection = sqlite3.connect(':memory:', isolation_level=None, check_same_thread=False)
+    migrations = _SCRIPTS_DIR / 'db/migrations'
+    for name in ('0001_init.sql', '0071_research_post_sources.sql'):
+        connection.executescript((migrations / name).read_text())
+    state = SimpleNamespace(mode='stale_reuse', connections=0, requests=0, commits=0, batches=[])
+    clock = {'t': 1000.0}
+    monkeypatch.setattr(db_http.time, 'monotonic', lambda: clock['t'])
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def setup(self):
+            super().setup()
+            self.requests = 0
+            state.connections += 1
+
+        def drop(self):
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            self.requests += 1
+            state.requests += 1
+            if state.mode == 'stale_reuse' and self.requests > 1:
+                self.drop()
+                return
+            operation = body['requests'][0]
+            if operation['type'] == 'batch':
+                state.batches.append(operation)
+                results, errors = [], []
+                for step in operation['batch']['steps']:
+                    cond = step.get('condition')
+                    if cond:
+                        valid = (results[cond['step']] is not None) if cond['type'] == 'ok' else (
+                            results[cond['cond']['step']] is None)
+                        if not valid:
+                            results.append(None)
+                            errors.append(None)
+                            continue
+                    stmt = step['stmt']
+                    args = [int(a['value']) if a['type'] == 'integer' else a.get('value') for a in stmt['args']]
+                    try:
+                        connection.execute(stmt['sql'], args)
+                        if stmt['sql'] == 'COMMIT':
+                            state.commits += 1
+                        results.append({'affected_row_count': 1})
+                        errors.append(None)
+                    except sqlite3.Error as error:
+                        results.append(None)
+                        errors.append({'message': str(error)})
+                response = {'results': [{'type': 'ok', 'response': {'type': 'batch', 'result': {
+                    'step_results': results, 'step_errors': errors}}}]}
+                if state.mode == 'lost_commit':
+                    self.drop()
+                    return
+            else:
+                stmt = operation['stmt']
+                connection.execute(stmt['sql'])
+                response = json.loads(_pipeline_body('1'))
+            encoded = json.dumps(response).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(encoded)))
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    _point_at(server, monkeypatch)
+    db_http._close_keepalive()
+    hrana_http._close_keepalive()
+    try:
+        yield state, clock, connection
+    finally:
+        db_http._close_keepalive()
+        hrana_http._close_keepalive()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+        connection.close()
+
+
+def _certified_marketdesk_post(monkeypatch):
+    from research import publish
+    from research_editor_fixtures import certify
+    monkeypatch.setattr(publish.book, 'current_tickers', lambda: {'NVDA'})
+    article = 'fixtureAbc12'
+    url = 'https://marketdesk.ai/library/browse/' + article
+    return certify({'id': publish.stable_post_id('marketdesk:' + article, 'article'),
+        'title': 'Dispersion shifted', 'content': 'New sector evidence.',
+        'timestamp': '2026-10-31T06:00:00Z', 'images': [], 'tags': ['NVDA'],
+        'source': {'kind': 'marketdesk', 'publisher': 'MS', 'articleId': article,
+            'articleUrl': url, 'url': url, 'evidenceKind': 'article', 'contentHash': 'a' * 64,
+            'documentDate': '2026-10-31', 'folderDate': '2026-10-31', 'pages': [], 'figures': []}})
+
+
+@pytest.mark.parametrize('copy_gap', [0, 18])
+def test_publication_fresh_connection_commits_post_and_source_once(monkeypatch, publication_peer, copy_gap):
+    from research import publish
+    state, clock, connection = publication_peer
+    post = _certified_marketdesk_post(monkeypatch)
+    assert db_http.hrana_execute('SELECT 1') == [(1,)]
+    clock['t'] += copy_gap  # Reproduce production's 18s gap below the 30s read idle budget.
+    assert publish.publish(post) == post['id']
+    assert state.connections == 2 and state.requests == 2
+    assert state.commits == 1 and len(state.batches) == 1
+    assert connection.execute('SELECT id FROM posts').fetchall() == [(post['id'],)]
+    source = connection.execute('SELECT post_id,provenance_json FROM research_post_sources').fetchall()
+    assert len(source) == 1 and source[0][0] == post['id']
+    assert json.loads(source[0][1])['articleId'] == post['source']['articleId']
+    assert not connection.in_transaction
+
+
+def test_publication_lost_commit_response_is_not_resent(monkeypatch, publication_peer):
+    from research import publish
+    state, clock, connection = publication_peer
+    state.mode = 'lost_commit'
+    post = _certified_marketdesk_post(monkeypatch)
+    assert db_http.hrana_execute('SELECT 1') == [(1,)]
+    clock['t'] += 18
+    with pytest.raises(db_http.DbHttpError, match='RemoteDisconnected') as error:
+        publish.publish(post)
+    assert isinstance(error.value.__cause__, http.client.RemoteDisconnected)
+    assert state.connections == 2 and state.requests == 2, 'fresh ambiguous write must never reconnect/resend'
+    assert state.commits == 1 and len(state.batches) == 1
+    assert connection.execute('SELECT count(*) FROM posts').fetchone() == (1,)
+    assert connection.execute('SELECT count(*) FROM research_post_sources').fetchone() == (1,)
+    assert not connection.in_transaction
+
+
+@pytest.mark.parametrize('gap', [5, 18])
+def test_read_pool_preserves_health_cadence_and_copy_gap(monkeypatch, publication_peer, gap):
+    state, clock, _ = publication_peer
+    state.mode = 'normal'
+    for _ in range(3):
+        assert db_http.hrana_execute('SELECT 1') == [(1,)]
+        clock['t'] += gap
+    assert db_http._KEEPALIVE_IDLE_S == 30.0
+    assert state.connections == 1 and state.requests == 3
+
+
+def test_sibling_write_pool_keeps_existing_five_second_reuse(publication_peer):
+    state, clock, connection = publication_peer
+    state.mode = 'normal'
+    hrana_http.hrana_execute('CREATE TABLE counter(value INTEGER)')
+    clock['t'] += 1
+    hrana_http.hrana_execute('INSERT INTO counter VALUES(1)')
+    clock['t'] += 3
+    hrana_http.hrana_execute('UPDATE counter SET value=value+1')
+    assert hrana_http._KEEPALIVE_IDLE_S == 5.0
+    assert state.connections == 1 and state.requests == 3
+    assert connection.execute('SELECT value FROM counter').fetchall() == [(2,)]
