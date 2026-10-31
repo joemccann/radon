@@ -94,6 +94,10 @@ The gateway starts before its consumers and has a bounded Unix-socket health
 probe. It participates in the normal exact-SHA deploy, restart, stability and
 rollback contracts. CLI/model dependency upgrades remain pinned source changes,
 image smokes and green CI; no mutable runtime auto-updater is introduced.
+Preparatory cache-migration and CLI-export containers discard inherited
+`NOTIFY_SOCKET`; only the foreground runtime's filtered notify proxy may
+notify systemd. This prevents a completed preparation container from replacing
+the service's main PID with its short-lived Podman conmon.
 `model_clients.py` promotes the exact image's CLI payload and consumer-only
 helpers atomically under `/opt/radon-model-clients/<SHA>`, with version/hash
 receipts. It does not execute host installers, provider login, or image tools
@@ -104,7 +108,21 @@ receipt under `/opt/radon-provision/model-gateway-cutover` before privileged
 helpers change. It verifies the observed API/Next image SHA and installed
 artifact bytes against the trusted previous Git commit. Recovery restores that
 exact previous helper/runtime/fleet contract before running the old helper's
-normal recovery; the control-plane floor never decreases. Other targets,
+normal recovery, with a daemon reload before invoking that helper. Application
+HEAD metadata is read as UID1000. The failed target must match root's pinned
+main and no committed-release marker may exist; the independent control-plane
+floor is preserved byte-for-byte even across rewritten history. The exact
+root-owned sticky `root:1000` `/etc/radon` directory is temporarily sealed via
+its pinned FD while artifacts are replaced, then its original `01770` mode is
+restored. A private receipt-side `config-parent-mode.json` intent is fsynced
+before chmod; kill/reboot retry validates exact directory identity before
+restoring permissions. Only the successful fsynced restoration removes that
+marker; its presence blocks receipt reuse or archival. A later capture first proves the previous release is serving and its
+entire installed baseline still matches the receipt, then atomically archives
+the completed attempt under a unique target-named root-private directory.
+Pending receipts are never discarded. Legacy units absent from the old
+manifest are retained only after exact previous-Git, owner and mode checks.
+Other targets,
 modified receipts, unrecognized paths and unverified source bytes are refused.
 
 ## MarketDesk deferred PDF archive

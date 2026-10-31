@@ -24,6 +24,23 @@ CLI packages and inference dependencies are built at reviewed pins in immutable 
 
 A release needs all required checks on its exact head and matching immutable application, archive and gateway images. Host coding clients are promoted from verified release artifacts; automated consumers do not install or upgrade provider CLIs. The first gateway cutover records a root-owned, hash-verified previous control-plane bundle for bounded rollback to that exact serving release. The privileged control-plane floor remains monotonic.
 
+First-cutover recovery reads application HEAD as UID1000, binds the failed
+target to root's pinned main, and refuses any committed-release marker. The
+independent control-plane floor stays unchanged across rewritten history.
+Capture also preserves canonical old files absent from a legacy manifest,
+after verifying their previous-Git bytes, ownership and mode. Recovery reloads
+the restored units before invoking the previous helper.
+
+The exact sticky `root:1000` `/etc/radon` directory is sealed temporarily
+through a pinned directory FD. Before chmod, recovery fsyncs a private
+`config-parent-mode.json` intent inside its root-owned receipt. SIGKILL or
+power-loss retry restores `01770` only when device, inode, ownership and modes
+match that intent; an unrelated `01750` directory is never widened. The marker
+is removed only after restored permissions reach stable storage. Pending
+permission recovery blocks receipt reuse and archival. A later serving and
+baseline-verified capture archives a completed attempt under a unique
+target-named root-private directory before creating the next receipt.
+
 Production verification must cover service readiness, isolated consumer environments, actual native client requests, provider fallback, token renewal, the forecasting and embedding spaces, and a real pipeline publication. A passing canary is not a deployed repair.
 
 

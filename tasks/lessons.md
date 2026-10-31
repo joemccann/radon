@@ -1398,3 +1398,8 @@ When the user includes coding and incident-response agents, inventory their infe
 ## 2026-10-30: shared model deadlines include admission and every streamed chunk
 
 Start the request clock before credential-lock and broker I/O admission. Every provider attempt, local acceptance continuation and native protocol must share that original deadline and cancellation signal. A per-read timeout is not a total budget; test a real tiny-chunk stream that keeps resetting reads. Moving a limiter into a container also requires durable pacing state and preservation of existing cooldown maxima before old containers disappear.
+
+
+## 2026-10-31: preparations cannot own service notifications
+
+Strip `NOTIFY_SOCKET` from preparatory Podman children and preserve the foreground proxy. Reproduce readiness followed by process exit with real systemd/Podman; a successful health reply alone does not prove service survival. First-cutover rollback must preserve legacy installed artifacts absent from older manifests, read application metadata under its owner UID, keep the privileged floor independent of the failed target, and retain receipts until verified recovery.

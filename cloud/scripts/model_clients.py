@@ -216,7 +216,11 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
     else:
         command += ["-C", "/opt/radon-clis", ".", "-C", "/usr/local/bin", "node", "-C", "/home/radon/radon/scripts", *("model_gateway/" + name for name in HELPERS)]
     subprocess.run([engine, "rm", "-f", EXPORT_NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    # Export is preparation, never the systemd service's main process. Podman
+    # otherwise adopts the inherited socket and publishes its conmon MAINPID.
+    export_env = os.environ.copy()
+    export_env.pop("NOTIFY_SOCKET", None)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=export_env)
     deadline = time.monotonic() + 60
     received = 0
     try:

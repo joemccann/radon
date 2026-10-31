@@ -200,6 +200,15 @@ notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
 including those mixed into an otherwise valid datagram. The proxy socket stays
 0600 and is owned by the container user.
 
+Preparatory model-cache migration and CLI-export containers remove inherited
+`NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
+Podman conmon. The foreground runtime retains its filtered notify proxy.
+First-cutover model rollback preserves the independent privileged floor,
+canonical legacy files omitted from the old manifest, and pending recovery
+receipts. Temporary `/etc/radon` hardening has a root-owned, fsynced permission
+intent so kill/reboot retries recover its exact original mode without widening
+unrelated directories. See [model gateway rollback](model-gateway.md#upgrades-and-rollback).
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container
