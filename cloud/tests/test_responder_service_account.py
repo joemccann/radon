@@ -38,7 +38,7 @@ def test_isolated_responder_has_own_identity_home_and_readiness_gate():
     assert unit["ProtectSystem"] == ["strict"]
     assert unit["ConditionPathExists"] == [HOME + "/ready"]
     assert "HOME=" + HOME in unit["Environment"]
-    assert "GROK_BIN=" + HOME + "/.local/bin/grok" in unit["Environment"]
+    assert "GROK_BIN=/opt/radon-model-clients/current/bin/grok" in unit["Environment"]
     assert unit["WorkingDirectory"] == [HOME + "/repo"]
     assert unit["ExecStart"] == [
         "/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py"
@@ -55,18 +55,15 @@ def test_isolated_responder_has_own_identity_home_and_readiness_gate():
     assert all("/home/radon" not in value for key in ("ExecStart", "ReadWritePaths") for value in unit.get(key, []))
 
 
-def test_separate_upgrader_retains_controller_ownership_and_shared_runtime():
+def test_legacy_upgrade_name_is_read_only_gateway_readiness():
     unit = _directives(UPGRADE)
     assert unit["User"] == [USER]
     assert unit["ProtectProc"] == ["invisible"]
-    assert unit["ConditionPathExists"] == [HOME + "/ready"]
-    command = unit["ExecStart"][0]
-    assert command.startswith("/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder-upgrade/scripts/grok_upgrade.py ")
-    assert "--lock " + HOME + "/runtime/grok-runtime.lock" in command
-    assert "--lkg " + HOME + "/runtime/grok_lkg.json" in command
-    assert "--scratch " + HOME + "/upgrade" in command
+    assert unit["ConditionPathExists"] == [HOME + "/ready", "/opt/radon-model-clients/current/manifest.json"]
+    assert unit["ExecStart"] == ["/usr/bin/python3.13 -I -S /opt/radon-model-clients/current/lib/model_gateway/cli.py status"]
+    assert unit["SupplementaryGroups"] == ["radon-model-connect"]
     assert HOME + "/repo" in " ".join(unit["InaccessiblePaths"])
-    assert "--live-bin /home/radon/" in (CLOUD / "services/radon-grok-upgrade.service").read_text()
+    assert not unit.get("ReadWritePaths")
     responder = _directives(RESPONDER)
     assert "RADON_GROK_RUNTIME_LOCK=" + HOME + "/runtime/grok-runtime.lock" in responder["Environment"]
     assert "RADON_GROK_LKG_PATH=" + HOME + "/runtime/grok_lkg.json" in responder["Environment"]
@@ -85,7 +82,8 @@ def test_migration_prepares_independent_auth_and_controlled_handover():
     assert 'ACCOUNT=radon-responder' in setup
     assert 'ACCOUNT_HOME=/var/lib/radon-responder' in setup
     assert 'useradd' in setup and '--system' in setup
-    assert 'grok login --device-auth' in setup
+    assert 'provider login belongs to the gateway' in setup
+    assert 'grok login --device-auth' not in setup
     assert 'finalize' in setup and 'rollback' in setup
     assert 'root-owned tree' in setup
     assert 'radon-grok-page-responder.timer' in setup
@@ -155,7 +153,7 @@ def test_forward_handover_preserves_a_working_timer_on_each_failure(maintenance,
         if "--property=ActiveState" in args:
             active_checks += 1
             return SimpleNamespace(returncode=0, stdout="active" if failure == "race-active" and active_checks == 2 else "inactive")
-        if failure == "target-enable" and args[1:3] == ["enable", "--now"] and args[-1] == maintenance.NEW_TIMERS[1]:
+        if failure == "target-enable" and args[1:3] == ["enable", "--now"] and args[-1] == maintenance.NEW_TIMERS[-1]:
             raise maintenance.MaintenanceError("synthetic enable failure")
         if failure == "source-disable" and args[1:3] == ["disable", "--now"] and args[-1] == maintenance.OLD_TIMER:
             raise maintenance.MaintenanceError("synthetic disable failure")
@@ -329,60 +327,30 @@ def test_handover_fails_closed_on_state_lookup_errors(maintenance, tmp_path, res
     assert not any(args[1:3] == ["enable", "--now"] and args[-1] in maintenance.NEW_TIMERS for args in calls)
 
 
-@requires_linux_test_binary
-@pytest.mark.parametrize("layout", ["native", "canonical", "canonical-link", "installer-native", "installer-empty", "dangling", "nonexecutable", "directory"])
-def test_preparation_normalizes_native_installer_layout_without_overwriting_slots(maintenance, tmp_path, monkeypatch, layout):
+@pytest.mark.parametrize("layout", ["native", "canonical", "canonical-link", "missing", "dangling", "nonexecutable", "directory"])
+def test_preparation_preserves_legacy_slots_and_uses_only_ci_receipts(maintenance, tmp_path, monkeypatch, layout):
     monkeypatch.setattr(maintenance, "ACCOUNT_HOME", tmp_path)
     canonical = tmp_path / ".local/bin/grok"
     native = tmp_path / ".grok/bin/grok"
     canonical.parent.mkdir(parents=True)
     native.parent.mkdir(parents=True)
-    installs = []
-
-    def executable(path):
-        path.write_text("#!/bin/sh\nexit 0\n")
-        path.chmod(0o700)
-
     if layout in {"native", "canonical-link"}:
-        executable(native)
+        native.write_text("preserve native"); native.chmod(0o700)
     if layout == "canonical":
-        executable(canonical)
-    elif layout == "canonical-link":
-        canonical.symlink_to(native)
-    elif layout == "dangling":
-        canonical.symlink_to(tmp_path / "missing")
-    elif layout == "nonexecutable":
-        canonical.write_text("preserve this slot")
-    elif layout == "directory":
-        canonical.mkdir()
-
-    def account(args, *, check=True, **kwargs):
-        if args[:2] == ["/bin/bash", "-c"]:
-            installs.append(args)
-            if layout != "installer-empty":
-                executable(native)
-            return SimpleNamespace(returncode=0)
-        result = subprocess.run([str(arg) for arg in args], capture_output=True, text=True, env=maintenance.native_env())
-        if check and result.returncode:
-            raise maintenance.MaintenanceError("synthetic layout rejected")
-        return result
-
-    monkeypatch.setattr(maintenance, "as_account", account)
-    if layout in {"installer-empty", "dangling", "nonexecutable", "directory"}:
-        with pytest.raises(maintenance.MaintenanceError):
-            maintenance.ensure_native_cli()
-        if layout == "dangling":
-            assert canonical.is_symlink() and os.readlink(canonical) == str(tmp_path / "missing")
-        elif layout == "nonexecutable":
-            assert canonical.read_text() == "preserve this slot"
-        elif layout == "directory":
-            assert canonical.is_dir()
-    else:
-        maintenance.ensure_native_cli()
-        assert canonical.is_file() and os.access(canonical, os.X_OK)
-        assert bool(installs) == (layout == "installer-native")
-        if layout != "canonical":
-            assert canonical.is_symlink() and canonical.resolve() == native
+        canonical.write_text("preserve canonical"); canonical.chmod(0o700)
+    elif layout == "canonical-link": canonical.symlink_to(native)
+    elif layout == "dangling": canonical.symlink_to(tmp_path / "missing")
+    elif layout == "nonexecutable": canonical.write_text("preserve slot")
+    elif layout == "directory": canonical.mkdir()
+    before = {str(path.relative_to(tmp_path)): (path.lstat().st_mode, os.readlink(path) if path.is_symlink() else path.read_bytes() if path.is_file() else None) for path in tmp_path.rglob("*")}
+    calls = []
+    monkeypatch.setattr(maintenance, "as_account", lambda args, **kw: calls.append(args) or SimpleNamespace(returncode=0))
+    maintenance.ensure_native_cli()
+    after = {str(path.relative_to(tmp_path)): (path.lstat().st_mode, os.readlink(path) if path.is_symlink() else path.read_bytes() if path.is_file() else None) for path in tmp_path.rglob("*")}
+    assert before == after
+    assert len(calls) == 1 and calls[0][:4] == ["/usr/bin/python3.13", "-I", "-S", "-c"]
+    assert "managed_manifest" in calls[0][4]
+    assert "curl" not in " ".join(map(str, calls[0]))
 
 
 @pytest.mark.parametrize("lookup_error", [OSError("synthetic lookup failure"), subprocess.TimeoutExpired("synthetic", 10)])

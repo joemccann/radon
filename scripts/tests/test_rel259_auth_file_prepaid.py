@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from clients.model_ladder import _auth_for, wired_providers
+from model_gateway.engine import _auth_for, wired_providers
 
 
 @pytest.mark.parametrize("provider,relative,payload", [

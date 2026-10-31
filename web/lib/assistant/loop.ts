@@ -15,9 +15,8 @@
  *      returning empty finals and the canned error).
  *
  * The conversation carries structured content blocks (text / tool_use /
- * tool_result) so the model sees its own calls and their outputs. Anthropic
- * accepts those blocks natively; OpenAI-compatible providers (xAI Grok) map
- * them in `toOpenAiMessages`. String turns from the UI stay strings.
+ * tool_result) so the model sees its own calls and their outputs. The standalone model
+ * gateway preserves those blocks and owns provider-specific translation. String turns from the UI stay strings.
  */
 
 import {

@@ -109,7 +109,7 @@ def _restart_services(tmp_path: pathlib.Path, *, refresh_rc: int) -> subprocess.
         for name, body in (
             ("prepare_release_transition", "return 0"),
             ("payload_paths_changed", "return 0"),
-            ("stop_services_for_transition", "return 0"),
+            ("stop_services_for_transition", 'prepare_release_transition "$@"; return 0'),
             ("activate_staged_release", "return 0"),
             ("recover_pending_transition", "return 0"),
             ("refresh_control_plane", f"return {refresh_rc}"),
@@ -145,9 +145,9 @@ def test_restart_services_restarts_the_app_tier_when_the_refresh_fails(tmp_path)
     assert result.returncode == 1, result.stdout + result.stderr
     assert result.started, result.calls  # type: ignore[attr-defined]
     assert result.calls == [  # type: ignore[attr-defined]
-        "prepare_release_transition",
         "payload_paths_changed",
         "stop_services_for_transition",
+        "prepare_release_transition",
         "activate_staged_release",
         "refresh_control_plane",
         "start_services_after_transition",
@@ -160,9 +160,9 @@ def test_restart_services_installs_units_only_after_a_successful_refresh(tmp_pat
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.calls == [  # type: ignore[attr-defined]
-        "prepare_release_transition",
         "payload_paths_changed",
         "stop_services_for_transition",
+        "prepare_release_transition",
         "activate_staged_release",
         "refresh_control_plane",
         "start_services_after_transition",

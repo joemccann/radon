@@ -40,7 +40,8 @@ OPERATOR_FLAGS = (
 MANAGED = (
     ("GROK_PAGE_NO_DOTENV", "1"),
     ("GROK_PAGE_SYNC_REMOTE", "1"),
-    ("GROK_BIN", "/home/radon/.local/bin/grok"),
+    ("GROK_BIN", "/opt/radon-model-clients/current/bin/grok"),
+    ("RADON_MODEL_GATEWAY_SOCKET", "/run/radon-model-gateway/gateway.sock"),
 )
 # Flags are booleans or small integers; anything else is not preserved.
 _FLAG_VALUE = re.compile(r"^[A-Za-z0-9_.-]{0,32}$")

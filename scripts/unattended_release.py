@@ -561,13 +561,15 @@ class CodexReviews:
         self.failure_reason = ""
 
     def _model_context(self, model):
-        path = Path.home() / ".codex" / "models_cache.json"
-        _trusted(path, os.getuid())
-        models = json.loads(path.read_text()).get("models", [])
-        rows = [row for row in models if row.get("slug") == model]
+        from model_gateway.client import request
+        inventory = request("models", {}, timeout_seconds=20)
+        models = inventory.get("models")
+        if not isinstance(models, list):
+            raise ValueError("reviewer capacity metadata unavailable")
+        rows = [row for row in models if isinstance(row, dict) and row.get("id") == model and row.get("provider") == "openai"]
         if len(rows) != 1:
             raise ValueError("reviewer capacity metadata unavailable")
-        window, percent = rows[0].get("context_window"), rows[0].get("effective_context_window_percent")
+        window, percent = rows[0].get("contextWindow"), rows[0].get("effectiveContextWindowPercent")
         if type(window) is not int or window <= 16384 or type(percent) is not int or not 1 <= percent <= 100:
             raise ValueError("invalid reviewer capacity metadata")
         # Carry only actual capacity fields into the restrictive catalog;
@@ -755,12 +757,12 @@ class CodexReviews:
         try:
             contexts = {model: self._model_context(model) for model in self.policy.reviewers}
         except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.TimeoutExpired):
-            self.failure_reason = "Verified local reviewer metadata is temporarily unavailable or invalid; preserve the exact candidate and retry. No approval was issued."
+            self.failure_reason = "Verified model-service reviewer metadata is temporarily unavailable or invalid; preserve the exact candidate and retry. No approval was issued."
             raise RuntimeError(self.failure_reason) from None
         complete = json.loads(payload)
         complete["verified_model_context"] = contexts
         payload = json.dumps(complete, sort_keys=True, separators=(",", ":"))
-        from codex_capability_probe import assert_tool_free, tool_free_catalog, snapshot_binary, assert_subscription
+        from codex_capability_probe import assert_tool_free, tool_free_catalog, snapshot_binary, assert_subscription, gateway_review
         _trusted(self.directory, os.getuid(), directory=True)
         binary = snapshot_binary(Path("/opt/homebrew/bin/codex"), self.directory)
         _trusted(binary, os.getuid())
@@ -787,7 +789,7 @@ class CodexReviews:
         assert_subscription(binary, env)
         receipts = []
         for model in self.policy.reviewers:
-            key = hashlib.sha256(f"full-source-context-v4:{binary_hash}:{pr.head_sha}:{pr.diff_digest}:{input_digest}:{model}".encode()).hexdigest()
+            key = hashlib.sha256(f"full-source-context-v5:{binary_hash}:{pr.head_sha}:{pr.diff_digest}:{input_digest}:{model}".encode()).hexdigest()
             receipt_path = self.directory / f"{key}.json"
             if receipt_path.exists():
                 _trusted(receipt_path, os.getuid())
@@ -820,7 +822,8 @@ class CodexReviews:
                     if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_hash:
                         raise RuntimeError("reviewer binary changed after its capability probe")
                     try:
-                        _command([*args, "-"], input=prompt, env=env, timeout=900)
+                        with gateway_review(binary, [*args[1:], "-"], env) as (gateway_args, gateway_env):
+                            _command(gateway_args, input=prompt, env=gateway_env, timeout=900)
                         data = json.loads(output.read_text())
                         if not self._valid_result(data):
                             raise ValueError("invalid reviewer result")

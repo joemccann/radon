@@ -1,9 +1,7 @@
 [Unit]
-Description=Radon subscription token vault (seal, refresh, probe, restore, push-login agent CLI credentials)
-# DS-2026-10-05-05: the vault broker holds the secret-store key; this unit
-# reaches the four CLI credential slots only through its socket.
-Wants=radon-subscription-vault.service
-After=network.target radon-subscription-vault.service
+Description=Radon subscription refresh request through the private model gateway
+Wants=radon-model-gateway.service
+After=radon-model-gateway.service
 StartLimitIntervalSec=1800
 StartLimitBurst=5
 
@@ -12,46 +10,25 @@ Type=oneshot
 User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/etc/radon/subscription-tokens/env
-Environment=RADON_DB_NO_REPLICA=1
-Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock
-# The Antigravity and Grok installers place `agy` and `grok` in ~/.local/bin;
-# the daemon prefers each CLI-native refresh. (The module also searches that
-# directory itself, so a manual run outside this unit finds them too.)
-Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
-# Provider CLIs retain their canonical credential locations and the vault
-# socket. Only the keeper's database, paging and provider-directory inputs
-# are loaded from its private derived environment.
+Environment=RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# The existing thirty-minute timer submits/polls a bounded refresh job.
+# Vendor authentication, probes, rotation and sealing execute only inside
+# the gateway's immutable image. This client receives no provider grants,
+# database credentials, paging keys, vault socket or store master key.
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictSUIDSGID=yes
 ProtectSystem=full
 CapabilityBoundingSet=
-# systemd loads the root-private environment before building this namespace.
-InaccessiblePaths=-/etc/radon/env -/etc/radon/subscription-tokens/env
 ProtectProc=invisible
-# The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
-# cooldowns and the consecutive-error streak. Without this the directory is not
-# owned by radon and every run silently loses both.
-StateDirectory=radon
-StateDirectoryMode=0750
-ExecStart=/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once
+InaccessiblePaths=-/etc/radon/env -/etc/radon/subscription-tokens/env -/run/radon-subscription-vault -/home/radon/.grok -/home/radon/.codex -/home/radon/.claude -/home/radon/.gemini
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.model_gateway.refresh_cli
 StandardOutput=journal
 StandardError=journal
-# --once exits 1 whenever a provider is needs_reauth or error, which is the
-# steady state this unit exists to report and which the module already pages
-# for at normal priority. Without this the oneshot latches ActiveState=failed on
-# every fire, the watchdog never matches its exit-code latch, and one revoked
-# refresh token becomes an hour-long P1 emergency siren every day. 78
-# (store_unavailable) is deliberately still a failure: that one warrants P1.
+# Needs-reauth/error is already paged by the lifecycle worker. Store/RPC
+# failures remain failures (78), never a false healthy credential state.
 SuccessExitStatus=1
-# Per provider the ceiling is a 150s CLI probe + 20s OIDC discovery + two 63s
-# POST envelopes (form, then the JSON retry): ~296s, and one push login can
-# hold the run for up to 600s. That sum does not fit a 30min slot, so the module
-# budgets itself: inside RUN_BUDGET_SECONDS (1500s) it starts no probe with
-# under 150s left, no refresh with under 170s left, and clips the login wait to
-# what remains. This kill is the backstop behind that budget, kept under the
-# 30min slot so a hung run cannot block the next refresh.
 TimeoutStartSec=1700
 
 [Install]

@@ -16,9 +16,10 @@ import tempfile
 import uuid
 
 REPO = 'joemccann/radon'
+PUBLIC_MODEL_HELPERS = tuple('model_gateway/' + name for name in ('__init__.py', 'client.py', 'cli.py', 'cli_bridge.py'))
 FILES = {
-    'radon-operator-releases': ('unattended_release.py', 'private_security_release.py', 'operator_runtime_refresh.py', 'codex_capability_probe.py', 'ci/check_pr_body.py'),
-    'radon-toolchain-updater': ('nightly_toolchain_update.py', 'utils/atomic_io.py'),
+    'radon-operator-releases': ('unattended_release.py', 'private_security_release.py', 'operator_runtime_refresh.py', 'codex_capability_probe.py', 'ci/check_pr_body.py', *PUBLIC_MODEL_HELPERS),
+    'radon-toolchain-updater': ('nightly_toolchain_update.py', 'utils/atomic_io.py', *PUBLIC_MODEL_HELPERS),
 }
 
 

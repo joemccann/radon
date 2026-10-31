@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_model_ladder import _StreamingResponse, _openai_obj_ok
-from clients import model_ladder as ml
+from model_gateway import engine as ml
 from research.model import Reviewer, ModelError
 
 @pytest.fixture
