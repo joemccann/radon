@@ -19,9 +19,6 @@ def test_bootstrap_is_status_only_and_never_touches_provider_secrets(tmp_path):
     assert not (tmp_path / ".radon/agent-cli/env").exists()
     assert not (tmp_path / ".fx/settings.json").exists()
     assert "nvapi-fixture" not in result.stdout + result.stderr
-    body = (ROOT / "scripts/agent_cli_bootstrap.sh").read_text()
-    assert "model_gateway/cli.py" in body
-    assert "NVIDIA_API_KEY" not in body and "CEREBRAS_API_KEY" not in body
 
 
 def fixture_release(tmp_path):

@@ -36,9 +36,25 @@ def test_invalid_argument_refused_before_service_probe(tmp_path):
     assert result.returncode == 64
 
 
-def test_bootstrap_only_invokes_trusted_gateway_status_helper():
+def test_bootstrap_only_invokes_trusted_gateway_status_helper(tmp_path):
     body = BOOTSTRAP.read_text()
-    assert '/opt/radon-model-clients/current/lib/model_gateway/cli.py' in body
-    assert '"$HELPER" status' in body
     for forbidden in ('curl ', 'auth.json', 'NVIDIA_API_KEY', 'CEREBRAS_API_KEY', 'write_grok_home', 'write_fx_settings'):
         assert forbidden not in body
+    home = tmp_path / 'home'
+    home.mkdir()
+    result = subprocess.run(
+        ['/bin/bash', '-x', str(BOOTSTRAP), '--check'],
+        env={'PATH': '/usr/bin:/bin', 'HOME': str(home)},
+        capture_output=True, text=True, timeout=5,
+    )
+    trace = result.stderr
+    helper = '/opt/radon-model-clients/current/lib/model_gateway/cli.py'
+    assert f'+ HELPER={helper}' in trace
+    refused = f'[[ ! -r {helper} ]]' in trace
+    launched = f'+ exec ' in trace and helper in trace and trace.rstrip().endswith(' status')
+    assert refused or launched
+    if refused:
+        assert result.returncode == 75
+        assert 'Model clients are unavailable; deploy the reviewed gateway client release.' in result.stderr
+    else:
+        assert result.returncode == 0
