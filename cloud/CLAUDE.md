@@ -933,6 +933,33 @@ and executable hashes, and atomically selects an immutable
 The manifest carries the exact release, provider versions and SHA256 evidence.
 A refused export retains the previous client selector and fails deployment.
 
+`radon-app-runtime check-model-space` is a fixed, read-only root action with
+no caller paths, thresholds or environment bypass. Deployment checks it after
+exact-image pulls, before creating a staged worktree and immediately before
+teardown; a prestage refusal never falls through to a host build. It groups
+fixed destinations by filesystem and uses `f_bavail`, not root-reserved free
+blocks. Sequential CLI archive/tree peaks derive from the enforced 2GiB
+export bounds and 100000-member allocation overhead. Pinned model-file sizes
+are root-owned constants contract-tested against the image manifest. Each
+filesystem must also have sufficient `f_favail` for bounded members/cache
+metadata; unknown or unbounded inode metadata refuses. The serving checkout
+filesystem retains an explicit 1GiB/1024-inode operational and recovery margin.
+A shared 4KiB filesystem requires 8881176576 writable bytes and 201161 inodes
+after pulls. This is admission evidence, not a reservation against later writes.
+Promotion repeats the check before allocation. Recovery instead uses
+`recover-model-clients` to verify existing exact immutable Linux/helper and
+Darwin bundle receipts/hashes and reselect the Linux payload without export or
+payload copying; Darwin publication remains commit-only. Missing or corrupt
+recovery bytes fail closed. Legacy two-image recovery remains unchanged.
+Model-cache reference write/fsync/replace failures remove temporary refs,
+retain the prior canonical ref and report only a safe errno name with exit78.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+
 
 ### Root export and Mac model transport
 

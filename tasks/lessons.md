@@ -1,3 +1,10 @@
+# 2026-10-31: model deployment resource admission
+
+- Use the canonical pytest temporary root for full gates. On macOS an explicit /tmp base can inherit group wheel instead of the process group and invalidate permission fixtures; reproduce with the canonical root before changing production guards or assertions.
+- Root-reserved free blocks do not establish writable capacity for UID1000. Check fixed destinations with f_bavail and finite f_favail, include archive/tree peaks, and repeat after image pulls and before teardown. A refused image preflight must not fall through to host compilation.
+- Preserve recovery under resource pressure: reuse verified existing immutable payloads without allocating another release, retain exact prior control-plane receipts, and never lower a resource guard to make deployment proceed.
+- A restored old release returning HTTP 200 proves recovery only. Keep the new service pending until its exact deployment and real consumer flow are verified.
+
 # 2026-10-30: tracked source and prior-release fixtures
 
 - Stage intended new source before tracked-file policy guards; untracked files can hide violations from otherwise green full suites.

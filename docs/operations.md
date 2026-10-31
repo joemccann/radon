@@ -203,6 +203,25 @@ including those mixed into an otherwise valid datagram. The proxy socket stays
 Preparatory model-cache migration and CLI-export containers remove inherited
 `NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
 Podman conmon. The foreground runtime retains its filtered notify proxy.
+Before prestage allocation, after exact image pulls and just before teardown,
+`sudo /usr/local/sbin/radon-app-runtime check-model-space` checks fixed destination
+filesystems using UID1000-available bytes (`f_bavail`) and available inodes.
+Root-reserved blocks do not count. The conservative shared 4KiB-volume budget
+is 8881176576 bytes/201161 inodes, including bounded archive/tree peaks, pinned
+model-cache assets and an explicit 1GiB/1024-inode runtime/recovery margin.
+No threshold override or data pruning occurs; insufficient or unknown capacity
+refuses before stopping consumers and never triggers a fallback host build.
+Promotion repeats the capacity check. Recovery instead hash-verifies existing
+immutable clients/exports, without allocating another payload or applying the
+fresh-install threshold. Missing/corrupt recovery artifacts fail closed.
+Cache-ref failures remove temporary files, preserve canonical refs and report
+a safe errno name with exit78; they never reset provider pacing state.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
 First-cutover model rollback preserves the independent privileged floor,
 canonical legacy files omitted from the old manifest, and pending recovery
 receipts. Temporary `/etc/radon` hardening has a root-owned, fsynced permission

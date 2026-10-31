@@ -2991,7 +2991,7 @@ case "$1" in
         exit "$rollback_rc"
       fi
     fi
-    "$MODEL_CLIENT_RUNTIME" install-model-clients
+    "$MODEL_CLIENT_RUNTIME" recover-model-clients
     reset_core_failures
     systemctl_bounded --no-block start "${CORE_SERVICES[@]}"
     for unit in "${CORE_SERVICES[@]}"; do

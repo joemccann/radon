@@ -43,6 +43,33 @@ target-named root-private directory before creating the next receipt.
 
 Production verification must cover service readiness, isolated consumer environments, actual native client requests, provider fallback, token renewal, the forecasting and embedding spaces, and a real pipeline publication. A passing canary is not a deployed repair.
 
+Before allocating prestage worktrees, after exact image pulls and immediately
+before stopping consumers, deployment runs the root-owned, read-only
+`sudo /usr/local/sbin/radon-app-runtime check-model-space` action. Its fixed
+per-filesystem budget uses non-root `f_bavail` and available inodes, includes
+bounded simultaneous CLI archives/trees, pinned model-cache bytes and member
+metadata, and retains a declared 1GiB/1024-inode operational/recovery margin.
+The shared 4KiB filesystem budget is 8881176576 writable bytes and 201161 inodes.
+Unknown inode capacity refuses; root-reserved blocks never satisfy the check.
+There is no threshold override or automatic data deletion. A rejected prestage
+or capacity probe cannot fall back to a host compile. Promotion rechecks before
+writing; concurrent disk growth can still cause a later refusal.
+
+Gateway-era recovery verifies and reuses the already-installed exact Linux
+executables/helpers and Darwin bundle using immutable receipts and hashes. It
+can reselect the existing Linux release without a new export, payload copy or
+fresh-install capacity gate. It does not publish a Mac export before commit.
+Missing/corrupt payloads refuse. Cache-migration failures retain canonical refs,
+remove temporary reference files and expose only the exception class and safe
+errno name, such as `errno=ENOSPC`, with exit78. Pacing deadlines and provider
+grants are unchanged.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+
 
 ## One-time Mac transport installation
 
