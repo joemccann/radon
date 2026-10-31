@@ -18,6 +18,7 @@ from typing import Any, Callable, Sequence
 import uuid
 
 from clients.model_ladder import (
+    MODEL_LADDER_ORDER,
     ModelLadderExhausted,
     ModelResponseError,
     complete_multimodal_json,
