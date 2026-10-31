@@ -135,6 +135,8 @@ readonly SERVICE_FILES=(
   radon-portfolio-archive.timer
   radon-research-archive.service
   radon-research-archive.timer
+  radon-research-asset-archive.service
+  radon-research-asset-archive.timer
   radon-marketdesk.service
   radon-marketdesk.timer
   radon-marketdesk-pdf.service

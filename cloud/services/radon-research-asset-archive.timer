@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon daily research asset archive
+
+[Timer]
+# Daily: assets grow ~0.14G/day on a 75G app host disk at 92% (2026-10-31).
+# Steady state is one HEAD per local asset plus the day's new uploads.
+# After the Sunday 03:20 UTC disk-cleanup pass, before the 04:20 evidence run.
+OnCalendar=*-*-* 03:40:00 UTC
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

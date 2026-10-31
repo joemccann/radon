@@ -465,6 +465,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 04:20 UTC). 9d window = one week + jitter + a 2-day grace, mirrors
     # web/lib/serviceHealthWindows.ts. B2 + local disk, no IB.
     "research-archive": {"open": 9 * _DAY, "closed": 9 * _DAY, "requires_ib": False},
+    # research-asset-archive — daily research asset + download archive to B2,
+    # confirm, then prune past a 30-day hot window
+    # (scripts/research/asset_archive.py via radon-research-asset-archive.timer,
+    # 03:40 UTC). 48h window mirrors web/lib/serviceHealthWindows.ts and the
+    # other nightly B2 jobs. B2 + local disk, no IB.
+    "research-asset-archive": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
     # db-retention — daily keep-latest sweep for append-only scan tables
     # (scripts/db_retention_sweep.py via radon-db-retention.timer).
     "db-retention": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
@@ -732,6 +738,8 @@ BUCKETS: dict[str, list[str]] = {
         "portfolio-archive",
         # Weekly research evidence archive to B2, 9-day window.
         "research-archive",
+        # Daily research asset/download archive to B2, 48h window.
+        "research-asset-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.

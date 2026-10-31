@@ -802,6 +802,17 @@ since host radon cannot traverse `/var/lib/radon-private`. Heartbeat
 `research-archive` (9d). Runbook: `docs/operations.md` "Research evidence
 archive".
 
+`setup-vps.sh` inventories `radon-research-asset-archive.{service,timer}`
+and `enable_services` enables the timer: daily 03:40 UTC, uploads private
+research `assets/` and cached `downloads/` to B2 (`research/assets/`,
+`research/downloads/`), HEAD-confirms, then prunes copies past a 30-day hot
+window and downloads identical to a confirmed asset. Files unfinished
+MarketDesk or research work references are kept at any age; a failed
+reference lookup prunes nothing. `read_asset` reads a pruned asset back
+from B2. Same drop-in shape as the evidence archive.
+Heartbeat `research-asset-archive` (48h). Runbook: `docs/operations.md`
+"Research asset archive".
+
 `setup-vps.sh` inventories `radon-marketdesk.{service,timer}` and
 `enable_services` enables the timer: every 5 minutes (`*:04/5:41`), the
 marketdesk.ai research ingest that replaced the shared-folder watcher. Its

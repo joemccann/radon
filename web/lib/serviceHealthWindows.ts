@@ -633,6 +633,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // 9d window = one week + timer jitter + a 2-day grace. No IB.
   "research-archive": { open: 9 * DAY, extended: 9 * DAY, closed: 9 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``research-asset-archive`` is the daily research asset + cached download
+  // archive (scripts/research/asset_archive.py via
+  // radon-research-asset-archive.timer, 03:40 UTC): upload to B2, confirm,
+  // then prune local copies past the 30-day hot window. 48h window matches
+  // the other nightly B2 jobs. No IB.
+  "research-asset-archive": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``db-retention`` is the daily keep-latest sweep for append-only scan
   // snapshot tables (scripts/db_retention_sweep.py via
   // radon-db-retention.timer, 07:22 UTC). Does not touch portfolio_snapshots

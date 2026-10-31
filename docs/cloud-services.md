@@ -643,6 +643,7 @@ available; portfolio and media archives cover only their respective data.
 | `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…), and delete `account_margin_samples` older than `MARGIN_SAMPLES_KEEP_DAYS` in [`scripts/db/retention.py`](../scripts/db/retention.py). A sample cited by `position_capital_observations` stays, as does a sample inside `MARGIN_SAMPLES_BRACKET_WINDOW_S` of a fill that no VALID observation covers. Never touches journal or portfolio. Heartbeat: `db-retention`. |
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
+| `radon-research-asset-archive.timer` | **03:40** daily | Research `assets/` and cached `downloads/` → **Backblaze B2** `research/assets/` and `research/downloads/`, HEAD-confirm, then prune local copies past the 30-day hot window (downloads identical to an asset go at once; files unfinished MarketDesk or research work references stay at any age, and a failed reference lookup prunes nothing). Readers fetch pruned assets back from B2. Heartbeat: `research-asset-archive` (48h). `TimeoutStartSec=10800`. Runbook: [operations](operations.md#research-asset-archive). |
 
 ## Subscription tokens (agent CLIs)
 

@@ -70,6 +70,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ai-cycle-backfill.service.d/runtime-container.conf
   services/radon-aa-frontier-refresh.service.d/runtime-container.conf
   services/radon-research-archive.service.d/runtime-container.conf
+  services/radon-research-asset-archive.service.d/runtime-container.conf
   services/radon-marketdesk.service.d/runtime-container.conf
   services/radon-marketdesk-pdf.service.d/runtime-container.conf
   scripts/subscription_service_env.py
@@ -145,6 +146,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ai-cycle-backfill.service.d/runtime-container.conf
   /etc/systemd/system/radon-aa-frontier-refresh.service.d/runtime-container.conf
   /etc/systemd/system/radon-research-archive.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research-asset-archive.service.d/runtime-container.conf
   /etc/systemd/system/radon-marketdesk.service.d/runtime-container.conf
   /etc/systemd/system/radon-marketdesk-pdf.service.d/runtime-container.conf
   /usr/local/lib/radon/subscription_service_env.py
@@ -179,6 +181,7 @@ readonly -a CONTROL_PLANE_MODES=(
   440
   440
   440
+  644
   644
   644
   644
