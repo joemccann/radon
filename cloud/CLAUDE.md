@@ -964,14 +964,21 @@ no caller paths, thresholds or environment bypass. Deployment checks it after
 exact-image pulls, before creating a staged worktree and immediately before
 teardown; a prestage refusal never falls through to a host build. It groups
 fixed destinations by filesystem and uses `f_bavail`, not root-reserved free
-blocks. Sequential CLI archive/tree peaks derive from the enforced 2GiB
-export bounds and 100000-member allocation overhead. Pinned model-file sizes
-are root-owned constants contract-tested against the image manifest. Each
+blocks. Sequential CLI archive/tree peaks derive from pinned per-release bounds
+(`LINUX_MAX_PAYLOAD_BYTES`/`LINUX_MAX_MEMBERS`/`LINUX_MAX_STREAM_BYTES`,
+`DARWIN_MAX_EXPORT_BYTES`, ~25% over the observed release) that export and
+extraction also enforce; app-images runs `scripts/ci/check_model_client_bounds.py`
+on the exact built image so a bigger bundle fails CI. Pinned model-file
+paths/sizes/digests are root-owned constants contract-tested against the image
+manifest; files already present at their digest are not charged. Each
 filesystem must also have sufficient `f_favail` for bounded members/cache
 metadata; unknown or unbounded inode metadata refuses. The serving checkout
 filesystem retains an explicit 1GiB/1024-inode operational and recovery margin.
-A shared 4KiB filesystem requires 8881176576 writable bytes and 201161 inodes
-after pulls. This is admission evidence, not a reservation against later writes.
+A shared 4KiB filesystem requires 5144893312 writable bytes (+545128448 when
+the model cache is absent) and 3209 inodes after pulls. This is admission
+evidence, not a reservation against later writes. A client payload identical to
+the selected release is hardlinked into the new SHA (receipt rewritten, never a
+symlink); retention keeps the selected release plus the previous one.
 Promotion repeats the check before allocation. Recovery instead uses
 `recover-model-clients` to verify existing exact immutable Linux/helper and
 Darwin bundle receipts/hashes and reselect the Linux payload without export or

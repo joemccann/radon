@@ -211,9 +211,13 @@ Podman conmon. The foreground runtime retains its filtered notify proxy.
 Before prestage allocation, after exact image pulls and just before teardown,
 `sudo /usr/local/sbin/radon-app-runtime check-model-space` checks fixed destination
 filesystems using UID1000-available bytes (`f_bavail`) and available inodes.
-Root-reserved blocks do not count. The conservative shared 4KiB-volume budget
-is 8881176576 bytes/201161 inodes, including bounded archive/tree peaks, pinned
-model-cache assets and an explicit 1GiB/1024-inode runtime/recovery margin.
+Root-reserved blocks do not count. The shared 4KiB-volume budget is
+5144893312 bytes/3209 inodes, including archive/tree peaks from the pinned
+per-release CLI bounds (enforced at export and CI-checked against the exact
+image), pinned model-cache assets not already present at their digest (+545128448
+bytes when absent) and an explicit 1GiB/1024-inode runtime/recovery margin.
+Unchanged client payloads are hardlinked into the new SHA; retention keeps the
+selected release plus the previous one once older releases age past two hours.
 No threshold override or data pruning occurs; insufficient or unknown capacity
 refuses before stopping consumers and never triggers a fallback host build.
 Promotion repeats the capacity check. Recovery instead hash-verifies existing

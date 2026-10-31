@@ -230,6 +230,16 @@ jobs:
             --entrypoint python \
             ghcr.io/joemccann/radon-model-gateway:${{ github.sha }} \
             -c "import importlib.metadata; import chronos, torch; from scripts.model_gateway import server; assert importlib.metadata.version('chronos-forecasting') == '2.3.0'; assert torch.__version__ == '2.12.1+cpu'; assert torch.version.cuda is None"
+      # Production admits model-client disk from pinned per-release bounds and
+      # refuses exports past them. Run the production export code against
+      # this exact image so a bundle that outgrows its pin fails here.
+      - name: Enforce pinned model client disk bounds
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci/check_model_client_bounds.py \
+            --engine docker --scratch "$RUNNER_TEMP" \
+            --image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
       - name: Record model gateway image input hash
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse-gateway.outputs.hit != 'true'
         run: |
