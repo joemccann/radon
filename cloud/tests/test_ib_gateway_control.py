@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import fcntl
 from pathlib import Path
 import re
@@ -1023,13 +1024,13 @@ def test_direct_gateway_privileges_are_removed_and_polkit_excludes_gateway():
     assert '"${CLOUD_DIR}/config/polkit/50-radon-services.rules"' in setup
 
 
-def _remote_reporting_head(tmp_path: Path) -> Path:
+def _remote_reporting_head(tmp_path: Path, repo_root: Path = CLOUD_ROOT) -> Path:
     """A bare repo sharing the checkout's objects whose main carries HEAD's
     tree as a parentless commit, so root can fetch it from a shallow CI
     checkout (HEAD's parents are absent there)."""
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(CLOUD_ROOT), *args],
+            ["git", "-C", str(repo_root), *args],
             check=True, capture_output=True, text=True,
         ).stdout.strip()
 
@@ -1048,6 +1049,12 @@ def _remote_reporting_head(tmp_path: Path) -> Path:
 
 
 def test_setup_upgrade_replaces_legacy_gateway_privileges(tmp_path: Path):
+    # Stage a committed fixture containing the candidate privileged bytes.
+    # The production provenance gate must also reject dirty worktree sources.
+    fixture_app=tmp_path/'app';fixture_cloud=fixture_app/'cloud'
+    shutil.copytree(CLOUD_ROOT,fixture_cloud,ignore=shutil.ignore_patterns('__pycache__'))
+    for args in [('init','-q'),('config','user.name','test'),('config','user.email','test@example.test'),('add','.'),('commit','-qm','candidate control plane')]:
+        subprocess.run(['git','-C',str(fixture_app),*args],check=True,capture_output=True)
     sudoers_dir = tmp_path / "sudoers.d"
     polkit_dir = tmp_path / "polkit-rules.d"
     fake_bin = tmp_path / "bin"
@@ -1073,21 +1080,21 @@ set -eu
     env = {
         **os.environ,
         "RADON_SETUP_SOURCE_ONLY": "1",
-        "RADON_CLOUD_DIR": str(CLOUD_ROOT),
-        "RADON_APP_DIR": str(APP_ROOT),
+        "RADON_CLOUD_DIR": str(fixture_cloud),
+        "RADON_APP_DIR": str(fixture_app),
         "RADON_SUDOERS_DIR": str(sudoers_dir),
         "RADON_POLKIT_RULES_DIR": str(polkit_dir),
         "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
         # This case is about the legacy-privilege upgrade, and it stages from
         # the real checkout: a stand-in remote reports its HEAD as main.
-        "RADON_PROVENANCE_REMOTE_URL": str(_remote_reporting_head(tmp_path)),
+        "RADON_PROVENANCE_REMOTE_URL": str(_remote_reporting_head(tmp_path,fixture_app)),
         "RADON_PROVISION_ROOT": str(tmp_path / "provision"),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",
     }
     command = (
-        f'source "{CLOUD_ROOT / "scripts" / "setup-vps.sh"}"; '
+        f'source "{fixture_cloud / "scripts" / "setup-vps.sh"}"; '
         "configure_sudoers; install_admin_polkit_rule"
     )
 

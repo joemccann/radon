@@ -51,15 +51,26 @@ def test_rule_or_book_changes_invalidate_cached_selection():
     assert base.key == policy.Context(frozenset({"AAPL"}), {}).key
 
 
+def _rows_for(sql, *, watch=None, snapshots=None, approved=None):
+    if "watchlist" in sql:
+        return [("AAPL",)] if watch is None else watch
+    if "portfolio_snapshots" in sql:
+        return snapshots
+    assert "status='approved'" in sql
+    return [("series_deny", "Calendar"), ("unknown_rule", "Ignored")] if approved is None else approved
+
+
+def _execute_many(statements, *, watch=None, snapshots=None, approved=None):
+    return [_rows_for(sql, watch=watch, snapshots=snapshots, approved=approved) for sql, _args in statements]
+
+
 def test_context_uses_cloud_watchlist_portfolio_underlyings_and_approved_rules(monkeypatch):
-    def execute(sql):
-        if "watchlist" in sql:
-            return [("AAPL",)]
-        if "portfolio_snapshots" in sql:
-            return [(json.dumps([{"ticker":"AAOI   261120C00080000"}]),)]
-        assert "status='approved'" in sql
-        return [("series_deny","Calendar"),("unknown_rule","Ignored")]
-    monkeypatch.setattr(policy, "hrana_execute", execute)
+    monkeypatch.setattr(
+        policy, "hrana_execute_many",
+        lambda statements, timeout=None: _execute_many(
+            statements, snapshots=[(json.dumps([{"ticker": "AAOI   261120C00080000"}]),)],
+        ),
+    )
     context = policy.load_context()
     assert context.tickers == {"AAPL","AAOI"}
     assert context.rules == {"series_deny":{"Calendar"}}
@@ -67,20 +78,25 @@ def test_context_uses_cloud_watchlist_portfolio_underlyings_and_approved_rules(m
 
 @pytest.mark.parametrize("rows", [[], [(None,)], [("bad",)], [('{}',)]])
 def test_unreadable_portfolio_fails_closed_without_local_cache(monkeypatch, rows):
-    monkeypatch.setattr(policy, "hrana_execute", lambda sql: [] if "watchlist" in sql else rows)
+    monkeypatch.setattr(
+        policy, "hrana_execute_many",
+        lambda statements, timeout=None: _execute_many(statements, snapshots=rows),
+    )
     with pytest.raises(policy.SelectionUnavailable, match="book_unavailable"):
         policy.load_context()
 
 
 @pytest.mark.parametrize("oversized", ["watchlist", "rules"])
 def test_truncated_context_never_silently_admits_downloads(monkeypatch, oversized):
-    def execute(sql):
-        if 'watchlist' in sql:
-            return [('AAPL',)] * (5001 if oversized=='watchlist' else 1)
-        if 'portfolio_snapshots' in sql:
-            return [('[]',)]
-        return [('series_deny','old')] * 5001
-    monkeypatch.setattr(policy, 'hrana_execute', execute)
+    monkeypatch.setattr(
+        policy, "hrana_execute_many",
+        lambda statements, timeout=None: _execute_many(
+            statements,
+            watch=[("AAPL",)] * (5001 if oversized == "watchlist" else 1),
+            snapshots=[("[]",)],
+            approved=[("series_deny", "old")] * 5001,
+        ),
+    )
     with pytest.raises(policy.SelectionUnavailable):
         policy.load_context()
 

@@ -90,15 +90,15 @@ def test_no_unit_hands_the_key_to_a_radon_uid_process(unit: str) -> None:
     assert unit in _runtime_list("APP_UNITS")
 
 
-def test_subscription_tokens_holds_no_key_and_uses_the_broker() -> None:
+def test_subscription_tokens_holds_no_key_and_uses_the_gateway() -> None:
     text = (SERVICES / TOKENS).read_text(encoding="utf-8")
     assert "LoadCredentialEncrypted" not in text
     assert "RADON_SECRET_STORE_PATH" not in text
     assert "secret_store.py" not in text
-    assert f"Environment=RADON_SUBSCRIPTION_VAULT_SOCKET={VAULT_SOCKET}" in text.splitlines()
-    assert re.search(rf"^Wants=.*\b{re.escape(VAULT)}\b", text, re.M)
-    assert re.search(rf"^After=.*\b{re.escape(VAULT)}\b", text, re.M)
-    assert not _drop_in(TOKENS).exists(), "the CLI runs stay radon; only the broker is wrapped"
+    assert "RADON_SUBSCRIPTION_VAULT_SOCKET" not in text
+    assert "scripts.model_gateway.refresh_cli" in text
+    assert "radon-model-gateway.service" in text
+    assert not _drop_in(TOKENS).exists(), "the secret-free RPC client stays on the host"
 
 
 # --- drop-ins and control-plane membership ----------------------------------

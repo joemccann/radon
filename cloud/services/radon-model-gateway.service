@@ -1,0 +1,32 @@
+[Unit]
+Description=Radon private AI model gateway and subscription lifecycle
+Wants=network-online.target radon-subscription-vault.service
+After=network-online.target radon-subscription-vault.service
+Before=radon-api.service radon-nextjs.service radon-newsfeed.service radon-monitor.service radon-marketdesk.service radon-research.service radon-subscription-tokens.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
+Environment=RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock
+Environment=RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# The managed container owns provider grants and pinned CLIs, never the
+# secret-store master key. The vault broker remains the bounded seal service.
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.model_gateway.server
+# Ordering includes readiness: Type=simple alone only proves process spawn.
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --unix-socket /run/radon-model-gateway/gateway.sock --retry 30 --retry-delay 1 --retry-all-errors --retry-max-time 45 --max-time 2 http://localhost/health
+TimeoutStartSec=60
+TimeoutStopSec=40
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,61 @@
+# Gateway exact release status identity (2026-10-31)
+
+- [x] RI1 depends_on: [] Reproduce missing gateway release identity and reject stale/caller-controlled or mutable resolved-image identity with regressions.
+- [x] RI2 depends_on: [RI1] Convey the already-resolved immutable gateway image SHA through a gateway-only fixed environment value; update owner documentation.
+- [x] RI3 depends_on: [RI2] Run focused and full cloud gates and independent review; coordinate remaining full suites serially with the parent release owner.
+- [ ] RI4 depends_on: [RI3] Publish the focused PR, verify exact-head strict/app-bound CI, notify once and administrator merge.
+- [ ] RI5 depends_on: [RI4] Verify the committed live gateway reports its actual image SHA before native/publication and Mac activation proofs.
+
+## Review
+
+Actual release057 gateway startup verified model-cache assets and retained pacing, and all application units became healthy. Its status still reported version=unknown because the server reads RADON_DEPLOY_SHA while the managed runtime never supplies that field. No production environment patch or provider/authentication change is authorized by this source repair. The release owner retains deployment and live verification. Regression baseline: six failures and four controls passed. The focused gateway image/runtime replay passed 41 tests; no live environment hotpatch was made. Required owner documentation passed 195 checks after adding the mapped operations note. Full canonical cloud: 3,792 passed, 16 skipped in 146.79s. Parent independent review found no actionable P1/P2; git diff --check is clean. Canonical web passed 11,592 tests with 21 skipped; TypeScript exited 0. Two full Python runs each passed 19,734 tests, 12 skipped and 63 subtests, with the same unchanged credential-cancellation latency test failing at approximately 0.351 seconds against a 0.2-second assertion. Its complete module passed separately (11 tests). Independent audit did not establish a cause; no Python source, assertion or timeout was changed. Exact-head CI and live identity verification remain pending.
+
+# Gateway disk headroom admission (2026-10-31)
+
+- [x] DS1 depends_on: [] Verify actual UID1000 byte exhaustion, failed gateway migration and blocked recovery without changing broker or provider clocks.
+- [x] DS2 depends_on: [DS1] Add failing regressions and minimal pre-teardown space admission for client promotion/runtime writes, with bounded migration error diagnostics and temporary-file cleanup.
+- [x] DS3 depends_on: [DS2] Run focused/full gates, independent review, exact-head PR CI, one accepted green notification and administrator merge.
+- [ ] DS4 depends_on: [DS3] Verify successful deployment, real gateway/model/pipeline behavior and the remaining Mac activation boundary.
+
+## Review
+
+DBC deployment failed with zero UID1000-available bytes despite root-reserved free blocks. Both model migrations failed before server startup; the preceding notification repair was not the cause. Automatic recovery could not reset the previous checkout because writes had no space. Parent recovery backed up and reclaimed only obsolete public native caches, restored the exact two prior Git scripts left empty by the failed reset, and completed normal recovery-only. Exact previous release 885f068ae is serving, all five managed app units are active, root verify-restored exits 0, both API health routes return HTTP 200, the transition journal is absent, and the original control-plane floor and broker remain unchanged. Signed-in dashboard reload renders account data and the feed. The fixed capacity/recovery changes passed 207 affected tests and independent review. The first full cloud replay exposed a noncanonical temporary-directory group mismatch and nine legacy fixture interface changes; the canonical strict-security replay passed 18 cases without weakening permission assertions. Final full cloud: 3,786 passed, 16 skipped; final optional-grant fixtures: 43 passed. Full Python: 19,735 passed, 12 skipped, 63 subtests passed. Full canonical web: 11,592 passed, 21 skipped; TypeScript exit 0. PR #1359 passed all 36 applicable checks and 28 app-bound required checks, received one accepted notification and was administrator-merged as 057b7d3b4. Main CI 41175064099 completed successfully on its second attempt; the first refused insufficient space before teardown. Normal exact-target image pruning recovered headroom without changing admission policy. Root committed-release verification and actual gateway/API/Next image references match 057b7d3b4; all six managed services are active and API health returns 200. Real Antigravity-first JSON, both embedding spaces and Chronos inference passed with unchanged runtime identities. Two new MarketDesk publications passed private source/media/copy checks (12 images; both scores 100); the SEB article also passed signed-in DOM headline/source/ordered-loaded-image comparison. Status identity, native requests, renewal and Mac activation remain tracked above. Obsolete uncommitted DBC public native-client artifacts were separately backed up and reclaimed after independent review, exact state/receipt, installed-unit and live-reference checks; application-writable space reached 11,336,683,520 bytes and both health routes and rollback verification stayed green. Protected wheel caches and shared model weights were retained.
+
+# Gateway startup notification isolation (2026-10-31)
+
+- [x] SN1 depends_on: [] Verify failed production cutover, process identity and automatic recovery without changing the broker or throttles.
+- [x] SN2 depends_on: [SN1] Reproduce inherited-notification failure; isolate preparatory model containers from systemd notifications while preserving foreground supervision.
+- [x] SN3 depends_on: [SN2] Run focused and full required gates; publish a focused PR, verify exact-head CI, notify once and administrator merge.
+- [ ] SN4 depends_on: [SN3] Verify successful main deployment, exact gateway identity, native inference, model capabilities, renewal and a new live MarketDesk publication; retain Mac OS activation boundary.
+
+## Review
+
+Main release 705c4ca22 failed deploy run 41167569790. Actual disposable Ubuntu/systemd/Podman and cross-owner Git reproductions confirmed preparation MAINPID replacement and rollback metadata ownership failures. The notification/recovery combined gate passed 105 tests before the final CLI guard; the final rollback replay passed 48, including actual SIGKILL/fresh-process recovery under ordinary and restrictive umasks, malformed/null/ownership/mode/identity failures, legacy keeper capture and both capture entry-point exits. Independent review found no remaining P1/P2. Bounded operator recovery restored exact previous release 885f068ae, passed verify-restored and recovery-only journal cleanup, preserved the original floor and broker, and archived the buggy old receipt without changing its bytes. Signed-in dashboard reload and API HTTP 200 verified restored production. Full canonical web: 11,592 passed, 21 skipped; TypeScript exit 0. Initial full Python found only the two exact owner-doc omissions, now repaired. Fresh full infrastructure: 3,747 passed, 16 skipped. Final full Python: 19,735 passed, 12 skipped, 63 subtests passed. PR #1357 passed all applicable exact-head checks (36 success, eight expected skips), all 28 app-bound requirements with strict/admin protection intact, and a final PR-body replay. One accepted normal green-PR notification preceded the authorized administrator merge dbc6145f3. Main CI/deployment 41171095402 and actual live verification remain pending. Focused whole-module coverage is below the 95% target; no claim of target attainment is made.
+
+# Unified standalone AI model gateway (2026-10-30)
+
+- [x] MG1 depends_on: [] Inventory app/pipeline and coding/incident clients; establish native interfaces and pre-refactor full baselines.
+- [x] MG2 depends_on: [MG1] Build private standalone gateway, normalized operations, capability routing, deadlines and credential lifecycle.
+- [x] MG3 depends_on: [MG1] Migrate Python/Node consumers, preserving accept callbacks, specialized outputs and model-space invariants; prevent bypasses.
+- [x] MG4 depends_on: [MG1] Migrate web chat/catalog/vision/Explain through the gateway without changing caller interfaces.
+- [ ] MG5 depends_on: [MG1] Install isolated managed gateway, route keeper refresh through it, remove model grants from consumers, gate immutable upgrades and deployment health.
+- [ ] MG6 depends_on: [MG2,MG3,MG4,MG5] Integration/full gates, PR, exact-head green, accepted Pushover, administrator merge and live production verification.
+
+## Review
+
+Mechanism-specific red/green regressions and independent reviews passed. Real pinned Linux and Darwin Claude/Codex/Grok clients preserve 11/10/26 native tools; final exported-helper canaries pass. Full tracked-source Python after CI repairs: 19,714 passed, 12 skipped, 63 subtests. Full cloud: 3,699 passed, 16 skipped. Full web after integration with main 885f068ae: 11,592 passed, 21 skipped; CI-contract replay 21 passed. TypeScript compiler exit 0. Gateway plus API route statement/branch coverage measured 74%; the 95% target has not been reached. Current-main integration is clean. Initial PR #1356 CI found four blockers; exact AST credential ownership, a pinned legacy helper fixture, narrow public-field scan annotations and real OpenSSH-compatible inference mounts passed their focused/full repairs. Real Ubuntu/OpenSSH validates read-only chroot mounts, reuse/rebind, dedicated UID and TCP/control denial; independent review is clean. The next CI pass exposed one legacy browser replay stub still using the vendor endpoint; its gateway migration passed the actual Playwright flow and visual screenshot, with exact two-call repair and PNG bytes retained. Full web replay: 11,592 passed, 21 skipped; compiler exit 0. The image runtime smoke then exposed package-mode startup and duplicate-engine imports; six clean-process regressions passed after entrypoint/bootstrap and relative backend repairs, and the Docker build now imports the actual entrypoint offline. The full Python run exposed a cached-session fixture leak; deterministic cold/warm job coverage passed after setup isolation, without production IV-rank changes. Final full Python: 19,715 passed, 12 skipped, 63 subtests. Final full cloud: 3,705 passed, 16 skipped. The lean Linux cloud runner then exposed an unrelated eager database dependency in pure catalog discovery. Database imports are now local to the three optional legacy read/persistence helpers; seven clean-process cases include denied native-DB imports, real discovery and engine identity, read-cache fallback and failed writes. Focused catalog/service cases: 131 passed. Full cloud: 3,706 passed, 16 skipped. Full Python: 19,715 passed, 12 skipped, 63 subtests. Actual immutable gateway image package/forecast smoke is green. The remaining pointer-fade CI test reproduced delayed native transition observation at opacity 1. The test harness now observes/deduplicates actual CSSTransition creation before asynchronous event delivery; product UI is unchanged. All original opacity/duration/curve/property, geometry, inert, keyboard and reduced-motion assertions remain. Delayed-event RED then 12 browser cases and six curation checks passed, with 10%/50%/settled screenshots inspected. Final canonical Node Vitest: 11,592 passed, 21 skipped; TypeScript exit 0. Published a8644865 passed all 38 completed applicable checks plus eight expected skips, including the real gateway image. Actual Mac root-runner admission exposed the preexisting post-deploy release-tag failure after history rewriting. Seventeen release-identity regressions failed before repair; 110 release/CI and 239 runner/documentation checks passed. Image/tag selection now validates the exact full checkout SHA and shares the existing package fallback for missing or disconnected original history. The original baseline, tag immutability, all 28 app-bound required checks, administrator enforcement and whole-main-CI/deployment updater admission remain unchanged. This does not restore monotonic semver. Full cloud repair replay: 3,706 passed, 16 skipped. Bot-grant quarantine remains an explicit separate step after real canonical/native transport proof; the installer does not automate it. Final repair full Python: 19,735 passed, 12 skipped, 63 subtests. Final canonical Node web replay using the validated CI label: 11,592 passed, 21 skipped; TypeScript exit 0. Final exact-head CI/production verification remain pending. One-time root Mac installation requires local administrator authentication; personal interactive grants remain untouched. Do not count canaries as deployed recovery or skip publication, Humanizer, quota, trading, native schema/tool or embedding-space gates.
+
+# Antigravity-first shared model ladder (2026-10-30)
+
+- [x] AL1 depends_on: [] Verify live provider wiring and reproduce default order / exhaustion fallback with red tests.
+- [x] AL2 depends_on: [AL1] Put Antigravity first, retain remaining order and all accuracy, subscription, image and publication gates.
+- [ ] AL3 depends_on: [AL2] Focused/full tests, owner documentation, exact-head CI and green notification.
+- [ ] AL4 depends_on: [AL3] Administrator merge, verify deployment and live model fallback / MarketDesk cycle.
+
+## Review
+
+Pending. Live Grok402 is not by itself full-ladder exhaustion; preserve independent factual verification. Antigravity passed managed and isolated-grant canaries; the MarketDesk worker needs a read-only seed and disposable CLI state. Images remain attached and proceed to a capable provider.
+
 # MarketDesk requested PDF backlog priority (2026-10-28)
 
 - [x] MP1 depends_on: [] Freeze the requested 32 IDs; verify live retry-time ordering and current policy separately.
@@ -10522,3 +10580,47 @@ Review:
 - PR #1347 initial head 8bfc09131: scripts-df rejected the stale held-out mobile-spec ledger stamp. Reproduced locally (1 failed/5 passed); added the dated receipt for the existing 12-case iPhone Safari run without changing CI membership or any test gate.
 - Curation repair verification: 200/200 curation and documentation tests passed; runtime implementation and its independent review digest remain unchanged.
 - Browser CI repair: named feedback regions replace screenshots of flattened wrappers; actual Saved-status 320px wrap reproduced at 48px and repaired by giving confirmation its own row. Independent review approved; full web 11,091 passed/10 skipped and combined browser 36 passed, including unchanged actual voting payload/down-hide/up-stay assertions. Runtime retirement and original-copy flow remain unchanged.
+
+
+## Mobile native platform pass (2026-10-30)
+
+- [x] MN1 depends_on: [] Audit viewport, touch capabilities, inputs, scrolling and safe areas against mobile-native and scoped web rules.
+- [x] MN2 depends_on: [MN1] Add failing regressions for verified defects, then apply minimal platform fixes.
+- [x] MN3 depends_on: [MN2] Run focused Vitest, mobile/desktop Playwright and screenshot verification; document real-device limitations.
+
+- [x] MN4 depends_on: [MN3] Isolate only mobile-native changes on current main and verify the resulting branch.
+- [x] MN5 depends_on: [MN4] Commit, push and create the requested PR with the required body.
+- [x] MN6 depends_on: [MN5] Confirm exact-head checks are green and deliver the required Pushover notification.
+
+Review: Applied mobile-native to shared web platform styles and all 20 authored CSS files containing ungated hover. Red: both authored/Tailwind hover contracts failed; WebKit reproduced missing keyboard viewport metadata and the 1024px touch-tablet search input at 14px. Green: 192 original ungated hover rules covered via 189 wrappers and three strengthened media gates; mixed keyboard-focus/selected selectors preserved. Shared control press feedback, control-only selection suppression, capability-based 16px input floor, landscape text sizing, vertical overscroll policy, viewport-bounded dvh surfaces, pinch zoom in modal scrollers and Next interactiveWidget metadata applied. Full web 11,076 passed / 10 skipped across 1,113 files. WebKit 27 passed; Chromium 3 passed. Phone/tablet/desktop screenshots inspected. Existing selector/declaration audit: 5822 compared, zero unexpected changes. Typecheck reports four errors in files untouched by this pass (DashboardNewsFeed.tsx, sameOrigin.ts); no new errors in changed files. git diff --check clean. No supported phone/tablet appeared in USB inventory: real keyboard, browser chrome, safe areas/rotation and installed-PWA feel remain unverified, as required by the skill. No application dependencies or trading logic changed; PR creation is now authorized. Evidence: output/mobile-native-iztzjg24/verification.json.
+
+PR preparation review: Current origin/main base 3cb47c7c5; 25 owned files isolated with a three-way merge against the pre-pass CSS snapshot, preserving unrelated original-checkout edits. Fresh worktree full web: 11,099 passed / 10 skipped across 1,116 files; typecheck passed. Fresh branch browser verification: WebKit 27 passed and Chromium 3 passed, screenshots inspected. PR checks pending.
+
+CI inventory repair: PR #1355 initial head 7b0b8f95d reproduced the same curation failure in two jobs. Production build/output audit passed (235 manifests) and next-start preflight passed 5/5 platform/search cases before adding mobile-native-platform.spec.ts to the existing curated CI list. Focused curation guard failed first, then passed 6/6. Required checks, deployment dependencies and branch protections are unchanged.
+
+
+## Audit animation implementation (2026-10-30)
+
+- [x] AM1 depends_on: [] Verify the two approved opacity recipes and existing component lifecycles.
+- [x] AM2 depends_on: [AM1] Add failing presence, input-modality and lifecycle regressions; implement cancellable CSS opacity presence across the three components.
+- [x] AM3 depends_on: [AM2] Verify keyboard immediacy, inert exits, rapid reversal, reduced motion, and real pointer/touch behavior in unit/browser tests; inspect screenshots.
+- [x] AM4 depends_on: [AM3] Run full web/typecheck/production verification and prepare the PR #1355 update.
+
+Release completion receipt: exact-head CI and Pushover delivery are tracked in output/animation-implementation-2026-10-30/verification.json after push.
+
+Review: Implemented only opacity presence for Feedback/Share (160ms entry, 120ms exit) and Columns (125ms entry, 100ms exit), reusing --ease-out. Keyboard/assistive activation and Escape remain immediate; reduced motion remains suppressed. Exits become inert/aria-hidden at logical close, rapid reopen cancels removal, and share export generations prevent stale downloads or busy-state changes. Red baseline: 20 failed / 1 passed before implementation. Focused component regressions: 64 passed; hook coverage 100% lines/functions, 97.67% statements and 96.29% branches. WebKit and Chromium each passed 11 real pointer/touch, keyboard, reduced-motion and frame-step cases; screenshots inspected at 10%, 50% and settled entry with unchanged geometry. React component/lifecycle review completed. The first production share regression found stale edited captions on rapid reopen; a failing unit regression confirmed it, and logical reopening now resets caption/preview while preserving edits through ordinary post refresh. Another failing unit regression confirmed late clipboard status could reach a new opening; generation checks now suppress it. Final full web: 11,127 passed / 10 skipped across 1,117 files. Typecheck passed; production build/output audit passed (235 manifests). Combined production browser regressions passed 35/35. The curation guard failed for the new unclassified spec, then passed 6/6 after its 11-case production preflight and registration. git diff --check clean. CI and notification are the remaining release steps, tracked in the completion receipt. No new dependencies or motion on financial data, navigation, layout or column changes. Hardware feel remains unverified; no physical phone/tablet is connected.
+
+
+## MarketDesk publication transport (2026-10-31)
+
+- [x] HP1 depends_on: [] Identify the actual publication transport and reproduce the stale pooled socket with a managed UID 1000 read-only transaction.
+- [x] HP2 depends_on: [HP1] Reproduce publication batching after idle with a failing regression; retain read pooling and no ambiguous write replay.
+- [x] HP3 depends_on: [HP2] Retire connections before non-read pipelines, update owner docs/runbook, and obtain independent review.
+- [ ] HP4 depends_on: [HP3] Run focused and full required gates; publish a focused PR, verify exact-head CI, accepted notification and authorized admin merge.
+- [ ] HP5 depends_on: [HP4] Verify the normal deployment and an actual new MarketDesk publication without changing retries, policy or provider pacing.
+
+Review:
+- Live `3ce7f24` SELECT 1 succeeds, a read-only transaction after 18s idle fails RemoteDisconnected inside the 30s API pool lifetime, and a fresh SELECT1 succeeds. Real publisher imports api.db_http; the separate daemon pool already expires after 5s. No model, broker, credential or cooldown changes.
+
+- Three true red regressions and three controls; 207 focused tests passed in 21.85s. Independent review found no blocking issues. Documentation contract: 195 passed. Full infrastructure: 3,792 passed, 16 skipped. Web: 11,592 passed, 21 skipped; TypeScript passed.
+- Full Python: 19,740 passed, 12 skipped, 63 subtests, with the unchanged credential-cancellation timing failure also observed before this repair (0.352s versus 0.2s). Its complete module passed separately: 11 passed. The assertion and credential code were not changed. Exact-head CI and production verification remain pending.

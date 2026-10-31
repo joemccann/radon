@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from scripts import fetch_x_xai
+from model_gateway import _x_search_backend as fetch_x_xai
 
 
 def test_bearer_token_travels_via_stdin_config_not_argv(monkeypatch):

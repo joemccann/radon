@@ -47,7 +47,17 @@ def _readonly_array(script: str, name: str) -> str:
 
 
 def _from_images(text: str) -> list[str]:
-    return [line.split()[1] for line in text.splitlines() if line.startswith("FROM ")]
+    # Stage aliases inherit the same digest-pinned parent, rather than pulling a tag.
+    aliases: dict[str, str] = {}
+    images = []
+    for line in text.splitlines():
+        if line.startswith("FROM "):
+            fields = line.split()
+            image = aliases.get(fields[1], fields[1])
+            images.append(image)
+            if len(fields) == 4 and fields[2].upper() == "AS":
+                aliases[fields[3]] = image
+    return images
 
 
 def _final_user(text: str) -> str | None:
@@ -126,7 +136,8 @@ class TestPythonImage:
         images = _from_images(text)
         # DS-2026-10-09-01: the runtime base is digest-pinned like the vendor stage.
         assert re.fullmatch(r"python:3\.13\.\d+-slim@sha256:[0-9a-f]{64}", images[-1])
-        assert len(images) == 3
+        assert len(images) == 6
+        assert len(set(images)) == 2
         for image in images[:2]:
             assert re.fullmatch(r"node:22\.23\.4-bookworm-slim@sha256:[0-9a-f]{64}", image)
         assert f"FROM {images[0]} AS vendor-clis" in text

@@ -230,8 +230,8 @@ def is_private_net_probe(request) -> bool:
 # UW-backed reads sit on their own paths, so each is listed here individually
 # (/options/ cannot be denied wholesale — the demo proxies /options/rv-ratio/).
 # The read surfaces the demo actually uses are enumerated in
-# web/lib/demo/routePolicy.ts as "backend" endpoints; none of them sit under a
-# prefix here. Pinned route-by-route by
+# web/lib/demo/routePolicy.ts as "backend" endpoints; exact GET gateway model
+# metadata is the sole exception within these denied namespaces. Pinned by
 # scripts/api/tests/test_service_token_scope.py, and derived from the handlers
 # themselves by scripts/api/tests/test_metered_client_scope.py.
 SERVICE_TOKEN_DENIED_PREFIXES = (
@@ -239,6 +239,7 @@ SERVICE_TOKEN_DENIED_PREFIXES = (
     "/credentials",
     "/ib/",
     "/journal/",
+    "/model-gateway",
     "/options/uw-chain",
     "/orders/",
     "/pi/exec",
@@ -251,8 +252,12 @@ SERVICE_TOKEN_DENIED_PREFIXES = (
 )
 
 
-def service_token_path_allowed(path: str) -> bool:
+def service_token_path_allowed(path: str, method: str | None = None) -> bool:
     """False for a privileged sink the demo service principal must not reach."""
+    # The demo picker reads cached metadata; inference spends shared grants.
+    # Keep this exact GET exception method-aware so future operations stay denied.
+    if path == "/model-gateway/models" and method == "GET":
+        return True
     return not path.startswith(SERVICE_TOKEN_DENIED_PREFIXES)
 
 
@@ -286,7 +291,7 @@ def is_trusted_service_request(request) -> bool:
         return False
     url = getattr(request, "url", None)
     path = getattr(url, "path", "") if url is not None else ""
-    return service_token_path_allowed(path)
+    return service_token_path_allowed(path, getattr(request, "method", None))
 
 
 _jwks_client = None

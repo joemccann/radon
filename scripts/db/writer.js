@@ -339,3 +339,26 @@ export function __setDbBoundsForTests(overrides) {
 export function __setDbForTests(client) {
   cached = client;
 }
+
+// Gateway inference has no Turso grant. Its optional SLM comparison travels
+// back to this existing newsfeed writer, with the original shadow schema.
+export async function recordSlmShadow(row) {
+  if (!row || typeof row !== "object" || Buffer.byteLength(JSON.stringify(row)) > 65536) return false;
+  const json = value => value == null ? null : typeof value === "string" ? value : JSON.stringify(value);
+  const args = [String(row.post_id || "").slice(0, 256), row.observed_at || new Date().toISOString(),
+    String(row.model_version || "1.0.0"), String(row.mode || "shadow"), json(row.tags_slm),
+    json(row.tags_slm_raw), json(row.tags_ladder), row.ladder_provider ?? null, row.ladder_sampled ? 1 : 0,
+    String(row.slm_status || "unavailable"), row.slm_latency_ms ?? null, row.ladder_latency_ms ?? null,
+    row.exact3 ?? null, row.jaccard ?? null];
+  try {
+    await withDbBounds("slmShadow", () => getDb().execute({
+      sql: `INSERT INTO slm_tagger_shadow (post_id, observed_at, model_version, mode, tags_slm, tags_slm_raw,
+        tags_ladder, ladder_provider, ladder_sampled, slm_status, slm_latency_ms, ladder_latency_ms, exact3, jaccard)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args,
+    }));
+    return true;
+  } catch {
+    console.warn("[radon-db] SLM telemetry write dropped");
+    return false;
+  }
+}

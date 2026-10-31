@@ -1,6 +1,7 @@
 [Unit]
 Description=Radon Grok P1 page responder (dedicated clone, stripped env)
-After=network.target
+Wants=radon-model-gateway.service
+After=network.target radon-model-gateway.service
 # Poller: do not park on start-limit. Failures are ticket attempts in Turso.
 StartLimitIntervalSec=0
 
@@ -14,9 +15,11 @@ EnvironmentFile=/home/radon/radon-page-responder.env
 Environment=GROK_PAGE_NO_DOTENV=1
 Environment=GROK_PAGE_SYNC_REMOTE=1
 Environment=HOME=/home/radon
-Environment=PATH=/home/radon/.local/bin:/home/radon/.grok/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GROK_BIN=/opt/radon-model-clients/current/bin/grok
+Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
+Environment=PATH=/opt/radon-model-clients/current/bin:/usr/local/bin:/usr/bin:/bin
 TimeoutStartSec=3900
-ExecStart=/home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_page_responder.py
+ExecStart=/usr/bin/env GROK_BIN=/opt/radon-model-clients/current/bin/grok RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock /home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_page_responder.py
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
@@ -30,18 +33,13 @@ PrivateTmp=yes
 # flex-secrets and rh-mcp hold other units' credentials under /var/lib/radon.
 # HOME is /home/radon, so the home credential stores (SSH key, agent CLI
 # sessions, GPG, gh/git credentials) are denied too; main syncs over HTTPS.
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/run/radon-subscription-vault -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gemini -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials
-# ~/.grok/bin, ~/.local/bin (read-only via /home/radon) and the promoted
-# candidate under /var/lib/radon/grok-upgrade are executed by the
-# secret-bearing subscription-tokens unit; ~/.grok/hooks is run by grok
-# itself. None of them may be writable here.
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env /home/radon/radon-page-responder.env -/run/radon-subscription-vault -/run/radon-model-control -/home/radon/.grok -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp -/home/radon/.ssh -/home/radon/.claude -/home/radon/.claude.json -/home/radon/.codex -/home/radon/.gemini -/home/radon/.gnupg -/home/radon/.config/gh -/home/radon/.git-credentials
+# Native clients are promoted from the exact CI image and remain root-owned.
+# The app-scoped bridge uses private temporary authentication state.
 ReadOnlyPaths=/home/radon /var/lib/radon -/home/radon/.grok/bin -/home/radon/.grok/hooks -/home/radon/.grok/downloads
-# The grok CLI writes its session state under ~/.grok; with only the clone
-# writable every fix attempt died at session creation ("Read-only file
-# system"), each page burned its 3 attempts and was skipped — the responder
-# polled healthily while fixing nothing (Aug 15–20 outage). The shared
-# runtime flock lives in its own dir so /var/lib/radon stays read-only.
-ReadWritePaths=/home/radon/radon-page-responder /home/radon/.grok -/var/lib/radon/grok-runtime
+# Repository execution and the shared local runtime lock remain writable;
+# provider grants are inaccessible and temporary bridge state stays in /tmp.
+ReadWritePaths=/home/radon/radon-page-responder -/var/lib/radon/grok-runtime
 
 [Install]
 WantedBy=multi-user.target

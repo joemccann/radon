@@ -277,6 +277,7 @@ source {DEPLOY!s}
 prepare_release_transition() {{ return 0; }}
 activate_staged_release() {{ printf 'activate\\n' >> {calls!s}; }}
 wait_for_gateway_ready() {{ return 0; }}
+preflight_model_disk() {{ return 0; }}
 sudo() {{
   printf '%s\\n' "$*" >> {calls!s}
   [[ "$*" == *install-units ]] && return {install_rc}

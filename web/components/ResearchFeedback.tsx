@@ -1,6 +1,7 @@
 "use client";
 import ErrorToast from "@/components/ErrorToast";
-import { useCallback, useId, useState } from "react";
+import { useCallback, useId, useRef, useState, type MouseEvent } from "react";
+import { usePointerPresence } from "@/lib/usePointerPresence";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { FEEDBACK_REASONS, MAX_FEEDBACK_COMMENT, REASONS_FOR_VOTE, type FeedbackReason, type PostFeedback } from "@/lib/researchFeedback";
 import styles from "./ResearchFeedback.module.css";
@@ -27,16 +28,25 @@ export default function ResearchFeedback({ postId, workKey, initial, onHidden }:
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const commentId = useId();
+  const { open: expanded, mounted, setOpen, props: fade } = usePointerPresence("panel");
+  const voteTrigger = useRef<HTMLButtonElement | null>(null);
 
-  const open = (vote: "up" | "down") => {
+  const open = (vote: "up" | "down", event: MouseEvent<HTMLButtonElement>) => {
+    voteTrigger.current = event.currentTarget;
+    if (expanded && draft === vote) {
+      setOpen(false, event.detail > 0);
+      event.currentTarget.focus();
+      return;
+    }
     setMessage("");
-    setDraft(current => current === vote ? null : vote);
+    setDraft(vote);
+    setOpen(true, event.detail > 0);
     setReasons(saved?.vote === vote ? saved.reasons : []);
     setComment(saved?.vote === vote ? saved.comment : "");
   };
 
   const save = useCallback(async () => {
-    if (!draft || busy) return;
+    if (!expanded || !draft || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -53,27 +63,28 @@ export default function ResearchFeedback({ postId, workKey, initial, onHidden }:
       setSaved({ vote: draft, reasons, comment: comment.trim() });
       setMessage("Saved");
       if (held || draft === "down") onHidden(target);
-      else setDraft(null);
+      else setOpen(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save feedback.");
     } finally {
       setBusy(false);
     }
-  }, [busy, comment, draft, held, onHidden, postId, reasons, target, workKey]);
+  }, [busy, comment, draft, expanded, held, onHidden, postId, reasons, target, workKey, setOpen]);
 
   return <div className={styles.root} data-research-feedback onKeyDown={event => {
+    if (event.key === "Escape" && expanded) { event.stopPropagation(); setOpen(false); voteTrigger.current?.focus(); }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") event.stopPropagation();
   }} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()}>
     <div className={styles.votes}>
-      <button type="button" className={styles.vote} aria-label={held ? "Should have published" : "Thumbs up"} aria-pressed={(draft ?? saved?.vote) === "up"} onClick={() => open("up")}>
+      <button type="button" className={styles.vote} aria-label={held ? "Should have published" : "Thumbs up"} aria-pressed={(expanded ? draft : saved?.vote) === "up"} aria-expanded={expanded && draft === "up"} onClick={event => open("up", event)}>
         <ThumbsUp size={15} aria-hidden />{held ? <span>Should have published</span> : null}
       </button>
-      <button type="button" className={styles.vote} aria-label={held ? "Correct to hold" : "Thumbs down"} aria-pressed={(draft ?? saved?.vote) === "down"} onClick={() => open("down")}>
+      <button type="button" className={styles.vote} aria-label={held ? "Correct to hold" : "Thumbs down"} aria-pressed={(expanded ? draft : saved?.vote) === "down"} aria-expanded={expanded && draft === "down"} onClick={event => open("down", event)}>
         <ThumbsDown size={15} aria-hidden />{held ? <span>Correct to hold</span> : null}
       </button>
       <span role="status" className={styles.status}>{message}</span>
     </div>
-    {draft ? <section className={styles.panel} aria-label={draft === "up" ? "Thumbs up feedback" : "Thumbs down feedback"}>
+    {mounted && draft ? <section {...fade} className={`pointer-fade ${styles.panel}`} aria-label={draft === "up" ? "Thumbs up feedback" : "Thumbs down feedback"}>
       <div className={styles.chips} hidden={held}>
         {(held ? [] : REASONS_FOR_VOTE[draft]).map(reason => (
           <button key={reason} type="button" className={styles.chip} aria-pressed={reasons.includes(reason)}

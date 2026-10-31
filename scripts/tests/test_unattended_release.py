@@ -662,7 +662,8 @@ def test_codex_review_adapter_disables_tools_and_strips_inherited_credentials(mo
     payload = json.loads(captured["input"].split("\n\n", 1)[1])
     assert payload["diff"] == patch
     assert "def authorized():\n    return True\n" == payload["changed_files"][1]["after"]["source"]
-    assert set(captured["env"]) == {"HOME", "PATH", "CODEX_HOME"}
+    assert set(captured["env"]) == {"HOME", "PATH", "CODEX_HOME", "RADON_AGENT_BRIDGE_TOKEN", "DISABLE_AUTOUPDATER", "NO_PROXY", "no_proxy"}
+    assert any("radon_gateway=" in arg for arg in args)
 
 
 def test_codex_review_adapter_rejects_oversized_diff_without_launch(monkeypatch, tmp_path):
@@ -1469,11 +1470,10 @@ def test_backend_rejection_after_byte_exact_capture_emits_private_reason_without
     assert 'backend' not in reviews.failure_reason and 'incomplete' in reviews.failure_reason
 
 
-def test_model_context_uses_only_verified_local_capacity_metadata(monkeypatch,tmp_path):
+def test_model_context_uses_only_verified_gateway_capacity_metadata(monkeypatch,tmp_path):
+    from model_gateway import client
     monkeypatch.setattr(Path,'home',lambda:tmp_path)
-    monkeypatch.setattr(ur,'_trusted',lambda *a,**kw:None)
-    cache=tmp_path/'.codex'/'models_cache.json'; cache.parent.mkdir()
-    cache.write_text(json.dumps({'models':[{'slug':REVIEWERS[0],'context_window':500000,'effective_context_window_percent':95,'base_instructions':'UNTRUSTED_NOT_COPIED'},{'slug':REVIEWERS[1],'context_window':272000,'effective_context_window_percent':95}]}))
+    monkeypatch.setattr(client,'request',lambda *a,**kw:{'models':[{'id':REVIEWERS[0],'provider':'openai','contextWindow':500000,'effectiveContextWindowPercent':95,'base_instructions':'UNTRUSTED_NOT_COPIED'},{'id':REVIEWERS[1],'provider':'openai','contextWindow':272000,'effectiveContextWindowPercent':95}]})
     reviews=ur.CodexReviews(_policy(),tmp_path/'reviews')
     assert reviews._model_context(REVIEWERS[1])=={'context_window':272000,'effective_context_window_percent':95}
     assert reviews._model_context(REVIEWERS[0])=={'context_window':500000,'effective_context_window_percent':95}

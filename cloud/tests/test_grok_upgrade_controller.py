@@ -134,8 +134,10 @@ def test_setup_installs_the_controller_from_its_root_owned_stage():
     text = SETUP.read_text(encoding="utf-8")
     assert '"$SCRIPT_DIR/install-grok-upgrade-controller.sh"' in text
     assert '"$SCRIPT_DIR/../../scripts"' in text
-    # The LKG seed runs the trusted copy too, never the clone's code.
-    assert f'{PYTHON} {CONTROLLER}/scripts/grok_upgrade.py' in text
+    # CI receipt verification runs only as radon from protected staged source.
+    assert 'sudo -u radon /usr/bin/python3.13 -I -S -c' in text
+    assert 'from grok_runtime import managed_manifest' in text
+    assert '--seed-if-missing' not in text
     assert '"$CLONE/scripts/grok_upgrade.py"' not in text
 
 

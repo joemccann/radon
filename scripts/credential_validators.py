@@ -115,19 +115,15 @@ def _validate_unusual_whales(values: Dict[str, str]) -> ValidationResult:
 
 
 def _validate_cerebras(values: Dict[str, str]) -> ValidationResult:
-    return _get(
-        "https://api.cerebras.ai/v1/models",
-        {"Authorization": f"Bearer {values['CEREBRAS_API_KEY']}"},
-        "Cerebras",
-    )
+    from model_gateway.client import request
+    reply = request("validate-credential", {"provider": "cerebras", "candidate": values["CEREBRAS_API_KEY"]}, timeout_seconds=15)
+    return ValidationResult(str(reply.get("status", "error")), str(reply.get("message", "")))
 
 
 def _validate_nvidia(values: Dict[str, str]) -> ValidationResult:
-    return _get(
-        "https://integrate.api.nvidia.com/v1/models",
-        {"Authorization": f"Bearer {values['NVIDIA_API_KEY']}"},
-        "NVIDIA NIM",
-    )
+    from model_gateway.client import request
+    reply = request("validate-credential", {"provider": "nvidia", "candidate": values["NVIDIA_API_KEY"]}, timeout_seconds=15)
+    return ValidationResult(str(reply.get("status", "error")), str(reply.get("message", "")))
 
 
 def _validate_fred(values: Dict[str, str]) -> ValidationResult:
