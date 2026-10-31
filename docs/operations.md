@@ -200,6 +200,11 @@ notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
 including those mixed into an otherwise valid datagram. The proxy socket stays
 0600 and is owned by the container user.
 
+Gateway status receives `RADON_DEPLOY_SHA` only from the managed runtime
+after validating the already-selected gateway image repository and full SHA.
+Its reported version must match that immutable image; caller/host dotenv values
+and a later checkout lookup cannot replace the identity.
+
 Preparatory model-cache migration and CLI-export containers remove inherited
 `NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
 Podman conmon. The foreground runtime retains its filtered notify proxy.

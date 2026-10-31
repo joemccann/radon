@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import yaml
+import pytest
 
 from test_app_runtime import CLOUD, TEST_SHA, _run, _run_line
 
@@ -46,3 +47,57 @@ def test_both_pr_and_release_build_and_smoke_the_gateway_image():
     assert 'import chronos, torch' in smoke['run']
     assert '--network none' in smoke['run']
     assert '--user 1000:1000' in smoke['run']
+
+
+def test_gateway_status_identity_uses_exact_image_not_caller_or_environment(tmp_path):
+    source=tmp_path/'source.env'
+    stale='a'*40
+    source.write_text('NODE_ENV=production\nRADON_DEPLOY_SHA='+stale+'\n')
+    result=_run(tmp_path,['run','radon-model-gateway.service'],extra_env={'RADON_DEPLOY_SHA':stale,'RADON_TEST_ENV_FILE':str(source)})
+    assert result.returncode==0,result.stderr
+    args=_run_line(result).split()
+    assert f'RADON_DEPLOY_SHA={TEST_SHA}' in args
+    assert f'RADON_DEPLOY_SHA={stale}' not in args
+    assert 'RADON_DEPLOY_SHA' not in args
+    rendered=Path(args[args.index('--env-file')+1]).read_text()
+    assert 'RADON_DEPLOY_SHA=' not in rendered
+
+
+def _run_selected_gateway(tmp_path, image):
+    """Run shipped cmd_run while making any second HEAD/tag lookup fail."""
+    import subprocess
+    from test_app_runtime import RUNTIME,_runtime_env
+    log=tmp_path/'docker.log';docker=tmp_path/'docker'
+    docker.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> '+str(log)+'\n');docker.chmod(0o755)
+    library=tmp_path/'runtime-library.sh'
+    library.write_text(RUNTIME.read_text().split('[[ $# -ge 1 ]] || usage',1)[0])
+    env=_runtime_env(tmp_path,docker)
+    env.pop('NOTIFY_SOCKET',None)
+    env['RESOLVED_IMAGE']=image
+    lookup=tmp_path/'unexpected-lookup'
+    env['LOOKUP_MARKER']=str(lookup)
+    script='''set -euo pipefail
+source "$1"
+model_gateway_image() { printf '%s\\n' "$RESOLVED_IMAGE"; }
+image_tag() { printf reread > "$LOOKUP_MARKER"; return 69; }
+cmd_run radon-model-gateway.service
+'''
+    result=subprocess.run(['bash','-c',script,'bash',str(library)],env=env,capture_output=True,text=True,timeout=20)
+    result.docker_log=log
+    return result,lookup
+
+
+def test_gateway_identity_is_derived_from_selected_image_without_second_head_lookup(tmp_path):
+    selected='b'*40
+    result,lookup=_run_selected_gateway(tmp_path,f'{GATEWAY_REPO}:{selected}')
+    assert result.returncode==0,result.stderr
+    assert f'--env RADON_DEPLOY_SHA={selected}' in _run_line(result)
+    assert not lookup.exists()
+
+
+@pytest.mark.parametrize('image',[GATEWAY_REPO+':latest',GATEWAY_REPO+'@sha256:'+'a'*64,'ghcr.io/joemccann/radon-python:'+'a'*40,GATEWAY_REPO+':'+'A'*40])
+def test_gateway_refuses_noncanonical_selected_image_before_launch(tmp_path,image):
+    result,lookup=_run_selected_gateway(tmp_path,image)
+    assert result.returncode==69,result.stdout+result.stderr
+    assert not result.docker_log.exists()
+    assert not lookup.exists()
