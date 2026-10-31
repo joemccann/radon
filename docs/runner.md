@@ -12,6 +12,37 @@ The agent does the whole job in one session: audit, fix, push the branch, open a
 
 The two security loops (`security`, `security-deepsec`) also use the optional knobs in [Loop config](#loop-config): one session per phase (audit, remediate, deliver), a claude-only ladder from a resolver, a root-owned `gh` guard, and root-owned pre- and post-run hooks that port the old wrapper's rails (credential and billing-reroute refusals, the green-base checkout, the sanitized dead-man (which keeps the quota ladder's usage URL only when sentence punctuation alone follows it), the private report). [docs/operations.md](operations.md#background-services) has the operator contract. The `security` loop's native audit workflow cannot read the environment, so its prompt passes `$RADON_REPO_ROOT` as `args.repoRoot`. When a session lists only plugin workflows, the prompt runs the clone's `.claude/workflows/security-audit.mjs` by absolute `scriptPath` instead of by name.
 
+## Model service and immutable clients
+
+Automated coding and incident inference uses the private model gateway. The
+reviewed gateway image supplies model clients at `/opt/radon-model-clients` on
+Linux and `/Library/Radon/model-clients` on the Mac runner;
+the installer verifies the release and records executable/helper SHA-256 hashes
+and exact CLI versions in `current/manifest.json`. Incident runtime selection
+checks root ownership, protected ancestry, immutable release files and matching
+hashes before using a client. Its model inventory comes from the gateway, not a
+CLI provider login probe. Existing last-known-good fallback and execution gates
+remain in force.
+
+`agent_cli_bootstrap.sh` now reports gateway status only. It creates no key file
+and rewrites no operator settings. Native CLI self-updates and desktop Codex
+updates are retired from `nightly_toolchain_update.py`; model pins move through
+reviewed CI artifacts. DeepSec package/version checks remain, while its smoke
+uses gateway inference. DeepSec process/revalidate commands use the bridge
+adapter, whose temporary loopback credential selects the pinned SDK's custom
+Responses provider without reading local subscription grants.
+
+The root runner updater still requires the latest exact-main CI run and its
+production deployment to succeed, including release tagging. Image and tag
+selection share the validated build identity; unavailable rewritten history uses
+the existing package label without changing the original version baseline.
+That fallback does not restore monotonic version numbers. Model transport/client
+bootstrap alone does not update installed runner code. After the root runner
+refresh, the old hourly native-updater job remains scheduled but its installed
+helper performs no vendor updates; immutable model-client promotion belongs to
+the gateway's root updater. Active runner/native-update maintenance gates remain
+required during installation.
+
 ## Safety boundary
 
 Safety is where the runner runs, not what the script checks:
@@ -20,8 +51,8 @@ Safety is where the runner runs, not what the script checks:
 |---|---|
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
-| Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; the bot's CLI directories (`~/.local/bin`, `~/.grok/bin`, `~/.bun/bin`) are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` load only from `~/.radon-runner.env`; the Claude token reaches claude rungs and the ladder resolver only. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
+| Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; root-owned gateway client shims are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
@@ -38,8 +69,8 @@ Where things live when you are done:
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The security loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
 | `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
-| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` (claude.ai subscription, from `claude setup-token`) and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
-| `/Users/_radonbot/.radon/agent-cli/env` | bot, 600 | `NVIDIA_API_KEY`, `CEREBRAS_API_KEY` for the fx agents |
+| `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
+| `/Library/Radon/model-gateway/identity` | root, 600 | Dedicated model-only SSH transport key; never a provider or operator key |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
 | `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
@@ -52,7 +83,6 @@ Where things live when you are done:
 ```bash
 # Homebrew first if the Mac has none: https://brew.sh
 brew install git gh coreutils python@3.13 uv bun node
-brew install --cask codex
 # gitleaks 8.30.1 for the security loops (docs/security-approved-tools.md), checksum-pinned, root-owned
 GL="$(mktemp -d)" && curl -fsSLo "$GL/gitleaks.tgz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
   && echo "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5  $GL/gitleaks.tgz" | shasum -a 256 -c \
@@ -62,7 +92,7 @@ GL="$(mktemp -d)" && curl -fsSLo "$GL/gitleaks.tgz" https://github.com/gitleaks/
 sudo pmset -a sleep 0 displaysleep 10     # the Mac must stay awake at night
 ```
 
-`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. For the security loop, `security_pre.sh` installs both bun projects (`bun install --frozen-lockfile --ignore-scripts`, root and `web/`) and `KEEP_PATHS` carries `node_modules` and `web/node_modules` across the nightly re-clone, so they reinstall only when a lockfile or `package.json` changes. A failed install skips the Vitest stage; it never refuses the phase. `codex` is shared from Homebrew; the other agent CLIs are installed per user in step 4.
+`coreutils` provides `timeout`; the runner exits 69 without it. `node` runs Vitest for the testing loop (bun installs the packages, `npx vitest run` runs them); without it that loop leaves Vitest to PR CI. For the security loop, `security_pre.sh` installs both bun projects (`bun install --frozen-lockfile --ignore-scripts`, root and `web/`) and `KEEP_PATHS` carries `node_modules` and `web/node_modules` across the nightly re-clone, so they reinstall only when a lockfile or `package.json` changes. A failed install skips the Vitest stage; it never refuses the phase. Model CLIs come from the immutable client updater in step 4; Homebrew does not update them.
 
 ### 2. Install the runner (operator)
 
@@ -95,56 +125,43 @@ The prompt shows `_radonbot@...`. Before running a check, confirm its output pat
 
 ### 4. Agent CLIs (bot shell)
 
-Install and sign in to every agent the loop's `AGENTS` names (`grok codex agy fx:nvidia fx:cerebras` for documentation, ci-performance, performance, testing and reliability; `claude` for the two security loops, step 8b). The sign-ins print a URL or a device code: open it in your own browser, signed in to the account that owns the subscription.
+The root-owned model-client updater supplies Claude Code, Codex and Grok from
+the exact CI-tested gateway release. Do not install provider CLIs, run provider
+login, or copy model API keys into the bot account. The runner resolves clients
+from `/Library/Radon/model-clients/current` and routes native model requests
+through its authenticated local adapter. Existing tool permissions, GitHub
+identity and process-group cleanup remain local.
 
-| Agent | Install (bot shell) | Sign in (bot shell) | Binary the runner uses |
-|---|---|---|---|
-| grok | `curl -fsSL https://x.ai/cli/install.sh \| bash` | `~/.grok/bin/grok`, approve the device code | `~/.grok/bin/grok` |
-| codex | shared, step 1 | `/opt/homebrew/bin/codex login` (or `codex login --device-auth`); DeepSec's reviewer uses this login too | `/opt/homebrew/bin/codex` |
-| claude | step 8b | step 8b | `~/.local/bin/claude` |
-| agy | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | step 5 (needs a keychain first) | `~/.local/bin/agy` |
-| fx | `curl -fsSL https://fx.sh/setup.sh \| bash` | none; uses the keys from step 6 | `~/.local/bin/fx` |
+### 5. Model transport (operator)
 
-### 5. Keychain, then agy (bot shell)
+Provision the root-owned `cloud/scripts/mac_model_gateway.py` helper with the
+model host's authenticated Ed25519 host key and operator account. Its `prepare`
+operation creates a dedicated transport key; the corresponding Linux
+`cloud/scripts/model_transport.py prepare` grants that public key only
+read-only artifact SFTP and private inference-socket forwarding. The Mac
+`activate` operation verifies the release and installs supervised tunnel and
+half-hour artifact-update jobs. Neither operation receives an operator SSH key
+or a provider grant. See [the service contract](model-gateway.md).
 
-agy stores its token in the macOS keychain, and a user who never logged in to the desktop has none: agy's first run then shows a "Keychain Not Found ... antigravity" dialog. Click Cancel and create the keychain from the shell, using the bot's password from step 2:
+Provider authentication and renewal belong to the Linux gateway. A Mac reboot
+does not require unlocking the bot's model keychain. A provider requiring new
+human consent uses the gateway's existing reauthorization alert path.
 
-```bash
-read -rs "KP?keychain password: "; K=~/Library/Keychains/login.keychain-db
-security create-keychain -p "$KP" $K && security list-keychains -d user -s $K \
-  && security default-keychain -d user -s $K && security login-keychain -d user -s $K \
-  && security set-keychain-settings $K && unset KP
-~/.local/bin/agy
-```
-
-agy prints a Google URL and waits 60 seconds for the pasted code. Then check it:
-
-```bash
-~/.local/bin/agy -p="reply ok" --output-format text
-```
-
-A reboot locks this keychain. After one, run `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell. Until then the agy rung fails and those loops move to the next agent. The security loops do not depend on it: they authenticate with `CLAUDE_CODE_OAUTH_TOKEN` (step 8b.4).
-
-### 6. Provider keys for fx (operator, then bot shell)
-
-In your own tab, copy only the two keys from your agent-cli env into the bot's. `grep` runs as you, so it reads your file; `sudo -u _radonbot` writes the bot's as the bot (never as root, which would follow a link the bot planted):
+### 6. Model readiness (bot shell)
 
 ```bash
-grep -E "^(export )?(NVIDIA_API_KEY|CEREBRAS_API_KEY)=" ~/.radon/agent-cli/env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d/agent-cli && chmod 700 $d $d/agent-cli && cat > $d/agent-cli/env'
+RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway/gateway.sock \
+  python3.13 -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py status
 ```
 
-On a Mac where you have no such file, create `/Users/_radonbot/.radon/agent-cli/env` in the bot shell with `NVIDIA_API_KEY=` and `CEREBRAS_API_KEY=` lines instead. Then, in the bot shell:
-
-```bash
-RB="$(mktemp -d)" && /usr/bin/git clone --depth 1 https://github.com/joemccann/radon.git "$RB"
-/bin/bash "$RB/scripts/agent_cli_bootstrap.sh"
-/bin/bash "$RB/scripts/agent_cli_bootstrap.sh" --check
-/bin/rm -rf "$RB"
-```
-
-Every line must read `OK` with a `/Users/_radonbot/...` path: codex, grok, nvidia, cerebras, fx. A `MISSING` line names its fix. agy is not in this check; step 5 covers it.
-
-The bootstrap also writes fx's `nvidia-paced` provider (`http://127.0.0.1:18431/v1`, or `RADON_NVIDIA_PROXY_PORT`), which the `fx:nvidia` rung uses; see [NVIDIA rate limits](#nvidia-rate-limits). Rerun it after pulling a change to that provider.
+The result identifies wired providers and service capabilities. A failed
+connection stops model work; it never creates local provider settings or
+credentials. `agent_cli_bootstrap.sh` performs the same status check. Model
+execution no longer uses the bot-side NVIDIA/Cerebras env, native login files
+or fx proxy. Quarantining known bot model grants is a separate, explicit
+operator step after canonical gateway grants and real native transport are
+verified; the installer does not automate it. Personal operator CLI logins
+remain untouched.
 
 ### 7. GitHub machine account (operator, browser)
 
@@ -198,7 +215,7 @@ Pushover is a pair. The runner takes both keys from the first source that has bo
 
 Only those two keys are read from the dotenv. `GH_TOKEN` stays in `~/.radon-runner.env`. The path is not in the plist, so regenerating the plists cannot drop it.
 
-`_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or an allowlisted copy using the step-6 pattern:
+`_radonbot` and every agent run as the same uid, so whatever file the runner can read, the agent can read. Pointing `RADON_RUNNER_DOTENV` at the full Radon root `.env` and granting the bot read access exposes every production key in it to the agents, which contradicts the safety table. Use a Pushover-only file, or a copy containing only the two notification keys:
 
 ```bash
 grep -E '^(export )?(PUSHOVER_USER|PUSHOVER_TOKEN)=' /path/to/radon/.env | sudo -u _radonbot /bin/sh -c 'umask 077; d=/Users/_radonbot/.radon; mkdir -p $d && chmod 700 $d && cat > $d/pushover.env'
@@ -229,7 +246,7 @@ To rotate a token, replace `PUSHOVER_TOKEN` in the chosen dotenv and blank or fi
 
 ### 8b. Security loops (operator and bot shell)
 
-The `security` and `security-deepsec` loops need the bot's own Claude Code on the claude.ai subscription, a deploy key for the private reports repository, their night-to-night state and DeepSec's workspace. The first three steps retire the old per-loop LaunchAgents; skip them on a Mac that never ran the wrappers.
+The `security` and `security-deepsec` loops need CI-pinned Claude Code through the private gateway, a deploy key for the private reports repository, their night-to-night state and DeepSec's workspace. The first three steps retire the old per-loop LaunchAgents; skip them on a Mac that never ran the wrappers.
 
 1. Operator tab, before cutover, confirm no security run is live (expect no output):
 
@@ -249,23 +266,11 @@ The `security` and `security-deepsec` loops need the bot's own Claude Code on th
    gh api repos/joemccann/radon/rulesets --jq '.[] | [.name,.enforcement] | @tsv'   # expect main-review active
    ```
 
-4. Bot shell, install Claude Code and sign in with the claude.ai subscription account (`/login`; the keychain from step 5 holds the session):
-
-   ```bash
-   curl -fsSL https://claude.ai/install.sh | bash && ~/.local/bin/claude
-   claude auth status   # loggedIn true, subscription auth (not an API key)
-   claude plugin install claude-security@claude-plugins-official --scope user && claude plugin list --json
-   claude models && /opt/homebrew/bin/codex login status && gitleaks version   # expect 8.30.1
-   ```
-
-   The keychain session works in the bot shell but not under launchd: the daemon cannot read the bot's login keychain, so every claude rung and the ladder resolver print `Not logged in · Please run /login` (both security loops failed every phase this way on 2026-10-08). Mint a one-year subscription token and put it in the bot's secrets file, never on a command line:
-
-   ```bash
-   ~/.local/bin/claude setup-token   # copy the sk-ant-oat01-... value it prints
-   read -rs "T?token: "; f=~/.radon-runner.env; umask 077; { grep -v '^CLAUDE_CODE_OAUTH_TOKEN=' "$f"; printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$T"; } > "$f.new" && mv "$f.new" "$f"; unset T
-   ```
-
-   The next fire logs `claude: CLAUDE_CODE_OAUTH_TOKEN present`. Rotate it before it expires.
+4. Verify gateway readiness using step 6. Install the approved Claude Security
+   plugin for the bot through the managed client, retaining the existing
+   plugin workflow and tool permissions. Provider login and subscription-token
+   creation do not run in the bot account. DeepSec's pinned SDK receives only
+   the temporary loopback adapter credential during process/revalidate.
 
 5. Bot shell, the reports deploy key:
 
@@ -414,7 +419,7 @@ failures with the loop name and sanitized log, never credentials.
 
 ### 10. Clean up
 
-`exit` the bot shell. Step 2 and step 6 already removed their clones.
+`exit` the bot shell.
 
 ## Operate
 
@@ -428,8 +433,8 @@ failures with the loop name and sanitized log, never credentials.
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a completed P1 fix | the loop exports immutable source to private CI; the operator coordinator owns independent review, public PR, merge and host sync. No terminal-written marker. P0 requires incident coordination |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
-| After a reboot | `security unlock-keychain ~/Library/Keychains/login.keychain-db` in the bot shell. Until then agy fails |
-| Re-sign a CLI | the bot shell, then the sign-in command from step 4 |
+| After a reboot | Verify `com.radon.model-gateway-tunnel` and `com.radon.model-gateway-updater` in system launchd, then step 6 |
+| Provider needs renewed consent | Follow the gateway reauthorization alert; do not create bot-side model grants |
 
 ## Troubleshooting
 
@@ -438,34 +443,29 @@ An uncertain lock requires operator inspection of its recorded PID and process s
 | Symptom | Cause | Fix |
 |---|---|---|
 | `sudo: a password is required` during initial root-runner upgrade | the old install has no unattended root updater | one legitimate macOS administrator authorization installs the reviewed updater; later CI-green runner refreshes need no terminal command. Never grant a bot-writable script root authority |
-| Security loop log: `Not logged in · Please run /login` | `CLAUDE_CODE_OAUTH_TOKEN` missing or expired in `~/.radon-runner.env` | Step 8b.4 `claude setup-token`, then kick the loop |
-| Security log: `Claude Security did not run (OPERATOR_REQUIRED)`, claude `auth status` logged out | The agent's shell does not inherit `CLAUDE_CODE_OAUTH_TOKEN`; Stage 4 reads it from `~/.radon-runner.env` itself, so the token there is missing or expired | `sudo -H -u _radonbot sh -c 'cd; CLAUDE_CODE_OAUTH_TOKEN=$(grep ^CLAUDE_CODE_OAUTH_TOKEN= .radon-runner.env \| cut -d= -f2-) .local/bin/claude auth status'`; re-mint with step 8b.4 if logged out |
-| "Keychain Not Found ... antigravity" dialog | The bot has no login keychain | Cancel, then step 5 |
 | `--check` passes but paths show your home | You ran it in your own tab | Rerun it in the bot shell |
 | GitHub signup: "email ... already associated with an account" | One email per GitHub account | Use a different address |
 | Signup form shows `joemccann` | Browser autofill | Clear the username and password fields, paste the bot's |
 | PR author is `joemccann`, not the bot | `GH_TOKEN` holds your token | Replace it with the bot's (step 8) |
-| Log stops at `starting agy`, then the next agent | Keychain locked after a reboot | Unlock it (Operate) |
-| A security loop's log shows claude `not logged in` on every rung, every phase `FAILED` | Keychain locked after a reboot, so the claude.ai session is unreadable | Unlock it, then `~/.local/bin/claude auth status` (Operate); re-sign with step 8b.4 if still logged out |
 | `no timeout or gtimeout in /opt/homebrew/bin:/usr/bin:/bin` | coreutils missing | `brew install coreutils` |
 | First `uv pip install` fails on `file:./vendor/fastembed-0.8.0-py3-none-any.whl` | `vendor/` is gitignored, and the security pre-run `git clean` deletes it | `run_loop.sh` writes the wheel after `PRE_RUN` and before the agent. The installed copy refreshes from CI-green main |
-| Log shows `NVIDIA is paused ... skipping fx:nvidia` or `stopping fx:nvidia` | NVIDIA answered persistent 429s or a 401/403, so the key is tripped | Nothing for 429s: it clears itself. For `NVIDIA AUTHORIZATION FAILED` in the proxy log, check the key (Credentials tab or `/v1/models`) |
-| Every `fx:nvidia` rung exits 75 at once, log `not calling NVIDIA unpaced` | The proxy could not start (lib missing: reinstall, step 2) | Reinstall; check `nvidia-proxy.log` |
-| fx:nvidia fails with an unknown provider | The bot's `~/.fx/settings.json` predates `nvidia-paced` | Rerun the bootstrap in the bot shell (step 6) |
 
 ## NVIDIA rate limits
 
-The build.nvidia.com key is free but rate limited per key, about 40 requests a minute (NVIDIA returns no rate-limit headers; this is the documented free-tier default). Production (the model ladder, knowledge embeddings, research page parsing) and the `fx:nvidia` rung share it, so each host paces itself with `scripts/nvidia_rate_limit.py`, installed as `/usr/local/radon-runner/lib/nvidia_rate_limit.py`.
+NVIDIA inference is paced inside the model gateway. The existing limiter
+retains its configured RPM, bounded state locking, Retry-After cooldowns and
+persistent authorization/429 trip deadlines. Gateway cutover captures known
+legacy state before old containers stop, merges stronger deadlines into the
+persistent account record and records each imported snapshot so later
+restarts cannot revive an already-cleared failure streak.
 
-- fx is a closed binary, so the `fx:nvidia` rung runs it as provider `nvidia-paced` against a loopback proxy on `127.0.0.1:18431`. The runner starts the proxy on first use (detached, cwd `/`, a clean environment; it never holds the key, it forwards fx's bearer to `https://integrate.api.nvidia.com` only) and it exits after 15 idle minutes. Every loop on the Mac shares it and one state file, `/Users/_radonbot/radon-runner/nvidia-rate.json`.
-- It spaces requests to `RADON_NVIDIA_RPM` (default 20, half the key's limit, because production uses the same key), at most 2 at a time. On a 429 it honours `Retry-After` / `x-ratelimit-reset*` (default 30 s, capped at 300 s) for every loop and retries at most twice; when the budget is still spent it answers a local 429 and sends nothing upstream.
-- Shared state locking is bounded to 250 ms across the thread mutex and file lock, and admission also respects a shorter caller budget. Contention refuses a send slot; response bookkeeping surfaces an explicit state-lock error. The proxy returns 503 and closes its upstream connection instead of hanging or sending an unpaced request (REL-300 / R-719).
-- Five consecutive 429s (`RADON_NVIDIA_TRIP_AFTER_429S`) or any 401/403 trip NVIDIA for 15 minutes (`RADON_NVIDIA_TRIP_SECS`, `RADON_NVIDIA_AUTH_BLOCK_SECS`) and write `nvidia-rate.json.tripped`. The runner checks that file before `fx:nvidia` and every 10 s while it runs: a trip stops fx and exits 75, so the ladder moves to the next rung instead of hammering the key. A 401/403 is never retried and is logged as `NVIDIA AUTHORIZATION FAILED` with a redacted body snippet.
-- Log: `sudo -u _radonbot tail -40 /Users/_radonbot/radon-runner/logs/nvidia-proxy.log` (429s, trips, 403s, a short secret-free excerpt of every non-200 body).
+Coding agents do not launch the legacy fx loopback proxy or carry its bearer
+key. A refused provider attempt moves through compatible gateway rungs;
+account pacing and cooldowns are never reset to force another attempt.
 
 ## Loop config
 
-`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`. `install.sh` installs every `loops/*.env` on any invocation, named or not, because `run_loop.sh` reads the installed env: the 2026-10-19 `install.sh performance` refreshed the harness but left six envs at a shape without `DEADMAN_LABEL`, so four loops ran a marker-posting harness with nothing to post to. `fx:cerebras`, where present, is always the last rung (`scripts/tests/test_cerebras_last_rung.py`).
+`scripts/runner/loops/<loop>.env` sets `BRANCH_PREFIX`, `PROMPT`, `AGENTS` (agent names in order; `fx:<provider>` for fx, `claude:<model>` for claude, which always runs with `--effort medium`), `TIMEOUT_SECS`, `SCHEDULE_HOUR` and `SCHEDULE_MINUTE`. Adding a loop is one `.env`, one prompt and one `install.sh <loop>`. `install.sh` installs every `loops/*.env` on any invocation, named or not, because `run_loop.sh` reads the installed env: the 2026-10-19 `install.sh performance` refreshed the harness but left six envs at a shape without `DEADMAN_LABEL`, so four loops ran a marker-posting harness with nothing to post to. Legacy `agy` and `fx:<provider>` config names now use the managed Codex native adapter; their old local binaries and provider keys are unused. Claude and Grok retain their native protocols. Provider capability and explicit model-identity checks remain service-owned.
 
 Optional knobs (empty means off; the security loops use them):
 

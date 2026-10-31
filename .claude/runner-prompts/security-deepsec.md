@@ -367,23 +367,25 @@ outside the diff. `base: UNRESOLVED` or no file: compute the range as below.
 Run the installed binary from the clone root, detached as described above,
 with `umask 077` and all output in the private run dir. Run from the clone
 root, `deepsec.config.ts` is not loaded, so DeepSec's reviewer is the
-vendored Codex SDK on the bot's own `codex` ChatGPT login (never an
-`OPENAI_API_KEY` / `CODEX_API_KEY`, which the runner unsets); record the
-agent line DeepSec prints in the run-record:
+vendored Codex SDK through the private model gateway bridge. The adapter
+supplies an ephemeral loopback token, so DeepSec never reads the bot's native
+subscription grant. Provider credentials stay in the model service. Keep the
+existing sandbox, tool and execution policy; record the agent line DeepSec
+prints in the run-record:
 
 ```sh
 umask 077
 RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ./.deepsec/node_modules/.bin/deepsec --version >"$PRIVATE_RUN_DIR/deepsec-version.log" 2>&1
 set +e
-./.deepsec/node_modules/.bin/deepsec process --project-id radon --agent codex --model gpt-6.1-sol \
+python3.13 /usr/local/radon-runner/lib/model_gateway/cli.py launch deepsec -- ./.deepsec/node_modules/.bin/deepsec process --project-id radon --agent codex --model gpt-6.1-sol \
   --diff "$LAST_AUDITED_SHA..$HEAD_SHA" --concurrency 2 \
   --comment-out "$PRIVATE_RUN_DIR/deepsec-findings.md" \
   >"$PRIVATE_RUN_DIR/deepsec-process.log" 2>&1
 DEEPSEC_RC=$?
 set -e
 case "$DEEPSEC_RC" in 0|1) ;; *) exit "$DEEPSEC_RC" ;; esac
-./.deepsec/node_modules/.bin/deepsec revalidate --project-id radon --agent codex --model gpt-6.1-sol --min-severity MEDIUM --concurrency 2 \
+python3.13 /usr/local/radon-runner/lib/model_gateway/cli.py launch deepsec -- ./.deepsec/node_modules/.bin/deepsec revalidate --project-id radon --agent codex --model gpt-6.1-sol --min-severity MEDIUM --concurrency 2 \
   >"$PRIVATE_RUN_DIR/deepsec-revalidate.log" 2>&1
 ./.deepsec/node_modules/.bin/deepsec export --project-id radon --format json --since "$RUN_STARTED_AT" \
   --out "$PRIVATE_RUN_DIR/deepsec-current-run-findings.json" >"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1

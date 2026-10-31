@@ -838,6 +838,8 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/mobile-price-format.spec.ts
           e2e/mobile-search-focus.spec.ts
+          e2e/mobile-native-platform.spec.ts
+          e2e/mobile-pointer-fades.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/portfolio-orders-polling.spec.ts
           e2e/portfolio-request-cadence.spec.ts
@@ -1566,8 +1568,10 @@ jobs:
       - name: Tag the deployed version
         run: |
           set -euo pipefail
-          tag="v$(python3 scripts/release_version.py)"
-          # A docs-only commit keeps the previous version; its tag stays put.
+          version="$(python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA")"
+          tag="v${version}"
+          # An unchanged build label (including the no-history package fallback)
+          # keeps its existing tag; never retag an already published version.
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already tagged at $(git rev-list -n 1 "${tag}")"
             exit 0

@@ -65,6 +65,7 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
         "private_security_release.py",
         "operator_runtime_refresh.py",
         "codex_capability_probe.py",
+        "model_gateway",
         "ci",
     }
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o500 for path in installed_release.iterdir() if path.is_file())

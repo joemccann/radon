@@ -32,6 +32,7 @@ ENV_CHECKER = ROOT / "scripts" / "check-env.py"
 JOURNAL_HELPER = ROOT / "scripts" / "deploy-journal.py"
 
 MANAGED_SERVICES = (
+    "radon-model-gateway.service",
     "radon-nextjs.service",
     "radon-api.service",
     "radon-relay.service",
@@ -856,6 +857,7 @@ recover_pending_transition
         assert marker.read_text(encoding="utf-8") == f"{self.REQUESTED}\n"
         assert not journal.exists()
         assert calls.read_text(encoding="utf-8").splitlines() == [
+            "/usr/local/sbin/radon-deploy-root verify-committed",
             "/usr/local/sbin/radon-deploy-root commit-transition",
             "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units",
             "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
@@ -951,6 +953,7 @@ recover_pending_transition
         assert result.returncode == 0, result.stdout + result.stderr
         _assert_release_snapshot(live, old)
         assert calls.read_text(encoding="utf-8").splitlines() == [
+            "/usr/local/sbin/radon-deploy-root verify-committed",
             "/usr/local/sbin/radon-deploy-root stop-clean",
             "/usr/local/sbin/radon-deploy-root revert-units",
             "/usr/local/sbin/radon-deploy-root recover",
@@ -987,6 +990,7 @@ write_green_marker() {{
 }}
 sudo() {{
   case "$*" in
+    "/usr/local/sbin/radon-deploy-root verify-committed") return 3 ;;
     "/usr/local/sbin/radon-deploy-root commit-transition")
       [[ "$(cat {events!s})" == green ]] || return 93
       [[ -f {journal!s} ]] || return 94
@@ -1199,6 +1203,7 @@ class TestRootHelper:
         self, tmp_path: Path, *, list_mode: str = "ok"
     ) -> tuple[dict[str, str], Path, Path, Path, Path]:
         units = {
+            "radon-model-gateway.service": ("active", "simple"),
             "radon-nextjs.service": ("active", "simple"),
             "radon-api.service": ("active", "simple"),
             "radon-relay.service": ("active", "notify"),
@@ -1847,6 +1852,7 @@ set -euo pipefail
 case "$1" in
   list-unit-files)
     printf '%s\\n' \
+      'radon-model-gateway.service enabled' \
       'radon-nextjs.service enabled' \
       'radon-api.service enabled' \
       'radon-relay.service enabled' \
@@ -1855,6 +1861,7 @@ case "$1" in
     ;;
   list-units)
     printf '%s\\n' \
+      'radon-model-gateway.service loaded active running' \
       'radon-nextjs.service loaded active running' \
       'radon-api.service loaded active running' \
       'radon-relay.service loaded active running' \
@@ -1933,6 +1940,7 @@ exec /bin/rm "$@"
 set -euo pipefail
 source {DEPLOY!s}
 wait_for_gateway_ready() {{ return 0; }}
+preflight_model_disk() {{ return 0; }}
 sudo() {{
   printf '%s\\n' "$*" >> {calls!s}
   [[ "$*" != *" stop-clean" ]]
@@ -3215,6 +3223,7 @@ raise SystemExit(0)
         shell = f"""
 set -euo pipefail
 source {DEPLOY!s}
+preflight_model_disk() {{ return 0; }}
 create_staged_worktree() {{
   STAGED_RELEASE_DIR="$(mktemp -d {tmp_path!s}/stage.XXXXXX)"
 }}
@@ -3249,6 +3258,7 @@ build_staged_release {'b' * 40}
         shell = f"""
 set -euo pipefail
 source {DEPLOY!s}
+preflight_model_disk() {{ return 0; }}
 create_staged_worktree() {{ STAGED_RELEASE_DIR={stage!s}; }}
 build_nextjs_at() {{ return 0; }}
 prepare_python_wheels() {{ return 61; }}
@@ -3373,6 +3383,7 @@ build_staged_release() {{
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 deploy_gate() {{ printf 'gate\\n' >> {calls!s}; return 0; }}
 short_log() {{ printf 'log\\n'; }}
+sudo() {{ [[ "$*" == "-n -l -- $APP_RUNTIME_HELPER check-model-space" ]]; }}
 RADON_DEPLOY_STAGE=1 main {sha}
 """
         result = subprocess.run(

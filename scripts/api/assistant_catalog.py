@@ -24,6 +24,10 @@ REFUSED_CAPABILITIES: frozenset[str] = frozenset(
 CatalogKey = tuple[str, str]
 
 CATALOG: dict[CatalogKey, Capability] = {
+    # Private model transport is never a callable assistant tool, including
+    # read-only catalog/status operations (prevents recursive inference).
+    ("GET", "/model-gateway/{operation}"): "internal",
+    ("POST", "/model-gateway/{operation}"): "internal",
     ("GET", "/uw/capabilities"): "read",
     ("GET", "/uw/research"): "read",
     ("POST", "/uw/research/refresh"): "read.spawn",

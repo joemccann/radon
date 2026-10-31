@@ -102,7 +102,7 @@ readonly BUN_VERSION="1.4.4"
 
 # Optional research collector joins subsequent release transactions only once
 # activated. A first deploy installs its code/unit before channel admission.
-SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+SERVICES=(radon-model-gateway radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
 UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
@@ -474,8 +474,19 @@ prepull_app_images() {
     log_error "App image prepull failed; refusing teardown"
     return 1
   fi
+  preflight_model_disk || return $?
   log_success "Exact app image pair is local for ${requested_sha:0:7}"
   return 0
+}
+
+# A successful pre-pull or earlier prestage does not prove that UID1000 can
+# still write the bounded client/model preparation. Reserved root blocks do
+# not count. The fixed root action reads metadata only and never prunes data.
+preflight_model_disk() {
+  if ! timeout 10 sudo -n "$APP_RUNTIME_HELPER" check-model-space; then
+    log_error "Model preparation disk admission failed; refusing teardown"
+    return 78
+  fi
 }
 
 # The serving release keeps serving while Turso is unhealthy; stopping it then
@@ -606,7 +617,7 @@ load_transition_journal() {
   JOURNAL_PHASE="${values[4]}"
   if [[ ! "$JOURNAL_REQUESTED_SHA" =~ ^[0-9a-f]{40}$ \
       || ! "$JOURNAL_PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ \
-      || ! "$JOURNAL_PHASE" =~ ^(prepared|backup_started|backup_complete|promoting|target_unverified|verified)$ \
+      || ! "$JOURNAL_PHASE" =~ ^(prepared|backup_started|backup_complete|promoting|target_unverified|verified|finalization_pending)$ \
       ]] || ! release_dir_is_managed "$JOURNAL_STAGE_DIR" \
       || ! release_dir_is_managed "$JOURNAL_BACKUP_DIR"; then
     log_error "Transition journal failed path, SHA, or phase validation"
@@ -816,9 +827,9 @@ should_rebuild_next() {
 
 # The gated node image already contains the production Next build. Prestaging
 # may reuse it instead of compiling the same SHA again, but only when the host
-# can prove that this release will actually run that image. Every check fails
-# closed to the host compile so manual/fallback deploys and control-plane drift
-# retain the established artifact path.
+# can prove that this release will actually run that image. Ordinary applicability
+# failures retain the host compile for manual/fallback deploys and control-plane
+# drift. A capacity refusal propagates78 and never permits a fallback build.
 container_node_image_replaces_next_compile() {
   local release_dir="$1"
   local target_sha target_dropin dropin_paths need_reload unit_environment exec_start
@@ -848,7 +859,7 @@ container_node_image_replaces_next_compile() {
   # This proves the immutable build artifact is present before host compile is
   # skipped. It shares the exact pull verb with the parallel prepull job; the
   # deploy repeats a fast local inspection before any service is stopped.
-  prepull_app_images "$target_sha" || return 1
+  prepull_app_images "$target_sha" || return $?
 }
 
 seed_staged_node_modules() {
@@ -911,7 +922,7 @@ build_nextjs_at() {
   # Persist only browser-safe variables. Server-side build inputs are supplied
   # to the build process from the literal dotenv parser below and never copied
   # into the application tree.
-  local cloud_env="$ENV_FILE_DEFAULT"
+  local cloud_env="$ENV_FILE_DEFAULT" image_status
   write_web_env "$cloud_env" "$release_dir"
 
   if ! command -v bun >/dev/null 2>&1 || [[ "$(bun --version)" != "$BUN_VERSION" ]]; then
@@ -966,6 +977,12 @@ build_nextjs_at() {
       if container_node_image_replaces_next_compile "$release_dir"; then
         log_info "Skipping next build; exact node image is the canonical production artifact"
       else
+        image_status=$?
+        # Capacity refusal (including an old control plane lacking the new
+        # check) is not permission to allocate an unbounded fallback build.
+        if (( image_status == 78 )); then
+          return "$image_status"
+        fi
         run_with_cloud_env "$cloud_env" bun run build
       fi
     else
@@ -1078,6 +1095,7 @@ build_staged_release() {
   local wheel_status=0
   local next_pid wheel_pid
 
+  preflight_model_disk || return $?
   create_staged_worktree "$requested_sha" || return $?
   # Next compile and pip wheel touch disjoint trees (.next/node_modules vs
   # .deploy-wheels). Overlap them so a wheel-cache miss does not sit behind
@@ -1282,6 +1300,40 @@ recover_pending_transition() {
   RELEASE_BACKUP_DIR="$JOURNAL_BACKUP_DIR"
   PREVIOUS_RELEASE_SHA="$JOURNAL_PREVIOUS_SHA"
 
+  if [[ "$JOURNAL_PHASE" == "verified" || "$JOURNAL_PHASE" == "finalization_pending" ]]; then
+    local committed_sha="" commit_status=0
+    committed_sha="$(sudo "$DEPLOY_ROOT_HELPER" verify-committed)" || commit_status=$?
+    if (( commit_status != 0 && commit_status != 3 )); then
+      log_error "Cannot establish root commit state; refusing rollback"
+      return "$commit_status"
+    fi
+    if [[ "$committed_sha" == "$JOURNAL_REQUESTED_SHA" ]]; then
+      [[ "$(current_commit)" == "$JOURNAL_REQUESTED_SHA" ]] || {
+        log_error "Committed release identity changed; manual recovery required"
+        return 78
+      }
+      write_transition_phase finalization_pending || return 1
+      # Export publication and retired timer cleanup are idempotent. Service
+      # health changing after root commit cannot revive discarded snapshots.
+      sudo "$DEPLOY_ROOT_HELPER" commit-transition || return $?
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed after a committed release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed after a committed release; the next deploy will republish it"
+      DEPLOY_RELEASE_UNVERIFIED=0
+      finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
+      log_success "Finalized committed release ${JOURNAL_REQUESTED_SHA:0:7}"
+      notify_release_live "$JOURNAL_REQUESTED_SHA"
+      return 0
+    elif [[ -n "$committed_sha" ]]; then
+      log_error "Root commit receipt differs from the journal; refusing rollback"
+      return 78
+    elif [[ "$JOURNAL_PHASE" == "finalization_pending" ]]; then
+      log_error "Committed journal lacks its exact root receipt; refusing rollback"
+      return 78
+    fi
+  fi
+
   if [[ "$JOURNAL_PHASE" == "verified" ]]; then
     if [[ "$(current_commit)" == "$JOURNAL_REQUESTED_SHA" ]] \
       && validate_rollback_artifacts "$RADON_DIR" \
@@ -1364,6 +1416,7 @@ wait_for_gateway_ready() {
 }
 
 stop_services_for_transition() {
+  local requested_sha="${1:-}" previous_sha="${2:-}"
   # Gate FIRST, while the CURRENT (not-yet-restarted) radon-api still serves
   # /health, so we read the IB gateway's actual auth state -- not a freshly
   # restarted api's pool warmup (which reads not-authenticated for ~a minute,
@@ -1374,6 +1427,13 @@ stop_services_for_transition() {
     log_warn "Gateway readiness is advisory for a code-controlled deploy"
   fi
 
+  preflight_model_disk || return $?
+  # A refused admission must leave no prepared journal: both the inner EXIT
+  # handler and the outer supervisor would otherwise stop the healthy release
+  # to recover that apparently unfinished transition.
+  if [[ -n "$requested_sha" ]]; then
+    prepare_release_transition "$requested_sha" "$previous_sha" || return $?
+  fi
   DEPLOY_TEARDOWN_STARTED=1
   DEPLOY_SERVICES_RECOVERED=0
   # The root-owned helper stops the exact unit set, verifies every unit reached
@@ -1426,11 +1486,9 @@ restart_services() {
   local status=0
   UNITS_RESTARTED=1
 
-  if [[ -n "$requested_sha" ]]; then
-    prepare_release_transition "$requested_sha" "$previous_sha" || return $?
-  fi
   if [[ -n "$requested_sha" && -n "$previous_sha" ]] \
     && ! payload_paths_changed "$previous_sha" "$requested_sha"; then
+    prepare_release_transition "$requested_sha" "$previous_sha" || return $?
     log_info "No runtime payload changes; promoting without unit restart"
     # Services stay UP through this branch (contrast the normal path below,
     # which calls stop_services_for_transition first). activate_staged_release
@@ -1448,7 +1506,7 @@ restart_services() {
     UNITS_RESTARTED=0
     return 0
   fi
-  stop_services_for_transition
+  stop_services_for_transition "$requested_sha" "$previous_sha" || return $?
   if [[ -n "$requested_sha" ]]; then
     activate_staged_release "$requested_sha" "$previous_sha" || status=$?
     if (( status != 0 )); then
@@ -1606,6 +1664,17 @@ check_release_topology_restored() {
   return 1
 }
 
+check_model_gateway() {
+  if curl -sf --max-time "$HEALTH_CURL_TIMEOUT" \
+      --unix-socket /run/radon-model-gateway/gateway.sock \
+      http://localhost/health >/dev/null 2>&1; then
+    log_success "[gate] private model gateway responding"
+    return 0
+  fi
+  log_error "[gate] private model gateway unavailable"
+  return 1
+}
+
 check_health_lite() {
   local attempt=1
   while (( attempt <= HEALTH_RETRIES )); do
@@ -1701,6 +1770,7 @@ deploy_gate() {
   check_release_topology_restored || gate_rc=1
   snapshot_unit_restarts || gate_rc=1
   check_health_lite || gate_rc=1
+  check_model_gateway || gate_rc=1
   check_nextjs_http || gate_rc=1
   check_relay_listener || gate_rc=1
   check_relay_http || gate_rc=1
@@ -1882,6 +1952,15 @@ main() {
   if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
     if [[ -f "$TRANSITION_JOURNAL_FILE" ]]; then
       log_warn "Unfinished transition present; skipping prestage"
+      trap - TERM INT HUP
+      return 0
+    fi
+    # Optional prestage runs before root's trusted control-plane sync. An old
+    # helper/grant cannot perform the new fixed check yet. Defer without a
+    # worktree or marker; mandatory deployment rechecks after that sync. An
+    # available checker refusing actual capacity still fails with status78.
+    if ! sudo -n -l -- "$APP_RUNTIME_HELPER" check-model-space >/dev/null 2>&1; then
+      log_warn "Model disk admission grant is not installed; deferring prestage until control-plane sync"
       trap - TERM INT HUP
       return 0
     fi

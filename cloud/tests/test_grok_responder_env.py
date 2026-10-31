@@ -142,7 +142,8 @@ def test_managed_keys_are_reset_not_preserved(tmp_path):
     env = _run(tmp_path, PROD, EXISTING)
     assert env["GROK_PAGE_NO_DOTENV"] == "1"
     assert env["GROK_PAGE_SYNC_REMOTE"] == "1"
-    assert env["GROK_BIN"] == "/home/radon/.local/bin/grok"
+    assert env["GROK_BIN"] == "/opt/radon-model-clients/current/bin/grok"
+    assert env["RADON_MODEL_GATEWAY_SOCKET"] == "/run/radon-model-gateway/gateway.sock"
 
 
 def test_first_install_leaves_flags_unset_so_they_default_off(tmp_path):

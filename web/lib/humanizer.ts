@@ -4,12 +4,11 @@ import { assertLocalHumanizer, assertPassed, auditHumanizerCopy, type HumanizerA
 export * from "./humanizerCheck";
 
 /** Review the exact final strings; provider failure and malformed reviews fail closed. */
-export async function assertHumanizedCopy(copy: Record<string, string>, options: { provider: LlmProviderName; signal: AbortSignal; timeoutMs?: number; previousAudit?: HumanizerAudit }): Promise<HumanizerAudit> {
+export async function assertHumanizedCopy(copy: Record<string, string>, options: { provider?: LlmProviderName; signal: AbortSignal; timeoutMs?: number; previousAudit?: HumanizerAudit }): Promise<HumanizerAudit> {
   assertLocalHumanizer(copy);
   options.signal.throwIfAborted();
   const result = await chat({
     provider: options.provider,
-    fallback: false,
     system: HUMANIZER_REVIEW_SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(copy) }],
     maxTokens: 2400,

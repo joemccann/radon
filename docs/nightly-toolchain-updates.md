@@ -18,18 +18,18 @@ caret dependency on `^0.145.0` cannot advance to `0.162.1` by itself.
 candidate directory with `npm ci --ignore-scripts`. `refresh` queries the
 official npm registry for exact stable versions, writes a candidate lockfile,
 and stages that exact tree. Automatic candidates permit same-major DeepSec
-releases and stable Codex CLI/SDK pairs at or above the baseline. A missing
-matching SDK, major DeepSec change, failed install or failed smoke leaves the
-working reviewer unchanged. No mutable package selector runs in the scanner.
+releases while retaining the reviewed Codex CLI/SDK pins. Model client pins
+advance only through a reviewed CI change. A major DeepSec change, failed
+install or failed smoke leaves the working reviewer unchanged. No mutable
+package selector runs in the scanner.
 
-Every candidate must report the exact installed versions, pass DeepSec's CLI
-startup, authenticate through the account's existing Codex login, and complete
-a real SDK inference from an empty temporary directory with read-only sandbox
-and tools prohibited in the prompt. No credential is copied or printed. Failure
-diagnostics remain mode `0600` in the private candidate directory. The default
-DeepSec `gpt-5.5` was rejected by the current ChatGPT account in the live smoke;
-`gpt-6.1-sol` passed with the staged `0.162.1` SDK/CLI pair. The actual source
-review commands explicitly select the tested model.
+Every candidate reports the exact installed versions and passes DeepSec's CLI
+startup. Inference smoke runs through the private model gateway, which owns
+subscription authentication and model fallback; it never loads a bot grant or
+launches direct SDK inference. Process/revalidate uses the gateway's supported
+DeepSec bridge adapter with an ephemeral loopback token. The SDK's custom
+Responses provider keeps tool execution and existing sandbox policy local.
+Failure diagnostics remain mode `0600` in the private candidate directory.
 
 ## Bot maintenance and recovery
 
@@ -85,28 +85,22 @@ before touching the private reviewer tree; it never updates any shared CLI.
 The Mini's bot home and LaunchDaemons require operator privilege to provision.
 The current operator account cannot install or run bot maintenance without
 that privilege. Existing keychain-unlock sudo permission is not a shell or
-maintenance authorization. Ordinary Claude login is also insufficient for
-headless launchd: retain the bot's `CLAUDE_CODE_OAUTH_TOKEN` from the existing
-`claude setup-token` procedure in `docs/runner.md`.
+maintenance authorization. Provider grants remain inside the model service;
+runner clients receive only its private socket and ephemeral bridge tokens.
 
 ## Desktop applications
 
-`operator` retains the installed twice-daily 09:00/21:00 user LaunchAgent
-and the native Claude, Grok stable, Agy and Muse update commands, with
-per-tool process deferral. A busy CLI does not block independent desktop
-apps. The permanent managed Codex app-server is a separate runtime and does
-not block a shared Homebrew CLI update; real shared-CLI processes and active
-nightly cycles that may invoke it still defer that cask. Native CLI updates
-check the operator's own processes, since the bot has separate installs. Its snapshot and previous plist are retained under
-`~/.local/share/radon-toolchain-updater/releases/`. These operator-owned CLI
-updates do not mutate the bot's vendored reviewer.
+`operator` retains its installed twice-daily 09:00/21:00 LaunchAgent for
+allowlisted desktop applications. `native` reports `managed-by-gateway-ci`;
+it performs no Claude, Grok, Agy, Muse or Codex self-update. Model clients are
+immutable CI artifacts with exact package versions and recorded hashes.
 
-`desktop` refreshes Homebrew metadata, updates Codex through its cask owner,
-and updates installed allowlisted VS Code/Obsidian casks only after their app
-processes have exited. Activity gates are independent per tool. Homebrew
-verifies artifact checksums. No `--force`, credential extraction, forced quit,
-or automatic OS restart is used. Homebrew cask updates use the vendor's stable
-catalog and do not have the reviewer's package rollback guarantee.
+`desktop` refreshes Homebrew metadata and updates installed allowlisted VS Code
+and Obsidian casks only after their processes exit. Codex returns
+`managed-by-gateway-ci` without a cask upgrade. Activity gates remain per tool.
+No forced quit, credential extraction or OS restart is used. The installed
+updater snapshot and previous plist remain under
+`~/.local/share/radon-toolchain-updater/releases/`.
 
 Observed installed applications also include ChatGPT, Claude, Chrome, Brave,
 Docker, Tailscale, Signal, Dropbox, Warp and Apple App Store apps. These are not

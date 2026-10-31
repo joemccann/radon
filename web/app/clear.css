@@ -76,7 +76,9 @@
 }
 
 .radon-clear .metric-card:last-child { border-right: 0; }
-.radon-clear .metric-card:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .radon-clear .metric-card:hover { background: var(--bg-subtle); }
+}
 .radon-clear .metric-value { font-weight: 500; letter-spacing: -0.045em; }
 .radon-clear .metric-change { border-top: 0; padding-top: 2px; font-size: var(--text-meta); }
 
@@ -105,7 +107,9 @@
 }
 
 .radon-clear td { border-color: var(--line-grid); }
-.radon-clear tbody tr:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .radon-clear tbody tr:hover { background: var(--bg-subtle); }
+}
 
 .radon-clear :is(.btn-primary, .btn-secondary, .btn-danger, .btn-quick, .btn-sync, .btn-order-action) {
   min-height: 40px;
@@ -132,9 +136,11 @@
 
 .radon-clear .btn-quick { padding-inline: 8px; }
 
-.radon-clear :is(.btn-secondary, .btn-quick, .btn-sync):hover:not(:disabled) {
-  background: var(--bg-subtle);
-  border-color: var(--text-muted);
+@media (hover: hover) and (pointer: fine) {
+  .radon-clear :is(.btn-secondary, .btn-quick, .btn-sync):hover:not(:disabled) {
+    background: var(--bg-subtle);
+    border-color: var(--text-muted);
+  }
 }
 
 .radon-clear :is(input, select, textarea) {
@@ -284,7 +290,9 @@
   color: var(--text-on-accent);
   font: 600 14px var(--font-sans);
 }
-.clear-auth .cl-formButtonPrimary:hover { background: var(--signal-deep); border-color: var(--signal-deep); }
+@media (hover: hover) and (pointer: fine) {
+  .clear-auth .cl-formButtonPrimary:hover { background: var(--signal-deep); border-color: var(--signal-deep); }
+}
 .clear-auth .cl-footerActionLink { color: var(--signal-core-text); }
 
 /* Populated desktop/mobile audits identified legacy 8–11px annotations.
@@ -529,7 +537,9 @@ body.radon-clear[data-mobile="true"] :is(
   color: var(--text-secondary); border: 0; border-radius: var(--radius);
   background: transparent; font: 500 13px var(--font-sans); cursor: pointer;
 }
-.chat-header-button:hover { background: var(--bg-subtle); color: var(--text-primary); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-header-button:hover { background: var(--bg-subtle); color: var(--text-primary); }
+}
 .chat-header-button:disabled { opacity: .5; cursor: default; }
 .chat-context {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
@@ -555,7 +565,10 @@ body.radon-clear[data-mobile="true"] :is(
 .chat-starters strong { font-size: 14px; font-weight: 500; }
 .chat-starters button span span { color: var(--text-muted); font-size: 12px; }
 .chat-starters svg { flex-shrink: 0; color: var(--text-muted); }
-.chat-starters button:hover strong, .chat-starters button:hover svg { color: var(--signal-core-text); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-starters button:hover strong,
+  .chat-starters button:hover svg { color: var(--signal-core-text); }
+}
 /* Short conversations stay with the composer; overflowing history still scrolls. */
 .chat-panel .chat-messages { display: flex; flex-direction: column; padding: 28px 40px 24px; scrollbar-gutter: stable; }
 .chat-panel .chat-message { flex-shrink: 0; margin-bottom: 28px; min-width: 0; }
@@ -574,7 +587,9 @@ body.radon-clear[data-mobile="true"] :is(
 .chat-panel .chat-markdown pre { max-width: 100%; overflow-x: auto; }
 .chat-panel .chat-actions { opacity: 1; flex-wrap: wrap; align-items: center; gap: 4px; }
 .chat-panel .chat-action-btn { min-height: 36px; padding: 6px 8px; border: 0; font: 400 12px var(--font-sans); letter-spacing: 0; text-transform: none; }
-.chat-panel .chat-action-btn:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-panel .chat-action-btn:hover { background: var(--bg-subtle); }
+}
 .chat-panel .chat-response-model { color: var(--text-muted); font-size: 12px; padding: 6px 8px; overflow-wrap: anywhere; }
 .chat-panel .chat-jump-btn { min-height: 36px; height: auto; font: 500 12px var(--font-sans); text-transform: none; letter-spacing: 0; border-radius: var(--radius); }
 .chat-panel .chat-composer { flex-shrink: 0; padding: 12px 28px 16px; background: var(--bg-canvas); }
@@ -594,7 +609,10 @@ body.radon-clear[data-mobile="true"] :is(
   min-height: 44px; padding: 8px; background: transparent; border: 0;
   border-radius: var(--radius); color: var(--text-secondary); font: 400 12px var(--font-sans); cursor: pointer;
 }
-.chat-panel .ask-composer__attach:hover, .chat-panel .ask-composer__stop:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-panel .ask-composer__attach:hover,
+  .chat-panel .ask-composer__stop:hover { background: var(--bg-subtle); }
+}
 .chat-panel .ask-composer__model { min-width: 0; gap: 4px; }
 .chat-panel .ask-composer__model-label { color: var(--text-muted); font: 400 12px var(--font-sans); letter-spacing: 0; }
 .chat-panel .ask-composer__model select {
@@ -607,7 +625,9 @@ body.radon-clear[data-mobile="true"] :is(
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--text-on-accent); background: var(--signal-core); border: 0; border-radius: var(--radius);
 }
-.chat-panel .ask-composer__enter:not(:disabled):hover { color: var(--text-on-accent); background: var(--signal-deep); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-panel .ask-composer__enter:not(:disabled):hover { color: var(--text-on-accent); background: var(--signal-deep); }
+}
 .chat-panel .ask-composer__enter:disabled { color: var(--text-muted); background: var(--bg-subtle); opacity: 1; }
 .chat-panel .ask-composer__help { margin: 0; padding: 0 16px 12px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .chat-panel .ask-composer__error { margin: 0; padding: 8px 16px; color: var(--negative); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -747,7 +767,9 @@ body.radon-clear[data-mobile="true"] :is(
   font-variant-numeric: tabular-nums;
   text-align: start;
 }
-.radon-clear .settings-preference__input:hover:not(:disabled) { border-color: var(--text-muted); }
+@media (hover: hover) and (pointer: fine) {
+  .radon-clear .settings-preference__input:hover:not(:disabled) { border-color: var(--text-muted); }
+}
 .radon-clear .settings-preference__input:focus-visible { background: var(--bg-panel); }
 .radon-clear .settings-preference__input:invalid { border-color: var(--negative); }
 .radon-clear .settings-preference .preferences-row__toggle {

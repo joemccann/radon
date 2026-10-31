@@ -62,112 +62,20 @@ const ENV_KEYS = [
 ];
 
 describe("llm provider image blocks", () => {
-  const saved: Record<string, string | undefined> = {};
-
-  beforeEach(() => {
-    for (const key of ENV_KEYS) saved[key] = process.env[key];
-    process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
-    process.env.CODEX_HOME = "/nonexistent/radon-no-codex-home";
-    process.env.GROK_AUTH_FILE = "/nonexistent/radon-no-grok-auth.json";
-    for (const key of ENV_KEYS) delete process.env[key];
-    process.env.ASSISTANT_MOCK = "0";
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-    for (const key of ENV_KEYS) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-  });
-
-  it("forwards the image block to Anthropic unchanged", async () => {
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  it("preserves images and native tool history on the shared service wire", async () => {
+    vi.stubEnv("ASSISTANT_MOCK", "0");
     const { chat } = await import("@/lib/llm/provider");
-    process.env.LLM_PROVIDER = "anthropic";
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
-    const { calls } = captureFetch(() =>
-      jsonResponse({ model: "claude-sonnet-4-5-20250929", content: [{ type: "text", text: "ok" }] }),
-    );
-
-    await chat({
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: "What is this chart?" }, IMAGE_BLOCK],
-        },
-      ],
-    });
-
-    const body = bodyOf(calls[0]);
-    expect(body.messages).toEqual([
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "What is this chart?" },
-          { type: "image", source: { type: "base64", media_type: "image/png", data: "AAA" } },
-        ],
-      },
-    ]);
-  });
-
-  it("maps the image block to an image_url part on the xAI path", async () => {
-    const { chat } = await import("@/lib/llm/provider");
-    process.env.LLM_PROVIDER = "xai";
-    process.env.XAI_OAUTH_TOKEN = "xai-test";
-    const { calls } = captureFetch(() =>
-      jsonResponse({ model: "grok-4", choices: [{ message: { content: "ok" } }] }),
-    );
-
-    await chat({
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: "What is this chart?" }, IMAGE_BLOCK],
-        },
-      ],
-    });
-
-    const body = bodyOf(calls[0]);
-    expect(body.messages).toEqual([
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "What is this chart?" },
-          { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
-        ],
-      },
-    ]);
-  });
-
-  it("keeps text-only turns on the plain-string content shape", async () => {
-    const { toOpenAiMessages } = await import("@/lib/llm/provider");
-
-    expect(
-      toOpenAiMessages({
-        system: "You are Radon.",
-        messages: [
-          { role: "user", content: "plain string turn" },
-          { role: "assistant", content: [{ type: "text", text: "block turn" }] },
-        ],
-      }),
-    ).toEqual([
-      { role: "system", content: "You are Radon." },
-      { role: "user", content: "plain string turn" },
-      { role: "assistant", content: "block turn" },
-    ]);
-  });
-
-  it("does not leak [object Object] into the mock prompt extraction", async () => {
-    process.env.ASSISTANT_MOCK = "1";
-    const { chat } = await import("@/lib/llm/provider");
-
-    const response = await chat({
-      messages: [{ role: "user", content: [{ type: "text", text: "read it" }, IMAGE_BLOCK] }],
-    });
-
-    expect(response.text).toContain("read it");
-    expect(response.text).not.toContain("[object Object]");
+    const { calls } = captureFetch(() => jsonResponse({ provider: "anthropic", model: "capable", text: "ok" }));
+    const messages = [
+      { role: "user" as const, content: [{ type: "text" as const, text: "Read" }, IMAGE_BLOCK] },
+      { role: "assistant" as const, content: [{ type: "tool_use" as const, id: "tool-1", name: "read", input: {} }] },
+      { role: "user" as const, content: [{ type: "tool_result" as const, tool_use_id: "tool-1", content: "42" }] },
+    ];
+    await chat({ messages });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toMatch(/model-gateway\/chat$/);
+    expect(bodyOf(calls[0]).messages).toEqual(messages);
   });
 });
 

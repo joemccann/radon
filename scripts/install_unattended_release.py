@@ -52,6 +52,12 @@ def install(*, source: Path, destination: Path, home: Path, python: Path, notifi
     shutil.copyfile(validator_source, release / "ci/check_pr_body.py")
     (release / "ci/check_pr_body.py").chmod(0o500)
     (release / "unattended_release.py").chmod(0o500)
+    (release / "model_gateway").mkdir(mode=0o700)
+    for name in ("__init__.py", "client.py", "cli.py", "cli_bridge.py"):
+        helper = source.parent / "model_gateway" / name
+        _trusted(helper, uid)
+        shutil.copyfile(helper, release / "model_gateway" / name)
+        (release / "model_gateway" / name).chmod(0o500)
     policy = destination / "policy.json"
     if not policy.exists():
         policy.write_text(json.dumps({"repository": "joemccann/radon", "authors": ["radon-runner-bot", "joemccann"], "branch_prefixes": LOOPS, "required_checks": CHECKS, "reviewers": ["gpt-6.1-sol", "gpt-6-luna"], "hosts": ["app", "broker"]}, indent=2) + "\n")

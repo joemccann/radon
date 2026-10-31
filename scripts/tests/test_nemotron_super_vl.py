@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from clients.model_ladder import (
+from model_gateway.engine import (
     accept_tags_payload,
     complete_multimodal_json,
     complete_text_json,
