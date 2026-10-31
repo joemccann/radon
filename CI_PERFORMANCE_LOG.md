@@ -2397,3 +2397,62 @@ green (5 passed in that file; 7 passed with the two node-image workflow
 asserts). `scripts/tests/test_cip020_python_image_reuse.py` stayed 15
 passed. Workflow YAML parses. The disk step passes `bash -n`. Full suites,
 Vitest, Docker builds, and workflow lint are left to PR CI.
+
+## CIP-022 - reuse verified model clients for an identical gateway image (2026-10-31) - VALIDATING
+
+Steady-state deploys retag the model gateway image (CIP-020) and still
+export its CLI payload twice during `restart-managed`, after services are
+stopped. Each export is a cold `docker`/`podman run` of the gateway image
+with a 60s cap (`cloud/scripts/model_clients.py`).
+
+Evidence, deploy SSH logs (`gh run view --log --job`), offsets from the
+first log line:
+
+| Run | Attempt | Clock | Deploy job | Image | Client promotion |
+|---|---|---|---|---|---|
+| [41178410707](https://github.com/joemccann/radon/actions/runs/41178410707) | 1 | 498s | 222s (job 124471474378) | both retagged, build skipped | 88.0s (control plane current at +35.7s, promoted at +123.7s) |
+| [41175064099](https://github.com/joemccann/radon/actions/runs/41175064099) | 2 | 898s | 230s (job 124463041105) | gateway build 217s | 86.9s (+47.9s to +134.8s) |
+
+The attempt-1 success is the comparable before sample. Its critical path is
+`pytest (cloud al)` ending at +230s (job wall 209s), then prepull 39s, then
+deploy. The 88s export sits inside the deploy SSH (215s) and after the
+40-second stability window's predecessor, so it moves the primary clock.
+Queue on that run is 2s and is not part of the gain. Ten percent of the
+498s clock is 50s. Removing the export on an image-id hit is expected to
+save about 88s, which clears 15s and 10%. A changed image id still exports.
+Runner minutes do not increase.
+
+**Change.** `reuse_identical_image_clients` inspects only
+`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tags. When the deploying
+tag's image id matches a donor whose Linux receipt and Darwin bundle already
+pass the recovery verifiers, it copies those bytes, rewrites `release_sha`,
+re-checks every hash, and activates the Linux selector. It does not activate
+the Darwin `current` symlink. A tree that already exists for this SHA is not
+proof: the registry tag can move, so that case falls through to export and
+the existing byte comparison. A miss, a corrupt donor, or an inspect failure
+falls through to the existing two exports. No `needs` edge, test inventory,
+coverage, health check, stability window, rollback, or exact-SHA image
+admission change.
+
+**Safety and revert trigger.** Fail closed to export. `:latest` and
+`ihash-` tags are not donors. Revert if a reused receipt's hash does not
+match the image export, if Darwin `current` moves before commit, or if
+promotion succeeds without either a reuse line or the two export containers.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS | 222s | pending | TBD until 5 samples |
+
+Before is the deploy job wall on run 41178410707 (job 124471474378), the
+newest attempt-1 mixed success that paid the 88s export. Acceptance remains
+five comparable warm mixed deploys before and five after: same-class p50 at
+least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no worse
+than 10%; runner minutes no more than 20% higher. The before set has one
+attempt-1 success, not five. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_model_clients_reuse.py` was red (4
+failed: missing `reuse_identical_image_clients`) then green. A fifth test
+was red while an existing tree for the same SHA skipped the image-id check,
+then green once that path falls through to export. Install, recovery,
+Darwin, and disk-admission tests stayed green (61 passed). Full suites,
+Vitest, Docker builds, and workflow lint are left to PR CI.
