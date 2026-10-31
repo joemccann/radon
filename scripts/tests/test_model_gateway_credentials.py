@@ -119,13 +119,15 @@ def test_credential_lock_wait_observes_cancellation(monkeypatch):
     monkeypatch.setattr(credentials,'connect_vault',lambda *a,**k:pytest.fail('cancelled request reached broker'))
     lock=threading.Lock();lock.acquire();monkeypatch.setattr(credentials,'_LOCK',lock)
     cancel=threading.Event();abort=threading.Timer(.04,cancel.set);abort.start()
-    release=threading.Timer(.35,lock.release);release.start()
-    started=time.monotonic()
+    released=threading.Event()
+    def let_go():
+        lock.release();released.set()
+    release=threading.Timer(.35,let_go);release.start()
     try:
-        with engine.attempt_scope(deadline=started+1,seen=set(),cancelled=cancel.is_set):
+        with engine.attempt_scope(deadline=time.monotonic()+1,seen=set(),cancelled=cancel.is_set):
             with pytest.raises(ModelResponseError) as error:credentials.refresh_keys()
         assert error.value.code=='cancelled'
-        assert time.monotonic()-started < .2
+        assert not released.is_set()
     finally:abort.join();release.join()
 
 
