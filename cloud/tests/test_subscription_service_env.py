@@ -366,6 +366,8 @@ printf 'sudo:%s\\n' "$*" >> "$CALLS"
 if [[ "${1:-}" == -l ]]; then
   shift
   [[ "${1:-}" == -- ]] && shift
+  # This fixture varies subscription publication, not the unrelated disk grant.
+  [[ "$1" != /usr/local/sbin/radon-app-runtime || "$2" != check-model-space ]] || exit 0
   [[ "$1" == "$HELPER" && "$2" == publish-mcp-env ]]
   exit "$?"
 fi

@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|install-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -412,6 +412,11 @@ cmd_capture_model_pacing() {
   fi
 }
 
+cmd_check_model_space() {
+  # Read-only fixed-filesystem admission; accepts no destination or threshold.
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py check-space
+}
+
 cmd_install_model_clients() {
   # Fixed destination/export policy lives in the root-owned control plane.
   # No caller-provided path, executable, registry or moving image tag.
@@ -419,6 +424,12 @@ cmd_install_model_clients() {
   tag="$(image_tag)" || return $?
   image="$(model_gateway_image)" || return $?
   "$PYTHON" -I /usr/local/lib/radon/model_clients.py "$DOCKER" "$image" "$tag"
+}
+
+cmd_recover_model_clients() {
+  local tag
+  tag="$(image_tag)" || return $?
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py recover "$tag"
 }
 
 cmd_commit_model_clients() {
@@ -1486,6 +1497,10 @@ cmd_run() {
 
 [[ $# -ge 1 ]] || usage
 case "$1" in
+  check-model-space)
+    [[ $# -eq 1 ]] || usage
+    cmd_check_model_space
+    ;;
   capture-model-pacing)
     [[ $# -eq 1 ]] || usage
     cmd_capture_model_pacing
@@ -1493,6 +1508,10 @@ case "$1" in
   install-model-clients)
     [[ $# -eq 1 ]] || usage
     cmd_install_model_clients
+    ;;
+  recover-model-clients)
+    [[ $# -eq 1 ]] || usage
+    cmd_recover_model_clients
     ;;
   commit-model-clients)
     [[ $# -eq 1 ]] || usage

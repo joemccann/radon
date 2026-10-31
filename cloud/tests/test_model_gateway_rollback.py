@@ -81,7 +81,7 @@ def test_capture_precedes_first_bootstrap_overwrite_and_recover_executes_restore
     bootstrap=(CLOUD/'scripts/bootstrap-control-plane.sh').read_text()
     assert bootstrap.index('model_gateway_rollback.py" capture') < bootstrap.index('TRANSACTION_ACTIVE=1')
     helper=(CLOUD/'scripts/deploy-root-helper.sh').read_text().split('  recover)\n',1)[1].split('    ;;',1)[0]
-    assert helper.index('model_gateway_rollback.py') < helper.index('install-model-clients')
+    assert helper.index('model_gateway_rollback.py') < helper.index('recover-model-clients')
     assert 'exec "$SELF" recover' in helper
 
 
