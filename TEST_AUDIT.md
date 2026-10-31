@@ -12053,7 +12053,9 @@ Acceptance: the code is `cancelled` and the lock-release event is unset, so the 
 
 Acceptance: the stall was entered, the code is `cancelled` or `deadline_exceeded`, `finished` is unset, and the key is still `old-key`. The same cancel no-op raises `GatewayError: Model credential store is unavailable` on the cancelled case. The 0.2s bound is not widened. The sibling deadline case at `scripts/tests/test_model_gateway_credentials.py:109` is unchanged.
 
-Audited through: 3ce7f24af5e8b6a143b976efeafc441208ad1322 on 2026-10-31 — 6 new findings
+Follow-on range `3ce7f24af5e8b6a143b976efeafc441208ad1322..38154af2ef580c8156dd5f1ae5c92b39b1201bb6`: 2 commits / 6 paths (pull request #1362). `scripts/api/db_http.py:147` retires the keep-alive socket before an unproven write, and `scripts/tests/test_hrana_http_keepalive.py:708` publishes through a peer that drops a reused second request. A write that reused the read socket would leave `connections == 1`. A resent commit would raise `requests` above 2 (`:724`). Reads inside 30s still share one connection (`:742`). The sibling 5s pool is a different client and is not the publication path (`:752`). No new finding.
+
+Audited through: 38154af2ef580c8156dd5f1ae5c92b39b1201bb6 on 2026-10-31 — 6 new findings
 
 ## Remediation 2026-10-31
 
