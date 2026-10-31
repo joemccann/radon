@@ -32,9 +32,24 @@ def test_selector_failure_does_not_publish_output_or_tag(tmp_path,index):
     assert not marker.exists()
 
 
-def test_image_and_tag_select_the_same_exact_sha_validated_identity():
+def test_image_and_tag_select_the_same_exact_sha_validated_identity(tmp_path):
+    executable=tmp_path/'python3'
+    record=tmp_path/'argv'
+    executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$RECORD"\nprintf "0.7.0\\n"\n')
+    executable.chmod(0o755)
+    git=tmp_path/'git'
+    git.write_text('#!/bin/sh\nexit 0\n')
+    git.chmod(0o755)
+    sha='a'*40
     for command in selection_steps():
-        assert 'scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA"' in command
+        record.write_text('')
+        output=tmp_path/'output'
+        output.unlink(missing_ok=True)
+        result=subprocess.run(['/bin/bash','-e','-o','pipefail','-c',command],cwd=tmp_path,
+            env={'PATH':str(tmp_path)+os.pathsep+os.defpath,'GITHUB_OUTPUT':str(output),'GITHUB_SHA':sha,'RECORD':str(record)},
+            capture_output=True,text=True,timeout=10)
+        assert result.returncode==0, result.stdout+result.stderr
+        assert record.read_text().splitlines()==['scripts/release_version.py','--ci-version','--expected-sha',sha]
     ci=yaml.safe_load((ROOT/'.github/workflows/ci.yml').read_text())
     tag=ci['jobs']['release-tag']
     assert tag['needs']==['deploy']

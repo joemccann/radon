@@ -931,7 +931,12 @@ documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
 
 Before managed services start, `radon-app-runtime install-model-clients`
 exports the exact gateway image's CLI payloads and Node runtime through a
-network-disabled, unprivileged container. The root-owned `model_clients.py`
+network-disabled, unprivileged container. When the new exact SHA's local
+image id matches another exact `radon-model-gateway:<40 hex>` tag whose
+Linux and Darwin receipts already verify, promotion copies those immutable
+bytes, rewrites only the release SHA, re-checks every receipt hash, and
+does not start the export container. A missing tag, a different image id,
+or a receipt mismatch exports exactly as before. The root-owned `model_clients.py`
 installer admits bounded safe archive members, verifies pinned package metadata
 and executable hashes, and atomically selects an immutable
 `/opt/radon-model-clients/<release-SHA>` through `current`. Consumers use

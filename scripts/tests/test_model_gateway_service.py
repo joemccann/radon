@@ -181,36 +181,28 @@ def test_native_operation_rejects_invalid_total_budget_before_dispatch(monkeypat
 
 
 def test_stream_drips_cannot_renew_the_total_deadline():
-    import http.server
-    import time
     from model_gateway import engine
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self,*args): pass
-        def do_POST(self):
-            self.rfile.read(int(self.headers.get('Content-Length','0')))
-            self.send_response(200)
-            self.send_header('Content-Length','30')
-            self.end_headers()
-            try:
-                for _ in range(30):
-                    self.wfile.write(b' ')
-                    self.wfile.flush()
-                    time.sleep(.025)
-            except (BrokenPipeError,ConnectionResetError):
-                pass
-    server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
-    server.daemon_threads=True
-    worker=threading.Thread(target=server.serve_forever,daemon=True)
-    worker.start()
-    try:
-        started=time.monotonic()
-        with engine.attempt_scope(deadline=started+.15,seen=set()):
-            with pytest.raises(engine.ModelResponseError) as error:
-                engine._request(engine._default_post,f'http://127.0.0.1:{server.server_port}/',{}, {},timeout=.12,stream=True,max_bytes=100)
-        assert error.value.code=='deadline_exceeded'
-        assert time.monotonic()-started<.45
-    finally:
-        server.shutdown();server.server_close();worker.join(timeout=1)
+    now = [0.0]
+
+    class Body:
+        status_code = 200
+
+        def iter_content(self, _chunk):
+            now[0] = 0.0
+            yield b'{"ok":'
+            now[0] = 1.0
+            yield b'true}'
+
+        def close(self):
+            pass
+
+    def post(url, **kwargs):
+        return Body()
+
+    with engine.attempt_scope(deadline=0.5, seen=set(), clock=lambda: now[0]):
+        with pytest.raises(engine.ModelResponseError) as error:
+            engine._request(post, 'http://gateway.test/', {}, {}, timeout=30, stream=True, max_bytes=100)
+    assert error.value.code == 'deadline_exceeded'
 
 
 def test_credential_admission_spends_the_original_request_budget(monkeypatch):

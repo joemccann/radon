@@ -3062,6 +3062,55 @@ class TestDocumentation20261029:
         assert "does not prove IB discarded" in contract
 
 
+class TestDocumentation20261030:
+    """A leftover dropbox-research error is not a live review repair."""
+
+    def test_retired_dropbox_research_health_is_not_a_live_repair(self):
+        incident = (_ROOT / "docs/incident-runbook.md").read_text()
+        section = incident.split("## retired-dropbox-research-health", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        for label in (
+            "Symptom:",
+            "Prerequisites:",
+            "Blast radius:",
+            "Safe diagnosis:",
+            "Stop conditions:",
+            "Verification:",
+            "Rollback:",
+            "Escalation:",
+        ):
+            assert label in section
+        assert "marketdesk-research" in section
+        assert "marketdesk-pdf" in section
+        assert "present_service_health_section" in section
+        assert "do not `systemctl start`" in section
+        assert "State.requeue_with_note" in section
+        assert "runs_on" in section
+
+        old = incident.split("## research-idle-review-stale-db-error", 1)[1]
+        old_head = old.split("\n## ", 1)[0][:700]
+        assert "Do not execute this repair" in old_head
+        assert "retired-dropbox-research-health" in old_head
+
+        generic = incident.split("## service-health-degraded", 1)[1]
+        generic = generic.split("\n## ", 1)[0]
+        assert "not writer-down" in generic
+        assert "#retired-dropbox-research-health" in generic
+
+        health = (_ROOT / "docs/marketdesk-research.md").read_text()
+        health_section = health.split("## Health", 1)[1].split("## ", 1)[0]
+        assert "retired-dropbox-research-health" in health_section
+
+        owner = (_ROOT / "scripts/health_service/CLAUDE.md").read_text()
+        assert "present_service_health_section" in owner
+        assert "retired-dropbox-research-health" in owner
+
+        retired = (_ROOT / "scripts/health_service/retired.py").read_text()
+        assert 'marked["state"] = "retired"' in retired
+        assert 'marked["last_error"] = None' in retired
+        watchdog = (_ROOT / "scripts/watchdog/services.py").read_text()
+        assert 'if service == "dropbox-research":' in watchdog
+        assert "return False" in watchdog.split('if service == "dropbox-research":', 1)[1][:240]
 class TestDocumentation20261031:
     """Provider grants stay on the model gateway, not on app consumers."""
 

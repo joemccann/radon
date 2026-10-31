@@ -4942,6 +4942,23 @@ def _fresh_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
     return _refresh_earnings_payload(cached, dte)
 
 
+def _stored_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
+    """Last file for a live miss. Recompute the session window from report_date.
+
+    A frozen ``days_until`` answers an older session. The panel treats that
+    number as earnings risk, so a name can show "no earnings risk" after the
+    date has moved inside the structure window (REL-335 / R-746). A missing
+    marker has no date to recompute and stays as stored. A total live failure
+    with no fresh batch hit is still 502; this is only the fallback row.
+    """
+    cached = _read_cache(_EARNINGS_DATES_DIR / f"{ticker}.json")
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("missing") or not cached.get("report_date"):
+        return cached
+    return _refresh_earnings_payload(cached, dte)
+
+
 @app.get("/earnings")
 async def earnings_batch_get(
     tickers: str = Query(..., description="Comma-separated tickers (max 50)"),
@@ -4991,8 +5008,8 @@ async def earnings_batch_get(
         if live is not None:
             rows.append(live)
             continue
-        stale = _read_cache(_EARNINGS_DATES_DIR / f"{symbol}.json")
-        if isinstance(stale, dict):
+        stale = _stored_earnings_cache(symbol, dte)
+        if stale is not None:
             rows.append(stale)
             continue
         rows.append(_earnings_missing_payload(symbol, dte))
@@ -5033,8 +5050,8 @@ async def earnings_get(
     if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
         return result.data
 
-    cached = _read_cache(_EARNINGS_DATES_DIR / f"{upper}.json")
-    if cached and isinstance(cached, dict):
+    cached = _stored_earnings_cache(upper, dte)
+    if cached is not None:
         return cached
 
     if not result.ok:
