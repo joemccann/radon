@@ -55,3 +55,28 @@ def test_runtime_prepares_chroot_bind_only_for_configured_gateway():
     hook = text.index('"$MODEL_TRANSPORT_HELPER" bind-inference', anchor)
     assert 'is_model_gateway "$unit" && [[ -n "$tunnel_uid" ]]' in text[anchor:hook]
     assert 'MODEL_TRANSPORT_HELPER=/usr/local/lib/radon/model_transport.py' in text
+
+
+def _dir_info(mode, uid=0, gid=1000):
+    import os, stat
+    return os.stat_result((stat.S_IFDIR | mode, 0, 0, 2, uid, gid, 4096, 0, 0, 0))
+
+
+def test_authorized_keys_live_outside_the_radon_writable_config_directory():
+    # sshd StrictModes rejects keys under the canonical root:radon 1770 /etc/radon.
+    api = module()
+    assert not api.PRIVATE.is_relative_to(api.ENVIRONMENT.parent)
+    assert f'AuthorizedKeysFile {api.PRIVATE}/authorized_keys' in api.sshd_config()
+
+
+@pytest.mark.parametrize('mode', [0o1770, 0o1750])
+def test_environment_parent_accepts_canonical_sticky_radon_config_directory(mode):
+    module().config_parent(_dir_info(mode))
+
+
+@pytest.mark.parametrize('info', [
+    _dir_info(0o0770), _dir_info(0o1777), _dir_info(0o1770, uid=1000),
+    _dir_info(0o1770, gid=1001), _dir_info(0o1770, gid=0),
+])
+def test_environment_parent_rejects_any_other_writable_config_directory(info):
+    with pytest.raises(ValueError):module().config_parent(info)

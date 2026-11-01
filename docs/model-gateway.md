@@ -124,6 +124,10 @@ Run the Linux commands as root on the app host. They create a dedicated
 group, validate SSH configuration, and reload SSH. The account has no shell,
 TCP forwarding, agent forwarding, PTY, writable export directory, provider
 grants, management socket, vault socket, or broader `radon` group membership.
+Its authorized key lives in root-only `/etc/ssh/radon-model-transport`, not
+under the radon-writable sticky `/etc/radon` (sshd `StrictModes` refuses keys
+there); the helper trusts `/etc/radon/env` only under that exact `root:radon`
+`01770`/`01750` parent.
 Its forced read-only SFTP session is chrooted to
 `/var/lib/radon-model-export`; its Unix forwarding admits only `/run/radon-model-gateway/gateway.sock`.
 The gateway start hook binds only that inference directory read-only inside
