@@ -152,9 +152,12 @@ def _run_gateway_reuse(tmp_path, *, event, ref, inspect_status, digest=GATEWAY_H
 def test_gateway_reuse_runs_on_main_push_and_pull_requests_only():
     step = next(s for s in _gateway_steps() if s.get("name") == GATEWAY_REUSE)
     assert step["id"] == "reuse-gateway"
+    # A PR that edits this workflow or cloud/scripts/model_clients.py (both
+    # outside the input hash) skips the lookup and runs the bounds check.
     assert step["if"] == (
         "(github.ref == 'refs/heads/main' && github.event_name == 'push')"
-        " || github.event_name == 'pull_request'"
+        " || (github.event_name == 'pull_request'"
+        " && steps.unhashed.outputs.gateway == 'unchanged')"
     )
 
 

@@ -81,12 +81,45 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "python image input hash refused; building"
           fi
+      # The input hash covers the image, not the steps a hit skips. Those
+      # also read this workflow and, for the gateway bounds check, the
+      # dockerignored cloud/scripts/model_clients.py. Main skips them on a hit
+      # too, so a pull request editing either must build, smoke and check.
+      # Only "unchanged" allows a PR lookup; no base, a failed fetch or a
+      # failed diff leaves it unset and builds.
+      - name: Find pull request edits outside the image inputs
+        id: unhashed
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHON_UNHASHED: .github/workflows/app-images.yml
+          GATEWAY_UNHASHED: .github/workflows/app-images.yml cloud/scripts/model_clients.py
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+              || ! git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+            echo "pull request base unavailable; building both images"
+            exit 0
+          fi
+          # Unquoted on purpose: each list is space-separated repo paths.
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $PYTHON_UNHASHED; then
+            echo "python=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the python image input hash; building it"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $GATEWAY_UNHASHED; then
+            echo "gateway=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the model gateway input hash; building it"
+          fi
       # Main retags a hit. A pull request only looks the tag up (public, no
       # login) and on a hit skips the build and smoke main already ran on
       # these exact inputs; it holds no packages:write token and never writes.
       - name: Reuse identical python image
         id: reuse
-        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.python == 'unchanged')
         run: |
           set -euo pipefail
           source="${{ steps.pyimage.outputs.tag }}"
@@ -199,7 +232,7 @@ jobs:
       # the build, smoke and bounds check main already ran on these inputs.
       - name: Reuse identical model gateway image
         id: reuse-gateway
-        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.gateway == 'unchanged')
         run: |
           set -euo pipefail
           hash="${{ steps.pyimage.outputs.hash }}"

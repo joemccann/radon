@@ -46,10 +46,13 @@ def _run(step_name: str) -> str:
 def test_reuse_step_retags_only_an_input_hash_manifest() -> None:
     reuse = _step("Reuse identical python image")
     script = reuse["run"]
-    # Main pushes retag; pull requests only look (see the behavior tests).
+    # Main pushes retag; pull requests only look (see the behavior tests),
+    # and only when they edit no unhashed file a hit would skip
+    # (test_app_images_pr_unhashed_edits.py).
     assert reuse["if"] == (
         "(github.ref == 'refs/heads/main' && github.event_name == 'push')"
-        " || github.event_name == 'pull_request'"
+        " || (github.event_name == 'pull_request'"
+        " && steps.unhashed.outputs.python == 'unchanged')"
     )
     assert "docker buildx imagetools inspect" in script
     assert "docker buildx imagetools create" in script
