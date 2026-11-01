@@ -233,3 +233,99 @@ def test_disconnected_request_never_enters_credential_lookup(monkeypatch):
         gateway.handle('json',{'instruction':'facts'},cancelled=lambda:True)
     assert error.value.code=='cancelled'
     assert called==[]
+
+
+@pytest.fixture
+def fresh_rungs(monkeypatch):
+    from model_gateway import engine
+    monkeypatch.setattr(engine, "_dead_until", {})
+
+
+def test_first_rung_keeps_the_budget_the_live_fallbacks_do_not_need(monkeypatch, fresh_rungs):
+    """Four keyed rungs: the first may spend all but 20s per later rung (was 120/6 = 20s)."""
+    gateway = service(monkeypatch, clock=lambda: 0.0)
+    from model_gateway import engine
+    monkeypatch.setattr(engine, "_auth_for", lambda name, env: None if name in {"cursor", "nvidia", "cerebras"}
+                        else engine.AuthMaterial("fixture", "subscription", "test"))
+    seen = []
+
+    def call(name, *a, **kw):
+        seen.append(engine.scoped_timeout(300))
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    gateway.handle("json", {"instruction": "facts", "read_timeout": 120})
+    assert seen[0] == pytest.approx(60.0)
+
+
+def test_rung_that_failed_permanently_stops_reserving_budget(monkeypatch, fresh_rungs):
+    now = [0.0]
+    gateway = service(monkeypatch, clock=lambda: now[0])
+    from model_gateway import engine
+    monkeypatch.setattr(engine, "_dead_clock", lambda: now[0])
+
+    def run(winner):
+        seen = []
+
+        def call(name, *a, **kw):
+            if name in {"nvidia", "cerebras"}:
+                return 404, '{"status":404,"title":"Not Found"}', {"status": 404}
+            seen.append((name, engine.scoped_timeout(300)))
+            return answer(name, {"ok": True}) if name == winner else (503, "busy", {"error": "busy"})
+
+        monkeypatch.setattr(engine, "_call_text_provider", call)
+        payload = {"instruction": "facts", "read_timeout": 120,
+                   "providers": ["antigravity", "nvidia", "anthropic", "grok", "codex", "cerebras"]}
+        if winner is None:
+            with pytest.raises(GatewayError):
+                gateway.handle("json", payload)
+        else:
+            gateway.handle("json", payload)
+        return seen
+
+    # Six keyed rungs, none known dead: an even split. Every rung fails once.
+    assert run(None)[0] == ("antigravity", pytest.approx(20.0))
+    # nvidia and cerebras answered 404: four live rungs remain, still attempted.
+    assert run("antigravity")[0] == ("antigravity", pytest.approx(60.0))
+    # The memory expires.
+    now[0] += engine._DEAD_RUNG_TTL_S + 1
+    assert run("antigravity")[0] == ("antigravity", pytest.approx(20.0))
+
+
+def test_dead_rung_is_still_attempted(monkeypatch, fresh_rungs):
+    gateway = service(monkeypatch, clock=lambda: 0.0)
+    from model_gateway import engine
+    engine._dead_until["codex"] = float("inf")
+    calls = []
+
+    def call(name, *a, **kw):
+        calls.append(name)
+        return answer(name, {"ok": True}) if name == "codex" else (503, "busy", {"error": "busy"})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    assert gateway.handle("json", {"instruction": "facts", "read_timeout": 120})["provider"] == "codex"
+    assert "codex" in calls and "codex" not in engine._dead_until
+
+
+def test_transient_failure_does_not_mark_a_rung_dead(monkeypatch, fresh_rungs):
+    gateway = service(monkeypatch, clock=lambda: 0.0)
+    from model_gateway import engine
+
+    def call(name, *a, **kw):
+        if name == "antigravity":
+            raise RuntimeError("network:ReadTimeout")
+        if name == "anthropic":
+            return 503, "busy", {"error": "busy"}
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    gateway.handle("json", {"instruction": "facts", "read_timeout": 120})
+    assert engine._dead_until == {}
+
+
+def test_rung_slice_never_starves_and_last_rung_gets_everything():
+    from model_gateway import engine
+    assert engine._rung_slice(120, 1) == 120
+    assert engine._rung_slice(120, 4) == pytest.approx(60)
+    assert engine._rung_slice(40, 4) == pytest.approx(10)  # even-split floor
+    assert engine._rung_slice(0, 3) > 0

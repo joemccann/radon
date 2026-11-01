@@ -1467,6 +1467,30 @@ def _models_for_attempt(
 
 LAST_RESORT_PROVIDER = "cerebras"
 
+# Per-rung time budget. A rung may spend all of the remaining request deadline
+# except FALLBACK_RESERVE_S for each later live rung, and never less than an
+# even split. An even split gave the first of six rungs 20s of 120s, so slow
+# but healthy multimodal replies timed out while later rungs had time to spare.
+_FALLBACK_RESERVE_S = 20.0
+# A rung whose models all failed for a reason that does not clear in seconds
+# (missing model, billing, refused key) is still attempted, but stops reserving
+# time from the rungs ahead of it until the memory expires or it answers.
+_DEAD_RUNG_TTL_S = 600.0
+_DEAD_RUNG_CODES = frozenset({"http_401", "http_402", "http_403", "http_404",
+                              "quota_or_billing", "credit_balance"})
+_dead_until: dict[str, float] = {}
+_dead_clock = time.monotonic
+
+
+def _rung_slice(remaining: float, live: int) -> float:
+    live = max(1, live)
+    return max(0.001, remaining / live, remaining - _FALLBACK_RESERVE_S * (live - 1))
+
+
+def _rung_dead(name: str) -> bool:
+    until = _dead_until.get(name)
+    return until is not None and until > _dead_clock()
+
 
 def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
     """Cerebras is the last resort: nothing runs after it, whatever the caller passed."""
@@ -1541,6 +1565,7 @@ def _run_ladder(
     attempted: list[str] = []
     skipped: list[str] = []
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
+    keyed = {name for name in order if name != "cursor" and _auth_for(name, env) is not None}
 
     for position, name in enumerate(order):
         if name == "cursor":
@@ -1567,6 +1592,7 @@ def _run_ladder(
         won_model = ""
         won_parsed: Any = None
         won_text = ""
+        rung_start = len(attempted)
         limiter = _nvidia_limiter(env, post) if name == "nvidia" else None
         for model in models:
             if state is not None:
@@ -1576,8 +1602,9 @@ def _run_ladder(
                 state.attempt_deadline = None
                 scoped_timeout(300.0)
                 remaining = state.deadline - state.clock()
-                candidates = max(1, sum(1 for candidate in order[position:] if candidate != "cursor"))
-                state.slice_seconds = max(0.001, remaining / candidates)
+                live = sum(1 for candidate in order[position + 1:]
+                           if candidate in keyed and not _rung_dead(candidate))
+                state.slice_seconds = _rung_slice(remaining, live + 1)
                 state.attempt_deadline = state.clock() + state.slice_seconds
                 state.seen.add((name, model))
             if limiter is not None and not acquire_model_slot(limiter, _nvidia_max_wait(env)):
@@ -1698,6 +1725,11 @@ def _run_ladder(
             won_text = text
             break
 
+        rung_codes = [entry.split(":", 1)[1] for entry in attempted[rung_start:]]
+        if provider_won:
+            _dead_until.pop(name, None)
+        elif rung_codes and all(code in _DEAD_RUNG_CODES for code in rung_codes):
+            _dead_until[name] = _dead_clock() + _DEAD_RUNG_TTL_S
         if provider_won:
             logger.info(
                 "%s won provider=%s model=%s auth=%s",
