@@ -783,20 +783,33 @@ def test_py_coverage_installs_coverage_only() -> None:
     assert "python -m coverage combine" in commands
 
 
-def test_bun_jobs_cache_the_install_store() -> None:
+def test_bun_jobs_do_not_cache_the_install_store() -> None:
+    """The bun store cache cost more than the install it saved.
+
+    1,177/1,177 Vitest jobs hit the ~/.bun/install/cache entry, but the
+    restore took 10-14s (p50 12s) and the install after it took <=2s. The
+    Playwright jobs install the same two lockfiles with no cache in ~3s each.
+    Both bun projects must still install from their frozen lockfiles.
+    """
     jobs = _workflow()["jobs"]
-    pin = "5a3ec84eff668545956fd18022155c47e93e2684"
     for name in ("web-tests", "perimeter-smoke"):
-        cache = next(
+        steps = jobs[name]["steps"]
+        bun_caches = [
             step
-            for step in jobs[name]["steps"]
-            if "actions/cache@" in step.get("uses", "")
+            for step in steps
+            if "actions/cache" in step.get("uses", "")
+            and ".bun" in str(step.get("with", {}).get("path", ""))
+        ]
+        assert not bun_caches, (
+            f"{name}: a bun store cache restore (p50 12s) is slower than the "
+            "uncached install (<=2s)"
         )
-        assert pin in cache["uses"]
-        assert "~/.bun/install/cache" in str(cache["with"]["path"])
-        key = str(cache["with"]["key"])
-        assert "bun.lock" in key
-        assert "web/bun.lock" in key
+        lines = [
+            line.strip().rstrip("&").strip()
+            for line in _job_commands(jobs[name]).splitlines()
+        ]
+        assert "bun install --frozen-lockfile" in lines, f"{name}: root project"
+        assert "bun install --frozen-lockfile --cwd web" in lines, f"{name}: web project"
 
 
 def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:

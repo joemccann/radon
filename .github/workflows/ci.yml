@@ -246,22 +246,30 @@ jobs:
     env:
       NODE_ENV: test
       ASSISTANT_MOCK: "1"
+    # PR path gating is STEP level: the job-level `if` above must stay true
+    # on every PR or the matrix never expands and the required shard checks
+    # never report. When the path filter says web is unchanged (it fails
+    # closed: unknown paths set web=true), the notice step runs and every
+    # other step skips, so the check reports success in seconds. Pushes
+    # already require web == 'true' at job level, so every step runs there.
+    # scripts/tests/test_ci_pr_path_gating_web.py pins this.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Vitest skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No ~/.bun/install/cache step: every Vitest job hit it, but the restore
+      # took 10-14s (p50 12s) and the install after it took <=2s.
+      - if: needs.changes.outputs.web == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.4"
       # The repo has TWO bun projects: the root one provides vitest + the
       # cross-cutting vitest.config.ts (which imports `vitest/config`), and
       # web/ provides the app modules the tests import (@/lib, react, ...).
       # Install BOTH or the root config fails to load with ERR_MODULE_NOT_FOUND.
-      - run: |
+      - if: needs.changes.outputs.web == 'true'
+        run: |
           bun install --frozen-lockfile &
           bun install --frozen-lockfile --cwd web &
           wait
@@ -290,7 +298,8 @@ jobs:
       # Shards zero the per-job coverage thresholds: each shard only executes
       # an eighth of the tests, so the ratchet would false-fail. web-coverage merges
       # istanbul JSON and applies vitest.config.ts lines/functions/branches.
-      - run: >-
+      - if: needs.changes.outputs.web == 'true'
+        run: >-
           bunx vitest run --config vitest.config.ts --coverage
           --shard=${{ matrix.shard }}/8
           --coverage.reporter=json
@@ -298,7 +307,8 @@ jobs:
           --coverage.thresholds.lines=0
           --coverage.thresholds.functions=0
           --coverage.thresholds.branches=0
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vitest-coverage-${{ matrix.shard }}
           path: coverage/shard-${{ matrix.shard }}
@@ -308,27 +318,34 @@ jobs:
 
   web-coverage:
     name: Vitest coverage ratchet
-    needs: [web-tests]
+    # `changes` is read by the step gates below: when web-tests skipped its
+    # steps no shard artifact exists, and the merge would fail on the gap.
+    needs: [changes, web-tests]
     if: needs.web-tests.result == 'success'
     runs-on: ubuntu-24.04
     concurrency:
       group: ci-web-coverage-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Vitest coverage skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             scripts/ci/merge_vitest_coverage.py
             vitest.config.ts
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: vitest-coverage-*
           path: coverage-artifacts
       # --expect-shards must match the web-tests shard count above. The merge
       # downloads with a glob, so without it a partial artifact download was
       # gated as if it were the whole suite. R-241.
-      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
+      - if: needs.changes.outputs.web == 'true'
+        run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
 
   py-tests:
     name: pytest (${{ matrix.shard }})
@@ -652,20 +669,22 @@ jobs:
       # authorized curl is the only request-time proof that the timing-safe
       # Web Crypto compare runs in the real Edge middleware runtime.
       RADON_PROBE_FRESHNESS_TOKEN: rpf_ci_perimeter_smoke_dummy
+    # Step-level PR path gating, same contract as web-tests: the job-level
+    # `if` stays as is, a web-unchanged PR runs only the notice step.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Perimeter smoke skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No bun store cache, same evidence as web-tests.
+      - if: needs.changes.outputs.web == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.4"
       # Both bun projects, same as web-tests: next.config aliases @tools to
       # the root lib/tools, so the build resolves modules from BOTH trees.
-      - run: |
+      - if: needs.changes.outputs.web == 'true'
+        run: |
           bun install --frozen-lockfile &
           bun install --frozen-lockfile --cwd web &
           wait
@@ -673,11 +692,13 @@ jobs:
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
       # the gate; `next start` + curl below is the dynamic half.
-      - run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts lib/sameOrigin.ts
+      - if: needs.changes.outputs.web == 'true'
+        run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts lib/sameOrigin.ts
         working-directory: web
       # Locked build constraint: web/package.json `build` is
       # `next build --experimental-build-mode=compile` (see web/CLAUDE.md).
-      - run: bun run build
+      - if: needs.changes.outputs.web == 'true'
+        run: bun run build
         working-directory: web
       # Request-time perimeter assertions against the real production server.
       # This is the only gate that catches the Edge-runtime crash class
@@ -685,6 +706,7 @@ jobs:
       # production 500s on EVERY route at request time, 2026-05-15) and
       # default-deny regressions (world-callable /api/*, 60fcca8 era).
       - name: next start + perimeter curls
+        if: needs.changes.outputs.web == 'true'
         working-directory: web
         run: |
           bunx next start -p 3000 &
@@ -727,21 +749,22 @@ jobs:
           exit $fail
 
   e2e-financial-smoke:
-    name: Playwright P0-financial smoke (non-gating, shard ${{ matrix.shard }}/3)
+    name: Playwright P0-financial smoke (non-gating)
     # CIP-009: defer behind secret-scan (the app-images pattern) so the t=0
-    # gate fan-out stays at the 20-job concurrency cap and no pytest gate
-    # shard queues for a slot. Still non-gating for deploy.
+    # gate fan-out does not take a concurrency slot from a gate shard. The
+    # account cap is 40 concurrent jobs (repo-wide running jobs plateau at
+    # exactly 40 across 2026-10-29..11-01), not the 20 first assumed here,
+    # and every in-flight run shares it. Still non-gating for deploy.
     needs: [changes, secret-scan]
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     # One serial `playwright test` (workers=1) ran ~263s and made this the
-    # longest PR check. Playwright --shard splits the curated files across
-    # parallel jobs; each builds its own bundle. Pinned by
-    # scripts/tests/test_ci_e2e_smoke_shards.py.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
+    # longest PR check. A 3-shard job matrix then paid ~65s of duplicated
+    # setup per shard (container init 25s, next build 28s, apt 6s, bun 6s)
+    # plus ~18s of uploads, for ~140s of specs each on one worker. One job
+    # builds once and runs `--workers=3`; fullyParallel:false still spreads
+    # FILES across workers. web/playwright.config.ts keeps workers: 1 for
+    # local runs. Pinned by scripts/tests/test_ci_e2e_smoke_shards.py.
     # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
     # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
     # instance (pk_test_) answered every cookie-less browser navigation with a
@@ -759,7 +782,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
-      group: ci-e2e-smoke-${{ github.ref }}-${{ matrix.shard }}
+      group: ci-e2e-smoke-${{ github.ref }}
       cancel-in-progress: true
     timeout-minutes: 25
     env:
@@ -801,7 +824,7 @@ jobs:
       - name: Run curated P0-financial specs
         working-directory: web
         run: >-
-          npx playwright test --shard=${{ matrix.shard }}/3
+          npx playwright test --workers=3
           e2e/account-metric-cards.spec.ts
           e2e/order-combo.spec.ts
           e2e/realized-pnl.spec.ts
@@ -874,7 +897,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: uw-advanced-research-screenshots-shard-${{ matrix.shard }}
+          name: uw-advanced-research-screenshots
           path: web/test-results/**/uw-research-*.png
           if-no-files-found: ignore
           retention-days: 7
@@ -882,21 +905,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: complex-combo-leg-pnl-screenshots-shard-${{ matrix.shard }}
+          name: complex-combo-leg-pnl-screenshots
           path: web/test-results/**/*complex-combo-leg-pnl*.png
           if-no-files-found: ignore
       - name: Upload mobile search focus screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mobile-search-focus-screenshots-shard-${{ matrix.shard }}
+          name: mobile-search-focus-screenshots
           path: web/test-results/**/*mobile-search-focus*.png
           if-no-files-found: ignore
       - name: Upload portfolio and orders polling screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: portfolio-orders-polling-screenshots-shard-${{ matrix.shard }}
+          name: portfolio-orders-polling-screenshots
           path: web/test-results/**/portfolio-orders-polling-*.png
           if-no-files-found: ignore
           retention-days: 7
@@ -904,49 +927,49 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: portfolio-implied-mv-screenshots-shard-${{ matrix.shard }}
+          name: portfolio-implied-mv-screenshots
           path: web/test-results/**/portfolio-implied-mv-*.png
           retention-days: 7
       - name: Upload mixed-position coverage screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mixed-position-coverage-screenshots-shard-${{ matrix.shard }}
+          name: mixed-position-coverage-screenshots
           path: web/test-results/**/mixed-coverage-*.png
           retention-days: 7
       - name: Upload toast error screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: toast-error-screenshots-shard-${{ matrix.shard }}
+          name: toast-error-screenshots
           path: web/test-results/**/vol-skew-safe-error-*.png
           retention-days: 7
       - name: Upload historical fill screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: historical-fill-screenshots-shard-${{ matrix.shard }}
+          name: historical-fill-screenshots
           path: web/test-results/**/historical-fill-*.png
           retention-days: 7
       - name: Upload form focus screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: form-focus-screenshots-shard-${{ matrix.shard }}
+          name: form-focus-screenshots
           path: web/test-results/**/focus-*.png
           retention-days: 7
       - name: Upload chat experience screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chat-experience-screenshots-shard-${{ matrix.shard }}
+          name: chat-experience-screenshots
           path: web/test-results/**/chat-experience-*.png
           retention-days: 7
       - name: Upload vol-skew missing history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: vol-skew-missing-screenshots-shard-${{ matrix.shard }}
+          name: vol-skew-missing-screenshots
           path: |
             web/test-results/**/vol-skew-missing-*.png
             web/test-results/**/vol-skew-safe-error-*.png
@@ -956,14 +979,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ai-industry-screenshots-shard-${{ matrix.shard }}
+          name: ai-industry-screenshots
           path: web/test-results/**/ai-industry-*.png
           retention-days: 7
       - name: Upload research rendering screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: research-rendering-screenshots-shard-${{ matrix.shard }}
+          name: research-rendering-screenshots
           path: |
             web/test-results/**/research-*.png
             web/test-results/**/*share*.png
@@ -972,91 +995,91 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-anchor-screenshots-shard-${{ matrix.shard }}
+          name: chain-anchor-screenshots
           path: web/test-results/**/chain-anchor-*.png
           retention-days: 7
       - name: Upload chain-first screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-first-screenshots-shard-${{ matrix.shard }}
+          name: chain-first-screenshots
           path: web/test-results/**/chain-first-*.png
           retention-days: 7
       - name: Upload instrument workspace screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: instrument-workspace-screenshots-shard-${{ matrix.shard }}
+          name: instrument-workspace-screenshots
           path: web/test-results/**/instrument-workspace-*.png
           retention-days: 7
       - name: Upload performance flow history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: performance-flow-history-screenshots-shard-${{ matrix.shard }}
+          name: performance-flow-history-screenshots
           path: web/test-results/**/performance-flow-history-*.png
           retention-days: 7
       - name: Upload HYAD history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hyad-history-screenshots-shard-${{ matrix.shard }}
+          name: hyad-history-screenshots
           path: web/test-results/**/hyad-history-*.png
           retention-days: 7
       - name: Upload mobile price format screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mobile-price-format-screenshots-shard-${{ matrix.shard }}
+          name: mobile-price-format-screenshots
           path: web/test-results/**/*price-format*.png
           if-no-files-found: ignore
       - name: Upload SPX breadth screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: record-high-breadth-screenshots-shard-${{ matrix.shard }}
+          name: record-high-breadth-screenshots
           path: web/test-results/**/record-high-breadth-*.png
           retention-days: 7
       - name: Upload table overflow screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: table-overflow-screenshots-shard-${{ matrix.shard }}
+          name: table-overflow-screenshots
           path: web/test-results/**/table-overflow-*.png
           retention-days: 7
       - name: Upload admin freshness screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: admin-freshness-screenshots-shard-${{ matrix.shard }}
+          name: admin-freshness-screenshots
           path: web/test-results/**/*-admin-component.png
           retention-days: 7
       - name: Upload profile settings screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: profile-settings-screenshots-shard-${{ matrix.shard }}
+          name: profile-settings-screenshots
           path: web/test-results/**/profile-settings-*.png
           retention-days: 7
       - name: Upload modification close screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: modification-close-screenshots-shard-${{ matrix.shard }}
+          name: modification-close-screenshots
           path: web/test-results/**/modify-sndk-subset-close*.png
           retention-days: 7
       - name: Upload position grouping screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: position-grouping-screenshots-shard-${{ matrix.shard }}
+          name: position-grouping-screenshots
           path: web/test-results/**/position-strategy-groups-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-traces-shard-${{ matrix.shard }}
+          name: playwright-traces
           path: web/test-results/
           retention-days: 7
       # Demo behavior is compile-time gated by NEXT_PUBLIC_RADON_DEMO. Rebuild
@@ -1068,13 +1091,11 @@ jobs:
       # build. This job is non-gating (absent from deploy.needs; see above).
       # test_ci_demo_build_order.py pins this order.
       - name: Build demo workstation
-        if: matrix.shard == 1
         working-directory: web
         env:
           NEXT_PUBLIC_RADON_DEMO: "1"
         run: bun run build
       - name: Run demo workstation spec
-        if: matrix.shard == 1
         working-directory: web
         env:
           NEXT_PUBLIC_RADON_DEMO: "1"
