@@ -1172,7 +1172,7 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
             stream_anthropic=False,
         )
         assert result.provider == "nvidia"
-        assert result.model == "meta/llama-3.2-90b-vision-instruct"
+        assert result.model == "nvidia/nemotron-3.5-super-vl-120b-a12b"
 
     def test_subscription_anthropic_wins_without_prepaid(self):
         router = _Router({"api.anthropic.com": _anthropic_obj_ok()})
@@ -1186,32 +1186,41 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
 
 
 class TestNvidiaVisionDefaultAndFallback:
-    def test_default_vision_model_is_90b(self):
+    # Production key probe 2026-11-01: llama-3.2-11b-vision 404 "Specified
+    # function in account ... not found"; llama-3.2-90b-vision 0/10 in 24h
+    # (ReadTimeout); Super VL 200 in 0.3s with reasoning off.
+    def test_default_vision_model_is_super_vl_then_90b(self):
         from model_gateway.engine import _model_for, _nvidia_vision_models
 
         assert _model_for("nvidia", {}, kind="vision") == (
-            "meta/llama-3.2-90b-vision-instruct"
+            "nvidia/nemotron-3.5-super-vl-120b-a12b"
         )
         assert _nvidia_vision_models({}) == (
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
             "meta/llama-3.2-90b-vision-instruct",
-            "meta/llama-3.2-11b-vision-instruct",
         )
+
+    def test_unentitled_11b_never_in_default_chain(self):
+        from model_gateway.engine import _nvidia_vision_models
+
+        for env in ({}, {"NVIDIA_VISION_MODEL": "meta/llama-3.2-90b-vision-instruct"}):
+            assert "meta/llama-3.2-11b-vision-instruct" not in _nvidia_vision_models(env)
 
     def test_nvidia_vision_model_override_honored(self):
         from model_gateway.engine import _nvidia_vision_models
 
         models = _nvidia_vision_models(
-            {"NVIDIA_VISION_MODEL": "meta/llama-3.2-11b-vision-instruct"}
+            {"NVIDIA_VISION_MODEL": "meta/llama-3.2-90b-vision-instruct"}
         )
-        assert models == ("meta/llama-3.2-11b-vision-instruct",)
+        assert models == ("meta/llama-3.2-90b-vision-instruct",)
 
-    def test_multimodal_falls_from_90b_to_11b_on_error(self):
+    def test_multimodal_falls_from_super_vl_to_90b_on_error(self):
         calls: list[str] = []
 
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
             model = (json or {}).get("model", "")
             calls.append(model)
-            if model.endswith("90b-vision-instruct"):
+            if model == "nvidia/nemotron-3.5-super-vl-120b-a12b":
                 return _Resp(500, {"error": {"message": "timeout"}})
             return _openai_obj_ok()
 
@@ -1223,19 +1232,19 @@ class TestNvidiaVisionDefaultAndFallback:
             stream_anthropic=False,
         )
         assert result.provider == "nvidia"
-        assert result.model == "meta/llama-3.2-11b-vision-instruct"
+        assert result.model == "meta/llama-3.2-90b-vision-instruct"
         assert calls == [
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
             "meta/llama-3.2-90b-vision-instruct",
-            "meta/llama-3.2-11b-vision-instruct",
         ]
 
-    def test_vision_extract_uses_90b_then_11b(self):
+    def test_vision_extract_uses_super_vl_then_90b(self):
         calls: list[str] = []
 
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
             model = (json or {}).get("model", "")
             calls.append(model)
-            if "90b" in model:
+            if "super-vl" in model:
                 return _Resp(503, {"error": {"message": "capacity"}})
             return _openai_ok()
 
@@ -1243,8 +1252,11 @@ class TestNvidiaVisionDefaultAndFallback:
             PNG, PROMPT, env={"NVIDIA_API_KEY": "nvapi-test"}, post=post
         )
         assert result.provider == "nvidia"
-        assert result.model == "meta/llama-3.2-11b-vision-instruct"
-        assert calls[0] == "meta/llama-3.2-90b-vision-instruct"
+        assert result.model == "meta/llama-3.2-90b-vision-instruct"
+        assert calls == [
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
+            "meta/llama-3.2-90b-vision-instruct",
+        ]
 
 
 class TestNoPrepaidByDefault:
@@ -1287,7 +1299,7 @@ class TestNoPrepaidByDefault:
             accept=accept_tags_payload,
         )
         assert result.provider == "nvidia"
-        assert result.model == "nvidia/nemotron-3-super-120b-a12b"
+        assert result.model == "nvidia/nemotron-3-ultra-550b-a55b"
         assert any("integrate.api.nvidia.com" in url for url in router.calls)
 
     def test_retired_allow_prepaid_flag_wires_nothing(self):
@@ -1316,12 +1328,15 @@ class TestNoPrepaidByDefault:
 
 
 class TestNvidiaTextDefault:
-    def test_default_text_model_is_nemotron_super_not_stale_llama(self):
+    def test_default_text_model_is_nemotron_ultra_not_unentitled_super(self):
+        # nemotron-3-super-120b-a12b: 404 "Function ... Not found for account"
+        # on the production key (2026-11-01); ultra-550b answered 200.
         from model_gateway.engine import _DEFAULT_TEXT_MODELS, _model_for
 
         assert "llama-3.3-70b" not in _DEFAULT_TEXT_MODELS["nvidia"]
+        assert _DEFAULT_TEXT_MODELS["nvidia"] != "nvidia/nemotron-3-super-120b-a12b"
         assert _model_for("nvidia", {}, kind="text") == (
-            "nvidia/nemotron-3-super-120b-a12b"
+            "nvidia/nemotron-3-ultra-550b-a55b"
         )
 
     def test_nvidia_text_model_override_honored(self):
@@ -1344,15 +1359,15 @@ class TestNvidiaTextDefault:
             == "nvidia/llama-3.1-nemotron-70b-instruct"
         )
 
-    def test_vision_defaults_unchanged_from_90b(self):
+    def test_vision_defaults_are_super_vl_then_90b(self):
         from model_gateway.engine import _model_for, _nvidia_vision_models
 
         assert _model_for("nvidia", {}, kind="vision") == (
-            "meta/llama-3.2-90b-vision-instruct"
+            "nvidia/nemotron-3.5-super-vl-120b-a12b"
         )
         assert _nvidia_vision_models({}) == (
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
             "meta/llama-3.2-90b-vision-instruct",
-            "meta/llama-3.2-11b-vision-instruct",
         )
 
 

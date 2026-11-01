@@ -1,17 +1,19 @@
 # Hosted Nemotron 3.5 Super VL pilot
 
-This release adds opt-in compatibility for the existing NVIDIA vision rung.
-It does not change the default model, provider order, PDF parser, embeddings,
-web assistant or Qwen GPU adapters. The NVIDIA hosted model is
-`nvidia/nemotron-3.5-super-vl-120b-a12b`.
+Super VL (`nvidia/nemotron-3.5-super-vl-120b-a12b`) became the default NVIDIA
+vision model on 2026-11-01, ahead of the gates below: the prior chain was not
+callable on the production key (Llama 11B answered 404 for the account, Llama
+90B timed out on every production call over 24h). Llama 90B is now the
+fallback. The gates below remain the quality check still owed. Provider order,
+PDF parser, embeddings, web assistant and Qwen GPU adapters are unchanged.
 
 ## Request contract
 
-Only that exact model, when called through the NVIDIA provider, gets
-`reasoning_effort: "none"` and API `stream: false`. Small extraction budgets
+Only Super VL and Nemotron 3 Ultra (the text default), when called through the
+NVIDIA provider, get `reasoning_effort: "none"` and API `stream: false`. Small extraction budgets
 are reserved for final answers. HTTP transport reading remains bounded and
 streamed internally; the response is parsed as one JSON document, not SSE.
-The retained Llama 11B fallback and other providers receive no new fields.
+The Llama 90B fallback and other providers receive no new fields.
 Existing array/object parsing, semantic validators, rate limits, response
 byte limits and provider fallbacks remain in effect. No JSON schema is forced:
 CTA extraction returns arrays while research review returns objects.
@@ -55,8 +57,7 @@ The short tagging/distillation budgets are unchanged.
 
 ## Rollback and limits
 
-Remove the vision override to restore the existing default, or restore its
-previous value; regenerate the affected runtime environment and restart the
+Set `NVIDIA_VISION_MODEL=meta/llama-3.2-90b-vision-instruct` to bypass Super VL; regenerate the affected runtime environment and restart the
 affected consumer. A code rollback is the ordinary prior-release rollback.
 No data migration or re-embedding is needed.
 
