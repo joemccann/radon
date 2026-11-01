@@ -1,0 +1,6 @@
+#!/bin/sh
+# Scoped pre-push check: the tests a push most often turns red in CI.
+# Selection and skips live in scripts/ci/pre_push.py. Skip once with
+# `git push --no-verify`; skip every push with RADON_SKIP_PRE_PUSH=1.
+command -v python3 >/dev/null 2>&1 || exit 0
+exec python3 scripts/ci/pre_push.py "$@"

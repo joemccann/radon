@@ -2,7 +2,8 @@
   "version": "0.13.9",
   "type": "module",
   "scripts": {
-    "db:migrate": "bun run scripts/db/migrate.ts"
+    "db:migrate": "bun run scripts/db/migrate.ts",
+    "prepare": "[ -f scripts/ci/pre_push.py ] && python3 scripts/ci/pre_push.py --install || true"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
