@@ -290,6 +290,15 @@ def test_deploy_key_material_never_in_any_output(tmp_path, capsys):
     assert "AAAAC3" not in blob and "ssh-ed25519" not in blob
 
 
+def test_json_stdout_is_one_parseable_document(tmp_path, capsys):
+    code = sld.main(["--repo-root", str(REPO_ROOT), "--checks", "github", "--json",
+                     "--out", str(tmp_path / "r.md")], fetchers=Fakes(world=_github_world()))
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["rows"]
+    assert captured.err.strip().startswith("radon-live-drift ")
+    assert code == 0
+
+
 def test_baseline_matches_documented_merge_gate():
     main = BASELINE["github"]["joemccann/radon"]
     protection = main["branch_protection"]
