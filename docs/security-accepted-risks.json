@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Operator-accepted DeepSec operator-only risks. Sanitized finding IDs only. Each row needs id, reason, accepted_at, expires_at (after accepted_at, at most 90 days later) and accepted_by. Rows are added by the operator via PR, never by the nightly agent. An unexpired row keeps the item out of PR Next; an expired row puts it back at the top of Next to be re-decided.",
+  "accepted": []
+}

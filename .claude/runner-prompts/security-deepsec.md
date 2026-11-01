@@ -511,6 +511,7 @@ Each item gets exactly one state:
 | `open` | Evidence shows the operator action is still needed. Cite it. | Next, open queue |
 | `closed` | Evidence shows it is done. Cite PR/commit/`file:line`. Record `closed_at` and evidence. | Durable `closed_queue` in `last-audited.json`. NOT listed in Next. Once in tonight's deliver report as closed tonight. |
 | `unverifiable` | The needed evidence is missing. Say what is missing. | Next, labeled `(unverifiable)`, stay in the open queue |
+| `accepted` | Set by the helper, never by a verdict: the item has an unexpired row in `docs/security-accepted-risks.json`. | Open queue (not closed). NOT listed in Next. Report lists it with its expiry. |
 
 A `closed` item stays in `last-audited.json` as a durable record. It is
 not listed in Next again. Reopen it only with new evidence that the
@@ -525,6 +526,23 @@ through the helper before building Next or rewriting the queue:
 Pass the helper's `next` text to `github_pr_output.py --next`. Pass
 `closed_tonight` into the deliver report. Never freehand a closed ID
 into Next.
+
+Next and the report's Operator actions are capped at three items:
+expired acceptances first, then `open`, then `unverifiable`, by severity
+then id. The helper emits the cap; when more remain it adds one counts-only
+line (`- N more operator-only item(s) in the private report.`, no IDs).
+Copy the helper's `next` as is; never re-add the overflow items. The full
+list stays in the helper's `items` and the private report's Findings.
+
+Accepted risk is an operator decision. A row in
+`docs/security-accepted-risks.json` (sanitized `DS-` id, `reason`,
+`accepted_at`, `expires_at` at most 90 days later, `accepted_by`) is added
+by the operator via PR. The agent never writes acceptance rows and never
+proposes one as a fix. A malformed ledger makes the helper exit 2: treat it
+as `BLOCKED`. The helper's `accepted` list (id and expiry) goes in the
+private report. An expired row (`expired_acceptances`) returns the item to
+Next with `(acceptance expired YYYY-MM-DD: re-decide)`: the operator must
+renew the row or act on the finding.
 
 Seeded closure (do not re-list): `DS-2026-09-20-03` is `closed`
 (PR #689, `e5c4e627`, `cloud/scripts/setup-vps.sh` L39-47: root-owned
@@ -630,7 +648,8 @@ to merge. The loop never merges. The runner caps this phase at 3h
    output (`--loop security-deepsec`); update the existing PR when one is
 already open for the branch (`gh api -X PATCH`). After the re-verify
 step, every still-`open` or labeled-`unverifiable` operator-only finding
-goes into the body's Operator Next Steps section as an exact operator action; `closed`
+goes into the body's Operator Next Steps section as an exact operator action, through
+the helper's three-item cap and counts line; `closed` and `accepted`
 items are NOT listed in Next. Record the PR:
    `python3.13 scripts/nightly_deliver.py record --loop security-deepsec --branch <branch> --pr <n> --url <url> --status pending`.
 4. Wait for CI, bounded:
@@ -666,7 +685,8 @@ sanitized bullet per finding: `- **Component**: what happened.`), `--fix`
 result, what was left to CI, sanitized), `--risk` when reverting the merge
 commit is not the whole rollback, and `--next` only from
 `nightly_deepsec_queue.py reverify` (still-`open` or labeled-`unverifiable`
-operator-only items; never a `closed` id) when something still must happen
+operator-only items, at most three plus the counts line; never a `closed`
+or `accepted` id) when something still must happen
 outside of CI pushing a new deployment. The body follows
 `.github/pull_request_template.md` (Summary, What changed, Test plan, Risk
 and rollback, Operator Next Steps, Checklist, in order); the `PR body
@@ -699,7 +719,8 @@ root cause, and no sensitive content in the local commit or any public PR.
 A completed deliver requires: only P2/P3 and released P0/P1 commits on the
 pushed branch; one sanitized PR open for it (or none, recorded as `prs=0`);
 every still-`open` or labeled-`unverifiable` operator-only finding named
-as an exact action in the PR's Operator Next Steps section after re-verify (`closed`
+as an exact action in the PR's Operator Next Steps section after re-verify,
+within the helper's three-item cap and counts line (`closed`
 items stay in `closed_queue` and appear once in the deliver report as
 closed tonight); the deliver record and run-record carrying the branch, PR number
 and CI outcome; and the verdict line printed before the completion marker.
@@ -739,6 +760,17 @@ do (rail 6): name the variable or secret class and location only. The
 runner additionally redacts known secret shapes, which is a backstop, not
 permission.
 
+Say what was not reviewed. Fill the Summary's Unreviewed and Coverage limits
+rows every phase. A DeepSec or engine rc of 75 or any other non-zero value,
+missing auth, or a scope the engine did not cover makes that stage `not
+reviewed`, never `complete`, and zero findings over that range is Status
+`NOT_REVIEWED`, never `COMPLETE`. The runner independently posts a counts-only
+`unreviewed:` line on the rolling issue from `last-audited.json` and
+`origin/main`; your report must agree with it. Operator actions hold at most
+three items plus a count line, and accepted risks (from
+`docs/security-accepted-risks.json`, never written by you) go in Accepted
+risks, not in Operator actions.
+
 ## Private reporting and notifications
 
 The runner sends every Pushover notification, including `radon PR green`.
@@ -754,6 +786,10 @@ radon-phase loop=security-deepsec phase=audit exit=0 audited-through=<sha> ts=<u
 audited-through: <sha>
 
 `audited-through` is present only when audit exited 0. A failed phase omits it.
+When `last-audited.json` is behind `origin/main` (or unusable), a final
+counts-only line follows, e.g. `unreviewed: 12 commits since 2026-10-24,
+reason incomplete`: a count, the checkpoint's date and a reason token, never
+a SHA or file.
 Operators read two dead-men: `security-nightly` for the security loop and
 `security-deepsec` for this one. A missing daily comment on either means
 that runner did not fire. Neither comment may name a route, file, attack,

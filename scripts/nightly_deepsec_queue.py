@@ -5,7 +5,10 @@ The loop used to copy every carried operator-only item into Next. This
 helper is the deterministic half: it applies the committed closed ledger,
 merges agent verdicts (open / closed / unverifiable), keeps closed IDs in
 ``last-audited.json`` as a durable record, and emits Next text that omits
-them. Stdlib only. No issue comments, no host mutation, no secrets.
+them. The operator-written accepted-risk ledger parks an item as
+``accepted`` until its expiry; an expired acceptance returns the item to
+Next to be re-decided. Next is capped at three lines plus a counts-only
+overflow line. Stdlib only. No issue comments, no host mutation, no secrets.
 """
 
 from __future__ import annotations
@@ -16,13 +19,19 @@ import os
 import re
 import sys
 import tempfile
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 STATES = ("open", "closed", "unverifiable")
 FINDING_ID_RE = re.compile(r"^DS-\d{4}-\d{2}-\d{2}-\d{2}$")
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_LEDGER = REPO / "docs" / "security-deepsec-closed.json"
+DEFAULT_ACCEPTED = REPO / "docs" / "security-accepted-risks.json"
+MAX_ACCEPT_DAYS = 90
+NEXT_CAP = 3
+SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -45,6 +54,48 @@ def load_ledger(path: Path | None = None) -> dict[str, dict[str, Any]]:
         item_id = str(row.get("id") or "")
         if not FINDING_ID_RE.fullmatch(item_id):
             raise ValueError(f"ledger id is not a sanitized DS- id: {item_id!r}")
+        out[item_id] = dict(row)
+    return out
+
+
+def parse_date(value: Any) -> date:
+    text = str(value or "")
+    if not ISO_DATE_RE.fullmatch(text):
+        raise ValueError(f"not an ISO date (YYYY-MM-DD): {text!r}")
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"not an ISO date (YYYY-MM-DD): {text!r}") from exc
+
+
+def load_accepted(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Validate the accepted-risk ledger. Any malformed row fails closed."""
+    raw = load_json(path or DEFAULT_ACCEPTED)
+    if not isinstance(raw, dict) or raw.get("version") != 1:
+        raise ValueError("accepted-risk ledger must be a version 1 object")
+    rows = raw.get("accepted")
+    if not isinstance(rows, list):
+        raise ValueError("accepted-risk ledger 'accepted' must be a list")
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError(f"accepted-risk row is not an object: {row!r}")
+        item_id = str(row.get("id") or "")
+        if not FINDING_ID_RE.fullmatch(item_id):
+            raise ValueError(f"accepted-risk id is not a sanitized DS- id: {item_id!r}")
+        if item_id in out:
+            raise ValueError(f"accepted-risk id listed twice: {item_id}")
+        for key in ("reason", "accepted_by"):
+            if not isinstance(row.get(key), str) or not row[key].strip():
+                raise ValueError(f"accepted-risk {item_id} needs a non-empty {key}")
+        accepted_at = parse_date(row.get("accepted_at"))
+        expires_at = parse_date(row.get("expires_at"))
+        if expires_at <= accepted_at:
+            raise ValueError(f"accepted-risk {item_id} expires_at must be after accepted_at")
+        if (expires_at - accepted_at).days > MAX_ACCEPT_DAYS:
+            raise ValueError(
+                f"accepted-risk {item_id} expires_at is more than {MAX_ACCEPT_DAYS} days out"
+            )
         out[item_id] = dict(row)
     return out
 
@@ -190,18 +241,58 @@ def classify_item(
     }
 
 
+def apply_acceptance(
+    item: dict[str, Any], accepted: dict[str, dict[str, Any]], today: date
+) -> dict[str, Any]:
+    """Park a non-closed item as accepted, or mark a lapsed acceptance."""
+    row = accepted.get(item["id"])
+    if not row or item.get("state") == "closed":
+        return item
+    expires_at = str(row["expires_at"])
+    if parse_date(expires_at) < today:
+        return {**item, "acceptance_expired": expires_at}
+    return {
+        **item,
+        "state": "accepted",
+        "prior_state": item.get("state"),
+        "expires_at": expires_at,
+        "accepted_at": str(row["accepted_at"]),
+        "accepted_by": str(row["accepted_by"]),
+        "reason": str(row["reason"]),
+    }
+
+
+def _next_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+    if item.get("acceptance_expired"):
+        group = 0
+    elif item.get("state") == "open":
+        group = 1
+    else:
+        group = 2
+    severity = SEVERITY_RANK.get(str(item.get("severity") or "").upper(), len(SEVERITY_RANK))
+    return (group, severity, item["id"])
+
+
 def next_text(items: list[dict[str, Any]]) -> str:
+    pending = sorted(
+        (item for item in items if item.get("state") in ("open", "unverifiable")),
+        key=_next_sort_key,
+    )
     lines: list[str] = []
-    for item in items:
-        if item.get("state") == "closed":
-            continue
+    for item in pending[:NEXT_CAP]:
         item_id = item["id"]
         action = str(item.get("action") or "").strip() or "operator action still required"
+        suffix = ""
+        if item.get("acceptance_expired"):
+            suffix = f" (acceptance expired {item['acceptance_expired']}: re-decide)"
         if item.get("state") == "unverifiable":
             missing = str(item.get("missing") or "needed evidence is missing")
-            lines.append(f"- **{item_id}** (unverifiable): {action} Missing: {missing}.")
+            lines.append(f"- **{item_id}** (unverifiable): {action} Missing: {missing}.{suffix}")
         else:
-            lines.append(f"- **{item_id}**: {action}")
+            lines.append(f"- **{item_id}**: {action}{suffix}")
+    overflow = len(pending) - NEXT_CAP
+    if overflow > 0:
+        lines.append(f"- {overflow} more operator-only item(s) in the private report.")
     return "\n".join(lines)
 
 
@@ -230,10 +321,14 @@ def reverify(
     last_audited_path: Path,
     verdicts: Any = None,
     ledger_path: Path | None = None,
+    accepted_ledger_path: Path | None = None,
+    today: date | None = None,
     write: bool = False,
 ) -> dict[str, Any]:
     state = load_last_audited(last_audited_path)
     ledger = load_ledger(ledger_path)
+    accepted = load_accepted(accepted_ledger_path)
+    today = today or datetime.now(timezone.utc).date()
     verdict_map = load_verdicts(verdicts)
     prior_closed: dict[str, dict[str, Any]] = {}
     for raw in state.get("closed_queue") or []:
@@ -275,6 +370,7 @@ def reverify(
             continue
         classified.append(_closed_record(item_id, row))
         seen.add(item_id)
+    classified = [apply_acceptance(item, accepted, today) for item in classified]
 
     closed_ids = {item["id"] for item in classified if item["state"] == "closed"}
     closed_tonight = [
@@ -301,6 +397,21 @@ def reverify(
         "next": next_text(classified),
         "closed_tonight": closed_tonight,
         "closed_ids": sorted(closed_ids),
+        "accepted": [
+            {
+                "id": item["id"],
+                "expires_at": item["expires_at"],
+                "accepted_by": item["accepted_by"],
+                "reason": item["reason"],
+            }
+            for item in classified
+            if item["state"] == "accepted"
+        ],
+        "expired_acceptances": [
+            {"id": item["id"], "expires_at": item["acceptance_expired"]}
+            for item in classified
+            if item.get("acceptance_expired")
+        ],
         "state": updated,
     }
 
@@ -317,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--last-audited", required=True)
     parser.add_argument("--verdicts", default="")
     parser.add_argument("--ledger", default="")
+    parser.add_argument("--accepted-ledger", default="")
+    parser.add_argument("--today", default="", help="YYYY-MM-DD; defaults to the UTC date")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -324,13 +437,20 @@ def main(argv: list[str] | None = None) -> int:
         last_audited_path=Path(args.last_audited),
         verdicts=_load_verdicts_arg(args.verdicts or None),
         ledger_path=Path(args.ledger) if args.ledger else None,
+        accepted_ledger_path=Path(args.accepted_ledger) if args.accepted_ledger else None,
+        today=parse_date(args.today) if args.today else None,
         write=args.write,
     )
     public = {
-        "items": result["items"],
-        "next": result["next"],
-        "closed_tonight": result["closed_tonight"],
-        "closed_ids": result["closed_ids"],
+        key: result[key]
+        for key in (
+            "items",
+            "next",
+            "closed_tonight",
+            "closed_ids",
+            "accepted",
+            "expired_acceptances",
+        )
     }
     if args.json:
         json.dump(public, sys.stdout)
