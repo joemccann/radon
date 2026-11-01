@@ -23,10 +23,10 @@ of the subscription band still runs. Only a full-cascade miss is an ops_only /
 hard fail — never "top up Anthropic" while another keyed provider remains.
 
 NVIDIA is first-class before Cerebras whenever ``NVIDIA_API_KEY`` is present.
-Default **text** model is ``nvidia/nemotron-3.5-super-vl-120b-a12b`` (invocable;
-override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
-``meta/llama-3.2-90b-vision-instruct``, with automatic fallback to
-``meta/llama-3.2-11b-vision-instruct`` on timeout/error (override
+Default **text** model is ``nvidia/nemotron-3-ultra-550b-a55b`` (override
+``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
+``nvidia/nemotron-3.5-super-vl-120b-a12b``, with automatic fallback to
+``meta/llama-3.2-90b-vision-instruct`` on timeout/error (override
 ``NVIDIA_VISION_MODEL``). Inject keys via ``/etc/radon/env``; never commit secrets.
 """
 from __future__ import annotations
@@ -185,12 +185,18 @@ _ANTIGRAVITY_CLI_ENV_ALLOWLIST = frozenset(
     }
 )
 
-_NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
-_NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
+# /v1/models lists ids the account cannot call, so defaults are chosen by a
+# live 1-token chat probe on the production key, not by the listing. Probe
+# 2026-11-01: nemotron-3-super-120b-a12b and llama-3.2-11b-vision answer 404
+# "Function ... not found for account"; llama-3.2-90b-vision answered 0/10 in
+# production over 24h (ReadTimeout). Ultra and Super VL answered 200.
 _NVIDIA_SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-# Invocable NIM text default. Listed nemotron-3-super-120b-a12b 404s "Function
-# not found for account" (2026-11-01); llama-3.3-70b-instruct 410s.
-_NVIDIA_TEXT_DEFAULT = _NVIDIA_SUPER_VL
+_NVIDIA_ULTRA = "nvidia/nemotron-3-ultra-550b-a55b"
+_NVIDIA_VISION_DEFAULT = _NVIDIA_SUPER_VL
+_NVIDIA_VISION_FALLBACK = "meta/llama-3.2-90b-vision-instruct"
+_NVIDIA_TEXT_DEFAULT = _NVIDIA_ULTRA
+# Nemotron reasoning models: reasoning on by default eats small JSON budgets.
+_NVIDIA_REASONING_OFF = frozenset({_NVIDIA_SUPER_VL, _NVIDIA_ULTRA})
 
 # Env inventory for cloud/.env.example tests: subscription material only.
 _ANTHROPIC_KEYS = _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
@@ -577,7 +583,7 @@ def _model_for(
 
 
 def _nvidia_vision_models(env: Mapping[str, str]) -> tuple[str, ...]:
-    """Primary NVIDIA vision id, then 11B fallback when distinct."""
+    """Primary NVIDIA vision id, then the Llama 90B fallback when distinct."""
     primary = _model_for("nvidia", env, kind="vision")
     models = [primary]
     if primary != _NVIDIA_VISION_FALLBACK:
@@ -1137,13 +1143,13 @@ def _openai_multimodal_body(
 
 
 def _nvidia_request_extras(model: str) -> dict[str, Any]:
-    """Keep Super VL's reasoning within our small, final-JSON budgets.
+    """Keep Nemotron reasoning within our small, final-JSON budgets.
 
     API token streaming is separate from the bounded HTTP transport reader:
     the latter expects one JSON document, not SSE events. These fields are
     model-specific so the retained Llama vision fallback stays compatible.
     """
-    if model == _NVIDIA_SUPER_VL:
+    if model in _NVIDIA_REASONING_OFF:
         return {"reasoning_effort": "none", "stream": False}
     return {}
 

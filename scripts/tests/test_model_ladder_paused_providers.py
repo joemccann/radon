@@ -23,5 +23,5 @@ def test_unset_or_empty_pause_list_changes_nothing():
 
 def test_nvidia_text_default_is_an_invocable_catalog_model():
     # nemotron-3-super-120b-a12b is listed but 404s "Function not found for
-    # account" (2026-11-01); Super VL answered the same probe.
-    assert _model_for("nvidia", {}, kind="text") == "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    # account" (2026-11-01); Ultra answered the same probe (PR #1379).
+    assert _model_for("nvidia", {}, kind="text") == "nvidia/nemotron-3-ultra-550b-a55b"
