@@ -1287,7 +1287,7 @@ class TestNoPrepaidByDefault:
             accept=accept_tags_payload,
         )
         assert result.provider == "nvidia"
-        assert result.model == "nvidia/nemotron-3-super-120b-a12b"
+        assert result.model == "nvidia/nemotron-3.5-super-vl-120b-a12b"
         assert any("integrate.api.nvidia.com" in url for url in router.calls)
 
     def test_retired_allow_prepaid_flag_wires_nothing(self):
@@ -1316,12 +1316,12 @@ class TestNoPrepaidByDefault:
 
 
 class TestNvidiaTextDefault:
-    def test_default_text_model_is_nemotron_super_not_stale_llama(self):
+    def test_default_text_model_is_invocable_super_vl_not_stale_llama(self):
         from model_gateway.engine import _DEFAULT_TEXT_MODELS, _model_for
 
         assert "llama-3.3-70b" not in _DEFAULT_TEXT_MODELS["nvidia"]
         assert _model_for("nvidia", {}, kind="text") == (
-            "nvidia/nemotron-3-super-120b-a12b"
+            "nvidia/nemotron-3.5-super-vl-120b-a12b"
         )
 
     def test_nvidia_text_model_override_honored(self):

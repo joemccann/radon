@@ -5,7 +5,7 @@ unavailable:
 
   1. subscription: antigravity (``agy -p``) -> anthropic -> grok -> cursor -> codex
   2. nvidia (API key OK)
-  3. cerebras (cheap paid, last; currently paused on Hetzner)
+  3. cerebras (cheap paid, last; pause any rung with RADON_LADDER_PAUSED_PROVIDERS)
 
 Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
 **subscription credentials only**: Claude Max OAuth, Grok device-auth,
@@ -23,7 +23,7 @@ of the subscription band still runs. Only a full-cascade miss is an ops_only /
 hard fail — never "top up Anthropic" while another keyed provider remains.
 
 NVIDIA is first-class before Cerebras whenever ``NVIDIA_API_KEY`` is present.
-Default **text** model is ``nvidia/nemotron-3-super-120b-a12b`` (catalog-valid;
+Default **text** model is ``nvidia/nemotron-3.5-super-vl-120b-a12b`` (invocable;
 override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
 ``meta/llama-3.2-90b-vision-instruct``, with automatic fallback to
 ``meta/llama-3.2-11b-vision-instruct`` on timeout/error (override
@@ -187,9 +187,10 @@ _ANTIGRAVITY_CLI_ENV_ALLOWLIST = frozenset(
 
 _NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
 _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
-# Catalog-valid NIM text default (meta/llama-3.3-70b-instruct → http_410 on Joe's catalog).
-_NVIDIA_TEXT_DEFAULT = "nvidia/nemotron-3-super-120b-a12b"
 _NVIDIA_SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+# Invocable NIM text default. Listed nemotron-3-super-120b-a12b 404s "Function
+# not found for account" (2026-11-01); llama-3.3-70b-instruct 410s.
+_NVIDIA_TEXT_DEFAULT = _NVIDIA_SUPER_VL
 
 # Env inventory for cloud/.env.example tests: subscription material only.
 _ANTHROPIC_KEYS = _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
@@ -494,6 +495,11 @@ _SUBSCRIPTION_AUTH: dict[str, Callable[[Mapping[str, str]], "AuthMaterial | None
 
 def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
     """Subscription credentials only for sub-tier rungs; prepaid keys never."""
+    # Operator pause (e.g. a billing hold): the rung reads as unkeyed, so the
+    # ladder skips it without sending a request. The key stays stored.
+    paused = _env_get(env, "RADON_LADDER_PAUSED_PROVIDERS") or ""
+    if name in {part.strip().lower() for part in paused.split(",")}:
+        return None
     if name in _SUBSCRIPTION_AUTH:
         prepaid_denylist.warn_ignored(env)
         return _SUBSCRIPTION_AUTH[name](env)

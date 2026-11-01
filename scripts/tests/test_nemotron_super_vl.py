@@ -125,18 +125,22 @@ def test_super_vl_failure_retains_legacy_vision_fallback_without_new_controls(ki
     assert_legacy_call(post.calls[1])
 
 
-@pytest.mark.parametrize("kind", ["single", "multimodal", "text"])
+@pytest.mark.parametrize("kind", ["single", "multimodal"])
 def test_existing_defaults_do_not_receive_super_vl_controls(kind):
     post = Capture(completion(ROWS if kind == "single" else OBJECT))
     if kind == "single":
         result = extract_via_vision(PNG, "extract", env=ENV, post=post)
-    elif kind == "multimodal":
-        result = complete_multimodal_json("review", images=[("page", PNG)], env=ENV, post=post)
     else:
-        result = complete_text_json("tag", env=ENV, post=post)
-    expected = "nvidia/nemotron-3-super-120b-a12b" if kind == "text" else "meta/llama-3.2-90b-vision-instruct"
-    assert result.model == expected
+        result = complete_multimodal_json("review", images=[("page", PNG)], env=ENV, post=post)
+    assert result.model == "meta/llama-3.2-90b-vision-instruct"
     assert_legacy_call(post.calls[0])
+
+
+def test_text_default_is_super_vl_with_its_bounded_controls():
+    post = Capture(completion(OBJECT))
+    result = complete_text_json("tag", env=ENV, post=post)
+    assert result.model == SUPER_VL
+    assert_super_vl_call(post.calls[0])
 
 
 def test_other_provider_does_not_receive_controls_even_with_super_vl_model_pin(tmp_path):
