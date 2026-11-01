@@ -9,6 +9,7 @@ publish only a digest recorded after that smoke.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import textwrap
 from pathlib import Path
@@ -45,8 +46,14 @@ def _run(step_name: str) -> str:
 def test_reuse_step_retags_only_an_input_hash_manifest() -> None:
     reuse = _step("Reuse identical python image")
     script = reuse["run"]
-    assert "github.ref == 'refs/heads/main'" in reuse["if"]
-    assert "github.event_name == 'push'" in reuse["if"]
+    # Main pushes retag; pull requests only look (see the behavior tests),
+    # and only when they edit no unhashed file a hit would skip
+    # (test_app_images_pr_unhashed_edits.py).
+    assert reuse["if"] == (
+        "(github.ref == 'refs/heads/main' && github.event_name == 'push')"
+        " || (github.event_name == 'pull_request'"
+        " && steps.unhashed.outputs.python == 'unchanged')"
+    )
     assert "docker buildx imagetools inspect" in script
     assert "docker buildx imagetools create" in script
     assert "docker tag " not in script
@@ -59,6 +66,102 @@ def test_reuse_step_retags_only_an_input_hash_manifest() -> None:
     assert "hit=false" in script
     assert "hit=true" in script
     assert "manifest bytes do not match" in script
+
+
+SHA = "c" * 40
+IHASH = "ghcr.io/joemccann/radon-python:ihash-" + "a" * 64
+
+
+def _run_reuse(
+    tmp_path: Path, *, event: str, ref: str, inspect_status: int, tag: str = IHASH
+) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    """Run the shipped reuse script with a docker that logs every call."""
+    script = _run("Reuse identical python image")
+    script = script.replace("${{ steps.pyimage.outputs.tag }}", tag)
+    script = script.replace("${{ github.sha }}", SHA)
+    assert "${{" not in script, "new interpolation: teach this fixture its value"
+    log = tmp_path / "docker.log"
+    output = tmp_path / "github-output"
+    docker = tmp_path / "bin" / "docker"
+    docker.parent.mkdir()
+    docker.write_text(
+        "#!/bin/bash\n"
+        'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
+        'if [ "$3" = inspect ] && [ "${5:-}" = --raw ]; then echo manifest; exit 0; fi\n'
+        'if [ "$3" = inspect ]; then exit "$INSPECT_STATUS"; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    env = {
+        "PATH": f"{docker.parent}{os.pathsep}{os.environ['PATH']}",
+        "CALL_LOG": str(log),
+        "INSPECT_STATUS": str(inspect_status),
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_EVENT_NAME": event,
+        "GITHUB_REF": ref,
+    }
+    completed = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    hits = output.read_text(encoding="utf-8") if output.exists() else ""
+    return completed, calls, hits
+
+
+@pytest.mark.parametrize(("inspect_status", "hit"), [(0, "true"), (1, "false")])
+def test_pull_request_reuse_only_reads_the_input_hash_tag(
+    tmp_path: Path, inspect_status: int, hit: str
+) -> None:
+    """A PR with main's exact inputs skips the build and smoke main already
+    ran. It holds no packages:write token, so it must never write a tag."""
+    completed, calls, output = _run_reuse(
+        tmp_path, event="pull_request", ref="refs/pull/7/merge", inspect_status=inspect_status
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert calls == [f"buildx imagetools inspect {IHASH}"]
+    assert output == f"hit={hit}\n"
+
+
+def test_pull_request_reuse_refuses_a_malformed_tag(tmp_path: Path) -> None:
+    completed, calls, output = _run_reuse(
+        tmp_path,
+        event="pull_request",
+        ref="refs/pull/7/merge",
+        inspect_status=0,
+        tag="ghcr.io/joemccann/radon-python:latest",
+    )
+    assert completed.returncode == 1
+    assert calls == []
+    assert output == ""
+
+
+def test_main_push_reuse_still_retags_and_compares_manifest_bytes(tmp_path: Path) -> None:
+    completed, calls, output = _run_reuse(
+        tmp_path, event="push", ref="refs/heads/main", inspect_status=0
+    )
+    assert completed.returncode == 0, completed.stderr
+    sha_tag = f"ghcr.io/joemccann/radon-python:{SHA}"
+    assert calls == [
+        f"buildx imagetools inspect {IHASH}",
+        f"buildx imagetools inspect {IHASH} --raw",
+        f"buildx imagetools create -t {sha_tag} -t ghcr.io/joemccann/radon-python:latest {IHASH}",
+        f"buildx imagetools inspect {sha_tag} --raw",
+    ]
+    assert output == "hit=true\n"
+
+
+def test_main_push_miss_builds(tmp_path: Path) -> None:
+    completed, calls, output = _run_reuse(
+        tmp_path, event="push", ref="refs/heads/main", inspect_status=1
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert calls == [f"buildx imagetools inspect {IHASH}"]
+    assert output == "hit=false\n"
 
 
 def test_build_and_hardened_smoke_run_only_on_a_miss() -> None:
