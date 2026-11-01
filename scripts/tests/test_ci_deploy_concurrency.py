@@ -16,6 +16,7 @@ import os
 import subprocess
 import re
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -43,6 +44,12 @@ TEST_JOBS = (
     "py-coverage",
     "cloud-tests",
     "perimeter-smoke",
+)
+# The `pytest (cloud heavy)` shard: 90s and 89s of 430s summed cloud test
+# time across 126 modules (local run), each pinning one al loadfile worker.
+CLOUD_HEAVY_MODULES = (
+    "cloud/tests/test_app_runtime.py",
+    "cloud/tests/test_deploy_corrections.py",
 )
 
 
@@ -270,21 +277,28 @@ def test_ci_runs_cloud_infra_pytest() -> None:
 def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     matrix = cloud["strategy"]["matrix"]
-    # CIP-009: al and mz merged — the ~25-job gate fan-out queued one shard
-    # ~37s past the 20-slot concurrency cap, and the late start set the wall.
-    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge"]
+    # CIP-009: al and mz merged when one shard queued ~37s for a runner slot.
+    # The account cap is 40 concurrent jobs, not 20 (repo-wide running jobs
+    # plateaued at exactly 40, 2026-10-29..11-01). heavy carries the two
+    # ~90s modules that each pinned one al loadfile worker and set the PR
+    # critical path (cloud al 181s of a 13s + 181s path).
+    assert [str(shard) for shard in matrix["shard"]] == ["al", "heavy", "edge"]
     rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
     assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
     assert rows["al"] == "cloud/tests/test_[a-z]*.py"
+    assert rows["heavy"].split() == list(CLOUD_HEAVY_MODULES)
     omits = {
         str(row["shard"]): str(row.get("omit", ""))
         for row in matrix["include"]
     }
-    assert omits["al"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert omits["al"].split() == ["cloud/tests/test_caddy_edge_timeouts.py", *CLOUD_HEAVY_MODULES]
+    assert omits["heavy"] == ""
     assert "matrix.omit" in _job_commands(cloud)
     assert "selected" in _job_commands(cloud)
     caddy_step = next(step for step in cloud["steps"] if step.get("name") == "Install caddy (edge mechanism tests)")
-    assert "edge" in caddy_step["if"]
+    # Every cloud shard installs caddy, so no module skips on a missing binary
+    # whichever shard it lands on (T-322 was the third such recurrence).
+    assert "matrix.shard" not in caddy_step.get("if", "")
     assert "--durations=25" in _job_commands(cloud)
     assert "--durations=25" in _job_commands(_workflow()["jobs"]["py-tests"])
 
@@ -1007,8 +1021,97 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     rows = {str(row["shard"]): row for row in cloud["strategy"]["matrix"]["include"]}
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
+    # One worker per heavy module: loadfile never divides a module, so a third
+    # worker would only idle.
+    assert rows["heavy"]["xdist"] == f"-n {len(CLOUD_HEAVY_MODULES)} --dist loadfile"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
+
+
+def _modern_bash() -> str | None:
+    for candidate in (shutil.which("bash"), "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"):
+        if not candidate or not os.path.exists(candidate):
+            continue
+        probe = subprocess.run(
+            [candidate, "-c", 'echo "${BASH_VERSINFO[0]}"'], capture_output=True, text=True, timeout=10
+        )
+        if probe.returncode == 0 and probe.stdout.strip().isdigit() and int(probe.stdout) >= 4:
+            return candidate
+    return None
+
+
+def test_every_python_matrix_shard_is_a_declared_required_check() -> None:
+    """A shard missing from the offline mirror is a check `main` may not
+    require: its failure would not block a merge once protection syncs."""
+    jobs = _workflow()["jobs"]
+    declared = _declared_required_status_checks()
+    for name in ("py-tests", "cloud-tests"):
+        template = jobs[name]["name"]
+        for shard in jobs[name]["strategy"]["matrix"]["shard"]:
+            context = template.replace("${{ matrix.shard }}", str(shard))
+            assert context in declared, f"{context} is not in {REQUIRED_STATUS_CHECKS.name}"
+
+
+def test_cloud_shard_run_step_selects_each_module_exactly_once(tmp_path: Path) -> None:
+    """Execute the real `Run cloud shard` script per matrix row with pytest
+    stubbed out. The partition tests above model `paths` / `omit` in Python;
+    this proves the bash that CI runs agrees, including an `omit` that names
+    several files and a `paths` that names several files."""
+    bash = _modern_bash()
+    if bash is None:
+        pytest.skip("the run step uses mapfile; no bash >= 4 on this host")
+    root = WORKFLOW.parents[2]
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    (run_step,) = [step for step in cloud["steps"] if step.get("name") == "Run cloud shard"]
+    stub = tmp_path / "python"
+    stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    seen: dict[str, list[str]] = {}
+    for row in cloud["strategy"]["matrix"]["include"]:
+        script = run_step["run"]
+        for key in ("paths", "omit", "xdist"):
+            script = script.replace("${{ matrix.%s }}" % key, str(row.get(key, "")))
+        assert "${{" not in script, script
+        result = subprocess.run(
+            [bash, "-c", script], cwd=root, env=env, capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, (row["shard"], result.stderr)
+        args = result.stdout.split("\n")
+        assert args[:2] == ["-m", "pytest"], args[:3]
+        if row["xdist"]:
+            assert str(row["xdist"]) in " ".join(args), (row["shard"], args)
+        for target in args:
+            if target.startswith("cloud/tests/"):
+                seen.setdefault(target, []).append(str(row["shard"]))
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    assert set(seen) == on_disk, sorted(on_disk ^ set(seen))[:6]
+    twice = {path: shards for path, shards in seen.items() if len(shards) != 1}
+    assert not twice, twice
+    assert {seen[path][0] for path in CLOUD_HEAVY_MODULES} == {"heavy"}
+
+
+def test_cloud_shard_run_step_fails_when_a_named_path_matches_nothing(tmp_path: Path) -> None:
+    """A renamed heavy module must fail the shard, not silently shrink it."""
+    bash = _modern_bash()
+    if bash is None:
+        pytest.skip("the run step uses mapfile; no bash >= 4 on this host")
+    root = WORKFLOW.parents[2]
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    (run_step,) = [step for step in cloud["steps"] if step.get("name") == "Run cloud shard"]
+    stub = tmp_path / "python"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    script = (
+        run_step["run"]
+        .replace("${{ matrix.paths }}", "cloud/tests/test_app_runtime.py cloud/tests/test_gone.py")
+        .replace("${{ matrix.omit }}", "")
+        .replace("${{ matrix.xdist }}", "")
+    )
+    result = subprocess.run([bash, "-c", script], cwd=root, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0
+    assert "cloud/tests/test_gone.py" in result.stderr
 
 
 def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:
