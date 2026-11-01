@@ -101,3 +101,118 @@ def test_gateway_refuses_noncanonical_selected_image_before_launch(tmp_path,imag
     assert result.returncode==69,result.stdout+result.stderr
     assert not result.docker_log.exists()
     assert not lookup.exists()
+
+
+GATEWAY_REUSE = "Reuse identical model gateway image"
+GATEWAY_HASH = "a" * 64
+GATEWAY_SHA = "c" * 40
+
+
+def _gateway_steps():
+    wf = yaml.safe_load((ROOT / ".github/workflows/app-images.yml").read_text())
+    return wf["jobs"]["python-image"]["steps"]
+
+
+def _run_gateway_reuse(tmp_path, *, event, ref, inspect_status, digest=GATEWAY_HASH):
+    """Run the shipped gateway reuse script with a docker that logs every call."""
+    import os
+    import subprocess
+    step = next(s for s in _gateway_steps() if s.get("name") == GATEWAY_REUSE)
+    script = step["run"].replace("${{ steps.pyimage.outputs.hash }}", digest)
+    script = script.replace("${{ github.sha }}", GATEWAY_SHA)
+    assert "${{" not in script, "new interpolation: teach this fixture its value"
+    log = tmp_path / "docker.log"
+    output = tmp_path / "github-output"
+    docker = tmp_path / "bin" / "docker"
+    docker.parent.mkdir()
+    docker.write_text(
+        "#!/bin/bash\n"
+        'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
+        'if [ "$3" = inspect ] && [ "${5:-}" = --raw ]; then echo manifest; exit 0; fi\n'
+        'if [ "$3" = inspect ]; then exit "$INSPECT_STATUS"; fi\n'
+        "exit 0\n"
+    )
+    docker.chmod(0o755)
+    env = {
+        "PATH": f"{docker.parent}{os.pathsep}{os.environ['PATH']}",
+        "CALL_LOG": str(log),
+        "INSPECT_STATUS": str(inspect_status),
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_EVENT_NAME": event,
+        "GITHUB_REF": ref,
+    }
+    completed = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    calls = log.read_text().splitlines() if log.exists() else []
+    return completed, calls, output.read_text() if output.exists() else ""
+
+
+def test_gateway_reuse_runs_on_main_push_and_pull_requests_only():
+    step = next(s for s in _gateway_steps() if s.get("name") == GATEWAY_REUSE)
+    assert step["id"] == "reuse-gateway"
+    assert step["if"] == (
+        "(github.ref == 'refs/heads/main' && github.event_name == 'push')"
+        " || github.event_name == 'pull_request'"
+    )
+
+
+@pytest.mark.parametrize(("inspect_status", "hit"), [(0, "true"), (1, "false")])
+def test_pull_request_gateway_reuse_only_reads_the_input_hash_tag(tmp_path, inspect_status, hit):
+    """A PR with main's exact inputs skips the build, smoke and bounds check
+    main already ran on them. No packages:write token: never a tag write."""
+    completed, calls, output = _run_gateway_reuse(
+        tmp_path, event="pull_request", ref="refs/pull/7/merge", inspect_status=inspect_status
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert calls == [f"buildx imagetools inspect {GATEWAY_REPO}:ihash-{GATEWAY_HASH}"]
+    assert output == f"hit={hit}\n"
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push"])
+def test_gateway_reuse_without_a_valid_hash_builds_without_looking(tmp_path, event):
+    completed, calls, output = _run_gateway_reuse(
+        tmp_path, event=event, ref="refs/heads/main", inspect_status=0, digest="not-a-hash"
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert calls == []
+    assert output == "hit=false\n"
+
+
+def test_main_push_gateway_reuse_still_retags_and_compares_manifest_bytes(tmp_path):
+    completed, calls, output = _run_gateway_reuse(
+        tmp_path, event="push", ref="refs/heads/main", inspect_status=0
+    )
+    assert completed.returncode == 0, completed.stderr
+    source = f"{GATEWAY_REPO}:ihash-{GATEWAY_HASH}"
+    target = f"{GATEWAY_REPO}:{GATEWAY_SHA}"
+    assert calls == [
+        f"buildx imagetools inspect {source}",
+        f"buildx imagetools inspect {source} --raw",
+        f"buildx imagetools create -t {target} -t {GATEWAY_REPO}:latest {source}",
+        f"buildx imagetools inspect {target} --raw",
+    ]
+    assert output == "hit=true\n"
+
+
+def test_gateway_build_reads_registry_cache_and_exports_only_on_main_push():
+    build = next(s for s in _gateway_steps() if s.get("with", {}).get("target") == "model-gateway")
+    assert build["with"]["cache-from"].splitlines() == [
+        f"type=registry,ref={GATEWAY_REPO}:buildcache",
+        "type=registry,ref=ghcr.io/joemccann/radon-python:buildcache",
+        "type=gha,scope=radon-model-gateway",
+        "type=gha,scope=radon-python",
+    ]
+    # Pull requests export nothing: the GHA export was 288.5s of a 490s
+    # gateway build step on PR run 41261010191.
+    assert build["with"]["cache-to"] == (
+        "${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && "
+        f"'type=registry,ref={GATEWAY_REPO}:buildcache,mode=max' || '' }}}}"
+    )
+
+
+def test_no_image_build_exports_to_the_actions_cache():
+    text = (ROOT / ".github/workflows/app-images.yml").read_text()
+    assert "type=gha,mode=" not in text
+    assert "cache_to=type=gha" not in text

@@ -8,8 +8,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
-CLOUD_ROOT = Path(__file__).resolve().parents[1]
+CLOUD_ROOT =Path(__file__).resolve().parents[1]
 REPO_ROOT = CLOUD_ROOT.parent
 DOCKER_APP = REPO_ROOT / "docker" / "app"
 PYTHON_DF = DOCKER_APP / "Dockerfile.python"
@@ -107,6 +108,68 @@ class TestImageWorkflowTokenScope:
     def test_main_push_caller_still_grants_publish(self) -> None:
         text = (self.WF_DIR / "ci.yml").read_text(encoding="utf-8")
         assert "packages: write" in text
+
+    MAIN_PUSH = "github.ref == 'refs/heads/main' && github.event_name == 'push'"
+
+    @pytest.mark.parametrize("inspect_status", [0, 1])
+    def test_pull_request_registry_calls_are_read_only(self, tmp_path, inspect_status) -> None:
+        """PR jobs may look up a public tag (input-hash reuse), never write one.
+
+        Every step that drives `imagetools` and is reachable on a pull request
+        runs here with a docker that logs its argv, for both lookup outcomes.
+        """
+        import os
+
+        jobs = yaml.safe_load((self.WF_DIR / "app-images.yml").read_text(encoding="utf-8"))["jobs"]
+        values = {
+            "${{ steps.pyimage.outputs.tag }}": "ghcr.io/joemccann/radon-python:ihash-" + "a" * 64,
+            "${{ steps.pyimage.outputs.hash }}": "a" * 64,
+            "${{ github.sha }}": "c" * 40,
+        }
+        docker = tmp_path / "bin" / "docker"
+        docker.parent.mkdir()
+        docker.write_text(
+            "#!/bin/bash\n"
+            'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
+            'if [ "$3" = inspect ] && [ "${5:-}" = --raw ]; then echo manifest; exit 0; fi\n'
+            'if [ "$3" = inspect ]; then exit "$INSPECT_STATUS"; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker.chmod(0o755)
+        log = tmp_path / "docker.log"
+        exercised = []
+        for job_name, job in jobs.items():
+            for step in job.get("steps", []):
+                script = step.get("run", "")
+                condition = str(step.get("if", ""))
+                if "imagetools" not in script:
+                    continue
+                if condition.startswith(self.MAIN_PUSH) and "||" not in condition:
+                    continue
+                for expression, value in values.items():
+                    script = script.replace(expression, value)
+                assert "${{" not in script, f"{job_name}/{step['name']}: unknown interpolation"
+                env = {
+                    "PATH": f"{docker.parent}{os.pathsep}{os.environ['PATH']}",
+                    "CALL_LOG": str(log),
+                    "INSPECT_STATUS": str(inspect_status),
+                    "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_REF": "refs/pull/7/merge",
+                    **{key: str(value) for key, value in (step.get("env") or {}).items()},
+                }
+                completed = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+                    env=env, capture_output=True, text=True, check=False,
+                )
+                assert completed.returncode == 0, f"{step['name']}: {completed.stderr}"
+                exercised.append(step["name"])
+        calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        assert {"Reuse identical python image", "Reuse identical model gateway image"} <= set(exercised)
+        assert calls, "no PR-reachable registry lookup ran"
+        assert all(call.startswith("buildx imagetools inspect ") for call in calls), calls
+        assert not any("--raw" in call or "buildcache" in call for call in calls), calls
 
 
 @pytest.mark.parametrize("dockerfile", [PYTHON_DF, NODE_DF], ids=lambda p: p.name)

@@ -6,6 +6,18 @@ name: App-plane images (PR)
 
 on:
   pull_request:
+    # Not a required status check, so a skipped run cannot hold a merge.
+    # Each prefix is proven to hold no input of any job in app-images.yml
+    # (docker context, step scripts, release label) by
+    # scripts/tests/test_app_images_pr_paths.py. cloud/** is not: the python
+    # job runs cloud/scripts/check_model_transport.py.
+    paths-ignore:
+      - 'docs/**'
+      - 'site/**'
+      - 'scripts/tests/**'
+      - 'web/tests/**'
+      - 'web/e2e/**'
+      - 'cloud/tests/**'
 
 permissions:
   contents: read
