@@ -126,6 +126,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # path_filter.py reads commits and trees only (merge-base and
+          # `git diff --no-renames --name-only`), so skip every historical
+          # blob: the full-history clone was 9s against 3s at depth 1, and
+          # this job gates every other one. test_ci_blobless_checkout.py.
+          filter: blob:none
       - id: filter
         # BASE_SHA is the PR base on pull_request and EMPTY on push: on a push
         # path_filter.py resolves the base itself as the newest main SHA whose
@@ -334,6 +339,8 @@ jobs:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
+    # A job-level false never expands the matrix, so no shard name would
+    # report; the path gate lives on the steps instead (first step below).
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
@@ -350,8 +357,10 @@ jobs:
         # 10-45s wall-floor modules at t=0 instead of alone at the tail.
         # PYTEST_SHARD_LEAD_MODULES in test_ci_deploy_concurrency.py pins them.
         # CIP-009: rest-api merged into rest (39s + 40s, both well under the
-        # ~103s shard wall) — the ~25-job fan-out queued one shard ~37s past
-        # the 20-slot concurrency cap and the late start set the gate wall.
+        # ~103s shard wall) after one shard queued ~37s for a runner slot and
+        # the late start set the gate wall. The cap is 40 concurrent jobs
+        # account-wide, shared by every run in flight (repo-wide running jobs
+        # plateaued at exactly 40, 2026-10-29..11-01), not 20.
         shard: [scripts-ac, scripts-df, scripts-i, scripts-gh, scripts-jm, scripts-npsz, scripts-rs, scripts-daemons, rest]
         include:
           - shard: scripts-ac
@@ -378,7 +387,15 @@ jobs:
     env:
       DOCS_CONTRACT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
+      # PR / merge_group with no Python change: report green without work.
+      # path_filter.py fails closed (an unresolved range selects python), and
+      # on push the job only exists when python == 'true', so every later
+      # step's python clause is a no-op there. test_ci_pr_path_gating_python.py.
+      - name: Skip (no Python change)
+        if: needs.changes.outputs.python != 'true'
+        run: echo "::notice title=pytest skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.python == 'true'
         with:
           # docs contract (test_docs_contract.py) diffs against DOCS_CONTRACT_BASE.
           # The branches are QUOTED. GitHub casts the number 0 to false, so the
@@ -388,7 +405,14 @@ jobs:
           # for every commit from 424e66da on. A non-empty string is truthy, so
           # '0' survives the ||. DOC-038.
           fetch-depth: ${{ matrix.shard == 'scripts-df' && '0' || '1' }}
+          # The docs contract diffs names and reads messages, so the scripts-df
+          # history needs no old blobs; a ledger it reads at the base is fetched
+          # on demand. Depth-1 shards stay unfiltered: there the filter only
+          # splits one fetch into two (5.3-6.1s became 9.0-9.5s, 3 rounds,
+          # 2026-11-01). An empty filter is no filter. test_ci_blobless_checkout.py.
+          filter: ${{ matrix.shard == 'scripts-df' && 'blob:none' || '' }}
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
@@ -401,6 +425,7 @@ jobs:
             requirements-dev.txt
             cloud/requirements-test.txt
       - name: Install dependencies
+        if: needs.changes.outputs.python == 'true'
         run: |
           python scripts/deps/materialize_fastembed_pillow13.py
           uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
@@ -418,7 +443,8 @@ jobs:
       # -n auto --dist loadfile: GitHub-hosted runners have multiple cores;
       # loadfile keeps each test module on one worker so autouse fixtures and
       # module-level stubs do not race. pytest-cov combines worker coverage.
-      - run: >-
+      - if: needs.changes.outputs.python == 'true'
+        run: >-
           python -m pytest ${{ matrix.paths }}
           -n auto --dist loadfile
           --durations=25
@@ -430,6 +456,7 @@ jobs:
       # of a work-bound shard). py-coverage finds `.coverage` by name; the XML
       # is inert there. ~50KB, same upload step, 0s on the critical path.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: needs.changes.outputs.python == 'true'
         with:
           name: pytest-coverage-${{ matrix.shard }}
           path: |
@@ -444,10 +471,10 @@ jobs:
       # are omitted when Python runs, so placing it there orphaned the artifact.
       # Run once on the shard that owns MCP tests, even if a preceding test fails.
       - name: Evaluate hosted MCP golden contracts
-        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' && needs.changes.outputs.python == 'true' }}
         run: PYTHONPATH=scripts python -m mcp_hosted.evaluate --output /tmp/mcp-evaluation.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' && needs.changes.outputs.python == 'true' }}
         with:
           name: mcp-golden-contract-report
           path: /tmp/mcp-evaluation.json
@@ -455,27 +482,38 @@ jobs:
 
   py-coverage:
     name: pytest coverage ratchet
-    needs: [py-tests]
+    # `changes` is listed so the steps can read its python output; a needs
+    # reference to an unlisted job is empty and would skip every step.
+    needs: [changes, py-tests]
     if: needs.py-tests.result == 'success'
     runs-on: ubuntu-24.04
     concurrency:
       group: ci-py-coverage-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      # The shards uploaded no coverage when the path filter skipped them;
+      # this required check reports green the same way they did.
+      - name: Skip (no Python change)
+        if: needs.changes.outputs.python != 'true'
+        run: echo "::notice title=pytest coverage ratchet skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.python == 'true'
         with:
           sparse-checkout: |
             pyproject.toml
             scripts
             tests
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
       - name: Install dependencies
+        if: needs.changes.outputs.python == 'true'
         run: uv pip install pytest-cov==7.1.0
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: needs.changes.outputs.python == 'true'
         with:
           pattern: pytest-coverage-*
           path: coverage-artifacts
@@ -483,7 +521,8 @@ jobs:
       # 2026-08-08 (TEST_AUDIT T-050): honest product-only coverage; 56 sits
       # ~2.5pts below the measured figure. Never lower it to make a red build
       # pass.
-      - run: |
+      - if: needs.changes.outputs.python == 'true'
+        run: |
           mapfile -d '' files < <(find coverage-artifacts -name '.coverage' -print0)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no .coverage files under coverage-artifacts" >&2
@@ -504,7 +543,7 @@ jobs:
         # Security 2026-09-18 (PR #514 follow-up): the demo database secrets
         # are handed to this step only on a push. A pull_request run never
         # materialises them, so a PR cannot exercise or leak the demo DB URLs.
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && needs.changes.outputs.python == 'true'
         env:
           TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
           TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}
@@ -524,15 +563,22 @@ jobs:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
+    # The path gate lives on the steps, as in py-tests.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # CIP-009: mz (28s) merged into al (44s) to cut the gate fan-out
-        # below the 20-slot concurrency cap; edge stays isolated (serial
-        # Caddy wall-clock mechanism).
-        shard: [al, edge]
+        # CIP-009: mz (28s) merged into al (44s) after a gate shard queued for
+        # a runner slot; edge stays isolated (serial Caddy wall-clock
+        # mechanism). The cap is 40 concurrent jobs account-wide, shared by
+        # every run in flight (repo-wide running jobs plateaued at exactly
+        # 40, 2026-10-29..11-01), not 20.
+        # heavy: test_app_runtime.py and test_deploy_corrections.py were 90s
+        # and 89s of 430s summed cloud test time (126 modules, local run),
+        # each pinning one al loadfile worker, and al (181s) was the PR
+        # critical path behind the 13s path filter. One worker per module.
+        shard: [al, heavy, edge]
         # CIP-001: al ran 765 tests serially in 91s while pytest-xdist was
         # already installed. edge is the Caddy wall-clock mechanism shard and
         # stays serial; loadfile keeps test_caddyfile.py's restart-window
@@ -540,8 +586,12 @@ jobs:
         include:
           - shard: al
             paths: "cloud/tests/test_[a-z]*.py"
-            omit: "cloud/tests/test_caddy_edge_timeouts.py"
+            omit: "cloud/tests/test_caddy_edge_timeouts.py cloud/tests/test_app_runtime.py cloud/tests/test_deploy_corrections.py"
             xdist: "-n auto --dist loadfile"
+          - shard: heavy
+            paths: "cloud/tests/test_app_runtime.py cloud/tests/test_deploy_corrections.py"
+            omit: ""
+            xdist: "-n 2 --dist loadfile"
           - shard: edge
             paths: "cloud/tests/test_caddy_edge_timeouts.py"
             omit: ""
@@ -550,8 +600,13 @@ jobs:
       group: ci-cloud-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     steps:
+      - name: Skip (no Python change)
+        if: needs.changes.outputs.python != 'true'
+        run: echo "::notice title=cloud pytest skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.python == 'true'
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
@@ -560,6 +615,7 @@ jobs:
             requirements-dev.txt
             cloud/requirements-test.txt
       - name: Install dependencies
+        if: needs.changes.outputs.python == 'true'
         run: |
           uv pip install -r requirements-dev.txt
           if [ -f cloud/requirements-test.txt ]; then
@@ -576,9 +632,10 @@ jobs:
       # `al` collects cloud/tests/test_caddyfile.py::TestRestartWindowMechanism,
       # the executable proof that a request arriving during the deploy restart
       # window is held and served rather than 502'd; it is gated on the same
-      # binary, so the install runs on both shards (T-322, third recurrence).
+      # binary, so the install runs on every shard (T-322, third recurrence):
+      # a module moved between shards never newly skips for want of it.
       - name: Install caddy (edge mechanism tests)
-        if: matrix.shard == 'edge' || matrix.shard == 'al'
+        if: needs.changes.outputs.python == 'true'
         run: |
           set -euo pipefail
           # v2.11.4 was the latest stable release tag on 2026-09-02.
@@ -607,21 +664,30 @@ jobs:
       # import path `tests.conftest`. Running it after unit pytest serialized
       # ~60s onto the deploy critical path.
       # pytest does not apply --ignore to an explicitly expanded CLI target.
-      # Expand the row first, remove its exact omission, then pass only the
-      # selected files so the Caddy mechanism module runs solely on edge.
+      # Expand the row first, remove its exact omissions, then pass only the
+      # selected files so each omitted module runs solely on its own shard.
+      # `paths` and `omit` are space-separated; a path that matches no file
+      # fails the shard instead of silently shrinking it.
       - name: Run cloud shard
+        if: needs.changes.outputs.python == 'true'
         run: |
           set -euo pipefail
-          paths='${{ matrix.paths }}'
-          omit='${{ matrix.omit }}'
-          mapfile -t selected < <(compgen -G "$paths" | sort)
-          if [[ -n "$omit" ]]; then
-            kept=()
-            for target in "${selected[@]}"; do
-              [[ "$target" == "$omit" ]] || kept+=("$target")
-            done
-            selected=("${kept[@]}")
-          fi
+          read -r -a patterns <<< '${{ matrix.paths }}'
+          omit=' ${{ matrix.omit }} '
+          selected=()
+          for pattern in "${patterns[@]}"; do
+            mapfile -t matched < <(compgen -G "$pattern" | sort)
+            if (( ${#matched[@]} == 0 )); then
+              echo "cloud shard path ${pattern} matched no file" >&2
+              exit 1
+            fi
+            selected+=("${matched[@]}")
+          done
+          kept=()
+          for target in "${selected[@]}"; do
+            [[ "$omit" == *" ${target} "* ]] || kept+=("$target")
+          done
+          selected=("${kept[@]}")
           if (( ${#selected[@]} == 0 )); then
             echo "cloud shard selected no tests" >&2
             exit 1

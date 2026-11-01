@@ -1,7 +1,8 @@
 {
   "_comment": [
     "Mirror of main branch protection verified with the GitHub API on 2026-10-12.",
-    "Keep this offline contract synchronized after any live protection change."
+    "Keep this offline contract synchronized after any live protection change.",
+    "2026-11-01: pytest (cloud heavy) added with the shard; the operator adds it to live protection after merge."
   ],
   "branch": "main",
   "contexts": [
@@ -20,6 +21,7 @@
     "pytest (rest)",
     "pytest (cloud al)",
     "pytest (cloud edge)",
+    "pytest (cloud heavy)",
     "pytest (scripts-ac)",
     "pytest (scripts-daemons)",
     "pytest (scripts-df)",
