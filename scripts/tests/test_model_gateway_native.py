@@ -105,3 +105,28 @@ def test_claude_native_headers_include_verified_pinned_advanced_feature_betas(mo
     beta=set(seen[0]["anthropic-beta"].split(","))
     assert {"context-management-2025-06-27","mid-conversation-tool-changes-2026-07-01","thinking-token-count-2026-05-13","advanced-tool-use-2025-11-20","effort-2025-11-24"} <= beta
     assert seen[0]["x-app"]=="cli"
+
+
+def test_claude_per_turn_output_config_on_system_message_carries_its_beta(monkeypatch):
+    # Shape captured from the pinned Claude Code 2.1.311 bundle against a local
+    # fake upstream: messages[1] is a mid-conversation system turn carrying
+    # output_config, sent with the per-turn-control beta. Without that beta the
+    # API rejects it: "messages.1.output_config: Extra inputs are not permitted".
+    native = module(monkeypatch, {"anthropic"})
+    request = {"model": "claude-opus-5-5", "stream": True, "max_tokens": 64000,
+        "system": [{"type": "text", "text": engine._CLAUDE_CODE_SYSTEM_PREFIX}],
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "run echo hi"}]},
+                     {"role": "system", "content": [{"type": "text", "text": "# Environment", "cache_control": {"type": "ephemeral"}}],
+                      "output_config": {"effort": "medium"}}],
+        "thinking": {"type": "adaptive", "display": "omitted"}, "output_config": {"effort": "medium"},
+        "context_management": {"edits": []}, "metadata": {"user_id": "u"}, "tools": []}
+    raw = event({"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 0}}}) + event({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}) + event({"type": "message_stop"})
+    seen = []
+    native.complete({"protocol": "messages", "request": request, "stream": True}, post=lambda url, **kw: seen.append(kw) or Response(raw), env={})
+    assert seen[0]["json"] == request
+    beta = seen[0]["headers"]["anthropic-beta"].split(",")
+    pinned_client = ["claude-code-20250219", "interleaved-thinking-2025-05-14", "context-management-2025-06-27",
+                     "per-turn-control-2026-07-01", "mid-conversation-tool-changes-2026-07-01",
+                     "thinking-token-count-2026-05-13", "advanced-tool-use-2025-11-20", "effort-2025-11-24"]
+    assert set(pinned_client) <= set(beta)
+    assert len(beta) == len(set(beta))
