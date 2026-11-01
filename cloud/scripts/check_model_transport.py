@@ -88,7 +88,7 @@ def main():
         listener(inference/'gateway.sock',group_gid=group.gr_gid);listener(private/'control.sock')
         with socket.socket() as probe:probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
         configuration=root/'sshd_config'
-        policy_text=policy.sshd_config().replace('/var/lib/radon-model-export',str(exports)).replace('/etc/radon/model-transport/authorized_keys',str(keys))
+        policy_text=policy.sshd_config().replace('/var/lib/radon-model-export',str(exports)).replace('/etc/ssh/radon-model-transport/authorized_keys',str(keys))
         configuration.write_text(f'Port {port}\nListenAddress 127.0.0.1\nHostKey {root}/host\nPidFile {root}/sshd.pid\nUsePAM no\nPasswordAuthentication no\nStrictModes yes\nLogLevel ERROR\nSubsystem sftp internal-sftp\n'+policy_text)
         Path('/run/sshd').mkdir(mode=0o755,exist_ok=True)
         run(['/usr/sbin/sshd','-t','-f',configuration])

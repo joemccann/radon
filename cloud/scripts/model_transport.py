@@ -19,7 +19,8 @@ from pathlib import Path
 ACCOUNT='radon-model-tunnel'
 GROUP='radon-model-connect'
 EXPORT=Path('/var/lib/radon-model-export')
-PRIVATE=Path('/etc/radon/model-transport')
+# sshd StrictModes rejects keys below the radon-writable /etc/radon.
+PRIVATE=Path('/etc/ssh/radon-model-transport')
 INFERENCE=Path('/run/radon-model-gateway')
 SSHD_CONFIG=Path('/etc/ssh/sshd_config.d/60-radon-model-transport.conf')
 ENVIRONMENT=Path('/etc/radon/env')
@@ -32,7 +33,7 @@ PermitUserEnvironment no
 Match User radon-model-tunnel
     ChrootDirectory /var/lib/radon-model-export
     ForceCommand internal-sftp -R -d /releases
-    AuthorizedKeysFile /etc/radon/model-transport/authorized_keys
+    AuthorizedKeysFile /etc/ssh/radon-model-transport/authorized_keys
     AuthenticationMethods publickey
     PubkeyAuthentication yes
     PasswordAuthentication no
@@ -82,6 +83,19 @@ def trusted(path,*,directory=False):
     if not kind(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022:
         raise ValueError('untrusted model transport path')
 
+def config_parent(info):
+    # /etc/radon is the canonical sticky root:radon 1770 directory (1750 while
+    # rollback seals it). Sticky ownership keeps radon from replacing root files.
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_gid!=1000 or stat.S_IMODE(info.st_mode) not in {0o1770,0o1750}:
+        raise ValueError('untrusted model transport config directory')
+
+def trusted_environment():
+    trusted(ENVIRONMENT.parent.parent,directory=True)
+    config_parent(ENVIRONMENT.parent.lstat())
+    info=ENVIRONMENT.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022:
+        raise ValueError('untrusted model transport environment')
+
 def root_directory(path,mode=0o755):
     if not path.exists() and not path.is_symlink():
         trusted(path.parent,directory=True);path.mkdir(mode=mode)
@@ -89,8 +103,10 @@ def root_directory(path,mode=0o755):
     path.chmod(mode)
 
 def atomic(path,raw,mode=0o644,*,gid=0):
-    trusted(path.parent,directory=True)
-    if path.exists() or path.is_symlink():trusted(path)
+    if path==ENVIRONMENT:trusted_environment()
+    else:
+        trusted(path.parent,directory=True)
+        if path.exists() or path.is_symlink():trusted(path)
     descriptor,name=tempfile.mkstemp(prefix='.'+path.name+'-',dir=path.parent)
     temporary=Path(name)
     try:
@@ -165,7 +181,7 @@ def prepare(public_key):
         run(['/usr/sbin/useradd','--system','--gid',GROUP,'--no-create-home','--home-dir',str(EXPORT),'--shell','/usr/sbin/nologin','--password','*',ACCOUNT]);account=pwd.getpwnam(ACCOUNT)
     if group.gr_gid in {0,1000} or account.pw_uid in {0,1000} or account.pw_gid!=group.gr_gid or account.pw_dir!=str(EXPORT) or account.pw_shell!='/usr/sbin/nologin' or set(os.getgrouplist(ACCOUNT,account.pw_gid))!={group.gr_gid}:
         raise ValueError('model-only SSH account has unexpected privileges')
-    trusted(ENVIRONMENT)
+    trusted_environment()
     meta=ENVIRONMENT.stat()
     original=ENVIRONMENT.read_text()
     updated=gateway_environment(original,account.pw_uid,group.gr_gid)
