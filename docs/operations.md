@@ -909,6 +909,63 @@ use it only as the deliberate prior configuration.
 the operator if required callers remain blocked or an unlisted caller retains
 bypass under enforcement.
 
+### Weekly live drift check (`scripts/security_live_drift.py`)
+
+The security loops review code only, and the policy and trust tests above are
+offline. This weekly job compares the repo with what is live. It makes no
+model calls and only reads: one Tailscale API GET, one BatchMode ssh command,
+`gh api` GETs. Expected state lives in
+[the live baseline](security-live-baseline.json); change it in the same PR as
+the reviewed live change it records. [Tests](../scripts/tests/test_security_live_drift.py)
+pin the parsing, the exit codes and the redaction.
+
+| Check | Live source | Expected |
+|---|---|---|
+| `tailnet_policy` | `GET /api/v2/tailnet/-/acl` | `cloud/tailscale/policy.hujson`, order-insensitive, `__OPERATOR_LOGIN__` bound from live `group:operator` |
+| `tailnet_trust` | `ssh -o BatchMode=yes root@radon-app` with a fixed command that prints only `PRESENT`/`ABSENT` and `LOG`/`ENFORCING` tokens for `RADON_TAILNET_TRUST_MODE` in `/etc/radon/env` | enforcing, per the narrowing runbook above |
+| `github:<repo>:*` | rulesets, `main` protection, deploy keys (id, title, read_only only), `security_and_analysis`, for `joemccann/radon` and `joemccann/radon-security-reports` | the baseline |
+
+It runs as the `com.radon.security-live-drift` LaunchAgent in the operator's
+account on the Mac mini, Sunday 15:17 local. Not the `_radonbot` runner:
+the check needs the operator's admin `gh` login and root ssh to the app host,
+and every nightly agent can read the bot's home. Install or refresh it from a
+reviewed clone of `main` (no sudo); re-run after changing the policy or the
+baseline, since the job reads its installed snapshot:
+
+```bash
+python3.13 scripts/install_security_live_drift.py --activate
+```
+
+**Credentials the operator provisions** (paths are in the plist, values never are):
+
+1. **Tailscale.** An OAuth client with only the `policy_file:read` scope,
+   stored as `client_id=` and `client_secret=` lines in
+   `~/.local/share/radon-security-live-drift/tailscale-oauth.env`, mode 0600,
+   owned by the operator. Absent or group-readable: `operator_required`.
+2. **GitHub.** None while the operator's own `gh` login is admin on both
+   repos. For least privilege, put a fine-grained token with Administration:
+   read and Metadata: read on both repos in `github-token` (0600) in the same
+   directory; the job then uses it instead of the `gh` login.
+3. **ssh.** The operator's existing BatchMode root ssh to `radon-app` (the
+   release coordinator uses the same path). Nothing new.
+
+**Output.** The private report (the [report template](security-report-template.md)
+rules, summary table first, a Coverage limits row) is written 0600 to
+`~/.local/share/radon-security-live-drift/reports/live-drift-<date>.md`. It is
+not pushed to `joemccann/radon-security-reports`: that path uses the bot's
+write deploy key, and this job stays read-only. `launchd.log` beside it holds
+only the public line,
+`radon-live-drift ts=<utc> ok=N drift=N operator_required=N error=N`, which never
+carries names, ids, ACL contents, hostnames or values.
+
+**Exit codes:** 0 all ok, 1 drift, 75 operator required or incomplete, 2 usage.
+**Manual run:** `python3.13 -I ~/.local/share/radon-security-live-drift/current/scripts/security_live_drift.py --repo-root ~/.local/share/radon-security-live-drift/current --checks github --out /tmp/drift.md`.
+**Stop conditions:** the job changes nothing. A drift row is reconciled by the
+owning runbook (policy, trust narrowing, branch protection), never by editing
+the baseline to match without review.
+**Rollback:** `launchctl bootout gui/$(id -u)/com.radon.security-live-drift`
+and remove its plist.
+
 ### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
 
 `TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` (was `100.0.0.0/8`: every tailnet node plus public space). No laptop or Mac mini `/32`: no laptop process opens an IB socket (broker binds `10.0.0.4` and loopback only).
