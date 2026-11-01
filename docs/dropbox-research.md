@@ -123,7 +123,7 @@ Cerebras is the last resort in every order, including a caller's `providers=` ov
 
 `RADON_MODEL_LADDER_ORDER` is an optional comma list of those rung names (default `anthropic, grok, cursor, codex, antigravity, nvidia, cerebras`). Unknown names are ignored. Grok is xAI via the existing `~/.grok/auth.json` grant (`XAI_MODEL` / `GROK_MODEL`). Antigravity is the documented `agy -p` CLI only (text; images record `image_unsupported` and the ladder continues). There is no separate Google HTTP API on this rung.
 
-Anthropic replies are read from every `text` block, including a list of text spans, and from a Messages SSE body when the HTTP body is not one JSON document. Thinking blocks are not the answer. A caller that sets `failover_response_errors` (MarketDesk copy and humanizer) keeps going when one rung's reply is unreadable or incomplete. The research reviewer still treats that as terminal.
+Anthropic replies are read from every `text` block, including a list of text spans, and from a Messages SSE body when the HTTP body is not one JSON document. Thinking blocks are not the answer. The gateway client (`scripts/clients/model_ladder.py`) raises `ModelResponseError` when the gateway reports an incomplete or invalid reply, for every caller. A reply the caller's `accept` rejects resumes the next rung through the gateway continuation.
 
 Codex HTTP 429 is a cooldown, not a tight retry. The ladder stores only the provider name and an expiry epoch (`RADON_PROVIDER_COOLDOWN_STATE`, default `~/.radon/provider-cooldown.json`). The wait is Retry-After, a reset timestamp in the body, or `RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S` (default 12 hours, cap 7 days). Later calls in that window record `codex:rate_limited_cooldown` and send nothing.
 
