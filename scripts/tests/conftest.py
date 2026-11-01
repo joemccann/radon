@@ -36,6 +36,7 @@ def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
     from model_gateway import engine as model_ladder
 
     provider_cooldown.clear_process_state()
+    monkeypatch.setattr(model_ladder, "_dead_until", {})
     for name in ("_json_load_object", "_read_secret_file"):
         original = getattr(model_ladder, name)
         empty = None if name == "_json_load_object" else ""

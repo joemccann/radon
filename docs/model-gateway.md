@@ -18,6 +18,8 @@ The gateway receives canonical subscription grants, a scoped credential-broker s
 
 The service owns model selection, deadlines, concurrency, cancellation and refresh coordination. SLM modes and sampling also run there using the request's current taxonomy; the newsfeed caller persists comparison telemetry with its existing database writer. Model inventory reads cached, sanitized metadata and marks configured defaults explicitly when discovery is unavailable. Missing context limits are unknown, never estimated.
 
+Each ladder rung gets a slice of the request deadline. A rung may spend the whole remaining deadline except 20 seconds for each later live rung, and never less than an even split. A later rung counts as live only when it has a credential and is not marked dead. A rung whose every model failed with 401, 402, 403, 404, `quota_or_billing` or `credit_balance` is marked dead for 10 minutes, in-process. A dead rung is still attempted, and a win clears the mark. Timeouts, 429 and 5xx never mark a rung dead (`engine._rung_slice`).
+
 ## Upgrades and rollback
 
 CLI packages and inference dependencies are built at reviewed pins in immutable release images. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
