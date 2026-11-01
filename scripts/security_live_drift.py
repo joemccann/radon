@@ -661,7 +661,7 @@ def main(argv=None, fetchers=None) -> int:
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--out", type=Path, help="private Markdown report path (written 0600)")
     parser.add_argument("--out-dir", type=Path, help="directory for live-drift-<date>.md (created 0700)")
-    parser.add_argument("--json", action="store_true", help="print the private rows as JSON before the public line")
+    parser.add_argument("--json", action="store_true", help="print the private rows as JSON on stdout (the public line goes to stderr)")
     parser.add_argument("--checks", type=_parse_checks, default=ALL_CHECKS, help="comma list of " + ",".join(ALL_CHECKS))
     parser.add_argument("--offline-fixture", type=Path, help="read every live input from this fixture directory")
     parser.add_argument("--app-host", default="radon-app")
@@ -683,8 +683,11 @@ def main(argv=None, fetchers=None) -> int:
         args.out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         _write_private(args.out_dir / f"live-drift-{ts[:10]}.md", report)
     if args.json:
+        # stdout stays one JSON document; the counts line moves to stderr.
         print(json.dumps({"ts": ts, "rows": rows}, indent=2))
-    print(public_line(rows, ts))
+        print(public_line(rows, ts), file=sys.stderr)
+    else:
+        print(public_line(rows, ts))
     return exit_code(rows)
 
 
