@@ -303,7 +303,8 @@ def test_baseline_matches_documented_merge_gate():
     main = BASELINE["github"]["joemccann/radon"]
     protection = main["branch_protection"]
     assert protection["strict"] is True and protection["enforce_admins"] is True
-    assert len(protection["required_checks"]) == 28
+    declared = json.loads((REPO_ROOT / ".github/required-status-checks.json").read_text())["contexts"]
+    assert sorted(name for name, _ in protection["required_checks"]) == sorted(declared)
     assert all(type(app) is int and app > 0 for _, app in protection["required_checks"])
     assert {r["id"]: r["name"] for r in main["rulesets"]} == {24143098: "main-review", 24587201: "runner-bot-nightly-only"}
 

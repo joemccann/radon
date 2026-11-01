@@ -826,6 +826,29 @@ def test_bun_jobs_do_not_cache_the_install_store() -> None:
         assert "bun install --frozen-lockfile --cwd web" in lines, f"{name}: web project"
 
 
+def test_parallel_bun_installs_fail_the_step_when_either_fails() -> None:
+    """A bare `wait` returns 0 whatever its children exited with.
+
+    With the store cache gone every install reaches the registry, so a failed
+    install must fail the install step instead of surfacing later as a module
+    resolution error inside a test shard. Each background PID is awaited by
+    name; `wait "$pid"` returns that child's status and bash -e stops there.
+    """
+    jobs = _workflow()["jobs"]
+    for name in ("web-tests", "perimeter-smoke"):
+        install = next(
+            str(step["run"])
+            for step in jobs[name]["steps"]
+            if "bun install --frozen-lockfile" in str(step.get("run", ""))
+        )
+        lines = [line.strip() for line in install.splitlines() if line.strip()]
+        assert "wait" not in lines, f"{name}: bare wait masks a failed install"
+        pids = [line.split("=", 1)[0] for line in lines if line.endswith("=$!")]
+        assert len(pids) == 2, f"{name}: capture both install PIDs: {lines}"
+        for pid in pids:
+            assert f'wait "${pid}"' in lines, f"{name}: wait on {pid} by PID"
+
+
 def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:
     root = Path(__file__).resolve().parents[2]
     expected = {

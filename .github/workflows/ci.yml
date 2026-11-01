@@ -276,8 +276,11 @@ jobs:
       - if: needs.changes.outputs.web == 'true'
         run: |
           bun install --frozen-lockfile &
+          root=$!
           bun install --frozen-lockfile --cwd web &
-          wait
+          web=$!
+          wait "$root"
+          wait "$web"
       # Run the FULL vitest config from the repo root (lib/tools + site/lib +
       # web/tests), NOT `bun run test` — that script restricts to web/tests and
       # silently skips ~9 files / ~68 tests (incl. site/lib/theme). vitest + the
@@ -722,8 +725,11 @@ jobs:
       - if: needs.changes.outputs.web == 'true'
         run: |
           bun install --frozen-lockfile &
+          root=$!
           bun install --frozen-lockfile --cwd web &
-          wait
+          web=$!
+          wait "$root"
+          wait "$web"
       # Static half of the Edge-runtime guard: the no-restricted-syntax
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
