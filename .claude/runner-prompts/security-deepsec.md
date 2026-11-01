@@ -739,6 +739,17 @@ do (rail 6): name the variable or secret class and location only. The
 runner additionally redacts known secret shapes, which is a backstop, not
 permission.
 
+Say what was not reviewed. Fill the Summary's Unreviewed and Coverage limits
+rows every phase. A DeepSec or engine rc of 75 or any other non-zero value,
+missing auth, or a scope the engine did not cover makes that stage `not
+reviewed`, never `complete`, and zero findings over that range is Status
+`NOT_REVIEWED`, never `COMPLETE`. The runner independently posts a counts-only
+`unreviewed:` line on the rolling issue from `last-audited.json` and
+`origin/main`; your report must agree with it. Operator actions hold at most
+three items plus a count line, and accepted risks (from
+`docs/security-accepted-risks.json`, never written by you) go in Accepted
+risks, not in Operator actions.
+
 ## Private reporting and notifications
 
 The runner sends every Pushover notification, including `radon PR green`.
@@ -754,6 +765,10 @@ radon-phase loop=security-deepsec phase=audit exit=0 audited-through=<sha> ts=<u
 audited-through: <sha>
 
 `audited-through` is present only when audit exited 0. A failed phase omits it.
+When `last-audited.json` is behind `origin/main` (or unusable), a final
+counts-only line follows, e.g. `unreviewed: 12 commits since 2026-10-24,
+reason incomplete`: a count, the checkpoint's date and a reason token, never
+a SHA or file.
 Operators read two dead-men: `security-nightly` for the security loop and
 `security-deepsec` for this one. A missing daily comment on either means
 that runner did not fire. Neither comment may name a route, file, attack,

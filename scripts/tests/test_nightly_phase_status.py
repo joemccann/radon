@@ -247,3 +247,56 @@ class TestLegacyFallback:
             loop="security", phase="deliver", exit_code=0, timestamp=TS,
         )
         assert nps.cursor_allowed(deliver) is False
+
+
+class TestUnreviewed:
+    """Counts-only coverage line the security post-run hook appends."""
+
+    def _bash(self, count, since, reason):
+        script = f'. "{BASH_LIB}"\nphase_status_body "$1" "$2" "$3" "$4"\n'
+        env = {**os.environ, "PHASE_RC": "0", "PHASE_REFUSED": "", "PHASE_AUDITED_SHA": "",
+               "PHASE_KILLED": "", "PHASE_HOOK_REQUIRED": "",
+               "PHASE_UNREVIEWED_COUNT": count, "PHASE_UNREVIEWED_SINCE": since,
+               "PHASE_UNREVIEWED_REASON": reason}
+        proc = subprocess.run(["bash", "-c", script, "x", "security-deepsec", "audit", "OK", TS],
+                              capture_output=True, text=True, env=env, timeout=15, check=False)
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout
+
+    @pytest.mark.parametrize("count, since, reason", [
+        ("12", "2026-10-24", "incomplete"),
+        ("unknown", "", "no-checkpoint"),
+        ("0", "2026-10-24", "incomplete"),
+        ("12", "not-a-date", "incomplete"),
+        ("12", "2026-10-24", "Bad Reason /api/admin"),
+        ("1e3", "2026-10-24", "incomplete"),
+        ("", "", ""),
+    ])
+    def test_bash_matches_python(self, count, since, reason):
+        py = nps.format_phase_comment(
+            loop="security-deepsec", phase="audit", exit_code=0, timestamp=TS,
+            unreviewed_count=count or None, unreviewed_since=since, unreviewed_reason=reason,
+        )
+        assert self._bash(count, since, reason) == py
+
+    def test_the_line_is_counts_date_and_reason_only(self):
+        body = nps.format_phase_comment(
+            loop="security-deepsec", phase="audit", exit_code=75, timestamp=TS,
+            unreviewed_count=12, unreviewed_since="2026-10-24", unreviewed_reason="incomplete",
+        )
+        assert body.splitlines()[-1] == "unreviewed: 12 commits since 2026-10-24, reason incomplete"
+        assert nps.parse_unreviewed(body) == {"count": 12, "since": "2026-10-24", "reason": "incomplete"}
+        assert nps.parse_phase_status(body)["exit"] == 75
+
+    def test_zero_or_invalid_emits_nothing(self):
+        assert nps.unreviewed_line(0, "2026-10-24", "incomplete") == ""
+        assert nps.unreviewed_line(3, "", "incomplete") == ""
+        assert nps.unreviewed_line(3, "2026-10-24", "") == ""
+        assert nps.parse_unreviewed("radon-phase loop=x phase=audit exit=0 ts=" + TS) is None
+
+    def test_unknown_parses_without_a_count(self):
+        body = nps.format_phase_comment(
+            loop="security", phase="audit", exit_code=1, timestamp=TS,
+            unreviewed_count="unknown", unreviewed_reason="checkpoint-not-ancestor",
+        )
+        assert nps.parse_unreviewed(body) == {"count": None, "since": "", "reason": "checkpoint-not-ancestor"}

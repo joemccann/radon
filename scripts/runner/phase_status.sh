@@ -7,6 +7,11 @@
 #   radon-phase loop=<loop> phase=<phase> exit=<n> audited-through=<sha> ts=<utc>
 #   audited-through: <sha>
 # The sha line is only for phase=audit with exit 0.
+# Optional counts-only coverage line, set by the security post-run hook:
+#   unreviewed: <n> commits since <YYYY-MM-DD>, reason <token>
+#   unreviewed: unknown, reason <token>
+# From PHASE_UNREVIEWED_COUNT (integer or "unknown"), PHASE_UNREVIEWED_SINCE
+# and PHASE_UNREVIEWED_REASON. Omitted for 0 or anything that is not a token.
 # Codes: 0 OK, 1 FAILED, 2 REFUSED, 70 GROUND TRUTH FAILED, 75 INCOMPLETE, 124 TIMEOUT.
 # A signalled phase (143) posts 1.
 
@@ -62,4 +67,20 @@ phase_status_body() {
   fields="${fields} ts=${ts}"
   printf '<!-- radon-phase %s -->\nradon-phase %s\n' "$fields" "$fields"
   if [[ -n "$sha" ]]; then printf 'audited-through: %s\n' "$sha"; fi
+  phase_status_unreviewed_line
+}
+
+# Counts, a date and a reason token only. Never a sha, path or finding.
+phase_status_unreviewed_line() {
+  local count="${PHASE_UNREVIEWED_COUNT:-}" since="${PHASE_UNREVIEWED_SINCE:-}"
+  local reason="${PHASE_UNREVIEWED_REASON:-}"
+  [[ "$reason" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || return 0
+  if [[ "$count" == unknown ]]; then
+    printf 'unreviewed: unknown, reason %s\n' "$reason"
+    return 0
+  fi
+  [[ "$count" =~ ^[0-9]{1,6}$ && "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 0
+  count=$((10#$count))
+  [[ "$count" -gt 0 ]] || return 0
+  printf 'unreviewed: %s commits since %s, reason %s\n' "$count" "$since" "$reason"
 }

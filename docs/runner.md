@@ -495,6 +495,8 @@ audited-through: <sha>
 
 Fields, in order: `loop`, `phase`, `exit`, optional `audited-through`, `ts` (`YYYY-MM-DDTHH:MM:SSZ`). Tokens are `[a-z0-9][a-z0-9-]*`.
 
+The security post-run hook may append one counts-only coverage line: `unreviewed: <n> commits since <YYYY-MM-DD>, reason <token>`, or `unreviewed: unknown, reason <token>`. The count is `origin/main` minus the loop's private checkpoint (`head_sha` / `last_audited_sha` in `last-audited.json`); the date is the checkpoint commit's. Reasons: `checkpoint-not-advanced` (an audit exited 0 but the checkpoint did not move), `awaiting-audit`, `incomplete`, `timeout`, `failed`, `refused`, `ground-truth-failed`, `no-checkpoint`, `checkpoint-unreadable`, `checkpoint-not-ancestor`. It is omitted at 0. `nightly_phase_status.parse_unreviewed` reads it.
+
 | Exit | Meaning |
 |---|---|
 | 0 | OK |

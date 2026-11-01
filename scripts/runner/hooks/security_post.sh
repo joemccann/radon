@@ -45,10 +45,12 @@ DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
 case "$LOOP" in
   security)
     PHASE_COMPLETE_MARKER="SECURITY-NIGHTLY PHASE COMPLETE:"
+    CHECKPOINT_KEY=head_sha
     DEADMAN_TITLE="Nightly security runner"
     DEADMAN_LABEL="security-nightly" ;;
   security-deepsec)
     PHASE_COMPLETE_MARKER="SECURITY-DEEPSEC PHASE COMPLETE:"
+    CHECKPOINT_KEY=last_audited_sha
     DEADMAN_TITLE="Nightly DeepSec runner"
     DEADMAN_LABEL="security-deepsec" ;;
   *) echo "status=FAILED (security_post.sh does not know loop $LOOP)"; exit 0 ;;
@@ -410,6 +412,65 @@ resolve_pr_url() {
   printf '%s' "$url"
 }
 
+# --- coverage -------------------------------------------------------------------
+
+# Counts-only "unreviewed" line for the public phase comment (phase_status.sh).
+# The base is the loop's private checkpoint (the same key security_pre.sh hands
+# nightly_audit_context.py); the tip is origin/main as fetched by the pre hook.
+# A scanner that failed, a phase that ended early, or an audit that exited 0
+# without advancing the checkpoint all leave a positive count here, so a gap
+# that used to show only in the private report is visible on the issue.
+# The clone is agent-writable: git runs with hooks and fsmonitor disabled, and
+# only an integer, a date and a fixed reason token leave this function.
+covgit() { git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$WORK" "$@"; }
+
+unreviewed_reason() {
+  case "$(phase_status_exit "$STATUS")" in
+    0) if [[ "$PHASE" == audit ]]; then printf 'checkpoint-not-advanced'; else printf 'awaiting-audit'; fi ;;
+    2) printf 'refused' ;;
+    70) printf 'ground-truth-failed' ;;
+    75) printf 'incomplete' ;;
+    124) printf 'timeout' ;;
+    *) printf 'failed' ;;
+  esac
+}
+
+compute_unreviewed() {
+  PHASE_UNREVIEWED_COUNT=""
+  PHASE_UNREVIEWED_SINCE=""
+  PHASE_UNREVIEWED_REASON=""
+  local ckpt="$SCRATCH/last-audited.json" base tip count since
+  [[ -e "$WORK/.git" ]] || return 0
+  tip="$(covgit rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}' 2>/dev/null)"
+  [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 0
+  if [[ ! -f "$ckpt" || -L "$ckpt" ]]; then
+    PHASE_UNREVIEWED_COUNT=unknown PHASE_UNREVIEWED_REASON=no-checkpoint
+    return 0
+  fi
+  base="$("$PY" -I -c '
+import json, re, sys
+try:
+    v = json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2])
+except Exception:
+    v = None
+print(v if isinstance(v, str) and re.fullmatch(r"[0-9a-f]{7,40}", v) else "")
+' "$ckpt" "$CHECKPOINT_KEY" 2>/dev/null)"
+  if [[ -z "$base" ]]; then
+    PHASE_UNREVIEWED_COUNT=unknown PHASE_UNREVIEWED_REASON=checkpoint-unreadable
+    return 0
+  fi
+  if ! covgit merge-base --is-ancestor "$base" "$tip" >/dev/null 2>&1; then
+    PHASE_UNREVIEWED_COUNT=unknown PHASE_UNREVIEWED_REASON=checkpoint-not-ancestor
+    return 0
+  fi
+  count="$(covgit rev-list --count "$base..$tip" 2>/dev/null)"
+  since="$(covgit log -1 --format=%cs "$base" 2>/dev/null)"
+  [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]] || return 0
+  PHASE_UNREVIEWED_COUNT="$count"
+  PHASE_UNREVIEWED_SINCE="$since"
+  PHASE_UNREVIEWED_REASON="$(unreviewed_reason)"
+}
+
 # --- dead-man -------------------------------------------------------------------
 
 _sanitize_issue_text() {
@@ -492,6 +553,7 @@ main() {
   echo "status=$status_line"
   if [[ -z "${PHASE_STATUS:-}" ]]; then publish_private_report; else REPORT_URL=""; fi
   pr="$(resolve_pr_url)"
+  compute_unreviewed
   report
   [[ -z "${PHASE_MARKER_POSTED:-}" ]] || echo "marker_posted=1"
   prune_scratch

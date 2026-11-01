@@ -879,3 +879,110 @@ def test_the_pre_hook_names_bun_by_absolute_path():
     pre = (HOOKS / "security_pre.sh").read_text()
     assert 'BUN="${RADON_RUNNER_BUN:-/opt/homebrew/bin/bun}"' in pre
     assert "command -v bun" not in pre
+
+
+# --- unreviewed coverage line ------------------------------------------------
+# The public phase comment names how much of origin/main the loop's private
+# checkpoint has not reviewed: counts, a date and a reason token, nothing else.
+# A DeepSec rc=75 used to surface only in the private report while the range
+# behind the checkpoint kept growing.
+
+CHECKPOINT_KEYS = {"security": "head_sha", "security-deepsec": "last_audited_sha"}
+
+
+def _rev(rig, ref="HEAD"):
+    return subprocess.run(["git", "-C", str(rig.work), "rev-parse", ref],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _checkpoint(rig, value):
+    rig.scratch.mkdir(parents=True, exist_ok=True)
+    (rig.scratch / "last-audited.json").write_text(json.dumps({CHECKPOINT_KEYS[rig.loop]: value}))
+
+
+def _land_on_main(rig, n):
+    for i in range(n):
+        (rig.work / f"land-{i}.txt").write_text(f"{i}\n")
+        _git("add", f"land-{i}.txt", cwd=rig.work)
+        _git("commit", "-qm", f"land {i}", cwd=rig.work)
+    _git("push", "-q", "origin", "HEAD:main", cwd=rig.work)
+    _git("fetch", "-q", "origin", cwd=rig.work)
+
+
+def test_a_checkpoint_at_main_posts_no_unreviewed_line(rig):
+    _checkpoint(rig, _rev(rig, "origin/main"))
+    rig.post(output=f"{rig.marker} audit run_id=r1\n")
+    assert "unreviewed" not in rig.comment()
+
+
+def test_an_audit_that_exits_0_without_advancing_the_checkpoint_is_counted(rig):
+    base = _rev(rig, "origin/main")
+    _checkpoint(rig, base)
+    _land_on_main(rig, 3)
+    since = subprocess.run(["git", "-C", str(rig.work), "log", "-1", "--format=%cs", base],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    rig.post(output=f"{rig.marker} audit run_id=r1\n")
+    comment = rig.comment()
+    assert "exit=0" in comment
+    assert f"unreviewed: 3 commits since {since}, reason checkpoint-not-advanced" in comment
+    assert base not in comment and base[:8] not in comment
+
+
+@pytest.mark.parametrize("rc, extra, reason", [
+    (3, {}, "failed"),
+    (124, {}, "timeout"),
+    (0, {"PHASE_REFUSED": "credential file present"}, "refused"),
+])
+def test_a_phase_that_did_not_finish_names_its_reason(rig, rc, extra, reason):
+    _checkpoint(rig, _rev(rig, "origin/main"))
+    _land_on_main(rig, 2)
+    rig.post(rc=rc, **extra)
+    comment = rig.comment()
+    assert "unreviewed: 2 commits since " in comment
+    assert comment.rstrip().endswith(f"reason {reason}")
+
+
+def test_exit_0_without_the_marker_is_counted_as_incomplete(rig):
+    _checkpoint(rig, _rev(rig, "origin/main"))
+    _land_on_main(rig, 1)
+    rig.post(output="all done, looks clean\n")
+    comment = rig.comment()
+    assert "exit=75" in comment
+    assert "unreviewed: 1 commits since " in comment
+    assert comment.rstrip().endswith("reason incomplete")
+
+
+def test_later_phases_say_the_range_awaits_the_next_audit(rig):
+    _checkpoint(rig, _rev(rig, "origin/main"))
+    _land_on_main(rig, 1)
+    rig.post(phase="remediate", output=f"{rig.marker} remediate\n")
+    assert rig.comment().rstrip().endswith("reason awaiting-audit")
+
+
+@pytest.mark.parametrize("state, reason", [
+    (None, "no-checkpoint"),
+    ("../../etc/passwd TOKEN=ghp_notreal", "checkpoint-unreadable"),
+    ("0123456789abcdef0123456789abcdef01234567", "checkpoint-not-ancestor"),
+])
+def test_an_unusable_checkpoint_is_unknown_and_never_echoed(rig, state, reason):
+    if state is not None:
+        _checkpoint(rig, state)
+    rig.post(output=f"{rig.marker} audit run_id=r1\n")
+    comment = rig.comment()
+    assert f"unreviewed: unknown, reason {reason}" in comment
+    assert "passwd" not in comment and "ghp_" not in comment and "0123456789abcdef" not in comment
+
+
+def test_the_coverage_git_calls_ignore_the_agents_clone_config(rig, tmp_path):
+    canary = tmp_path / "fsmonitor-ran"
+    script = tmp_path / "fsmonitor.sh"
+    script.write_text(f"#!/bin/bash\ntouch {canary}\n")
+    script.chmod(0o755)
+    _checkpoint(rig, _rev(rig, "origin/main"))
+    _land_on_main(rig, 1)
+    _git("config", "core.fsmonitor", str(script), cwd=rig.work)
+    _git("config", "core.pager", f"{script} #", cwd=rig.work)
+    canary.unlink(missing_ok=True)
+    rig.post(output=f"{rig.marker} audit run_id=r1\n")
+    assert "unreviewed: 1 commits since " in rig.comment()
+    assert not canary.exists()
