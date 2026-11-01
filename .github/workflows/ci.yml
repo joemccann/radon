@@ -339,8 +339,10 @@ jobs:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    # A job-level false never expands the matrix, so no shard name would
-    # report; the path gate lives on the steps instead (first step below).
+    # No step reads the path filter: Python tests read every tracked tree
+    # (`git ls-files` scans, docs globs, web files), so no PR diff is provably
+    # unread, and python=false only skips pushes, whose PR ran everything.
+    # test_ci_pr_path_gating_python.py.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
@@ -387,15 +389,7 @@ jobs:
     env:
       DOCS_CONTRACT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
-      # PR / merge_group with no Python change: report green without work.
-      # path_filter.py fails closed (an unresolved range selects python), and
-      # on push the job only exists when python == 'true', so every later
-      # step's python clause is a no-op there. test_ci_pr_path_gating_python.py.
-      - name: Skip (no Python change)
-        if: needs.changes.outputs.python != 'true'
-        run: echo "::notice title=pytest skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.python == 'true'
         with:
           # docs contract (test_docs_contract.py) diffs against DOCS_CONTRACT_BASE.
           # The branches are QUOTED. GitHub casts the number 0 to false, so the
@@ -412,7 +406,6 @@ jobs:
           # 2026-11-01). An empty filter is no filter. test_ci_blobless_checkout.py.
           filter: ${{ matrix.shard == 'scripts-df' && 'blob:none' || '' }}
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
-        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
@@ -425,7 +418,6 @@ jobs:
             requirements-dev.txt
             cloud/requirements-test.txt
       - name: Install dependencies
-        if: needs.changes.outputs.python == 'true'
         run: |
           python scripts/deps/materialize_fastembed_pillow13.py
           uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
@@ -443,8 +435,7 @@ jobs:
       # -n auto --dist loadfile: GitHub-hosted runners have multiple cores;
       # loadfile keeps each test module on one worker so autouse fixtures and
       # module-level stubs do not race. pytest-cov combines worker coverage.
-      - if: needs.changes.outputs.python == 'true'
-        run: >-
+      - run: >-
           python -m pytest ${{ matrix.paths }}
           -n auto --dist loadfile
           --durations=25
@@ -456,7 +447,6 @@ jobs:
       # of a work-bound shard). py-coverage finds `.coverage` by name; the XML
       # is inert there. ~50KB, same upload step, 0s on the critical path.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: needs.changes.outputs.python == 'true'
         with:
           name: pytest-coverage-${{ matrix.shard }}
           path: |
@@ -471,10 +461,10 @@ jobs:
       # are omitted when Python runs, so placing it there orphaned the artifact.
       # Run once on the shard that owns MCP tests, even if a preceding test fails.
       - name: Evaluate hosted MCP golden contracts
-        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' && needs.changes.outputs.python == 'true' }}
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
         run: PYTHONPATH=scripts python -m mcp_hosted.evaluate --output /tmp/mcp-evaluation.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' && needs.changes.outputs.python == 'true' }}
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
         with:
           name: mcp-golden-contract-report
           path: /tmp/mcp-evaluation.json
@@ -482,38 +472,27 @@ jobs:
 
   py-coverage:
     name: pytest coverage ratchet
-    # `changes` is listed so the steps can read its python output; a needs
-    # reference to an unlisted job is empty and would skip every step.
-    needs: [changes, py-tests]
+    needs: [py-tests]
     if: needs.py-tests.result == 'success'
     runs-on: ubuntu-24.04
     concurrency:
       group: ci-py-coverage-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      # The shards uploaded no coverage when the path filter skipped them;
-      # this required check reports green the same way they did.
-      - name: Skip (no Python change)
-        if: needs.changes.outputs.python != 'true'
-        run: echo "::notice title=pytest coverage ratchet skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.python == 'true'
         with:
           sparse-checkout: |
             pyproject.toml
             scripts
             tests
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
-        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
       - name: Install dependencies
-        if: needs.changes.outputs.python == 'true'
         run: uv pip install pytest-cov==7.1.0
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        if: needs.changes.outputs.python == 'true'
         with:
           pattern: pytest-coverage-*
           path: coverage-artifacts
@@ -521,8 +500,7 @@ jobs:
       # 2026-08-08 (TEST_AUDIT T-050): honest product-only coverage; 56 sits
       # ~2.5pts below the measured figure. Never lower it to make a red build
       # pass.
-      - if: needs.changes.outputs.python == 'true'
-        run: |
+      - run: |
           mapfile -d '' files < <(find coverage-artifacts -name '.coverage' -print0)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no .coverage files under coverage-artifacts" >&2
@@ -543,7 +521,7 @@ jobs:
         # Security 2026-09-18 (PR #514 follow-up): the demo database secrets
         # are handed to this step only on a push. A pull_request run never
         # materialises them, so a PR cannot exercise or leak the demo DB URLs.
-        if: github.event_name == 'push' && needs.changes.outputs.python == 'true'
+        if: github.event_name == 'push'
         env:
           TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
           TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}
@@ -563,7 +541,7 @@ jobs:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
-    # The path gate lives on the steps, as in py-tests.
+    # No step reads the path filter, as in py-tests.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
@@ -600,13 +578,8 @@ jobs:
       group: ci-cloud-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     steps:
-      - name: Skip (no Python change)
-        if: needs.changes.outputs.python != 'true'
-        run: echo "::notice title=cloud pytest skipped::The path filter found no Python change on this ${{ github.event_name }}."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.python == 'true'
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
-        if: needs.changes.outputs.python == 'true'
         with:
           python-version: "3.13"
           enable-cache: true
@@ -615,7 +588,6 @@ jobs:
             requirements-dev.txt
             cloud/requirements-test.txt
       - name: Install dependencies
-        if: needs.changes.outputs.python == 'true'
         run: |
           uv pip install -r requirements-dev.txt
           if [ -f cloud/requirements-test.txt ]; then
@@ -635,7 +607,6 @@ jobs:
       # binary, so the install runs on every shard (T-322, third recurrence):
       # a module moved between shards never newly skips for want of it.
       - name: Install caddy (edge mechanism tests)
-        if: needs.changes.outputs.python == 'true'
         run: |
           set -euo pipefail
           # v2.11.4 was the latest stable release tag on 2026-09-02.
@@ -669,7 +640,6 @@ jobs:
       # `paths` and `omit` are space-separated; a path that matches no file
       # fails the shard instead of silently shrinking it.
       - name: Run cloud shard
-        if: needs.changes.outputs.python == 'true'
         run: |
           set -euo pipefail
           read -r -a patterns <<< '${{ matrix.paths }}'

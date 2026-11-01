@@ -1,16 +1,28 @@
-"""Step-level path gating for the Python required checks.
+"""The Python required checks do their full work on every PR and merge_group.
 
-`pytest (*)`, `pytest (cloud *)` and `pytest coverage ratchet` are required
-contexts, so their JOBS must run on every pull_request and merge_group: a
-job-level false condition never expands the matrix and the required names
-never report (see test_required_matrix_checks_run_for_every_pr_and_filter_pushes).
-8 of 109 PRs changed no Python path, yet each paid the full Python matrix.
-The gate therefore moves one level down: on a PR whose path filter says
-`python != 'true'` each job runs one notice step and reports green; every
-other step carries `needs.changes.outputs.python == 'true'`. path_filter.py
-fails closed (an unresolvable range selects both gates), and on push the job
-level already requires python == 'true', so pushes run exactly what they ran
-before.
+`pytest (*)`, `pytest (cloud *)` and `pytest coverage ratchet` must not gate
+their steps on the path filter. path_filter.py's `python=false` is a push-time
+saving built on one premise: the PR already ran the whole Python matrix. Its
+cross-tree inventory (CROSS_TREE_CONTRACTS, route_documentation) finds only
+readers that quote a path literal, and Python tests read every tracked tree:
+
+- cloud/tests/test_integration.py::test_no_real_secrets_in_tracked_files and
+  scripts/tests/test_subscriptions_only_policy.py scan `git ls-files`;
+- scripts/tests/test_model_gateway_no_bypass.py scans tracked web/ sources;
+- scripts/tests/test_docs_contract.py globs docs/**/*.md;
+- scripts/tests/test_rel021_p2_batch.py (OptionsChainTab.tsx WS_CAP),
+  cloud/tests/test_keepalive_ordering.py (web/package.json) and
+  cloud/tests/test_env_example.py (web/.env.example) read web files through
+  `root / "web/..."`.
+
+A step gate on `python` (2026-11-01) skipped all of them on web-only PRs, and
+one on `python || web` still skips the docs ones on a docs-only PR: a new
+docs/*.md claiming the host env file is 0600 fails the docs contract on main
+and selects python=false, web=false and no contract. A PR that broke
+path_filter.py's own classification would also skip test_path_filter.py, the
+test that pins it. No PR diff is provably unread by Python, so the path
+filter decides pushes only (job-level `if`, which keeps the required matrix
+names reporting on every PR).
 
 Conditions are evaluated here with a whitelisted boolean walker over the
 literal atoms these jobs use; nothing from the workflow is executed.
@@ -30,18 +42,16 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 GATED_JOBS = ("py-tests", "cloud-tests", "py-coverage")
-PYTHON_CHANGED = "needs.changes.outputs.python == 'true'"
-PYTHON_UNCHANGED = "needs.changes.outputs.python != 'true'"
-EVENTS = ("pull_request", "merge_group", "push")
+PR_EVENTS = ("pull_request", "merge_group")
+FILTER_OUTPUTS = ("true", "false")
 STATES = ("ok", "failed", "cancelled")
 
-# What each step ran on before step gating, for a run whose python output is
-# 'true'. None is the implicit `success()`. The caddy install used to be
-# limited to `al` / `edge`; it now runs on every cloud shard so no module in
-# a new shard skips for want of the binary.
+# The only step conditions these jobs carry. Every other step runs under the
+# implicit success(). The caddy install runs on every cloud shard, so a module
+# moved between shards never newly skips for want of the binary.
 BASELINE = {
-    ("py-tests", "Evaluate hosted MCP golden contracts"): "!cancelled() && matrix.shard == 'scripts-jm'",
-    ("py-tests", "mcp-golden-contract-report"): "!cancelled() && matrix.shard == 'scripts-jm'",
+    ("py-tests", "Evaluate hosted MCP golden contracts"): "${{ !cancelled() && matrix.shard == 'scripts-jm' }}",
+    ("py-tests", "mcp-golden-contract-report"): "${{ !cancelled() && matrix.shard == 'scripts-jm' }}",
     ("py-coverage", "Demo isolation guard"): "github.event_name == 'push'",
 }
 STATUS_FUNCTIONS = ("success()", "failure()", "cancelled()", "always()")
@@ -66,6 +76,8 @@ def _atom(match: re.Match, ctx: dict) -> str:
         "github.event_name": ctx["event"],
         "matrix.shard": ctx["shard"],
         "needs.changes.outputs.python": ctx["python"],
+        "needs.changes.outputs.web": ctx["web"],
+        "needs.py-tests.result": ctx.get("py_tests", "success"),
     }
     assert key in known, f"unmodelled atom {key!r}; extend this evaluator"
     return str((known[key] == value) == (op == "=="))
@@ -86,7 +98,7 @@ def _walk(node: ast.AST) -> bool:
 
 
 def _runs(condition: str | None, ctx: dict) -> bool:
-    """GitHub step semantics: no status function means `success() && (...)`."""
+    """GitHub semantics: no status function means `success() && (...)`."""
     text = (condition or "").strip()
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2].strip()
@@ -108,93 +120,65 @@ def _runs(condition: str | None, ctx: dict) -> bool:
     return _walk(ast.parse(text.strip(), mode="eval"))
 
 
-def _job_runs(name: str, ctx: dict) -> bool:
-    if name == "py-coverage":
-        # needs.py-tests.result == 'success': py-tests ran (job level) and passed.
-        return _job_runs("py-tests", ctx)
-    return ctx["event"] != "push" or ctx["python"] == "true"
-
-
-def _contexts(job: dict):
-    for event, python, shard, state in itertools.product(
-        EVENTS, ("true", "false"), _shards(job), STATES
+def _pr_contexts(job: dict):
+    for event, python, web, shard, state in itertools.product(
+        PR_EVENTS, FILTER_OUTPUTS, FILTER_OUTPUTS, _shards(job), STATES
     ):
-        yield {"event": event, "python": python, "shard": shard, "state": state}
+        yield {"event": event, "python": python, "web": web, "shard": shard, "state": state}
 
 
 @pytest.mark.parametrize("name", GATED_JOBS)
-def test_first_step_is_a_notice_only_skip_report(name: str) -> None:
-    first = _jobs()[name]["steps"][0]
-    assert first.get("if") == PYTHON_UNCHANGED, first
-    assert "uses" not in first, "the skip path must not check out or install anything"
-    run = first["run"].strip()
-    assert run.startswith('echo "::notice'), run
-    assert len(run.splitlines()) == 1, run
+def test_no_step_reads_the_path_filter(name: str) -> None:
+    for step in _jobs()[name]["steps"]:
+        assert "needs.changes" not in str(step), (name, _label(step))
 
 
 @pytest.mark.parametrize("name", GATED_JOBS)
-def test_every_other_step_requires_a_python_change(name: str) -> None:
-    for step in _jobs()[name]["steps"][1:]:
-        assert PYTHON_CHANGED in str(step.get("if", "")), (name, _label(step))
+def test_step_conditions_are_exactly_the_baseline(name: str) -> None:
+    """No notice-only skip step, no added clause: what is not in BASELINE runs
+    under the implicit success()."""
+    for step in _jobs()[name]["steps"]:
+        assert step.get("if") == BASELINE.get((name, _label(step))), (name, _label(step), step.get("if"))
+    named = {label for job, label in BASELINE if job == name}
+    assert named <= {_label(step) for step in _jobs()[name]["steps"]}, named
 
 
 @pytest.mark.parametrize("name", GATED_JOBS)
-def test_step_gating_matches_the_path_filter_on_every_event(name: str) -> None:
-    job = _jobs()[name]
-    notice, *rest = job["steps"]
-    for ctx in _contexts(job):
-        if not _job_runs(name, ctx):
-            continue
-        changed = ctx["python"] == "true"
-        first_ctx = dict(ctx, state="ok")  # nothing precedes the first step
-        assert _runs(notice.get("if"), first_ctx) is (not changed), (name, ctx)
-        for step in rest:
-            baseline = BASELINE.get((name, _label(step)))
-            expected = changed and _runs(baseline, ctx)
-            assert _runs(step.get("if"), ctx) is expected, (name, _label(step), ctx, step.get("if"))
+def test_every_pr_runs_every_step_whatever_the_filter_says(name: str) -> None:
+    """Web-only (python=false, web=true), docs-only (false, false) and a
+    misclassifying filter all run the same steps as a Python change."""
+    jobs = _jobs()
+    job = jobs[name]
+    gate = "py-tests" if name == "py-coverage" else name
+    for ctx in _pr_contexts(job):
+        assert _runs(jobs[gate]["if"], dict(ctx, state="ok")), (gate, ctx)
+        if name == "py-coverage":
+            assert _runs(job["if"], dict(ctx, state="ok")), ctx
+        for step in job["steps"]:
+            expected = _runs(BASELINE.get((name, _label(step))), dict(ctx, python="true", web="true"))
+            assert _runs(step.get("if"), ctx) is expected, (name, _label(step), ctx)
 
 
-@pytest.mark.parametrize("name", GATED_JOBS)
-def test_pushes_run_every_step_they_ran_before(name: str) -> None:
-    """On push the job only exists when python == 'true'; the gate is a no-op."""
-    job = _jobs()[name]
-    for ctx in _contexts(job):
-        if ctx["event"] != "push" or not _job_runs(name, ctx):
-            continue
-        assert ctx["python"] == "true"
-        for step in job["steps"][1:]:
-            baseline = BASELINE.get((name, _label(step)))
-            assert _runs(step.get("if"), ctx) is _runs(baseline, ctx), (name, _label(step), ctx)
-
-
-def test_required_python_jobs_still_report_on_every_pull_request() -> None:
+def test_the_path_filter_still_decides_pushes_at_job_level() -> None:
+    """Required matrix names report on every PR; a push runs Python only when
+    the filter selects it (test_required_matrix_checks_run_for_every_pr_and_filter_pushes)."""
     jobs = _jobs()
     for name in ("py-tests", "cloud-tests"):
-        for event in ("pull_request", "merge_group"):
-            assert _job_runs(name, {"event": event, "python": "false"})
-        condition = jobs[name]["if"]
-        assert "github.event_name == 'pull_request'" in condition
-        assert "github.event_name == 'merge_group'" in condition
-        assert PYTHON_CHANGED in condition
+        assert jobs[name]["needs"] == ["changes"]
+        for python, web in itertools.product(FILTER_OUTPUTS, FILTER_OUTPUTS):
+            ctx = {"event": "push", "python": python, "web": web, "shard": "", "state": "ok"}
+            assert _runs(jobs[name]["if"], ctx) is (python == "true"), (name, python, web)
     assert jobs["py-coverage"]["if"] == "needs.py-tests.result == 'success'"
-
-
-def test_every_job_reading_the_python_output_needs_the_changes_job() -> None:
-    """A `needs.<job>` reference to a job not in `needs` is an empty string, so
-    `python == 'true'` would be false everywhere and the ratchet would skip its
-    own work while reporting green."""
-    for name, job in _jobs().items():
-        steps = job.get("steps") or []
-        if any("needs.changes.outputs.python" in str(step.get("if", "")) for step in steps):
-            needs = job.get("needs", [])
-            needs = needs if isinstance(needs, list) else [needs]
-            assert "changes" in needs, name
-    assert "py-tests" in _jobs()["py-coverage"]["needs"]
+    assert jobs["py-coverage"]["needs"] == ["py-tests"]
 
 
 def test_evaluator_has_teeth() -> None:
-    ctx = {"event": "push", "python": "true", "shard": "scripts-jm", "state": "failed"}
+    ctx = {"event": "pull_request", "python": "false", "web": "false", "shard": "scripts-jm", "state": "failed"}
     assert _runs(None, ctx) is False
     assert _runs("${{ !cancelled() && matrix.shard == 'scripts-jm' }}", ctx) is True
-    assert _runs("github.event_name == 'push' && " + PYTHON_CHANGED, dict(ctx, state="ok")) is True
-    assert _runs(PYTHON_UNCHANGED, dict(ctx, state="ok")) is False
+    # Both rejected designs skip a docs-only PR.
+    ok = dict(ctx, state="ok")
+    assert _runs("needs.changes.outputs.python == 'true'", ok) is False
+    assert _runs(
+        "needs.changes.outputs.python == 'true' || needs.changes.outputs.web == 'true'", ok
+    ) is False
