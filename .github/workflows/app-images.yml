@@ -4,8 +4,10 @@ name: App-plane images
 # slower image, not python+node+four sequential pushes. Each image exports
 # both registry tags in one BuildKit operation. Main writes an isolated
 # registry build cache on that same package (tag buildcache, never a deploy
-# ref). Pull requests keep an isolated GHA cache because this workflow's
-# pull_request caller has no packages:write token.
+# ref). Pull requests read that public buildcache anonymously and export no
+# cache: their caller has no packages:write token, and a GHA export cost
+# 288.5s of the gateway build on PR run 41261010191 while the repo Actions
+# cache sat at 13.7 GB against its 10 GB limit and evicted itself.
 # Main CI calls this workflow and gates deploy on the exact SHA pair. Pull
 # requests invoke it directly as a build-only image contract.
 
@@ -79,9 +81,45 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "python image input hash refused; building"
           fi
+      # The input hash covers the image, not the steps a hit skips. Those
+      # also read this workflow and, for the gateway bounds check, the
+      # dockerignored cloud/scripts/model_clients.py. Main skips them on a hit
+      # too, so a pull request editing either must build, smoke and check.
+      # Only "unchanged" allows a PR lookup; no base, a failed fetch or a
+      # failed diff leaves it unset and builds.
+      - name: Find pull request edits outside the image inputs
+        id: unhashed
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHON_UNHASHED: .github/workflows/app-images.yml
+          GATEWAY_UNHASHED: .github/workflows/app-images.yml cloud/scripts/model_clients.py
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+              || ! git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+            echo "pull request base unavailable; building both images"
+            exit 0
+          fi
+          # Unquoted on purpose: each list is space-separated repo paths.
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $PYTHON_UNHASHED; then
+            echo "python=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the python image input hash; building it"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $GATEWAY_UNHASHED; then
+            echo "gateway=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the model gateway input hash; building it"
+          fi
+      # Main retags a hit. A pull request only looks the tag up (public, no
+      # login) and on a hit skips the build and smoke main already ran on
+      # these exact inputs; it holds no packages:write token and never writes.
       - name: Reuse identical python image
         id: reuse
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.python == 'unchanged')
         run: |
           set -euo pipefail
           source="${{ steps.pyimage.outputs.tag }}"
@@ -99,6 +137,11 @@ jobs:
           if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
             echo "hit=false" >> "$GITHUB_OUTPUT"
             echo "no smoked image for ${source}; building"
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ] || [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "main already built and smoked ${source}; skipping the build"
             exit 0
           fi
           source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
@@ -121,7 +164,8 @@ jobs:
           # GHA cache export kept this job, and deploy behind it, after GHCR
           # already had the exact SHA (403s on run 37664940638, 104s on run
           # 37472489871). Registry cache mounts those blobs. buildcache is
-          # not a deploy tag. PRs cannot push packages, so they stay on GHA.
+          # not a deploy tag. PRs cannot push packages, so they read main's
+          # public buildcache and export nothing (the GHA export was ~41s).
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
@@ -136,11 +180,14 @@ jobs:
               echo "cache_to=type=registry,ref=${IMAGE_REPO}:buildcache,mode=max"
             } >> "$GITHUB_OUTPUT"
           else
+            # No inspect first: the gateway build below already reads these
+            # public refs unconditionally on PRs.
             {
               echo "cache_from<<EOF"
+              echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
-              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+              echo "cache_to="
             } >> "$GITHUB_OUTPUT"
           fi
       - name: Build and publish python image
@@ -181,9 +228,11 @@ jobs:
             exit 0
           fi
 
+      # Same read-only pull request lookup as the python image: a hit skips
+      # the build, smoke and bounds check main already ran on these inputs.
       - name: Reuse identical model gateway image
         id: reuse-gateway
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.gateway == 'unchanged')
         run: |
           set -euo pipefail
           hash="${{ steps.pyimage.outputs.hash }}"
@@ -195,6 +244,10 @@ jobs:
           target="ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
           if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
             echo "hit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ] || [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
@@ -220,7 +273,7 @@ jobs:
             type=registry,ref=ghcr.io/joemccann/radon-python:buildcache
             type=gha,scope=radon-model-gateway
             type=gha,scope=radon-python
-          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache,mode=max' || 'type=gha,mode=max,scope=radon-model-gateway' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache,mode=max' || '' }}
           provenance: false
       - name: Smoke model gateway runtime
         if: steps.reuse-gateway.outputs.hit != 'true'
@@ -325,7 +378,8 @@ jobs:
         run: |
           set -euo pipefail
           # Same boundary as the python image: do not hold the exact-SHA
-          # publish on a GHA cache upload. buildcache is not a deploy tag.
+          # publish on a GHA cache upload, and PRs export no cache at all.
+          # buildcache is not a deploy tag.
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
@@ -342,9 +396,10 @@ jobs:
           else
             {
               echo "cache_from<<EOF"
+              echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
-              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+              echo "cache_to="
             } >> "$GITHUB_OUTPUT"
           fi
       - name: Build and publish node image

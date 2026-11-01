@@ -345,21 +345,22 @@ def test_dropping_one_host_key_pin_fails_the_check() -> None:
 
 
 def test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap() -> None:
-    """CIP-009: the gate fan-out must not exceed the 20-job concurrency cap.
+    """CIP-009: the non-gating Playwright job must not take a gate shard's slot.
 
-    2026-09-06: ~25 jobs launched at the gate window against the plan's
-    20 concurrent-job cap, so one pytest gate shard queued ~37s for a slot
-    and the LATE START, not shard work, set the pytest gate wall
-    (runs 34009244091, 33983869958). With the shard merges the t=0 fan-out
-    is 20 exactly only if the non-gating Playwright job defers behind
-    secret-scan (the app-images pattern), freeing its slot for a gate
-    shard. The job must stay non-gating for deploy.
+    2026-09-06: one pytest gate shard queued ~37s for a runner slot and the
+    LATE START, not shard work, set the pytest gate wall (runs 34009244091,
+    33983869958). The slot cap is 40 concurrent jobs account-wide, shared by
+    every run in flight (repo-wide running jobs plateaued at exactly 40,
+    2026-10-29..11-01), not the 20 first assumed, so concurrent PR runs are
+    what fill it. Deferring the Playwright job behind secret-scan (the
+    app-images pattern) leaves its slot to a gate shard at the gate window.
+    The job must stay non-gating for deploy.
     """
     jobs = _workflow()["jobs"]
     e2e = jobs["e2e-financial-smoke"]
     assert "secret-scan" in e2e["needs"], (
-        "the non-gating e2e job must defer behind secret-scan so the t=0 "
-        "gate fan-out stays at the 20-job concurrency cap"
+        "the non-gating e2e job must defer behind secret-scan so it does not "
+        "take a gate shard's slot under the 40-job concurrency cap"
     )
     assert "changes" in e2e["needs"]
     assert "e2e-financial-smoke" not in jobs["deploy"]["needs"], (

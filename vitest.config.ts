@@ -86,7 +86,18 @@ export default defineConfig({
     //   renders "1,030". en-US is not a preference here: it is the locale the
     //   product hardcodes, so the test-side default must match it. ICU resolves
     //   LC_ALL before LANG, so both are set.
-    env: { NODE_ENV: "test", TZ: "America/New_York", LC_ALL: "en_US.UTF-8", LANG: "en_US.UTF-8" },
+    //   RADON_RELEASE_VERSION — importing web/next.config.mjs otherwise runs
+    //   scripts/release_version.py, whose history fold takes ~34s in a full
+    //   clone, so the five suites that import the config time out at 5s on
+    //   every developer machine (CI's depth-1 checkout skips the fold). Tests
+    //   that care about the version stub NEXT_PUBLIC_RADON_VERSION themselves.
+    env: {
+      NODE_ENV: "test",
+      TZ: "America/New_York",
+      LC_ALL: "en_US.UTF-8",
+      LANG: "en_US.UTF-8",
+      RADON_RELEASE_VERSION: "0.0.0",
+    },
     // Global @testing-library cleanup so jsdom components (and their leaked
     // effects/timers/WebSocket handlers) can't bleed into the next test — the
     // cross-test leak that made `vitest --coverage` throw window-undefined.

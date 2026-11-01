@@ -639,10 +639,11 @@ class TestCiProvidesTheCaddyBinary:
 
     @staticmethod
     def _shard_that_collects(job, name: str) -> str:
+        # `paths` and `omit` are space-separated lists in the workflow.
         def collects(entry) -> bool:
-            included = fnmatch.fnmatch(name, Path(entry["paths"]).name)
-            omitted = Path(entry.get("omit", "")).name
-            return included and name != omitted
+            included = any(fnmatch.fnmatch(name, Path(path).name) for path in str(entry["paths"]).split())
+            omitted = {Path(path).name for path in str(entry.get("omit", "")).split()}
+            return included and name not in omitted
 
         shards = [
             entry["shard"]
@@ -657,7 +658,8 @@ class TestCiProvidesTheCaddyBinary:
 
     @staticmethod
     def _shards_named_in(condition: str, all_shards: list[str]) -> set[str]:
-        if not condition:
+        # A condition that never tests matrix.shard holds for every shard.
+        if "matrix.shard" not in condition:
             return set(all_shards)
         return set(re.findall(r"matrix\.shard\s*==\s*'([^']+)'", condition))
 

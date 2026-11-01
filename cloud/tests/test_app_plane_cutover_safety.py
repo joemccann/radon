@@ -303,7 +303,7 @@ def _run_image_cache_selector(
 
 def _parse_github_output(text: str) -> tuple[str, str]:
     cache_from = ""
-    cache_to = ""
+    cache_to = None
     lines = text.splitlines()
     index = 0
     while index < len(lines):
@@ -319,7 +319,8 @@ def _parse_github_output(text: str) -> tuple[str, str]:
         elif line.startswith("cache_to="):
             cache_to = line.split("=", 1)[1]
         index += 1
-    assert cache_from and cache_to
+    # An empty cache_to is a deliberate "export nothing"; a missing line is not.
+    assert cache_from and cache_to is not None
     return cache_from, cache_to
 
 
@@ -422,9 +423,21 @@ class TestImageBuildUsesRemoteCache:
         ]
         assert warm_to == missing_to
         assert ":latest" not in warm_to and "github.sha" not in warm_to
-        assert pr_from == f"type=gha,scope={scope}"
-        assert pr_to == f"type=gha,mode=max,scope={scope}"
-        assert "packages:write" not in pr_to
+        # Pull requests read main's public registry cache and export nothing:
+        # a GHA export cost ~41s (python) and ~289s (gateway) per PR on run
+        # 41261010191 while the repo cache sat over its 10 GB limit.
+        pr_warm_from, pr_warm_to = _run_image_cache_selector(
+            jobs[job_name],
+            ref="refs/pull/1/merge",
+            event="pull_request",
+            inspect_status=0,
+        )
+        assert pr_from.splitlines() == [
+            f"type=registry,ref=ghcr.io/joemccann/{image}:buildcache",
+            f"type=gha,scope={scope}",
+        ]
+        assert pr_to == ""
+        assert (pr_warm_from, pr_warm_to) == (pr_from, pr_to)
 
     def test_python_and_node_do_not_share_a_cache_scope(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
