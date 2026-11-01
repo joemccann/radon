@@ -572,10 +572,13 @@ jobs:
         # mechanism). The cap is 40 concurrent jobs account-wide, shared by
         # every run in flight (repo-wide running jobs plateaued at exactly
         # 40, 2026-10-29..11-01), not 20.
-        # heavy: test_app_runtime.py and test_deploy_corrections.py were 90s
-        # and 89s of 430s summed cloud test time (126 modules, local run),
-        # each pinning one al loadfile worker, and al (181s) was the PR
-        # critical path behind the 13s path filter. One worker per module.
+        # heavy: the three modules whose serial time set the al wall under
+        # loadfile, and al (181s) was the PR critical path behind the 13s
+        # path filter. Moving only test_app_runtime.py and
+        # test_deploy_corrections.py left al at 171s on CI (run 41335275763):
+        # test_bootstrap_control_plane.py (45 subprocess drills of 5-10s)
+        # still pinned one worker. Each test builds its own tmp_path sandbox,
+        # so heavy distributes per test (--dist load), not per module.
         shard: [al, heavy, edge]
         # CIP-001: al ran 765 tests serially in 91s while pytest-xdist was
         # already installed. edge is the Caddy wall-clock mechanism shard and
@@ -584,12 +587,12 @@ jobs:
         include:
           - shard: al
             paths: "cloud/tests/test_[a-z]*.py"
-            omit: "cloud/tests/test_caddy_edge_timeouts.py cloud/tests/test_app_runtime.py cloud/tests/test_deploy_corrections.py"
+            omit: "cloud/tests/test_caddy_edge_timeouts.py cloud/tests/test_app_runtime.py cloud/tests/test_bootstrap_control_plane.py cloud/tests/test_deploy_corrections.py"
             xdist: "-n auto --dist loadfile"
           - shard: heavy
-            paths: "cloud/tests/test_app_runtime.py cloud/tests/test_deploy_corrections.py"
+            paths: "cloud/tests/test_app_runtime.py cloud/tests/test_bootstrap_control_plane.py cloud/tests/test_deploy_corrections.py"
             omit: ""
-            xdist: "-n 2 --dist loadfile"
+            xdist: "-n auto --dist load"
           - shard: edge
             paths: "cloud/tests/test_caddy_edge_timeouts.py"
             omit: ""
@@ -791,7 +794,7 @@ jobs:
           exit $fail
 
   e2e-financial-smoke:
-    name: Playwright P0-financial smoke (non-gating)
+    name: Playwright P0-financial smoke (non-gating, shard ${{ matrix.shard }}/2)
     # CIP-009: defer behind secret-scan (the app-images pattern) so the t=0
     # gate fan-out does not take a concurrency slot from a gate shard. The
     # account cap is 40 concurrent jobs (repo-wide running jobs plateau at
@@ -801,12 +804,19 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     # One serial `playwright test` (workers=1) ran ~263s and made this the
-    # longest PR check. A 3-shard job matrix then paid ~65s of duplicated
-    # setup per shard (container init 25s, next build 28s, apt 6s, bun 6s)
-    # plus ~18s of uploads, for ~140s of specs each on one worker. One job
-    # builds once and runs `--workers=3`; fullyParallel:false still spreads
-    # FILES across workers. web/playwright.config.ts keeps workers: 1 for
-    # local runs. Pinned by scripts/tests/test_ci_e2e_smoke_shards.py.
+    # longest PR check. Three 1-worker shards paid ~65s of duplicated setup
+    # each (container init 25s, next build 28s, apt 6s, bun 6s) plus ~18s of
+    # uploads. One job on `--workers=3` (run 41335275763) ran specs for 291s
+    # and the job for 444s: three browsers plus `next start` saturate the 4
+    # vCPU runner, and it became the longest check agents wait on. Two
+    # shards on `--workers=2` pay the setup twice, not three times;
+    # fullyParallel:false still spreads FILES across workers.
+    # web/playwright.config.ts keeps workers: 1 for local runs. Pinned by
+    # scripts/tests/test_ci_e2e_smoke_shards.py.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
     # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
     # instance (pk_test_) answered every cookie-less browser navigation with a
@@ -824,7 +834,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
-      group: ci-e2e-smoke-${{ github.ref }}
+      group: ci-e2e-smoke-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     timeout-minutes: 25
     env:
@@ -866,7 +876,7 @@ jobs:
       - name: Run curated P0-financial specs
         working-directory: web
         run: >-
-          npx playwright test --workers=3
+          npx playwright test --shard=${{ matrix.shard }}/2 --workers=2
           e2e/account-metric-cards.spec.ts
           e2e/order-combo.spec.ts
           e2e/realized-pnl.spec.ts
@@ -939,7 +949,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: uw-advanced-research-screenshots
+          name: uw-advanced-research-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/uw-research-*.png
           if-no-files-found: ignore
           retention-days: 7
@@ -947,21 +957,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: complex-combo-leg-pnl-screenshots
+          name: complex-combo-leg-pnl-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*complex-combo-leg-pnl*.png
           if-no-files-found: ignore
       - name: Upload mobile search focus screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mobile-search-focus-screenshots
+          name: mobile-search-focus-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*mobile-search-focus*.png
           if-no-files-found: ignore
       - name: Upload portfolio and orders polling screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: portfolio-orders-polling-screenshots
+          name: portfolio-orders-polling-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/portfolio-orders-polling-*.png
           if-no-files-found: ignore
           retention-days: 7
@@ -969,49 +979,49 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: portfolio-implied-mv-screenshots
+          name: portfolio-implied-mv-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/portfolio-implied-mv-*.png
           retention-days: 7
       - name: Upload mixed-position coverage screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mixed-position-coverage-screenshots
+          name: mixed-position-coverage-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/mixed-coverage-*.png
           retention-days: 7
       - name: Upload toast error screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: toast-error-screenshots
+          name: toast-error-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/vol-skew-safe-error-*.png
           retention-days: 7
       - name: Upload historical fill screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: historical-fill-screenshots
+          name: historical-fill-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/historical-fill-*.png
           retention-days: 7
       - name: Upload form focus screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: form-focus-screenshots
+          name: form-focus-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/focus-*.png
           retention-days: 7
       - name: Upload chat experience screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chat-experience-screenshots
+          name: chat-experience-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/chat-experience-*.png
           retention-days: 7
       - name: Upload vol-skew missing history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: vol-skew-missing-screenshots
+          name: vol-skew-missing-screenshots-shard-${{ matrix.shard }}
           path: |
             web/test-results/**/vol-skew-missing-*.png
             web/test-results/**/vol-skew-safe-error-*.png
@@ -1021,14 +1031,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ai-industry-screenshots
+          name: ai-industry-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/ai-industry-*.png
           retention-days: 7
       - name: Upload research rendering screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: research-rendering-screenshots
+          name: research-rendering-screenshots-shard-${{ matrix.shard }}
           path: |
             web/test-results/**/research-*.png
             web/test-results/**/*share*.png
@@ -1037,91 +1047,91 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-anchor-screenshots
+          name: chain-anchor-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/chain-anchor-*.png
           retention-days: 7
       - name: Upload chain-first screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-first-screenshots
+          name: chain-first-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/chain-first-*.png
           retention-days: 7
       - name: Upload instrument workspace screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: instrument-workspace-screenshots
+          name: instrument-workspace-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/instrument-workspace-*.png
           retention-days: 7
       - name: Upload performance flow history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: performance-flow-history-screenshots
+          name: performance-flow-history-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/performance-flow-history-*.png
           retention-days: 7
       - name: Upload HYAD history screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hyad-history-screenshots
+          name: hyad-history-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/hyad-history-*.png
           retention-days: 7
       - name: Upload mobile price format screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mobile-price-format-screenshots
+          name: mobile-price-format-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*price-format*.png
           if-no-files-found: ignore
       - name: Upload SPX breadth screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: record-high-breadth-screenshots
+          name: record-high-breadth-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/record-high-breadth-*.png
           retention-days: 7
       - name: Upload table overflow screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: table-overflow-screenshots
+          name: table-overflow-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/table-overflow-*.png
           retention-days: 7
       - name: Upload admin freshness screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: admin-freshness-screenshots
+          name: admin-freshness-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/*-admin-component.png
           retention-days: 7
       - name: Upload profile settings screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: profile-settings-screenshots
+          name: profile-settings-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/profile-settings-*.png
           retention-days: 7
       - name: Upload modification close screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: modification-close-screenshots
+          name: modification-close-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/modify-sndk-subset-close*.png
           retention-days: 7
       - name: Upload position grouping screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: position-grouping-screenshots
+          name: position-grouping-screenshots-shard-${{ matrix.shard }}
           path: web/test-results/**/position-strategy-groups-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-traces
+          name: playwright-traces-shard-${{ matrix.shard }}
           path: web/test-results/
           retention-days: 7
       # Demo behavior is compile-time gated by NEXT_PUBLIC_RADON_DEMO. Rebuild
@@ -1133,11 +1143,13 @@ jobs:
       # build. This job is non-gating (absent from deploy.needs; see above).
       # test_ci_demo_build_order.py pins this order.
       - name: Build demo workstation
+        if: matrix.shard == 1
         working-directory: web
         env:
           NEXT_PUBLIC_RADON_DEMO: "1"
         run: bun run build
       - name: Run demo workstation spec
+        if: matrix.shard == 1
         working-directory: web
         env:
           NEXT_PUBLIC_RADON_DEMO: "1"

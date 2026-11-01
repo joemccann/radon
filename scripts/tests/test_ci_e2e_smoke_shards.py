@@ -1,17 +1,22 @@
-"""The Playwright P0 smoke is ONE job running three Playwright workers.
+"""The Playwright P0 smoke runs as two shards of two Playwright workers each.
 
-One serial `playwright test` step (workers=1) made the smoke the longest check
-on every PR (~386s wall, 263s of it in a single step). A 3-shard job matrix
-fixed the wall but each shard paid ~65s of duplicated setup (container init
-25s, next build 28s, apt 6s, bun 6s) plus ~18s of uploads, for ~140s of specs
-per shard on one worker. One job with `--workers=3` builds once and runs the
-same curated files in parallel (fullyParallel:false still parallelizes across
-files). web/playwright.config.ts keeps `workers: 1` for local runs; only the
-CI command line raises it.
+History, all measured on CI:
+- One serial `playwright test` (workers=1): ~386s wall, the longest PR check.
+- Three shards on one worker each: ~264-292s wall, but every shard paid ~65s
+  of duplicated setup (container init 25s, next build 28s, apt 6s, bun 6s)
+  plus ~18s of uploads, ~800 runner-seconds per PR.
+- One job on `--workers=3` (run 41335275763): specs 291s, job 444s. It used
+  ~444 runner-seconds but became the longest check agents wait on, because
+  three browsers plus `next start` saturate the 4 vCPU runner.
 
-With no matrix, artifact names carry no shard suffix and must still be unique
-within the run (upload-artifact v4+ rejects duplicates), the concurrency group
-has no matrix key, and the demo rebuild pair runs unconditionally, LAST
+Two shards on `--workers=2` keep the wall near the three-shard figure while
+paying the setup twice instead of three times. web/playwright.config.ts keeps
+`workers: 1` for local runs; only the CI command line raises it.
+
+Each shard keeps its own concurrency group (a shared group with
+cancel-in-progress would make the shards cancel each other) and uploads
+uniquely named artifacts (upload-artifact v4+ rejects duplicate names within a
+run). The demo rebuild pair runs on exactly one shard, LAST
 (test_ci_demo_build_order.py, T-448).
 """
 
@@ -22,7 +27,8 @@ from pathlib import Path
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
-WORKERS = "--workers=3"
+SHARDS = ["1", "2"]
+WORKERS = "--workers=2"
 
 
 def _jobs() -> dict:
@@ -39,31 +45,28 @@ def _curated(job: dict) -> dict:
     return curated[0]
 
 
-def test_smoke_is_one_job_not_a_shard_matrix() -> None:
-    job = _job()
-    assert "strategy" not in job, (
-        "a shard matrix repeats ~65s of setup and ~18s of uploads per shard"
-    )
-    assert "matrix." not in yaml.safe_dump(job), (
-        "no matrix exists; a leftover matrix reference renders empty"
-    )
+def test_smoke_is_a_two_shard_matrix_that_does_not_fail_fast() -> None:
+    strategy = _job()["strategy"]
+    assert strategy["matrix"]["shard"] == SHARDS
+    assert strategy["fail-fast"] == "false", "one red shard must not cancel the other"
 
 
-def test_curated_specs_run_on_three_workers_in_one_invocation() -> None:
+def test_each_shard_runs_its_slice_on_two_workers() -> None:
     run = " ".join(_curated(_job())["run"].split())
-    assert run.startswith(f"npx playwright test {WORKERS} "), run
-    assert "--shard" not in run
+    assert run.startswith(
+        f"npx playwright test --shard=${{{{ matrix.shard }}}}/{len(SHARDS)} {WORKERS} "
+    ), run
 
 
-def test_job_name_stays_non_gating_without_shard_text() -> None:
+def test_job_name_carries_the_shard_and_stays_non_gating() -> None:
     name = _job()["name"]
-    assert "(non-gating)" in name
-    assert "shard" not in name.lower()
+    assert "(non-gating" in name
+    assert f"shard ${{{{ matrix.shard }}}}/{len(SHARDS)}" in name
 
 
-def test_concurrency_group_has_no_matrix_key() -> None:
+def test_each_shard_has_its_own_concurrency_group() -> None:
     concurrency = _job()["concurrency"]
-    assert concurrency["group"] == "ci-e2e-smoke-${{ github.ref }}"
+    assert concurrency["group"] == "ci-e2e-smoke-${{ github.ref }}-${{ matrix.shard }}"
     assert concurrency["cancel-in-progress"] == "true"
 
 
@@ -80,7 +83,7 @@ def test_every_artifact_name_is_unique_within_the_run() -> None:
     smoke = _artifact_names(jobs["e2e-financial-smoke"])
     assert smoke
     for name in smoke:
-        assert "shard" not in name and "matrix." not in name, name
+        assert name.endswith("-shard-${{ matrix.shard }}"), name
     assert len(smoke) == len(set(smoke)), "upload-artifact v4+ rejects duplicate names"
     others = {
         name
@@ -91,12 +94,9 @@ def test_every_artifact_name_is_unique_within_the_run() -> None:
     assert not set(smoke) & others, set(smoke) & others
 
 
-def test_demo_pair_runs_unconditionally() -> None:
+def test_demo_pair_runs_on_exactly_one_shard() -> None:
     steps = _job()["steps"]
     demo = [s for s in steps if s.get("env", {}).get("NEXT_PUBLIC_RADON_DEMO") == "1"]
     assert len(demo) == 2
     for step in demo:
-        assert "if" not in step, (
-            f"{step.get('name')}: with one job the demo pair runs once; a "
-            "leftover shard condition would render against an absent matrix"
-        )
+        assert step.get("if") == "matrix.shard == 1", step.get("name")

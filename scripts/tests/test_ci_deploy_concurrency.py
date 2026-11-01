@@ -45,10 +45,15 @@ TEST_JOBS = (
     "cloud-tests",
     "perimeter-smoke",
 )
-# The `pytest (cloud heavy)` shard: 90s and 89s of 430s summed cloud test
-# time across 126 modules (local run), each pinning one al loadfile worker.
+# The `pytest (cloud heavy)` shard: the three cloud modules whose serial
+# time set the al wall under loadfile. On CI (run 41335275763) al still ran
+# 171s after the first two moved out: test_bootstrap_control_plane.py (45
+# tests of 5-10s subprocess drills, 129s serial locally) pinned one worker.
+# Every test in these modules builds its own tmp_path sandbox, so heavy
+# distributes them per test instead of per module.
 CLOUD_HEAVY_MODULES = (
     "cloud/tests/test_app_runtime.py",
+    "cloud/tests/test_bootstrap_control_plane.py",
     "cloud/tests/test_deploy_corrections.py",
 )
 
@@ -1057,9 +1062,9 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     rows = {str(row["shard"]): row for row in cloud["strategy"]["matrix"]["include"]}
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
-    # One worker per heavy module: loadfile never divides a module, so a third
-    # worker would only idle.
-    assert rows["heavy"]["xdist"] == f"-n {len(CLOUD_HEAVY_MODULES)} --dist loadfile"
+    # Per-test distribution: under loadfile the largest heavy module is the
+    # shard floor, which is the wall this shard exists to remove.
+    assert rows["heavy"]["xdist"] == "-n auto --dist load"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
 
