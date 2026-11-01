@@ -512,7 +512,7 @@ The default order is **Antigravity -> Anthropic -> Grok -> Cursor (unwired) -> C
 - **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token plus `tokens.account_id`, posted to `chatgpt.com/backend-api/codex/responses` (streaming only, `chatgpt-account-id` header). `api.openai.com` meters the prepaid wallet and rejects the grant ("no credits remaining"); Radon never calls it.
 - **Grok:** `~/.grok/auth.json` (entries keyed `<issuer>::<client_id>`, token under `key`, RFC 3339 `expires_at`), accepted by `api.x.ai` as a Bearer.
 - **Antigravity (Google):** the Antigravity CLI only. Its grant lacks the `generativelanguage` scope (403), so the rung shells out to `agy -p ... --output-format json` (`~/.local/bin/agy`, override `ANTIGRAVITY_CLI`; model via `ANTIGRAVITY_MODEL`, blank for the account default) when `~/.gemini/antigravity-cli/antigravity-oauth-token` (Google's fixed path) exists. Text only; image inputs skip the rung. There is no Google API key or OAuth-token path at all, under any flag (operator, 2026-09-18).
-- **NVIDIA:** `NVIDIA_API_KEY` is always OK; text default `nvidia/nemotron-3-super-120b-a12b`.
+- **NVIDIA:** `NVIDIA_API_KEY` is always OK; text default `nvidia/nemotron-3.5-super-vl-120b-a12b`.
 - **Cerebras:** last rung; uses available credit on Hetzner, nothing is tried after it.
 
 CLI agent authentication belongs to the [nightly runner](runner.md), separately from this server-side ladder. See the auth matrix in [Dropbox research](dropbox-research.md#auth-matrix-research--cta--knowledge--newsfeed).
