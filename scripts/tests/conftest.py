@@ -37,6 +37,9 @@ def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
 
     provider_cooldown.clear_process_state()
     monkeypatch.setattr(model_ladder, "_dead_until", {})
+    # Rung mechanics stay covered for every provider; the shipped pause
+    # baseline is pinned in test_model_ladder_paused_providers.
+    monkeypatch.setattr(model_ladder, "PAUSED_BY_DEFAULT", frozenset())
     for name in ("_json_load_object", "_read_secret_file"):
         original = getattr(model_ladder, name)
         empty = None if name == "_json_load_object" else ""

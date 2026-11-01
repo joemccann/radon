@@ -4,8 +4,8 @@ Joe's exact order (2026-10-30). Do not leave a band until it is exhausted or
 unavailable:
 
   1. subscription: antigravity (``agy -p``) -> anthropic -> grok -> cursor -> codex
-  2. nvidia (API key OK)
-  3. cerebras (cheap paid, last; pause any rung with RADON_LADDER_PAUSED_PROVIDERS)
+  2. nvidia (API key OK; paused by default via PAUSED_BY_DEFAULT)
+  3. cerebras (cheap paid, last; paused by default; RADON_LADDER_PAUSED_PROVIDERS adds more)
 
 Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
 **subscription credentials only**: Claude Max OAuth, Grok device-auth,
@@ -150,6 +150,12 @@ def _invoke_provider(call, name, auth, model):
 
 
 
+
+# Rungs paused in every environment (operator, 2026-11-01). Cerebras: every
+# model answers 402 payment_required. NVIDIA: won 4 of ~1,550 gateway requests
+# over 3 days and its research figure match is unsafe in either model order
+# (pilot results, PR #1382). Unpause by removing the name.
+PAUSED_BY_DEFAULT = frozenset({"cerebras", "nvidia"})
 
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
@@ -502,9 +508,10 @@ _SUBSCRIPTION_AUTH: dict[str, Callable[[Mapping[str, str]], "AuthMaterial | None
 def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
     """Subscription credentials only for sub-tier rungs; prepaid keys never."""
     # Operator pause (e.g. a billing hold): the rung reads as unkeyed, so the
-    # ladder skips it without sending a request. The key stays stored.
+    # ladder skips it without sending a request. The key stays stored. The env
+    # list adds to the shipped baseline; it cannot unpause a baseline rung.
     paused = _env_get(env, "RADON_LADDER_PAUSED_PROVIDERS") or ""
-    if name in {part.strip().lower() for part in paused.split(",")}:
+    if name in PAUSED_BY_DEFAULT or name in {part.strip().lower() for part in paused.split(",")}:
         return None
     if name in _SUBSCRIPTION_AUTH:
         prepaid_denylist.warn_ignored(env)
