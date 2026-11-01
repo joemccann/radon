@@ -23,7 +23,8 @@ _MAX_RESPONSE_BYTES = 2_000_000
 # Safe-only metadata captured from the exact pinned Claude 2.1.311 client.
 _CLAUDE_NATIVE_BETAS = (
     "claude-code-20250219", "interleaved-thinking-2025-05-14",
-    "context-management-2025-06-27", "mid-conversation-tool-changes-2026-07-01",
+    # per-turn-control gates output_config on mid-conversation system turns.
+    "context-management-2025-06-27", "per-turn-control-2026-07-01", "mid-conversation-tool-changes-2026-07-01",
     "thinking-token-count-2026-05-13", "advanced-tool-use-2025-11-20", "effort-2025-11-24",
 )
 _PROTOCOLS = {"responses", "messages", "chat_completions"}
