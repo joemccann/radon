@@ -20,6 +20,8 @@ The service owns model selection, deadlines, concurrency, cancellation and refre
 
 Each ladder rung gets a slice of the request deadline. A rung may spend the whole remaining deadline except 20 seconds for each later live rung, and never less than an even split. A later rung counts as live only when it has a credential and is not marked dead. A rung whose every model failed with 401, 402, 403, 404, `quota_or_billing` or `credit_balance` is marked dead for 10 minutes, in-process. A dead rung is still attempted, and a win clears the mark. Timeouts, 429 and 5xx never mark a rung dead (`engine._rung_slice`).
 
+`engine.PAUSED_PROVIDERS` lists rungs that are skipped before credential lookup (`<name>:paused`). They reserve no budget and are left out of `wired_providers`. Their stored key is kept. Cerebras has been paused since 2026-11-01 because every model returned 402 `payment_required` for the account. To unpause it, remove it from the set once billing is active.
+
 ## Upgrades and rollback
 
 CLI packages and inference dependencies are built at reviewed pins in immutable release images. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.

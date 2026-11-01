@@ -329,3 +329,44 @@ def test_rung_slice_never_starves_and_last_rung_gets_everything():
     assert engine._rung_slice(120, 4) == pytest.approx(60)
     assert engine._rung_slice(40, 4) == pytest.approx(10)  # even-split floor
     assert engine._rung_slice(0, 3) > 0
+
+
+def test_paused_cerebras_is_never_called_even_with_a_key(monkeypatch, fresh_rungs):
+    """Cerebras is paused (account-wide 402, 2026-11-01): skipped before auth, no budget reserved."""
+    gateway = service(monkeypatch, clock=lambda: 0.0)
+    from model_gateway import engine
+    monkeypatch.setattr(engine, "PAUSED_PROVIDERS", frozenset({"cerebras"}))
+    calls = []
+
+    def call(name, *a, **kw):
+        calls.append(name)
+        return 503, "busy", {"error": "busy"}
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    with pytest.raises(GatewayError) as error:
+        gateway.handle("json", {"instruction": "facts", "read_timeout": 120})
+    assert "cerebras" not in calls and "nvidia" in calls
+    assert "cerebras" not in engine.wired_providers({"CEREBRAS_API_KEY": "k"})
+
+
+def test_paused_cerebras_reserves_no_budget(monkeypatch, fresh_rungs):
+    gateway = service(monkeypatch, clock=lambda: 0.0)
+    from model_gateway import engine
+    monkeypatch.setattr(engine, "PAUSED_PROVIDERS", frozenset({"cerebras"}))
+    seen = []
+
+    def call(name, *a, **kw):
+        seen.append(engine.scoped_timeout(300))
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    gateway.handle("json", {"instruction": "facts", "read_timeout": 120})
+    # antigravity, anthropic, grok, codex, nvidia are live: 120 - 4 * 20.
+    assert seen[0] == pytest.approx(40.0)
+
+
+def test_production_pause_list_names_cerebras():
+    """conftest unpauses for rung-mechanics tests; pin the shipped value."""
+    from pathlib import Path
+    from model_gateway import engine
+    assert 'PAUSED_PROVIDERS = frozenset({"cerebras"})' in Path(engine.__file__).read_text()

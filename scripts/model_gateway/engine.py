@@ -5,7 +5,7 @@ unavailable:
 
   1. subscription: antigravity (``agy -p``) -> anthropic -> grok -> cursor -> codex
   2. nvidia (API key OK)
-  3. cerebras (cheap paid, last; currently paused on Hetzner)
+  3. cerebras (cheap paid, last; paused in code via PAUSED_PROVIDERS)
 
 Subscription-tier rungs (Anthropic / Grok / Codex / Antigravity) use
 **subscription credentials only**: Claude Max OAuth, Grok device-auth,
@@ -295,7 +295,7 @@ def wired_providers(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
     src = env if env is not None else os.environ
     wired: list[str] = []
     for name in MODEL_LADDER_ORDER:
-        if name == "cursor":
+        if name == "cursor" or name in PAUSED_PROVIDERS:
             continue
         if _auth_for(name, src) is not None:
             wired.append(name)
@@ -1460,6 +1460,11 @@ def _models_for_attempt(
 
 LAST_RESORT_PROVIDER = "cerebras"
 
+# Paused rungs are skipped before credential lookup and reserve no budget; the
+# stored key is kept. Cerebras: every model answers 402 payment_required for
+# this account (probed 2026-11-01). Unpause by removing it once billing is set.
+PAUSED_PROVIDERS = frozenset({"cerebras"})
+
 # Per-rung time budget. A rung may spend all of the remaining request deadline
 # except FALLBACK_RESERVE_S for each later live rung, and never less than an
 # even split. An even split gave the first of six rungs 20s of 120s, so slow
@@ -1558,12 +1563,16 @@ def _run_ladder(
     attempted: list[str] = []
     skipped: list[str] = []
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
-    keyed = {name for name in order if name != "cursor" and _auth_for(name, env) is not None}
+    keyed = {name for name in order if name != "cursor" and name not in PAUSED_PROVIDERS
+             and _auth_for(name, env) is not None}
 
     for position, name in enumerate(order):
         if name == "cursor":
             skipped.append("cursor:unwired")
             logger.info("%s skip provider=cursor reason=unwired", log_prefix)
+            continue
+        if name in PAUSED_PROVIDERS:
+            skipped.append(f"{name}:paused")
             continue
         auth = _auth_for(name, env)
         if auth is None:
