@@ -70,6 +70,8 @@ protocol_value() {
 phase_status() {
   if [[ "$PHASE_RC" -eq 124 ]]; then
     printf 'TIMEOUT'
+  elif [[ "$PHASE_RC" -eq 75 ]]; then
+    printf 'INCOMPLETE (exit 75)'
   elif [[ "$PHASE_RC" -ne 0 ]]; then
     printf 'FAILED (exit %s)' "$PHASE_RC"
   elif grep -qF "$BG_CEILING_MARKER" "$PHASE_LOG" 2>/dev/null; then
@@ -111,9 +113,16 @@ sys.exit(0 if int(ts.timestamp()) >= since else 1)
 
 # REL-188 (R-535): only a dedicated column-0 marker line counts, never a
 # recital. Deliver also needs the stamp AFTER a verdict line.
+# A line inside a fenced code block, or a stamp still carrying the prompt's
+# `<run-id>` placeholder, is a quotation of the rule, not a stamp.
 phase_marker_present() {
-  local marker="" verdict_seen=0 saw_stamp=0 line
+  local marker="" verdict_seen=0 saw_stamp=0 in_fence=0 line
   while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      '```'*|'~~~'*) in_fence=$((1 - in_fence)); continue ;;
+    esac
+    [[ "$in_fence" -eq 0 ]] || continue
+    [[ "$line" == *"<run-id>"* ]] && continue
     case "$line" in
       "$DELIVER_READY_MARKER"*|"$DELIVER_INCOMPLETE_MARKER"*) verdict_seen=1 ;;
       "$PHASE_COMPLETE_MARKER"*)
@@ -471,6 +480,29 @@ print(v if isinstance(v, str) and re.fullmatch(r"[0-9a-f]{7,40}", v) else "")
   PHASE_UNREVIEWED_REASON="$(unreviewed_reason)"
 }
 
+# The public audited-through claims the pinned head was audited. For these
+# loops that is true only when the private checkpoint now names that head: an
+# exit-0 audit that recorded OPERATOR_REQUIRED, or one whose scanner stopped
+# early, leaves the checkpoint behind and must not post the sha.
+drop_unproven_audited_sha() {
+  [[ "$PHASE" == audit && -n "${PHASE_AUDITED_SHA:-}" ]] || return 0
+  local ckpt="$SCRATCH/last-audited.json" base="" pinned
+  if [[ -f "$ckpt" && ! -L "$ckpt" ]]; then
+    base="$("$PY" -I -c '
+import json, re, sys
+try:
+    v = json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2])
+except Exception:
+    v = None
+print(v if isinstance(v, str) and re.fullmatch(r"[0-9a-f]{7,40}", v) else "")
+' "$ckpt" "$CHECKPOINT_KEY" 2>/dev/null)"
+  fi
+  pinned="$(printf '%s' "$PHASE_AUDITED_SHA" | tr -cd '0-9a-f')"
+  if [[ -z "$base" || ${#base} -gt ${#pinned} || "${pinned:0:${#base}}" != "$base" ]]; then
+    PHASE_AUDITED_SHA=""
+  fi
+}
+
 # --- dead-man -------------------------------------------------------------------
 
 _sanitize_issue_text() {
@@ -554,6 +586,7 @@ main() {
   if [[ -z "${PHASE_STATUS:-}" ]]; then publish_private_report; else REPORT_URL=""; fi
   pr="$(resolve_pr_url)"
   compute_unreviewed
+  drop_unproven_audited_sha
   report
   [[ -z "${PHASE_MARKER_POSTED:-}" ]] || echo "marker_posted=1"
   prune_scratch

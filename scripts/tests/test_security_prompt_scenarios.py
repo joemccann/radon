@@ -15,6 +15,7 @@ reports key exists, and it does not here.
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -81,6 +82,7 @@ class Scenario:
     sha: bool = False  # audited-through expected on the public line
     loops: tuple = LOOPS
     xfail: str = ""
+    checkpoint: str = "pinned"  # private last-audited.json: "pinned" (= audited head) or "behind"
 
 
 NO_MARKER_RULE = "Without a dedicated marker line an exit-0 phase is reported INCOMPLETE and exits non-zero."
@@ -151,18 +153,14 @@ SCENARIOS = [
         status="INCOMPLETE (exit 0 without the phase-completion marker)", exit=75,
     ),
     Scenario(
-        # The hook takes any column-0 line with the prefix, so a plan that
-        # quotes the marker in an unindented fence (and never stamps for real)
-        # reads as a completed phase and advances the audited SHA.
+        # A plan that quotes the marker in an unindented fence (and never
+        # stamps for real) must not read as a completed phase.
         id="marker-at-column0-inside-a-quoted-code-fence-is-not-a-pass",
         rules={"security": ("Never emit the marker text anywhere else — not in a plan, a quote of this "
                             "skill, or an interim message.",),
                "security-deepsec": ("Never emit the marker text anywhere else.",)},
         slice="My plan, quoting the skill:\n```\n{m} audit run_id=<run-id>\n```\nStarting stage 1.\n",
         status="INCOMPLETE (exit 0 without the phase-completion marker)", exit=75,
-        xfail=("security_post.sh phase_marker_present matches any column-0 line with the prefix; it does "
-               "not track code fences or reject a `<run-id>` placeholder, so a quoted marker in a plan "
-               "reads as OK exit=0 and posts audited-through"),
     ),
     Scenario(
         id="deliver-stamp-before-the-verdict-is-incomplete",
@@ -272,18 +270,23 @@ SCENARIOS = [
         status="TIMEOUT", exit=124,
     ),
     Scenario(
-        # DeepSec exiting 75 is a runtime failure per the prompt, but the
-        # agent's own process exits 0 and stamps the marker. The rc shows only
-        # in the transcript/private report; the hook never reads it.
-        id="deepsec-rc75-in-transcript-with-a-stamp-is-not-ok",
+        # DeepSec exiting 75 is a runtime failure per the prompt; the agent
+        # keeps the checkpoint behind and may still stamp (OPERATOR_REQUIRED
+        # and BLOCKED nights are complete). The hook never trusts transcript
+        # rc text: the private checkpoint decides, so the public line drops
+        # audited-through (the security hook tests pin the unreviewed count).
+        id="deepsec-rc75-with-a-stamp-never-posts-audited-through",
         rules={"security-deepsec": ("any other nonzero = runtime/config failure — preserve resumable state "
                                     "and do NOT advance the audited SHA.",)},
         slice="deepsec process finished\ndeepsec rc=75\nDEEPSEC_RC=75\n{m} audit run_id=r1\n",
         loops=("security-deepsec",),
-        status="INCOMPLETE", exit=75,
-        xfail=("security_post.sh decides from PHASE_RC, the background-ceiling line and the completion "
-               "marker only; a scanner rc=75 reported inside the transcript (it showed only in the private "
-               "report) is ignored, so the hook posts OK exit=0 with audited-through"),
+        status="OK", exit=0, checkpoint="behind",
+    ),
+    Scenario(
+        id="agent-exit-75-is-incomplete-not-failed",
+        rules=_both(HOOK_RULE),
+        slice="{m} audit run_id=r1\n", rc=75,
+        status="INCOMPLETE (exit 75)", exit=75,
     ),
 ]
 
@@ -320,13 +323,17 @@ def rig(tmp_path):
     calls.mkdir()
     slice_log = tmp_path / "slice.log"
 
-    def post(loop, phase, rc, output, env):
+    def post(loop, phase, rc, output, env, checkpoint="pinned"):
         work = home / "radon-runner" / "work" / loop
         state = home / "radon-runner" / "state" / loop
         work.mkdir(parents=True, exist_ok=True)
         state.mkdir(parents=True, exist_ok=True)
         mark = state / f".phase-start-{loop}"
         mark.write_text("")
+        (state / "scratch").mkdir(exist_ok=True)
+        key = "last_audited_sha" if loop == "security-deepsec" else "head_sha"
+        value = AUDITED_SHA if checkpoint == "pinned" else "b" * 40
+        (state / "scratch" / "last-audited.json").write_text(json.dumps({key: value}))
         slice_log.write_text(output)
         full_env = {
             "PATH": f"{bin_dir}:{TIMEOUT_DIR}:/usr/bin:/bin", "HOME": str(home), "CALLS": str(calls),
@@ -357,7 +364,7 @@ def test_the_prompt_still_states_the_rule(prompt_text, loop, quote):
 def test_the_hook_enforces_the_rule(rig, sc, loop):
     output = sc.slice.format(m=MARKERS[loop], other=MARKERS[[x for x in LOOPS if x != loop][0]],
                              loop=loop, pr=PR)
-    proc, statuses, body = rig(loop, sc.phase, sc.rc, output, dict(sc.env))
+    proc, statuses, body = rig(loop, sc.phase, sc.rc, output, dict(sc.env), sc.checkpoint)
 
     assert proc.returncode == 0, proc.stderr
     # First line is the pre-network verdict; the last supersedes it. Both must agree.

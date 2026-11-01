@@ -712,6 +712,9 @@ def _issue_comments(rig):
 def test_a_public_audit_comment_carries_the_sha_only_on_exit_0(rig):
     sha = subprocess.run(["git", "-C", str(rig.work), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=True).stdout.strip()
+    rig.scratch.mkdir(parents=True, exist_ok=True)
+    key = "last_audited_sha" if rig.loop == "security-deepsec" else "head_sha"
+    (rig.scratch / "last-audited.json").write_text(json.dumps({key: sha}))
     out = rig.post(output=f"{rig.marker} audit run_id=r1\n", PHASE_AUDITED_SHA=sha)
     comment = _issue_comments(rig)[-1]
     assert out["marker_posted"] == "1"
@@ -986,3 +989,39 @@ def test_the_coverage_git_calls_ignore_the_agents_clone_config(rig, tmp_path):
     rig.post(output=f"{rig.marker} audit run_id=r1\n")
     assert "unreviewed: 1 commits since " in rig.comment()
     assert not canary.exists()
+
+
+@pytest.mark.parametrize("checkpoint", [None, "behind", "junk"])
+def test_an_exit_0_audit_without_an_advanced_checkpoint_posts_no_sha(rig, checkpoint):
+    sha = _rev(rig, "HEAD")
+    if checkpoint == "behind":
+        _checkpoint(rig, "b" * 40)
+    elif checkpoint == "junk":
+        _checkpoint(rig, "not a sha")
+    out = rig.post(output=f"{rig.marker} audit run_id=r1\n", PHASE_AUDITED_SHA=sha)
+    comment = rig.comment()
+    assert out["status"].startswith("OK")
+    assert "exit=0" in comment
+    assert "audited-through" not in comment and sha not in comment
+
+
+def test_a_checkpoint_at_the_pinned_head_keeps_the_sha(rig):
+    sha = _rev(rig, "HEAD")
+    _checkpoint(rig, sha[:12])
+    rig.post(output=f"{rig.marker} audit run_id=r1\n", PHASE_AUDITED_SHA=sha)
+    assert f"audited-through: {sha}" in rig.comment()
+
+
+def test_a_marker_quoted_in_a_fence_or_with_the_placeholder_is_not_a_stamp(rig):
+    out = rig.post(output=f"plan:\n```\n{rig.marker} audit run_id=r1\n```\n")
+    assert out["status"].startswith("INCOMPLETE (exit 0 without the phase-completion marker)")
+    out = rig.post(output=f"{rig.marker} audit run_id=<run-id>\n")
+    assert out["status"].startswith("INCOMPLETE (exit 0 without the phase-completion marker)")
+    out = rig.post(output=f"```\nquote\n```\n{rig.marker} audit run_id=r1\n")
+    assert out["status"] == "OK" or out["status"].startswith("OK")
+
+
+def test_an_agent_exit_75_is_incomplete(rig):
+    out = rig.post(rc=75, output=f"{rig.marker} audit run_id=r1\n")
+    assert out["status"].startswith("INCOMPLETE (exit 75)")
+    assert "exit=75" in rig.comment()
