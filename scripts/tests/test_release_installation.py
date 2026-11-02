@@ -90,6 +90,9 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
     assert config["EnvironmentVariables"] == {
         "HOME": str(home),
         "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+        # Reviews reach the model service only through the Mac transport socket;
+        # the client default is the Linux /run path, which does not exist here.
+        "RADON_MODEL_GATEWAY_SOCKET": "/Library/Radon/model-gateway/gateway.sock",
     }
     assert "GH_TOKEN" not in str(config) and "PUSHOVER_TOKEN" not in str(config)
 
