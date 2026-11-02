@@ -342,7 +342,7 @@ class TestAcceptedRiskLedger:
     def test_unexpired_acceptance_is_excluded_from_next_but_stays_open_queued(self, tmp_path):
         import nightly_deepsec_queue as q
 
-        item_id = "DS-2026-10-28-02"
+        item_id = "DS-2099-01-01-01"
         last = _queue(tmp_path, [{"id": item_id, "action": "Rotate the host key."}])
         result = q.reverify(
             last_audited_path=last,
@@ -429,18 +429,18 @@ class TestAcceptedRiskLedger:
         "row",
         [
             _row("DS-26-10-28-02"),
-            _row("DS-2026-10-28-02", reason=""),
-            _row("DS-2026-10-28-02", reason="   "),
-            _without(_row("DS-2026-10-28-02"), "reason"),
-            _without(_row("DS-2026-10-28-02"), "accepted_by"),
-            _row("DS-2026-10-28-02", accepted_by=""),
-            _row("DS-2026-10-28-02", accepted_at="10/15/2026"),
-            _row("DS-2026-10-28-02", expires_at="20261215"),
-            _row("DS-2026-10-28-02", expires_at="2026-10-15"),
-            _row("DS-2026-10-28-02", expires_at="2026-10-01"),
-            _row("DS-2026-10-28-02", accepted_at="2026-10-01", expires_at="2026-12-31"),
-            _without(_row("DS-2026-10-28-02"), "expires_at"),
-            "DS-2026-10-28-02",
+            _row("DS-2099-01-01-01", reason=""),
+            _row("DS-2099-01-01-01", reason="   "),
+            _without(_row("DS-2099-01-01-01"), "reason"),
+            _without(_row("DS-2099-01-01-01"), "accepted_by"),
+            _row("DS-2099-01-01-01", accepted_by=""),
+            _row("DS-2099-01-01-01", accepted_at="10/15/2026"),
+            _row("DS-2099-01-01-01", expires_at="20261215"),
+            _row("DS-2099-01-01-01", expires_at="2026-10-15"),
+            _row("DS-2099-01-01-01", expires_at="2026-10-01"),
+            _row("DS-2099-01-01-01", accepted_at="2026-10-01", expires_at="2026-12-31"),
+            _without(_row("DS-2099-01-01-01"), "expires_at"),
+            "DS-2099-01-01-01",
         ],
     )
     def test_malformed_row_fails_closed(self, tmp_path, row):
@@ -455,17 +455,17 @@ class TestAcceptedRiskLedger:
         rows = q.load_accepted(
             _accepted(
                 tmp_path,
-                [_row("DS-2026-10-28-02", accepted_at="2026-10-01", expires_at="2026-12-30")],
+                [_row("DS-2099-01-01-01", accepted_at="2026-10-01", expires_at="2026-12-30")],
             )
         )
-        assert set(rows) == {"DS-2026-10-28-02"}
+        assert set(rows) == {"DS-2099-01-01-01"}
 
     def test_duplicate_ids_and_bad_shape_fail_closed(self, tmp_path):
         import nightly_deepsec_queue as q
 
         with pytest.raises(ValueError):
             q.load_accepted(
-                _accepted(tmp_path, [_row("DS-2026-10-28-02"), _row("DS-2026-10-28-02")])
+                _accepted(tmp_path, [_row("DS-2099-01-01-01"), _row("DS-2099-01-01-01")])
             )
         bad = tmp_path / "bad.json"
         bad.write_text(json.dumps({"version": 1, "accepted": {}}), encoding="utf-8")
@@ -476,7 +476,7 @@ class TestAcceptedRiskLedger:
             q.load_accepted(bad)
 
     def test_cli_accepts_ledger_and_today(self, tmp_path):
-        item_id = "DS-2026-10-28-02"
+        item_id = "DS-2099-01-01-01"
         last = _queue(tmp_path, [{"id": item_id, "action": "Rotate the host key."}])
         verdicts = tmp_path / "verdicts.json"
         verdicts.write_text(json.dumps([_open_verdict(item_id)]), encoding="utf-8")
@@ -500,8 +500,8 @@ class TestAcceptedRiskLedger:
         assert "acceptance expired 2026-11-10: re-decide" in payload["next"]
 
     def test_cli_malformed_ledger_exits_nonzero(self, tmp_path):
-        last = _queue(tmp_path, [{"id": "DS-2026-10-28-02", "action": "x"}])
-        ledger = _accepted(tmp_path, [_row("DS-2026-10-28-02", reason="")])
+        last = _queue(tmp_path, [{"id": "DS-2099-01-01-01", "action": "x"}])
+        ledger = _accepted(tmp_path, [_row("DS-2099-01-01-01", reason="")])
         proc = _run_cli(
             ["--last-audited", str(last), "--accepted-ledger", str(ledger), "--today", TODAY]
         )

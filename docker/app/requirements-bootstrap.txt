@@ -1,0 +1,9 @@
+# DS-2026-10-28-02: the pip bootstrap is hash-locked. The base image's pip
+# still vendors a certifi that trusts the eMudhra/emSign intermediates, so
+# these digests, not TLS, authenticate the replacement pip and trust store.
+# Source: PyPI JSON API digests.sha256, cross-checked 2026-11-01 against the
+# sha256 of an independent `pip download` of the same wheels.
+pip==26.2.2 \
+    --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70
+certifi==2026.10.19 \
+    --hash=sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b
