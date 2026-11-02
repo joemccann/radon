@@ -166,7 +166,7 @@ Production is three planes. Do not collapse them.
   `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
   after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune` and `prune-locked <sha>` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune`, the argumentless disk headroom guard `reclaim-locked` and `prune-locked <sha>` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.

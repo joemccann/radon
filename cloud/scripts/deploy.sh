@@ -2297,6 +2297,7 @@ supervise_deploy_command() {
   # Before the inner deploy pulls or admits anything, and before prepull's
   # target set can tip a full disk into ENOSPC.
   prune_app_images_before_admission "${DEPLOY_TARGET_SHA:-}"
+  reclaim_disk_before_admission "${DEPLOY_TARGET_SHA:-}"
 
   local exit_code=0
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
@@ -2342,6 +2343,26 @@ prune_app_images_before_admission() {
   fi
   if ! timeout 120 sudo -n "$APP_RUNTIME_HELPER" prune-locked "$target_sha" 0<&9; then
     log_warn "Lock-held app image prune failed; stale release images remain"
+  fi
+  return 0
+}
+
+# Runs while FD 9 holds the deploy lock, after the image prune. The root
+# disk_cleanup guard exits at once when free space already covers a deploy
+# (HEADROOM_THRESHOLD_BYTES); below it, it vacuums journald, drops dangling
+# layers, rotated logs, pip/npm caches and old leaked worktrees, and heartbeats
+# `error` on disk-cleanup when headroom is still short (2026-10-31: refused at
+# 6.2G free, a human ran the oneshot). Best effort; never fails a deploy, so a
+# still-short disk is refused by model disk admission as before. Like the
+# prune, it runs only for a real release SHA (main() refuses anything else).
+reclaim_disk_before_admission() {
+  [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] || return 0
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" reclaim-locked >/dev/null 2>&1; then
+    log_warn "Lock-held disk reclaim is not granted yet; skipping"
+    return 0
+  fi
+  if ! timeout 300 sudo -n "$APP_RUNTIME_HELPER" reclaim-locked 0<&9; then
+    log_warn "Lock-held disk reclaim did not complete; continuing to admission"
   fi
   return 0
 }

@@ -662,9 +662,9 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 
 | Piece | Where | What |
 |---|---|---|
-| `radon-disk-cleanup.timer` | VPS | Weekly **Sun 03:20 UTC**, `RandomizedDelaySec=300`, `Persistent=true`. Clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). |
+| `radon-disk-cleanup.timer` | VPS | Weekly sweep **Sun 03:20 UTC** plus an hourly **:50 UTC** headroom guard, `RandomizedDelaySec=300`, no `Persistent=` (R-369). The sweep slot is clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). Every timer firing outside Sunday 03:xx UTC is the guard: it exits at once while free space on `/` is at or above `HEADROOM_THRESHOLD_BYTES` (12 GiB: ~8.3G model admission plus ~3.4G of next-release layers), never waits on a deploy, and otherwise runs every category. A manual `systemctl start` is always the full sweep. |
 | `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only container engines + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
-| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: `app-images` (delegated to `radon-app-runtime prune-locked` with the job's held deploy lock as stdin, on whichever engine the runtime uses), `dangling-images` (`image prune -f` on podman and docker when installed), leaked release worktrees, npm/pip caches, journald. |
+| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: `app-images` (delegated to `radon-app-runtime prune-locked` with the job's held deploy lock as stdin, on whichever engine the runtime uses), `dangling-images` (`image prune -f` on podman and docker when installed), leaked release worktrees, npm/pip caches, journald, `rotated-logs` (numbered logrotate rotations such as `syslog.2.gz` older than 7 days, only in root-owned directories under `/var/log`, never `/var/log/journal`). `--deploy-locked` is the guard `deploy.sh`'s supervisor runs through `radon-app-runtime reclaim-locked` with its held deploy lock as stdin, after `prune-locked <sha>` and before the inner deploy; it skips `app-images`. Never touches `/var/lib/radon/media` or any DB/data tree. |
 
 ### Demo mirror (`radon-demo-mirror.timer`)
 
@@ -672,7 +672,7 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 |---|---|---|
 | `radon-demo-mirror.timer` | VPS | Daily **21:45 UTC** plus a **23:30 UTC** retry slot, weekends included, `Persistent=true`. A weekday-only schedule aged demo snapshots past the regime routes' 48h budget every weekend, and a pass a deploy SIGTERMed was never re-run. |
 | `radon-demo-mirror.service` | VPS | Oneshot: `migrate.py --demo`, then `demo_seed.py` (re-anchors the synthetic book's expiries to the run date; refuses any non `radon-demo` URL), then `mirror_market_snapshots_to_demo.js`. Heartbeat: `demo-mirror` (26h). Contract: [`demo-environment.md`](demo-environment.md). |
-| `service_health` heartbeat | row `disk-cleanup` | Written on EVERY run — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. 8-day freshness window. |
+| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages. 8-day freshness window. |
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):
 
@@ -684,6 +684,8 @@ Retention constants (`cloud/scripts/disk_cleanup.py`):
   records by filesystem op (root never runs `git` inside a repo the radon
   account can configure).
 - `JOURNAL_VACUUM_SIZE = "200M"`.
+- `ROTATED_LOG_MAX_AGE_DAYS = 7`, `MAX_ROTATED_LOGS = 500`.
+- `HEADROOM_THRESHOLD_BYTES = 12 GiB` — the guard and deploy reclaim trigger, and the post-run headroom check.
 
 Never touched: the running `ghcr.io/gnzsnz/ib-gateway` and
 `willfarrell/autoheal` images, `/home/radon/radon` (the live tree),

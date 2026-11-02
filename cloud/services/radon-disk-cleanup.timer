@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon disk cleanup -- weekly, Sunday off-hours
+Description=Radon disk cleanup -- weekly sweep Sunday off-hours, hourly headroom guard
 
 [Timer]
 # Sunday 03:20 UTC: the weekend slot the operator asked for, and deliberately
@@ -8,6 +8,13 @@ Description=Radon disk cleanup -- weekly, Sunday off-hours
 # nightly cluster above it. Not :00/:30 to stay off the top-of-hour scheduler
 # herd.
 OnCalendar=Sun *-*-* 03:20:00 UTC
+# Hourly headroom guard (2026-11-01): root reached 3.1 GiB free mid-week and a
+# deploy was refused at 6.2G, so a human ran this oneshot. disk_cleanup.py
+# treats every timer firing outside the Sunday 03:xx UTC slot as the guard: it
+# exits at once while free space is at or above HEADROOM_THRESHOLD_BYTES,
+# never waits on a deploy, and otherwise reclaims and heartbeats `error` when
+# it cannot restore headroom. :50 plus the 300s spread never reaches 03:xx.
+OnCalendar=*-*-* *:50:00 UTC
 RandomizedDelaySec=300
 # NO Persistent=true, deliberately. A missed firing replaying at boot voids
 # this timer's own "Sunday 03:20 UTC, clear of every DB-maintenance window"
@@ -15,7 +22,8 @@ RandomizedDelaySec=300
 # a DESTRUCTIVE sweep during US market hours, rmtree-ing caches, removing app
 # images and vacuuming journald while live trading and possibly a deploy are in
 # progress. Missing one weekly reclaim costs a week of disk; replaying it into
-# an active session costs the session. R-369.
+# an active session costs the session. R-369. The hourly guard does run during
+# market hours, but only below the threshold, where ENOSPC is the larger risk.
 
 [Install]
 WantedBy=timers.target
