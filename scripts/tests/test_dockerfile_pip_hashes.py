@@ -33,6 +33,9 @@ VALUE_OPTIONS = {
     "-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
     "--extra-index-url", "-f", "--find-links", "--only-binary", "--no-binary",
 }
+# pip, pip3, pip3.13: every spelling of the installer.
+PIP_RE = re.compile(r"pip(?:3(?:\.\d+)?)?")
+PIP_INSTALL_RE = re.compile(r"\bpip(?:3(?:\.\d+)?)?\s+install\b")
 HASH_RE = re.compile(r"--hash=sha256:[0-9a-f]{64}\b")
 PIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?==[A-Za-z0-9.!+-]+$")
 
@@ -49,12 +52,12 @@ def _pip_installs(text: str) -> list[list[str]]:
     """Each `pip install` invocation's argument vector, split at shell operators."""
     found: list[list[str]] = []
     for line in _logical_lines(text):
-        if not line.lstrip().startswith("RUN ") or "pip install" not in line:
+        if not line.lstrip().startswith("RUN ") or not PIP_INSTALL_RE.search(line):
             continue
         for segment in re.split(r"&&|\|\||;", line):
             tokens = shlex.split(segment)
             for i in range(len(tokens) - 1):
-                if tokens[i] == "pip" and tokens[i + 1] == "install":
+                if PIP_RE.fullmatch(tokens[i]) and tokens[i + 1] == "install":
                     found.append(tokens[i + 2 :])
                     break
     return found
@@ -142,6 +145,8 @@ def test_scanner_finds_the_python_image() -> None:
         'RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.12.1+cpu"',
         "RUN apt-get update && pip install --require-hashes requests==2.33.0",
         "RUN python -m pip install --require-hashes -r /tmp/missing.txt",
+        "RUN pip3 install requests==2.33.0",
+        "RUN python3 -m pip3.13 install --no-cache-dir requests==2.33.0",
     ],
 )
 def test_scanner_rejects_unhashed_installs(run: str) -> None:
@@ -168,3 +173,30 @@ def test_bootstrap_certifi_matches_requirements_pin() -> None:
     pinned = re.search(r"^certifi==(\S+)$", REQUIREMENTS.read_text(encoding="utf-8"), re.M)
     assert pinned
     assert f"certifi=={pinned.group(1)}" in {e.split()[0] for e in _requirement_entries(BOOTSTRAP)}
+
+
+GATEWAY_LOCK = DOCKER / "app" / "requirements-model-gateway.txt"
+# The gateway keeps its own scipy pin (it did before the lock); every other
+# package the runtime requirements pin directly must match, or the --no-deps
+# lock install silently swaps the runtime's version inside the gateway image.
+GATEWAY_OWN_PINS = {"scipy"}
+EXACT_PIN_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([^\s;#\\]+)", re.M)
+
+
+def _pins(path: Path) -> dict[str, str]:
+    return {
+        m.group(1).lower().replace("_", "-"): m.group(2)
+        for m in EXACT_PIN_RE.finditer(path.read_text(encoding="utf-8"))
+    }
+
+
+def test_gateway_lock_matches_runtime_direct_pins() -> None:
+    lock = _pins(GATEWAY_LOCK)
+    runtime = {**_pins(REQUIREMENTS), **_pins(REPO / "scripts" / "requirements-api.txt")}
+    stale = {
+        name: (lock[name], runtime[name])
+        for name in lock.keys() & runtime.keys()
+        if name not in GATEWAY_OWN_PINS and lock[name] != runtime[name]
+    }
+    assert not stale, f"regenerate {GATEWAY_LOCK.name} (lock, runtime): {stale}"
+    assert {"numpy", "pandas", "certifi"} <= lock.keys() & runtime.keys()
