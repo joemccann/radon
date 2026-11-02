@@ -469,7 +469,7 @@ PY_MIGRATE_STATE
 }
 
 if (( $# != 1 )) && ! { (( $# == 2 )) && [[ "${1:-}" == sync-control-plane && "${2:-}" =~ ^[0-9a-f]{40}$ ]]; }; then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|verify-committed|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|promote-in-place|recover|verify-restored|verify-control-plane|verify-committed|commit-transition|publish-caddy|publish-mcp-env|publish-subscription-env|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -2909,6 +2909,11 @@ root_action_timeout() {
       # budget was consumed by a wedged reload, so restart never ran.
       printf '%s\n' "$ROOT_PUBLISH_CADDY_ACTION_TIMEOUT"
       ;;
+    promote-in-place)
+      # Receipt clear plus model-client export; services keep running, so it
+      # stays outside the release-lifecycle job-cancel class.
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
     sync-scheduled-units)
       # Bounded like a mutation (stage/install/reload) but deliberately
       # outside the release-lifecycle job-cancel class above. A rejected
@@ -2999,6 +3004,14 @@ case "$1" in
     snapshot_active_units
     stop_release_consumers
     "$RM" -f "${REPLICA_FILES[@]}"
+    ;;
+  promote-in-place)
+    # Payload-unchanged release (deploy.sh restart_services): services keep
+    # running, so stop-clean and restart-managed never run. Do their two
+    # release-identity steps here, or commit-transition finds the previous
+    # release's receipt and refuses (2026-11-02, #1382).
+    committed_transition_receipt clear
+    "$MODEL_CLIENT_RUNTIME" install-model-clients
     ;;
   restart-managed)
     "$MODEL_CLIENT_RUNTIME" install-model-clients
