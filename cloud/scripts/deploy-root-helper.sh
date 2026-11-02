@@ -2960,13 +2960,18 @@ supervise_root_action() {
   trap 'handle_root_supervisor_signal TERM' TERM
   trap 'handle_root_supervisor_signal INT' INT
   trap 'handle_root_supervisor_signal HUP' HUP
+  # RADON_ROOT_ACTION_DEADLINE hands children the supervisor's own budget as
+  # epoch seconds (2s under it: SECONDS ticks whole seconds) so a bounded step
+  # such as the model client export fails with its own error before the kill.
   "$SESSION_PYTHON" -I -c '
 import os
 import sys
+import time
 os.setsid()
 os.environ["RADON_DEPLOY_ROOT_INTERNAL"] = "1"
-os.execv(sys.argv[2], sys.argv[2:])
-' -- "$0" "$@" &
+os.environ["RADON_ROOT_ACTION_DEADLINE"] = str(int(time.time()) + int(sys.argv[2]) - 2)
+os.execv(sys.argv[3], sys.argv[3:])
+' -- "$action_timeout" "$0" "$@" &
   ROOT_ACTION_PID=$!
   resolve_root_action_group || true
   while kill -0 "$ROOT_ACTION_PID" 2>/dev/null; do

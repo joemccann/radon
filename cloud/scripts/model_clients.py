@@ -63,11 +63,19 @@ EXPORT_NAME = "radon-model-client-export"
 # attempts while bytes were still flowing. A wedged export emits nothing, so
 # the stall window resets on every chunk. Each ceiling fits its byte bound at
 # 23 MB/s with 1.25x headroom and bounds a trickle; production runs both
-# exports back to back, so their sum stays under the 180s root action budget
-# and this labelled error fires before the supervisor kills the helper.
+# exports back to back inside a root action (deploy-root-helper.sh) whose
+# supervisor kills the whole process group at its budget. The supervisor
+# exports RADON_ROOT_ACTION_DEADLINE (epoch seconds) and main() turns it into
+# one absolute export deadline that keeps POST_EXPORT_RESERVE_SECONDS for the
+# work after an export (tar install or Darwin publish, container cleanup), so
+# admission, reuse checks and both exports share that budget and the labelled
+# TimeoutError fires before the kill. CI runs exports standalone, with no
+# root deadline, so only the flavour ceilings apply there.
 EXPORT_STALL_SECONDS = 30
 LINUX_EXPORT_CEILING_SECONDS = 115
 DARWIN_EXPORT_CEILING_SECONDS = 50
+ROOT_ACTION_DEADLINE_ENV = "RADON_ROOT_ACTION_DEADLINE"
+POST_EXPORT_RESERVE_SECONDS = 30
 HELPERS = ("__init__.py", "client.py", "cli.py", "cli_bridge.py")
 PACKAGES = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "grok": "@xai-official/grok"}
 
@@ -412,8 +420,14 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) ->
         _remove_stage(stage)
 
 
-def export_from_image(engine: str, image: str, target, *, darwin: bool = False) -> None:
-    """An isolated unprivileged container exports bytes; nothing runs on root."""
+def export_from_image(engine: str, image: str, target, *, darwin: bool = False, deadline: float | None = None) -> None:
+    """An isolated unprivileged container exports bytes; nothing runs on root.
+
+    `deadline` is a time.monotonic() instant from the root action budget; the
+    export stops at it or at its flavour ceiling, whichever comes first.
+    """
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError("client export reached the root action deadline before it started")
     command = [engine, "run", "--rm", "--read-only", "--name", EXPORT_NAME, "--pull=never", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--entrypoint", "tar", image, "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-cf", "-"]
     if darwin:
         command += ["-C", "/opt/radon-darwin", "."]
@@ -427,16 +441,22 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=export_env)
     ceiling = DARWIN_EXPORT_CEILING_SECONDS if darwin else LINUX_EXPORT_CEILING_SECONDS
     started = last_progress = time.monotonic()
+    limit = started + ceiling
+    root_bound = deadline is not None and deadline < limit
+    if root_bound:
+        limit = deadline
     received = 0
     try:
         assert process.stdout is not None
         while True:
             now = time.monotonic()
-            if now - started >= ceiling:
+            if now >= limit:
+                if root_bound:
+                    raise TimeoutError(f"client export reached the root action deadline after {received} bytes")
                 raise TimeoutError(f"client export exceeded the {ceiling}s ceiling after {received} bytes")
             if now - last_progress >= EXPORT_STALL_SECONDS:
                 raise TimeoutError(f"client export stalled: no bytes for {EXPORT_STALL_SECONDS}s after {received} bytes")
-            wait = min(1, started + ceiling - now, last_progress + EXPORT_STALL_SECONDS - now)
+            wait = min(1, limit - now, last_progress + EXPORT_STALL_SECONDS - now)
             if not select.select([process.stdout], [], [], wait)[0]:
                 continue
             chunk = os.read(process.stdout.fileno(), 65536)
@@ -807,6 +827,13 @@ def main(args: list[str]) -> int:
     engine, image, release = args
     if engine not in ("/usr/bin/podman", "/usr/bin/docker") or image != "ghcr.io/joemccann/radon-model-gateway:" + release or not re.fullmatch(r"[0-9a-f]{40}", release):
         return 64
+    # Taken before admission so every step below spends the same root budget.
+    root_deadline = os.environ.get(ROOT_ACTION_DEADLINE_ENV)
+    export_deadline = None
+    if root_deadline is not None:
+        if not re.fullmatch(r"[0-9]{1,12}", root_deadline):
+            return 64
+        export_deadline = time.monotonic() + (int(root_deadline) - time.time()) - POST_EXPORT_RESERVE_SECONDS
     try:
         check_model_space()
         _trusted_root(ROOT, 0)
@@ -819,13 +846,15 @@ def main(args: list[str]) -> int:
             print("model clients promoted from exact CI image")
             return 0
         with tempfile.TemporaryFile(dir=ROOT) as stream:
-            export_from_image(engine, image, stream)
+            export_from_image(engine, image, stream, deadline=export_deadline)
             install_from_tar(stream, ROOT, release)
         with tempfile.TemporaryFile(dir=EXPORT_ROOT) as stream:
-            export_from_image(engine,image,stream,darwin=True)
+            export_from_image(engine,image,stream,darwin=True,deadline=export_deadline)
             publish_darwin_bundle(stream,EXPORT_ROOT/"releases",release)
     except Exception as exc:
-        print(f"model client promotion failed: {type(exc).__name__}", file=sys.stderr)
+        # Timeout messages carry only limits and byte counts; name which fired.
+        detail = f": {exc}" if isinstance(exc, TimeoutError) else ""
+        print(f"model client promotion failed: {type(exc).__name__}{detail}", file=sys.stderr)
         return 78
     print("model clients promoted from exact CI image")
     return 0

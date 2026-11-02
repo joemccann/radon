@@ -1024,6 +1024,11 @@ and executable hashes, and atomically selects an immutable
 `current/bin`; they never run a vendor installer or change the selected payload.
 The manifest carries the exact release, provider versions and SHA256 evidence.
 A refused export retains the previous client selector and fails deployment.
+The root helper supervisor exports its action budget to children as
+`RADON_ROOT_ACTION_DEADLINE` (epoch seconds); promotion keeps 30s of it for
+post-export install and cleanup, so a slow export fails with its labelled
+`TimeoutError` before the supervisor kills the action
+([time bounds](../docs/model-gateway.md)).
 
 `radon-app-runtime check-model-space` is a fixed, read-only root action with
 no caller paths, thresholds or environment bypass. Deployment checks it after

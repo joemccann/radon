@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -104,17 +105,97 @@ def test_darwin_export_uses_its_own_ceiling(api, tmp_path, monkeypatch):
     assert time.monotonic() - started < 4
 
 
-def test_limits_are_sized_from_ci_evidence_and_fit_the_root_action_budget(api):
+def test_limits_are_sized_from_ci_evidence(api):
     # Slowest observed CI throughput ~23 MB/s; the largest admissible stream
-    # of each flavour must fit its ceiling with headroom at that rate.
+    # of each flavour must fit its ceiling with headroom at that rate. CI runs
+    # the exports standalone, outside any root action, so only these apply.
     assert api.LINUX_MAX_STREAM_BYTES / 23e6 * 1.25 <= api.LINUX_EXPORT_CEILING_SECONDS
     assert api.DARWIN_MAX_EXPORT_BYTES / 23e6 * 1.25 <= api.DARWIN_EXPORT_CEILING_SECONDS
-    # Production runs both exports back to back inside restart-managed /
-    # promote-in-place, whose root action budget kills the helper; the
-    # export's own, labelled error must fire first even on the second export.
-    budget = int(re.search(r"readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)\n", ROOT_HELPER.read_text()).group(1))
-    assert api.LINUX_EXPORT_CEILING_SECONDS + api.DARWIN_EXPORT_CEILING_SECONDS < budget
     assert 0 < api.EXPORT_STALL_SECONDS < min(api.LINUX_EXPORT_CEILING_SECONDS, api.DARWIN_EXPORT_CEILING_SECONDS)
+    # The post-export reserve must leave most of the real root budget to the
+    # exports: production promote-in-place took 84-98s end to end.
+    budget = int(re.search(r"readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)\n", ROOT_HELPER.read_text()).group(1))
+    assert 0 < api.POST_EXPORT_RESERVE_SECONDS and budget - api.POST_EXPORT_RESERVE_SECONDS >= 120
+
+
+def test_root_deadline_binds_before_the_flavour_ceiling(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 5)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match=r"root action deadline after \d+ bytes"):
+        api.export_from_image(trickle_engine(tmp_path, chunks=1000, interval=0.1), "image", io.BytesIO(),
+                              deadline=started + 1)
+    assert time.monotonic() - started < 4
+
+
+def test_no_time_left_refuses_before_starting_an_export(api, tmp_path):
+    marker = tmp_path / "ran"
+    engine = tmp_path / "engine"
+    engine.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    engine.chmod(0o755)
+    with pytest.raises(TimeoutError, match="root action deadline"):
+        api.export_from_image(str(engine), "image", io.BytesIO(), deadline=time.monotonic() - 1)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("raw", ["", "soon", "-5", "1e9", "12.5"])
+def test_malformed_root_deadline_refuses_promotion(api, monkeypatch, raw):
+    monkeypatch.setattr(api.os, "geteuid", lambda: 0)
+    monkeypatch.setenv("RADON_ROOT_ACTION_DEADLINE", raw)
+    monkeypatch.setattr(api, "check_model_space", lambda: pytest.fail("admission ran"))
+    assert api.main(["/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + "a" * 40, "a" * 40]) == 64
+
+
+def test_complete_root_action_fails_with_the_labelled_timeout_before_the_supervisor(tmp_path):
+    """promote-in-place end to end: supervisor -> helper -> runtime -> main().
+
+    Slow admission work eats part of the budget and the export keeps flowing
+    bytes, so neither the stall window nor the 115s flavour ceiling can fire.
+    Only a deadline derived from the supervisor's own budget stops the export
+    with its labelled error before the supervisor kills the action (rc 124).
+    """
+    from test_deploy_corrections import TestRootHelper
+
+    env, *_ = TestRootHelper()._root_helper_fixture(tmp_path)
+    engine = trickle_engine(tmp_path, chunks=100000, interval=0.05)
+    clients, exports = tmp_path / "clients", tmp_path / "exports"
+    clients.mkdir()
+    exports.mkdir()
+    wrapper = tmp_path / "model_clients_wrapper.py"
+    wrapper.write_text(
+        "import importlib.util, sys, time\n"
+        "from pathlib import Path\n"
+        f"spec = importlib.util.spec_from_file_location('mc', {str(MODULE)!r})\n"
+        "api = importlib.util.module_from_spec(spec); spec.loader.exec_module(api)\n"
+        "api.os.geteuid = lambda: 0\n"
+        f"api.ROOT, api.EXPORT_ROOT = Path({str(clients)!r}), Path({str(exports)!r})\n"
+        "api.check_model_space = lambda: time.sleep(2) or {}\n"
+        "api._trusted_root = lambda *a, **k: None\n"
+        "api.reuse_identical_image_clients = lambda *a, **k: False\n"
+        "api.POST_EXPORT_RESERVE_SECONDS = 1\n"
+        "real = api.export_from_image\n"
+        f"api.export_from_image = lambda _engine, *a, **k: real({engine!r}, *a, **k)\n"
+        "sha = 'a' * 40\n"
+        "raise SystemExit(api.main(['/usr/bin/docker', 'ghcr.io/joemccann/radon-model-gateway:' + sha, sha]))\n"
+    )
+    runtime = tmp_path / "model-client-runtime"
+    runtime.write_text(
+        "#!/bin/bash\n"
+        f'[[ "$1" == install-model-clients ]] || exit 0\nexec {sys.executable} {wrapper}\n'
+    )
+    runtime.chmod(0o755)
+    budget = 8
+    env.update({
+        "RADON_TEST_MODEL_CLIENT_RUNTIME": str(runtime),
+        "RADON_TEST_ROOT_MUTATION_ACTION_TIMEOUT": str(budget),
+        "RADON_TEST_COMMIT_SHA": "a" * 40,
+    })
+    started = time.monotonic()
+    result = subprocess.run(["bash", str(ROOT_HELPER), "promote-in-place"], env=env,
+                            capture_output=True, text=True, timeout=60)
+    elapsed = time.monotonic() - started
+    assert result.returncode == 78, (result.returncode, result.stderr)
+    assert "TimeoutError" in result.stderr and "root action deadline" in result.stderr
+    assert elapsed < budget, elapsed
 
 
 def test_ci_checker_does_not_tell_people_to_raise_pins_for_a_timeout(tmp_path, monkeypatch, capsys):
