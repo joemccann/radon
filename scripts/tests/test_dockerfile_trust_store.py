@@ -16,6 +16,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO / "docker" / "app" / "Dockerfile.python"
 REQUIREMENTS = REPO / "requirements.txt"
+BOOTSTRAP = REPO / "docker" / "app" / "requirements-bootstrap.txt"
 
 MIN_PIP = (26, 2, 2)
 MIN_CERTIFI = (2026, 10, 19)
@@ -27,10 +28,10 @@ def _version(spec: str) -> tuple[int, ...]:
 
 def test_python_image_upgrades_pip_before_installing_requirements() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
-    match = re.search(r'pip install[^\n\\]*--upgrade[^\n]*?"pip>=([0-9.]+)"', text)
-    assert match, "Dockerfile.python must upgrade pip itself (its vendored certifi) before installing requirements"
-    assert _version(match.group(1)) >= MIN_PIP
-    upgrade_at = match.start()
+    pinned = re.search(r"^pip==([0-9.]+) ", BOOTSTRAP.read_text(encoding="utf-8"), re.M)
+    assert pinned, "the bootstrap must pin pip itself (its vendored certifi) before requirements install"
+    assert _version(pinned.group(1)) >= MIN_PIP
+    upgrade_at = text.index("-r requirements-bootstrap.txt")
     requirements_at = text.index("-r requirements.txt")
     assert upgrade_at < requirements_at, "pip must be upgraded before requirements are installed"
 

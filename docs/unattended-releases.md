@@ -22,6 +22,17 @@ A candidate that changes anything under `.github/` is never reviewed or
 merged unattended: pull-request CI runs the candidate's own workflow files, so
 those checks cannot judge it. It waits for a human merge.
 
+Since 2026-11-01 the operator policy also covers the general branch families,
+not only the nightly loops. Authors are `radon-runner-bot` and `joemccann`. Branch prefixes
+are the loop families (`security/`, `security-deepsec/`, `reliability/`,
+`testing/`, `documentation/`, `ci-performance/`, `performance/`,
+`security-private-release/`) plus `fix/`, `feat/`, `ci/` and `docs/`. That
+includes the Grok page responder's `fix/<slug>` branches, which the Mac mini
+pickup opens under the `joemccann` login. Any other prefix (`cursor/`,
+`codex/`, `claude/`, `chore/`) waits for a human. The installer writes these
+defaults only when `policy.json` is absent, so an existing install changes by
+editing that 0600 file in place.
+
 Reviews are cached by model, immutable head SHA and complete diff digest.
 The controller copies the Homebrew CLI into an owner-only snapshot, verifies
 its OpenAI Developer ID signature, and binds review receipts to its SHA-256.

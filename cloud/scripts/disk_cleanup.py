@@ -49,6 +49,19 @@ outcome and never fails the unit; a category that RAISES flips the heartbeat
 to error (visible on the dashboard + the watchdog daily bucket) while the
 remaining categories still run and the unit still exits 0, the same shape as
 drift_audit.py reporting drift.
+
+THRESHOLD GUARD (2026-11-01). The weekly sweep alone left a human running this
+oneshot by hand: root hit 3.1 GiB free on 2026-10-31 and a deploy was refused
+at 6.2G against ~8.3G of model admission. The same unit's timer now also fires
+hourly; any timer firing outside the Sunday 03:00-03:44 UTC slot (and `--if-below`)
+reclaims only when free space is under HEADROOM_THRESHOLD_BYTES, and never
+waits on a deploy. `--deploy-locked` is the same guard run by deploy.sh's
+supervisor through `radon-app-runtime reclaim-locked`, with the supervisor's
+held deploy-lock descriptor as stdin; it skips `app-images` because the
+supervisor has just run `prune-locked <target>`. A manual start stays the full
+sweep. Every run checks the result against the threshold and reports
+`headroom` as an error when it could not restore it, so the existing watchdog
+error bucket on the `disk-cleanup` row pages.
 """
 from __future__ import annotations
 
@@ -75,6 +88,25 @@ SUBPROCESS_TIMEOUT = 300
 # Retention constants -- the only knobs an operator should need.
 RELEASE_MAX_AGE_DAYS = 3
 JOURNAL_VACUUM_SIZE = "200M"
+ROTATED_LOG_MAX_AGE_DAYS = 7
+
+GIB = 1024**3
+# Free bytes a deploy needs on / before it pulls: ~8.3G of model admission
+# (2026-10-31 refusal) plus ~3.4G of unique layers for the next release set
+# (podman system df, 2026-11-01), rounded up.
+HEADROOM_THRESHOLD_BYTES = 12 * GIB
+# Timer firings in this UTC slot are the weekly sweep; every other timer
+# firing is the hourly guard (radon-disk-cleanup.timer).
+WEEKLY_SWEEP_WEEKDAY = 6  # Sunday
+WEEKLY_SWEEP_HOUR = 3
+# 03:20 + RandomizedDelaySec=300 ends by 03:25; the hourly :50 firing also
+# elapses inside 03:xx on Sunday and must stay the guard, not a second sweep.
+WEEKLY_SWEEP_MINUTE_END = 45
+# The guard never waits out a deploy: the supervisor runs its own reclaim.
+GUARD_LOCK_WAIT_S = 0.0
+GUARD_FLAGS = ("--if-below", "--deploy-locked")
+# --deploy-locked: the caller's held deploy-lock descriptor.
+LOCK_STDIN_FD = 0
 
 DOCKER_BIN = "/usr/bin/docker"
 PODMAN_BIN = "/usr/bin/podman"
@@ -200,6 +232,15 @@ PROTECTED_PATHS = (
 # deploy.sh:RELEASES_DIR mktemp templates -- `stage.<sha12>.XXXXXX` and
 # `backup.<sha12>.XXXXXX`. Anything else under the releases dir is left alone.
 RELEASE_NAME_RE = re.compile(r"^(?:stage|backup)\.[0-9a-f]{7,40}\.[A-Za-z0-9]{6}$")
+
+# logrotate's numbered rotations (`syslog.1`, `auth.log.2.gz`). Caddy's own
+# timestamped rolls and journald files never match.
+ROTATED_LOG_RE = re.compile(r"^[A-Za-z0-9_.-]+\.[0-9]+(?:\.gz)?$")
+LOG_DIR = Path("/var/log")
+# Only directories this uid owns are walked: root never unlinks inside a
+# directory another account (caddy, syslog) could rearrange underneath it.
+ROTATED_LOG_DIR_OWNER = 0
+MAX_ROTATED_LOGS = 500
 
 # ---------------------------------------------------------------------------
 # Pure selectors and parsers (unit-tested in tests/test_disk_cleanup.py)
@@ -333,6 +374,43 @@ def select_stale_worktree_admin_dirs(
     return sorted(admin for admin, exists in entries if not exists)
 
 
+def needs_reclaim(free_bytes: int, threshold: int = HEADROOM_THRESHOLD_BYTES) -> bool:
+    return free_bytes < threshold
+
+
+def is_weekly_sweep_slot(now: datetime) -> bool:
+    now = now.astimezone(timezone.utc)
+    return (
+        now.weekday() == WEEKLY_SWEEP_WEEKDAY
+        and now.hour == WEEKLY_SWEEP_HOUR
+        and now.minute < WEEKLY_SWEEP_MINUTE_END
+    )
+
+
+def resolve_mode(
+    args: list[str],
+    trigger_unit: str,
+    now: datetime,
+    free_bytes: int,
+    threshold: int = HEADROOM_THRESHOLD_BYTES,
+) -> str:
+    """'sweep' (every category), 'reclaim' (guard under threshold) or 'skip'.
+
+    A manual start has no TRIGGER_UNIT and stays the full sweep; a timer
+    firing outside the weekly slot is the hourly guard.
+    """
+    guard = any(flag in args for flag in GUARD_FLAGS) or (
+        bool(trigger_unit) and not is_weekly_sweep_slot(now)
+    )
+    if not guard:
+        return "sweep"
+    return "reclaim" if needs_reclaim(free_bytes, threshold) else "skip"
+
+
+def is_rotated_log_name(name: str) -> bool:
+    return bool(ROTATED_LOG_RE.match(name))
+
+
 def human_bytes(count: int) -> str:
     value = float(count)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
@@ -361,6 +439,7 @@ def build_summary(categories: dict[str, int], errors: dict[str, str], before: in
 def _run(argv: list[str]) -> str:
     return subprocess.run(
         argv,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=SUBPROCESS_TIMEOUT,
@@ -550,20 +629,73 @@ def cleanup_journal() -> tuple[int, str]:
     return max(before - after, 0), f"vacuumed to {JOURNAL_VACUUM_SIZE}"
 
 
+def cleanup_rotated_logs() -> tuple[int, str]:
+    """Delete numbered logrotate rotations older than the age floor.
+
+    Walks with directory fds (os.fwalk never follows symlinks), skips
+    /var/log/journal and every directory not owned by ROTATED_LOG_DIR_OWNER,
+    and unlinks only regular files relative to their pinned directory fd.
+    """
+    if not LOG_DIR.is_dir() or has_symlink_component(LOG_DIR):
+        return 0, "no log dir"
+    cutoff = time.time() - ROTATED_LOG_MAX_AGE_DAYS * 86400
+    targets: list[tuple[int, str, int]] = []
+    try:
+        for root, dirs, files, root_fd in os.fwalk(LOG_DIR, follow_symlinks=False):
+            if os.fstat(root_fd).st_uid != ROTATED_LOG_DIR_OWNER:
+                dirs[:] = []
+                continue
+            if root == str(LOG_DIR):
+                dirs[:] = [d for d in dirs if d != "journal"]
+            for name in files:
+                if not is_rotated_log_name(name):
+                    continue
+                try:
+                    info = os.lstat(name, dir_fd=root_fd)
+                except OSError:
+                    continue
+                if stat.S_ISREG(info.st_mode) and info.st_mtime < cutoff:
+                    targets.append((os.dup(root_fd), name, info.st_size))
+        if len(targets) > MAX_ROTATED_LOGS:
+            raise ReclaimCeilingExceeded(
+                f"rotated-logs: {len(targets)} targets exceeds MAX_ROTATED_LOGS "
+                f"({MAX_ROTATED_LOGS}); refusing rather than deleting"
+            )
+        _enforce_ceiling("rotated-logs", 0, sum(size for _fd, _name, size in targets))
+        freed = removed = 0
+        for dir_fd, name, size in targets:
+            if not DRY_RUN:
+                try:
+                    os.unlink(name, dir_fd=dir_fd)
+                except FileNotFoundError:
+                    continue
+            freed += size
+            removed += 1
+    finally:
+        for dir_fd, _name, _size in targets:
+            os.close(dir_fd)
+    verb = "would remove" if DRY_RUN else "removed"
+    return freed, f"{verb} {removed} rotation(s) older than {ROTATED_LOG_MAX_AGE_DAYS}d"
+
+
 CATEGORIES: tuple[tuple[str, Callable[[], tuple[int, str]]], ...] = (
     ("app-images", cleanup_app_images),
     ("dangling-images", cleanup_dangling_images),
     ("release-worktrees", cleanup_release_worktrees),
     ("caches", cleanup_caches),
     ("journal", cleanup_journal),
+    ("rotated-logs", cleanup_rotated_logs),
 )
+# The deploy supervisor has just run `prune-locked <target>`; a target-less
+# app-image prune here could drop the pair that deploy is about to run.
+DEPLOY_CATEGORIES = tuple(item for item in CATEGORIES if item[0] != "app-images")
 
 
 def _free_space() -> int:
     return shutil.disk_usage("/").free
 
 
-def run_cleanup(categories=None, free_space=None) -> dict:
+def run_cleanup(categories=None, free_space=None, threshold=HEADROOM_THRESHOLD_BYTES) -> dict:
     """Run every category, isolating failures, and return the heartbeat payload."""
     categories = CATEGORIES if categories is None else categories
     free_space = _free_space if free_space is None else free_space
@@ -582,6 +714,11 @@ def run_cleanup(categories=None, free_space=None) -> dict:
         reclaimed[name] = freed
         notes[name] = note
     after = free_space()
+    if needs_reclaim(after, threshold):
+        errors["headroom"] = (
+            f"free {human_bytes(after)} still below the {human_bytes(threshold)} "
+            "deploy headroom after reclaim; operator action needed"
+        )
 
     return {
         "state": "error" if errors else "ok",
@@ -708,6 +845,33 @@ def write_service_health(state: str, detail: dict | None, started_at: str) -> No
         raise RuntimeError(f"service_health upsert rejected: {json.dumps(first)[:300]}")
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def deploy_lock_held_on_stdin(fd: Optional[int] = None, path: Optional[Path] = None) -> bool:
+    """True when ``fd`` is an open of the deploy lock this process may act under.
+
+    Same contract as `radon-app-runtime prune-locked`: the inode must be the
+    lock file's, and an flock through the SHARED description succeeds only if
+    the caller holds it (or nobody does); a lock held through any other open
+    refuses.
+    """
+    fd = LOCK_STDIN_FD if fd is None else fd
+    path = DEPLOY_LOCK_FILE if path is None else path
+    try:
+        held, named = os.fstat(fd), os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(named.st_mode) or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     global DRY_RUN
     args = list(sys.argv[1:] if argv is None else argv)
@@ -718,21 +882,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         DRY_RUN = True
         print("[disk-cleanup] DRY RUN: nothing will be deleted", file=sys.stderr)
 
+    free = _free_space()
+    mode = resolve_mode(args, os.environ.get("TRIGGER_UNIT", ""), _utcnow(), free)
+    if mode == "skip":
+        print(
+            f"[disk-cleanup] headroom ok: free {human_bytes(free)} >= "
+            f"{human_bytes(HEADROOM_THRESHOLD_BYTES)}; no reclaim"
+        )
+        return 0
+
     started_at = datetime.now(timezone.utc).isoformat()
-    with acquire_deploy_lock() as held:
+    if "--deploy-locked" in args:
+        if not deploy_lock_held_on_stdin():
+            print("[disk-cleanup] stdin is not the held deploy lock; skipping", file=sys.stderr)
+            return EX_TEMPFAIL
+        return _run_and_heartbeat(started_at, DEPLOY_CATEGORIES)
+
+    wait = GUARD_LOCK_WAIT_S if mode == "reclaim" else None
+    with acquire_deploy_lock(timeout_s=wait) as held:
         if not held:
             print(
                 "[disk-cleanup] a deployment owns the production deploy lock; "
-                "skipping this weekly reclaim",
+                f"skipping this {'guard' if mode == 'reclaim' else 'weekly'} reclaim",
                 file=sys.stderr,
             )
             return EX_TEMPFAIL
         return _run_and_heartbeat(started_at)
 
 
-def _run_and_heartbeat(started_at: str) -> int:
+def _run_and_heartbeat(started_at: str, categories=None) -> int:
     try:
-        outcome = run_cleanup()
+        outcome = run_cleanup(categories)
     except Exception as exc:  # noqa: BLE001 - a crash must still heartbeat
         crash = {"summary": f"disk cleanup crashed: {exc.__class__.__name__}: {exc}"[:SUMMARY_CAP]}
         print(crash["summary"], file=sys.stderr)

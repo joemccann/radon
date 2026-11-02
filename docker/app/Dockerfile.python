@@ -44,7 +44,11 @@ COPY scripts/requirements-api.txt ./scripts/requirements-api.txt
 # pip vendors its own certifi, so the base image's pip keeps trusting the
 # eMudhra/emSign intermediates (keys recovered 2026-10) until pip itself moves
 # to 26.2.2 (certifi 2026.10.19). Upgrade it before anything is downloaded.
-RUN python -m pip install --no-cache-dir --upgrade "pip>=26.2.2" "certifi>=2026.10.19"
+# DS-2026-10-28-02: that upgrade is fetched through the old trust store, so
+# it installs only the exact wheels whose sha256 the bootstrap file pins.
+COPY docker/app/requirements-bootstrap.txt ./requirements-bootstrap.txt
+RUN python -m pip install --no-cache-dir --require-hashes --no-deps \
+    --only-binary=:all: -r requirements-bootstrap.txt
 COPY scripts/deps/materialize_fastembed_pillow13.py ./scripts/deps/materialize_fastembed_pillow13.py
 RUN python scripts/deps/materialize_fastembed_pillow13.py
 RUN python -m pip install --no-cache-dir \
@@ -133,8 +137,12 @@ RUN python /opt/radon-clis/install-antigravity.py \
 ENV DISABLE_AUTOUPDATER=1
 
 COPY --from=vendor-clis-darwin /opt/radon-darwin /opt/radon-darwin
-RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.12.1+cpu" \
-    && python -m pip install --no-cache-dir "chronos-forecasting==2.3.0" "scipy==1.17.1"
+# DS-2026-10-28-02: torch 2.12.1+cpu, chronos-forecasting 2.3.0, scipy 1.17.1
+# and their whole closure install only as the wheels the lock's sha256 pins.
+COPY docker/app/requirements-model-gateway.txt ./requirements-model-gateway.txt
+RUN python -m pip install --no-cache-dir --require-hashes --no-deps --only-binary=:all: \
+    --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple \
+    -r requirements-model-gateway.txt
 USER radon
 # Run by GitHub's image build: verify real native payloads and root ownership.
 RUN python - <<'PY'

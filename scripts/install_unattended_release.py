@@ -15,7 +15,7 @@ import sys
 # The installer may itself run with -I; import only its reviewed source tree.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-LOOPS = ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/", "ci-performance/", "performance/", "security-private-release/")
+LOOPS = ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/", "ci-performance/", "performance/", "security-private-release/", "fix/", "feat/", "ci/", "docs/")
 CHECKS = ("Secret scan (gitleaks)", "PR body template", "Path filter", "Vitest coverage ratchet", "pytest coverage ratchet", "pytest (cloud al)", "pytest (cloud heavy)", "pytest (cloud edge)", "Perimeter smoke (next start + curl)", *(f"Vitest (shard {i}/8)" for i in range(1, 9)), *(f"pytest ({shard})" for shard in ("scripts-ac", "scripts-df", "scripts-i", "scripts-gh", "scripts-jm", "scripts-npsz", "scripts-rs", "scripts-daemons", "rest")))
 
 

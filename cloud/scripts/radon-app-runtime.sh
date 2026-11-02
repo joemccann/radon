@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -529,6 +529,16 @@ cmd_prune_locked() {
   # The pruner's own script arrives on stdin; the lock descriptor moves to 7.
   exec 7<&0
   prune_stale_app_images "$target" 1
+}
+
+# `reclaim-locked` is the disk headroom guard deploy.sh's supervisor runs after
+# `prune-locked`, before the inner deploy pulls or admits anything (2026-10-31:
+# a deploy refused at 6.2G free and a human ran the disk-cleanup oneshot). It
+# takes no argument: the threshold and every target are fixed in the root-owned
+# control-plane copy. The held deploy-lock descriptor stays on stdin, where
+# disk_cleanup.py verifies it; app images are left to `prune-locked`.
+cmd_reclaim_locked() {
+  RADON_ENV_FILE=/etc/radon/env exec "$PYTHON" -I /usr/local/lib/radon/disk_cleanup.py --deploy-locked
 }
 
 # $2 is 1 when fd 7 is the caller's held deploy-lock descriptor.
@@ -1591,6 +1601,10 @@ case "$1" in
   prune-locked)
     [[ $# -eq 1 || $# -eq 2 ]] || usage
     cmd_prune_locked "${2:-}"
+    ;;
+  reclaim-locked)
+    [[ $# -eq 1 ]] || usage
+    cmd_reclaim_locked
     ;;
   run)
     [[ $# -eq 2 ]] || usage

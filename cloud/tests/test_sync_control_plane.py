@@ -363,7 +363,7 @@ sudo() {{
   if [[ "$*" == *" prune" ]]; then
     {sys.executable} -c {shlex.quote(probe)} {lock} >> {log} 2>&1 || echo held >> {log}
   fi
-  if [[ "$*" == *" prune-locked "* ]]; then
+  if [[ "$*" == *" prune-locked "* || "$*" == *" reclaim-locked" ]]; then
     {sys.executable} -c {shlex.quote(stdin_probe)} {lock} >> {log} 2>&1
   fi
   return 0
@@ -410,6 +410,34 @@ supervise_deploy_command bash -c 'echo inner >> {log}; exit {deploy_rc}'
         assert body.index('log_success "Acquired production deploy lock"') \
             < body.index("prune_app_images_before_admission") < body.index('"${DEPLOY_TIMEOUT}s" "$@"')
         assert "0<&9" in function_body(DEPLOY.read_text(encoding="utf-8"), "prune_app_images_before_admission")
+
+    def test_supervisor_reclaims_disk_under_its_held_lock_after_the_prune(self, tmp_path):
+        """2026-10-31: a deploy was refused at 6.2G free against ~8.3G of model
+        admission and a human ran the disk-cleanup oneshot. The supervisor now
+        runs the threshold guard under its held FD 9, after the image prune and
+        before the inner deploy pulls or admits anything."""
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0)
+        assert result.returncode == 0, result.stdout + result.stderr
+        prune = f"-n /usr/local/sbin/radon-app-runtime prune-locked {self.TARGET}"
+        reclaim = "-n /usr/local/sbin/radon-app-runtime reclaim-locked"
+        assert reclaim in lines
+        assert lines[lines.index(reclaim) + 1] == "stdin=lock"
+        assert lines.index(prune) < lines.index(reclaim) < lines.index("inner")
+        body = function_body(DEPLOY.read_text(encoding="utf-8"), "supervise_deploy_command")
+        assert body.index("prune_app_images_before_admission") \
+            < body.index("reclaim_disk_before_admission") < body.index('"${DEPLOY_TIMEOUT}s" "$@"')
+
+    def test_a_missing_target_sha_skips_the_lock_held_reclaim(self, tmp_path):
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, target="")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not any("reclaim-locked" in line for line in lines)
+        assert "inner" in lines
+
+    def test_ungranted_reclaim_is_skipped_without_failing_the_deploy(self, tmp_path):
+        result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, granted=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "-n /usr/local/sbin/radon-app-runtime reclaim-locked" not in lines
+        assert "inner" in lines
 
     def test_a_missing_target_sha_skips_the_lock_held_prune(self, tmp_path):
         result, lines = self._post_deploy_prune(tmp_path, deploy_rc=0, target="")
