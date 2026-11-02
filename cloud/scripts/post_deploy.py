@@ -390,15 +390,18 @@ def _terminate_group(proc: subprocess.Popen) -> None:
 
 def execute_hook(hook: Hook, ctx: HookContext, timeout: float) -> tuple[bool, str]:
     interpreter = str(ctx.python) if hook.interpreter == "python" else ctx.bash
-    proc = subprocess.Popen(
-        [interpreter, str(hook.path)],
-        cwd=ctx.radon_dir,
-        env=_hook_env(hook, ctx),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
+    try:
+        proc = subprocess.Popen(
+            [interpreter, str(hook.path)],
+            cwd=ctx.radon_dir,
+            env=_hook_env(hook, ctx),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return False, f"could not start {interpreter}: {exc}"
     try:
         output, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -641,6 +644,18 @@ def _page_log_pager(path: str) -> Pager:
 
 def run(*, root: Path, state_path: Path, hook_ctx: HookContext, verify_ctx: VerifyContext,
         expect_user: str, pager: Pager) -> int:
+    # deploy.sh ignores the exit status, so an uncaught error would be silent.
+    try:
+        return _run(root=root, state_path=state_path, hook_ctx=hook_ctx, verify_ctx=verify_ctx,
+                    expect_user=expect_user, pager=pager)
+    except Exception as exc:  # noqa: BLE001 - every failure must page
+        _page(pager, "radon post-deploy crashed",
+              f"{hook_ctx.deploy_sha[:7]}: {type(exc).__name__}: {exc}. Pending hooks retry next deploy.")
+        return 1
+
+
+def _run(*, root: Path, state_path: Path, hook_ctx: HookContext, verify_ctx: VerifyContext,
+         expect_user: str, pager: Pager) -> int:
     euid = os.geteuid()
     try:
         if euid == 0:

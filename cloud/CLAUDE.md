@@ -530,11 +530,13 @@ log creation, writing and rotation while source directories remain unwritable.
 
 Host work that a PR would otherwise leave under "Operator Next Steps" is
 code: a reviewed hook in `post_deploy/hooks/` plus an entry in
-`post_deploy/manifest.json`. `deploy.sh` `run_post_deploy` calls
-`scripts/post_deploy.py run` from the immutable runner only after the live
-gate passed for the SHA: after `commit-transition` and the live Pushover on a
-fresh deploy, and after the live gate on an already-green rerun. It returns
-0 either way; nothing here can roll back a verified release.
+`post_deploy/manifest.json`. The deploy supervisor calls
+`scripts/post_deploy.py run` from the immutable runner after the inner deploy
+exits 0 (a fresh deploy or an already-green rerun), the green marker and HEAD
+both name the SHA, and the supervisor has released the deploy lock: `radon
+unit restart` refuses while that lock is held. Prestage and failed deploys run
+nothing. It returns 0 either way; nothing here can roll back a verified
+release.
 
 Hooks:
 

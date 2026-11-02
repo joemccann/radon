@@ -244,6 +244,29 @@ def test_hook_timeout_kills_process_group_and_records_failure(tree):
     assert not (tree.radon_dir / "orphan").exists()
 
 
+def test_hook_that_cannot_start_is_recorded_failed_and_paged(tree):
+    """A missing interpreter used to raise out of the runner: no page, and the
+    record stayed `running` until some later deploy."""
+    tree.add_hook("0001-py", "print('hi')\n", ext=".py")
+    assert tree.run_hooks(python=tree.radon_dir / "missing-python") == 1
+    record = tree.read_state()["hooks"]["0001-py"]
+    assert record["status"] == "failed"
+    assert "could not start" in record["last_error"]
+    assert len(tree.pages) == 1 and "0001-py" in tree.pages[0][1]
+
+
+def test_unexpected_runner_error_is_paged_not_swallowed(tree, monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("disk on fire")
+
+    tree.log_hook("0001-any")
+    monkeypatch.setattr(pd, "run_hooks", boom)
+    assert tree.run_all() == 1
+    assert len(tree.pages) == 1
+    assert tree.pages[0][0] == "radon post-deploy crashed"
+    assert "disk on fire" in tree.pages[0][1]
+
+
 def test_budget_exhaustion_defers_remaining_hooks_and_pages(tree):
     tree.log_hook("0001-first")
     tree.log_hook("0002-second")
@@ -760,18 +783,98 @@ def _function_body(src: str, name: str) -> str:
     return src[start:end]
 
 
-def test_deploy_runs_post_deploy_only_after_verified_release():
+def test_deploy_runs_post_deploy_only_after_the_supervisor_releases_the_lock():
+    """`radon unit restart` (the documented hook path) takes the deploy lock
+    non-blocking and refuses while it is held. The supervisor holds it on FD 9
+    for the whole inner deploy, so hooks must run after it closes FD 9."""
     src = DEPLOY.read_text()
-    main = _function_body(src, "main")
-    assert main.count("run_post_deploy ") == 2
-    # Fresh deploy: after the green marker, commit and live notification.
-    tail = main[main.index("write_green_marker"):]
-    assert tail.index("commit-transition") < tail.index("notify_release_live") < tail.index("run_post_deploy")
-    # Already-green rerun retries pending hooks only after the live gate passes.
-    green = main[main.index("already has a durable green marker"):main.index("quarantine_green_marker")]
-    assert green.index("deploy_gate") < green.index("run_post_deploy")
+    assert "run_post_deploy" not in _function_body(src, "main")
     assert "run_post_deploy" not in _function_body(src, "rollback")
     assert "run_post_deploy" not in _function_body(src, "deploy_gate")
+    supervisor = _function_body(src, "supervise_deploy_command")
+    assert supervisor.count("run_post_deploy_if_green") == 1
+    assert supervisor.rindex("exec 8>&- 9>&-") < supervisor.index("run_post_deploy_if_green")
+    assert supervisor.index('DEPLOY_STARTED_EPOCH="$(date +%s)"') < supervisor.index('"${DEPLOY_TIMEOUT}s" "$@"')
+
+
+def _supervised_deploy(tmp_path, *, deploy_rc=0, stage="0", marker=True, head_matches=True):
+    """Run the real supervisor with an inner deploy stub and a fake runner that
+    records whether the production deploy lock was free when it ran."""
+    radon = tmp_path / "radon"
+    radon.mkdir()
+    git = ["git", "-C", str(radon), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    target = head if head_matches else "e" * 40
+    green = tmp_path / "green"
+    if marker:
+        green.write_text(f"{target}\n")
+    lock = tmp_path / "deploy.lock"
+    lock.write_text("")
+    support = tmp_path / "support"
+    support.mkdir()
+    probe_log = tmp_path / "runner.log"
+    (support / "post_deploy.py").write_text(
+        "import fcntl, sys\n"
+        f"lock = open({str(lock)!r})\n"
+        "try:\n"
+        "    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+        "    state = 'free'\n"
+        "except BlockingIOError:\n"
+        "    state = 'held'\n"
+        f"open({str(probe_log)!r}, 'a').write(state + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+    )
+    flock_py = "import fcntl,sys; fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX | fcntl.LOCK_NB)"
+    shell = f"""
+set -euo pipefail
+source {shlex.quote(str(DEPLOY))}
+# A real flock on the supervisor's FD (the lock lives on the open file description).
+flock() {{ [[ "$1" == "-n" ]] && shift; {shlex.quote(sys.executable)} -c {shlex.quote(flock_py)} "$1"; }}
+timeout() {{ if [[ "$1" == --signal=* ]]; then shift 3; else shift; fi; "$@"; }}
+sudo() {{ return 1; }}
+DEPLOY_TARGET_SHA={target}
+supervise_deploy_command bash -c 'exit {deploy_rc}' || echo "supervisor rc=$?"
+"""
+    env = {
+        **os.environ,
+        "RADON_DIR": str(radon),
+        "RADON_CLOUD_DIR": str(CLOUD_ROOT),
+        "RADON_DEPLOY_SUPPORT_DIR": str(support),
+        "RADON_SYSTEM_PYTHON": sys.executable,
+        "RADON_DEPLOY_ENV_FILE": str(tmp_path / "env"),
+        "RADON_DEPLOY_LOCK_FILE": str(lock),
+        "RADON_DEPLOY_GREEN_MARKER": str(green),
+        "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
+        "RADON_POST_DEPLOY_STATE": str(tmp_path / "state.json"),
+        "RADON_POST_DEPLOY_USER": ME,
+        "RADON_DEPLOY_STAGE": stage,
+        "DEPLOY_TIMEOUT": "30",
+        "DEPLOY_KILL_AFTER": "5",
+    }
+    result = subprocess.run(["bash", "-c", shell], env=env, capture_output=True, text=True, timeout=60)
+    lines = probe_log.read_text().splitlines() if probe_log.exists() else []
+    return result, lines, target
+
+
+def test_supervisor_runs_post_deploy_once_with_the_deploy_lock_free(tmp_path):
+    result, lines, target = _supervised_deploy(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "supervisor rc" not in result.stdout
+    assert len(lines) == 1, result.stdout + result.stderr
+    assert lines[0].startswith("free run ")
+    assert f"--deploy-sha {target}" in lines[0]
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"deploy_rc": 1},
+    {"stage": "1"},
+    {"marker": False},
+    {"head_matches": False},
+], ids=["failed-deploy", "prestage", "no-green-marker", "head-not-target"])
+def test_supervisor_skips_post_deploy_without_a_green_release(tmp_path, kwargs):
+    result, lines, _ = _supervised_deploy(tmp_path, **kwargs)
+    assert lines == [], result.stdout + result.stderr
 
 
 def test_post_deploy_failure_is_non_fatal_and_runs_as_radon():

@@ -1831,6 +1831,8 @@ run_post_deploy() {
   # Runs only after the live gate passed for this SHA. The release is already
   # verified, so a hook or check failure cannot roll it back: the runner pages
   # it, a failed hook stays pending for the next deploy, and this returns 0.
+  # The supervisor calls it after closing FD 8/9: a hook restarts a unit with
+  # `radon unit restart`, which refuses while the deploy lock is held.
   local sha="$1"
   local py="${VENV_DIR}/bin/python"
   [[ -x "$py" ]] || py="$SYSTEM_PYTHON"
@@ -1849,6 +1851,19 @@ run_post_deploy() {
     log_error "Post-deploy hooks or verification failed (paged); the release stays live"
   fi
   return 0
+}
+
+run_post_deploy_if_green() {
+  # The inner deploy exited 0 (fresh deploy or already-green rerun) and both
+  # the green marker and HEAD name the requested SHA. Prestage, a refused or
+  # rolled-back deploy, or a missing target runs no hook.
+  local exit_code="$1" sha="${DEPLOY_TARGET_SHA:-}"
+  (( exit_code == 0 )) || return 0
+  [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]] || return 0
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+  green_marker_matches "$sha" || return 0
+  [[ "$(current_commit 2>/dev/null)" == "$sha" ]] || return 0
+  run_post_deploy "$sha"
 }
 
 # -- Rollback ---------------------------------------------------------------
@@ -1897,7 +1912,6 @@ main() {
   fi
 
   trap 'handle_deploy_signal TERM' TERM INT HUP
-  DEPLOY_STARTED_EPOCH="$(date +%s)"
   log_info "Starting deployment (timeout: ${DEPLOY_TIMEOUT}s)..."
   if [[ "${RADON_RUNTIME:-host}" != "host" ]]; then
     log_error "RADON_RUNTIME=${RADON_RUNTIME:-} is not production. Host binaries only (GHCR down must not block a deploy)."
@@ -1970,7 +1984,6 @@ main() {
         "Caddy publish failed on an already-green release; the next deploy will republish it"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
-      run_post_deploy "$requested_sha"
       return 0
     else
       log_error "Previously green release no longer passes the live gate; rebuilding and restarting it"
@@ -2045,7 +2058,6 @@ main() {
   trap - TERM INT HUP
   log_success "Deploy successful: $(short_log)"
   notify_release_live "$requested_sha"
-  run_post_deploy "$requested_sha"
 }
 
 run_deploy_internal() {
@@ -2335,6 +2347,8 @@ supervise_deploy_command() {
   prune_app_images_before_admission "${DEPLOY_TARGET_SHA:-}"
 
   local exit_code=0
+  # Journal checks never look before this deploy began.
+  DEPLOY_STARTED_EPOCH="$(date +%s)"
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
     "${DEPLOY_TIMEOUT}s" "$@" 8>&- 9>&- &
   SUPERVISED_TIMEOUT_PID=$!
@@ -2361,6 +2375,8 @@ supervise_deploy_command() {
   if [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
     prune_app_images_after_deploy
   fi
+  # After FD 8/9 close: a hook's `radon unit restart` needs the deploy lock.
+  run_post_deploy_if_green "$exit_code"
   return "$exit_code"
 }
 
