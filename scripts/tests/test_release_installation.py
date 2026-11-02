@@ -317,3 +317,23 @@ os.replace = replace_then_kill"""
 
     recovered = ur.FileStateStore(state_path, owner_uid=owner_uid)
     assert expected_claim in {key for key, _ in recovered.pending_releases()}
+
+
+def test_default_policy_auto_merges_every_operator_branch_prefix():
+    # Operator decision 2026-11-01: the coordinator releases every branch
+    # family, not only the nightly loops. .github/, review and CI gates stay.
+    for prefix in ("fix/", "feat/", "ci/", "docs/"):
+        assert prefix in installer.LOOPS
+    for loop in ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/",
+                 "ci-performance/", "performance/", "security-private-release/"):
+        assert loop in installer.LOOPS
+    policy = ur.TrustedPolicy(repository="joemccann/radon", authors=("radon-runner-bot", "joemccann"),
+                              branch_prefixes=installer.LOOPS, required_checks=installer.CHECKS)
+    pr = SimpleNamespace(repository="joemccann/radon", draft=False, base_branch="main", author="joemccann",
+                         head_branch="fix/grok-page-ledger-timeout", head_sha="a" * 40, diff_digest="d" * 64)
+    assert ur._eligible(pr, policy)
+    assert ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "feat/x"}), policy)
+    # Unlisted families, and near-miss names, still wait for a human.
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "cursor/x"}), policy)
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "fixes/x"}), policy)
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "author": "someone-else"}), policy)
