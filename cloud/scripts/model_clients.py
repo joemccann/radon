@@ -58,6 +58,13 @@ PINNED_MODEL_FILE_BYTES = tuple(size for _path, size, _digest in PINNED_MODEL_FI
 RUNTIME_RESERVE_BYTES = 1024 * 1024 * 1024
 RUNTIME_RESERVE_INODES = 1024
 EXPORT_NAME = "radon-model-client-export"
+# Export time limits. CI streams the Linux export (1621964800 bytes) at
+# ~23-30 MB/s, ~55s on a typical runner; a fixed 60s wall clock failed 3 of
+# 28 attempts while bytes were still flowing. A wedged export emits nothing,
+# so the stall window resets on every chunk; the ceiling bounds a trickle and
+# sits under the 180s root action budget so this error fires first.
+EXPORT_STALL_SECONDS = 30
+EXPORT_CEILING_SECONDS = 150
 HELPERS = ("__init__.py", "client.py", "cli.py", "cli_bridge.py")
 PACKAGES = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "grok": "@xai-official/grok"}
 
@@ -415,19 +422,23 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
     export_env = os.environ.copy()
     export_env.pop("NOTIFY_SOCKET", None)
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=export_env)
-    deadline = time.monotonic() + 60
+    started = last_progress = time.monotonic()
     received = 0
     try:
         assert process.stdout is not None
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("client export deadline")
-            if not select.select([process.stdout], [], [], min(remaining, 1))[0]:
+            now = time.monotonic()
+            if now - started >= EXPORT_CEILING_SECONDS:
+                raise TimeoutError(f"client export exceeded the {EXPORT_CEILING_SECONDS}s ceiling after {received} bytes")
+            if now - last_progress >= EXPORT_STALL_SECONDS:
+                raise TimeoutError(f"client export stalled: no bytes for {EXPORT_STALL_SECONDS}s after {received} bytes")
+            wait = min(1, started + EXPORT_CEILING_SECONDS - now, last_progress + EXPORT_STALL_SECONDS - now)
+            if not select.select([process.stdout], [], [], wait)[0]:
                 continue
             chunk = os.read(process.stdout.fileno(), 65536)
             if not chunk:
                 break
+            last_progress = time.monotonic()
             received += len(chunk)
             if received > (DARWIN_MAX_EXPORT_BYTES if darwin else LINUX_MAX_STREAM_BYTES):
                 raise ValueError("client export exceeds bounds")

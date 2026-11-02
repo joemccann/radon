@@ -66,6 +66,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = measure(args.engine, args.image, args.scratch)
+    except TimeoutError as exc:
+        # A slow or wedged export is not a size breach; the pins are not the fix.
+        print(f"::error title=model client export timeout::{type(exc).__name__}: {exc}. "
+              "Not a disk-bounds breach: the export ran past its time limit "
+              "(EXPORT_STALL_SECONDS / EXPORT_CEILING_SECONDS in cloud/scripts/model_clients.py).",
+              file=sys.stderr)
+        return 1
     except Exception as exc:  # noqa: BLE001 - every refusal is a CI failure
         print(f"::error title=model client disk bounds::{type(exc).__name__}: {exc}. "
               "Raise the pins in cloud/scripts/model_clients.py (and the documented "
