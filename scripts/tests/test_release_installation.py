@@ -65,6 +65,7 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
         "private_security_release.py",
         "operator_runtime_refresh.py",
         "codex_capability_probe.py",
+        "credential_redaction.py",
         "model_gateway",
         "ci",
     }
@@ -77,6 +78,13 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
     )
     assert isolated_help.returncode == 0, isolated_help.stderr
     assert "--policy" in isolated_help.stdout
+    private_import = _REAL_SUBPROCESS_RUN(
+        [sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import private_security_release",
+         str(installed_release)],
+        capture_output=True,
+        text=True,
+    )
+    assert private_import.returncode == 0, private_import.stderr
     assert config["StartInterval"] == 300
     assert config["RunAtLoad"] is True
     assert config["EnvironmentVariables"] == {
