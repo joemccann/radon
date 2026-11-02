@@ -56,3 +56,12 @@ def test_specific_unit_capture_occurs_immediately_before_container_stop():
     text=(CLOUD/'scripts/radon-app-runtime.sh').read_text();body=text.split('cmd_halt() {',1)[1].split('\n}',1)[0]
     assert 'capture-model-pacing' in body or 'model_pacing.py' in body
     assert body.index('model_pacing.py')<body.index('\"$DOCKER\" stop ')
+
+def test_every_app_unit_is_a_managed_pacing_unit():
+    # cmd_halt passes every APP_UNITS member to model_pacing.py, which returns 64
+    # for a unit outside UNITS; systemd then marks the finished oneshot failed.
+    import re
+    text=(CLOUD/'scripts/radon-app-runtime.sh').read_text()
+    app_units=re.search(r'^readonly APP_UNITS="([^"]*)"',text,re.M).group(1).split()
+    missing=sorted(set(app_units)-set(module().UNITS))
+    assert missing==[]
