@@ -46,6 +46,10 @@ def install(*, source: Path, destination: Path, home: Path, python: Path, notifi
     _trusted(probe_source, uid)
     shutil.copyfile(probe_source, release / "codex_capability_probe.py")
     (release / "codex_capability_probe.py").chmod(0o500)
+    redaction_source = source.with_name("credential_redaction.py")
+    _trusted(redaction_source, uid)
+    shutil.copyfile(redaction_source, release / "credential_redaction.py")
+    (release / "credential_redaction.py").chmod(0o500)
     validator_source = source.parent / "ci/check_pr_body.py"
     _trusted(validator_source, uid)
     (release / "ci").mkdir(mode=0o700)
