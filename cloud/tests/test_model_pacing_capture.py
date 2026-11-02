@@ -56,3 +56,14 @@ def test_specific_unit_capture_occurs_immediately_before_container_stop():
     text=(CLOUD/'scripts/radon-app-runtime.sh').read_text();body=text.split('cmd_halt() {',1)[1].split('\n}',1)[0]
     assert 'capture-model-pacing' in body or 'model_pacing.py' in body
     assert body.index('model_pacing.py')<body.index('\"$DOCKER\" stop ')
+
+
+def test_halt_accepts_every_app_unit_it_hands_to_the_pacing_capture():
+    # cmd_halt runs model_pacing.py for every APP_UNITS member as ExecStop; a
+    # unit missing from UNITS exits 64 and marks the unit failed after a clean
+    # run (radon-research-asset-archive, 2026-11-01 and 2026-11-02).
+    import re
+    text=(CLOUD/'scripts/radon-app-runtime.sh').read_text()
+    app_units=set(re.search(r'^readonly APP_UNITS="([^"]+)"',text,re.M).group(1).split())
+    assert 'radon-research-asset-archive.service' in app_units
+    assert app_units-set(module().UNITS)==set()
