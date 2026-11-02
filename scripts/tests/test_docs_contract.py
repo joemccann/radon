@@ -3192,3 +3192,80 @@ class TestDocumentation20261031:
         assert "reaches the vault through the broker socket" not in drift
         assert "read-only ladder grants" not in drift
         assert "The subscription keeper loads the root-private derived environment" not in drift
+
+
+class TestDocumentation20261102:
+    """Gateway-era ladder env and the no-restart promote path match source."""
+
+    def test_ladder_order_is_not_an_env_override(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        auth = research.split("#### Auth matrix", 1)[1].split("**Expired subscription token.**", 1)[0]
+        assert "RADON_MODEL_LADDER_ORDER" not in auth
+        assert "provider-cooldown.json" not in auth
+        assert "RADON_PROVIDER_COOLDOWN_STATE" not in auth
+        assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in auth
+        assert "codex:rate_limited_cooldown" not in auth
+        assert "CEREBRAS_MAX_IMAGES" not in auth
+        assert "CEREBRAS_MAX_REQUEST_BYTES" not in auth
+        assert "https://integrate.api.nvidia.com/v1/<model>" not in auth
+        assert "uses NVIDIA when keyed" not in auth
+        assert "PAUSED_BY_DEFAULT" in auth
+        assert "http_429" in auth
+        assert "MODEL_LADDER_ORDER" in auth
+
+        contracts = (_ROOT / "scripts/model_gateway/contracts.py").read_text()
+        order = contracts.split("MODEL_LADDER_ORDER = (", 1)[1].split(")", 1)[0]
+        assert '"antigravity"' in order.split(",", 1)[0]
+        engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
+        assert "RADON_MODEL_LADDER_ORDER" not in engine
+        assert 'PAUSED_BY_DEFAULT = frozenset({"cerebras", "nvidia"})' in engine
+        assert "provider_cooldown" not in engine
+
+        example = (_ROOT / "cloud/.env.example").read_text()
+        for name in (
+            "RADON_MODEL_LADDER_ORDER",
+            "RADON_PROVIDER_COOLDOWN_STATE",
+            "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S",
+            "CEREBRAS_MAX_IMAGES",
+            "CEREBRAS_MAX_REQUEST_BYTES",
+        ):
+            assert name not in example
+
+        oauth = (_ROOT / "docs/oauth-subscription-auth.md").read_text()
+        ladder = oauth.split("## Radon HTTP model ladder (server)", 1)[1]
+        ladder = ladder.split("\n## ", 1)[0]
+        assert "PAUSED_BY_DEFAULT" in ladder
+        assert "NVIDIA_API_KEY` is always OK" not in ladder
+
+    def test_marketdesk_copy_does_not_skip_grok_or_fail_over_incomplete(self):
+        desk = (_ROOT / "docs/marketdesk-research.md").read_text()
+        copy_rules = desk.split("## Copy rules", 1)[1].split("## ", 1)[0]
+        assert "Captions obey the same\nladder is" not in copy_rules
+        assert "The image copy call skips text-only Antigravity and grok" not in copy_rules
+        assert "IMAGE_PROVIDERS" not in copy_rules
+        assert "fails over to the next rung" not in copy_rules
+        assert "grok included" in copy_rules
+        assert "ModelResponseError" in copy_rules
+        assert "CopyUnavailable" in copy_rules
+        src = (_ROOT / "scripts/research/marketdesk_copy.py").read_text()
+        write = src.split("def write_copy(", 1)[1]
+        ask = write.split("def ask(prompt: str):", 1)[1]
+        assert "providers=" not in ask.split("try:", 1)[0]
+        assert "except ModelResponseError as exc:" in write
+        assert "raise CopyUnavailable" in write.split("except ModelResponseError as exc:", 1)[1][:200]
+
+    def test_payload_unchanged_promote_in_place_is_in_the_deploy_owner(self):
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        deploy = cloud.split("## Deployment Contract", 1)[1].split("## Post-deploy hooks", 1)[0]
+        assert "promote-in-place" in deploy
+        assert "stop-clean" in deploy
+        assert "payload_paths_changed" in deploy
+        helper = (_ROOT / "cloud/scripts/deploy.sh").read_text()
+        restart = helper.split("restart_services()", 1)[1]
+        assert 'sudo "$DEPLOY_ROOT_HELPER" promote-in-place' in restart
+        assert "UNITS_RESTARTED=0" in restart.split("promote-in-place", 1)[1][:400]
+        sudoers = (_ROOT / "cloud/config/sudoers.d/radon-deploy").read_text()
+        assert "radon-deploy-root promote-in-place" in sudoers
+        readme = (_ROOT / "cloud/README.md").read_text()
+        assert "stop-clean`, `restart-managed`, `recover`" not in readme
+        assert "sudoers.d/radon-deploy" in readme
