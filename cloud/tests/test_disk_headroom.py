@@ -355,12 +355,26 @@ class TestUnitWiring:
         assert "Persistent=true" not in code
 
     def test_the_hourly_guard_never_lands_in_the_weekly_slot(self):
-        # RandomizedDelaySec spreads :50 to at most :55, never into 03:xx.
+        # RandomizedDelaySec spreads :50 to at most :55, never into the 03:00-03:44 sweep slot.
         code = self._code(self.TIMER_FILE)
         assert "RandomizedDelaySec=300" in code
         assert not disk_cleanup.is_weekly_sweep_slot(
             datetime(2026, 11, 8, 2, 55, tzinfo=timezone.utc)
         )
+
+    @pytest.mark.parametrize("minute", [50, 52, 55])
+    def test_the_sunday_0350_hourly_firing_is_a_guard_not_a_second_sweep(self, minute):
+        # Both OnCalendar lines elapse inside Sunday 03:xx UTC: 03:20 (sweep)
+        # and 03:50 (hourly guard). The :50 firing must stay the guard.
+        when = datetime(2026, 11, 8, 3, minute, tzinfo=timezone.utc)
+        assert not disk_cleanup.is_weekly_sweep_slot(when)
+        assert disk_cleanup.resolve_mode([], TIMER, when, 50 * GIB) == "skip"
+
+    @pytest.mark.parametrize("minute", [20, 25, 44])
+    def test_the_sunday_0320_firing_and_its_spread_stay_the_sweep(self, minute):
+        when = datetime(2026, 11, 8, 3, minute, tzinfo=timezone.utc)
+        assert disk_cleanup.is_weekly_sweep_slot(when)
+        assert disk_cleanup.resolve_mode([], TIMER, when, 50 * GIB) == "sweep"
 
     def test_runtime_exposes_an_argumentless_reclaim_locked_verb(self):
         runtime = (ROOT / "scripts" / "radon-app-runtime.sh").read_text(encoding="utf-8")

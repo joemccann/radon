@@ -163,7 +163,7 @@ cb09556b2a06dda7a685727f293494124b1722220cd7a9be45876d7a66eaaaee  radon-dispersi
 # CONTROL_PLANE_SOURCES growth already requires before the next deploy's
 # verify-control-plane preflight can pass.
 94ce3a04639184a971e4919242be86d273079f5125c03f70f6f615a80a15c4e3  radon-disk-cleanup.service
-b71569d9ee5d30376d2063da1606a33fcd448ec3c5bb47bbd032f4735846058f  radon-disk-cleanup.timer
+d86f1b6a9e0c510cd3b52f7db6424076432a38198c97aa03122f79e35bda14e1  radon-disk-cleanup.timer
 
 # T-236: the FLEET-WIDE systemd prefix drop-in. Not a unit -- systemd applies
 # "radon-.service.d/" to every unit named radon-*, so this one file's blast

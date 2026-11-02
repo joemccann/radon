@@ -53,7 +53,7 @@ drift_audit.py reporting drift.
 THRESHOLD GUARD (2026-11-01). The weekly sweep alone left a human running this
 oneshot by hand: root hit 3.1 GiB free on 2026-10-31 and a deploy was refused
 at 6.2G against ~8.3G of model admission. The same unit's timer now also fires
-hourly; any timer firing outside the Sunday 03:xx UTC slot (and `--if-below`)
+hourly; any timer firing outside the Sunday 03:00-03:44 UTC slot (and `--if-below`)
 reclaims only when free space is under HEADROOM_THRESHOLD_BYTES, and never
 waits on a deploy. `--deploy-locked` is the same guard run by deploy.sh's
 supervisor through `radon-app-runtime reclaim-locked`, with the supervisor's
@@ -99,6 +99,9 @@ HEADROOM_THRESHOLD_BYTES = 12 * GIB
 # firing is the hourly guard (radon-disk-cleanup.timer).
 WEEKLY_SWEEP_WEEKDAY = 6  # Sunday
 WEEKLY_SWEEP_HOUR = 3
+# 03:20 + RandomizedDelaySec=300 ends by 03:25; the hourly :50 firing also
+# elapses inside 03:xx on Sunday and must stay the guard, not a second sweep.
+WEEKLY_SWEEP_MINUTE_END = 45
 # The guard never waits out a deploy: the supervisor runs its own reclaim.
 GUARD_LOCK_WAIT_S = 0.0
 GUARD_FLAGS = ("--if-below", "--deploy-locked")
@@ -377,7 +380,11 @@ def needs_reclaim(free_bytes: int, threshold: int = HEADROOM_THRESHOLD_BYTES) ->
 
 def is_weekly_sweep_slot(now: datetime) -> bool:
     now = now.astimezone(timezone.utc)
-    return now.weekday() == WEEKLY_SWEEP_WEEKDAY and now.hour == WEEKLY_SWEEP_HOUR
+    return (
+        now.weekday() == WEEKLY_SWEEP_WEEKDAY
+        and now.hour == WEEKLY_SWEEP_HOUR
+        and now.minute < WEEKLY_SWEEP_MINUTE_END
+    )
 
 
 def resolve_mode(

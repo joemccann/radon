@@ -10,10 +10,10 @@ Description=Radon disk cleanup -- weekly sweep Sunday off-hours, hourly headroom
 OnCalendar=Sun *-*-* 03:20:00 UTC
 # Hourly headroom guard (2026-11-01): root reached 3.1 GiB free mid-week and a
 # deploy was refused at 6.2G, so a human ran this oneshot. disk_cleanup.py
-# treats every timer firing outside the Sunday 03:xx UTC slot as the guard: it
+# treats every timer firing outside the Sunday 03:00-03:44 UTC slot as the guard: it
 # exits at once while free space is at or above HEADROOM_THRESHOLD_BYTES,
 # never waits on a deploy, and otherwise reclaims and heartbeats `error` when
-# it cannot restore headroom. :50 plus the 300s spread never reaches 03:xx.
+# it cannot restore headroom. :50 plus the 300s spread never reaches 03:00-03:44.
 OnCalendar=*-*-* *:50:00 UTC
 RandomizedDelaySec=300
 # NO Persistent=true, deliberately. A missed firing replaying at boot voids
