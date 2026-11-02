@@ -764,10 +764,17 @@ class TestPushGate:
             world["origin"], "for-each-ref", "--format=%(refname)"
         ).stdout
 
-    def test_plist_ships_with_autopush_off(self):
+    def test_plist_ships_with_autopush_on(self):
+        """Pickup is the only job that holds the push credential, so it is
+        the one place AUTOPUSH is on. The documented reinstall renders this
+        template, so a template shipping 0 silently stops publication. The
+        VPS responder env still forces 0 (cloud/tests/test_grok_responder_env)."""
         plist = plistlib.loads(PLIST.read_bytes())
         env = plist["EnvironmentVariables"]
-        assert env.get("GROK_PAGE_AUTOPUSH") == "0"
+        assert env.get("GROK_PAGE_AUTOPUSH") == "1"
+        assert not any(
+            k.startswith(("PUSHOVER_", "TURSO_", "GH_", "GITHUB_")) for k in env
+        )
 
     def test_stale_pickup_code_refuses_to_run(self, world, monkeypatch):
         """A clone that stopped refreshing ran pre-#773 code with none of

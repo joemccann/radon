@@ -1508,6 +1508,10 @@ restart_services() {
     # live env is correct by construction here. R-231.
     RADON_DEPLOY_KEEP_LIVE_VENV=1 \
       activate_staged_release "$requested_sha" "$previous_sha" || return $?
+    # No teardown or managed restart runs here, so the helper must clear the
+    # previous release's commit receipt and export model clients for the new
+    # HEAD, or the final commit refuses (2026-11-02, #1382).
+    sudo "$DEPLOY_ROOT_HELPER" promote-in-place || return 1
     refresh_control_plane || return 1
     install_release_units
     UNITS_RESTARTED=0
