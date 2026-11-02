@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         # A slow or wedged export is not a size breach; the pins are not the fix.
         print(f"::error title=model client export timeout::{type(exc).__name__}: {exc}. "
               "Not a disk-bounds breach: the export ran past its time limit "
-              "(EXPORT_STALL_SECONDS / EXPORT_CEILING_SECONDS in cloud/scripts/model_clients.py).",
+              "(EXPORT_STALL_SECONDS / *_EXPORT_CEILING_SECONDS in cloud/scripts/model_clients.py).",
               file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 - every refusal is a CI failure

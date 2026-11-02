@@ -53,7 +53,7 @@ def trickle_engine(tmp_path: Path, *, chunks: int, interval: float, initial_dela
 def test_export_keeps_going_past_the_stall_window_while_bytes_flow(api, tmp_path, monkeypatch):
     # Total runtime (~1.6s) is several stall windows; progress keeps it alive.
     monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 0.5)
-    monkeypatch.setattr(api, "EXPORT_CEILING_SECONDS", 10)
+    monkeypatch.setattr(api, "LINUX_EXPORT_CEILING_SECONDS", 10)
     target = io.BytesIO()
     api.export_from_image(trickle_engine(tmp_path, chunks=8, interval=0.2), "image", target)
     assert target.read() == b"x" * 8 * 1024
@@ -61,7 +61,7 @@ def test_export_keeps_going_past_the_stall_window_while_bytes_flow(api, tmp_path
 
 def test_export_fails_fast_with_an_accurate_message_when_bytes_stop(api, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 0.5)
-    monkeypatch.setattr(api, "EXPORT_CEILING_SECONDS", 10)
+    monkeypatch.setattr(api, "LINUX_EXPORT_CEILING_SECONDS", 10)
     engine = trickle_engine(tmp_path, chunks=2, interval=5)
     started = time.monotonic()
     with pytest.raises(TimeoutError) as raised:
@@ -73,14 +73,14 @@ def test_export_fails_fast_with_an_accurate_message_when_bytes_stop(api, tmp_pat
 
 def test_export_with_no_first_byte_is_a_stall(api, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 0.5)
-    monkeypatch.setattr(api, "EXPORT_CEILING_SECONDS", 10)
+    monkeypatch.setattr(api, "LINUX_EXPORT_CEILING_SECONDS", 10)
     with pytest.raises(TimeoutError, match=r"stalled.* 0 bytes"):
         api.export_from_image(trickle_engine(tmp_path, chunks=1, interval=0, initial_delay=5), "image", io.BytesIO())
 
 
 def test_steady_progress_still_hits_the_hard_ceiling(api, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 0.5)
-    monkeypatch.setattr(api, "EXPORT_CEILING_SECONDS", 1)
+    monkeypatch.setattr(api, "LINUX_EXPORT_CEILING_SECONDS", 1)
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="ceiling") as raised:
         api.export_from_image(trickle_engine(tmp_path, chunks=1000, interval=0.1), "image", io.BytesIO())
@@ -94,16 +94,27 @@ def test_byte_bounds_still_refuse_a_fast_oversized_export(api, tmp_path, monkeyp
         api.export_from_image(trickle_engine(tmp_path, chunks=8, interval=0), "image", io.BytesIO())
 
 
+def test_darwin_export_uses_its_own_ceiling(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "EXPORT_STALL_SECONDS", 0.5)
+    monkeypatch.setattr(api, "LINUX_EXPORT_CEILING_SECONDS", 10)
+    monkeypatch.setattr(api, "DARWIN_EXPORT_CEILING_SECONDS", 1)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="1s ceiling"):
+        api.export_from_image(trickle_engine(tmp_path, chunks=1000, interval=0.1), "image", io.BytesIO(), darwin=True)
+    assert time.monotonic() - started < 4
+
+
 def test_limits_are_sized_from_ci_evidence_and_fit_the_root_action_budget(api):
-    # Slowest observed CI throughput ~23 MB/s; the largest admissible Linux
-    # stream must fit the ceiling with headroom at that rate.
-    assert api.LINUX_MAX_STREAM_BYTES / 23e6 * 1.5 <= api.EXPORT_CEILING_SECONDS
-    # Production runs the export inside restart-managed / promote-in-place,
-    # whose root action budget kills the helper; the export's own, labelled
-    # error must fire first.
+    # Slowest observed CI throughput ~23 MB/s; the largest admissible stream
+    # of each flavour must fit its ceiling with headroom at that rate.
+    assert api.LINUX_MAX_STREAM_BYTES / 23e6 * 1.25 <= api.LINUX_EXPORT_CEILING_SECONDS
+    assert api.DARWIN_MAX_EXPORT_BYTES / 23e6 * 1.25 <= api.DARWIN_EXPORT_CEILING_SECONDS
+    # Production runs both exports back to back inside restart-managed /
+    # promote-in-place, whose root action budget kills the helper; the
+    # export's own, labelled error must fire first even on the second export.
     budget = int(re.search(r"readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)\n", ROOT_HELPER.read_text()).group(1))
-    assert api.EXPORT_CEILING_SECONDS < budget
-    assert 0 < api.EXPORT_STALL_SECONDS < api.EXPORT_CEILING_SECONDS
+    assert api.LINUX_EXPORT_CEILING_SECONDS + api.DARWIN_EXPORT_CEILING_SECONDS < budget
+    assert 0 < api.EXPORT_STALL_SECONDS < min(api.LINUX_EXPORT_CEILING_SECONDS, api.DARWIN_EXPORT_CEILING_SECONDS)
 
 
 def test_ci_checker_does_not_tell_people_to_raise_pins_for_a_timeout(tmp_path, monkeypatch, capsys):

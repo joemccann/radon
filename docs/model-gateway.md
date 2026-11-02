@@ -59,8 +59,8 @@ release in `cloud/scripts/model_clients.py` (Linux payload 2030000000 bytes /
 release); export and extraction refuse anything larger, and app-images runs
 `scripts/ci/check_model_client_bounds.py` against the exact built image so a
 bigger bundle fails CI. Each export is also time-bounded: it fails after 30s
-with no bytes (stall) or 150s total (ceiling, under the 180s root action
-budget), and reports which limit fired with the byte count. A timeout is not a
+with no bytes (stall) or past its ceiling (115s Linux, 50s Darwin; together
+under the 180s root action budget), and reports which limit fired with the byte count. A timeout is not a
 bounds breach; raising the byte pins does not fix it. The shared 4KiB filesystem budget is 5144893312
 writable bytes (plus 545128448 when the model cache must be fetched) and 3209 inodes.
 Unknown inode capacity refuses; root-reserved blocks never satisfy the check.
