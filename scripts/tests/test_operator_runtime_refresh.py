@@ -94,7 +94,7 @@ def test_green_exact_sha_updates_only_allowlisted_code_and_preserves_policy(inst
     assert not marker.exists()
     assert set(refresh.FILES['radon-operator-releases']) == {
         'unattended_release.py', 'private_security_release.py',
-        'operator_runtime_refresh.py', 'codex_capability_probe.py', 'ci/check_pr_body.py',
+        'operator_runtime_refresh.py', 'codex_capability_probe.py', 'credential_redaction.py', 'ci/check_pr_body.py',
         'model_gateway/__init__.py','model_gateway/client.py','model_gateway/cli.py','model_gateway/cli_bridge.py',
     }
     for name, base in bases.items():
@@ -279,3 +279,24 @@ def test_all_nested_module_directories_are_durable_before_release_activation(ins
         assert synced.index(release / child) < synced.index(release)
         assert synced.index(release) < synced.index(base / 'releases')
         assert synced.index(base / 'releases') < synced.index(base)
+
+
+@pytest.mark.parametrize('runtime', sorted(refresh.FILES))
+def test_every_local_import_of_a_runtime_file_ships_with_it(runtime):
+    """A refreshed release must import in isolation: no sibling module left behind."""
+    import ast
+    scripts = Path(refresh.__file__).resolve().parent
+    files = set(refresh.FILES[runtime])
+    missing = set()
+    for relative in files:
+        if not relative.endswith('.py'):
+            continue
+        tree = ast.parse((scripts / relative).read_text(encoding='utf-8'))
+        for node in ast.walk(tree):
+            names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else \
+                [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else []
+            for name in names:
+                top = name.split('.')[0]
+                if (scripts / f'{top}.py').is_file() and f'{top}.py' not in files:
+                    missing.add((relative, top))
+    assert not missing, f'{runtime} imports modules it does not ship: {sorted(missing)}'
