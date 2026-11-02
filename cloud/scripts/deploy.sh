@@ -155,6 +155,12 @@ readonly TRANSITION_JOURNAL_FILE="${RADON_DEPLOY_TRANSITION_JOURNAL:-/home/radon
 readonly DEPLOY_SUPPORT_DIR="${RADON_DEPLOY_SUPPORT_DIR:-${_CLOUD_FROM_SCRIPT}/scripts}"
 readonly JOURNAL_HELPER="${RADON_DEPLOY_JOURNAL_HELPER:-${DEPLOY_SUPPORT_DIR}/deploy-journal.py}"
 readonly JOURNAL_PYTHON="${RADON_DEPLOY_JOURNAL_PYTHON:-${SYSTEM_PYTHON}}"
+# Checked-in post-deploy hooks (once each) and read-only verification (every
+# deploy), loaded from the immutable runner like the journal helper.
+readonly POST_DEPLOY_RUNNER="${DEPLOY_SUPPORT_DIR}/post_deploy.py"
+readonly POST_DEPLOY_ROOT="${RADON_POST_DEPLOY_ROOT:-${CLOUD_DIR}/post_deploy}"
+readonly POST_DEPLOY_STATE="${RADON_POST_DEPLOY_STATE:-/home/radon/.radon-post-deploy-state.json}"
+readonly POST_DEPLOY_USER="${RADON_POST_DEPLOY_USER:-radon}"
 # Mutable deploy-process state used only by the TERM/INT/HUP recovery trap.
 # An interrupted deploy deliberately leaves Git at the requested SHA with no
 # green marker; the next run sees the marker mismatch and resumes the full
@@ -166,6 +172,7 @@ SEEDED_WEB_NODE_MODULES=0
 DEPLOY_TEARDOWN_STARTED=0
 DEPLOY_SERVICES_RECOVERED=1
 DEPLOY_RELEASE_UNVERIFIED=0
+DEPLOY_STARTED_EPOCH=0
 PREVIOUS_RELEASE_SHA=""
 STAGED_RELEASE_DIR=""
 RELEASE_BACKUP_DIR=""
@@ -1818,6 +1825,32 @@ print(f"[marker] deploy marker recorded: {sys.argv[1][:7]} @ {now}")
 PYEOF
 }
 
+# -- Post-deploy hooks --------------------------------------------------------
+
+run_post_deploy() {
+  # Runs only after the live gate passed for this SHA. The release is already
+  # verified, so a hook or check failure cannot roll it back: the runner pages
+  # it, a failed hook stays pending for the next deploy, and this returns 0.
+  local sha="$1"
+  local py="${VENV_DIR}/bin/python"
+  [[ -x "$py" ]] || py="$SYSTEM_PYTHON"
+  log_info "Post-deploy hooks and verification..."
+  if "$SYSTEM_PYTHON" "$POST_DEPLOY_RUNNER" run \
+    --root "$POST_DEPLOY_ROOT" \
+    --state "$POST_DEPLOY_STATE" \
+    --deploy-sha "$sha" \
+    --radon-dir "$RADON_DIR" \
+    --env-file "$ENV_FILE_DEFAULT" \
+    --python "$py" \
+    --expect-user "$POST_DEPLOY_USER" \
+    --since-epoch "$DEPLOY_STARTED_EPOCH"; then
+    log_success "Post-deploy hooks and verification clean"
+  else
+    log_error "Post-deploy hooks or verification failed (paged); the release stays live"
+  fi
+  return 0
+}
+
 # -- Rollback ---------------------------------------------------------------
 
 rollback() {
@@ -1864,6 +1897,7 @@ main() {
   fi
 
   trap 'handle_deploy_signal TERM' TERM INT HUP
+  DEPLOY_STARTED_EPOCH="$(date +%s)"
   log_info "Starting deployment (timeout: ${DEPLOY_TIMEOUT}s)..."
   if [[ "${RADON_RUNTIME:-host}" != "host" ]]; then
     log_error "RADON_RUNTIME=${RADON_RUNTIME:-} is not production. Host binaries only (GHCR down must not block a deploy)."
@@ -1936,6 +1970,7 @@ main() {
         "Caddy publish failed on an already-green release; the next deploy will republish it"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
+      run_post_deploy "$requested_sha"
       return 0
     else
       log_error "Previously green release no longer passes the live gate; rebuilding and restarting it"
@@ -2010,6 +2045,7 @@ main() {
   trap - TERM INT HUP
   log_success "Deploy successful: $(short_log)"
   notify_release_live "$requested_sha"
+  run_post_deploy "$requested_sha"
 }
 
 run_deploy_internal() {
