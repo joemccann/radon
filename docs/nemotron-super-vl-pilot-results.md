@@ -7,6 +7,9 @@ with the Llama 90B fallback (`meta/llama-3.2-90b-vision-instruct`), the only
 other vision model the production key can call. Llama 11B answers 404 for this
 account, so it is not a baseline.
 
+Status: the NVIDIA rung has been paused in every environment since PR #1383
+(`engine.PAUSED_BY_DEFAULT`). The verdict below applies if it is unpaused.
+
 ## Verdict
 
 **Keep Super VL first. Do not swap the order or revert to 90B.** No code or
