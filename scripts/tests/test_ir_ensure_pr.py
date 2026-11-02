@@ -438,6 +438,27 @@ class TestGrokPromptAndPlaybook:
         assert "## What broke" in prompt
         assert "Pickup opens the PR from this body" in prompt
 
+    def test_autopush_off_prompt_leaves_publication_to_pickup(self):
+        """The VPS responder runs with AUTOPUSH=0 by design. Grok read the
+        bare "do not push" as a stall and wrote "AUTOPUSH is off ... until
+        the branch is pushed" into Still open, which became a manual
+        Operator Next Steps item on PRs pickup had already opened (#1344)."""
+        prompt = responder.build_prompt(_page(), autoship=True, autopush=False)
+        assert "`fix/<short-slug>`" in prompt
+        assert "do not push" in prompt
+        assert "git push -u origin HEAD" not in prompt
+        assert "ir_ensure_pr.py" not in prompt
+        assert "Mac mini pickup pushes" in prompt
+        assert "Do not list pushing the branch" in prompt
+        still_open = "Nothing beyond review and merge after CI is green."
+        assert still_open in prompt
+        assert len(still_open) >= ir_pr_description.SECTION_MIN_CHARS
+
+    def test_autoship_off_prompt_still_forbids_push(self):
+        prompt = responder.build_prompt(_page(), autoship=False, autopush=False)
+        assert "AUTOPUSH is off: do not push." in prompt
+        assert "Mac mini pickup pushes" not in prompt
+
     def test_prompt_forbids_real_broker_identifiers(self):
         """2026-10-16: two fix branches put a real IB account id and Flex
         exec ids in tests and commit messages; the push gate refused both."""
