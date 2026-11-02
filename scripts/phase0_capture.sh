@@ -16,6 +16,7 @@ sec() { printf '\n\n========== %s ==========\n' "$1"; }
 # header above states a guarantee, so the key is resolved through a systemd
 # `Environment=` wrapper and a quoted value is consumed to its real close.
 SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET'
+# Unit files. Env files go through redact_dotenv below.
 redact() {
   awk -v secret="$SECRET_KEY_PATTERN" '
     function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
@@ -35,6 +36,15 @@ redact() {
     # a quote, the carry never arms, and the rest of it falls through the
     # catch-all print. The logical line is therefore assembled first, and the
     # untouched physical lines are what gets printed when nothing is redacted.
+    # True when any NAME= assignment in s names a secret.
+    function names_secret(s,   name) {
+      while (match(s, /[A-Za-z_][A-Za-z0-9_]*=/)) {
+        name=substr(s, RSTART, RLENGTH-1)
+        if (toupper(name) ~ secret) return 1
+        s=substr(s, RSTART+RLENGTH)
+      }
+      return 0
+    }
     function continued(s,   n) {
       n=0
       while (length(s) > n && substr(s, length(s)-n, 1) == "\\") n++
@@ -79,6 +89,13 @@ redact() {
           inner=substr(inner, 2)
         }
         outer=rest
+        # systemd decodes C escapes in the value (\x3d is "="), so a
+        # backslash can hide a name or separator from the checks below.
+        if (index(inner, "\\") > 0) {
+          if (quote != "" && unclosed(outer, quote)) carry=quote
+          emit(key, rest)
+          next
+        }
         ieq=index(inner, "=")
         if (ieq > 0) {
           key=key"="substr(inner, 1, ieq-1)
@@ -87,14 +104,7 @@ redact() {
           # name in the remainder is inspected and any secret among them
           # redacts the whole directive value. Checking the first assignment
           # alone printed the rest of the line unchecked.
-          hit=0
-          scan=inner
-          while (match(scan, /[A-Za-z_][A-Za-z0-9_]*=/)) {
-            name=substr(scan, RSTART, RLENGTH-1)
-            if (toupper(name) ~ secret) { hit=1; break }
-            scan=substr(scan, RSTART+RLENGTH)
-          }
-          if (hit) {
+          if (names_secret(inner)) {
             # Only a redacted value suppresses its continuation lines; a
             # non-secret multi-line directive keeps printing as before.
             if (quote != "" && unclosed(outer, quote)) carry=quote
@@ -105,6 +115,9 @@ redact() {
           next
         }
       }
+      # A joined line keyed on a plain name can carry a secret assignment
+      # on a later physical line; any secret name in it redacts the value.
+      if (index(raw, "\n") > 0 && names_secret(rest)) { emit(key, rest); next }
       if (toupper(key) ~ secret) {
         # dotenv accepts a backtick-quoted multiline value too, and the
         # carry armed only for the two ASCII quotes.
@@ -128,12 +141,43 @@ redact() {
     }'
 }
 
+# Env files fail closed. Each loader (systemd EnvironmentFile, python-dotenv,
+# Next.js dotenv) has its own quoting, escaping and continuation grammar, and
+# mirroring them leaked one edge case after another. A line prints only when
+# it is blank, a comment, or NAME=value / NAME: value with a non-secret name
+# and a plain or simply quoted single-line value. Every other line is
+# redacted, and once a value might span lines (an unbalanced quote, a
+# backslash, a line that is not an assignment) the rest of the file is too.
+redact_dotenv() {
+  awk -v secret="$SECRET_KEY_PATTERN" '
+    function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
+    opaque { if ($0 ~ /^[[:space:]]*$/) print; else print "<redacted:line>"; next }
+    /^[[:space:]]*$/ { print; next }
+    /^[[:space:]]*#/ { print; next }
+    match($0, /^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_.-]*[[:space:]]*(=|:[[:space:]])/) {
+      head=substr($0, 1, RLENGTH)
+      rest=substr($0, RLENGTH+1)
+      key=head
+      sub(/[[:space:]]*(=|:[[:space:]])$/, "", key)
+      sub(/^[[:space:]]+/, "", key)
+      plain = rest !~ /["'"'"'`\\]/
+      quoted = rest ~ /^[[:space:]]*"[^"'"'"'`\\]*"[[:space:]]*(#.*)?$/ ||
+               rest ~ /^[[:space:]]*'"'"'[^"'"'"'`\\]*'"'"'[[:space:]]*(#.*)?$/ ||
+               rest ~ /^[[:space:]]*`[^"'"'"'`\\]*`[[:space:]]*(#.*)?$/
+      if (!plain && !quoted) opaque=1
+      if (opaque || toupper(key) ~ secret) { emit(key, rest); next }
+      print
+      next
+    }
+    { opaque=1; print "<redacted:line>" }'
+}
+
 # Every configured env file, each redacted whole so quoted multi-line values
 # keep the key that decides them.
 redact_env_files() {
   local f
   for f in "${ENV_FILES[@]}"; do
-    [ -f "$f" ] && redact < "$f"
+    [ -f "$f" ] && redact_dotenv < "$f"
   done
 }
 
@@ -218,7 +262,7 @@ sec "ENV FILES — surface (values redacted for secrets)"
 ENV_FILES=(/etc/radon/env /home/radon/radon-cloud/.env /home/radon/radon-cloud/web/.env)
 for f in "${ENV_FILES[@]}"; do
   echo "----- $f -----"
-  [ -f "$f" ] && redact < "$f" || echo "(absent)"
+  [ -f "$f" ] && redact_dotenv < "$f" || echo "(absent)"
 done
 
 sec "TURSO / DB references in env (keys only)"
