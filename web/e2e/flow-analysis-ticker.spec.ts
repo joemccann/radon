@@ -339,13 +339,20 @@ test.describe("Flow Analysis per-ticker route", () => {
   test("a served cache names its age above the figures it produced", async ({ page }) => {
     await setupBaseMocks(page);
     const DAYS_OLD = 73;
-    const stamped = new Date(Date.now() - DAYS_OLD * 86_400_000);
-    const isoDay = new Intl.DateTimeFormat("en-CA", {
+    // Age is counted in ET calendar days. Subtracting 73 x 24h from "now" crosses
+    // a DST change for part of the year and lands one ET day off near midnight,
+    // so stamp 16:00 UTC (midday ET in both EST and EDT) on the calendar day
+    // exactly DAYS_OLD ET days before today.
+    const todayEt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/New_York",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    }).format(stamped);
+    }).format(new Date());
+    const isoDay = new Date(Date.parse(`${todayEt}T00:00:00Z`) - DAYS_OLD * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const stamped = new Date(`${isoDay}T16:00:00Z`);
     const cached = bullishReport("AMZN", stamped.toISOString());
 
     await page.route("**/api/flow-analysis/AMZN**", async (route) => {
