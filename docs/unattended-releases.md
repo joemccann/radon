@@ -22,8 +22,8 @@ A candidate that changes anything under `.github/` is never reviewed or
 merged unattended: pull-request CI runs the candidate's own workflow files, so
 those checks cannot judge it. It waits for a human merge.
 
-Since 2026-11-01 the operator policy covers every branch family, not only the
-nightly loops. Authors are `radon-runner-bot` and `joemccann`. Branch prefixes
+Since 2026-11-01 the operator policy also covers the general branch families,
+not only the nightly loops. Authors are `radon-runner-bot` and `joemccann`. Branch prefixes
 are the loop families (`security/`, `security-deepsec/`, `reliability/`,
 `testing/`, `documentation/`, `ci-performance/`, `performance/`,
 `security-private-release/`) plus `fix/`, `feat/`, `ci/` and `docs/`. That
