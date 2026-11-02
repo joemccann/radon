@@ -41,6 +41,13 @@
       "id": "DS-2026-09-23-02",
       "closed_at": "2026-10-08",
       "evidence": "Operator-approved close. GitHub API 2026-10-08T22:08Z: ruleset 24587201 runner-bot-nightly-only (active, created 2026-10-06) blocks creation, update and deletion on every ref except the nightly prefixes (reliability, testing, documentation, ci-performance, security, security-deepsec, codemap, dependabot, factory), bypass only the admin role and listed apps; radon-runner-bot holds write, not admin. Ruleset 24143098 main-review requires a PR with 1 approval on main; branch protection enforces admins and disallows force pushes."
+    },
+    {
+      "id": "DS-2026-10-28-02",
+      "closed_at": "2026-11-01",
+      "path": "docker/app/Dockerfile.python",
+      "lines": "49-51",
+      "evidence": "Branch security/pip-hash-pinning: docker/app/Dockerfile.python L49-51 installs docker/app/requirements-bootstrap.txt with --require-hashes --no-deps --only-binary=:all:; it pins pip==26.2.2 (sha256 fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70) and certifi==2026.10.19 (sha256 42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b), both equal to PyPI's JSON API digests and to an independent pip download. The model-gateway torch/chronos install (L142-145) also moved to a hash lock. scripts/tests/test_dockerfile_pip_hashes.py fails any unhashed pip install under docker/ except the one named application-requirements install."
     }
   ]
 }

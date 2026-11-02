@@ -29,8 +29,13 @@ def test_gateway_image_preserves_forecasting_outside_the_ordinary_python_image()
     assert text.rstrip().endswith("FROM runtime AS python\nUSER radon")
     gateway = text.split("FROM runtime AS model-gateway", 1)[1].split("FROM runtime AS python", 1)[0]
     assert "--index-url https://download.pytorch.org/whl/cpu" in gateway
-    assert "torch==2.12.1+cpu" in gateway
-    assert "chronos-forecasting==2.3.0" in gateway
+    # DS-2026-10-28-02: the forecasting closure installs from a hash lock.
+    assert "--require-hashes --no-deps" in gateway
+    assert "-r requirements-model-gateway.txt" in gateway
+    lock = (ROOT / "docker/app/requirements-model-gateway.txt").read_text()
+    assert re.search(r"^torch==2\.12\.1\+cpu \\$", lock, re.M)
+    assert re.search(r"^chronos-forecasting==2\.3\.0 \\$", lock, re.M)
+    assert re.search(r"^scipy==1\.17\.1 \\$", lock, re.M)
     assert "import chronos, torch" in gateway
     assert "USER radon" in gateway
 

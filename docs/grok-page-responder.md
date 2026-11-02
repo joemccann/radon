@@ -359,7 +359,7 @@ pickup refuses:
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
   (default 20);
 - anything at all unless `GROK_PAGE_AUTOPUSH` is truthy in the pickup job's
-  own environment (the plist ships `0`). Off, a fire returns
+  own environment (the plist ships `1`). Off, a fire returns
   `{"action": "disabled"}` before touching either remote;
 - a branch whose commit messages, added lines or paths in any commit
   (including merge resolutions), or PR title/body carry a private identifier
@@ -464,8 +464,25 @@ sed -e "s|__PICKUP_REPO__|$HOME/radon-weekend/radon-grok-pickup|g" \
     -e "s|__HOME__|$HOME|g" \
   config/com.radon.grok-fix-pickup.plist \
   > ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
+launchctl enable "gui/$(id -u)/com.radon.grok-fix-pickup"
 launchctl load ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
+launchctl print "gui/$(id -u)/com.radon.grok-fix-pickup" | grep -E 'state|run interval'
 ```
+
+Pickup is the only publisher. The plist ships `GROK_PAGE_AUTOPUSH=1`
+because this job already holds the operator's GitHub credential; the VPS
+responder env stays forced to `0` and holds none. The responder prompt
+tells Grok that pickup pushes the branch and opens the PR, so `Still open`
+(the PR's Operator Next Steps) never asks the operator to push. A reinstall
+from this template therefore keeps publication on. `launchctl disable`
+persists across `load` and reboots, so the `enable` line above is required
+after any stand-down; `launchctl print` must then show `run interval = 900
+seconds`.
+To stand pickup down, set the plist value to `0` and reload, or
+`launchctl disable` the label; either leaves `fix/*` branches on the VPS.
+Check for unpublished work with
+`ssh radon-app git -C /home/radon/radon-page-responder for-each-ref refs/heads/fix`
+against `git ls-remote origin 'refs/heads/fix/*'`.
 
 ## Kill switches
 
@@ -479,7 +496,7 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 |---|---|---|
 | `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
 | `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Nothing pushes: the responder, `ir_ensure_pr` (module and CLI) and the Mac mini pickup all refuse |
+| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR. Set only in the Mac mini pickup plist (ships `1`) | Commit locally. Nothing pushes: the responder, `ir_ensure_pr` (module and CLI) and the Mac mini pickup all refuse. The VPS responder env is always `0` |
 
 `GROK_BIN` overrides the `grok` executable.
 

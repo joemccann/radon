@@ -156,6 +156,20 @@ Layers, in order:
 
 The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_gateway_ready`. Worst-case gate time ≈ 65s — well inside the CI step budget.
 
+#### Post-deploy hooks and verification
+
+Host work a PR used to list under "Operator Next Steps" (restart a unit,
+requeue Turso rows, run a prepare script, watch a unit's journal) ships as a
+reviewed hook in `cloud/post_deploy/hooks/`, pinned by SHA-256 in
+`cloud/post_deploy/manifest.json`. After the live gate passes, `deploy.sh`
+runs each pending hook once, in numeric order, as `radon`, and records
+completion in `/home/radon/.radon-post-deploy-state.json`. A failed hook pages
+P1 and is retried on the next deploy. The manifest's `verify` checks (unit
+active, journal pattern present or absent, localhost HTTP) run read-only after
+every deploy and page on failure. Neither can roll back a verified release.
+Root-only work (editing `/etc/radon/env`, secrets, 2FA) stays an operator step.
+Format and limits: [`cloud/CLAUDE.md`](../cloud/CLAUDE.md#post-deploy-hooks).
+
 #### Escape hatches
 
 | Env var | Effect |
