@@ -155,6 +155,12 @@ readonly TRANSITION_JOURNAL_FILE="${RADON_DEPLOY_TRANSITION_JOURNAL:-/home/radon
 readonly DEPLOY_SUPPORT_DIR="${RADON_DEPLOY_SUPPORT_DIR:-${_CLOUD_FROM_SCRIPT}/scripts}"
 readonly JOURNAL_HELPER="${RADON_DEPLOY_JOURNAL_HELPER:-${DEPLOY_SUPPORT_DIR}/deploy-journal.py}"
 readonly JOURNAL_PYTHON="${RADON_DEPLOY_JOURNAL_PYTHON:-${SYSTEM_PYTHON}}"
+# Checked-in post-deploy hooks (once each) and read-only verification (every
+# deploy), loaded from the immutable runner like the journal helper.
+readonly POST_DEPLOY_RUNNER="${DEPLOY_SUPPORT_DIR}/post_deploy.py"
+readonly POST_DEPLOY_ROOT="${RADON_POST_DEPLOY_ROOT:-${CLOUD_DIR}/post_deploy}"
+readonly POST_DEPLOY_STATE="${RADON_POST_DEPLOY_STATE:-/home/radon/.radon-post-deploy-state.json}"
+readonly POST_DEPLOY_USER="${RADON_POST_DEPLOY_USER:-radon}"
 # Mutable deploy-process state used only by the TERM/INT/HUP recovery trap.
 # An interrupted deploy deliberately leaves Git at the requested SHA with no
 # green marker; the next run sees the marker mismatch and resumes the full
@@ -166,6 +172,7 @@ SEEDED_WEB_NODE_MODULES=0
 DEPLOY_TEARDOWN_STARTED=0
 DEPLOY_SERVICES_RECOVERED=1
 DEPLOY_RELEASE_UNVERIFIED=0
+DEPLOY_STARTED_EPOCH=0
 PREVIOUS_RELEASE_SHA=""
 STAGED_RELEASE_DIR=""
 RELEASE_BACKUP_DIR=""
@@ -1822,6 +1829,47 @@ print(f"[marker] deploy marker recorded: {sys.argv[1][:7]} @ {now}")
 PYEOF
 }
 
+# -- Post-deploy hooks --------------------------------------------------------
+
+run_post_deploy() {
+  # Runs only after the live gate passed for this SHA. The release is already
+  # verified, so a hook or check failure cannot roll it back: the runner pages
+  # it, a failed hook stays pending for the next deploy, and this returns 0.
+  # The supervisor calls it after closing FD 8/9: a hook restarts a unit with
+  # `radon unit restart`, which refuses while the deploy lock is held.
+  local sha="$1"
+  local py="${VENV_DIR}/bin/python"
+  [[ -x "$py" ]] || py="$SYSTEM_PYTHON"
+  log_info "Post-deploy hooks and verification..."
+  if "$SYSTEM_PYTHON" "$POST_DEPLOY_RUNNER" run \
+    --root "$POST_DEPLOY_ROOT" \
+    --state "$POST_DEPLOY_STATE" \
+    --deploy-sha "$sha" \
+    --radon-dir "$RADON_DIR" \
+    --env-file "$ENV_FILE_DEFAULT" \
+    --python "$py" \
+    --expect-user "$POST_DEPLOY_USER" \
+    --since-epoch "$DEPLOY_STARTED_EPOCH"; then
+    log_success "Post-deploy hooks and verification clean"
+  else
+    log_error "Post-deploy hooks or verification failed (paged); the release stays live"
+  fi
+  return 0
+}
+
+run_post_deploy_if_green() {
+  # The inner deploy exited 0 (fresh deploy or already-green rerun) and both
+  # the green marker and HEAD name the requested SHA. Prestage, a refused or
+  # rolled-back deploy, or a missing target runs no hook.
+  local exit_code="$1" sha="${DEPLOY_TARGET_SHA:-}"
+  (( exit_code == 0 )) || return 0
+  [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]] || return 0
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+  green_marker_matches "$sha" || return 0
+  [[ "$(current_commit 2>/dev/null)" == "$sha" ]] || return 0
+  run_post_deploy "$sha"
+}
+
 # -- Rollback ---------------------------------------------------------------
 
 rollback() {
@@ -2303,6 +2351,8 @@ supervise_deploy_command() {
   prune_app_images_before_admission "${DEPLOY_TARGET_SHA:-}"
 
   local exit_code=0
+  # Journal checks never look before this deploy began.
+  DEPLOY_STARTED_EPOCH="$(date +%s)"
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
     "${DEPLOY_TIMEOUT}s" "$@" 8>&- 9>&- &
   SUPERVISED_TIMEOUT_PID=$!
@@ -2329,6 +2379,8 @@ supervise_deploy_command() {
   if [[ "${RADON_DEPLOY_STAGE:-0}" != "1" ]]; then
     prune_app_images_after_deploy
   fi
+  # After FD 8/9 close: a hook's `radon unit restart` needs the deploy lock.
+  run_post_deploy_if_green "$exit_code"
   return "$exit_code"
 }
 
