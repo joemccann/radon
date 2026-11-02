@@ -439,3 +439,14 @@ def test_installer_refuses_root(monkeypatch, tmp_path):
     monkeypatch.setattr(installer.os, "getuid", lambda: 0)
     with pytest.raises(PermissionError):
         installer.install(source_root=REPO_ROOT, destination=tmp_path / "d", home=tmp_path, python=Path("/usr/bin/python3"))
+
+
+def test_installer_refuses_a_group_writable_destination(monkeypatch, tmp_path):
+    monkeypatch.setattr(installer.subprocess, "run", lambda *a, **k: None)
+    shared = tmp_path / "share"
+    shared.mkdir()
+    shared.chmod(0o775)
+    with pytest.raises(PermissionError):
+        installer.install(source_root=REPO_ROOT, destination=shared / "radon-security-live-drift",
+                          home=tmp_path, python=Path("/usr/bin/python3"))
+    assert not (shared / "radon-security-live-drift").exists()
