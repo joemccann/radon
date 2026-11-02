@@ -41,6 +41,10 @@ binary, schema and restricted model catalog and rejects advertised tools.
 Live inference then uses the private model gateway's native Responses bridge;
 only transport/auth settings change. Model capacity comes from the gateway's
 bounded projection of its own Codex CLI cache, not the controller's HOME.
+The installed LaunchAgent sets `RADON_MODEL_GATEWAY_SOCKET` to the Mac
+transport socket `/Library/Radon/model-gateway/gateway.sock`; without it the
+client falls back to the Linux `/run` path and every review defers with
+"reviewer metadata is temporarily unavailable".
 Missing verified capacity remains a deferral. Explicit GPT reviewers are
 Codex-only and the terminal response must identify the requested model;
 a shared fallback cannot impersonate two independent reviewers. Version-5
