@@ -18,7 +18,7 @@ The gateway receives canonical subscription grants, a scoped credential-broker s
 
 The service owns model selection, deadlines, concurrency, cancellation and refresh coordination. SLM modes and sampling also run there using the request's current taxonomy; the newsfeed caller persists comparison telemetry with its existing database writer. Model inventory reads cached, sanitized metadata and marks configured defaults explicitly when discovery is unavailable. Missing context limits are unknown, never estimated.
 
-Each ladder rung gets a slice of the request deadline. A rung may spend the whole remaining deadline except 20 seconds for each later live rung, and never less than an even split. A later rung counts as live only when it has a credential and is not marked dead. A rung whose every model failed with 401, 402, 403, 404, `quota_or_billing` or `credit_balance` is marked dead for 10 minutes, in-process. A dead rung is still attempted, and a win clears the mark. Timeouts, 429 and 5xx never mark a rung dead (`engine._rung_slice`).
+Each ladder rung gets a slice of the request deadline. A rung may spend the whole remaining deadline except 20 seconds for each later live rung, and never less than an even split. A later rung counts as live only when it has a credential and is not marked dead. A rung whose every model failed with 401, 402, 403, 404, `quota_or_billing` or `credit_balance` is marked dead for 10 minutes, in-process. A dead rung is still attempted, and a win clears the mark. Timeouts, 429 and 5xx never mark a rung dead (`engine._rung_slice`). A 429 whose body names a reset records `clients.provider_cooldown` (provider name and expiry) and later calls, including a new oneshot, skip that rung as `rate_limited_cooldown` until it lapses. A bare 429 records nothing.
 
 NVIDIA and Cerebras are paused in every environment by `engine.PAUSED_BY_DEFAULT` (operator, 2026-11-01). A paused rung reads as unkeyed, so no request is sent, and its stored key is kept. `RADON_LADDER_PAUSED_PROVIDERS` in the gateway env adds more rungs and cannot unpause these two. Cerebras returns 402 for every model. NVIDIA won 4 of about 1,550 requests over 3 days, and its research figure match is unsafe in either model order (pilot results, PR #1382). To unpause, remove the name from the set.
 
@@ -69,11 +69,15 @@ Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
 bundle when the local engine reports the same image id. Donors are exact
 `ghcr.io/joemccann/radon-model-gateway:<40 hex>` tags, the same image id
 listed under `localhost/ghcr.io/...` after a prune untagged the donor SHA,
-or a Linux receipt that already recorded that image id. It hardlinks those
-bytes, rewrites only the release SHA, re-checks every hash, and activates
-the Linux selector. It does not move the Darwin selector; that still happens
-at commit. A tree that already exists for the deploying SHA is not proof,
-because the registry tag can move. A missing tag, a different image id, a
+or a Linux receipt that already recorded that image id. Failing those, a
+donor tag whose image carries the same `radon.model-clients.payload-sha256`
+label is reused (the hash of `docker/app/Dockerfile.python`, the vendor-clis
+and chart-runtime locks, and the exported `model_gateway` helpers). It
+hardlinks those bytes, rewrites only the release SHA, re-checks every hash,
+and activates the Linux selector. It does not move the Darwin selector; that
+still happens at commit. A tree that already exists for the deploying SHA is
+not proof, because the registry tag can move. A missing tag, a different
+image id without a matching payload label, a missing or malformed label, a
 corrupt donor, or an inspect failure exports from the image as before.
 A successful export records the image id on the new receipt so the next
 identical image does not need the donor tag.

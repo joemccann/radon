@@ -516,15 +516,18 @@ def test_newsfeed_deterministic(db):
 
 
 def _seed_service_health(db):
+    # One clock read per stamp: separate _days_ago(0) calls straddle a second
+    # boundary often enough to fail CI (2026-11-03, run 41719382112).
+    day_ago, now = _days_ago(1), _days_ago(0)
     db.execute(
         "INSERT INTO service_health VALUES (?, ?, ?, ?, ?, ?)",
         (
             "journal-gap-sli",
             "ok",
-            _days_ago(1),
-            _days_ago(1),
+            day_ago,
+            day_ago,
             json.dumps({"missing_exec_id_count": 0, "window_days": 7}),
-            _days_ago(1),
+            day_ago,
         ),
     )
     db.execute(
@@ -532,17 +535,18 @@ def _seed_service_health(db):
         (
             "ib-realtime-relay",
             "error",
-            _days_ago(0),
-            _days_ago(0),
+            now,
+            now,
             "no ticks for 60s despite healthy gateway",
-            _days_ago(0),
+            now,
         ),
     )
     db.commit()
+    return now
 
 
 def test_incidents_one_doc_per_service_with_state_digest(db):
-    _seed_service_health(db)
+    seeded_now = _seed_service_health(db)
     docs = {d.doc_key: d for d in incidents_source.fetch(db)}
     assert set(docs) == {"journal-gap-sli", "ib-realtime-relay"}
     ok_doc = docs["journal-gap-sli"]
@@ -555,7 +559,7 @@ def test_incidents_one_doc_per_service_with_state_digest(db):
     err_doc = docs["ib-realtime-relay"]
     assert "no ticks for 60s" in err_doc.content
     assert "error" in err_doc.content
-    assert err_doc.last_activity_at == _days_ago(0)
+    assert err_doc.last_activity_at == seeded_now
 
 
 def test_incidents_content_stable_across_writer_cycles(db):

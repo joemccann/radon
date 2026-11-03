@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-from clients import prepaid_denylist
+from clients import prepaid_denylist, provider_cooldown
 from .contracts import (MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, ModelLadderExhausted, ModelResponseError, LadderResult, VisionResult, parse_json_object, parse_json_rows, safe_error_message, accept_tags_payload, accept_distill_payload)
 
 logger = logging.getLogger(__name__)
@@ -1588,6 +1588,14 @@ def _run_ladder(
         if auth is None:
             skipped.append(f"{name}:no_key")
             continue
+        if provider_cooldown.rate_limited(name, env):
+            attempted.append(f"{name}:rate_limited_cooldown")
+            logger.warning(
+                "%s provider=%s skipped: rate-limit cooldown; no request sent",
+                log_prefix,
+                name,
+            )
+            continue
         logger.info(
             "%s try provider=%s auth=%s mechanism=%s",
             log_prefix,
@@ -1702,7 +1710,14 @@ def _run_ladder(
                     status,
                     _body_snippet(body_text) if status != 200 else "",
                 )
-                if status == 429 and name == "nvidia":
+                if status == 429:
+                    # Persist only when the body or headers name a reset.
+                    # A bare 429 still fails this request and this model list,
+                    # but the next document or oneshot may try the rung again
+                    # (scripts/tests/test_research_runtime.py).
+                    seconds = provider_cooldown.reset_seconds(body_text, None)
+                    if seconds is not None:
+                        provider_cooldown.note(name, seconds, env)
                     break
                 continue
 
