@@ -414,10 +414,11 @@ def test_entrypoint_prestage_refuses_inode_replacement_after_open(tmp_path):
     assert canonical.is_symlink(), "the isolated race sensor must actually replace the name"
 
 
-# Once both locks are held, the supervisor's lock-held image prune checks its
-# sudo grant before the bounded child starts. The fake sudo refuses (exit 98),
-# so the prune is skipped and the child still runs.
-LOCKED_PRUNE_PROBE = ["helper"]
+# Once both locks are held, the supervisor's lock-held image prune and then its
+# lock-held disk reclaim each check their sudo grant before the bounded child
+# starts. The fake sudo refuses (exit 98), so both are skipped and the child
+# still runs.
+LOCKED_PRUNE_PROBE = ["helper", "helper"]
 
 
 @requires_flock

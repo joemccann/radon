@@ -28,6 +28,7 @@
 ## Operator Next Steps
 
 <!-- Work still required after the production deploy lands. Write None when the deploy is the whole ship. -->
+<!-- A unit restart, Turso requeue, prepare script or journal watch is a checked-in hook or verify check in cloud/post_deploy/ (cloud/CLAUDE.md "Post-deploy hooks"), not a step here. -->
 
 <None, or the operator work still open: merge (nightly bot never merges; operator release coordinator may use standing policy), secret or flag change, host package or unit install, data backfill, 2FA or gateway action, follow-up outside CI.>
 

@@ -166,7 +166,7 @@ Production is three planes. Do not collapse them.
   `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
   after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune` and `prune-locked <sha>` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune`, the argumentless disk headroom guard `reclaim-locked` and `prune-locked <sha>` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.
@@ -525,6 +525,72 @@ rollback). One batched `systemctl show` decides; a failed query keeps every unit
 The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.
+
+## Post-deploy hooks
+
+Host work that a PR would otherwise leave under "Operator Next Steps" is
+code: a reviewed hook in `post_deploy/hooks/` plus an entry in
+`post_deploy/manifest.json`. The deploy supervisor calls
+`scripts/post_deploy.py run` from the immutable runner after the inner deploy
+exits 0 (a fresh deploy or an already-green rerun), the green marker and HEAD
+both name the SHA, and the supervisor has released the deploy lock: `radon
+unit restart` refuses while that lock is held. Prestage and failed deploys run
+nothing. It returns 0 either way; nothing here can roll back a verified
+release.
+
+Hooks:
+
+- File `hooks/NNNN-lower-kebab.sh` (bash) or `.py` (release venv python),
+  manifest entry `{"id", "sha256", "description", "timeout_seconds"?}`
+  (default 120s, max 300s; all hooks share a 300s budget per deploy). Pin
+  with `shasum -a 256`. `python3 cloud/scripts/post_deploy.py check --root
+  cloud/post_deploy` validates the tree; `cloud/tests/test_post_deploy_hooks.py`
+  runs it on the repo copy.
+- Runs pending hooks in numeric order, as `radon` (the runner refuses root
+  and any user other than `--expect-user`), cwd `/home/radon/radon`, with a
+  minimal env: `RADON_DIR`, `RADON_DEPLOY_SHA`, `RADON_ENV_FILE`,
+  `RADON_PYTHON`, `RADON_POST_DEPLOY_HOOK_ID`, `PYTHONPATH`, fixed `PATH`.
+  Nothing else is inherited; a hook that needs Turso reads `RADON_ENV_FILE`
+  itself. Root work goes through the existing sudoers grants, for example
+  `sudo -n /usr/local/bin/radon unit restart radon-model-gateway.service`.
+- State is `/home/radon/.radon-post-deploy-state.json` (`0600`, fsynced
+  temp+rename, `.lock` flock). A hook is marked `running` before it starts
+  and `done` after exit 0, so it runs once on success and at least once
+  across a crash: every hook must be idempotent. Failure, timeout (process
+  group killed) or an interrupted `running` record leaves it pending, stops
+  the hooks after it, pages P1, and retries on the next deploy or CI rerun.
+  A `done` hook never reruns; editing one pages "changed after it
+  completed". Add a new number instead. Delete retired hooks and their
+  manifest entries freely; state keeps the record.
+- Refused before anything runs, and paged: a file in `hooks/` the manifest
+  does not list, a SHA-256 mismatch, a symlink, a group/world-writable file
+  or directory, a foreign owner (runner files are `radon`-owned `a-w`), a
+  malformed id, a duplicate number, unknown manifest keys, a corrupt or
+  symlinked state file, a concurrent runner. The runner never reads PR text,
+  never builds a shell string and never takes a command from the environment.
+- Not hookable: `/etc/radon/env` edits, secrets, 2FA, Gateway actions.
+  `radon` cannot write the env file, and secret values never enter the repo.
+  Those remain operator steps.
+
+Verification (`verify` in the manifest, read-only, every deploy, 150s budget):
+
+- `{"type": "unit_active", "unit": "radon-*.service|.timer"}`:
+  `systemctl is-active --quiet`.
+- `{"type": "journal", "unit": "radon-*.service", "pattern": <regex>,
+  "expect": "present"|"absent", "since_minutes": 1-60}`: reads
+  `sudo -n /usr/local/bin/radon logs <unit>` (the fixed 300-line JSON tail;
+  `radon` is not in `systemd-journal`). The window never starts before this
+  deploy began, so an old release's error cannot fail it. A busy unit can
+  push older lines out of 300.
+- `{"type": "http", "url": "http://localhost:PORT/path"|"http://127.0.0.1:...",
+  "expect_status"?, "contains"?, "timeout_seconds"? (max 10)}`: GET only.
+- Every check needs `id` and `description`; optional `wait_seconds` (max
+  120) polls a present/active/http check until it passes, and holds an
+  absent check open for that long before deciding.
+
+Failures page through `scripts.watchdog.notify.send_direct_page` (P1, tag
+`radon-post-deploy`) with only `PUSHOVER_USER` and `PUSHOVER_TOKEN` read
+from the env file. Delivery failure is logged in the deploy output.
 
 ## Privileged Bootstrap
 

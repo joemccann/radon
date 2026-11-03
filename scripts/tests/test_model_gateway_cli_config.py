@@ -42,6 +42,19 @@ def test_grok_uses_private_leader_and_auth_state_with_supported_endpoint_overrid
         assert child['HOME'] == '/operator'
 
 
+def test_grok_home_is_private_bridge_state_never_operator_grok_dir(tmp_path):
+    # The page-responder unit hides /home/radon/.grok; grok resolving its home
+    # there died on requirements.toml (EACCES) before any request was sent.
+    from model_gateway.cli import configured_cli
+    env = {'HOME': '/operator', 'GROK_HOME': '/operator/.grok'}
+    with configured_cli('grok', ['/trusted/grok', '-m', 'grok-4.7'], 'http://127.0.0.1:12345', 'app-token', env=env, state_dir=tmp_path) as (_args, child):
+        home = Path(child['GROK_HOME'])
+        assert home.is_dir()
+        assert home.is_relative_to(tmp_path)
+        assert Path(child['GROK_AUTH_PATH']).parent == home
+        assert child['HOME'] == '/operator'
+
+
 def test_unknown_cli_cannot_execute_arbitrary_gateway_commands(tmp_path):
     from model_gateway.cli import configured_cli
     with pytest.raises(ValueError):
