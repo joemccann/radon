@@ -2322,22 +2322,26 @@ async def health_lite():
         )
     except Exception as exc:  # never let a passive health probe consume a worker
         logger.warning(
-            "/health/lite gateway probe %s after %.1fs; returning degraded status",
+            "/health/lite gateway probe %s after %.1fs; returning unknown status",
             "timed out" if isinstance(exc, asyncio.TimeoutError) else f"raised {type(exc).__name__}",
             HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
         )
-        gw = {}
+        gw = None
     # REL-303 / R-722: only observed booleans confirm a hold or release.
     # Broker status loss and probe timeout must remain unknown to the relay.
-    hold = gw.get("operator_hold")
+    observed = gw if gw is not None else {}
+    hold = observed.get("operator_hold")
     held = hold.get("held") if isinstance(hold, dict) else None
+    # A probe that never answered observed nothing: its port and upstream
+    # fields are unknown (null), never a confirmed down.
+    missing_bool = None if gw is None else False
     return {
         "status": "ok",
         "dependencies": await dependencies,
-        "auth_state": gw.get("auth_state", "unknown"),
-        "service_state": gw.get("service_state", "unknown"),
-        "upstream_dead": gw.get("upstream_dead", False),
-        "port_listening": gw.get("port_listening", False),
+        "auth_state": observed.get("auth_state", ib_gateway.AuthState.UNKNOWN.value),
+        "service_state": observed.get("service_state", "unknown"),
+        "upstream_dead": observed.get("upstream_dead", missing_bool),
+        "port_listening": observed.get("port_listening", missing_bool),
         # Account-free three-valued observation: true, false, or unknown.
         "operator_hold": held if type(held) is bool else None,
         "loop_lag_ms": round(loop_lag_ms, 3),

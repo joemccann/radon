@@ -216,7 +216,7 @@ Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_i
 
 ```json
 {
-  "auth_state": "authenticated" | "awaiting_2fa" | "unauthenticated",
+  "auth_state": "authenticated" | "awaiting_2fa" | "unreachable" | "unknown" | "remote",
   "service_state": "...",
   "upstream_dead": false,
   "restart_backoff": {
@@ -226,6 +226,8 @@ Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_i
   }
 }
 ```
+
+`auth_state` is exactly `ib_gateway.AuthState`; nothing produces `unauthenticated`. `remote` is the cloud TCP-only answer when this process has no pool to judge from, and the health daemon reads it, like `unknown`, as `unknown`. A `/health/lite` probe that times out reports `auth_state: "unknown"` with `port_listening` and `upstream_dead` null, never a confirmed down.
 
 Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin/health` every 15s). Fixed "footer says CONNECTED while banner says degraded".
 

@@ -178,6 +178,21 @@ def _release_2fa_push_lock_bounded(*, expected_holder: Optional[str] = None):
         return None
 
 
+class AuthState(str, Enum):
+    """The only auth_state values /health and /health/lite produce.
+
+    Payloads carry ``.value`` (plain strings). The health daemon maps the same
+    literals (``health_service.probes.AUTH_STATE_COARSE``); a parity test pins
+    the two.
+    """
+
+    UNREACHABLE = "unreachable"      # port closed or upstream API dead
+    AUTHENTICATED = "authenticated"  # a pool role holds managed accounts
+    AWAITING_2FA = "awaiting_2fa"    # port up, no accounts (login pending)
+    UNKNOWN = "unknown"              # no pool status to judge from
+    REMOTE = "remote"                # cloud TCP-only answer, no pool here
+
+
 _restart_state: Dict = {
     "attempt_count": 0,            # consecutive unconfirmed attempts
     "next_attempt_after": 0.0,     # epoch seconds; restart() refuses before this
@@ -1221,11 +1236,11 @@ async def _heal_ib_dependent_service_health(timeout: float) -> List[str]:
 # the pool and the service_health rows. unreachable -> authenticated (a
 # Gateway that came back already logged in) needs the same heal + release as
 # a resolved 2FA wait.
-_RECOVERY_EDGE_SOURCES = frozenset({"awaiting_2fa", "unreachable"})
+_RECOVERY_EDGE_SOURCES = frozenset({AuthState.AWAITING_2FA.value, AuthState.UNREACHABLE.value})
 
 
 def _is_recovery_edge(previous, new_auth_state) -> bool:
-    return previous in _RECOVERY_EDGE_SOURCES and new_auth_state == "authenticated"
+    return previous in _RECOVERY_EDGE_SOURCES and new_auth_state == AuthState.AUTHENTICATED.value
 
 
 def last_observed_auth_state():
@@ -1448,13 +1463,13 @@ def _derive_auth_state(check_result: Dict, pool_status: Optional[dict]) -> str:
       unknown       — pool status unavailable; cannot distinguish auth/no-auth
     """
     if not check_result.get("port_listening"):
-        return "unreachable"
+        return AuthState.UNREACHABLE.value
     if not pool_status:
-        return "unknown"
+        return AuthState.UNKNOWN.value
     for role_info in pool_status.values():
         if role_info.get("connected") and role_info.get("managed_accounts"):
-            return "authenticated"
-    return "awaiting_2fa"
+            return AuthState.AUTHENTICATED.value
+    return AuthState.AWAITING_2FA.value
 
 
 async def _operator_hold() -> Optional[Dict]:
@@ -1500,7 +1515,7 @@ async def check_ib_gateway(
         await _overlay_broker_push_lock(result["restart_backoff"])
         result["operator_hold"] = await _operator_hold()
         if not result.get("port_listening") or result.get("upstream_dead"):
-            result["auth_state"] = "unreachable"
+            result["auth_state"] = AuthState.UNREACHABLE.value
         elif pool_status:
             # Pool gives us visibility into managed_accounts on the remote
             # Gateway via this process's own client connections — that's the
@@ -1511,11 +1526,11 @@ async def check_ib_gateway(
             # pool). The TCP probe alone can't distinguish authenticated from
             # awaiting_2fa, so report "remote" and defer to the host that
             # actually owns the Gateway.
-            result["auth_state"] = "remote"
+            result["auth_state"] = AuthState.REMOTE.value
             remote_summary = _remote_cert_summary()
             if remote_summary is not None:
                 result["remote"] = remote_summary
-        if pool is not None and result["auth_state"] != "remote":
+        if pool is not None and result["auth_state"] != AuthState.REMOTE.value:
             await handle_auth_state_transition(result["auth_state"], pool)
         return result
 
@@ -1688,10 +1703,10 @@ async def restart_ib_gateway(pool=None) -> Dict:
             if authenticated:
                 _restart_state["attempt_count"] = 0
                 _restart_state["next_attempt_after"] = 0.0
-                _restart_state["last_outcome"] = "authenticated"
+                _restart_state["last_outcome"] = AuthState.AUTHENTICATED.value
                 _restart_state["last_accounts"] = accounts
                 result["authenticated"] = True
-                result["auth_state"] = "authenticated"
+                result["auth_state"] = AuthState.AUTHENTICATED.value
                 # Release the lock — login completed, other restart paths
                 # can proceed when they need to (e.g. a future bounce).
                 _release_2fa_push_lock_bounded(expected_holder=IB_GATEWAY_LOCK_HOLDER)
@@ -1700,14 +1715,14 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 # uses, so a successful restart that lands the system back at
                 # `authenticated` while the pool is still stale auto-recovers
                 # the pool without a separate operator step.
-                await handle_auth_state_transition("authenticated", pool)
+                await handle_auth_state_transition(AuthState.AUTHENTICATED.value, pool)
             else:
                 _restart_state["attempt_count"] += 1
                 delay = _next_backoff_delay(_restart_state["attempt_count"])
                 _restart_state["next_attempt_after"] = now + delay
-                _restart_state["last_outcome"] = "awaiting_2fa"
+                _restart_state["last_outcome"] = AuthState.AWAITING_2FA.value
                 result["authenticated"] = False
-                result["auth_state"] = "awaiting_2fa"
+                result["auth_state"] = AuthState.AWAITING_2FA.value
                 result["next_attempt_in_secs"] = delay
                 result["attempt_count"] = _restart_state["attempt_count"]
                 logger.warning(
@@ -1720,15 +1735,15 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 # Record the awaiting_2fa observation through the transition
                 # entrypoint so the next "authenticated" sighting fires the
                 # recovery edge.
-                await handle_auth_state_transition("awaiting_2fa", pool)
+                await handle_auth_state_transition(AuthState.AWAITING_2FA.value, pool)
                 # Lock stays HELD — the user is approving the push we
                 # just fired, no other path should fire another.
         else:
             _restart_state["attempt_count"] += 1
             delay = _next_backoff_delay(_restart_state["attempt_count"])
             _restart_state["next_attempt_after"] = now + delay
-            _restart_state["last_outcome"] = "unreachable"
-            result["auth_state"] = "unreachable"
+            _restart_state["last_outcome"] = AuthState.UNREACHABLE.value
+            result["auth_state"] = AuthState.UNREACHABLE.value
             result["next_attempt_in_secs"] = delay
             result["attempt_count"] = _restart_state["attempt_count"]
             logger.warning(
@@ -1737,7 +1752,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 delay, _restart_state["attempt_count"],
                 _remaining_lock_secs_bounded(now),
             )
-            await handle_auth_state_transition("unreachable", pool)
+            await handle_auth_state_transition(AuthState.UNREACHABLE.value, pool)
             # Lock stays HELD — even on a fully-down restart, IBC may
             # have started firing pushes before crashing; better to
             # block the next attempt than to stack on a phantom push.

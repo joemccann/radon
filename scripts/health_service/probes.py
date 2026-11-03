@@ -308,6 +308,19 @@ def _unit_evidence_current(units_age_secs) -> bool:
     return _evidence_current(units_age_secs, UNIT_STATE_MAX_AGE_SECS)
 
 
+# FastAPI's auth_state vocabulary (ib_gateway.AuthState) -> coarse state. Kept
+# here as literals by the stdlib-only contract; a parity test pins the keys to
+# the producer's enum. Anything else is not evidence and reads "unknown".
+AUTH_STATE_COARSE = {
+    "authenticated": "up",
+    "awaiting_2fa": "down",
+    "unreachable": "down",
+    "unknown": "unknown",
+    # Cloud TCP-only answer: this host cannot tell login from a 2FA wait.
+    "remote": "unknown",
+}
+
+
 def _nested_api_state(probe_results: dict) -> str | None:
     """Classify the FastAPI payload carried by the HTTP transport probe.
 
@@ -341,9 +354,8 @@ def _nested_api_state(probe_results: dict) -> str | None:
         "down", "error", "failed", "unhealthy",
     }:
         return "down"
-    if isinstance(auth_state, str) and auth_state.lower() in {
-        "awaiting_2fa", "down", "error", "failed", "unauthenticated",
-    }:
+    auth_coarse = AUTH_STATE_COARSE.get(auth_state, "unknown")
+    if auth_coarse == "down":
         return "down"
     if upstream_dead is not None and type(upstream_dead) is not bool:
         return "unknown"
@@ -354,9 +366,7 @@ def _nested_api_state(probe_results: dict) -> str | None:
         "up", "ok", "healthy", "reachable",
     }:
         return "unknown"
-    if isinstance(auth_state, str) and auth_state.lower() not in {
-        "authenticated", "ok", "healthy",
-    }:
+    if auth_coarse != "up":
         return "unknown"
     return "up"
 
