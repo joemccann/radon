@@ -443,8 +443,11 @@ class Controller:
                 self._invalidate_status()
 
         self.spawn(run)
-        return {"ok": True, "accepted": True, "returncode": 0,
-                "detail": f"{label} accepted; it runs in {self.detach_delay:.0f}s and the panel reconnects"}
+        # Accepted is not done: the operator CLI can still refuse (deploy lock,
+        # exit 74) after this reply. ``pending`` tells the caller the outcome
+        # is unknown until the panel reconnects; the result lands in the audit.
+        return {"ok": True, "accepted": True, "pending": True, "returncode": 0,
+                "detail": f"{label} accepted, not yet run; it runs in {self.detach_delay:.0f}s and the panel reconnects"}
 
     def _invalidate_status(self) -> None:
         with self._status_lock:

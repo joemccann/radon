@@ -2626,8 +2626,8 @@ def _admin_actor(request: Request) -> str:
 
 def _audit_admin_action(actor: str, result) -> None:
     logger.info(
-        "admin service action actor=%s unit=%s action=%s ok=%s rc=%s detail=%s",
-        actor, result.unit, result.action, result.ok, result.returncode,
+        "admin service action actor=%s unit=%s action=%s ok=%s pending=%s rc=%s detail=%s",
+        actor, result.unit, result.action, result.ok, getattr(result, "pending", False), result.returncode,
         (result.detail or "")[:200],
     )
 
@@ -2686,6 +2686,13 @@ async def admin_service_action(unit: str, action: str, request: Request):
             # timeout, not a caller error.
             raise HTTPException(status_code=504, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
+    return _admin_action_response(result)
+
+
+def _admin_action_response(result):
+    """202 for an action the host daemon accepted but has not run yet."""
+    if result.pending:
+        return JSONResponse(status_code=202, content=result.to_dict())
     return result.to_dict()
 
 
@@ -2705,7 +2712,7 @@ async def admin_stack_restart(request: Request):
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
-    return result.to_dict()
+    return _admin_action_response(result)
 
 
 # ---------------------------------------------------------------------------

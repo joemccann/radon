@@ -1060,6 +1060,9 @@ class ActionResult:
     detail: str
     returncode: int
     refusal: Optional[str] = None
+    # Accepted by the host daemon but not yet run (it cycles this process).
+    # The outcome is unknown until the panel reconnects; never a success.
+    pending: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1115,7 +1118,8 @@ async def _control_via_host(request: dict, unit: str, action: str, timeout: floa
     raw_rc = reply.get("returncode")
     rc = raw_rc if isinstance(raw_rc, int) and not isinstance(raw_rc, bool) else REMOTE_BAD_REPLY_RC
     if reply.get("ok") is True:
-        return ActionResult(unit, action, True, detail or f"{action} accepted", 0)
+        pending = reply.get("pending") is True or reply.get("accepted") is True
+        return ActionResult(unit, action, True, detail or f"{action} accepted", 0, pending=pending)
     if rc == OPERATOR_LOCK_HELD_RC:
         return ActionResult(unit, action, False, detail or "deploy/control lock held", PUSH_LOCK_HELD_RC,
                             refusal=RefusalReason.CONTROL_BUSY.value)
