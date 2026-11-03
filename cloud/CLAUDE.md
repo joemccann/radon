@@ -768,7 +768,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 **Cloudflare Workers AI (Clairic report dates, optional, off by default):** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` live in `/etc/radon/env` (root:radon `0640`, unquoted `KEY=value`), the gateway-only filtered model environment. Consumer services receive only the nonsecret feature flags. They take effect at the next gateway start. They are not in `cloud/config/required-env.txt` (a missing required key fails deploy preflight). The token is a Workers AI token with Read and Edit only. `CLAIRIC_DATES_ENABLED` and `CLAIRIC_DATE_SANITY_ENABLED` also default off; set `CLAIRIC_DATES_ENABLED=1` (and optionally `CLAIRIC_DATE_SANITY_ENABLED=1`) in that file, then restart `radon-model-gateway.service` or deploy. Behavior: [Dropbox research](../docs/dropbox-research.md#clairic-report-dates-off-by-default).
 
-They are intentionally left out of `mcp.env` (`deploy.sh` `MCP_ENV_KEYS` is Clerk and `RADON_MCP_*` only) and out of the newsfeed allowlist in `radon-app-runtime.sh` `render_env_file`.
+They are intentionally left out of `mcp.env` (`deploy.sh` `MCP_ENV_KEYS` is the Clerk keys, including `CLERK_AUTHORIZED_PARTIES`, `ALLOWED_USER_IDS` and `RADON_MCP_*` only) and out of the newsfeed allowlist in `radon-app-runtime.sh` `render_env_file`.
 
 Provisioning (app host, as root). Append via stdin. Never pass the token as a command argument:
 
