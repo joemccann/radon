@@ -530,13 +530,21 @@ finally:
 PY_PERSIST_TOPOLOGY
 }
 
-saved_timers() {
+# Saved-topology machine: running (no file) -> stop -> stopped (file lists
+# what stop quiesced) -> start -> running (file removed). A stop while already
+# stopped merges into the saved list; it never replaces it with what is
+# active now, which after a first stop is nothing.
+saved_units() {
   [[ -f "$TOPOLOGY_PATH" ]] || return 0
   while IFS= read -r unit; do
-    [[ "$unit" =~ ^radon-[a-z0-9-]+\.timer$ ]] || continue
+    [[ "$unit" =~ ^radon-[a-z0-9-]+\.(service|timer)$ ]] || continue
     [[ "$unit" == radon-beta-* ]] && continue
     printf '%s\n' "$unit"
   done < "$TOPOLOGY_PATH"
+}
+
+saved_timers() {
+  saved_units | grep -E '\.timer$' || true
 }
 
 unique_units() {
@@ -571,6 +579,13 @@ systemctl_many() {
   return "$rc"
 }
 
+report_gateway_refusal() {
+  local verb="$1" rc="$2"
+  (( rc == 0 )) && return 0
+  echo "Gateway control refused ${verb} (exit ${rc}); radon units were still ${verb}ed" >&2
+  exit "$rc"
+}
+
 emit_stack_result() {
   local verb="$1"
   local count="$2"
@@ -591,7 +606,10 @@ case "$requested_action" in
     done
     STOP_UNITS+=("${ACTIVE_TIMERS[@]}")
     STOP_UNITS+=("${ACTIVE_SCHEDULED_SERVICES[@]}")
-    persist_topology "${STOP_UNITS[@]}"
+    mapfile -t SAVED_UNITS < <(
+      { saved_units; printf '%s\n' "${STOP_UNITS[@]}"; } | unique_units
+    )
+    persist_topology "${SAVED_UNITS[@]}"
     systemctl_many stop "${STOP_UNITS[@]}"
     if [[ "$HOST_ROLE" != "app" ]]; then
       gateway_control stop
@@ -610,12 +628,16 @@ case "$requested_action" in
       printf '%s\n' "${PERSISTENT_UNITS[@]}" \
         "${PRIOR_TIMERS[@]}" | unique_units
     )
+    # A Gateway refusal (2FA lease, operator hold) must not keep the app
+    # plane down: record it, start the units, report it in the exit code.
+    gateway_rc=0
     if [[ "$HOST_ROLE" != "app" ]]; then
-      gateway_control start
+      gateway_control start || gateway_rc=$?
     fi
     systemctl_many start "${START_UNITS[@]}"
     rm -f "$TOPOLOGY_PATH"
     emit_stack_result "started" "${#START_UNITS[@]}"
+    report_gateway_refusal start "$gateway_rc"
     ;;
   restart)
     mapfile -t RESTART_UNITS < <(
@@ -625,11 +647,13 @@ case "$requested_action" in
     # Quiesce timer-owned jobs that are currently running, but never start
     # them directly after the Gateway cycle. Their timers retain ownership.
     systemctl_many stop "${ACTIVE_SCHEDULED_SERVICES[@]}"
+    gateway_rc=0
     if [[ "$HOST_ROLE" != "app" ]]; then
-      gateway_control restart
+      gateway_control restart || gateway_rc=$?
     fi
     systemctl_many restart "${RESTART_UNITS[@]}"
     emit_stack_result "restarted" "${#RESTART_UNITS[@]}"
+    report_gateway_refusal restart "$gateway_rc"
     ;;
   status)
     run_bounded "$SYSTEMCTL_QUERY_TIMEOUT_SECS" \
