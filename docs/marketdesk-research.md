@@ -245,13 +245,10 @@ length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
 ladder is `scripts/clients/model_ladder.py`. Image and text copy use that
-shared order, grok included. One provider's unreadable or incomplete reply
-fails over to the next rung. A read timeout cools that provider down for the
-rest of the process, so the 2026-10-27 grok-4.6 image timeouts (153s, or the
-120s cap) are not repeated for every article in the 270s cycle. Captions obey the same
-ladder is `scripts/clients/model_ladder.py`. Text-only editorial requests start with Antigravity, then Anthropic, Grok, Cursor, Codex, NVIDIA and Cerebras; quota failures fall through. The image copy call skips text-only Antigravity and grok
-(`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
-image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
+shared order, grok included. NVIDIA and Cerebras stay paused at the gateway.
+A reply the caller's `accept` rejects resumes the next rung. An incomplete
+or invalid gateway reply raises `ModelResponseError` and stops the article
+(`CopyUnavailable`). Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
 the source text.
 
