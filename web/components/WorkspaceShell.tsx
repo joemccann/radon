@@ -37,7 +37,6 @@ import clearResearch from "@/components/ClearResearch.module.css";
 import clearShell from "@/components/ClearShell.module.css";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
-import DashboardSurface from "@/components/dashboard/DashboardSurface";
 import ChatLauncher from "@/components/ChatLauncher";
 import DemoWelcomeModal from "@/components/DemoWelcomeModal";
 import MobileShell from "@/components/mobile/MobileShell";
@@ -53,6 +52,9 @@ const PortfolioSections = dynamic(() => import("@/components/PortfolioSections")
 });
 const PerformancePanel = dynamic(() => import("@/components/PerformancePanel"), {
   loading: () => <InstrumentSkeleton testId="performance-panel-skeleton" />,
+});
+const DashboardSurface = dynamic(() => import("@/components/dashboard/DashboardSurface"), {
+  loading: () => <InstrumentSkeleton testId="dashboard-surface-skeleton" />,
 });
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
