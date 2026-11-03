@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 type MediaQueryMatcher = (query: string) => boolean;
 
@@ -89,10 +89,47 @@ function installLocalStorageShim(): void {
   });
 }
 
+const PINNED_ENV = {
+  NODE_ENV: "test",
+  TZ: "America/New_York",
+  LC_ALL: "en_US.UTF-8",
+  LANG: "en_US.UTF-8",
+} as const;
+
+function clearWebStorage(): void {
+  if (typeof window === "undefined") return;
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      store?.clear();
+    } catch {
+      // A test may have replaced the storage object with a partial stub.
+    }
+  }
+}
+
 beforeEach(() => {
   resetMatchMediaMatcher();
   installLocalStorageShim();
   installMatchMediaShim();
+});
+
+// isolate: false reuses the worker module graph and globals across files.
+// Vitest restores spies once after each file; this puts them back after each
+// test, and puts back timers, stubbed globals, stubbed env, and web storage.
+// Raw process.env writes do not go through vi.stubEnv, so the suite contract
+// (NODE_ENV, TZ, locale) is pinned again here. DOM cleanup stays below and
+// still resolves the test file's own @testing-library/react.
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  for (const [key, value] of Object.entries(PINNED_ENV)) {
+    process.env[key] = value;
+  }
+  clearWebStorage();
+  resetMatchMediaMatcher();
 });
 
 // Global test isolation: unmount any @testing-library-rendered React tree after

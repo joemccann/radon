@@ -44,6 +44,17 @@ describe("vitest global config", () => {
     expect(retry?.[1] ?? "0").toBe("0");
   });
 
+  it("shares one worker module graph and restores it from the setup file", () => {
+    expect(configSource).toMatch(/^\s*isolate:\s*false,?\s*$/m);
+    const setup = readFileSync(join(REPO_ROOT, "vitest.setup.ts"), "utf-8");
+    expect(setup).toMatch(/vi\.restoreAllMocks\(\)/);
+    expect(setup).toMatch(/vi\.useRealTimers\(\)/);
+    expect(setup).toMatch(/vi\.unstubAllGlobals\(\)/);
+    expect(setup).toMatch(/vi\.unstubAllEnvs\(\)/);
+    expect(setup).toMatch(/createRequire\(task\.file\.filepath\)/);
+    expect(setup).not.toMatch(/^import\s[^;]*@testing-library\/react/m);
+  });
+
   it("keeps the slow jsdom files fail-fast with a raised per-file timeout", () => {
     for (const file of SLOW_JSDOM_FILES) {
       const source = readFileSync(join(REPO_ROOT, file), "utf-8");

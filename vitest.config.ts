@@ -52,6 +52,11 @@ export default defineConfig({
     ],
     environment: "node",
     fileParallelism: true,
+    // Shared worker module graph. Per-file VM isolation was most of a shard's
+    // wall time. vitest.setup.ts afterEach restores spies, timers, globals,
+    // env, web storage, and any rendered DOM. retry stays 0 so a leak fails
+    // the shard on the first run.
+    isolate: false,
     // Half the cores locally, all of them on CI (vitest.workers.ts).
     maxWorkers: resolveMaxWorkers(process.env),
     // Never retry (TEST_AUDIT T-161). A suite-wide retry turns any intermittent

@@ -7,8 +7,9 @@
  * exists; this node-environment file proves the setup did not load it.
  *
  * RTL ships CommonJS and vitest externalizes node_modules, so loading it
- * populates Node's require.cache. Each test file runs in a fresh worker
- * (isolate is on), so the cache reflects this file and its setup only.
+ * populates Node's require.cache. isolate is off, but this file's worker is
+ * the node environment: the setup loads RTL only when a document exists, and
+ * jsdom files do not share this worker. The cache must still not contain RTL.
  */
 import { createRequire } from "node:module";
 import { describe, it, expect } from "vitest";

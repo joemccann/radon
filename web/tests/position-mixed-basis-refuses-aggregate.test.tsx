@@ -22,7 +22,7 @@
  */
 
 import React from "react";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 
 import { cleanup as cleanupHooks, renderHook } from "@testing-library/react";
@@ -118,12 +118,10 @@ function partiallyRolledVertical(
 // (lib/ibDailyPnlSession.ts), so the IB-override assertion below is only
 // meaningful inside a live session. Pin the clock to a Friday afternoon ET;
 // this file was authored on 2026-09-18 and went red at 00:00 ET Saturday.
-beforeAll(() => {
+beforeEach(() => {
+  // The suite afterEach restores real timers (isolate: false). Re-pin per test.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-18T19:00:00Z"));
-});
-afterAll(() => {
-  vi.useRealTimers();
 });
 
 function todayET(): string {
