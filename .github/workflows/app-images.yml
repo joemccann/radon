@@ -81,6 +81,12 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "python image input hash refused; building"
           fi
+          if payload="$(python3 scripts/ci/model_client_payload_inputs.py)"; then
+            echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+          else
+            echo "payload=" >> "$GITHUB_OUTPUT"
+            echo "model client payload hash refused; deploy will export"
+          fi
       # The input hash covers the image, not the steps a hit skips. Those
       # also read this workflow and, for the gateway bounds check, the
       # dockerignored cloud/scripts/model_clients.py. Main skips them on a hit
@@ -268,6 +274,8 @@ jobs:
           tags: |
             ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}
             ghcr.io/joemccann/radon-model-gateway:latest
+          build-args: |
+            MODEL_CLIENTS_PAYLOAD_SHA256=${{ steps.pyimage.outputs.payload }}
           cache-from: |
             type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache
             type=registry,ref=ghcr.io/joemccann/radon-python:buildcache

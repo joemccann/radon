@@ -2519,3 +2519,65 @@ images-list donor, receipt image_id donor, image_id kwarg) then green (9
 passed in that file; 57 passed with install/dedupe/recovery/darwin). Workflow
 YAML unchanged. Full suites, Vitest, Docker builds, and workflow lint are
 left to PR CI.
+
+## CIP-024 - reuse model clients when the payload hash matches (2026-11-03) - VALIDATING
+
+CIP-022/023 reuse only when the gateway image id matches. A python-image
+rebuild (CIP-020 miss) still exports the CLI payload even when vendor-clis
+and the four exported `model_gateway` helpers did not change, because
+`FROM runtime AS model-gateway` gives the new image a new id.
+
+Evidence, attempt-1 mixed python-rebuild, deploy SSH logs
+(`gh run view --log --job`), offsets from the first log line:
+
+| Run | Attempt | Clock | Deploy job | Python image | Client promotion |
+|---|---|---|---|---|---|
+| [41487857404](https://github.com/joemccann/radon/actions/runs/41487857404) | 1 | 860s | 233s (job 125428712620) | 407s (gateway build 224s) | ~86s export after control-plane (clients promoted +130s) |
+
+The comparable before sample is that attempt-1 success. Its critical path is
+the python-image job ending at +507s, then prestage/prepull 111s, then
+deploy. The 86s export sits inside Deploy via SSH (222s) after services
+stop, so it moves the primary clock. Queue on that run is 2s and is not
+part of the gain. Ten percent of last-night's rebuild p50 (749s) is 75s;
+86s clears 15s and 10%. An ihash-reuse deploy already skips the rebuild
+and is a different class. A payload miss still exports. Runner minutes do
+not increase.
+
+**Change.** The gateway build stamps
+`radon.model-clients.payload-sha256` from
+`scripts/ci/model_client_payload_inputs.py` (`docker/app/Dockerfile.python`,
+vendor-clis, chart-runtime lock, exported helpers). The Dockerfile is hashed
+because the exported `node` and the CLI installs run on its pinned base
+images; a digest bump alone must not reuse old clients. `reuse_identical_image_clients` still prefers an
+image-id donor; on a miss it inspects that label and clones a verified
+donor whose label matches. Empty, missing or malformed labels export. No
+new receipt keys (avoids the CIP-023 schema fight). No `needs` edge, test
+inventory, coverage, health check, stability window, rollback, or
+exact-SHA image admission change. The first labeled rebuild after merge
+still exports (no labeled donor yet); later rebuilds with the same payload
+skip.
+
+**Safety and revert trigger.** Fail closed to export. `:latest` and
+`ihash-` tags are not donors. Revert if a reused receipt's hash does not
+match a payload-identical image export, if Darwin `current` moves before
+commit, or if promotion succeeds without either a reuse line or the two
+export containers.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS | 233s | pending | TBD until 5 samples |
+
+Before is the deploy job wall on run 41487857404 (job 125428712620), the
+newest attempt-1 mixed python-rebuild that paid the 86s export. Acceptance
+remains five comparable mixed python-rebuild deploys before and five after:
+same-class p50 at least 10% and 15s faster; p95 no worse than 5% or 15s;
+cold p50 no worse than 10%; runner minutes no more than 20% higher. The
+before set has one attempt-1 rebuild success in the newest window, not
+five. Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip024_model_client_payload.py` was
+red (hasher and LABEL missing) then green (5 passed).
+`cloud/tests/test_model_clients_reuse.py` gained three payload-label tests
+that were red then green; image-id miss without a label still exports.
+Related scripts (39) and cloud gateway/reuse (26) stayed green. Full
+suites, Vitest, Docker builds, and workflow lint are left to PR CI.
