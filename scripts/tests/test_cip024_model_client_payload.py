@@ -22,6 +22,7 @@ LABEL = "radon.model-clients.payload-sha256"
 PAYLOAD_ARG = "MODEL_CLIENTS_PAYLOAD_SHA256"
 
 PAYLOAD_FILES = (
+    "docker/app/Dockerfile.python",
     "docker/app/vendor-clis/package.json",
     "docker/app/vendor-clis/package-lock.json",
     "docker/app/vendor-clis/install-native.cjs",
@@ -73,6 +74,27 @@ def test_payload_hash_ignores_unrelated_scripts(tmp_path: Path) -> None:
     assert module.payload_hash(tree) == original
     helper = tree / "scripts/model_gateway/cli.py"
     helper.write_text(helper.read_text(encoding="utf-8") + "\n# payload change\n")
+    assert module.payload_hash(tree) != original
+
+
+def test_payload_hash_tracks_the_base_images_that_build_the_clients(tmp_path: Path) -> None:
+    """The exported `node` is copied out of the pinned node base image, and the
+    CLI installs run on it. A digest bump with no lockfile change must miss."""
+    import shutil
+
+    module = _load_hasher()
+    tree = tmp_path / "radon"
+    for path in PAYLOAD_FILES:
+        dest = tree / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / path, dest)
+    original = module.payload_hash(tree)
+    dockerfile = tree / "docker/app/Dockerfile.python"
+    text = dockerfile.read_text(encoding="utf-8")
+    assert "AS chart-runtime" in text
+    bumped = text.replace("@sha256:", "@sha256:0", 1)
+    assert bumped != text
+    dockerfile.write_text(bumped, encoding="utf-8")
     assert module.payload_hash(tree) != original
 
 

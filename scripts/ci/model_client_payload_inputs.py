@@ -16,8 +16,11 @@ REPO = Path(__file__).resolve().parents[2]
 # Paths COPY'd into /opt/radon-clis, /opt/radon-darwin, /usr/local/bin/node
 # or the four exported model_gateway helpers. A new COPY into those trees
 # must be added here; scripts/tests/test_cip024_model_client_payload.py
-# walks Dockerfile.python and fails otherwise.
+# walks Dockerfile.python and fails otherwise. Dockerfile.python itself is
+# hashed because the exported `node` is copied out of its pinned node base
+# image and the CLI installs run on it: a digest bump must export.
 PAYLOAD_FILES = (
+    "docker/app/Dockerfile.python",
     "docker/app/vendor-clis/package.json",
     "docker/app/vendor-clis/package-lock.json",
     "docker/app/vendor-clis/install-native.cjs",
