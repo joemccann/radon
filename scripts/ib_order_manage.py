@@ -201,7 +201,7 @@ def executed_quantity(client: IBClient, trade) -> tuple:
         executed = True
         if getattr(fill.contract, "secType", None) == sec_type:
             by_exec_id[execution.execId] = _quantity(execution.shares)
-    quantity = max(sum(by_exec_id.values()), _quantity(trade.orderStatus.filled))
+    quantity = max(sum(by_exec_id.values()), _quantity(getattr(trade.orderStatus, "filled", None)))
     return quantity, executed or quantity > 0
 
 
@@ -226,13 +226,13 @@ def classify_cancel(status, *, gone: bool, acked: bool, filled: Optional[float],
     return CancelOutcome.CANCELLED
 
 
-def _cancel_outcome(client: IBClient, trade, status, *, gone=False, acked=False):
+def resolve_cancel_outcome(client: IBClient, trade, status, *, gone=False, acked=False):
     """(outcome, filled, read_error) for ``trade`` in broker ``status``."""
     total = _quantity(trade.order.totalQuantity)
     if classify_cancel(status, gone=gone, acked=acked, filled=0.0, total=total) in (
         CancelOutcome.FILLED, CancelOutcome.STILL_WORKING,
     ):
-        filled = _quantity(trade.orderStatus.filled) or (total if status == FILLED_STATUS else 0.0)
+        filled = _quantity(getattr(trade.orderStatus, "filled", None)) or (total if status == FILLED_STATUS else 0.0)
         outcome = classify_cancel(status, gone=gone, acked=acked, filled=filled, total=total)
         return outcome, filled, None
     try:
@@ -244,7 +244,7 @@ def _cancel_outcome(client: IBClient, trade, status, *, gone=False, acked=False)
     return outcome, filled, None
 
 
-def _cancel_result(trade, outcome: CancelOutcome, status, filled, read_error):
+def cancel_result(trade, outcome: CancelOutcome, status, filled, read_error):
     """(status, message, extra) the CLI emits for a settled cancel."""
     order_id = trade.order.orderId
     final_status = status if status in TERMINAL else CANCELLED
@@ -294,7 +294,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
 
     status = trade.orderStatus.status
     if status in TERMINAL:
-        outcome, filled, _ = _cancel_outcome(client, trade, status)
+        outcome, filled, _ = resolve_cancel_outcome(client, trade, status)
         output("error", f"Order already {status} — cannot cancel",
                orderId=trade.order.orderId, finalStatus=status,
                cancelOutcome=outcome.value, filledQuantity=json_number(filled))
@@ -334,13 +334,13 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
         # orderId acknowledges; broadcasts confirm solely via the refreshed
         # trade snapshot (gone / terminal).
         acked = any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs)
-        outcome, filled, read_error = _cancel_outcome(
+        outcome, filled, read_error = resolve_cancel_outcome(
             client, current, current.orderStatus.status, gone=gone, acked=acked,
         )
         if outcome is CancelOutcome.STILL_WORKING:
             return
         client.ib.errorEvent -= on_error
-        status_text, message, extra = _cancel_result(
+        status_text, message, extra = cancel_result(
             current, outcome, current.orderStatus.status, filled, read_error,
         )
         output(status_text, message, **extra)
