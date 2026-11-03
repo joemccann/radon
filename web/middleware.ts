@@ -376,6 +376,15 @@ export async function handleProbeBearerGate(
 // fails the navigation with ERR_NAME_NOT_RESOLVED. Returning next() from INSIDE
 // this wrapper did NOT suppress that handshake; only never entering the wrapper
 // does.
+// Origins whose Clerk session tokens this app accepts (the token's azp
+// claim). The Clerk instance can issue tokens for more than one app, so
+// production pins its own origin. Unset keeps Clerk's default: no azp check.
+// The FastAPI and hosted MCP verifiers read the same variable.
+const authorizedParties = (process.env.CLERK_AUTHORIZED_PARTIES ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const clerkHandler = clerkMiddleware(async (auth, request) => {
   // Public HTML auth pages (/sign-in, /sign-up) still render through the root
   // layout + ThemeBootstrap, so they need the nonce + enforced CSP too. The
@@ -447,6 +456,7 @@ const clerkHandler = clerkMiddleware(async (auth, request) => {
   // request host ends with ".vercel.app" and the key is live. The instance does
   // not allow those hosts, so every proxied call answered 400 host_invalid.
   frontendApiProxy: { enabled: false },
+  authorizedParties: authorizedParties.length > 0 ? authorizedParties : undefined,
 });
 
 // Entry point. The probe bearer gate and the local/authless bypass run BEFORE
