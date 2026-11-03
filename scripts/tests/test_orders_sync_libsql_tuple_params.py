@@ -66,6 +66,15 @@ def libsql_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
         )
         """
     )
+    conn.execute(  # replace_open_orders_for_session claims its snapshot slot (C3)
+        """
+        CREATE TABLE IF NOT EXISTS app_config (
+          key         TEXT PRIMARY KEY,
+          value       TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
 
     monkeypatch.setenv("RADON_DB_NO_REPLICA", "1")

@@ -35,7 +35,7 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
     fake = types.ModuleType("db.writer")
     fake.ensure_no_replica_for_writers = lambda: calls["ensure_no_replica_for_writers"].append(True)  # type: ignore[attr-defined]
     fake.record_service_health = lambda *a, **kw: calls["record_service_health"].append((a, kw))  # type: ignore[attr-defined]
-    fake.replace_open_orders_for_session = lambda rows: calls["replace_open_orders_for_session"].append(rows)  # type: ignore[attr-defined]
+    fake.replace_open_orders_for_session = lambda rows, **kw: calls["replace_open_orders_for_session"].append(rows) or True  # type: ignore[attr-defined]
     def upsert_executed_orders_for_session(rows):
         calls["upsert_executed_order"].extend(
             {"exec_id": exec_id, "payload": payload, "fill_time": fill_time, "perm_id": perm_id}

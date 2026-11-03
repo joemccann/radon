@@ -39,6 +39,7 @@ try:
     # waiting for the RTH-gated 5-min orders-sync loop.
     from ib_orders import (  # type: ignore
         build_orders_data as build_orders_data_for_mirror,
+        snapshot_time as snapshot_time_for_mirror,
         fetch_executed_orders as fetch_executed_orders_for_mirror,
         fetch_open_orders as fetch_open_orders_for_mirror,
         save_orders as save_orders_snapshot,
@@ -46,6 +47,7 @@ try:
     from db.writer import count_open_orders as count_open_orders_for_mirror  # type: ignore
 except ImportError:  # pragma: no cover
     build_orders_data_for_mirror = None  # type: ignore[assignment]
+    snapshot_time_for_mirror = None  # type: ignore[assignment]
     fetch_executed_orders_for_mirror = None  # type: ignore[assignment]
     fetch_open_orders_for_mirror = None  # type: ignore[assignment]
     save_orders_snapshot = None  # type: ignore[assignment]
@@ -345,6 +347,9 @@ class FillMonitorHandler(BaseHandler):
         ):
             return
         try:
+            # Read time BEFORE the fetch: orders this book against the
+            # orders-sync writer's (C3).
+            snapshot_at = snapshot_time_for_mirror() if snapshot_time_for_mirror else None
             open_orders = fetch_open_orders_for_mirror(client)
             # get_open_orders caps its openOrderEnd wait at 0.5s and returns
             # whatever arrived. The same cap that yields an EMPTY book yields a
@@ -381,7 +386,11 @@ class FillMonitorHandler(BaseHandler):
                     )
                     return
             executed = fetch_executed_orders_for_mirror(client)
-            save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
+            # No heartbeat: the orders-sync service row belongs to orders-sync.
+            save_orders_snapshot(
+                build_orders_data_for_mirror(open_orders, executed, snapshot_at=snapshot_at),
+                heartbeat=False,
+            )
         except Exception as exc:  # noqa: BLE001 — never crash on mirror failure
             logger.warning("fill_monitor: orders snapshot mirror failed: %s", exc)
     

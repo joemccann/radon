@@ -190,7 +190,7 @@ class TestFillMonitorMirrorBody:
             lambda client: executed, raising=False)
         monkeypatch.setattr(
             fill_monitor_module, "build_orders_data_for_mirror",
-            lambda o, e: {"open_orders": o, "executed_orders": e}, raising=False)
+            lambda o, e, **kw: {"open_orders": o, "executed_orders": e}, raising=False)
         monkeypatch.setattr(
             fill_monitor_module, "save_orders_snapshot", save, raising=False)
         monkeypatch.setattr(
@@ -215,7 +215,7 @@ class TestFillMonitorMirrorBody:
         handler = FillMonitorHandler(send_notifications=False)
         _ORIG_MIRROR(handler, MagicMock())
         save.assert_called_once_with(
-            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]})
+            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]}, heartbeat=False)
 
     def test_nonempty_book_fetches_builds_and_saves(self, monkeypatch):
         """Happy path: mirror body runs fetch → build → save."""
@@ -225,7 +225,7 @@ class TestFillMonitorMirrorBody:
         handler = FillMonitorHandler(send_notifications=False)
         _ORIG_MIRROR(handler, MagicMock())
         save.assert_called_once_with(
-            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]})
+            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]}, heartbeat=False)
 
     def test_partial_book_never_drops_tracked_working_orders(self, monkeypatch):
         """RED for R-610 (P1): the same 0.5s openOrderEnd cap that produces an
@@ -629,8 +629,8 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
              patch.object(fm, "count_open_orders_for_mirror", lambda: 1), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
         assert saved == [], (
             "an empty open-orders read whole-replaced Turso while a working "
@@ -646,8 +646,8 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
              patch.object(fm, "count_open_orders_for_mirror", lambda: 0), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             handler._mirror_ib_orders_snapshot(MagicMock())
         assert len(saved) == 1
 
@@ -657,7 +657,7 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         saved = []
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: [{"orderId": 7}]), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
         assert len(saved) == 1
