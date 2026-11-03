@@ -207,13 +207,17 @@ class TestGuardSurvivesRestart:
 
     def test_get_state_serializes_guard_json_safe(self):
         handler = ExitOrdersHandler(db=FakeJournalDb([]))
-        handler._unrecorded_placements[("trade-8", "target")] = 99
+        handler._unrecorded_placements[("trade-8", "target")] = {
+            "order_id": 99, "perm_id": 777001,
+        }
         state = handler.get_state()
         # Must survive a JSON round-trip (daemon_state.json).
         restored_raw = json.loads(json.dumps(state))
         handler2 = ExitOrdersHandler(db=FakeJournalDb([]))
         handler2.set_state(restored_raw)
-        assert handler2._unrecorded_placements == {("trade-8", "target"): 99}
+        assert handler2._unrecorded_placements == {
+            ("trade-8", "target"): {"order_id": 99, "perm_id": 777001},
+        }
 
 
 class TestBrokerCrossCheck:
