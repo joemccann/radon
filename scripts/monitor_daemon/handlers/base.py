@@ -37,10 +37,11 @@ for every handler — not just cash_flow_sync. See
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from zoneinfo import ZoneInfo
 import logging
+import threading
 import time
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,15 @@ class BaseHandler(ABC):
         # Set while a finished cycle's service_health write has not landed.
         # The scan stays latched; the daemon retries only this payload.
         self._pending_health: Optional[Dict[str, Any]] = None
+        # Guards every field get_state() reads. A timed-out worker keeps
+        # running after the daemon moves on, so the loop thread's
+        # save_state and a late worker can touch the same containers.
+        self.state_lock = threading.RLock()
+        # Run identity: run() takes a token, the daemon marks a token timed
+        # out, and a timed-out run's late result is discarded instead of
+        # latching last_run and heartbeating ok over the timeout row.
+        self._run_token = 0
+        self._timed_out_token = 0
     
     @property
     def enabled(self) -> bool:
@@ -172,8 +182,10 @@ class BaseHandler(ABC):
         # REL-021b / R-030: wall time is for durable reporting, never the
         # running process's interval clock. Rebase restored/explicitly changed
         # timestamps once; a future timestamp waits at most one interval.
+        # A legacy naive value is local wall time; compare it as such.
         if self._last_run_monotonic is None or self._scheduled_last_run != self.last_run:
-            elapsed = max(0.0, (datetime.now() - self.last_run).total_seconds())
+            now = datetime.now(timezone.utc if self.last_run.tzinfo else None)
+            elapsed = max(0.0, (now - self.last_run).total_seconds())
             self._last_run_monotonic = time.monotonic() - elapsed
             self._scheduled_last_run = self.last_run
         return time.monotonic() - self._last_run_monotonic >= self.interval_seconds
@@ -198,13 +210,19 @@ class BaseHandler(ABC):
         start_time = time.monotonic()
         started_at = self._utc_now_iso()
         self._cycle_health_recorded = False
+        with self.state_lock:
+            self._run_token += 1
+            token = self._run_token
 
         try:
             result = self.execute()
             self._enforce_return_contract(result)
-            self.last_run = datetime.now()
-            self._last_run_monotonic = time.monotonic()
-            self._scheduled_last_run = self.last_run
+            with self.state_lock:
+                if self._run_timed_out(token):
+                    return self._discarded_late_result(result)
+                self.last_run = datetime.now(timezone.utc)
+                self._last_run_monotonic = time.monotonic()
+                self._scheduled_last_run = self.last_run
             self._ensure_cycle_heartbeat(result, started_at=started_at)
 
             elapsed_ms = (self._last_run_monotonic - start_time) * 1000
@@ -217,6 +235,8 @@ class BaseHandler(ABC):
             }
         except Exception as e:
             logger.exception(f"Handler {self.name} failed: {e}")
+            if self._run_timed_out(token):
+                return self._discarded_late_result(None)
             if not self._cycle_health_recorded:
                 self.record_cycle_health(
                     "error", started_at=started_at, error={"message": str(e)}
@@ -227,6 +247,26 @@ class BaseHandler(ABC):
                 "error": str(e),
                 "data": None
             }
+
+    def mark_run_timed_out(self) -> None:
+        """Called by the daemon when its deadline abandons the current run.
+        The worker thread cannot be killed; its eventual result is dropped."""
+        with self.state_lock:
+            self._timed_out_token = self._run_token
+
+    def _run_timed_out(self, token: int) -> bool:
+        with self.state_lock:
+            return token <= self._timed_out_token
+
+    def _discarded_late_result(self, data: Any) -> Dict[str, Any]:
+        message = f"handler {self.name} finished after its deadline; result discarded"
+        logger.warning(message)
+        return {
+            "status": "error",
+            "timestamp": self._utc_now_iso(),
+            "error": message,
+            "data": data,
+        }
 
     def record_cycle_health(
         self,
