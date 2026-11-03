@@ -12114,3 +12114,37 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | 19,735 passed / 12 skipped / 63 subtests (220.64s) | 11,592 passed / 21 skipped / 1,180 files (132.58s) | 42 failed / 3,743 passed / 23 skipped (924.32s) | 0 added / 0 removed |
 
 Base cloud at `3ce7f24a` on this Mac: 42 failed / 3,743 passed / 23 skipped (939.76s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
+
+## Delta audit 2026-11-02
+
+Newest trusted checkpoint is the 2026-10-31 collaborator comment on issue #83. The authored comment and `TEST_AUDIT.md` ledger audited through `38154af2ef580c8156dd5f1ae5c92b39b1201bb6`. The runner's later `audited-through:` line was `3ce7f24af5e8b6a143b976efeafc441208ad1322` (the first range end). The follow-on `3ce7f24a..38154af2` (PR #1362, 2 commits / 6 paths) was already judged as no finding. Tonight's unaudited range is `38154af2..6288d75fc3da7a2452857749b15c425608acfb07`: 164 commits / 194 paths. The checkpoint carried no open verified finding. No open `testing/` pull request. Coverage thresholds did not drop. New skips are host-only (`gitleaks` absent, bash 3.2 `mapfile`); Linux CI owns those gates.
+
+Standing sweep on `6288d75f`: root pytest 20,220 passed / 1 failed / 12 skipped / 63 subtests (131.13s). The failure is `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]` under xdist (`elapsed < 1.0` at 1.00046s). Serial rerun of that file: 11 passed (10.77s). Vitest 11,597 passed / 21 skipped / 1,181 files (44.04s). cloud/tests 42 failed / 3,958 passed / 23 skipped (953.45s). Shared cloud error is bash 3.2 `mapfile` / `pin[@]` unbound. Linux CI is the authority.
+
+Re-triaged TEST_LOG and NEW_FINDINGS. Older OPEN/BLOCKED rows named on 2026-10-31 stay DONE or operator-completed. No still-open verified finding was carried forward.
+
+Not filed: the credentials clock bound under xdist (serial green). The gitleaks and `mapfile` skips (CI owns those jobs). `web/e2e/flow-analysis-ticker.spec.ts` DST pin already merged as #1401.
+
+### T-581 — P1 — Codex 429 cooldown is stored and never consulted
+
+`scripts/clients/provider_cooldown.py` (165 lines, `97a15b78`) persists a provider expiry so a Codex 429 whose reset is days away is not retried on every 5-minute oneshot (`docs/dropbox-research.md:128`). After the gateway cutover, `scripts/clients/model_ladder.py` is a thin client and `scripts/model_gateway/engine.py` never imports the module. `scripts/tests/conftest.py:35-38` still clears it. `_DEAD_RUNG_CODES` at `engine.py:1491` does not include `http_429`, so even in-process a 429 is retried on the next article. NVIDIA keeps its own limiter.
+
+Acceptance: a Codex 429 with body `try again in 2 days` falls through, then after `clear_process_state()` and an empty `_dead_until` the next `complete_text_json` records `codex:rate_limited_cooldown` and does not call chatgpt.com. A missing `note()` or `rate_limited()` check fails that. `reset_seconds` still parses a relative body over a shorter Retry-After.
+
+Audited through: 6288d75fc3da7a2452857749b15c425608acfb07 on 2026-11-02 — 1 new finding
+
+## Remediation 2026-11-02
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-581 | DONE | Red: second oneshot recorded `codex:http_599` (chatgpt.com called again). Green: 429 body `try again in 2 days` persists via `reset_seconds` then `note()`; next oneshot after `clear_process_state()` + empty `_dead_until` is `codex:rate_limited_cooldown` with zero chatgpt.com calls. Bare 429 (`too many requests`) does not persist and the next oneshot still hits chatgpt.com (`codex:http_429`). `test_provider_cooldown.py` 4 passed; `TestCodexRateLimitCooldown` + NVIDIA 12 passed; `test_model_ladder.py` 138 passed; research_runtime + ladder + cooldown 269 passed. |
+
+Closing gates 2026-11-02 (serial, never pytest+vitest together):
+
+| Round | pytest | vitest | cloud/tests |
+|---|---|---|---|
+| 1 | 20228 passed / 12 skipped / 63 subtests, 144.12s, EXIT 0 | 11597 passed / 21 skipped / 1181 files, 95.33s, EXIT 0 | 42 failed / 3958 passed / 23 skipped, 991.98s |
+| 2 | first xdist credentials flake (`elapsed < 1.0`); serial file 11 passed; rerun 20228 passed / 12 skipped / 63 subtests, 160.19s, EXIT 0 | 11597 passed / 21 skipped / 1181 files, 92.36s, EXIT 0 | 42 failed / 3958 passed / 23 skipped, 981.29s |
+| 3 | xdist flakes: credentials clock + `test_cta_share_llm_copy` copy-string (r3 2 failed / 20226 passed; r3b 1 failed / 20227; r3c 2 failed / 20226). Serial both files 12 passed (55.92s). Load class, not a finding. | 11597 passed / 21 skipped / 1181 files, 88.32s, EXIT 0 | 42 failed / 3958 passed / 23 skipped, 1140.57s |
+
+cloud/tests sorted FAILED node IDs identical across r1, r2, r3, and the standing audit of `6288d75f` (42 nodes; bash 3.2 `mapfile` / `pin[@]` unbound). Linux CI is the authority.
