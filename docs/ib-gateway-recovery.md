@@ -260,6 +260,10 @@ While held:
 | FastAPI `/ib/restart`, admin Gateway `start\|restart` | `423`, and no request leaves the app host. `stop` still works |
 | FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
 | Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
+
+When the app host cannot read the hold (`operator_hold: null`), `services.operator_hold_blocks` applies one rule: an unknown hold blocks mutating actions only. Admin Gateway `start|restart` (and `/ib/restart` through it) refuse with `refusal: "operator_hold_unknown"` and no login request leaves the host: `504` when the broker channel is unreachable, else `423`. `stop` still runs. The recovery heartbeat keeps checking and reconnecting the pool but withholds the radon-api self-exit.
+
+Lifecycle refusals carry a typed `refusal` in the action result: `lease_held` (2FA lease, helper exit 75), `control_busy` (helper or operator exit 74: lifecycle mutex, deploy lock, pending transition, broker verb cooldown or login throttle), `deploy_lock_held` (this host's deploy/control flock), `operator_hold`, `operator_hold_unknown`. `/ib/restart` reports the refusal as its `reason`, keeping `2fa_push_in_flight` for `lease_held`. The Gateway row's power state comes from the helper `status` exit code and word together (`0 running`, `1 stopped`, `74 transition-pending`); anything else, including a matching word in other output, reads `unknown`.
 | Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
 | IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`), so no push spam. The daily `AUTO_RESTART_TIME=11:45 PM` token restart only runs while the Gateway is up, which a hold rules out |
 

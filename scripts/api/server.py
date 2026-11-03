@@ -461,7 +461,7 @@ def _restart_radon_api_self() -> None:
     os._exit(1)
 
 
-async def _recover_stuck_pool_guarded() -> None:
+async def _recover_stuck_pool_guarded(*, allow_self_exit: bool = True) -> None:
     """Single-flight + cooldown + escalation wrapper around recover_stuck_pool.
 
     Runs inside the heartbeat try/except so a probe/reconnect error can never
@@ -548,6 +548,9 @@ async def _recover_stuck_pool_guarded() -> None:
             now - last_exit, POOL_RECOVERY_SELF_EXIT_WINDOW_SECS,
         )
         return
+    if decision is PoolEscalation.SELF_EXIT and not allow_self_exit:
+        logger.error("pool recovery: self-exit withheld: IBKR operator hold state unknown")
+        return
     if decision is PoolEscalation.SELF_EXIT and _record_pool_self_exit(now):
         _restart_radon_api_self()
 
@@ -574,7 +577,7 @@ async def _ib_recovery_heartbeat_tick() -> None:
         # uses the shared IBKR login. Pool reconnects and the radon-api
         # self-restart ladder have nothing to recover; stand down.
         hold = await admin_services.operator_hold_state()
-        if hold and hold.get("held"):
+        if admin_services.operator_hold_blocks(hold, mutating=False):
             if not _pool_recovery_state.get("held_logged"):
                 logger.warning("IB recovery heartbeat standing down: IBKR operator hold %s", hold)
                 _pool_recovery_state["held_logged"] = True
@@ -582,7 +585,11 @@ async def _ib_recovery_heartbeat_tick() -> None:
             return
         _pool_recovery_state["held_logged"] = False
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
-        await _recover_stuck_pool_guarded()
+        # Same policy as _control_gateway: an unknown hold (None) withholds the
+        # mutating step (the radon-api self-exit); pool reconnects still run.
+        await _recover_stuck_pool_guarded(
+            allow_self_exit=not admin_services.operator_hold_blocks(hold, mutating=True),
+        )
     except Exception:
         logger.exception("IB recovery heartbeat tick failed")
 
@@ -2459,6 +2466,17 @@ def _gateway_unit_controllable() -> bool:
     )
 
 
+def _ib_restart_refusal_reason(action) -> str:
+    """The /ib/restart failure reason. A held 2FA lease keeps its historical
+    name; every other typed refusal is named for what it is."""
+    refusal = getattr(action, "refusal", None)
+    if refusal and refusal != admin_services.RefusalReason.LEASE_HELD.value:
+        return refusal
+    if refusal or action.returncode == admin_services.PUSH_LOCK_HELD_RC:
+        return "2fa_push_in_flight"
+    return "unit_restart_failed"
+
+
 @app.post("/ib/restart")
 async def ib_restart():
     """Restart IB Gateway via IBC service, then reconnect pool.
@@ -2479,8 +2497,12 @@ async def ib_restart():
     the operator off the shared IBKR username. The relay's stale-data
     escalation lands here too and treats 423 as "stand down".
     """
+    # A confirmed hold answers 423 here without touching anything. An
+    # unknown hold is refused where a login would start: _control_gateway
+    # (the restart_ib_gateway fallback never logs in on the app role, the
+    # only host whose hold can be unknown).
     hold = await admin_services.operator_hold_state()
-    if hold and hold.get("held"):
+    if admin_services.operator_hold_blocks(hold, mutating=False):
         raise HTTPException(
             status_code=423,
             detail={
@@ -2513,9 +2535,7 @@ async def ib_restart():
                 "restarted": False,
                 "gateway_mode": "cloud",
                 "via": admin_services.GATEWAY_UNIT,
-                "reason": "2fa_push_in_flight"
-                if action.returncode == admin_services.PUSH_LOCK_HELD_RC
-                else "unit_restart_failed",
+                "reason": _ib_restart_refusal_reason(action),
                 "error": action.detail,
             },
         )
