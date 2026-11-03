@@ -1103,3 +1103,59 @@ def test_budget_stop_without_a_fresh_prior_row_stays_an_error(
     assert "1 uncovered" in health[-1]["message"]
     assert payload["status"] == "degraded"
     assert "MSFT" not in {row["ticker"] for row in payload["results"]}
+
+
+def _deferring_msft(tickers, min_gap, workers=16, failed_tickers=None,
+                    provider_failures=None, deferred_tickers=None, deadline=None):
+    deferred_tickers.append("MSFT")
+    return [_one_scan_result("AAPL"), _one_scan_result("GOOG")]
+
+
+def _prior_without_msft_row(cache, *, failed, providers, deferred):
+    _prior_leap_cache(cache, universe="preset:largecaps", deferred=deferred,
+                      rows=[_cached_row("AAPL"), _cached_row("GOOG")])
+    prior = json.loads(cache.read_text())
+    prior.update(failed_tickers=failed, provider_failures=providers)
+    cache.write_text(json.dumps(prior))
+
+
+def test_budget_stop_of_a_name_the_last_run_found_without_leaps_is_covered(
+    tmp_path, monkeypatch
+):
+    """10-30 attempted 387 largecaps names for 334 rows; the rest had no LEAP
+    chain. Such a name has no row to carry, but the last run scanned it fresh
+    and the answer was "nothing to show". Counting it uncovered errors nearly
+    every rotated budget stop.
+    """
+    cache = tmp_path / "leap.json"
+    _prior_without_msft_row(cache, failed=["MSFT"], providers=[], deferred=[])
+
+    code, payload, health = _run_preset_main(tmp_path, monkeypatch, cache, _deferring_msft)
+
+    assert code == 0
+    assert health[-1] is None
+    assert payload["status"] == "ok"
+    assert payload["deferred_tickers"] == ["MSFT"]
+    assert "MSFT" not in {row["ticker"] for row in payload["results"]}
+
+
+@pytest.mark.parametrize(
+    "failed, providers, deferred",
+    [
+        # The last run's miss was the provider's fault: nothing is known.
+        (["MSFT"], ["MSFT"], []),
+        # The last run deferred it too: it was never scanned.
+        (["MSFT"], [], ["MSFT"]),
+    ],
+)
+def test_budget_stop_of_a_row_less_name_the_last_run_never_resolved_stays_an_error(
+    tmp_path, monkeypatch, failed, providers, deferred
+):
+    cache = tmp_path / "leap.json"
+    _prior_without_msft_row(cache, failed=failed, providers=providers, deferred=deferred)
+
+    code, payload, health = _run_preset_main(tmp_path, monkeypatch, cache, _deferring_msft)
+
+    assert code == 1
+    assert health[-1]["class"] == "scan_budget_spent"
+    assert "1 uncovered" in health[-1]["message"]

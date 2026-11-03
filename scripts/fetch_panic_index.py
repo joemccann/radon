@@ -126,7 +126,7 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
 def _write_json_cache(payload: dict[str, Any]) -> None:
     PANIC_INDEX_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = PANIC_INDEX_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, PANIC_INDEX_JSON)
 
 
