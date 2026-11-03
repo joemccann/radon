@@ -12148,3 +12148,41 @@ Closing gates 2026-11-02 (serial, never pytest+vitest together):
 | 3 | xdist flakes: credentials clock + `test_cta_share_llm_copy` copy-string (r3 2 failed / 20226 passed; r3b 1 failed / 20227; r3c 2 failed / 20226). Serial both files 12 passed (55.92s). Load class, not a finding. | 11597 passed / 21 skipped / 1181 files, 88.32s, EXIT 0 | 42 failed / 3958 passed / 23 skipped, 1140.57s |
 
 cloud/tests sorted FAILED node IDs identical across r1, r2, r3, and the standing audit of `6288d75f` (42 nodes; bash 3.2 `mapfile` / `pin[@]` unbound). Linux CI is the authority.
+
+## Delta audit 2026-11-03
+
+Range `6288d75fc3da7a2452857749b15c425608acfb07..157938f596234f3f1fe3974ddcd89275b55900f2`: 2 commits / 13 paths (`085ec323` DeepSec, `157938f5` model-client export budget). Newest trusted checkpoint on issue #83 is `audited-through: 6288d75fc3da7a2452857749b15c425608acfb07`. It carried no open verified finding. Open `testing/` PR #1405 carries T-581 and is not repeated. Highest id across ledgers and that PR is T-581. Next id T-582.
+
+Codemap (`tools/codemap/codemap.json`, generated 2026-10-29) lists `web/tests/assistant-call-api.test.ts` as an importer of `web/lib/assistant/dispatch.ts` and `web/lib/assistant/tools.ts`, and ten loop tests as importers of `web/lib/assistant/loop.ts`. It does not yet list `web/tests/assistant-combo-envelope.test.ts` or the Python files in the range. `rg` confirmed the new combo file and the Python tests.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` or `xfail`. Re-triaged `TEST_LOG.md` OPEN rows T-492 / T-493 / T-495: later DONE evidence in this ledger (2026-09-27 and after) still holds.
+
+Not filed: combo SELL is refused at `web/lib/assistant/loop.ts:171` and pinned by `web/tests/assistant-combo-envelope.test.ts:31`. `placeProposedOrder` was not in the range. Env-file fail-closed redaction is executed by `scripts/tests/test_phase0_capture.py:209` and `:221`. The live-drift installer group-writable refusal is executed by `scripts/tests/test_security_live_drift.py:444`. The CI export budget spy is executed by `cloud/tests/test_model_client_bounds_ci.py:103`.
+
+Standing sweeps on this Mac: root pytest 20,227 passed / 12 skipped / 63 subtests (116.43s); Vitest 11,601 passed / 21 skipped / 1,182 files (44.81s); cloud/tests 42 failed / 3,960 passed / 23 skipped (952.39s). Delta tests three times: `scripts/tests/test_phase0_capture.py` + `scripts/tests/test_security_live_drift.py` 57 passed; `cloud/tests/test_model_client_bounds_ci.py` 9 passed; `web/tests/assistant-call-api.test.ts` + `web/tests/assistant-combo-envelope.test.ts` 22 passed.
+
+### T-582 — P1 — workspace-mutation refusal after a retrieved read is only proven for call_api
+
+`web/lib/assistant/tools.ts:1234` sets `budget.retrievedRead` after `fetch_backend`, and `:1263` sets it after a named `tool.run` except `list_apis` and isolated-result tools. `web/lib/assistant/dispatch.ts:270` is the refuse. The DeepSec test at `web/tests/assistant-call-api.test.ts:183` only drives `call_api` GET `/streaks/AAPL`, which sets the flag inside `dispatch.ts:302`. Deleting the two `tools.ts` assignments left that case green (17 passed) and let `POST /api/watchlist` succeed after `fetch_backend` and after `get_quote`.
+
+Acceptance: `fetch_backend` GET `/quote/AAPL` then `POST /api/watchlist` returns ok false, the error names a data read, and `user_watchlist` has 0 rows. `get_quote` then the same POST does the same. `list_apis` then that POST still writes 1 row. Deleting the two assignments fails the first two cases.
+
+Audited through: 157938f596234f3f1fe3974ddcd89275b55900f2 on 2026-11-03 — 1 new finding
+
+## Remediation 2026-11-03
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-582 | DONE | Deleting `budget.retrievedRead = true` at `web/lib/assistant/tools.ts:1234` and `:1263` failed the new `fetch_backend` and `get_quote` cases (`expected true to be false`, 2 failed / 17 passed). Restored both assignments. `web/tests/assistant-call-api.test.ts` 19 passed and `web/tests/assistant-combo-envelope.test.ts` 3 passed on each of three runs. Product source unchanged. |
+
+### Closing gates 2026-11-03
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest round 1 and 2 each had one xdist load flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially both times. Round 3 pytest EXIT 0. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other and as `157938f5` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `157938f5` |
+|---|---|---|---|---|
+| 1 | xdist 1 failed credentials clock, serial file 11 passed; 20,226 passed / 12 skipped / 63 subtests (124.49s) | 11,604 passed / 21 skipped / 1,182 files (82.45s) | 42 failed / 3,960 passed / 23 skipped (984.63s) | 0 added / 0 removed |
+| 2 | xdist 1 failed credentials clock, serial file 11 passed; 20,226 passed / 12 skipped / 63 subtests (148.37s) | 11,604 passed / 21 skipped / 1,182 files (94.32s) | 42 failed / 3,960 passed / 23 skipped (1057.79s) | 0 added / 0 removed |
+| 3 | 20,227 passed / 12 skipped / 63 subtests (165.79s) | 11,604 passed / 21 skipped / 1,182 files (98.29s) | 42 failed / 3,960 passed / 23 skipped (1067.63s) | 0 added / 0 removed |
+
+Base cloud at `157938f5` on this Mac (standing sweep before the test commit; cloud tree unchanged): 42 failed / 3,960 passed / 23 skipped (952.39s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
