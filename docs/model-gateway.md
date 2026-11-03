@@ -67,12 +67,15 @@ writing; concurrent disk growth can still cause a later refusal.
 
 Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
 bundle when the local engine reports the same image id for another exact
-`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag. It hardlinks those bytes,
-rewrites only the release SHA, re-checks every hash, and activates the Linux
-selector. It does not move the Darwin selector; that still happens at commit.
-A tree that already exists for the deploying SHA is not proof, because the
-registry tag can move. A missing tag, a different image id, a corrupt donor,
-or an inspect failure exports from the image as before.
+`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag, or when both images
+carry the same `radon.model-clients.payload-sha256` label (the hash of the
+vendor-clis, chart-runtime lock and exported `model_gateway` helpers). It
+hardlinks those bytes, rewrites only the release SHA, re-checks every hash,
+and activates the Linux selector. It does not move the Darwin selector; that
+still happens at commit. A tree that already exists for the deploying SHA is
+not proof, because the registry tag can move. A missing tag, a different
+image id without a matching payload label, a missing or malformed label, a
+corrupt donor, or an inspect failure exports from the image as before.
 
 Gateway-era recovery verifies and reuses the already-installed exact Linux
 executables/helpers and Darwin bundle using immutable receipts and hashes. It

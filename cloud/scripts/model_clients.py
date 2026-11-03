@@ -606,6 +606,9 @@ def _verify_linux_release(root: Path, release: str, owner_uid: int) -> None:
                 raise ValueError("recovery client digest mismatch")
 
 
+PAYLOAD_LABEL = "radon.model-clients.payload-sha256"
+
+
 def _image_id(engine: str, image: str) -> str:
     if engine not in ("/usr/bin/podman","/usr/bin/docker"):
         raise ValueError("unsupported container engine")
@@ -620,6 +623,22 @@ def _image_id(engine: str, image: str) -> str:
     if not re.fullmatch(r"sha256:[0-9a-f]{64}",image_id):
         raise ValueError("gateway image id is not a sha256 digest")
     return image_id
+
+
+def _payload_label(engine: str, image: str) -> str:
+    """Read the CIP-024 client-payload label. Missing or malformed is a miss."""
+    if engine not in ("/usr/bin/podman","/usr/bin/docker"):
+        raise ValueError("unsupported container engine")
+    if not re.fullmatch(r"ghcr\.io/joemccann/radon-model-gateway:[0-9a-f]{40}",image):
+        raise ValueError("refusing an image that is not an exact gateway SHA")
+    fmt='{{index .Config.Labels "%s"}}' % PAYLOAD_LABEL
+    result=subprocess.run([engine,"image","inspect","--format",fmt,image],capture_output=True,text=True,timeout=20,check=False)
+    if result.returncode!=0:
+        raise ValueError("gateway payload label unavailable")
+    value=result.stdout.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}",value):
+        raise ValueError("gateway payload label is not a sha256 digest")
+    return value
 
 
 def _copy_verified_tree(source: Path, stage: Path) -> None:
@@ -736,15 +755,33 @@ def reuse_identical_image_clients(engine: str, image: str, release: str, *, root
             return False
         requested=_image_id(engine,image)
         donors=[]
+        seen=set()
         for entry in root.iterdir():
             if entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
                 continue
             donor_image="ghcr.io/joemccann/radon-model-gateway:"+entry.name
             try:
                 if _image_id(engine,donor_image)==requested:
+                    seen.add(entry.name)
                     donors.append(entry.name)
             except (OSError,ValueError,subprocess.SubprocessError):
                 continue
+        if not donors:
+            try:
+                requested_payload=_payload_label(engine,image)
+            except (OSError,ValueError,subprocess.SubprocessError):
+                requested_payload=None
+            if requested_payload:
+                for entry in root.iterdir():
+                    if entry.name in seen or entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
+                        continue
+                    donor_image="ghcr.io/joemccann/radon-model-gateway:"+entry.name
+                    try:
+                        if _payload_label(engine,donor_image)==requested_payload:
+                            seen.add(entry.name)
+                            donors.append(entry.name)
+                    except (OSError,ValueError,subprocess.SubprocessError):
+                        continue
         for donor in sorted(donors):
             try:
                 _clone_verified_release(root,exports,donor,release,owner_uid)
