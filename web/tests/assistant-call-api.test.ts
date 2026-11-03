@@ -169,6 +169,31 @@ describe("assistant call_api catalog client", () => {
     expect(watchlistFrom(other.data)).toEqual([]);
   });
 
+  it("refuses a workspace mutation after a retrieved read in the same turn", async () => {
+    const { createAssistantTurnBudget } = await import("@/lib/assistant/dispatch");
+    mocks.radonFetch.mockResolvedValue({ symbol: "AAPL", streak: 3 });
+    const budget = createAssistantTurnBudget();
+    const read = await callApi({ method: "GET", path: "/streaks/AAPL" }, PRINCIPAL, budget);
+    expect(read.ok).toBe(true);
+
+    const posted = await callApi(
+      { method: "POST", path: "/api/watchlist", body: { symbol: "VST" } },
+      PRINCIPAL,
+      budget,
+    );
+    expect(posted.ok).toBe(false);
+    const rows = await db.execute("SELECT symbol FROM user_watchlist");
+    expect(rows.rows).toHaveLength(0);
+
+    // A fresh turn with no retrieved read still mutates.
+    const fresh = await callApi(
+      { method: "POST", path: "/api/watchlist", body: { symbol: "VST" } },
+      PRINCIPAL,
+      createAssistantTurnBudget(),
+    );
+    expect(fresh.ok).toBe(true);
+  });
+
   it("A7 oversized FastAPI payload is truncated", async () => {
     mocks.radonFetch.mockResolvedValue({ blob: "A".repeat(30_000) });
     const result = await callApi({ method: "GET", path: "/quote/AAPL" });
