@@ -2526,8 +2526,8 @@ async def ib_restart():
         if action.returncode == admin_services.OPERATOR_HOLD_RC:
             raise HTTPException(
                 status_code=423,
-                detail={"restarted": False, "reason": "operator_hold", "code": "OPERATOR_HOLD",
-                        "error": action.detail},
+                detail={"restarted": False, "reason": action.refusal or "operator_hold",
+                        "code": "OPERATOR_HOLD", "error": action.detail},
             )
         raise HTTPException(
             status_code=503,

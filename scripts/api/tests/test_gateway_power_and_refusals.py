@@ -241,3 +241,23 @@ def test_probe_started_before_a_hold_change_does_not_refill_the_cache(app_remote
     payload = asyncio.run(scenario())
     assert payload["operator_hold"] == {"held": True}
     assert calls["n"] == 2
+
+
+def test_ib_restart_423_names_an_unknown_hold(monkeypatch):
+    from fastapi.testclient import TestClient
+    from scripts.api import auth
+
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
+    monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: True)
+    monkeypatch.setattr(server.admin_services, "operator_hold_state", AsyncMock(return_value=None))
+    monkeypatch.setattr(server.admin_services, "control_unit", AsyncMock(
+        return_value=admin_services.ActionResult(
+            GATEWAY, "restart", False, admin_services.OPERATOR_HOLD_UNKNOWN_DETAIL,
+            admin_services.OPERATOR_HOLD_RC, refusal="operator_hold_unknown",
+        )
+    ))
+    resp = TestClient(server.app).post("/ib/restart")
+    assert resp.status_code == 423
+    assert resp.json()["detail"]["reason"] == "operator_hold_unknown"
