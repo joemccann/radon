@@ -250,3 +250,26 @@ def test_the_notification_recipient_key_is_redacted():
     ):
         assert "live_NOTREAL123" not in out, out
         assert "RADON_MODE=hetzner" in out, out
+
+
+# systemd and python-dotenv both end a line at a bare carriage return, so a
+# record awk reads as one line can be two assignments to the loader.
+def test_a_carriage_return_line_ending_is_a_line_boundary():
+    for out in (
+        _redact_dotenv("RADON_MODE=hetzner\rUW_TOKEN=live_NOTREAL123\r\nPORT=8321\r"),
+        _redact_input("RADON_MODE=hetzner\rUW_TOKEN=live_NOTREAL123\r\nPORT=8321\r"),
+    ):
+        assert "live_NOTREAL123" not in out, out
+        assert "RADON_MODE=hetzner" in out, out
+        assert "PORT=8321" in out, out
+
+
+# systemd skips a comment line inside a backslash-continued directive and
+# keeps joining, so the lines after it still belong to the directive.
+def test_a_comment_inside_a_continued_directive_does_not_end_it():
+    out = _redact_input(
+        "Environment=RADON_MODE=hetzner \\\n# note\n; note\n"
+        "  PORT=8321 UW_TOKEN=live_NOTREAL123\nRADON_HOST_ROLE=app"
+    )
+    assert "live_NOTREAL123" not in out, out
+    assert "RADON_HOST_ROLE=app" in out, out

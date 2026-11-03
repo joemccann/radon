@@ -16,9 +16,13 @@ sec() { printf '\n\n========== %s ==========\n' "$1"; }
 # header above states a guarantee, so the key is resolved through a systemd
 # `Environment=` wrapper and a quoted value is consumed to its real close.
 SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET|PUSHOVER'
+# systemd and python-dotenv end a line at LF, CRLF or a bare CR; awk only
+# at LF, so a bare CR hid a second assignment inside one awk record.
+split_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'; }
+
 # Unit files. Env files go through redact_dotenv below.
 redact() {
-  awk -v secret="$SECRET_KEY_PATTERN" '
+  split_lines | awk -v secret="$SECRET_KEY_PATTERN" '
     function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
     # True while a quoted value opened on an earlier line is still open.
     function unclosed(s, q,   i, c, open) {
@@ -63,6 +67,9 @@ redact() {
       # A comment never continues, in systemd or dotenv; joining one
       # printed the next physical line raw under the comment rule.
       if (buf == "" && cur ~ /^[[:space:]]*#/) { print cur; next }
+      # systemd skips a comment inside a continued directive and keeps
+      # joining; ending the directive there printed the rest unwrapped.
+      if (buf != "" && cur ~ /^[[:space:]]*[#;]/) { raw=raw "\n" cur; next }
       if (buf != "") { raw=raw "\n" cur; sub(/^[[:space:]]+/, "", cur); line=buf " " cur }
       else { raw=cur; line=cur }
       if (continued(line)) { sub(/\\$/, "", line); buf=line; next }
@@ -149,7 +156,7 @@ redact() {
 # redacted, and once a value might span lines (an unbalanced quote, a
 # backslash, a line that is not an assignment) the rest of the file is too.
 redact_dotenv() {
-  awk -v secret="$SECRET_KEY_PATTERN" '
+  split_lines | awk -v secret="$SECRET_KEY_PATTERN" '
     function emit(key, rest) { print key"=<redacted:"length(rest)"chars>" }
     opaque { if ($0 ~ /^[[:space:]]*$/) print; else print "<redacted:line>"; next }
     /^[[:space:]]*$/ { print; next }
