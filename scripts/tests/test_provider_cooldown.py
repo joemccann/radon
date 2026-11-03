@@ -46,3 +46,19 @@ def test_a_write_failure_still_skips_this_process(tmp_path, monkeypatch):
     monkeypatch.setattr(provider_cooldown, "_persist", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
     provider_cooldown.note("codex", 3600, env)
     assert provider_cooldown.rate_limited("codex", env) is True
+
+
+def test_docs_match_the_engine_cooldown_contract():
+    """The engine persists only a body-named reset; no env fallback is read."""
+    root = Path(__file__).resolve().parents[2]
+    engine = (root / "scripts/model_gateway/engine.py").read_text()
+    assert "provider_cooldown.reset_seconds(body_text, None)" in engine
+    assert "fallback_seconds" not in engine
+    research = (root / "docs/dropbox-research.md").read_text()
+    assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in research
+    assert "A bare 429 persists nothing" in research
+    gateway = (root / "docs/model-gateway.md").read_text()
+    assert "A 429 whose body names a reset records `clients.provider_cooldown`" in gateway
+    example = (root / "cloud/.env.example").read_text()
+    assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in example
+    assert "RADON_PROVIDER_COOLDOWN_STATE=" in example
