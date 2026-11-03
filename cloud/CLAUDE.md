@@ -104,8 +104,12 @@ notify systemd. This prevents a completed preparation container from replacing
 the service's main PID with its short-lived Podman conmon.
 `model_clients.py` promotes the exact image's CLI payload and consumer-only
 helpers atomically under `/opt/radon-model-clients/<SHA>`, with version/hash
-receipts. It does not execute host installers, provider login, or image tools
-as root. The `current` selector retains its prior value on failed validation.
+receipts. When the deploying image id matches a donor SHA tag, or both images
+carry the same `radon.model-clients.payload-sha256` label, promotion
+hardlinks those verified bytes instead of exporting. A miss, a missing label
+or a corrupt donor exports. It does not execute host installers, provider
+login, or image tools as root. The `current` selector retains its prior value
+on failed validation.
 
 The first two-image to three-image cutover preserves a root-only rollback
 receipt under `/opt/radon-provision/model-gateway-cutover` before privileged
@@ -525,6 +529,14 @@ rollback). One batched `systemctl show` decides; a failed query keeps every unit
 The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.
+
+When `payload_paths_changed` is false, `restart_services` keeps units up,
+sets `RADON_DEPLOY_KEEP_LIVE_VENV=1`, and runs `radon-deploy-root
+promote-in-place` instead of `stop-clean` / `restart-managed`. That verb
+clears the previous release's commit receipt and exports model clients for
+the new SHA without stopping anything. Do not write the receipt by hand.
+`cloud/tests/test_deploy_inplace_promotion.py` pins the sudoers grant and
+the no-restart path.
 
 ## Post-deploy hooks
 
@@ -1013,11 +1025,17 @@ documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
 Before managed services start, `radon-app-runtime install-model-clients`
 exports the exact gateway image's CLI payloads and Node runtime through a
 network-disabled, unprivileged container. When the new exact SHA's local
-image id matches another exact `radon-model-gateway:<40 hex>` tag whose
-Linux and Darwin receipts already verify, promotion copies those immutable
-bytes, rewrites only the release SHA, re-checks every receipt hash, and
-does not start the export container. A missing tag, a different image id,
-or a receipt mismatch exports exactly as before. The root-owned `model_clients.py`
+image id matches another exact `radon-model-gateway:<40 hex>` tag (including
+a `localhost/ghcr.io/...` name after prune removed the donor SHA tag) or a
+verified Linux receipt that recorded that image id, or both images carry the
+same `radon.model-clients.payload-sha256` label, promotion copies those
+immutable bytes, rewrites only the release SHA, re-checks every receipt hash,
+and does not start the export container. A missing tag, a different image id
+without a matching payload label, a missing label, or a receipt mismatch
+exports exactly as before. Export writes the image id onto the new receipt so
+the next identical image can reuse without the donor tag. The payload label
+hashes `docker/app/Dockerfile.python` too, so a base-image digest bump (the
+exported `node` comes from it) never reuses old clients. The root-owned `model_clients.py`
 installer admits bounded safe archive members, verifies pinned package metadata
 and executable hashes, and atomically selects an immutable
 `/opt/radon-model-clients/<release-SHA>` through `current`. Consumers use

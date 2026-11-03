@@ -1699,3 +1699,81 @@ class TestNvidiaRateLimits:
         env = {"RADON_NVIDIA_RATE_STATE": str(tmp_path / "rate.json")}
         limiter = model_ladder._nvidia_limiter(env, model_ladder._default_post)
         assert limiter is not None and limiter.path == tmp_path / "rate.json"
+
+
+class TestCodexRateLimitCooldown:
+    """A Codex 429 must not be retried on the next article or oneshot.
+
+    ``clients.provider_cooldown`` stores the provider and an expiry. After the
+    gateway cutover the module had no caller, so every 5-minute MarketDesk
+    oneshot hit Codex again (docs/dropbox-research.md).
+    """
+
+    def test_a_429_skips_codex_on_the_next_call(self, tmp_path):
+        from clients import provider_cooldown
+
+        env = {
+            **CODEX_ENV,
+            "CEREBRAS_API_KEY": "csk-test",
+            "RADON_PROVIDER_COOLDOWN_STATE": str(tmp_path / "cooldown.json"),
+        }
+        # Body has no "rate limit" marker so classification stays http_429,
+        # which is not a dead-rung code. A new oneshot also has an empty
+        # _dead_until; only the persisted cooldown can skip the second call.
+        first_router = _Router({
+            "chatgpt.com": _Resp(429, "try again in 2 days"),
+            "api.cerebras.ai": _openai_obj_ok(),
+        })
+        first = complete_text_json(
+            "evaluate", env=env, post=first_router, providers=("codex", "cerebras"),
+        )
+        assert first.provider == "cerebras"
+        assert "codex:http_429" in first.attempted
+        assert sum("chatgpt.com" in url for url in first_router.calls) == 1
+
+        provider_cooldown.clear_process_state()
+        model_ladder._dead_until.clear()
+
+        second_router = _Router({
+            "chatgpt.com": _Resp(599, {"error": {"message": "codex was called again"}}),
+            "api.cerebras.ai": _openai_obj_ok(),
+        })
+        second = complete_text_json(
+            "evaluate", env=env, post=second_router, providers=("codex", "cerebras"),
+        )
+        assert second.provider == "cerebras"
+        assert "codex:rate_limited_cooldown" in second.attempted
+        assert not any("chatgpt.com" in url for url in second_router.calls)
+
+    def test_a_bare_429_does_not_skip_the_next_call(self, tmp_path):
+        from clients import provider_cooldown
+
+        env = {
+            **CODEX_ENV,
+            "CEREBRAS_API_KEY": "csk-test",
+            "RADON_PROVIDER_COOLDOWN_STATE": str(tmp_path / "cooldown.json"),
+        }
+        first_router = _Router({
+            "chatgpt.com": _Resp(429, "too many requests"),
+            "api.cerebras.ai": _openai_obj_ok(),
+        })
+        first = complete_text_json(
+            "evaluate", env=env, post=first_router, providers=("codex", "cerebras"),
+        )
+        assert first.provider == "cerebras"
+        assert "codex:http_429" in first.attempted
+
+        provider_cooldown.clear_process_state()
+        model_ladder._dead_until.clear()
+
+        second_router = _Router({
+            "chatgpt.com": _Resp(429, "too many requests"),
+            "api.cerebras.ai": _openai_obj_ok(),
+        })
+        second = complete_text_json(
+            "evaluate", env=env, post=second_router, providers=("codex", "cerebras"),
+        )
+        assert second.provider == "cerebras"
+        assert "codex:http_429" in second.attempted
+        assert "codex:rate_limited_cooldown" not in second.attempted
+        assert sum("chatgpt.com" in url for url in second_router.calls) == 1

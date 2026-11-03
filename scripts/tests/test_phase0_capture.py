@@ -239,3 +239,64 @@ def test_an_escaped_environment_value_is_redacted():
     out = _redact_input('Environment="UW_TOKEN\\x3dlive_NOTREAL123"\nRADON_MODE=hetzner')
     assert "live_NOTREAL123" not in out, out
     assert "RADON_MODE=hetzner" in out, out
+
+
+# The capture promises no secret values, and the notification recipient key
+# is a credential even though its name carries no TOKEN/SECRET marker.
+def test_the_notification_recipient_key_is_redacted():
+    for out in (
+        _redact_dotenv("PUSHOVER_USER=live_NOTREAL123\nRADON_MODE=hetzner"),
+        _redact_input('Environment="PUSHOVER_USER=live_NOTREAL123"\nRADON_MODE=hetzner'),
+    ):
+        assert "live_NOTREAL123" not in out, out
+        assert "RADON_MODE=hetzner" in out, out
+
+
+# systemd and python-dotenv both end a line at a bare carriage return, so a
+# record awk reads as one line can be two assignments to the loader.
+def test_a_carriage_return_line_ending_is_a_line_boundary():
+    for out in (
+        _redact_dotenv("RADON_MODE=hetzner\rUW_TOKEN=live_NOTREAL123\r\nPORT=8321\r"),
+        _redact_input("RADON_MODE=hetzner\rUW_TOKEN=live_NOTREAL123\r\nPORT=8321\r"),
+    ):
+        assert "live_NOTREAL123" not in out, out
+        assert "RADON_MODE=hetzner" in out, out
+        assert "PORT=8321" in out, out
+
+
+# systemd skips a comment line inside a backslash-continued directive and
+# keeps joining, so the lines after it still belong to the directive.
+def test_a_comment_inside_a_continued_directive_does_not_end_it():
+    out = _redact_input(
+        "Environment=RADON_MODE=hetzner \\\n# note\n; note\n"
+        "  PORT=8321 UW_TOKEN=live_NOTREAL123\nRADON_HOST_ROLE=app"
+    )
+    assert "live_NOTREAL123" not in out, out
+    assert "RADON_HOST_ROLE=app" in out, out
+
+
+# A credential-bearing HTTPS origin is an accepted remote shape, so the
+# remote listing drops URL userinfo and keeps the rest.
+def test_a_remote_url_prints_without_its_userinfo():
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    remotes = (
+        "origin\thttps://x-access-token:live_NOTREAL123@github.com/o/r.git (fetch)\n"
+        "backup\tgit@github.com:o/r.git (push)\n"
+    )
+    script = functions + "strip_url_userinfo <<'RADON_FIXTURE_EOF'\n" + remotes + "RADON_FIXTURE_EOF\n"
+    out = subprocess.run(["bash"], input=script, text=True, capture_output=True).stdout
+    assert "NOTREAL123" not in out, out
+    assert "https://<redacted>@github.com/o/r.git (fetch)" in out, out
+    assert "backup\tgit@github.com:o/r.git (push)" in out, out
+    assert "git remote -v 2>/dev/null | strip_url_userinfo" in body
+
+
+# A trailing backslash continues a quoted value even after a comment-like
+# suffix, so the line after it is not a fresh assignment.
+def test_a_quoted_value_whose_suffix_ends_in_a_backslash_redacts_the_rest():
+    for quote in ('"', "'", "`"):
+        out = _redact_dotenv(
+            "UW_TOKEN=" + quote + "a" + quote + " # note \\\nRADON_MODE=b_NOTREAL123"
+        )
+        assert "NOTREAL123" not in out, (quote, out)

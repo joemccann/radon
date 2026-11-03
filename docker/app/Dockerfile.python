@@ -177,6 +177,11 @@ assert torch.__version__ == "2.12.1+cpu"
 assert torch.version.cuda is None
 PY_FORECAST
 
+# CIP-024: deploy reuses verified client receipts when this matches a donor.
+# Empty default is fail-closed (no reuse) for builds that omit the arg.
+ARG MODEL_CLIENTS_PAYLOAD_SHA256=
+LABEL radon.model-clients.payload-sha256=$MODEL_CLIENTS_PAYLOAD_SHA256
+
 # Keep the default Docker build target lean for all ordinary application units.
 FROM runtime AS python
 USER radon
