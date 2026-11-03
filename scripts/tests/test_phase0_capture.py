@@ -290,3 +290,13 @@ def test_a_remote_url_prints_without_its_userinfo():
     assert "https://<redacted>@github.com/o/r.git (fetch)" in out, out
     assert "backup\tgit@github.com:o/r.git (push)" in out, out
     assert "git remote -v 2>/dev/null | strip_url_userinfo" in body
+
+
+# A trailing backslash continues a quoted value even after a comment-like
+# suffix, so the line after it is not a fresh assignment.
+def test_a_quoted_value_whose_suffix_ends_in_a_backslash_redacts_the_rest():
+    for quote in ('"', "'", "`"):
+        out = _redact_dotenv(
+            "UW_TOKEN=" + quote + "a" + quote + " # note \\\nRADON_MODE=b_NOTREAL123"
+        )
+        assert "NOTREAL123" not in out, (quote, out)

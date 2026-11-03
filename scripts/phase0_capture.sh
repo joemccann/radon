@@ -171,9 +171,9 @@ redact_dotenv() {
       sub(/[[:space:]]*(=|:[[:space:]])$/, "", key)
       sub(/^[[:space:]]+/, "", key)
       plain = rest !~ /["'"'"'`\\]/
-      quoted = rest ~ /^[[:space:]]*"[^"'"'"'`\\]*"[[:space:]]*(#.*)?$/ ||
-               rest ~ /^[[:space:]]*'"'"'[^"'"'"'`\\]*'"'"'[[:space:]]*(#.*)?$/ ||
-               rest ~ /^[[:space:]]*`[^"'"'"'`\\]*`[[:space:]]*(#.*)?$/
+      quoted = rest ~ /^[[:space:]]*"[^"'"'"'`\\]*"[[:space:]]*(#[^\\]*)?$/ ||
+               rest ~ /^[[:space:]]*'"'"'[^"'"'"'`\\]*'"'"'[[:space:]]*(#[^\\]*)?$/ ||
+               rest ~ /^[[:space:]]*`[^"'"'"'`\\]*`[[:space:]]*(#[^\\]*)?$/
       if (!plain && !quoted) opaque=1
       if (opaque || toupper(key) ~ secret) { emit(key, rest); next }
       print
