@@ -33,10 +33,10 @@ from typing import Iterable
 # host, which cannot see this VM's lock file (REL-172, R-475).
 try:
     from utils import ib_2fa_lock, ib_operator_hold
-    from utils.ib_login_throttle import format_utc, login_throttle_retry_at
+    from utils.ib_login_throttle import format_utc, login_throttle_gate
 except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
     from scripts.utils import ib_2fa_lock, ib_operator_hold
-    from scripts.utils.ib_login_throttle import format_utc, login_throttle_retry_at
+    from scripts.utils.ib_login_throttle import format_utc, login_throttle_gate
 
 DEFAULT_BIND = "10.0.0.4"
 DEFAULT_PORT = 8340
@@ -402,10 +402,17 @@ def login_throttle_refusal(verb: str, watchdog_state: str, now: float | None = N
     """Reason a login verb is refused while IBKR throttles logins, else None."""
     if verb not in LOGIN_VERBS:
         return None
-    retry_at = login_throttle_retry_at(Path(watchdog_state))
+    retry_at, unreadable = login_throttle_gate(Path(watchdog_state))
     now = time.time() if now is None else now
     if retry_at is None or now >= retry_at:
         return None
+    if unreadable:
+        # Fail closed: the state may be hiding a live IBKR login throttle.
+        return (
+            "the watchdog state is unreadable, so an IBKR login throttle cannot be "
+            f"ruled out; {verb} is refused until {format_utc(retry_at)} "
+            "(check the watchdog, then restart once and approve the push)."
+        )
     return (
         "IBKR is refusing Gateway logins (too many failed login attempts); "
         f"every {verb} is another failed login. Wait until {format_utc(retry_at)}, "
