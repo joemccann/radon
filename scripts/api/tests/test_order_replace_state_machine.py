@@ -86,7 +86,7 @@ def test_replace_preserves_indeterminate_status_and_cancel_audit(trusted_client,
     from scripts.api import server
 
     monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
-    monkeypatch.setattr(server, "orders_cancel", AsyncMock(return_value={"finalStatus": "Cancelled"}))
+    monkeypatch.setattr(server, "orders_cancel", AsyncMock(return_value={"finalStatus": "Cancelled", "cancelOutcome": "cancelled"}))
     monkeypatch.setattr(
         server,
         "_orders_place_after_rate_reservation",
@@ -129,7 +129,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
     ):
         from scripts.api import server
 
-        cancel = AsyncMock(return_value={"finalStatus": "Cancelled"})
+        cancel = AsyncMock(return_value={"finalStatus": "Cancelled", "cancelOutcome": "cancelled"})
         place = AsyncMock(return_value={"status": "ok"})
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
         monkeypatch.setattr(server, "orders_cancel", cancel)
@@ -156,7 +156,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
         from scripts.api import server
         import trading_halt
 
-        cancel = AsyncMock(return_value={"finalStatus": "Cancelled"})
+        cancel = AsyncMock(return_value={"finalStatus": "Cancelled", "cancelOutcome": "cancelled"})
         place = AsyncMock(return_value={"status": "ok"})
 
         async def halt_during_whatif(_request):
@@ -188,7 +188,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
         from scripts.api import server
 
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
-        monkeypatch.setattr(server, "orders_cancel", AsyncMock(return_value={"finalStatus": "Cancelled"}))
+        monkeypatch.setattr(server, "orders_cancel", AsyncMock(return_value={"finalStatus": "Cancelled", "cancelOutcome": "cancelled"}))
         monkeypatch.setattr(server, "test_mode", True)
         server._order_rate_timestamps.clear()
 
@@ -209,7 +209,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
     ):
         from scripts.api import server
 
-        cancel = AsyncMock(return_value={"finalStatus": "Cancelled"})
+        cancel = AsyncMock(return_value={"finalStatus": "Cancelled", "cancelOutcome": "cancelled"})
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
         monkeypatch.setattr(server, "orders_cancel", cancel)
         monkeypatch.setattr(
@@ -508,3 +508,127 @@ def test_replace_does_not_place_when_cancel_reports_order_still_submitted(
     assert response.status_code == 502
     place.assert_not_awaited()
     assert response.json()["detail"]["cancelled"] == []
+
+
+# ---------------------------------------------------------------------------
+# §1#1 (implicit-state-machines audit): a cancel that ends Filled, partially
+# filled, or unresolved must never be followed by the replacement. Only the
+# subprocess's explicit cancelOutcome="cancelled" admits the placement.
+# ---------------------------------------------------------------------------
+
+
+def _replace_with_cancel(trusted_client, monkeypatch, cancel_mock, snapshot=None):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(server, "orders_cancel", cancel_mock)
+    monkeypatch.setattr(server, "_find_working_order", AsyncMock(return_value=snapshot))
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10, "permId": 44}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+    return response, place
+
+
+class TestReplacePlacesOnlyOnConfirmedCancel:
+    def test_partial_fill_then_cancel_refuses_the_replacement(self, trusted_client, monkeypatch):
+        cancel = AsyncMock(return_value={
+            "status": "ok", "finalStatus": "Cancelled",
+            "cancelOutcome": "partially_filled_then_cancelled", "filledQuantity": 2,
+        })
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 502
+        place.assert_not_awaited()
+        detail = response.json()["detail"]
+        assert detail["code"] == "REPLACE_PARTIAL"
+        assert detail["phase"] == "cancellation"
+        assert detail["upstream"]["code"] == "CANCEL_NOT_CONFIRMED"
+        assert detail["upstream"]["cancelOutcome"] == "partially_filled_then_cancelled"
+        assert detail["upstream"]["filledQuantity"] == 2
+
+    def test_success_without_a_cancel_outcome_refuses(self, trusted_client, monkeypatch):
+        cancel = AsyncMock(return_value={"status": "ok", "finalStatus": "Cancelled"})
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 502
+        place.assert_not_awaited()
+
+    def test_filled_outcome_refuses_and_preserves_upstream_detail(self, trusted_client, monkeypatch):
+        detail = {
+            "code": "ORDER_CANCEL_FAILED", "status": "error",
+            "message": "Order filled before the cancel took effect (orderId=10)",
+            "cancelOutcome": "filled", "finalStatus": "Filled", "filledQuantity": 1,
+        }
+        cancel = AsyncMock(side_effect=HTTPException(status_code=502, detail=detail))
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 502
+        place.assert_not_awaited()
+        assert response.json()["detail"]["upstream"] == detail
+
+    def test_unknown_outcome_refuses(self, trusted_client, monkeypatch):
+        detail = {
+            "code": "ORDER_CANCEL_FAILED", "status": "error",
+            "message": "Cancel outcome unknown: executions could not be read (timeout)",
+            "cancelOutcome": "unknown",
+        }
+        cancel = AsyncMock(side_effect=HTTPException(status_code=502, detail=detail))
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 502
+        place.assert_not_awaited()
+
+    def test_already_cancelled_with_fills_refuses_even_when_snapshot_is_gone(
+        self, trusted_client, monkeypatch
+    ):
+        """The subprocess outcome outranks an absent (or unreadable) snapshot row."""
+        detail = {
+            "code": "ORDER_CANCEL_FAILED", "status": "error",
+            "message": "Order already Cancelled — cannot cancel",
+            "cancelOutcome": "partially_filled_then_cancelled", "filledQuantity": 1,
+        }
+        cancel = AsyncMock(side_effect=HTTPException(status_code=502, detail=detail))
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel, snapshot=None)
+
+        assert response.status_code == 502
+        place.assert_not_awaited()
+
+    def test_already_cancelled_with_no_fills_places(self, trusted_client, monkeypatch):
+        detail = {
+            "code": "ORDER_CANCEL_FAILED", "status": "error",
+            "message": "Order already Cancelled — cannot cancel",
+            "finalStatus": "Cancelled", "cancelOutcome": "cancelled",
+        }
+        cancel = AsyncMock(side_effect=HTTPException(status_code=502, detail=detail))
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 200
+        place.assert_awaited_once()
+        assert response.json()["cancelled"] == [
+            {"orderId": 10, "permId": 44, "status": "Cancelled"},
+        ]
+
+    def test_confirmed_cancel_places(self, trusted_client, monkeypatch):
+        cancel = AsyncMock(return_value={
+            "status": "ok", "finalStatus": "Cancelled", "cancelOutcome": "cancelled",
+        })
+        response, place = _replace_with_cancel(trusted_client, monkeypatch, cancel)
+
+        assert response.status_code == 200
+        place.assert_awaited_once()
+
+
+def test_cancel_route_test_mode_reports_a_cancelled_outcome(trusted_client, monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "test_mode", True)
+    body = trusted_client.post("/orders/cancel", json={"orderId": 10}).json()
+
+    assert body["cancelOutcome"] == "cancelled"
