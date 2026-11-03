@@ -300,6 +300,21 @@ def _record_outcome(deps: Deps, work: dict, review: dict) -> None:
         _log(f"outcome mirror for {work['key']} failed: {type(exc).__name__}")
 
 
+def _enqueue_published_pdf(deps: Deps, ref) -> None:
+    """Queue one published article for the PDF archive. Discovery must not call this.
+
+    A pending row cannot match the archive eligibility scan. A Turso read timeout
+    on that scan aborted the oneshot before any article published. The PDF timer
+    seeds a miss. A stop still ends the cycle.
+    """
+    try:
+        deps.enqueue_pdf(ref)
+    except CycleTerminated:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the archive timer retries; publication already committed
+        _log(f"pdf enqueue for {ref.article_id} skipped: {type(exc).__name__}")
+
+
 def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_wait_hours: int) -> None:
     store = deps.store
     post_id = stable_post_id("marketdesk:" + ref.article_id, "article")
@@ -318,6 +333,7 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
         store.record_published(ref.article_id, post_id, existing.get("url") if legacy else None,
                                existing.get("contentHash") if legacy else None)
         counts["healed"] += 1
+        _enqueue_published_pdf(deps, ref)
         return
     article = deps.fetch_article(session, ref)
     summary = _clean_summary(getattr(article, "summary", None))
@@ -405,6 +421,7 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
         return
     store.record_published(ref.article_id, post["id"], None, None, fingerprint=decision.fingerprint,
                            publisher=decision.identity.publisher, folders=folders, file_name=title)
+    _enqueue_published_pdf(deps, ref)
     review["posts"] = [post["id"]]
     _record_outcome(deps, work, review)
     counts["published"] += 1
@@ -458,8 +475,6 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
     counts["excluded"] = len(refs) - len(kept)
     discovered = store.unseen(kept, lookback_hours=lookback)
     store.discover(discovered)
-    for ref in discovered:
-        deps.enqueue_pdf(ref)
     todo = store.pending(limit=max(100, max_per_cycle))
     counts["unseen"] = len(todo)
     attempted = 0
