@@ -1374,3 +1374,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-578 | DONE | Deleting the per-chunk `scoped_timeout(120)` returned the parsed stream (`DID NOT RAISE`). Restored `scripts/model_gateway/engine.py`. The injected clock crosses 0.5s between two chunks and the code is `deadline_exceeded`. Product source unchanged. |
 | T-579 | DONE | Disabling the cancel check reached the broker (`cancelled request reached broker`). Restored the engine. The case passes with the lock-release event unset. Product source unchanged. |
 | T-580 | DONE | The same cancel no-op raised `GatewayError: Model credential store is unavailable` on the cancelled stall. Restored the engine. Both stall cases passed five serial runs. Product source unchanged. Closing rounds: root pytest 19,735 passed / 12 skipped / 63 subtests each round. Vitest 11,592 passed / 21 skipped / 1,180 files each round. Cloud 42 failed / 3,743 passed / 23 skipped each round, 0 added / 0 removed against `3ce7f24a` (42 failed / 3,743 passed / 23 skipped, 939.76s). |
+
+## 2026-11-03
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-582 | DONE | Deleting the two `retrievedRead` assignments in `web/lib/assistant/tools.ts` left the `call_api` case green and failed the new `fetch_backend` and `get_quote` cases (2 failed / 17 passed, watchlist POST `ok` true). Restored the assignments. File 19 passed on three runs. Product source unchanged. Closing rounds: root pytest r1/r2 xdist credentials clock flake then serial 11 passed; r3 20,227 passed / 12 skipped / 63 subtests. Vitest 11,604 passed / 21 skipped / 1,182 files each round. Cloud 42 failed / 3,960 passed / 23 skipped each round, 0 added / 0 removed against `157938f5`. |
