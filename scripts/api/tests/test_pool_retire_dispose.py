@@ -122,7 +122,6 @@ async def test_retire_disposes_while_worker_still_wedged(monkeypatch):
     pool = pool_module.IBPool()
     client = gateway.connect(5)
     pool._clients["data"] = client
-    pool._connected["data"] = True
 
     assert await pool.retire("data", client) is True
 
@@ -149,7 +148,6 @@ async def test_reconnect_roles_leaves_live_roles_untouched(monkeypatch):
     sync_client = gateway.connect(3)
     orders_client = gateway.connect(4)
     pool._clients.update({"sync": sync_client, "orders": orders_client})
-    pool._connected.update({"sync": True, "orders": True, "data": False})
 
     status = await pool.reconnect_roles(["data"])
 

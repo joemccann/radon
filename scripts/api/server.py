@@ -25,6 +25,7 @@ import uuid
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 
@@ -378,12 +379,70 @@ async def _coordinated_orders_sync(*, fresh: bool = False) -> _IBSyncOutcome:
 # See feedback_ib_pool_stuck_after_2fa.md.
 POOL_RECOVERY_COOLDOWN_SECS = 60.0
 POOL_RECOVERY_MAX_BEFORE_RESTART = 3
+# The escalation is os._exit, which wipes this process's memory. The last
+# self-exit is therefore kept in a host-local file that survives it: a pool
+# still wedged after one self-restart inside this window stands down instead
+# of exiting every 3-4 minutes forever (below systemd's StartLimitBurst).
+POOL_RECOVERY_SELF_EXIT_WINDOW_SECS = 3600.0
+POOL_RECOVERY_STATE_FILE = Path(
+    os.environ.get("RADON_POOL_RECOVERY_STATE", str(DATA_DIR / "pool_recovery_state.json"))
+)
 
 _pool_recovery_state: dict = {
     "in_progress": False,       # single-flight: skip overlapping ticks
     "last_attempt_at": 0.0,     # epoch seconds; cooldown gate
     "consecutive_failures": 0,  # verified-fail count → escalation ladder
 }
+
+
+class PoolEscalation(str, Enum):
+    NONE = "none"
+    SELF_EXIT = "self_exit"
+    STAND_DOWN = "stand_down"
+
+
+_UNREADABLE = object()
+
+
+def _pool_escalation(
+    failures: int, last_self_exit_at: Optional[float], *, now: float,
+) -> PoolEscalation:
+    """The one escalation decision. ``last_self_exit_at`` None = no record."""
+    if failures < POOL_RECOVERY_MAX_BEFORE_RESTART:
+        return PoolEscalation.NONE
+    if last_self_exit_at is not None and now - last_self_exit_at < POOL_RECOVERY_SELF_EXIT_WINDOW_SECS:
+        return PoolEscalation.STAND_DOWN
+    return PoolEscalation.SELF_EXIT
+
+
+def _read_last_pool_self_exit():
+    """Epoch of the last recorded self-exit, None when absent, or _UNREADABLE."""
+    try:
+        raw = POOL_RECOVERY_STATE_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return _UNREADABLE
+    try:
+        value = json.loads(raw).get("last_self_exit_at")
+    except (ValueError, AttributeError):
+        return _UNREADABLE
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _UNREADABLE
+    return float(value)
+
+
+def _record_pool_self_exit(now: float) -> bool:
+    """Persist the self-exit before it happens. False = do not exit."""
+    path = POOL_RECOVERY_STATE_FILE
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps({"last_self_exit_at": now}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.error("pool recovery: cannot record self-exit at %s: %s", path, exc)
+        return False
+    return True
 
 
 def _restart_radon_api_self() -> None:
@@ -469,8 +528,27 @@ async def _recover_stuck_pool_guarded() -> None:
         "pool recovery: verified-fail %d/%d (Gateway authenticated, pool still stuck)",
         failures, POOL_RECOVERY_MAX_BEFORE_RESTART,
     )
-    if failures >= POOL_RECOVERY_MAX_BEFORE_RESTART:
-        _pool_recovery_state["consecutive_failures"] = 0
+    if failures < POOL_RECOVERY_MAX_BEFORE_RESTART:
+        return
+    _pool_recovery_state["consecutive_failures"] = 0
+    last_exit = _read_last_pool_self_exit()
+    if last_exit is _UNREADABLE:
+        logger.error(
+            "pool recovery: self-exit record %s unreadable; standing down "
+            "(fail safe: no restart storm)", POOL_RECOVERY_STATE_FILE,
+        )
+        return
+    now = time.time()
+    decision = _pool_escalation(failures, last_exit, now=now)
+    if decision is PoolEscalation.STAND_DOWN:
+        logger.error(
+            "pool recovery: pool still stuck after a self-restart %.0fs ago; "
+            "standing down for the %.0fs window. Operator: "
+            "`systemctl restart radon-api.service` once the Gateway is verified.",
+            now - last_exit, POOL_RECOVERY_SELF_EXIT_WINDOW_SECS,
+        )
+        return
+    if decision is PoolEscalation.SELF_EXIT and _record_pool_self_exit(now):
         _restart_radon_api_self()
 
 

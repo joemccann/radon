@@ -1217,6 +1217,17 @@ async def _heal_ib_dependent_service_health(timeout: float) -> List[str]:
     return healed
 
 
+# Leaving either of these for authenticated is a login that may have stranded
+# the pool and the service_health rows. unreachable -> authenticated (a
+# Gateway that came back already logged in) needs the same heal + release as
+# a resolved 2FA wait.
+_RECOVERY_EDGE_SOURCES = frozenset({"awaiting_2fa", "unreachable"})
+
+
+def _is_recovery_edge(previous, new_auth_state) -> bool:
+    return previous in _RECOVERY_EDGE_SOURCES and new_auth_state == "authenticated"
+
+
 def last_observed_auth_state():
     """The most recent auth_state any health check derived, or None.
 
@@ -1254,7 +1265,7 @@ async def handle_auth_state_transition(
         only act on real transitions, not first-probe assumptions.
       • previous == new: no transition, do nothing. Mid-session disconnects
         are handled by the per-role auto-reconnect in `_PoolContext`.
-      • previous == "awaiting_2fa" AND new == "authenticated":
+      • previous in {"awaiting_2fa", "unreachable"} AND new == "authenticated":
           1. Heal stale IB-outage error rows in ``service_health`` (bounded
              by ``heal_timeout``).
           2. If any pool slot is disconnected, schedule
@@ -1275,8 +1286,7 @@ async def handle_auth_state_transition(
     if previous is None or previous == new_auth_state:
         return False
 
-    is_recovery_edge = previous == "awaiting_2fa" and new_auth_state == "authenticated"
-    if not is_recovery_edge:
+    if not _is_recovery_edge(previous, new_auth_state):
         return False
 
     # Only clear the startup holder we own, and only on a real authentication
@@ -1690,8 +1700,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 # uses, so a successful restart that lands the system back at
                 # `authenticated` while the pool is still stale auto-recovers
                 # the pool without a separate operator step.
-                if pool is not None:
-                    await handle_auth_state_transition("authenticated", pool)
+                await handle_auth_state_transition("authenticated", pool)
             else:
                 _restart_state["attempt_count"] += 1
                 delay = _next_backoff_delay(_restart_state["attempt_count"])
@@ -1708,9 +1717,10 @@ async def restart_ib_gateway(pool=None) -> Dict:
                     delay, _restart_state["attempt_count"],
                     _remaining_lock_secs_bounded(now),
                 )
-                # Record the awaiting_2fa observation in the transition tracker
-                # so the next "authenticated" sighting fires the recovery edge.
-                _auth_transition_state["previous_auth_state"] = "awaiting_2fa"
+                # Record the awaiting_2fa observation through the transition
+                # entrypoint so the next "authenticated" sighting fires the
+                # recovery edge.
+                await handle_auth_state_transition("awaiting_2fa", pool)
                 # Lock stays HELD — the user is approving the push we
                 # just fired, no other path should fire another.
         else:
@@ -1727,7 +1737,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 delay, _restart_state["attempt_count"],
                 _remaining_lock_secs_bounded(now),
             )
-            _auth_transition_state["previous_auth_state"] = "unreachable"
+            await handle_auth_state_transition("unreachable", pool)
             # Lock stays HELD — even on a fully-down restart, IBC may
             # have started firing pushes before crashing; better to
             # block the next attempt than to stack on a phantom push.
