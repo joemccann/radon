@@ -378,7 +378,7 @@ def diff_new_rows(cached: list[dict[str, Any]], series: list[dict[str, Any]]) ->
 def _write_json_cache(payload: dict[str, Any]) -> None:
     CREDIT_VIX_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = CREDIT_VIX_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, CREDIT_VIX_JSON)
 
 

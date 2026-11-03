@@ -87,6 +87,22 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     )
 
 
+def _caddy_floor_while_healthd_stopped(down_reason: str, now: datetime) -> bool:
+    """True when the Caddy floor is the deploy's own healthd stop.
+
+    stop-clean stops radon-health, so :8330 cannot confirm the serving path.
+    A fresh transition journal is the deploy's evidence that this unread
+    aggregate is that stop. A readable aggregate that says the serving path
+    is down still pages. A stranded journal does not count.
+    """
+    if down_reason != "status_unreachable:caddy":
+        return False
+    journal_age = _transition_journal_age_seconds(now)
+    if journal_age is None or journal_age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS:
+        return False
+    return _read_local_aggregate() is None
+
+
 def _local_aggregate_serving_path_ok(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     """Serving path up, including dependency-only ``degraded``.
 
@@ -360,24 +376,36 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     # matching caddy-observer body. Runner-side *_unreachable still pages.
     # Dependency-only degraded (weekend IB clean-exit, sidecar flap) still
     # counts: requiring overall_state=up re-paged d98c3364 on every weekend
-    # deploy. The next off-box cycle still independently proves perimeter recovery.
+    # deploy. 2026-11-01 03:36Z: stop-clean stops radon-health, so the
+    # serving-path read cannot succeed during the exact floor it exists to
+    # cover. A fresh journal plus an unread :8330 is that stop. A readable
+    # aggregate that says the serving path is down still pages. The next
+    # off-box cycle still independently proves perimeter recovery.
     if state == reader.VERDICT_DOWN:
         down_reason = str(verdict.get("reason") or "")
         age = verdict.get("age_seconds")
         sample_time = checked_at - timedelta(seconds=float(age)) if age is not None else None
+        serving_ok = _local_aggregate_serving_path_ok()
+        healthd_stopped = (not serving_ok) and _caddy_floor_while_healthd_stopped(
+            down_reason, checked_at
+        )
         if (
             _DEPLOY_COLLATERAL_REASON.fullmatch(down_reason)
             and sample_time is not None
             and _sampled_during_deploy_window(sample_time, checked_at)
-            and _local_aggregate_serving_path_ok()
+            and (serving_ok or healthd_stopped)
         ):
+            if healthd_stopped:
+                detail = "healthd stopped with the transition"
+            else:
+                detail = "local aggregate healthy"
             return CheckOutcome(
                 service=SERVICE,
                 kind="deadman",
                 status="healthy",
                 severity=None,
                 fired=False,
-                message=f"off-box {down_reason} sampled inside deploy window; local aggregate healthy",
+                message=f"off-box {down_reason} sampled inside deploy window; {detail}",
                 consecutive_failures=0,
                 now=checked_at,
             )
