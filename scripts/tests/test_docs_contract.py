@@ -3198,19 +3198,15 @@ class TestDocumentation20261102:
     """Gateway-era ladder env and the no-restart promote path match source."""
 
     def test_ladder_order_is_not_an_env_override(self):
+        # Codex 429 cooldown sentences and env names belong to #1405 (engine wiring).
         research = (_ROOT / "docs/dropbox-research.md").read_text()
         auth = research.split("#### Auth matrix", 1)[1].split("**Expired subscription token.**", 1)[0]
         assert "RADON_MODEL_LADDER_ORDER" not in auth
-        assert "provider-cooldown.json" not in auth
-        assert "RADON_PROVIDER_COOLDOWN_STATE" not in auth
-        assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in auth
-        assert "codex:rate_limited_cooldown" not in auth
         assert "CEREBRAS_MAX_IMAGES" not in auth
         assert "CEREBRAS_MAX_REQUEST_BYTES" not in auth
         assert "https://integrate.api.nvidia.com/v1/<model>" not in auth
         assert "uses NVIDIA when keyed" not in auth
         assert "PAUSED_BY_DEFAULT" in auth
-        assert "http_429" in auth
         assert "MODEL_LADDER_ORDER" in auth
 
         contracts = (_ROOT / "scripts/model_gateway/contracts.py").read_text()
@@ -3219,13 +3215,10 @@ class TestDocumentation20261102:
         engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
         assert "RADON_MODEL_LADDER_ORDER" not in engine
         assert 'PAUSED_BY_DEFAULT = frozenset({"cerebras", "nvidia"})' in engine
-        assert "provider_cooldown" not in engine
 
         example = (_ROOT / "cloud/.env.example").read_text()
         for name in (
             "RADON_MODEL_LADDER_ORDER",
-            "RADON_PROVIDER_COOLDOWN_STATE",
-            "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S",
             "CEREBRAS_MAX_IMAGES",
             "CEREBRAS_MAX_REQUEST_BYTES",
         ):

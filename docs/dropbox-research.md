@@ -125,7 +125,7 @@ The order is `MODEL_LADDER_ORDER` in `scripts/model_gateway/contracts.py` (Antig
 
 Anthropic replies are read from every `text` block, including a list of text spans, and from a Messages SSE body when the HTTP body is not one JSON document. Thinking blocks are not the answer. The gateway client (`scripts/clients/model_ladder.py`) raises `ModelResponseError` when the gateway reports an incomplete or invalid reply, for every caller. A reply the caller's `accept` rejects resumes the next rung through the gateway continuation.
 
-Codex HTTP 429 is `http_429`. The gateway continues to the next live rung in the same request. It does not persist a cooldown file, and clearing a home-directory JSON does not change the next Codex call.
+Codex HTTP 429 is a cooldown, not a tight retry. The ladder stores only the provider name and an expiry epoch (`RADON_PROVIDER_COOLDOWN_STATE`, default `~/.radon/provider-cooldown.json`). The wait is Retry-After, a reset timestamp in the body, or `RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S` (default 12 hours, cap 7 days). Later calls in that window record `codex:rate_limited_cooldown` and send nothing.
 
 NVIDIA calls `https://integrate.api.nvidia.com/v1/chat/completions`. A 404 or 400 on one model continues to the next NVIDIA model, then the next live rung. Cerebras 413 is `http_413` and continues; the gateway does not skip a request from an image-count or body-byte env cap.
 
