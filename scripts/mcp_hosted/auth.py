@@ -249,6 +249,22 @@ def _get_allowed_users() -> set[str]:
     return {uid.strip() for uid in raw.split(",") if uid.strip()}
 
 
+def _get_authorized_parties() -> set[str]:
+    """Parse CLERK_AUTHORIZED_PARTIES, mirrored from
+    scripts/api/auth.py:_get_authorized_parties. Empty: no ``azp`` check."""
+    raw = os.environ.get("CLERK_AUTHORIZED_PARTIES", "")
+    return {origin.strip() for origin in raw.split(",") if origin.strip()}
+
+
+def _from_authorized_party(claims: dict) -> bool:
+    """Whether the token's ``azp`` is acceptable for the operator rung. Only
+    the operator rung is bound: demo-trial tokens are minted by the demo app
+    and stay valid for the ``demo_*`` tools."""
+    parties = _get_authorized_parties()
+    azp = claims.get("azp")
+    return not parties or azp is None or (isinstance(azp, str) and azp in parties)
+
+
 def _decode_clerk_jwt(token: str) -> dict:
     """Verified Clerk JWT claims, or AuthError(401). Mirrors the checks in
     scripts/api/auth.py:verify_clerk_bearer."""
@@ -301,7 +317,12 @@ def resolve_principal(
     claims = decoder(token)
 
     sub = claims.get("sub")
-    if isinstance(sub, str) and sub and sub in _get_allowed_users():
+    if (
+        isinstance(sub, str)
+        and sub
+        and sub in _get_allowed_users()
+        and _from_authorized_party(claims)
+    ):
         return Principal(role=ROLE_OPERATOR, user_id=sub, token=token)
 
     # Clerk session tokens carry publicMetadata as the `metadata` claim
