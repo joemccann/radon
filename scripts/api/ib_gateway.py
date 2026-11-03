@@ -305,7 +305,26 @@ def restart_backoff_state() -> Dict:
         "next_attempt_in_secs": max(0, int(_restart_state["next_attempt_after"] - now)),
         "last_outcome": _restart_state["last_outcome"],
         "push_lock": push_lock,
+        "applicable": True,
+        "gateway_mode": gateway_mode().value,
     }
+
+
+# The Gate 1 ladder fields. restart_ib_gateway returns before Gate 1 in cloud
+# mode, so these describe nothing there and are withheld (absent reads as
+# null to every tolerant reader) rather than reported as a live zero.
+_LADDER_FIELDS = (
+    "attempt_count", "last_attempt_at", "next_attempt_after",
+    "next_attempt_in_secs", "last_outcome",
+)
+
+
+def _mark_ladder_not_applicable(backoff: Dict) -> Dict:
+    for key in _LADDER_FIELDS:
+        backoff.pop(key, None)
+    backoff["applicable"] = False
+    backoff["gateway_mode"] = GatewayMode.CLOUD.value
+    return backoff
 
 
 # Synthetic hold while the broker reports a pending container transition: a
@@ -381,6 +400,7 @@ def reset_restart_backoff() -> Dict:
     previous = {k: _restart_state[k] for k in ("attempt_count", "next_attempt_after", "last_outcome")}
     _restart_state["attempt_count"] = 0
     _restart_state["next_attempt_after"] = 0.0
+    _restart_state["last_outcome"] = None
     released = _release_2fa_push_lock_bounded()
     return {
         "reset": True,
@@ -1459,7 +1479,11 @@ async def check_ib_gateway(
         # The admin panel uses this state to prevent duplicate IBKR pushes.
         # It is local control-plane state and must be present regardless of
         # where the Gateway itself runs.
-        result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
+        # Only the push lock is live here; the Gate 1 ladder never runs in
+        # cloud mode, so it is reported not applicable.
+        result["restart_backoff"] = _mark_ladder_not_applicable(
+            await asyncio.to_thread(restart_backoff_state)
+        )
         # REL-172 (R-475): on the app host the lease lives on the BROKER; the
         # local lock file is never held by its helper. Proxy the broker's
         # lease / transition so Force 2FA and Start disarm during a push.

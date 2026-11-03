@@ -149,12 +149,14 @@ Per-process. `restart_ib_gateway()` runs a `managedAccounts()` probe post-restar
 
 Backoff applies to the next restart attempt by THIS process. Cross-process backoff is the push lock above.
 
+**Not applicable in cloud mode (production).** `restart_ib_gateway()` returns before this gate when `IB_GATEWAY_MODE=cloud`: the cloud helper owns the lease and the Gateway cycle, so the ladder never advances. `/health` reports `restart_backoff.applicable: false` with `gateway_mode: "cloud"` and omits the ladder fields (`attempt_count`, `next_attempt_in_secs`, `next_attempt_after`, `last_attempt_at`, `last_outcome`); `push_lock` is still reported. The ladder runs only on the legacy `docker` / `launchd` harness, where `applicable: true`.
+
 ### 3. Watchdog stuck-2FA self-heal (2026-05-20)
 
 `is_stuck_awaiting_2fa()` fires when ALL of:
 - `auth_state == "awaiting_2fa"`
 - `push_lock_active == false`
-- `next_attempt_in_secs <= 0`
+- `next_attempt_in_secs <= 0` (absent in cloud mode, where the ladder is not applicable, so this term never defers)
 
 After **3 consecutive stuck cycles (~3 min)**, the watchdog acquires the push lock and starts `radon-ib-gateway-preheld-restart.service`. That fixed adapter verifies the exact watchdog holder, consumes that lease fingerprint once, and delegates the Docker cycle to the production helper without acquiring a second lease.
 
@@ -218,9 +220,9 @@ Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_i
   "service_state": "...",
   "upstream_dead": false,
   "restart_backoff": {
-    "push_lock": { "active": false, "expires_at": null },
-    "attempt_count": 0,
-    "next_attempt_in_secs": 0
+    "push_lock": null,
+    "applicable": false,
+    "gateway_mode": "cloud"
   }
 }
 ```
@@ -231,7 +233,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 ## Operator Escape Hatches
 
-`POST /ib/reset-backoff` clears BOTH in-memory backoff AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
+`POST /ib/reset-backoff` clears BOTH in-memory backoff (attempt count, window and last outcome) AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
 
 `/usr/local/bin/radon restart` and the admin Gateway controls delegate to `/usr/local/bin/radon-ib-gateway-control`. A healthy start is a no-op with no lease; a stopped/missing start or any restart atomically acquires the lease before touching Docker.
 
