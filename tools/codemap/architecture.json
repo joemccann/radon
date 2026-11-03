@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-11-02T04:20:52Z",
-  "node_count": 4342,
-  "edge_count": 8813,
+  "generated_at": "2026-11-03T17:16:23Z",
+  "node_count": 4343,
+  "edge_count": 8815,
   "areas": {
-    "web": 2397,
+    "web": 2398,
     "site": 159,
     "scripts": 1580,
     "cloud": 158,
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1138
+      "count": 1139
     },
     {
       "id": "site/app",
