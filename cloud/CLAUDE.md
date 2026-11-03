@@ -530,6 +530,14 @@ The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.
 
+When `payload_paths_changed` is false, `restart_services` keeps units up,
+sets `RADON_DEPLOY_KEEP_LIVE_VENV=1`, and runs `radon-deploy-root
+promote-in-place` instead of `stop-clean` / `restart-managed`. That verb
+clears the previous release's commit receipt and exports model clients for
+the new SHA without stopping anything. Do not write the receipt by hand.
+`cloud/tests/test_deploy_inplace_promotion.py` pins the sudoers grant and
+the no-restart path.
+
 ## Post-deploy hooks
 
 Host work that a PR would otherwise leave under "Operator Next Steps" is
