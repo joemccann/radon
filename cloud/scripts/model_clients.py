@@ -58,6 +58,10 @@ PINNED_MODEL_FILE_BYTES = tuple(size for _path, size, _digest in PINNED_MODEL_FI
 RUNTIME_RESERVE_BYTES = 1024 * 1024 * 1024
 RUNTIME_RESERVE_INODES = 1024
 EXPORT_NAME = "radon-model-client-export"
+# Production wall-clock budget for one image export. CI measures on shared
+# runners with cold layer reads, so the bounds checker passes a larger budget;
+# byte and member bounds are enforced identically either way.
+EXPORT_DEADLINE_SECONDS = 60
 HELPERS = ("__init__.py", "client.py", "cli.py", "cli_bridge.py")
 PACKAGES = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "grok": "@xai-official/grok"}
 
@@ -408,7 +412,14 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0, im
         _remove_stage(stage)
 
 
-def export_from_image(engine: str, image: str, target, *, darwin: bool = False) -> None:
+def export_from_image(
+    engine: str,
+    image: str,
+    target,
+    *,
+    darwin: bool = False,
+    deadline_seconds: float = EXPORT_DEADLINE_SECONDS,
+) -> None:
     """An isolated unprivileged container exports bytes; nothing runs on root."""
     command = [engine, "run", "--rm", "--read-only", "--name", EXPORT_NAME, "--pull=never", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--entrypoint", "tar", image, "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-cf", "-"]
     if darwin:
@@ -421,7 +432,7 @@ def export_from_image(engine: str, image: str, target, *, darwin: bool = False) 
     export_env = os.environ.copy()
     export_env.pop("NOTIFY_SOCKET", None)
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=export_env)
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + deadline_seconds
     received = 0
     try:
         assert process.stdout is not None
