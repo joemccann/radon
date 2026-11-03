@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -204,29 +205,65 @@ RECONNECT_TIMEOUT_SECS = 30.0
 # handler — surfacing a stale banner is preferable to stalling /health.
 HEAL_TIMEOUT_SECS = 10.0
 
-# Substring patterns that classify a ``service_health.last_error`` as
-# "caused by IB Gateway being unreachable". Matched case-insensitively
-# against the JSON blob's ``message`` (or ``detail``) field.
-#
-# Sourced from the production patterns IB-dependent writers emit when
-# the Gateway is unreachable — kept symmetric with the runtime classifier
-# in ``scripts/api/server.py:_IB_CONN_REFUSED_PATTERNS`` so a future
-# additional pattern only needs to be added in one place. We deliberately
-# do NOT collapse the two lists into a shared constant: this module
-# imports cleanly without the server, and a stray import from server.py
-# would pull FastAPI into the IB Gateway helper's dependency surface.
-_IB_OUTAGE_ERROR_PATTERNS: tuple[str, ...] = (
-    "failed to connect to ib",
-    "127.0.0.1:4001",
-    "timeouterror",
-    "connection refused",
-    "econnrefused",
+class IBFailure(str, Enum):
+    """What a failure text says about IB Gateway reachability."""
+
+    NONE = "none"
+    # Raw socket / API-handshake failure text from a subprocess or writer.
+    CONNECTION = "connection"
+    # This process already decided the Gateway is down (recovery verdicts).
+    GATEWAY_DOWN = "gateway_down"
+
+
+# The one list of raw "IB unreachable" substrings, matched case-insensitively.
+# Used by the runtime recovery wrapper (server.py), the orders-sync heartbeat
+# and the service_health heal below.
+IB_CONNECTION_ERROR_PATTERNS: tuple[str, ...] = (
     "connect call failed",
+    "econnrefused",
+    "connection refused",
+    "timeouterror",
     "api connection failed",
+    "failed to connect to ib",
     "ibconnectionerror",
     "make sure api port",
+    "connectivity between ibkr and",
     "request timed out",
+    "127.0.0.1:4001",
 )
+
+# Gateway-down verdicts _run_ib_script_with_recovery returns. Their text is
+# owned here so the classifier and the producers cannot drift.
+GATEWAY_NOT_ACCEPTING_ERROR = (
+    "IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval."
+)
+GATEWAY_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying shortly."
+GATEWAY_NOT_RESPONDING_CLOUD_ERROR = (
+    "IB Gateway is not responding (cloud mode). Check remote host and Tailscale."
+)
+GATEWAY_NOT_RESPONDING_MANAGED_ERROR = (
+    "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
+    "approve any existing IBKR Mobile 2FA prompt."
+)
+GATEWAY_RESTART_FAILED_PREFIX = "IB Gateway is down and restart failed."
+_GATEWAY_DOWN_VERDICT_MARKERS: tuple[str, ...] = (
+    "ib gateway is not responding",
+    "ib gateway is not accepting connections",
+    "ib gateway is down and restart failed",
+    "ib gateway connection recently failed",
+)
+
+
+def classify_ib_failure(text: object) -> IBFailure:
+    """Classify failure text. A verdict this process wrote wins over raw text."""
+    haystack = str(text or "").lower()
+    if not haystack:
+        return IBFailure.NONE
+    if any(marker in haystack for marker in _GATEWAY_DOWN_VERDICT_MARKERS):
+        return IBFailure.GATEWAY_DOWN
+    if any(pattern in haystack for pattern in IB_CONNECTION_ERROR_PATTERNS):
+        return IBFailure.CONNECTION
+    return IBFailure.NONE
 
 
 def _next_backoff_delay(attempt_count: int) -> int:
@@ -1039,8 +1076,7 @@ def _error_message_looks_like_ib_outage(last_error_blob: Optional[str]) -> bool:
         message = str(parsed.get("message") or parsed.get("detail") or last_error_blob)
     else:
         message = last_error_blob
-    haystack = message.lower()
-    return any(pattern in haystack for pattern in _IB_OUTAGE_ERROR_PATTERNS)
+    return classify_ib_failure(message) is not IBFailure.NONE
 
 
 def _query_ib_dependent_error_services() -> List[str]:

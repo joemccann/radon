@@ -711,23 +711,14 @@ async def _run_script_retrying_capacity(
 ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS = 3
 _orders_sync_consecutive_sheds = 0
 
-# _run_ib_script_with_recovery returns these only after it has already
-# decided the gateway is down (cloud mode, lock-aware watchdog, preflight
-# port closed, or the short cooldown that follows). They are not a writer
-# miss while the gateway is up. Heartbeating them latches a last_error the
-# IB grouper does not treat as an outage; later silent ticks then page
+# _run_ib_script_with_recovery returns a gateway-down verdict only after it
+# has already decided the gateway is down (cloud mode, lock-aware watchdog,
+# preflight port closed, or the short cooldown that follows). They are not a
+# writer miss while the gateway is up. Heartbeating them latches a last_error
+# the IB grouper does not treat as an outage; later silent ticks then page
 # orders-sync during an operator hold.
-_GATEWAY_DOWN_SYNC_MARKERS = (
-    "ib gateway is not responding",
-    "ib gateway is not accepting connections",
-    "ib gateway is down and restart failed",
-    "ib gateway connection recently failed",
-)
-
-
 def _orders_sync_failure_is_gateway_down(error: object) -> bool:
-    hay = str(error or "").lower()
-    return any(marker in hay for marker in _GATEWAY_DOWN_SYNC_MARKERS)
+    return ib_gateway.classify_ib_failure(error) is ib_gateway.IBFailure.GATEWAY_DOWN
 
 
 def _reset_orders_sync_shed_state() -> None:
@@ -6362,26 +6353,14 @@ async def ticker_ratings(ticker: str):
 # IB Gateway auto-recovery
 # ---------------------------------------------------------------------------
 
-_IB_CONN_REFUSED_PATTERNS = (
-    "Connect call failed",
-    "ECONNREFUSED",
-    "Connection refused",
-    "TimeoutError",
-    "API connection failed",
-    "Failed to connect to IB",
-    "IBConnectionError",
-    "Make sure API port",
-    "Connectivity between IBKR and",
-    "request timed out",
-)
-
-# Cooldown: after an IB subprocess fails with a connection error, skip
-# subsequent attempts for this many seconds to avoid churn.
+# Cooldown: after a CONFIRMED gateway-down verdict, skip subsequent attempts
+# for this many seconds to avoid churn. 0.0 = clear, else the monotonic time
+# it was armed. Only _arm_ib_cooldown / _clear_ib_cooldown write it.
 _IB_SCRIPT_COOLDOWN_SECS = 15.0
-_ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
+_ib_last_failure: float = 0.0
 # Returned when the cooldown skips a spawn. The script never ran, so callers
 # must not record it as a writer failure.
-_IB_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying shortly."
+_IB_COOLDOWN_SKIP_ERROR = ib_gateway.GATEWAY_COOLDOWN_SKIP_ERROR
 
 # Scripts that transmit orders are NOT idempotent: a connection-flavored
 # failure can surface after placeOrder already reached IB, so the automatic
@@ -6391,7 +6370,52 @@ _NON_IDEMPOTENT_IB_SCRIPTS = frozenset({"ib_place_order.py"})
 
 def _is_ib_connection_error(error_msg: str) -> bool:
     """Check if an error message indicates IB Gateway is unreachable."""
-    return any(p in (error_msg or "") for p in _IB_CONN_REFUSED_PATTERNS)
+    return ib_gateway.classify_ib_failure(error_msg) is ib_gateway.IBFailure.CONNECTION
+
+
+def _arm_ib_cooldown() -> None:
+    global _ib_last_failure
+    _ib_last_failure = time.monotonic()
+
+
+def _clear_ib_cooldown() -> None:
+    global _ib_last_failure
+    _ib_last_failure = 0.0
+
+
+def _ib_cooldown_active(now: float) -> bool:
+    return _ib_last_failure > 0 and (now - _ib_last_failure) < _IB_SCRIPT_COOLDOWN_SECS
+
+
+def _is_order_cancel(script: str, args: list) -> bool:
+    """A cancel removes risk; a gateway-down verdict must never refuse it."""
+    return script == "ib_order_manage.py" and bool(args) and args[0] == "cancel"
+
+
+def _placement_outcome(script: str, result: ScriptResult) -> Optional[dict]:
+    """The indeterminate placement outcome recovery must carry, or None.
+
+    A completed placement subprocess reports it as ``indeterminate: true``.
+    A failed one whose text already says the outcome is unknown (timeout,
+    no-retry) is lifted into the same structured shape, so a recovery
+    rewrite of the connection error cannot turn it into a retryable 502.
+    """
+    if script not in _NON_IDEMPOTENT_IB_SCRIPTS:
+        return None
+    data = getattr(result, "data", None)
+    if isinstance(data, dict) and data.get("indeterminate") is True:
+        return data
+    if not result.ok and _is_indeterminate_place_failure(result.error):
+        return {
+            "status": "error",
+            "indeterminate": True,
+            "message": (
+                "Order outcome INDETERMINATE: the placement subprocess failed "
+                "after it may have transmitted. CHECK OPEN ORDERS before "
+                f"re-placing. Upstream: {result.error}"
+            ),
+        }
+    return None
 
 
 def _pool_has_any_connection() -> bool:
@@ -6455,12 +6479,12 @@ async def _run_ib_script_with_recovery(
     those with "Invalid JSON output" because run_script greedily parses
     the first '{' it finds in the status text.
     """
-    global _ib_last_failure
     _runner = run_script_raw if raw else run_script
 
-    # Layer 1: Cooldown — skip if a recent failure occurred
+    # Layer 1: Cooldown — skip after a recent confirmed gateway-down verdict.
+    # Never for a cancel: it removes risk and the verdict may be stale.
     now = time.monotonic()
-    if _ib_last_failure > 0 and (now - _ib_last_failure) < _IB_SCRIPT_COOLDOWN_SECS:
+    if _ib_cooldown_active(now) and not _is_order_cancel(script, args):
         elapsed = now - _ib_last_failure
         logger.debug(
             "Skipping %s — IB cooldown active (%.1fs since last failure, %ds cooldown)",
@@ -6477,15 +6501,12 @@ async def _run_ib_script_with_recovery(
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if not port_ok or upstream_dead:
-            _ib_last_failure = now
+            _arm_ib_cooldown()
             logger.warning(
                 "Skipping %s — Gateway down (port=%s, upstream_dead=%s), pool disconnected",
                 script, port_ok, upstream_dead,
             )
-            return ScriptResult(
-                ok=False,
-                error="IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
-            )
+            return ScriptResult(ok=False, error=ib_gateway.GATEWAY_NOT_ACCEPTING_ERROR)
 
         # REL-017 (R-008): an awaiting-2FA Gateway keeps the API socket open,
         # so the port check above passes and a placement subprocess would burn
@@ -6508,38 +6529,31 @@ async def _run_ib_script_with_recovery(
 
     result = await _runner(script, args, timeout=timeout)
 
-    # Recovery guidance must not erase a placing subprocess's explicit
-    # post-transmit uncertainty or broker identity. Raw/read scripts and
-    # deterministic pre-transmit failures retain their existing behavior.
-    result_data = getattr(result, "data", None)
-    placement_outcome = (
-        result_data
-        if script in _NON_IDEMPOTENT_IB_SCRIPTS
-        and isinstance(result_data, dict)
-        and result_data.get("indeterminate") is True
-        else None
-    )
+    # Recovery guidance must not erase a placing subprocess's post-transmit
+    # uncertainty or broker identity, whether the script reported it as data
+    # or only in its error text. Read scripts keep their existing behavior.
+    placement_outcome = _placement_outcome(script, result)
 
-    # Clear cooldown on success
     if result.ok:
-        _ib_last_failure = 0.0
+        _clear_ib_cooldown()
 
     if not result.ok and _is_ib_connection_error(result.error):
-        # Set cooldown to prevent churn from repeated failures
-        _ib_last_failure = time.monotonic()
-
-        # Verify Gateway is actually down before restarting
+        # Verify Gateway is actually down before arming the cooldown or
+        # restarting. A connection-flavored error from a healthy Gateway (a
+        # slow read's timeout) is that script's failure, not an outage.
         gw_status = await check_ib_gateway()
         port_ok = gw_status.get("port_listening", False)
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if port_ok and not upstream_dead:
-            # Gateway is healthy — subprocess failed for other reasons
+            _clear_ib_cooldown()
             logger.warning(
-                "Script %s failed but Gateway is healthy — not restarting (cooldown %ds)",
-                script, _IB_SCRIPT_COOLDOWN_SECS,
+                "Script %s failed but Gateway is healthy — not restarting, cooldown not armed",
+                script,
             )
             return result
+
+        _arm_ib_cooldown()
 
         if not _should_auto_restart_ib_gateway_after_runtime_failure():
             if is_cloud_mode():
@@ -6550,7 +6564,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error="IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
+                    error=ib_gateway.GATEWAY_NOT_RESPONDING_CLOUD_ERROR,
                 )
             else:
                 logger.warning(
@@ -6561,10 +6575,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error=(
-                        "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
-                        "approve any existing IBKR Mobile 2FA prompt."
-                    ),
+                    error=ib_gateway.GATEWAY_NOT_RESPONDING_MANAGED_ERROR,
                 )
         else:
             working_perm_ids = await _working_open_order_perm_ids()
@@ -6580,7 +6591,7 @@ async def _run_ib_script_with_recovery(
             gw_result = await restart_ib_gateway()
 
             if gw_result.get("restarted") and gw_result.get("port_listening"):
-                _ib_last_failure = 0.0  # Clear cooldown after successful restart
+                _clear_ib_cooldown()
                 if ib_pool:
                     await ib_pool.disconnect_all()
                     await ib_pool.connect_all()
@@ -6610,7 +6621,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error=f"IB Gateway is down and restart failed. {gw_result.get('error', '')}".strip()
+                    error=f"{ib_gateway.GATEWAY_RESTART_FAILED_PREFIX} {gw_result.get('error', '')}".strip()
                         + " Check IBKR Mobile for 2FA approval.",
                 )
 
