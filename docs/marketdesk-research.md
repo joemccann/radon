@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. A Turso wire failure while seeding, selecting, or acknowledging a PDF does the same: the error row stays and the oneshot exits 0 so the next timer can retry. The classifier uses the chained exception type, including a timeout, a connection reset, and HTTP 502, 503, or 504. A statement error, including a missing table, still exits 1. Other download failures still exit 1. A report that fails on its own (such as a provider `http_500` for one file) backs off per item and loses priority after three such failures, so it cannot starve the backlog.
+The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. A Turso wire failure while seeding, selecting, or acknowledging a PDF does the same: the error row stays and the oneshot exits 0 so the next timer can retry. The classifier uses the chained exception type, including a timeout, a connection reset, and HTTP 502, 503, or 504. A statement error, including a missing table, still exits 1. A persisted provider `http_5xx` deferral keeps the error row, prints the public code, and the oneshot exits 0. `not_pdf`, `http_transport`, `unauthenticated`, `http_404`, and other non-5xx download failures still exit 1. A report that fails on its own (such as a provider `http_500` for one file) backs off per item and loses priority after three such failures, so it cannot starve the backlog.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
@@ -146,7 +146,9 @@ fetched with a cookie-less opener that never follows redirects.
    ZeroHedge are excluded (radon-newsfeed already carries that feed). Keep items
    inside `MARKETDESK_LOOKBACK_HOURS` (default 48) that the ledger has not
    published, held, dropped or failed out. Persist every new reference before
-   processing; replay all durable pending rows with operator re-queues first
+   processing. Do not scan PDF eligibility here. A pending row cannot enter
+   the archive queue, and a Turso read timeout on that scan used to abort the
+   oneshot before any article was published. Replay all durable pending rows with operator re-queues first
    and least-recently-attempted rows next, even outside that listing/lookback. If the oldest listed item is newer than the newest
    article the ledger knows, the cycle still publishes and then reports
    `listing_gap`: items between them may have been missed.
@@ -155,7 +157,12 @@ fetched with a cookie-less opener that never follows redirects.
    post id), read the summary and folder chain, run source/identity/equity-eligibility/novelty admission (held or dropped items stop here,
    counted against `MARKETDESK_MAX_PER_CYCLE`), store up to 40 images (12 shown,
    each attached to the copy request), write grounded prose from the original
-   source facts, certify the exact final copy, publish, record. An item MarketDesk has not summarised yet is parked as
+   source facts, certify the exact final copy, publish, record. After the ledger
+   write (including a crash heal that records an already published post), ask
+   the archive to queue that article. A failure on that queue write, including
+   `TimeoutError: The read operation timed out`, is logged and the article
+   stays published. The PDF timer seeds any miss. A stop during that call still
+   ends the cycle. An item MarketDesk has not summarised yet is parked as
    `summary_pending` (no attempt spent, not a failure, not counted against
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
    than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). That deadline spends an
@@ -185,6 +192,12 @@ later cycle.
   rung), HTTP 5xx or 429, a transport error, and a session that stays signed
   out after one re-login (which also stops the cycle).
   Parked articles remain durably replayable after they leave the discovery lookback.
+- The article cycle does not enqueue a PDF while discovering. It asks the
+  archive to queue an article only after that article is recorded `published`
+  (a new post or a crash heal). A Turso read timeout on that queue write is
+  logged and the oneshot still exits 0. The PDF timer's `seed_missing` retries
+  a miss. A read timeout on the article's own ledger or publish statements
+  still fails the oneshot. A stop during the queue write still exits 143.
 - PDF provider denials belong exclusively to the separate archive service. A
   `preview_quota` response persists an independent retry/backoff and an error
   health row; it does not park or stop article publication. No reset time is
@@ -334,7 +347,7 @@ research assets are served by the same authenticated route.
 
 | Row | Writer | Window | States |
 |---|---|---|---|
-| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. A `no_summary` deadline still writes this error row, and the oneshot exits 0. |
+| `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article, and one whose only extra failure is the post-publish PDF queue write); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. A `no_summary` deadline still writes this error row, and the oneshot exits 0. A Turso read timeout while queueing an already published article does not write this error row. |
 | `marketdesk-dropbox` | `record_service_health`, continuous bucket | 15m | `ok` after a cycle with write credentials and no upload failure; `paused` when all three write credentials are absent (a warning, never the error bucket); `error` when an upload failed (retried next cycle) or when only some write credentials are set. |
 
 Both rows are registered in `scripts/watchdog/services.py` and
