@@ -20,6 +20,9 @@ SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|J
 # at LF, so a bare CR hid a second assignment inside one awk record.
 split_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'; }
 
+# An HTTPS remote may carry a credential as URL userinfo.
+strip_url_userinfo() { sed -E 's#://[^/[:space:]]*@#://<redacted>@#'; }
+
 # Unit files. Env files go through redact_dotenv below.
 redact() {
   split_lines | awk -v secret="$SECRET_KEY_PATTERN" '
@@ -205,7 +208,7 @@ sec "GIT STATE (radon-cloud)"
 cd /home/radon/radon-cloud 2>/dev/null && {
   echo "branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
   echo "HEAD:   $(git rev-parse --short HEAD 2>/dev/null)"
-  echo "remote:"; git remote -v 2>/dev/null
+  echo "remote:"; git remote -v 2>/dev/null | strip_url_userinfo
   echo "status (short):"; git status --short 2>/dev/null | head -20
 }
 
