@@ -12,7 +12,7 @@ The default text/JSON order starts with Antigravity. Requests needing images or 
 
 ## Authentication and renewal
 
-The inference socket is `/run/radon-model-gateway/gateway.sock`. The separate management socket is `/run/radon-model-control/control.sock`. Only privileged credential-validation, catalog and keeper clients receive the management mount. Neither socket is a TCP listener. Coding agents use an ephemeral authenticated loopback adapter to reach the private service; tool execution stays inside the agent's existing local permissions and approval policy.
+The inference socket is `/run/radon-model-gateway/gateway.sock`. The separate management socket is `/run/radon-model-control/control.sock`. Only privileged credential-validation, catalog and keeper clients receive the management mount. Neither socket is a TCP listener. Coding agents use an ephemeral authenticated loopback adapter to reach the private service; tool execution stays inside the agent's existing local permissions and approval policy. Bridged Grok gets its own per-run `GROK_HOME`. That directory also holds its config, auth file and leader socket. Grok never reads the operator's `~/.grok`, which the page-responder unit makes inaccessible. Grok will not start if it can read the directory's existence but not `requirements.toml` (`model_gateway.cli.configured_cli`).
 
 The gateway receives canonical subscription grants, a scoped credential-broker socket and fixed model-key slots. It does not receive the secret-store master key. Stored NVIDIA, Cerebras and Cloudflare values take effect through the broker; application processes do not export those model secrets. The subscription timer requests gateway-owned renewal jobs. Inference-triggered renewal cannot launch an interactive login. A provider requiring renewed human authorization remains unavailable and retains the existing alert path.
 
@@ -190,7 +190,10 @@ The gateway pins NVIDIA pacing state to
 Operator RPM, trip threshold, cooldown and wait limits survive environment
 filtering. Before stopping managed containers, root captures only validated
 numeric account clocks as UID1000, including `.tripped` markers; it also
-rechecks each fixed unit immediately before stopping it. Python snapshots
+rechecks each fixed unit immediately before stopping it. Every
+`radon-app-runtime` app unit must be in `model_pacing.UNITS`: `halt` runs the
+recheck as ExecStop, and an unlisted unit exits 64 and marks a clean run
+failed. Python snapshots
 join the existing account lock for at most 250ms. Captured clocks are staged
 privately, mounted read-only into the unprivileged image migrator, and merged
 without weakening existing deadlines. Per-source digest receipts prevent an

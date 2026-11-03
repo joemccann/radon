@@ -19,6 +19,9 @@ import shutil
 import subprocess
 import sys
 
+# The installer may itself run with -I; import only its reviewed source tree.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 LABEL = "com.radon.security-live-drift"
 FILES = ("scripts/security_live_drift.py", "docs/security-live-baseline.json", "cloud/tailscale/policy.hujson")
 # Sunday 15:17 local: outside trading hours, after the Saturday nightly loops.
@@ -29,9 +32,15 @@ def install(*, source_root: Path, destination: Path, home: Path, python: Path, a
     uid = os.getuid()
     if uid == 0:
         raise PermissionError("install as the operator, never root")
+    from unattended_release import _trusted
+    # Same full-path walk as the sibling installers, on the nearest existing
+    # ancestor before creating anything and on the destination after.
+    existing = destination.absolute()
+    while not existing.exists() and not existing.is_symlink():
+        existing = existing.parent
+    _trusted(existing, uid, directory=True)
     destination.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if destination.is_symlink() or destination.stat().st_uid != uid:
-        raise PermissionError(f"untrusted destination: {destination}")
+    _trusted(destination, uid, directory=True)
     release = destination / "releases" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     release.mkdir(mode=0o700, parents=True)
     for rel in FILES:
