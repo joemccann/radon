@@ -65,6 +65,7 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
         "private_security_release.py",
         "operator_runtime_refresh.py",
         "codex_capability_probe.py",
+        "credential_redaction.py",
         "model_gateway",
         "ci",
     }
@@ -77,11 +78,21 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
     )
     assert isolated_help.returncode == 0, isolated_help.stderr
     assert "--policy" in isolated_help.stdout
+    private_import = _REAL_SUBPROCESS_RUN(
+        [sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import private_security_release",
+         str(installed_release)],
+        capture_output=True,
+        text=True,
+    )
+    assert private_import.returncode == 0, private_import.stderr
     assert config["StartInterval"] == 300
     assert config["RunAtLoad"] is True
     assert config["EnvironmentVariables"] == {
         "HOME": str(home),
         "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+        # Reviews reach the model service only through the Mac transport socket;
+        # the client default is the Linux /run path, which does not exist here.
+        "RADON_MODEL_GATEWAY_SOCKET": "/Library/Radon/model-gateway/gateway.sock",
     }
     assert "GH_TOKEN" not in str(config) and "PUSHOVER_TOKEN" not in str(config)
 
