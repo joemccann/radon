@@ -426,10 +426,11 @@ class TestFillMonitorJournalPersistence:
     def _make_partial_fill_trade(self):
         mock_trade = MagicMock()
         mock_trade.order.orderId = 5
-        # Realistic identity fields: permId 0 = not yet assigned by IB (the
-        # key then falls back to orderId); bare MagicMocks coerce via
-        # __int__ to 1 and shadow the orderId in the T-013 trade_id.
-        mock_trade.order.permId = 0
+        # Realistic identity fields: bare MagicMocks coerce via __int__ to 1
+        # and shadow the permId in the T-013 trade_id. A permId of 0 (not
+        # yet assigned) writes no mirror at all (C2); see
+        # test_fill_monitor_order_identity.py.
+        mock_trade.order.permId = 1234567
         mock_trade.order.action = "BUY"
         mock_trade.order.totalQuantity = 25
         mock_trade.order.lmtPrice = 1.00
