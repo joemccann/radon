@@ -8,7 +8,8 @@ Routes:
   GET  /healthz      liveness, no helper
   GET  /status       helper status
   POST /start|stop|restart|reset-lease
-  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor)
+  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor; unhold
+                      takes an optional hold_id for compare-and-clear)
   POST /rotate-password  IB Gateway password rotation (JSON body: password,
                          userid?, actor?). Writes the new value through the
                          root writer (`sudo -n radon-ib-gateway-credential
@@ -68,6 +69,7 @@ VERBS = MUTATIONS | {"status"}
 HOLD_VERBS = frozenset({"hold", "unhold"})
 HOLD_REASON_MAX = 200
 HOLD_ACTOR_MAX = 80
+HOLD_ID_MAX = 80
 # IB Gateway password rotation. Not a helper verb either: run_helper never
 # sees it. The daemon calls the root writer itself (password on stdin; the
 # helper's own `python - <<'PY'` re-execs replace fd 0, so it cannot carry a
@@ -712,8 +714,13 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         actor = "app:" + str(request.get("actor") or "unknown")[:HOLD_ACTOR_MAX]
         if verb == "hold":
             self._set_hold(cfg, request, actor)
-        else:
-            self._clear_hold(cfg, actor)
+            return
+        hold_id = request.get("hold_id")
+        if hold_id is not None and (not isinstance(hold_id, str) or not hold_id
+                                    or len(hold_id) > HOLD_ID_MAX):
+            self._refuse(400, "hold_id must be a hold id string")
+            return
+        self._clear_hold(cfg, actor, hold_id)
 
     def _set_hold(self, cfg: dict, request: dict, actor: str) -> None:
         reason = str(request.get("reason") or "operator hold from the admin panel")[:HOLD_REASON_MAX]
@@ -745,9 +752,18 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             payload["detail"] = "hold set; Gateway stopped. Wait ~30s, then log in to IBKR."
         self._ok(payload, 200 if payload["ok"] else 502)
 
-    def _clear_hold(self, cfg: dict, actor: str) -> None:
+    def _clear_hold(self, cfg: dict, actor: str, hold_id: str | None) -> None:
+        # With hold_id this is compare-and-clear: a newer hold (a watchdog
+        # auto-hold, another release) survives an unhold aimed at an older
+        # one. Without it the admin panel's Resume lifts whatever is held,
+        # stated explicitly as ANY_HOLD.
         try:
-            ib_operator_hold.clear_hold(actor)
+            ib_operator_hold.clear_hold(actor, expected_id=hold_id or ib_operator_hold.ANY_HOLD)
+        except ib_operator_hold.HoldChanged as exc:
+            self._ok({"ok": False, "verb": "unhold", "code": "HOLD_CHANGED",
+                      "detail": f"hold not cleared: {exc}; refresh and retry",
+                      "operator_hold": ib_operator_hold.hold_state()}, 409)
+            return
         except OSError as exc:
             self._ok({"ok": False, "verb": "unhold", "detail": f"hold not cleared: {exc}",
                       "operator_hold": ib_operator_hold.hold_state()}, 502)

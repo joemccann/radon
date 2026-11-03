@@ -85,7 +85,7 @@ def test_stop_is_allowed_while_held(httpd, certs, tmp_path):
 
 def test_restart_passes_once_the_hold_is_cleared(httpd, certs, tmp_path):
     ib_operator_hold.set_hold("operator web login", "test")
-    ib_operator_hold.clear_hold("test")
+    ib_operator_hold.clear_hold("test", expected_id=ib_operator_hold.ANY_HOLD)
     status, body = _request(httpd, certs, "/restart", "POST")
     assert (status, body["ok"]) == (200, True)
     assert _helper_calls(tmp_path) == ["restart"]
@@ -196,3 +196,37 @@ def test_refused_login_reports_the_hold(httpd, certs):
     ib_operator_hold.set_hold("flatten", "ssh:joe")
     _status, body = _request(httpd, certs, "/start", "POST")
     assert body["operator_hold"]["actor"] == "ssh:joe"
+
+
+# --- Compare-and-clear on /unhold (audit 2026-11-03 §3.2) --------------------
+
+
+def test_unhold_naming_an_older_hold_keeps_the_newer_one(httpd, certs, tmp_path):
+    older = ib_operator_hold.set_hold("operator release", "ssh:joe")
+    newer = ib_operator_hold.set_hold("IBKR session taken", "auto:ib-watchdog")
+
+    status, body = _post_json(httpd, certs, "/unhold", {"actor": "u", "hold_id": older["id"]})
+
+    assert status == 409
+    assert body["ok"] is False
+    assert body["code"] == "HOLD_CHANGED"
+    assert body["operator_hold"]["id"] == newer["id"]
+    assert ib_operator_hold.is_held() is True
+    assert _helper_calls(tmp_path) == [], "no login after a refused unhold"
+
+
+def test_unhold_naming_the_current_hold_clears_it(httpd, certs, tmp_path):
+    current = ib_operator_hold.set_hold("operator release", "ssh:joe")
+
+    status, body = _post_json(httpd, certs, "/unhold", {"actor": "u", "hold_id": current["id"]})
+
+    assert status == 200, body
+    assert body["operator_hold"]["held"] is False
+    assert _helper_calls(tmp_path) == ["start"]
+
+
+def test_unhold_rejects_a_non_string_hold_id(httpd, certs, tmp_path):
+    ib_operator_hold.set_hold("operator release", "ssh:joe")
+    status, _ = _post_json(httpd, certs, "/unhold", {"actor": "u", "hold_id": 7})
+    assert status == 400
+    assert ib_operator_hold.is_held() is True
