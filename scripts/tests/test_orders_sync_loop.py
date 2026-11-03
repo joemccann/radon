@@ -365,7 +365,7 @@ async def test_restart_failed_producer_stays_silent():
 
     The parametrized silence cases above hand the matcher its own other
     substrings. Deleting "ib gateway is down and restart failed" from
-    _GATEWAY_DOWN_SYNC_MARKERS left those four cases green and this
+    the gateway-down verdict markers left those four cases green and this
     producer sentence wrote an orders-sync error heartbeat. The grouping
     list carries the same phrase, but the sentence always ends in "2FA",
     which an older pattern already matches, so this test does not claim
@@ -393,8 +393,7 @@ async def test_restart_failed_producer_stays_silent():
              patch.object(srv, "check_ib_gateway", new=fake_check_ib_gateway), \
              patch.object(srv, "restart_ib_gateway", new=fake_restart), \
              patch.object(srv, "is_cloud_mode", return_value=False), \
-             patch.object(srv, "is_docker_mode", return_value=False), \
-             patch.object(srv, "is_launchd_mode", return_value=False), \
+             patch.object(srv, "_should_auto_restart_ib_gateway_after_runtime_failure", return_value=True), \
              patch.object(srv, "_pool_has_any_connection", return_value=True), \
              patch.object(srv, "_working_open_order_perm_ids", new=no_working_orders):
             produced = await srv._run_ib_script_with_recovery("ib_orders.py", ["--sync"])

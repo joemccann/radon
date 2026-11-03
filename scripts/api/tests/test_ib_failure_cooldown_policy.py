@@ -36,8 +36,6 @@ def _wire(monkeypatch, *, results, gateway):
     monkeypatch.setattr(server, "_ib_last_failure", 0.0)
     monkeypatch.setattr(server, "ib_pool", None)
     monkeypatch.setattr(server, "is_cloud_mode", lambda: True)
-    monkeypatch.setattr(server, "is_docker_mode", lambda: False)
-    monkeypatch.setattr(server, "is_launchd_mode", lambda: False)
     return calls
 
 
@@ -102,7 +100,6 @@ def test_indeterminate_text_survives_recovery_rewrite_as_504(monkeypatch, mode):
         gateway=_DOWN,
     )
     monkeypatch.setattr(server, "is_cloud_mode", lambda: mode == "cloud")
-    monkeypatch.setattr(server, "is_launchd_mode", lambda: mode == "managed")
     monkeypatch.setattr(server, "record_order_event", AsyncMock())
     body = {"type": "stock", "symbol": "AAPL", "action": "BUY", "quantity": 1,
             "limitPrice": 1.0, "orderRef": "radon-test-ref"}

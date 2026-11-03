@@ -64,9 +64,7 @@ from api.ib_gateway import (
     ensure_ib_gateway,
     restart_ib_gateway,
     recover_stuck_pool,
-    is_docker_mode,
     is_cloud_mode,
-    is_launchd_mode,
     reset_restart_backoff,
 )
 from api import ib_gateway
@@ -6436,12 +6434,12 @@ def _should_auto_restart_ib_gateway_after_runtime_failure() -> bool:
     """Runtime subprocess failures should not churn a local launchd/IBC session.
 
     Startup still uses ensure_ib_gateway(); this only governs mid-session recovery.
+    Every known mode delegates recovery (cloud: the remote host; docker and
+    launchd: the lock-aware watchdog). An unrecognized IB_GATEWAY_MODE used to
+    fall through to True; a config typo must fail safe, so nothing returns
+    True. The restart branch below stays as the legacy harness seam.
     """
-    if is_cloud_mode() or is_docker_mode():
-        return False
-    if is_launchd_mode():
-        return False
-    return True
+    return False
 
 
 async def _working_open_order_perm_ids() -> list:

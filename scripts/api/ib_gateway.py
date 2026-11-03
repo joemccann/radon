@@ -954,19 +954,43 @@ async def _ensure_cloud() -> Dict:
 # ---------------------------------------------------------------------------
 
 
+class GatewayMode(str, Enum):
+    CLOUD = "cloud"
+    DOCKER = "docker"
+    LAUNCHD = "launchd"
+    # Anything else in IB_GATEWAY_MODE: a config typo. Never a lifecycle.
+    UNKNOWN = "unknown"
+
+
+def gateway_mode() -> GatewayMode:
+    """The configured mode. An unrecognized value is UNKNOWN, never a default."""
+    try:
+        mode = GatewayMode(GATEWAY_MODE)
+    except ValueError:
+        return GatewayMode.UNKNOWN
+    return mode
+
+
+def _unknown_mode_error(action: str) -> str:
+    return (
+        f"Refusing {action}: IB_GATEWAY_MODE={GATEWAY_MODE!r} is not one of "
+        "cloud, docker, launchd."
+    )
+
+
 def is_cloud_mode() -> bool:
     """Return True if Gateway runs on a remote host (no local lifecycle)."""
-    return GATEWAY_MODE == "cloud"
+    return gateway_mode() is GatewayMode.CLOUD
 
 
 def is_docker_mode() -> bool:
     """Return True if Gateway is managed by Docker."""
-    return GATEWAY_MODE == "docker"
+    return gateway_mode() is GatewayMode.DOCKER
 
 
 def is_launchd_mode() -> bool:
     """Return True if Gateway is managed by the local launchd/IBC service."""
-    return GATEWAY_MODE == "launchd"
+    return gateway_mode() is GatewayMode.LAUNCHD
 
 
 async def _probe_authenticated(timeout: float = 8.0) -> tuple[bool, List[str]]:
@@ -1481,6 +1505,13 @@ async def ensure_ib_gateway() -> Dict:
     async with _restart_lock:
         if is_cloud_mode():
             return await _ensure_cloud()
+        if gateway_mode() is GatewayMode.UNKNOWN:
+            logger.error(_unknown_mode_error("ensure_ib_gateway"))
+            return {
+                "status": "refused",
+                "gateway_mode": GatewayMode.UNKNOWN.value,
+                "error": _unknown_mode_error("ensure_ib_gateway"),
+            }
         refusal = _app_role_refusal("ensure_ib_gateway")
         if refusal is not None:
             return refusal
@@ -1537,6 +1568,15 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 "restarted": False,
                 "gateway_mode": "cloud",
                 "error": f"Cannot restart remote Gateway at {IB_HOST}:{IB_PORT}. Manage it on the remote host.",
+            }
+        if gateway_mode() is GatewayMode.UNKNOWN:
+            # Fail safe before backoff or lease: a typo must not reach the
+            # launchd lifecycle the old fall-through picked.
+            logger.error(_unknown_mode_error("restart_ib_gateway"))
+            return {
+                "restarted": False,
+                "gateway_mode": GatewayMode.UNKNOWN.value,
+                "error": _unknown_mode_error("restart_ib_gateway"),
             }
 
         refusal = _app_role_refusal("restart_ib_gateway")
