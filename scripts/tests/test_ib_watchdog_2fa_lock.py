@@ -295,3 +295,78 @@ def test_stuck_2fa_does_not_fire_when_backoff_scheduled(state_path):
 
     restart_mock.assert_not_called()
     assert result.stuck_2fa_count == 2  # frozen
+
+
+# --- Lease release is bound to the watchdog's own acquisition --------------
+# Audit 2026-11-03 §1 #19: release matched the holder name only.
+
+
+def _healthy_payload() -> dict:
+    return {
+        "ib_gateway": {
+            "service_state": "healthy",
+            "port_listening": True,
+            "upstream_dead": False,
+            "auth_state": "authenticated",
+        }
+    }
+
+
+def test_watchdog_records_the_token_of_the_lease_it_takes(state_path):
+    save_state(state_path, WatchdogState(degraded_count=2))
+    result, _ = _drive(state_path, _hang_payload())
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None
+    assert result.lease_acquired_at == held.acquired_at
+
+
+def test_recovery_release_keeps_a_newer_watchdog_lease(state_path):
+    """The lease on disk is a later acquisition by the same component (taken
+    after an orphan revoke). The earlier run's recovery release must not
+    delete it."""
+    import time as _time
+
+    ok, newer = ib_2fa_lock.acquire_2fa_push_lock(WATCHDOG_LOCK_HOLDER, ttl_secs=600)
+    assert ok
+    save_state(state_path, WatchdogState(lease_acquired_at=_time.time() - 500))
+    result, _ = _drive(state_path, _healthy_payload())
+    assert ib_2fa_lock.check_2fa_push_lock() == newer
+    assert result.lease_acquired_at == 0.0
+
+
+def test_recovery_release_clears_the_watchdogs_own_lease(state_path):
+    ok, mine = ib_2fa_lock.acquire_2fa_push_lock(WATCHDOG_LOCK_HOLDER, ttl_secs=600)
+    assert ok
+    save_state(state_path, WatchdogState(lease_acquired_at=mine.acquired_at))
+    result, _ = _drive(state_path, _healthy_payload())
+    assert ib_2fa_lock.check_2fa_push_lock() is None
+    assert result.lease_acquired_at == 0.0
+
+
+def test_failed_handoff_rolls_back_only_its_own_lease(monkeypatch):
+    import ib_watchdog
+
+    ok, newer = ib_2fa_lock.acquire_2fa_push_lock(WATCHDOG_LOCK_HOLDER, ttl_secs=600)
+    assert ok
+
+    def fail(*a, **k):
+        raise ib_watchdog.subprocess.CalledProcessError(1, "systemctl")
+
+    monkeypatch.setattr(ib_watchdog.subprocess, "run", fail)
+    assert ib_watchdog.trigger_restart(
+        ib_watchdog.DEFAULT_RESTART_UNIT, lease_acquired_at=newer.acquired_at - 1
+    ) is False
+    assert ib_2fa_lock.check_2fa_push_lock() == newer
+    assert ib_watchdog.trigger_restart(
+        ib_watchdog.DEFAULT_RESTART_UNIT, lease_acquired_at=newer.acquired_at
+    ) is False
+    assert ib_2fa_lock.check_2fa_push_lock() is None
+
+
+def test_recovery_without_a_token_never_releases_by_holder_name(state_path):
+    ok, newer = ib_2fa_lock.acquire_2fa_push_lock(WATCHDOG_LOCK_HOLDER, ttl_secs=600)
+    assert ok
+    save_state(state_path, WatchdogState())
+    _drive(state_path, _healthy_payload())
+    _drive(state_path, _healthy_payload())
+    assert ib_2fa_lock.check_2fa_push_lock() == newer
