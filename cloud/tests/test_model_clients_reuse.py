@@ -26,15 +26,44 @@ def installed(tmp_path):
 def _inspect(mapping):
     def run(argv, **_kwargs):
         assert argv[0] in ("/usr/bin/docker", "/usr/bin/podman")
-        assert argv[1:4] == ["image", "inspect", "--format"]
-        ref = argv[-1]
-        tag = ref.rsplit(":", 1)[-1]
 
         class Result:
-            returncode = 0 if tag in mapping else 1
-            stdout = (mapping[tag] + "\n") if tag in mapping else ""
+            returncode = 1
+            stdout = ""
             stderr = ""
 
+        if argv[1] == "images":
+            Result.returncode = 0
+            return Result()
+        assert argv[1:4] == ["image", "inspect", "--format"]
+        tag = argv[-1].rsplit(":", 1)[-1]
+        Result.returncode = 0 if tag in mapping else 1
+        Result.stdout = (mapping[tag] + "\n") if tag in mapping else ""
+        return Result()
+
+    return run
+
+
+def _engine(inspect_map, image_rows=()):
+    """Donor tag inspect can miss while the same image id still has other names."""
+
+    def run(argv, **_kwargs):
+        assert argv[0] in ("/usr/bin/docker", "/usr/bin/podman")
+
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        if argv[1:4] == ["image", "inspect", "--format"]:
+            tag = argv[-1].rsplit(":", 1)[-1]
+            Result.returncode = 0 if tag in inspect_map else 1
+            Result.stdout = (inspect_map[tag] + "\n") if tag in inspect_map else ""
+            return Result()
+        if argv[1] == "images":
+            Result.returncode = 0
+            Result.stdout = "".join(row + "\n" for row in image_rows)
+            return Result()
         return Result()
 
     return run
@@ -102,6 +131,171 @@ def test_existing_release_is_not_treated_as_already_proven(tmp_path, monkeypatch
         "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + SHA, SHA,
         root=root, exports=exports / "releases", owner_uid=os.getuid(),
     ) is False
+
+
+def test_reuse_finds_donor_when_tag_inspect_fails_but_images_share_id(tmp_path, monkeypatch):
+    """Prepull prune removes the donor SHA tag; podman still lists it under localhost/."""
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid())
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(api.subprocess, "run", _engine(
+        {NEW: IMAGE_ID},
+        image_rows=(
+            f"{IMAGE_ID}\tlocalhost/ghcr.io/joemccann/radon-model-gateway\t{DONOR}",
+            f"{IMAGE_ID}\tghcr.io/joemccann/radon-model-gateway\t{NEW}",
+        ),
+    ))
+    monkeypatch.setattr(api, "export_from_image", lambda *args, **kwargs: pytest.fail("export"))
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    )
+    assert json.loads((root / NEW / "manifest.json").read_text())["image_id"] == IMAGE_ID
+    assert (root / "current").resolve() == root / NEW
+
+
+def test_reuse_finds_donor_from_receipt_when_donor_tag_is_gone(tmp_path, monkeypatch):
+    """After prune, only the new SHA tag remains. The donor receipt still names the id."""
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid(), image_id=IMAGE_ID)
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(api.subprocess, "run", _engine(
+        {NEW: IMAGE_ID},
+        image_rows=(f"{IMAGE_ID}\tghcr.io/joemccann/radon-model-gateway\t{NEW}",),
+    ))
+    monkeypatch.setattr(api, "export_from_image", lambda *args, **kwargs: pytest.fail("export"))
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    )
+    assert json.loads((root / NEW / "manifest.json").read_text())["image_id"] == IMAGE_ID
+    assert json.loads((root / NEW / "manifest.json").read_text())["sha256"] == json.loads(
+        (root / DONOR / "manifest.json").read_text()
+    )["sha256"]
+
+
+def test_receipt_image_id_mismatch_does_not_reuse_when_tags_are_gone(tmp_path, monkeypatch):
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(
+        payload(), root, DONOR, owner_uid=os.getuid(), image_id="sha256:" + ("cd" * 32),
+    )
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(api.subprocess, "run", _engine(
+        {NEW: IMAGE_ID},
+        image_rows=(f"{IMAGE_ID}\tghcr.io/joemccann/radon-model-gateway\t{NEW}",),
+    ))
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    ) is False
+    assert not (root / NEW).exists()
+
+
+def test_install_records_image_id_and_same_sha_reinstall_accepts_it(tmp_path):
+    api = module()
+    root = tmp_path / "clients"
+    first = api.install_from_tar(payload(), root, SHA, owner_uid=os.getuid())
+    assert "image_id" not in json.loads((first / "manifest.json").read_text())
+    second = api.install_from_tar(payload(), root, SHA, owner_uid=os.getuid(), image_id=IMAGE_ID)
+    assert second == first
+    assert "image_id" not in json.loads((first / "manifest.json").read_text())
+    other = api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid(), image_id=IMAGE_ID)
+    assert json.loads((other / "manifest.json").read_text())["image_id"] == IMAGE_ID
+
+
+PAYLOAD_LABEL = "radon.model-clients.payload-sha256"
+PAYLOAD = "ab" * 32
+OTHER_PAYLOAD = "cd" * 32
+
+
+def _inspect_id_and_label(ids, labels=None):
+    """ids maps SHA tag -> image id; labels maps SHA tag -> payload hash."""
+    labels = {} if labels is None else labels
+
+    def run(argv, **_kwargs):
+        assert argv[0] in ("/usr/bin/docker", "/usr/bin/podman")
+
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        if argv[1:4] != ["image", "inspect", "--format"]:
+            return Result()
+        fmt = argv[4]
+        tag = argv[-1].rsplit(":", 1)[-1]
+        if "{{.Id}}" in fmt:
+            Result.returncode = 0 if tag in ids else 1
+            Result.stdout = (ids[tag] + "\n") if tag in ids else ""
+            return Result()
+        if PAYLOAD_LABEL in fmt:
+            value = labels.get(tag, "")
+            Result.returncode = 0 if tag in ids else 1
+            Result.stdout = (value + "\n") if tag in ids else ""
+            return Result()
+        return Result()
+
+    return run
+
+
+def test_same_payload_label_reuses_when_image_ids_differ(tmp_path, monkeypatch):
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid())
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(
+        api.subprocess,
+        "run",
+        _inspect_id_and_label(
+            {DONOR: IMAGE_ID, NEW: "sha256:" + ("cd" * 32)},
+            {DONOR: PAYLOAD, NEW: PAYLOAD},
+        ),
+    )
+    monkeypatch.setattr(api, "export_from_image", lambda *args, **kwargs: pytest.fail("export"))
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    )
+    promoted = root / NEW
+    donor = json.loads((root / DONOR / "manifest.json").read_text())
+    proof = json.loads((promoted / "manifest.json").read_text())
+    assert proof["release_sha"] == NEW
+    assert proof["sha256"] == donor["sha256"]
+    assert (root / "current").resolve() == promoted
+
+
+def test_different_payload_label_does_not_reuse_clients(tmp_path, monkeypatch):
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid())
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(
+        api.subprocess,
+        "run",
+        _inspect_id_and_label(
+            {DONOR: IMAGE_ID, NEW: "sha256:" + ("cd" * 32)},
+            {DONOR: PAYLOAD, NEW: OTHER_PAYLOAD},
+        ),
+    )
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    ) is False
+    assert not (root / NEW).exists()
+
+
+def test_missing_payload_label_does_not_reuse_on_a_different_image_id(tmp_path, monkeypatch):
+    api, root, exports = installed(tmp_path)
+    api.install_from_tar(payload(), root, DONOR, owner_uid=os.getuid())
+    api.publish_darwin_bundle(darwin_payload(), exports / "releases", DONOR, owner_uid=os.getuid())
+    monkeypatch.setattr(
+        api.subprocess,
+        "run",
+        _inspect_id_and_label({DONOR: IMAGE_ID, NEW: "sha256:" + ("cd" * 32)}),
+    )
+    assert api.reuse_identical_image_clients(
+        "/usr/bin/docker", "ghcr.io/joemccann/radon-model-gateway:" + NEW, NEW,
+        root=root, exports=exports / "releases", owner_uid=os.getuid(),
+    ) is False
+    assert not (root / NEW).exists()
 
 
 def test_promotion_tries_reuse_before_export(tmp_path, monkeypatch):

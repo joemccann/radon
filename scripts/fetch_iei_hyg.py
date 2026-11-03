@@ -447,7 +447,7 @@ def diff_new_rows(cached: list[dict[str, Any]], series: list[dict[str, Any]]) ->
 def _write_json_cache(payload: dict[str, Any]) -> None:
     IEI_HYG_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = IEI_HYG_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, IEI_HYG_JSON)
 
 

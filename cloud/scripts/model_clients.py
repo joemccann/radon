@@ -310,7 +310,7 @@ def _link_identical_release(root: Path, stage: Path, release: str, owner_uid: in
     return True
 
 
-def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) -> Path:
+def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0, image_id: str | None = None) -> Path:
     """Validate a bounded payload completely before selecting the new release."""
     if not isinstance(release, str) or not re.fullmatch(r"[0-9a-f]{40}", release):
         raise ValueError("exact release SHA required")
@@ -366,6 +366,8 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) ->
                 raise ValueError("missing or escaping client executable")
             hashes[name] = _digest(path)
         proof = {"version": 1, "release_sha": release, "cli_versions": versions, "sha256": hashes, "helper_sha256": helper_hashes}
+        if image_id is not None:
+            proof["image_id"] = _normalize_image_id(image_id)
         manifest = stage / "manifest.json"
         with manifest.open("w") as output:
             json.dump(proof, output, sort_keys=True)
@@ -389,7 +391,11 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0) ->
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner_uid or info.st_mode & 0o222:
                 raise ValueError("untrusted existing client release")
             _immutable_tree(target, owner_uid)
-            if json.loads((target / "manifest.json").read_text()) != proof:
+            existing_proof = json.loads((target / "manifest.json").read_text())
+            existing_proof.pop("image_id", None)
+            compare = dict(proof)
+            compare.pop("image_id", None)
+            if existing_proof != compare:
                 raise ValueError("existing release differs from CI payload")
             for name, digest in hashes.items():
                 if _digest(target / "bin" / name) != digest:
@@ -592,8 +598,11 @@ def _verify_linux_release(root: Path, release: str, owner_uid: int) -> None:
     receipt=folder/"manifest.json"
     if receipt.is_symlink():raise ValueError("unsafe recovery receipt")
     proof=json.loads(receipt.read_text())
-    if not isinstance(proof,dict) or set(proof)!={"version","release_sha","cli_versions","sha256","helper_sha256"} or type(proof["version"]) is not int or proof["version"]!=1 or proof["release_sha"]!=release:
+    required={"version","release_sha","cli_versions","sha256","helper_sha256"}
+    if not isinstance(proof,dict) or not required<=set(proof) or set(proof)-required-{"image_id"} or type(proof["version"]) is not int or proof["version"]!=1 or proof["release_sha"]!=release:
         raise ValueError("recovery client receipt mismatch")
+    if "image_id" in proof:
+        _normalize_image_id(proof["image_id"])
     versions=proof["cli_versions"]
     if not isinstance(versions,dict) or set(versions)!={*PACKAGES,"agy"} or any(not isinstance(value,str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",value) for value in versions.values()):
         raise ValueError("recovery client versions are not pinned")
@@ -606,6 +615,20 @@ def _verify_linux_release(root: Path, release: str, owner_uid: int) -> None:
                 raise ValueError("recovery client digest mismatch")
 
 
+PAYLOAD_LABEL = "radon.model-clients.payload-sha256"
+
+
+def _normalize_image_id(image_id: str) -> str:
+    if not isinstance(image_id,str):
+        raise ValueError("gateway image id is not a sha256 digest")
+    image_id=image_id.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}",image_id):
+        image_id="sha256:"+image_id
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}",image_id):
+        raise ValueError("gateway image id is not a sha256 digest")
+    return image_id
+
+
 def _image_id(engine: str, image: str) -> str:
     if engine not in ("/usr/bin/podman","/usr/bin/docker"):
         raise ValueError("unsupported container engine")
@@ -614,12 +637,68 @@ def _image_id(engine: str, image: str) -> str:
     result=subprocess.run([engine,"image","inspect","--format","{{.Id}}",image],capture_output=True,text=True,timeout=20,check=False)
     if result.returncode!=0:
         raise ValueError("gateway image id unavailable")
-    image_id=result.stdout.strip()
-    if re.fullmatch(r"[0-9a-f]{64}",image_id):
-        image_id="sha256:"+image_id
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}",image_id):
-        raise ValueError("gateway image id is not a sha256 digest")
-    return image_id
+    return _normalize_image_id(result.stdout.strip())
+
+
+def _gateway_sha_from_names(repository: str, tag: str) -> str | None:
+    if not isinstance(repository,str) or not isinstance(tag,str) or not re.fullmatch(r"[0-9a-f]{40}",tag):
+        return None
+    # Podman may prefix a pulled GHCR name with localhost/. ihash and moving tags are not donors.
+    if re.fullmatch(r"(?:localhost/)?ghcr\.io/joemccann/radon-model-gateway",repository):
+        return tag
+    return None
+
+
+def _local_gateway_shas_with_id(engine: str, image_id: str) -> set[str]:
+    """SHA tags whose local image id matches, including names inspect-by-tag misses."""
+    if engine not in ("/usr/bin/podman","/usr/bin/docker"):
+        return set()
+    result=subprocess.run(
+        [engine,"images","--no-trunc","--format","{{.ID}}\t{{.Repository}}\t{{.Tag}}"],
+        capture_output=True,text=True,timeout=20,check=False,
+    )
+    if result.returncode!=0:
+        return set()
+    donors=set()
+    for line in result.stdout.splitlines():
+        parts=line.split("\t")
+        if len(parts)!=3:
+            continue
+        try:
+            if _normalize_image_id(parts[0])!=image_id:
+                continue
+        except ValueError:
+            continue
+        sha=_gateway_sha_from_names(parts[1],parts[2])
+        if sha is not None:
+            donors.add(sha)
+    return donors
+
+
+def _receipt_image_id(folder: Path) -> str | None:
+    try:
+        proof=json.loads((folder/"manifest.json").read_text())
+        if not isinstance(proof,dict) or "image_id" not in proof:
+            return None
+        return _normalize_image_id(proof["image_id"])
+    except (OSError,ValueError,TypeError,json.JSONDecodeError):
+        return None
+
+
+def _payload_label(engine: str, image: str) -> str:
+    """Read the CIP-024 client-payload label. Missing or malformed is a miss."""
+    if engine not in ("/usr/bin/podman","/usr/bin/docker"):
+        raise ValueError("unsupported container engine")
+    if not re.fullmatch(r"ghcr\.io/joemccann/radon-model-gateway:[0-9a-f]{40}",image):
+        raise ValueError("refusing an image that is not an exact gateway SHA")
+    fmt='{{index .Config.Labels "%s"}}' % PAYLOAD_LABEL
+    result=subprocess.run([engine,"image","inspect","--format",fmt,image],capture_output=True,text=True,timeout=20,check=False)
+    if result.returncode!=0:
+        raise ValueError("gateway payload label unavailable")
+    value=result.stdout.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}",value):
+        raise ValueError("gateway payload label is not a sha256 digest")
+    return value
 
 
 def _copy_verified_tree(source: Path, stage: Path) -> None:
@@ -649,7 +728,7 @@ def _copy_verified_tree(source: Path, stage: Path) -> None:
         os.chmod(folder,0o555)
 
 
-def _clone_verified_release(root: Path, exports: Path, donor: str, release: str, owner_uid: int) -> None:
+def _clone_verified_release(root: Path, exports: Path, donor: str, release: str, owner_uid: int, image_id: str | None = None) -> None:
     """Copy one verified image's receipts onto a new exact SHA without exporting."""
     _verify_linux_release(root,donor,owner_uid)
     _verify_darwin_export(exports,donor,owner_uid)
@@ -664,6 +743,8 @@ def _clone_verified_release(root: Path, exports: Path, donor: str, release: str,
         _copy_verified_tree(root/donor,linux_stage)
         proof=json.loads((linux_stage/"manifest.json").read_text())
         proof["release_sha"]=release
+        if image_id is not None:
+            proof["image_id"]=_normalize_image_id(image_id)
         manifest=linux_stage/"manifest.json"
         manifest.chmod(0o644)
         with manifest.open("w") as output:
@@ -736,18 +817,50 @@ def reuse_identical_image_clients(engine: str, image: str, release: str, *, root
             return False
         requested=_image_id(engine,image)
         donors=[]
+        seen=set()
+        def consider(name: str) -> None:
+            if name in seen or name==release or not re.fullmatch(r"[0-9a-f]{40}",name):
+                return
+            folder=root/name
+            if not folder.is_dir() or folder.is_symlink():
+                return
+            seen.add(name)
+            donors.append(name)
         for entry in root.iterdir():
             if entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
                 continue
             donor_image="ghcr.io/joemccann/radon-model-gateway:"+entry.name
             try:
                 if _image_id(engine,donor_image)==requested:
-                    donors.append(entry.name)
+                    consider(entry.name)
             except (OSError,ValueError,subprocess.SubprocessError):
                 continue
+        if not donors:
+            for name in _local_gateway_shas_with_id(engine,requested):
+                consider(name)
+            for entry in root.iterdir():
+                if entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
+                    continue
+                if _receipt_image_id(entry)==requested:
+                    consider(entry.name)
+        if not donors:
+            try:
+                requested_payload=_payload_label(engine,image)
+            except (OSError,ValueError,subprocess.SubprocessError):
+                requested_payload=None
+            if requested_payload:
+                for entry in root.iterdir():
+                    if entry.name in seen or entry.name==release or not re.fullmatch(r"[0-9a-f]{40}",entry.name) or not entry.is_dir() or entry.is_symlink():
+                        continue
+                    donor_image="ghcr.io/joemccann/radon-model-gateway:"+entry.name
+                    try:
+                        if _payload_label(engine,donor_image)==requested_payload:
+                            consider(entry.name)
+                    except (OSError,ValueError,subprocess.SubprocessError):
+                        continue
         for donor in sorted(donors):
             try:
-                _clone_verified_release(root,exports,donor,release,owner_uid)
+                _clone_verified_release(root,exports,donor,release,owner_uid,image_id=requested)
                 return True
             except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
                 continue
@@ -814,9 +927,13 @@ def main(args: list[str]) -> int:
             print("reused verified model clients for identical image")
             print("model clients promoted from exact CI image")
             return 0
+        try:
+            image_id=_image_id(engine,image)
+        except (OSError,ValueError,subprocess.SubprocessError):
+            image_id=None
         with tempfile.TemporaryFile(dir=ROOT) as stream:
             export_from_image(engine, image, stream)
-            install_from_tar(stream, ROOT, release)
+            install_from_tar(stream, ROOT, release, image_id=image_id)
         with tempfile.TemporaryFile(dir=EXPORT_ROOT) as stream:
             export_from_image(engine,image,stream,darwin=True)
             publish_darwin_bundle(stream,EXPORT_ROOT/"releases",release)

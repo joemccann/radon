@@ -36,9 +36,11 @@ MAX_PDF_BYTES = 100 * 1024 * 1024
 MIN_INTERVAL_SECONDS = 1800
 BACKOFF_SECONDS = 900
 PROVIDER_BACKOFF_SECONDS = 21600
-# Allowance is already a durable error row. Exit 1 makes every timer fire a
-# new oneshot Result=exit-code and a P1 page. Other deferrals still fail.
+# Allowance and a transient provider 5xx are already durable error rows.
+# Exit 1 makes every timer fire a new oneshot Result=exit-code and a P1 page.
+# not_pdf, http_transport, unauthenticated, and other deferrals still fail.
 ALLOWANCE_DEFERRALS = frozenset({PREVIEW_QUOTA, "download_quota"})
+PROVIDER_5XX = re.compile(r"http_5\d\d\Z")
 ID = re.compile(r"[A-Za-z0-9]{8,16}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 ASSET_PREFIX = "/api/newsfeed/research/files/"
@@ -101,6 +103,12 @@ def _deferral_code(exc):
         return ""
     code = message[len(prefix):]
     return code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else ""
+
+
+def _quiet_oneshot(exc):
+    """True when the error row is the page and the oneshot must exit 0."""
+    code = _deferral_code(exc)
+    return code in ALLOWANCE_DEFERRALS or PROVIDER_5XX.fullmatch(code) is not None
 
 
 def _is_db_transport(exc):
@@ -224,7 +232,7 @@ def main(argv=None):
     except DownloadDeferred as exc:
         # Only our explicit public error code is safe to print.
         print("[marketdesk-pdf] " + str(exc), file=sys.stderr)
-        return 0 if _deferral_code(exc) in ALLOWANCE_DEFERRALS else 1
+        return 0 if _quiet_oneshot(exc) else 1
     except Exception as exc:
         if _is_db_transport(exc):
             # Cause type only. URLError text can carry a request URL.
