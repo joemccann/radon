@@ -114,7 +114,43 @@ def test_preview_quota_download_exits_zero_after_durable_retry(tmp_path, monkeyp
     assert not dependency.store.downloads
 
 
-@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated"])
+@pytest.mark.parametrize("code", ["http_500", "http_503"])
+def test_persisted_provider_5xx_backoff_keeps_error_and_exits_zero(tmp_path, monkeypatch, capsys, code):
+    """A durable provider 5xx is already the error row. Exit 1 pages P1."""
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    dependency = deps(tmp_path)
+    dependency.service_cycle = recording
+    dependency.store.work = None
+    dependency.store.blocked = lambda: code
+    dependency.open_session = lambda env: pytest.fail("persisted provider 5xx must not sign in")
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert recorded == ["PDF archive deferred: " + code]
+    assert "PDF archive deferred: " + code in capsys.readouterr().err
+
+
+def test_http_500_download_exits_zero_after_durable_retry(tmp_path, monkeypatch):
+    def fail(session, key):
+        raise MarketDeskError("http_500")
+
+    dependency = deps(tmp_path, download=fail)
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert dependency.store.retries[0][0] == "http_500"
+    assert 900 <= dependency.store.retries[0][1]["backoff_seconds"] < 21600
+    assert not dependency.store.downloads
+
+
+@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated", "http_404"])
 def test_non_allowance_deferral_still_fails_the_oneshot(tmp_path, monkeypatch, code):
     dependency = deps(tmp_path)
     dependency.store.work = None
