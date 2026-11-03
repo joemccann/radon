@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT
+from utils import ib_order_status
 from order_limits import (
     _finite,
     _ib_order_type,
@@ -101,13 +102,9 @@ def _held_quantities(snapshot: dict) -> dict[tuple, float]:
     return held
 
 
-_RESTING_STATUSES = {
-    "PENDINGSUBMIT",
-    "PRESUBMITTED",
-    "SUBMITTED",
-    "APIPENDING",
-    "PENDINGCANCEL",
-}
+# Upper-cased, space-free form of the shared vocabulary: callers normalize
+# the stored status the same way before the membership test.
+_RESTING_STATUSES = frozenset(status.upper() for status in ib_order_status.WORKING)
 
 
 def _load_working_orders() -> Optional[list[dict]]:

@@ -19,6 +19,7 @@ from ib_insync import Option, LimitOrder
 
 from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
+from utils import ib_order_status
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +210,12 @@ class ExitOrdersHandler(BaseHandler):
     # outcome, so the journal must not be marked PLACED (REL-002 / R-003).
     ACK_DEADLINE_SECONDS = 6.0
     ACK_POLL_STEP_SECONDS = 0.25
-    _TERMINAL_FAILED_STATUSES = {"Rejected", "Cancelled", "ApiCancelled", "Inactive"}
-    _ACCEPTED_STATUSES = {"Submitted", "PreSubmitted", "Filled"}
+    _TERMINAL_FAILED_STATUSES = ib_order_status.TERMINAL_FAILED
+    _ACCEPTED_STATUSES = frozenset({
+        ib_order_status.SUBMITTED,
+        ib_order_status.PRE_SUBMITTED,
+        ib_order_status.FILLED_STATUS,
+    })
 
     @staticmethod
     def _ack_perm_id(trade: Any) -> Optional[int]:
@@ -383,7 +388,8 @@ class ExitOrdersHandler(BaseHandler):
                 logger.warning(f"Skipping malformed guard entry: {entry!r}")
         self._unrecorded_placements = restored
 
-    _ACTIVE_ORDER_STATUSES = {"Submitted", "PreSubmitted", "PendingSubmit", "ApiPending"}
+    # A PendingCancel SELL can still fill, so it counts as working.
+    _ACTIVE_ORDER_STATUSES = ib_order_status.WORKING
 
     @staticmethod
     def _limit_price_key(value: Any) -> Optional[float]:
