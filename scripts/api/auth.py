@@ -452,6 +452,17 @@ def _require_operator_allowlist() -> bool:
     return os.environ.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"
 
 
+def _get_authorized_parties() -> set[str]:
+    """Parse CLERK_AUTHORIZED_PARTIES: the app origins whose Clerk session
+    tokens are accepted (the token's ``azp`` claim). The Clerk instance can
+    issue tokens for more than one app, so production pins its own origin.
+    Empty: no check (dev, CI). Mirrors ``authorizedParties`` in
+    web/middleware.ts and Clerk's semantics: a token without ``azp`` passes.
+    """
+    raw = os.environ.get("CLERK_AUTHORIZED_PARTIES", "")
+    return {origin.strip() for origin in raw.split(",") if origin.strip()}
+
+
 def _get_issuer() -> str:
     """Get Clerk issuer URL from env."""
     return os.environ.get("CLERK_ISSUER", "")
@@ -523,6 +534,10 @@ async def verify_clerk_bearer(request: Request) -> dict:
             issuer=issuer if issuer else None,
             options=decode_options,
         )
+        parties = _get_authorized_parties()
+        azp = payload.get("azp")
+        if parties and azp is not None and (not isinstance(azp, str) or azp not in parties):
+            raise pyjwt.exceptions.InvalidTokenError("unauthorized party")
     except pyjwt.exceptions.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except pyjwt.exceptions.PyJWTError as e:

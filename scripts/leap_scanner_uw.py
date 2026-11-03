@@ -1036,6 +1036,8 @@ def carry_forward_rows(
 
     A row the last run itself carried is two runs old and is not carried
     again: that name is uncovered, and the run stays an error (R-744).
+    A name the last run scanned fresh and found no LEAP for has no row to
+    carry and is covered: the dashboard shows nothing for it either way.
     """
     rows_by_ticker: Dict[str, dict] = {}
     scan_time = ""
@@ -1044,15 +1046,29 @@ def carry_forward_rows(
         for row in prior.get("results") or []:
             if isinstance(row, dict) and row.get("ticker") and "carried_from" not in row:
                 rows_by_ticker[row["ticker"]] = row
+    known_empty = _prior_fresh_empty_tickers(prior)
     carried: List[dict] = []
     uncovered: List[str] = []
     for ticker in deferred:
-        row = rows_by_ticker.get(ticker)
-        if row is None or not scan_time:
+        if not scan_time:
             uncovered.append(ticker)
             continue
-        carried.append({**row, "carried_from": scan_time})
+        row = rows_by_ticker.get(ticker)
+        if row is not None:
+            carried.append({**row, "carried_from": scan_time})
+        elif ticker not in known_empty:
+            uncovered.append(ticker)
     return carried, uncovered
+
+
+def _prior_fresh_empty_tickers(prior: Optional[dict]) -> set:
+    """Names the last run scanned to completion and found nothing to show."""
+    if not prior:
+        return set()
+    unresolved = set(prior.get("provider_failures") or []) | set(
+        prior.get("deferred_tickers") or []
+    )
+    return set(prior.get("failed_tickers") or []) - unresolved
 
 
 def best_leap_payload(leap: Optional[LeapOption], hv_20: float) -> Optional[dict]:

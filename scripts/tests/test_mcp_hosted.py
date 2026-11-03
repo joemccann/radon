@@ -346,11 +346,11 @@ class TestHostedServerPins:
 
     def test_module_never_reads_service_secrets(self):
         """AST pin: every os.environ key the hosted MCP modules read is either
-        an RADON_MCP_* knob or one of the three Clerk/allowlist values. No
+        an RADON_MCP_* knob or one of the Clerk/allowlist values. No
         service-token or vendor-key env vars."""
         import ast
 
-        allowed = {"CLERK_JWKS_URL", "CLERK_ISSUER", "ALLOWED_USER_IDS"}
+        allowed = {"CLERK_JWKS_URL", "CLERK_ISSUER", "CLERK_AUTHORIZED_PARTIES", "ALLOWED_USER_IDS"}
         for name in ("server.py", "auth.py", "serve.py", "__init__.py"):
             tree = ast.parse((_SCRIPTS_DIR / "mcp_hosted" / name).read_text())
             for node in ast.walk(tree):

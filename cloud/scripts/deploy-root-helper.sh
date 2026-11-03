@@ -2014,7 +2014,7 @@ PY_INLINE_ISOLATION
 # still reads it through group radon. Same key set as deploy.sh:MCP_ENV_KEYS
 # and setup-vps.sh:write_mcp_env; cloud/tests/test_mcp_env_ownership.py pins
 # the three copies together.
-readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
+readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|CLERK_AUTHORIZED_PARTIES|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
 
 publish_mcp_env() {
   local staged mode
