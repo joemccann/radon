@@ -172,8 +172,6 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-forecast-nightly.timer",
     "radon-garch.service",
     "radon-garch.timer",
-    "radon-grok-page-responder.service",
-    "radon-grok-page-responder.timer",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
     "radon-hhlev.service",

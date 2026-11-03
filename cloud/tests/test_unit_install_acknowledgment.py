@@ -33,6 +33,14 @@ ALLOWLIST = ROOT / "config" / "drift-allowlist.conf"
 
 ACKNOWLEDGING_DRIFT_PREFIXES = ("unit-mismatch:", "not-installed:")
 
+# DS-2026-10-29-01: rollback-only bodies that no installer publishes. They are
+# frozen at the content already on the host, because an edit could never
+# reach it; drift_audit.ROLLBACK_RETAINED_UNITS tolerates their absence.
+ROLLBACK_RETAINED = {
+    "radon-grok-page-responder.service": "c6321d9b27d478be755ccc2c7325c33a23e8e1f424976458a2517611ae3d50ed",
+    "radon-grok-page-responder.timer": "ac5bd445e1a564d00f01be12c4eb84659349b499d81025380f94ffd4e35b5870",
+}
+
 
 def _unit_files() -> dict[str, pathlib.Path]:
     """Every unit artifact the host installs, keyed by its manifest name.
@@ -115,7 +123,7 @@ def test_changed_units_are_acknowledged_pending_install():
     unacknowledged = []
     for name, path in sorted(_unit_files().items()):
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if installed.get(name) == digest or name in acknowledged:
+        if installed.get(name) == digest or name in acknowledged or name in ROLLBACK_RETAINED:
             continue
         unacknowledged.append(name)
     assert not unacknowledged, (
@@ -243,7 +251,7 @@ def test_every_unit_is_either_manifest_pinned_or_acked_for_a_real_reason():
     """No unit may fall through both paths into silent non-installation."""
     installed = set(_manifest_hashes())
     acked = set(_not_installed_acks()) | _acknowledged_units()
-    orphans = sorted(set(_unit_files()) - installed - acked)
+    orphans = sorted(set(_unit_files()) - installed - acked - set(ROLLBACK_RETAINED))
     assert not orphans, (
         "units in services/ with neither a manifest entry nor an ack — they "
         f"install nowhere and nothing reports it: {orphans}"
@@ -286,3 +294,19 @@ def test_radon_mcp_stripped_unit_is_pinned_without_mismatch_ack():
     assert name not in _acknowledged_units(), (
         f"{name} still has a drift-allowlist ack after the host install-copy"
     )
+
+
+def test_rollback_retained_units_are_frozen_and_never_installed():
+    """DS-2026-10-29-01: no installer may publish these, and an edit to one
+    could never reach a host, so their bodies stay at the installed content."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("drift_audit_retained", ROOT / "scripts" / "drift_audit.py")
+    audit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit)
+    assert audit.ROLLBACK_RETAINED_UNITS == frozenset(ROLLBACK_RETAINED)
+    units = _unit_files()
+    for name, frozen in ROLLBACK_RETAINED.items():
+        assert name not in _manifest_hashes(), name
+        assert name not in _acknowledged_units(), name
+        assert hashlib.sha256(units[name].read_bytes()).hexdigest() == frozen, name
