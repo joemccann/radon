@@ -600,9 +600,24 @@ failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
   window when the local serving path is up, same arm as 5xx. Real
   healthd-down outside a deploy still pages. Do not local-clear
   perimeter unreachability.
+- **2026-11-01 03:36Z follow-on:** page `f888f629a07b14aeae3fbc2087c5f814`.
+  Deploy via SSH for `bd81dd9ebb` ran 03:34:23Z-03:38:07Z. The 03:35
+  off-box probe recorded `status_unreachable:caddy` and exited 2. The
+  deadman paged at 03:36:46Z. The next probe (03:40Z) succeeded.
+  stop-clean stops `radon-health`, so the serving-path read of `:8330`
+  cannot succeed during the floor it exists to cover, and the old gate
+  paged that stop. A fresh transition journal plus an unread local
+  aggregate now suppresses only `status_unreachable:caddy`. A readable
+  aggregate that says the serving path is down still pages. A raw 502
+  with healthd unread still pages. Outside the journal, healthd-down
+  still pages.
 - **Regression:**
   `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
   `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
+  `test_deploy_stop_clean_caddy_floor_with_healthd_down_is_suppressed`,
+  `test_caddy_floor_with_healthd_down_outside_deploy_still_pages`,
+  `test_caddy_floor_with_readable_down_aggregate_during_deploy_still_pages`,
+  `test_raw_502_with_healthd_down_during_deploy_still_pages`,
   `test_caddy_status_unreachable_outside_deploy_window_pages`,
   `test_aggregate_invalid_inside_deploy_window_still_pages`.
 - **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
