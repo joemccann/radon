@@ -56,6 +56,79 @@ before 2003-01-02, and errors preserve the last good snapshot. Source lag is a
 payload condition separate from writer health. API use is operator-only; no demo
 mirror. Contract: [High-Low Line](../docs/indicators/high-low.md).
 
+## Private model gateway
+
+`radon-model-gateway.service` is the single production inference and provider
+credential boundary. It exposes HTTP only through the private UID1000 socket
+`/run/radon-model-gateway/gateway.sock`; no Caddy or public TCP route exists.
+The management listener is `/run/radon-model-control/control.sock` (0700/0600).
+Only the gateway, privileged API credential validation, and keeper/catalog jobs
+receive it; refresh and candidate validation never use the inference socket.
+An optional dedicated model-only SSH UID receives only allowlisted inference
+operations, with a narrow numeric UID/GID pair and 0710/0660 inference access.
+It never joins the radon group or sees the vault/control directories.
+Bridge-isolated newsfeed and MarketDesk workers mount only the socket directory
+read-only. Other app consumers and timer-owned host jobs use the same gateway
+interfaces and fail closed rather than loading vendor credentials locally.
+
+Only the gateway receives canonical provider grant directories, model API
+keys and immutable image-owned CLIs. It gets the bounded subscription-vault
+socket, never the store master key or application/research/broker data. Its
+health/paging database token is the distinct subscription-keeper token.
+`radon-subscription-tokens.timer` retains its thirty-minute cadence but its
+oneshot only requests and polls a gateway-owned refresh job; native probes,
+rotation and sealing execute inside the managed gateway image. Individual
+revoked logins still require the existing provider consent process.
+
+The `model-gateway` Docker target adds the production Chronos 2.3.0 and CPU
+Torch 2.12.1 packages to the identical Python base; the default Python image
+remains lean. The existing image check builds both targets on pull requests,
+smokes optional package capability without fetching weights, and publishes a
+third exact-SHA `radon-model-gateway` image on main. Admission, concurrent
+prepull and protected rollback pruning cover all three image repositories.
+Only the gateway writes its persistent model cache under the root-owned
+`/var/lib/radon-private/model-gateway` anchor, mounted as
+`/var/lib/radon/model-cache`; HF and FastEmbed use separate children.
+
+The gateway starts before its consumers and has a bounded Unix-socket health
+probe. The managed runtime supplies its status identity through gateway-only
+`RADON_DEPLOY_SHA`, derived from the already-resolved, validated exact gateway
+image reference. Caller/env-file values and a second checkout lookup cannot
+replace that identity; mutable, digest-only or foreign image references refuse
+before container launch. It participates in the normal exact-SHA deploy, restart, stability and
+rollback contracts. CLI/model dependency upgrades remain pinned source changes,
+image smokes and green CI; no mutable runtime auto-updater is introduced.
+Preparatory cache-migration and CLI-export containers discard inherited
+`NOTIFY_SOCKET`; only the foreground runtime's filtered notify proxy may
+notify systemd. This prevents a completed preparation container from replacing
+the service's main PID with its short-lived Podman conmon.
+`model_clients.py` promotes the exact image's CLI payload and consumer-only
+helpers atomically under `/opt/radon-model-clients/<SHA>`, with version/hash
+receipts. It does not execute host installers, provider login, or image tools
+as root. The `current` selector retains its prior value on failed validation.
+
+The first two-image to three-image cutover preserves a root-only rollback
+receipt under `/opt/radon-provision/model-gateway-cutover` before privileged
+helpers change. It verifies the observed API/Next image SHA and installed
+artifact bytes against the trusted previous Git commit. Recovery restores that
+exact previous helper/runtime/fleet contract before running the old helper's
+normal recovery, with a daemon reload before invoking that helper. Application
+HEAD metadata is read as UID1000. The failed target must match root's pinned
+main and no committed-release marker may exist; the independent control-plane
+floor is preserved byte-for-byte even across rewritten history. The exact
+root-owned sticky `root:1000` `/etc/radon` directory is temporarily sealed via
+its pinned FD while artifacts are replaced, then its original `01770` mode is
+restored. A private receipt-side `config-parent-mode.json` intent is fsynced
+before chmod; kill/reboot retry validates exact directory identity before
+restoring permissions. Only the successful fsynced restoration removes that
+marker; its presence blocks receipt reuse or archival. A later capture first proves the previous release is serving and its
+entire installed baseline still matches the receipt, then atomically archives
+the completed attempt under a unique target-named root-private directory.
+Pending receipts are never discarded. Legacy units absent from the old
+manifest are retained only after exact previous-Git, owner and mode checks.
+Other targets,
+modified receipts, unrecognized paths and unverified source bytes are refused.
+
 ## MarketDesk deferred PDF archive
 
 `radon-marketdesk-pdf.service`, `.timer` and its runtime drop-in are setup-listed
@@ -87,9 +160,13 @@ Production is three planes. Do not collapse them.
   still has the base `User=radon` `ExecStart`; waiting for the first
   control-plane refresh to supply the drop-in handed `radon` the decrypted
   secret-store master key for that window. `install_fleet_dropin` still
-  installs only `common.conf`. [The runtime owner](../docs/cloud-services.md#runtime-planes)
+  installs only `common.conf`. Every control-plane refresh and bootstrap
+  (app and combined roles) also reinstalls `common.conf` through
+  `CONTROL_PLANE_SOURCES`, and refuses a drop-in carrying anything but
+  `[Service]`, `Environment=` and `UnsetEnvironment=`, so it cannot drift
+  after first boot. [The runtime owner](../docs/cloud-services.md#runtime-planes)
   and checked-in `docker/app` plus unit drop-ins own the configuration.
-  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull` and no-argument `prune` via sudoers;
+  `/usr/local/sbin/radon-app-runtime` is the root wrapper (`pull`, no-argument `prune`, the argumentless disk headroom guard `reclaim-locked` and `prune-locked <sha>` via sudoers;
   `run` is systemd-only and does not take the deploy lock). Do not put
   `User=radon` on `docker run`. App containers must not own Gateway, Caddy,
   health or the Docker engine socket.
@@ -449,6 +526,72 @@ The Python image keeps application source root-owned and provisions only
 `/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
 log creation, writing and rotation while source directories remain unwritable.
 
+## Post-deploy hooks
+
+Host work that a PR would otherwise leave under "Operator Next Steps" is
+code: a reviewed hook in `post_deploy/hooks/` plus an entry in
+`post_deploy/manifest.json`. The deploy supervisor calls
+`scripts/post_deploy.py run` from the immutable runner after the inner deploy
+exits 0 (a fresh deploy or an already-green rerun), the green marker and HEAD
+both name the SHA, and the supervisor has released the deploy lock: `radon
+unit restart` refuses while that lock is held. Prestage and failed deploys run
+nothing. It returns 0 either way; nothing here can roll back a verified
+release.
+
+Hooks:
+
+- File `hooks/NNNN-lower-kebab.sh` (bash) or `.py` (release venv python),
+  manifest entry `{"id", "sha256", "description", "timeout_seconds"?}`
+  (default 120s, max 300s; all hooks share a 300s budget per deploy). Pin
+  with `shasum -a 256`. `python3 cloud/scripts/post_deploy.py check --root
+  cloud/post_deploy` validates the tree; `cloud/tests/test_post_deploy_hooks.py`
+  runs it on the repo copy.
+- Runs pending hooks in numeric order, as `radon` (the runner refuses root
+  and any user other than `--expect-user`), cwd `/home/radon/radon`, with a
+  minimal env: `RADON_DIR`, `RADON_DEPLOY_SHA`, `RADON_ENV_FILE`,
+  `RADON_PYTHON`, `RADON_POST_DEPLOY_HOOK_ID`, `PYTHONPATH`, fixed `PATH`.
+  Nothing else is inherited; a hook that needs Turso reads `RADON_ENV_FILE`
+  itself. Root work goes through the existing sudoers grants, for example
+  `sudo -n /usr/local/bin/radon unit restart radon-model-gateway.service`.
+- State is `/home/radon/.radon-post-deploy-state.json` (`0600`, fsynced
+  temp+rename, `.lock` flock). A hook is marked `running` before it starts
+  and `done` after exit 0, so it runs once on success and at least once
+  across a crash: every hook must be idempotent. Failure, timeout (process
+  group killed) or an interrupted `running` record leaves it pending, stops
+  the hooks after it, pages P1, and retries on the next deploy or CI rerun.
+  A `done` hook never reruns; editing one pages "changed after it
+  completed". Add a new number instead. Delete retired hooks and their
+  manifest entries freely; state keeps the record.
+- Refused before anything runs, and paged: a file in `hooks/` the manifest
+  does not list, a SHA-256 mismatch, a symlink, a group/world-writable file
+  or directory, a foreign owner (runner files are `radon`-owned `a-w`), a
+  malformed id, a duplicate number, unknown manifest keys, a corrupt or
+  symlinked state file, a concurrent runner. The runner never reads PR text,
+  never builds a shell string and never takes a command from the environment.
+- Not hookable: `/etc/radon/env` edits, secrets, 2FA, Gateway actions.
+  `radon` cannot write the env file, and secret values never enter the repo.
+  Those remain operator steps.
+
+Verification (`verify` in the manifest, read-only, every deploy, 150s budget):
+
+- `{"type": "unit_active", "unit": "radon-*.service|.timer"}`:
+  `systemctl is-active --quiet`.
+- `{"type": "journal", "unit": "radon-*.service", "pattern": <regex>,
+  "expect": "present"|"absent", "since_minutes": 1-60}`: reads
+  `sudo -n /usr/local/bin/radon logs <unit>` (the fixed 300-line JSON tail;
+  `radon` is not in `systemd-journal`). The window never starts before this
+  deploy began, so an old release's error cannot fail it. A busy unit can
+  push older lines out of 300.
+- `{"type": "http", "url": "http://localhost:PORT/path"|"http://127.0.0.1:...",
+  "expect_status"?, "contains"?, "timeout_seconds"? (max 10)}`: GET only.
+- Every check needs `id` and `description`; optional `wait_seconds` (max
+  120) polls a present/active/http check until it passes, and holds an
+  absent check open for that long before deciding.
+
+Failures page through `scripts.watchdog.notify.send_direct_page` (P1, tag
+`radon-post-deploy`) with only `PUSHOVER_USER` and `PUSHOVER_TOKEN` read
+from the env file. Delivery failure is logged in the deploy output.
+
 ## Privileged Bootstrap
 
 `scripts/bootstrap-control-plane.sh` is the only live-host upgrade path for the
@@ -611,7 +754,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 **Backblaze B2 (portfolio cold-archive, production required):** `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` (+ optional `RADON_ARCHIVE_S3_PREFIX`). S3-compatible API to bucket `radon-archive`. Used by `radon-portfolio-archive.service` / `scripts/archive_portfolio_snapshots.py`. Not Cloudflare R2. Full contract: root `.env.example`, `docs/cloud-services.md` "Portfolio archive".
 
-**Cloudflare Workers AI (Clairic report dates, optional, off by default):** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` live in `/etc/radon/env` (root:radon `0640`, unquoted `KEY=value`), the same file `radon-research.service` loads for its other API keys. They take effect at the next service start. They are not in `cloud/config/required-env.txt` (a missing required key fails deploy preflight). The token is a Workers AI token with Read and Edit only. `CLAIRIC_DATES_ENABLED` and `CLAIRIC_DATE_SANITY_ENABLED` also default off; set `CLAIRIC_DATES_ENABLED=1` (and optionally `CLAIRIC_DATE_SANITY_ENABLED=1`) in that file, then restart `radon-research.service` or deploy. Behavior: [Dropbox research](../docs/dropbox-research.md#clairic-report-dates-off-by-default).
+**Cloudflare Workers AI (Clairic report dates, optional, off by default):** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` live in `/etc/radon/env` (root:radon `0640`, unquoted `KEY=value`), the gateway-only filtered model environment. Consumer services receive only the nonsecret feature flags. They take effect at the next gateway start. They are not in `cloud/config/required-env.txt` (a missing required key fails deploy preflight). The token is a Workers AI token with Read and Edit only. `CLAIRIC_DATES_ENABLED` and `CLAIRIC_DATE_SANITY_ENABLED` also default off; set `CLAIRIC_DATES_ENABLED=1` (and optionally `CLAIRIC_DATE_SANITY_ENABLED=1`) in that file, then restart `radon-model-gateway.service` or deploy. Behavior: [Dropbox research](../docs/dropbox-research.md#clairic-report-dates-off-by-default).
 
 They are intentionally left out of `mcp.env` (`deploy.sh` `MCP_ENV_KEYS` is Clerk and `RADON_MCP_*` only) and out of the newsfeed allowlist in `radon-app-runtime.sh` `render_env_file`.
 
@@ -624,7 +767,7 @@ stat -c '%U:%G %a' /etc/radon/env    # root:radon 640
 grep -c '^CLOUDFLARE_' /etc/radon/env  # 2
 ```
 
-`cat` reads the two unquoted lines (`CLOUDFLARE_ACCOUNT_ID=...` and `CLOUDFLARE_API_TOKEN=...`) from stdin until EOF. Rotation: create a new token, replace the `CLOUDFLARE_API_TOKEN` line, restart `radon-research.service`, then revoke the old token.
+`cat` reads the two unquoted lines (`CLOUDFLARE_ACCOUNT_ID=...` and `CLOUDFLARE_API_TOKEN=...`) from stdin until EOF. Rotation: create a new token, replace the `CLOUDFLARE_API_TOKEN` line, restart `radon-model-gateway.service`, then revoke the old token.
 
 
 ## Systemd And Drift
@@ -640,18 +783,18 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
-The subscription keeper loads the root-private derived environment
-`/etc/radon/subscription-tokens/env`. Setup derives it before installing units;
-each ordinary deploy refreshes it through the fixed `publish-subscription-env`
-root verb after environment preflight and the job's pinned control-plane sync.
-Prestage precedes that sync and skips this publisher. The keeper's UID, native
-credential paths and vault socket are unchanged. Lifecycle and rollback ownership:
+Setup still derives the root-private `/etc/radon/subscription-tokens/env`
+before installing units, and each ordinary deploy refreshes it through
+`publish-subscription-env` after environment preflight and the job's pinned
+control-plane sync. Prestage precedes that sync and skips this publisher.
+The timer does not load that file. The gateway container reads the keeper
+token from its filtered copy of `/etc/radon/env`. Lifecycle and rollback:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md#service-environment-lifecycle).
 
-`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
-and heals the agent-CLI subscription credentials (claude, codex, grok,
-Antigravity `agy`) from the encrypted secret store, with a daily keepalive
-probe; a dead codex or grok grant pages a one-tap login link. Runbook:
+`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`).
+Its oneshot only requests and polls a gateway-owned refresh job. Native probes,
+rotation and sealing run inside the gateway image. A dead codex or grok grant
+still pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
 **Secret-store key units (DS-2026-10-05-05).** Every unit that loads
@@ -660,16 +803,17 @@ control-plane `radon-subscription-vault.service` (base unit and drop-in), and
 the `Type=oneshot` drop-ins for `radon-ai-cycle`, `radon-ai-cycle-backfill`
 and `radon-aa-frontier-refresh`. Both drop-in gates therefore accept
 `Type=simple|notify|oneshot`. `radon-subscription-tokens` stays `User=radon`
-with no key and reaches the vault through the broker socket
-(`/run/radon-subscription-vault/vault.sock`); its `Wants=` starts the broker.
+with no key. Its `InaccessiblePaths` include the vault socket, and it does not
+`Wants=` the broker. `radon-model-gateway` wants the broker and is the process
+that mounts `/run/radon-subscription-vault/vault.sock`.
 `install-units` never enables a `.service`, so an existing host needs one
 `systemctl enable radon-subscription-vault.service` for boot start. Host
 cutover (removing the plaintext seed key): `docs/operations.md` "Secret-store
 key cutover". Contract: `cloud/tests/test_ds_secret_store_key_units.py`.
 The Python image carries integrity-pinned `claude`, `codex`, `grok` and `agy`
-(`docker/app/vendor-clis/`), so `radon-api` and `radon-research` never mount host
-`~/.local/bin`. Provider credential directories and `HOME=/home/radon` remain
-unchanged; Antigravity retains its existing writable refresh/state directories. Root `prepare_private_dir` pins
+(`docker/app/vendor-clis/`). Only `radon-model-gateway` mounts the provider
+grant directories, read-write, with `HOME=/home/radon`. Do not mount those
+directories into `radon-api` or `radon-research`. Root `prepare_private_dir` pins
 every ancestor with `O_NOFOLLOW`, and an unverifiable `id -nG radon` refuses
 every key-bearing start. Contract: `cloud/tests/test_secret_jobs_runtime.py`.
 
@@ -695,35 +839,25 @@ Auto-sync stays off. `cloud/tests/test_knowledge_eval_setup.py` pins
 the inventory-and-skip. Contract:
 [`docs/knowledge-embeddings.md`](../docs/knowledge-embeddings.md).
 
-`setup-vps.sh` inventories `radon-grok-upgrade.{service,timer}` and
-`enable_services` enables both. Daily 07:40 UTC. The oneshot side-installs
-the latest stable Grok CLI, smokes it, and auto-promotes on pass (writes
-`/var/lib/radon/grok_lkg.json`). A failed smoke stays on last-known-good
-and pages via Pushover plus the unit watchdog. The job heartbeats
-`service_health` as `grok-upgrade` (26h daily window). Contract:
+`setup-vps.sh` inventories `radon-grok-upgrade.{service,timer}` for exact
+rollback and never enables the mutable updater. Successful gateway/client
+promotion retires loaded legacy upgrade timers. Model CLI versions come from
+the CI-verified immutable gateway image, with version/hash receipts under
+`/opt/radon-model-clients`; provider authentication remains in the gateway.
+The retired scheduled health rows are removed rather than reporting fake
+upgrade success. `cloud/tests/test_grok_upgrade_setup.py` pins retirement.
+
 The optional isolated responder is prepared through
-`cloud/scripts/setup-grok-responder-account.sh`, from a root-only provision
-stage. Nested `services/responder-domain/` units are outside automatic fleet
-installation. The responder's executed code is not: `setup-vps.sh` and every
-`install-units` publish a root-owned tree at
-`/usr/local/lib/radon/grok-responder`, and the optional unit runs that tree
-with `python3.13 -E -S` (DS-2026-10-17-16). The account clone stays the
-writable worktree. An already-finalized host swaps its installed unit only
-when `setup-grok-responder-account.sh` is rerun from a trusted stage; the
-`ready` marker selects that refresh and leaves the clone and timers alone.
-The explicit native-login and pickup checks precede a
-transactional timer handover; root-private installed-unit inventory adds the
-optional units to ongoing drift verification. The canonical keeper upgrader
-remains unchanged. Migration and rollback commands are owned by
+`cloud/scripts/setup-grok-responder-account.sh` from a root-only provision
+stage. Nested `services/responder-domain/` units remain outside automatic fleet
+installation. Its code bundle is installed root-owned by setup and deploy;
+model requests use the inference-only gateway group and fixed managed client
+paths. Gateway readiness and pickup checks precede transactional timer
+handover. Neither default nor optional setup invokes a vendor installer,
+native login, or independent grant probe. The existing keeper timer requests
+gateway-owned refresh. Legacy updater bodies remain rollback artifacts,
+guarded off once the managed manifest exists. Migration details remain in
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
-`cloud/tests/test_grok_upgrade_setup.py` pins the inventory-and-enable.
-The unit names every link the upgrader may move (`--live-bin`,
-`--alias-bin ~/.grok/bin/grok`); `grok_upgrade.py` never derives a path
-from HOME, so a test run in the responder clone cannot relink the live CLI.
-The unit runs the root-owned copy `/usr/local/lib/radon/grok-upgrade` on
-`/usr/bin/python3.13 -E -S`, never the responder clone (hidden from it);
-`setup-grok-page-responder.sh` installs that copy, so an upgrader fix lands
-on the host only at a setup rerun (`cloud/tests/test_grok_upgrade_controller.py`).
 
 `setup-vps.sh` inventories `radon-research-archive.{service,timer}` and
 `enable_services` enables the timer: Sunday 04:20 UTC, moves
@@ -734,6 +868,17 @@ since host radon cannot traverse `/var/lib/radon-private`. Heartbeat
 `research-archive` (9d). Runbook: `docs/operations.md` "Research evidence
 archive".
 
+`setup-vps.sh` inventories `radon-research-asset-archive.{service,timer}`
+and `enable_services` enables the timer: daily 03:40 UTC, uploads private
+research `assets/` and cached `downloads/` to B2 (`research/assets/`,
+`research/downloads/`), HEAD-confirms, then prunes copies past a 30-day hot
+window and downloads identical to a confirmed asset. Files unfinished
+MarketDesk or research work references are kept at any age; a failed
+reference lookup prunes nothing. `read_asset` reads a pruned asset back
+from B2. Same drop-in shape as the evidence archive.
+Heartbeat `research-asset-archive` (48h). Runbook: `docs/operations.md`
+"Research asset archive".
+
 `setup-vps.sh` inventories `radon-marketdesk.{service,timer}` and
 `enable_services` enables the timer: every 5 minutes (`*:04/5:41`), the
 marketdesk.ai research ingest that replaced the shared-folder watcher. Its
@@ -742,7 +887,8 @@ bootstrap, helper and manifest lists) runs `scripts/research/marketdesk_job.py`
 in the Python image as a research unit (rw private research bind, no data,
 media or lease binds) with the newsfeed's Chromium isolation: bridge network,
 the seccomp profile (start refused without it), 512m `/dev/shm`, an env
-allowlist and read-only ladder grants. Heartbeats `marketdesk-research` and
+allowlist and the read-only inference socket. Provider grants stay on the
+model gateway. Heartbeats `marketdesk-research` and
 `marketdesk-dropbox` (15m). `radon-research.service` is retired:
 `restart-managed` and `recover` run `retire_research_watcher` (disable --now an
 enabled watcher, stop a hand-started one, never fatal) in place of the old
@@ -838,7 +984,7 @@ Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
 
-Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `deploy.sh` calls `radon-app-runtime prune` after a green deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; both prunes skip while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. `pull` from `deploy.sh` runs under the deploy lock. The CI prepull job runs `pull` without that lock. `pull <sha>` prunes before it fetches layers. Inside the deploy lock, the supervisor runs `radon-app-runtime prune-locked <sha>` with its held FD 9 as stdin before the inner deploy builds, pulls or runs model disk admission, so a refused deploy's images cannot ratchet the disk. `deploy.sh` calls `radon-app-runtime prune` after a green or failed deploy and never after prestage, which runs beside prepull, once the supervisor has closed the lock fd. Every `pull` holds a shared pull lock until it exits; every prune skips while another pull holds it. Which tags either verb may delete is the [app image prune](../docs/operations.md#app-image-prune) procedure. Runtime starts still allow the exact local image during registry outages.
 
 ### SPX breadth scheduled comparison
 
@@ -860,3 +1006,75 @@ and environment admission. The optional process then participates in restart
 and rollback with the core services. Sourcing deploy.sh or refusing a prestage
 lock must not invoke systemctl. Account settings and request admission are
 documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
+
+
+## Pinned operator clients
+
+Before managed services start, `radon-app-runtime install-model-clients`
+exports the exact gateway image's CLI payloads and Node runtime through a
+network-disabled, unprivileged container. When the new exact SHA's local
+image id matches another exact `radon-model-gateway:<40 hex>` tag whose
+Linux and Darwin receipts already verify, promotion copies those immutable
+bytes, rewrites only the release SHA, re-checks every receipt hash, and
+does not start the export container. A missing tag, a different image id,
+or a receipt mismatch exports exactly as before. The root-owned `model_clients.py`
+installer admits bounded safe archive members, verifies pinned package metadata
+and executable hashes, and atomically selects an immutable
+`/opt/radon-model-clients/<release-SHA>` through `current`. Consumers use
+`current/bin`; they never run a vendor installer or change the selected payload.
+The manifest carries the exact release, provider versions and SHA256 evidence.
+A refused export retains the previous client selector and fails deployment.
+
+`radon-app-runtime check-model-space` is a fixed, read-only root action with
+no caller paths, thresholds or environment bypass. Deployment checks it after
+exact-image pulls, before creating a staged worktree and immediately before
+teardown; a prestage refusal never falls through to a host build. It groups
+fixed destinations by filesystem and uses `f_bavail`, not root-reserved free
+blocks. Sequential CLI archive/tree peaks derive from pinned per-release bounds
+(`LINUX_MAX_PAYLOAD_BYTES`/`LINUX_MAX_MEMBERS`/`LINUX_MAX_STREAM_BYTES`,
+`DARWIN_MAX_EXPORT_BYTES`, ~25% over the observed release) that export and
+extraction also enforce; app-images runs `scripts/ci/check_model_client_bounds.py`
+on the exact built image so a bigger bundle fails CI. Pinned model-file
+paths/sizes/digests are root-owned constants contract-tested against the image
+manifest; files already present at their digest are not charged. Each
+filesystem must also have sufficient `f_favail` for bounded members/cache
+metadata; unknown or unbounded inode metadata refuses. The serving checkout
+filesystem retains an explicit 1GiB/1024-inode operational and recovery margin.
+A shared 4KiB filesystem requires 5144893312 writable bytes (+545128448 when
+the model cache is absent) and 3209 inodes after pulls. This is admission
+evidence, not a reservation against later writes. A client payload identical to
+the selected release is hardlinked into the new SHA (receipt rewritten, never a
+symlink); retention keeps the selected release plus the previous one.
+Promotion repeats the check before allocation. Recovery instead uses
+`recover-model-clients` to verify existing exact immutable Linux/helper and
+Darwin bundle receipts/hashes and reselect the Linux payload without export or
+payload copying; Darwin publication remains commit-only. Missing or corrupt
+recovery bytes fail closed. Legacy two-image recovery remains unchanged.
+Model-cache reference write/fsync/replace failures remove temporary refs,
+retain the prior canonical ref and report only a safe errno name with exit78.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+
+
+### Root export and Mac model transport
+
+The reviewed `model_transport.py` and `mac_model_gateway.py` payloads are part
+of the fixed privileged control-plane manifest. The gateway image also embeds
+locked Darwin arm64 native clients and only the four public transport helpers.
+A native macOS CI job checks signatures and actual fake-provider tool traffic
+before the existing image gate can publish the image. Root exports and hashes
+these bytes as `/var/lib/radon-model-export/releases/<SHA>` using an unprivileged,
+network-disabled image process. It selects the public `current` export only
+for a successfully committed app deployment.
+
+The exact committed SHA is fsynced under the root-only deploy state directory
+before snapshot deletion. `verify-committed` accepts no arguments and reads
+only this receipt; finalization retries never roll back a truly committed
+release. See `docs/model-gateway.md` for initial root Mac installation, pinned
+host-key authorization, private SSH/UDS routing and launchd verification.
+The Mac service is not installed by a source change alone. Personal operator
+credentials and SSH keys must remain untouched.

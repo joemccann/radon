@@ -404,6 +404,16 @@ line here whenever you ship a security fix.**
   template literals included.
   (`scripts/tests/test_credential_redaction_value_tokenizer.py`)
 
+- **The diagnostic capture redacts env files fail closed.** systemd
+  `EnvironmentFile`, python-dotenv and Next.js dotenv each have their own
+  quoting, escape, separator and continuation grammar; mirroring them in
+  `scripts/phase0_capture.sh` leaked one edge case per cycle. `redact_dotenv`
+  prints only blank lines, comments, and single-line assignments with a
+  non-secret name and a plain or simply quoted value. Any other line is
+  redacted, and once a value might span lines the rest of the file is too.
+  Unit files keep `redact`, which also redacts an `Environment=` value that
+  carries a backslash escape. (`scripts/tests/test_phase0_capture.py`)
+
 - **A redaction opt-out is decided on the WHOLE value.** The scrubber declines
   to rewrite a value it has already tagged, so repeated scrubbing is
   idempotent. That opt-out may never be a prefix test: a value whose prefix is

@@ -45,10 +45,13 @@ exception strings, URLs and response error bodies do not enter snapshots or stdo
 `--scheduled` exits 0 when every ticker is `ok`, `partial`, or `unavailable`
 only because each section is `rate_limited`. That cycle still records a non-ok
 health row, so a standing quota problem stays visible without latching
-`radon-uw-research.service` as `Result=exit-code`. Authentication, entitlement,
-schema, request-budget and other upstream failures still exit 1. An invalid
-ticker or any exception before a snapshot is written still exits 1 with
-`research_collection_unavailable` and no provider text.
+`radon-uw-research.service` as `Result=exit-code`. A `--ticker` refresh,
+including `POST /uw/research/refresh`, still exits 1 on that same cycle so
+the route stays a failure and does not start the success cooldown.
+Authentication, entitlement, schema, request-budget and other upstream
+failures still exit 1. An invalid ticker or any exception before a snapshot
+is written still exits 1 with `research_collection_unavailable` and no
+provider text.
 
 ## Integrity and bounded storage
 

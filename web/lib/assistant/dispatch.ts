@@ -25,6 +25,12 @@ export type AssistantTurnBudget = {
   spawnAttempts: number;
   /** Per-turn abort: client hung up or the wall clock fired. */
   signal?: AbortSignal;
+  /**
+   * Set once retrieved data re-enters a tool-capable round this turn. Fenced
+   * text still carries natural-language instructions, so a later workspace
+   * mutation in the same turn is refused.
+   */
+  retrievedRead?: boolean;
 };
 
 export type DispatchResult = {
@@ -261,6 +267,13 @@ export async function callApi(
     return { ok: false, error: "Operator-only API. This principal cannot run it." };
   }
 
+  if (authz.capability === "mutate.workspace" && budget.retrievedRead) {
+    return {
+      ok: false,
+      error: "Workspace changes are refused after a data read in the same turn. Ask for the change in its own message.",
+    };
+  }
+
   if (authz.capability === "read.spawn") {
     const refusal = consumeSpawnBudget(budget);
     if (refusal) return { ok: false, error: refusal };
@@ -286,6 +299,7 @@ export async function callApi(
             principal.token,
             budget.signal,
           );
+    if (authz.capability !== "mutate.workspace") budget.retrievedRead = true;
     return { ok: true, data: wrapped };
   } catch (error) {
     const message = error instanceof Error ? error.message : "call_api failed.";

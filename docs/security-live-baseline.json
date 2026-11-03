@@ -1,0 +1,268 @@
+{
+  "version": 1,
+  "description": "Expected live security posture for scripts/security_live_drift.py. A read-only weekly check (no model calls) compares this file, cloud/tailscale/policy.hujson and the app host's trust mode with what is live. Sources: CLAUDE.md Pull Request Completion (strict, 28 app-bound required checks, enforce_admins); docs/runner.md Safety boundary and steps 8b.5 and 11 (main-review ruleset; one radon-runner-bot write deploy key on the reports repo, the old wrapper key retired); docs/security-deepsec-closed.json DS-2026-09-23-02 (rulesets 24143098 and 24587201); docs/operations.md Tailnet trust narrowing (enforce closes the unlisted-peer bypass). The reports-repo protection and secret-scanning entries were seeded from the live API on 2026-10-31 because no doc states them. Change this file in the same PR as the live change it records.",
+  "tailnet_policy": {
+    "path": "cloud/tailscale/policy.hujson",
+    "placeholder": "__OPERATOR_LOGIN__",
+    "placeholder_group": "group:operator"
+  },
+  "tailnet_trust": {
+    "service": "radon-api.service",
+    "env_file": "/etc/radon/env",
+    "expected_mode": "enforce"
+  },
+  "github": {
+    "joemccann/radon": {
+      "rulesets": [
+        {
+          "id": 24143098,
+          "name": "main-review",
+          "target": "branch",
+          "enforcement": "active",
+          "conditions": {
+            "ref_name": {
+              "exclude": [],
+              "include": [
+                "~DEFAULT_BRANCH"
+              ]
+            }
+          },
+          "rules": [
+            {
+              "type": "pull_request",
+              "parameters": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews_on_push": true,
+                "required_reviewers": [],
+                "require_code_owner_review": false,
+                "require_last_push_approval": true,
+                "required_review_thread_resolution": false,
+                "require_extra_approval_for_unattributed_changes": true,
+                "allowed_merge_methods": [
+                  "merge",
+                  "squash",
+                  "rebase"
+                ]
+              }
+            }
+          ],
+          "bypass_actors": [
+            {
+              "actor_id": 5,
+              "actor_type": "RepositoryRole",
+              "bypass_mode": "pull_request"
+            }
+          ]
+        },
+        {
+          "id": 24587201,
+          "name": "runner-bot-nightly-only",
+          "target": "branch",
+          "enforcement": "active",
+          "conditions": {
+            "ref_name": {
+              "exclude": [
+                "refs/heads/reliability/**",
+                "refs/heads/testing/**",
+                "refs/heads/documentation/**",
+                "refs/heads/documentation-runner/**",
+                "refs/heads/ci-performance/**",
+                "refs/heads/security/**",
+                "refs/heads/security-deepsec/**",
+                "refs/heads/codemap/**",
+                "refs/heads/dependabot/**",
+                "refs/heads/factory/**",
+                "refs/heads/performance/**",
+                "refs/heads/gh-readonly-queue/**"
+              ],
+              "include": [
+                "~ALL"
+              ]
+            }
+          },
+          "rules": [
+            {
+              "type": "creation"
+            },
+            {
+              "type": "update"
+            },
+            {
+              "type": "deletion"
+            }
+          ],
+          "bypass_actors": [
+            {
+              "actor_id": 5,
+              "actor_type": "RepositoryRole",
+              "bypass_mode": "always"
+            },
+            {
+              "actor_id": 29110,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            },
+            {
+              "actor_id": 1143301,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            },
+            {
+              "actor_id": 1144995,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            },
+            {
+              "actor_id": 1210556,
+              "actor_type": "Integration",
+              "bypass_mode": "always"
+            }
+          ]
+        }
+      ],
+      "branch_protection": {
+        "protected": true,
+        "strict": true,
+        "enforce_admins": true,
+        "allow_force_pushes": false,
+        "allow_deletions": false,
+        "required_checks": [
+          [
+            "Path filter",
+            15368
+          ],
+          [
+            "Secret scan (gitleaks)",
+            15368
+          ],
+          [
+            "Perimeter smoke (next start + curl)",
+            15368
+          ],
+          [
+            "Vitest (shard 1/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 2/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 3/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 4/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 5/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 6/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 7/8)",
+            15368
+          ],
+          [
+            "Vitest (shard 8/8)",
+            15368
+          ],
+          [
+            "Vitest coverage ratchet",
+            15368
+          ],
+          [
+            "pytest (rest)",
+            15368
+          ],
+          [
+            "pytest (cloud al)",
+            15368
+          ],
+          [
+            "pytest (cloud edge)",
+            15368
+          ],
+          [
+            "pytest (cloud heavy)",
+            15368
+          ],
+          [
+            "pytest (scripts-ac)",
+            15368
+          ],
+          [
+            "pytest (scripts-daemons)",
+            15368
+          ],
+          [
+            "pytest (scripts-df)",
+            15368
+          ],
+          [
+            "pytest (scripts-gh)",
+            15368
+          ],
+          [
+            "pytest (scripts-i)",
+            15368
+          ],
+          [
+            "pytest (scripts-jm)",
+            15368
+          ],
+          [
+            "pytest (scripts-npsz)",
+            15368
+          ],
+          [
+            "pytest (scripts-rs)",
+            15368
+          ],
+          [
+            "pytest coverage ratchet",
+            15368
+          ],
+          [
+            "Cross-tree contracts (cloud)",
+            15368
+          ],
+          [
+            "Cross-tree contracts (scripts)",
+            15368
+          ],
+          [
+            "Cross-tree contracts (root)",
+            15368
+          ],
+          [
+            "PR body template",
+            15368
+          ]
+        ]
+      },
+      "deploy_keys": [],
+      "security_and_analysis": {
+        "secret_scanning": "enabled",
+        "secret_scanning_push_protection": "enabled"
+      }
+    },
+    "joemccann/radon-security-reports": {
+      "rulesets": [],
+      "branch_protection": {
+        "protected": false
+      },
+      "deploy_keys": [
+        {
+          "title": "radon-runner-bot",
+          "read_only": false
+        }
+      ],
+      "security_and_analysis": null
+    }
+  }
+}

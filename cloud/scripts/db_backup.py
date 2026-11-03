@@ -56,8 +56,10 @@ SERVICE_NAME = "db-backup"
 # Operator call 2026-08-29: 7 days on-box. Thirty days of ~570 MB dumps
 # held 13 G of the 75 G root fs the night it hit 100% and every gate failed;
 # B2 keeps a year, so the local window only needs to cover a restore of a
-# very recent dump without a download.
-RETENTION_DAYS = 7
+# very recent dump without a download. Operator call 2026-10-31: 2 days.
+# Seven dumps held 3.6 G while deploys refused on ENOSPC; the prune still
+# unlinks only dumps B2 confirms, so the cut never drops the last copy.
+RETENTION_DAYS = 2
 # Off-box copies outlive the on-box window by design -- a year of nightly
 # dumps in B2 is the whole reason for pushing them off a 75 GB root fs.
 # Local RETENTION_DAYS stays the operator's call and is untouched by this.

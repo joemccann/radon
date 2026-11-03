@@ -56,6 +56,8 @@ _MAX_RESPONSE_BYTES = 8_388_608  # hard ceiling; these result sets are tiny
 # process issues Hrana pipelines on a hot path (/health/lite every 5s, plus
 # every route). Thread-local keep-alive reuses one socket per worker thread
 # for `_KEEPALIVE_IDLE_S` after the last success (PERF-008, PERF-033).
+# Only proven reads reuse that socket. Writes and batches connect before
+# sending so a peer's shorter idle timeout cannot make their outcome unknown.
 # Tests that replace urllib.request.urlopen still take that seam.
 _STDLIB_URLOPEN = urllib.request.urlopen
 _local = threading.local()
@@ -123,6 +125,7 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
     headers.setdefault("Connection", "keep-alive")
     body = req.data or b""
     method = req.get_method() or "POST"
+    safe_read = _retry_safe_read(req)
 
     def connect() -> http.client.HTTPConnection:
         if parts.scheme == "https":
@@ -141,12 +144,13 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
 
     last_success = getattr(_local, "last_success", None)
     if getattr(_local, "conn", None) is not None and (
-        getattr(_local, "key", None) != key
+        not safe_read
+        or getattr(_local, "key", None) != key
         or last_success is None
         or time.monotonic() - last_success >= _KEEPALIVE_IDLE_S
     ):
-        # Retire before sending: an idle write must never discover a dead
-        # socket after its outcome has become uncertain.
+        # Retire before sending any unproven read/write/batch. Never discover
+        # a stale socket by sending an operation whose replay is unsafe.
         _close_keepalive()
     reused = getattr(_local, "key", None) == key and getattr(_local, "conn", None) is not None
     conn = getattr(_local, "conn", None) if reused else None
@@ -162,7 +166,7 @@ def _pooled_open(req: urllib.request.Request, timeout: float) -> _PooledResponse
         # The peer may have committed a POST before its response was lost.
         # Retire every failed socket, but resend only proven reads.
         _close_keepalive()
-        if not reused or not _retry_safe_read(req):
+        if not reused or not safe_read:
             raise
         conn = connect()
         try:

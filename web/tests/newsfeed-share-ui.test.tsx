@@ -70,6 +70,31 @@ describe("news feed sharing", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
+  it("resets the caption and preview when rapidly reopened during its exit", async () => {
+    render(<NewsfeedShare post={post} />);
+    await openShare();
+    fireEvent.change(screen.getByRole("textbox", { name: "Post caption" }), { target: { value: "Edited fixture" } });
+    const trigger = screen.getByRole("button", { name: "Share", exact: true });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(document.querySelector('[data-fade-state="exiting"][inert]')).not.toBeNull();
+    fireEvent.click(trigger, { detail: 1 });
+    expect((screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value).toBe(engine.buildShareCaption(post));
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores clipboard completion from a previous opening", async () => {
+    let finishCopy!: () => void;
+    clipboard.mockImplementationOnce(() => new Promise<void>(resolve => { finishCopy = resolve; }));
+    render(<NewsfeedShare post={post} />);
+    await openShare();
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    const trigger = screen.getByRole("button", { name: "Share", exact: true });
+    fireEvent.click(trigger, { detail: 1 });
+    fireEvent.click(trigger, { detail: 1 });
+    await act(async () => finishCopy());
+    expect(screen.queryByText("Caption copied.")).toBeNull();
+  });
+
   it("uses existing post copy for captions and media without a rewrite request", async () => {
     render(<NewsfeedShare post={equityIssuance} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
@@ -228,6 +253,29 @@ describe("news feed sharing", () => {
     const signal = engine.canvasToMp4.mock.calls[0][1] as AbortSignal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts recording at logical close and ignores its completion after a rapid reopen", async () => {
+    let finishOld!: (blob: Blob) => void;
+    let finishNew!: (blob: Blob) => void;
+    engine.canvasToMp4.mockImplementationOnce(() => new Promise<Blob>(resolve => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise<Blob>(resolve => { finishNew = resolve; }));
+    render(<NewsfeedShare post={post} />);
+    await openShare();
+    fireEvent.click(screen.getByRole("button", { name: "Download Reels / TikTok video" }));
+    const signal = engine.canvasToMp4.mock.calls[0][1] as AbortSignal;
+    const trigger = screen.getByRole("button", { name: "Share", exact: true });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(signal.aborted).toBe(true);
+    expect(document.querySelector('[data-fade-state="exiting"][inert]')).not.toBeNull();
+    fireEvent.click(trigger, { detail: 1 });
+    await screen.findByAltText("Portrait share preview: Yen hedge demand");
+    fireEvent.click(screen.getByRole("button", { name: "Download Reels / TikTok video" }));
+    await act(async () => { finishOld(new Blob(["old"], { type: "video/mp4" })); });
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Exporting…" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { finishNew(new Blob(["new"], { type: "video/mp4" })); });
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
   });
 
   it("preserves an edited caption through refreshed post objects and chart selection", async () => {

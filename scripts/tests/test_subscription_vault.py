@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import socket
+import struct
 import tempfile
 import threading
 from pathlib import Path
@@ -161,3 +162,75 @@ def test_serve_replaces_a_stale_socket_but_never_a_regular_file(tmp_path):
     with pytest.raises(SystemExit):
         sv.serve(str(target), st.Vault(Store()), stop=threading.Event(), ready=threading.Event())
     assert target.read_text() == "not a socket"
+
+
+def test_the_broker_refuses_a_peer_outside_the_service_account(broker, monkeypatch):
+    path, store = broker
+    monkeypatch.setattr(sv, "_peer_uid", lambda _conn: os.getuid() + 1)
+    for request in (
+        {"op": "ping"},
+        {"op": "get", "provider": "anthropic"},
+        {"op": "model-key", "provider": "nvidia"},
+        {"op": "seal", "provider": "anthropic", "value": "written-by-a-foreign-peer"},
+    ):
+        assert _raw(path, json.dumps(request).encode()) == {"ok": False, "error": "unauthorized peer"}
+    assert store.rows["SUBSCRIPTION_TOKEN_ANTHROPIC"] == "sealed-anthropic"
+
+
+def test_the_admitted_peer_still_reads_and_writes(broker):
+    path, store = broker
+    assert _raw(path, b'{"op": "ping"}') == {"ok": True}
+    reply = _raw(path, json.dumps({"op": "get", "provider": "anthropic"}).encode())
+    assert reply == {"ok": True, "value": "sealed-anthropic"}
+    assert _raw(path, json.dumps({"op": "seal", "provider": "codex", "value": "{}"}).encode()) == {"ok": True}
+    assert store.rows["SUBSCRIPTION_TOKEN_CODEX"] == "{}"
+
+
+class _RefusedConn:
+    """A connection whose peer already sent a request before being refused."""
+
+    def __init__(self, inbound: bytes):
+        self._inbound = inbound
+        self.sent = b""
+        self.shutdown_calls = []
+        self.unread_at_close = None
+
+    def settimeout(self, _seconds):
+        pass
+
+    def recv(self, size):
+        chunk, self._inbound = self._inbound[:size], self._inbound[size:]
+        return chunk
+
+    def sendall(self, payload):
+        self.sent += payload
+
+    def shutdown(self, how):
+        self.shutdown_calls.append(how)
+
+    def getsockopt(self, *_args):
+        return struct.pack("3i", 0, os.getuid() + 1, 0)
+
+    def close(self):
+        self.unread_at_close = len(self._inbound)
+
+
+def test_a_refused_peer_reads_the_refusal_instead_of_a_reset(monkeypatch):
+    # A socket closed while inbound data is still unread is reset by the
+    # kernel on Linux, which discards the refusal the broker just wrote.
+    monkeypatch.setattr(sv, "_peer_uid", lambda _conn: os.getuid() + 1)
+    conn = _RefusedConn(json.dumps({"op": "get", "provider": "anthropic"}).encode())
+    sv._serve_one(conn, st.Vault(Store()))
+    conn.close()
+    assert json.loads(conn.sent) == {"ok": False, "error": "unauthorized peer"}
+    assert conn.unread_at_close == 0
+    assert conn.shutdown_calls == [socket.SHUT_WR]
+
+
+def test_a_refused_peer_cannot_make_the_broker_drain_without_bound(monkeypatch):
+    monkeypatch.setattr(sv, "_peer_uid", lambda _conn: os.getuid() + 1)
+    conn = _RefusedConn(b"x" * (8 * sv.MAX_REQUEST_BYTES))
+    sv._serve_one(conn, st.Vault(Store()))
+    conn.close()
+    assert json.loads(conn.sent) == {"ok": False, "error": "unauthorized peer"}
+    assert conn.unread_at_close > 0

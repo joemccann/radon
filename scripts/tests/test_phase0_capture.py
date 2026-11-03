@@ -159,3 +159,83 @@ def test_a_backtick_quoted_multiline_value_does_not_leak():
     out = _redact_input(TWS_PW_KEY + "=`first\nsecond_line_NOTREALsecret`\nRADON_MODE=hetzner")
     assert "second_line_NOTREALsecret" not in out, out
     assert "RADON_MODE=hetzner" in out, out
+
+
+# A comment never continues: neither systemd nor dotenv joins a comment line
+# that ends in a backslash with the next line. Assembling it as one logical
+# line matched the comment rule and printed the next physical line raw.
+def test_a_comment_ending_in_a_backslash_does_not_swallow_the_next_line():
+    out = _redact_input("# note \\\nUW_TOKEN=live_NOTREAL123\nRADON_MODE=hetzner")
+    assert "live_NOTREAL123" not in out, out
+    assert "# note \\" in out, out
+    assert "RADON_MODE=hetzner" in out, out
+
+
+def test_a_semicolon_line_is_still_keyed_and_redacted():
+    out = _redact_input("; UW_TOKEN=live_NOTREAL123 \\\nRADON_MODE=hetzner")
+    assert "live_NOTREAL123" not in out, out
+
+
+# A continued non-secret assignment can carry a secret assignment on its next
+# physical line (an inline note ending in a backslash). Keyed on the first
+# name alone, the joined line printed that next line raw.
+def test_a_continued_plain_assignment_does_not_print_a_secret_line():
+    out = _redact_input("RADON_MODE=hetzner # note \\\nUW_TOKEN=live_NOTREAL123\nCLIENT_ID=91")
+    assert "live_NOTREAL123" not in out, out
+    assert "<redacted:" in out, out
+    assert "CLIENT_ID=91" in out, out
+
+
+# Next.js's dotenv also accepts `NAME: value`, and web/.env is captured.
+def test_a_colon_assignment_is_keyed_and_redacted():
+    out = _redact_dotenv(TWS_PW_KEY + ": live_NOTREAL123\nRADON_MODE: hetzner")
+    assert "live_NOTREAL123" not in out, out
+    assert "<redacted:" in out, out
+    assert "RADON_MODE: hetzner" in out, out
+
+
+
+def _redact_dotenv(text: str) -> str:
+    body = SCRIPT.read_text()
+    functions = body[: body.index('sec "HOST BASICS"')]
+    script = functions + "redact_dotenv <<'RADON_FIXTURE_EOF'\n" + text + "\nRADON_FIXTURE_EOF\n"
+    return subprocess.run(["bash"], input=script, text=True, capture_output=True, check=True).stdout
+
+
+# Env files fail closed: each loader has its own quoting, escape and
+# continuation grammar, so only blank lines, comments and plain single-line
+# assignments with non-secret names print. Anything that could span lines
+# redacts the rest of the file.
+def test_dotenv_plain_settings_print_and_secrets_do_not():
+    out = _redact_dotenv(
+        "RADON_MODE=hetzner\nexport CLIENT_ID=91\nNEXT_PUBLIC_X=\"abc\"  # note\n"
+        "RADON_DB: libsql://synthetic.example.test\nUW_TOKEN: live_NOTREAL123\n\n# comment"
+    )
+    for kept in ("RADON_MODE=hetzner", "export CLIENT_ID=91", 'NEXT_PUBLIC_X="abc"',
+                 "RADON_DB: libsql://synthetic.example.test", "# comment"):
+        assert kept in out, out
+    assert "live_NOTREAL123" not in out, out
+    assert "UW_TOKEN=<redacted:" in out, out
+
+
+def test_dotenv_lines_that_may_span_redact_the_rest_of_the_file():
+    for text in (
+        # inline comment ending in a backslash, then a colon assignment
+        "RADON_MODE=hetzner # note \\\nUW_TOKEN: live_NOTREAL123",
+        # a quoted multi-line value after such a comment
+        "RADON_MODE=hetzner # note \\\n" + TWS_PW_KEY + "=\"first\nX=second_NOTREAL123\"",
+        # whitespace, including a newline, between the separator and the quote
+        TWS_PW_KEY + "=\n\"live_NOTREAL123\"",
+        # an escaped-looking quote the loaders read differently
+        "NOTE=\"a\\\\\" b\nX=live_NOTREAL123\"",
+    ):
+        out = _redact_dotenv(text)
+        assert "NOTREAL123" not in out, (text, out)
+
+
+# systemd decodes C escapes in an Environment value, so an escaped separator
+# or name hides the assignment from a literal match.
+def test_an_escaped_environment_value_is_redacted():
+    out = _redact_input('Environment="UW_TOKEN\\x3dlive_NOTREAL123"\nRADON_MODE=hetzner')
+    assert "live_NOTREAL123" not in out, out
+    assert "RADON_MODE=hetzner" in out, out

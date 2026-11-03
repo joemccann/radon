@@ -345,21 +345,22 @@ def test_dropping_one_host_key_pin_fails_the_check() -> None:
 
 
 def test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap() -> None:
-    """CIP-009: the gate fan-out must not exceed the 20-job concurrency cap.
+    """CIP-009: the non-gating Playwright job must not take a gate shard's slot.
 
-    2026-09-06: ~25 jobs launched at the gate window against the plan's
-    20 concurrent-job cap, so one pytest gate shard queued ~37s for a slot
-    and the LATE START, not shard work, set the pytest gate wall
-    (runs 34009244091, 33983869958). With the shard merges the t=0 fan-out
-    is 20 exactly only if the non-gating Playwright job defers behind
-    secret-scan (the app-images pattern), freeing its slot for a gate
-    shard. The job must stay non-gating for deploy.
+    2026-09-06: one pytest gate shard queued ~37s for a runner slot and the
+    LATE START, not shard work, set the pytest gate wall (runs 34009244091,
+    33983869958). The slot cap is 40 concurrent jobs account-wide, shared by
+    every run in flight (repo-wide running jobs plateaued at exactly 40,
+    2026-10-29..11-01), not the 20 first assumed, so concurrent PR runs are
+    what fill it. Deferring the Playwright job behind secret-scan (the
+    app-images pattern) leaves its slot to a gate shard at the gate window.
+    The job must stay non-gating for deploy.
     """
     jobs = _workflow()["jobs"]
     e2e = jobs["e2e-financial-smoke"]
     assert "secret-scan" in e2e["needs"], (
-        "the non-gating e2e job must defer behind secret-scan so the t=0 "
-        "gate fan-out stays at the 20-job concurrency cap"
+        "the non-gating e2e job must defer behind secret-scan so it does not "
+        "take a gate shard's slot under the 40-job concurrency cap"
     )
     assert "changes" in e2e["needs"]
     assert "e2e-financial-smoke" not in jobs["deploy"]["needs"], (
@@ -407,8 +408,11 @@ def test_path_filter_only_queries_the_actions_api_on_push() -> None:
 # The VPS runs Ubuntu 24.04. `ubuntu-latest` rolled to the 26.04 image on
 # 2026-10-25 and the cloud suite went red on coreutils behaviour the host does
 # not have (`install -T /dev/null` onto a directory). CI must exercise the
-# production OS, so every workflow job names it.
+# production OS, so every production job names it. The single Darwin native
+# artifact verifier must execute the signed arm64 clients on their target OS;
+# its exact job identity, pinned runner and non-production purpose are guarded.
 PRODUCTION_RUNNER = "ubuntu-24.04"
+NATIVE_ARTIFACT_RUNNERS = {("app-images.yml", "darwin-clients"): "macos-15"}
 WORKFLOWS_DIR = WORKFLOW.parent
 
 
@@ -421,16 +425,53 @@ def _every_workflow_job() -> list[tuple[str, str, dict]]:
     return found
 
 
+def _workflow_runner_offenders(jobs: list[tuple[str, str, dict]]) -> list[str]:
+    return [
+        f"{file}:{name} runs-on {job.get('runs-on')!r}"
+        for file, name, job in jobs
+        if "runs-on" in job
+        and job["runs-on"] != NATIVE_ARTIFACT_RUNNERS.get((file, name), PRODUCTION_RUNNER)
+    ]
+
+
 def test_every_workflow_job_runs_on_the_production_os() -> None:
     jobs = _every_workflow_job()
     assert jobs, "no workflow jobs found"
-    floating = [
-        f"{file}:{name} runs-on {job.get('runs-on')!r}"
-        for file, name, job in jobs
-        if "runs-on" in job and job["runs-on"] != PRODUCTION_RUNNER
-    ]
+    floating = _workflow_runner_offenders(jobs)
     assert not floating, (
-        f"every job must pin `runs-on: {PRODUCTION_RUNNER}` (the VPS OS); "
-        "`ubuntu-latest` drifts to a newer image than production:\n  "
+        f"production jobs must pin `runs-on: {PRODUCTION_RUNNER}` (the VPS OS); "
+        "only the exact native Darwin artifact verifier may use its pinned Mac runner. "
+        "Floating runner labels are forbidden:\n  "
         + "\n  ".join(floating)
     )
+
+
+def test_darwin_runner_exception_only_verifies_native_consumer_artifacts() -> None:
+    workflow = yaml.load((WORKFLOWS_DIR / "app-images.yml").read_text(), Loader=yaml.BaseLoader)
+    jobs = workflow["jobs"]
+    native = jobs["darwin-clients"]
+    assert native["runs-on"] == "macos-15"
+    assert not _touches_production_host(native)
+    assert native["permissions"] == {"contents": "read"}
+    assert "darwin-clients" in _needs(jobs["python-image"])
+    commands = "\n".join(str(step.get("run", "")) for step in native["steps"])
+    for evidence in (
+        'test "$(uname -m)" = arm64',
+        "install-darwin.cjs",
+        "codesign --verify --strict --all-architectures",
+        "scripts/ci/check_model_cli_transport.py",
+        "--network-isolated",
+        "/usr/bin/sandbox-exec",
+    ):
+        assert evidence in commands, f"native artifact exception lost its required proof: {evidence}"
+
+
+def test_native_runner_exception_never_accepts_other_jobs_or_floating_labels() -> None:
+    for file, name, runner in (
+        ("another-workflow.yml", "darwin-clients", "macos-15"),
+        ("app-images.yml", "another-native-job", "macos-15"),
+        ("app-images.yml", "darwin-clients", "macos-latest"),
+        ("ci.yml", "deploy", "ubuntu-latest"),
+        ("ci.yml", "deploy", "macos-15"),
+    ):
+        assert _workflow_runner_offenders([(file, name, {"runs-on": runner})])

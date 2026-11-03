@@ -109,7 +109,7 @@ class TestCTAVisionModelLadder:
         scripts_dir = root.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
         try:
-            from clients import model_ladder
+            from scripts.model_gateway import engine as model_ladder
         finally:
             sys.path.pop(0)
 

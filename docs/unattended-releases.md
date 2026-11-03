@@ -22,11 +22,33 @@ A candidate that changes anything under `.github/` is never reviewed or
 merged unattended: pull-request CI runs the candidate's own workflow files, so
 those checks cannot judge it. It waits for a human merge.
 
+Since 2026-11-01 the operator policy also covers the general branch families,
+not only the nightly loops. Authors are `radon-runner-bot` and `joemccann`. Branch prefixes
+are the loop families (`security/`, `security-deepsec/`, `reliability/`,
+`testing/`, `documentation/`, `ci-performance/`, `performance/`,
+`security-private-release/`) plus `fix/`, `feat/`, `ci/` and `docs/`. That
+includes the Grok page responder's `fix/<slug>` branches, which the Mac mini
+pickup opens under the `joemccann` login. Any other prefix (`cursor/`,
+`codex/`, `claude/`, `chore/`) waits for a human. The installer writes these
+defaults only when `policy.json` is absent, so an existing install changes by
+editing that 0600 file in place.
+
 Reviews are cached by model, immutable head SHA and complete diff digest.
 The controller copies the Homebrew CLI into an owner-only snapshot, verifies
 its OpenAI Developer ID signature, and binds review receipts to its SHA-256.
 Before each uncached review, a fake-credential local transport probes the same
 binary, schema and restricted model catalog and rejects advertised tools.
+Live inference then uses the private model gateway's native Responses bridge;
+only transport/auth settings change. Model capacity comes from the gateway's
+bounded projection of its own Codex CLI cache, not the controller's HOME.
+The installed LaunchAgent sets `RADON_MODEL_GATEWAY_SOCKET` to the Mac
+transport socket `/Library/Radon/model-gateway/gateway.sock`; without it the
+client falls back to the Linux `/run` path and every review defers with
+"reviewer metadata is temporarily unavailable".
+Missing verified capacity remains a deferral. Explicit GPT reviewers are
+Codex-only and the terminal response must identify the requested model;
+a shared fallback cannot impersonate two independent reviewers. Version-5
+receipts invalidate earlier transport evidence while retaining prior concerns.
 The GitHub merge API receives that exact head SHA as a compare-and-swap for
 the head. Immediately before a new merge request, the controller verifies that
 main requires strict up-to-date status checks, enforces protection for
@@ -153,9 +175,10 @@ separate release-verification page after production and host reconciliation.
 See [Nightly toolchain updates](nightly-toolchain-updates.md). The existing
 operator updater manages each application's update separately. DeepSec repairs
 its private dependencies before source review on a normal nightly fire, using
-the bot's existing subscription login and a real SDK inference smoke test.
-Missing authentication remains an explicit incomplete run; credentials are never
-invented, copied across accounts or replaced with a billing API key.
+the private model gateway for inference smoke. Its actual Codex SDK review
+commands use an ephemeral authenticated loopback bridge, without reading the
+bot's native grants. Missing service capability remains an incomplete run.
+Model CLI/SDK pins advance through reviewed CI artifacts.
 
 The root-owned runner uses a shared lifecycle lock. Scheduled root refreshes
 accept only public main with completed successful production CI, take the

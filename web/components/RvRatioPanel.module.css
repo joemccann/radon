@@ -195,9 +195,11 @@
   cursor: pointer;
 }
 
-.retry:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--signal-core) 8%, var(--bg-panel));
+@media (hover: hover) and (pointer: fine) {
+  .retry:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--signal-core) 8%, var(--bg-panel));
+  }
 }
 
 .retry:focus-visible {

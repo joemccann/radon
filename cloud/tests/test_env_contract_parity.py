@@ -58,6 +58,7 @@ EXEMPT: dict[str, str] = {
     "ROBINHOOD_MCP_TOKEN_FILE": "override for DEFAULT_TOKEN_FILE in clients/robinhood_client.py; points at the writable 0600 refresh store (/var/lib/radon/rh-mcp/rh-mcp.json in production)",
     "ROBINHOOD_MCP_URL": "override for DEFAULT_MCP_URL in clients/robinhood_client.py",
     "MDW_API_KEY": "optional X-API-Key lane; unset means no service principal",
+    "RADON_AGENT_BRIDGE_TOKEN": "generated per invocation by the local native CLI bridge; never an operator-configured provider credential",
     "RADON_SERVICE_TOKEN": "never configured on prod; unset makes the lane a no-op",
     "MENTHORQ_ARTIFACT_DIR": "debug artifact dump; unset means no artifacts",
     "RADON_CTA_SYNC_SOURCE": "argparse default for --source; the CLI flag is the contract",

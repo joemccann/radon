@@ -618,12 +618,6 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Without this row a wedged poller was invisible for 2h40m (2026-08-14).
   "grok-page-responder": { open: 90 * MIN, extended: 90 * MIN, closed: 90 * MIN, category: "scheduled", requires_ib: false },
 
-  // ``grok-upgrade`` is the daily Grok CLI/model track-latest oneshot
-  // (scripts/grok_upgrade.py via radon-grok-upgrade.timer, 07:40 UTC).
-  // Smoke then auto-promote, or stay on last-known-good. Pure xAI CLI +
-  // Turso heartbeat — no IB. 26h window = daily cadence + timer jitter.
-  "grok-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
-  "grok-responder-upgrade": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
@@ -638,6 +632,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // 04:20 UTC): upload to B2, verify, then prune local copies.
   // 9d window = one week + timer jitter + a 2-day grace. No IB.
   "research-archive": { open: 9 * DAY, extended: 9 * DAY, closed: 9 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``research-asset-archive`` is the daily research asset + cached download
+  // archive (scripts/research/asset_archive.py via
+  // radon-research-asset-archive.timer, 03:40 UTC): upload to B2, confirm,
+  // then prune local copies past the 30-day hot window. 48h window matches
+  // the other nightly B2 jobs. No IB.
+  "research-asset-archive": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``db-retention`` is the daily keep-latest sweep for append-only scan
   // snapshot tables (scripts/db_retention_sweep.py via

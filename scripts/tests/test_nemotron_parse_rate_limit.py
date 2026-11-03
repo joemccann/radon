@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from research import nemotron_parse
-from research.nemotron_parse import PageParseError, _post_with_retries
+from model_gateway import _ocr_backend as nemotron_parse
+from model_gateway._ocr_backend import PageParseError, _post_with_retries
 
 
 class _Limiter:
@@ -41,7 +41,7 @@ class _Resp:
 
 @pytest.fixture
 def limiter(monkeypatch):
-    import clients.model_ladder as ladder
+    import model_gateway.engine as ladder
     lim = _Limiter()
     monkeypatch.setattr(ladder, "_nvidia_limiter", lambda env, post: lim)
     monkeypatch.setenv("RADON_RESEARCH_PARSE_MAX_RETRIES", "0")
@@ -49,7 +49,7 @@ def limiter(monkeypatch):
 
 
 def _call(post):
-    return _post_with_retries(nemotron_parse.parse_models()[0], {"model": "m"}, post=post,
+    return _post_with_retries("nvidia/nemotron-parse", {"model": "m"}, post=post,
                               sleep=lambda _s: None, monotonic=lambda: 0.0,
                               jitter=lambda: 0.0, deadline=100.0)
 

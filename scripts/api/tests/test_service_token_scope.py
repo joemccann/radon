@@ -43,6 +43,7 @@ _PATH_PARAM_PLACEHOLDERS = {
     "name": "TWS_PASSWORD",
     "key": "RADON_MAX_ORDER_NOTIONAL",
     "strategy": "theta",
+    "operation": "chat",
 }
 
 # Every route a demo-frontend service principal must NOT reach, reviewed one by
@@ -73,6 +74,7 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/ib/restart",
     "/journal/reconcile",
     "/journal/rehydrate",
+    "/model-gateway/{operation}",
     "/options/uw-chain",
     "/orders/cancel",
     "/orders/cancel-all",
@@ -186,6 +188,8 @@ def _inert_third_party_clients(monkeypatch):
     from api.routes import tradingview
 
     monkeypatch.setattr(tradingview, "_client", _refuse)
+    from api.routes import model_gateway
+    monkeypatch.setattr(model_gateway.gateway, "request", _refuse)
 
 
 _PRIVILEGED_CALLS = sorted(
@@ -196,6 +200,30 @@ _PRIVILEGED_CALLS = sorted(
 
 
 class TestServiceTokenIsScoped:
+    @pytest.mark.parametrize(("method", "path"), [
+        ("POST", "/model-gateway/chat"),
+        ("POST", "/model-gateway/json"),
+        ("POST", "/model-gateway/models"),
+        ("POST", "/model-gateway/future-inference"),
+        ("GET", "/model-gateway/status"),
+    ])
+    def test_gateway_inference_never_dispatches_for_demo_token(self, service_token_client, monkeypatch, method, path):
+        from api.routes import model_gateway
+        calls=[]
+        monkeypatch.setattr(model_gateway.gateway,'request',lambda *a,**k:calls.append(a) or {'status':'ok'})
+        response=service_token_client.request(method,path,json={})
+        assert response.status_code in _DENIED_STATUSES
+        assert calls==[]
+
+    def test_demo_catalog_get_is_the_only_gateway_exception(self, service_token_client, monkeypatch):
+        from api.routes import model_gateway
+        calls=[]
+        catalog={'models':[],'defaultId':'','source':'gateway'}
+        monkeypatch.setattr(model_gateway.gateway,'request',lambda *a,**k:calls.append(a) or catalog)
+        response=service_token_client.get('/model-gateway/models')
+        assert response.status_code==200 and response.json()==catalog
+        assert calls==[('models',{})]
+
     def test_token_is_actually_accepted_by_the_lane(self, service_token_client):
         """Control: the probe token must really authenticate, or every denial
         below would be vacuous (a rejected token denies everything)."""

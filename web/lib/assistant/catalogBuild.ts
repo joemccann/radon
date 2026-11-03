@@ -25,6 +25,8 @@ export const CALLABLE_CAPS = new Set<Capability>(["read", "read.spawn", "mutate.
 
 const DENY_PREFIXES = [
   "/knowledge",
+  "/model-gateway",
+  "/api/model-gateway",
   "/docs",
   "/redoc",
   "/openapi.json",

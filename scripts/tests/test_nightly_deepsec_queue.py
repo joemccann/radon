@@ -273,3 +273,319 @@ class TestOperatorVerifiedClosures:
                 assert row["pr"] == pr
                 assert row["commit"].startswith(commit)
         assert set(q.load_ledger(LEDGER)) >= set(expected)
+
+
+ACCEPTED = REPO / "docs" / "security-accepted-risks.json"
+TODAY = "2026-10-31"
+
+
+def _queue(tmp_path, items):
+    last = tmp_path / "last-audited.json"
+    last.write_text(
+        json.dumps(
+            {
+                "last_audited_sha": "deadbeef",
+                "open_queue": [
+                    {"disposition": "operator-only", **item} for item in items
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return last
+
+
+def _accepted(tmp_path, rows):
+    path = tmp_path / "accepted.json"
+    path.write_text(json.dumps({"version": 1, "accepted": rows}), encoding="utf-8")
+    return path
+
+
+def _row(item_id, accepted_at="2026-10-15", expires_at="2026-12-15", **extra):
+    return {
+        "id": item_id,
+        "reason": "Host-local only; compensating control documented.",
+        "accepted_at": accepted_at,
+        "expires_at": expires_at,
+        "accepted_by": "operator",
+        **extra,
+    }
+
+
+def _without(row, key):
+    return {k: v for k, v in row.items() if k != key}
+
+
+def _open_verdict(item_id, **extra):
+    return {"id": item_id, "state": "open", "evidence": "still present on main", **extra}
+
+
+def _run_cli(args):
+    return subprocess.run(
+        [sys.executable, str(HELPER), "reverify", *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(REPO),
+    )
+
+
+class TestAcceptedRiskLedger:
+    def test_committed_ledger_starts_empty_and_valid(self):
+        import nightly_deepsec_queue as q
+
+        data = json.loads(ACCEPTED.read_text(encoding="utf-8"))
+        assert data["version"] == 1
+        assert data["accepted"] == []
+        assert q.load_accepted(ACCEPTED) == {}
+
+    def test_unexpired_acceptance_is_excluded_from_next_but_stays_open_queued(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        item_id = "DS-2099-01-01-01"
+        last = _queue(tmp_path, [{"id": item_id, "action": "Rotate the host key."}])
+        result = q.reverify(
+            last_audited_path=last,
+            verdicts=[_open_verdict(item_id)],
+            accepted_ledger_path=_accepted(tmp_path, [_row(item_id)]),
+            today=q.parse_date(TODAY),
+            write=True,
+        )
+        item = next(i for i in result["items"] if i["id"] == item_id)
+        assert item["state"] == "accepted"
+        assert item_id not in result["next"]
+        assert result["accepted"] == [
+            {
+                "id": item_id,
+                "expires_at": "2026-12-15",
+                "accepted_by": "operator",
+                "reason": "Host-local only; compensating control documented.",
+            }
+        ]
+        assert item_id not in result["closed_ids"]
+        stored = json.loads(last.read_text(encoding="utf-8"))
+        assert any(i.get("id") == item_id for i in stored["open_queue"])
+        assert not any(i.get("id") == item_id for i in stored["closed_queue"])
+
+    def test_acceptance_expiring_today_still_holds(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        item_id = "DS-2026-10-14-01"
+        last = _queue(tmp_path, [{"id": item_id, "action": "Re-key the backup bucket."}])
+        result = q.reverify(
+            last_audited_path=last,
+            verdicts=[_open_verdict(item_id)],
+            accepted_ledger_path=_accepted(
+                tmp_path, [_row(item_id, accepted_at="2026-08-31", expires_at=TODAY)]
+            ),
+            today=q.parse_date(TODAY),
+        )
+        assert next(i for i in result["items"] if i["id"] == item_id)["state"] == "accepted"
+        assert result["expired_acceptances"] == []
+
+    def test_expired_acceptance_reverts_and_leads_next(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        expired = "DS-2026-10-14-01"
+        other = "DS-2026-10-01-01"
+        last = _queue(
+            tmp_path,
+            [
+                {"id": other, "action": "Rotate the leftover host key."},
+                {"id": expired, "action": "Re-key the backup bucket."},
+            ],
+        )
+        result = q.reverify(
+            last_audited_path=last,
+            verdicts=[_open_verdict(other), _open_verdict(expired)],
+            accepted_ledger_path=_accepted(
+                tmp_path, [_row(expired, accepted_at="2026-08-01", expires_at="2026-10-30")]
+            ),
+            today=q.parse_date(TODAY),
+        )
+        item = next(i for i in result["items"] if i["id"] == expired)
+        assert item["state"] == "open"
+        assert result["expired_acceptances"] == [{"id": expired, "expires_at": "2026-10-30"}]
+        assert result["accepted"] == []
+        lines = result["next"].splitlines()
+        assert lines[0].startswith(f"- **{expired}**")
+        assert "(acceptance expired 2026-10-30: re-decide)" in lines[0]
+        assert other in lines[1]
+
+    def test_closed_beats_acceptance(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        last = _queue(tmp_path, [{"id": SEEDED_ID, "action": "Re-provision."}])
+        result = q.reverify(
+            last_audited_path=last,
+            verdicts=[],
+            accepted_ledger_path=_accepted(tmp_path, [_row(SEEDED_ID)]),
+            today=q.parse_date(TODAY),
+        )
+        assert next(i for i in result["items"] if i["id"] == SEEDED_ID)["state"] == "closed"
+        assert result["accepted"] == []
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            _row("DS-26-10-28-02"),
+            _row("DS-2099-01-01-01", reason=""),
+            _row("DS-2099-01-01-01", reason="   "),
+            _without(_row("DS-2099-01-01-01"), "reason"),
+            _without(_row("DS-2099-01-01-01"), "accepted_by"),
+            _row("DS-2099-01-01-01", accepted_by=""),
+            _row("DS-2099-01-01-01", accepted_at="10/15/2026"),
+            _row("DS-2099-01-01-01", expires_at="20261215"),
+            _row("DS-2099-01-01-01", expires_at="2026-10-15"),
+            _row("DS-2099-01-01-01", expires_at="2026-10-01"),
+            _row("DS-2099-01-01-01", accepted_at="2026-10-01", expires_at="2026-12-31"),
+            _without(_row("DS-2099-01-01-01"), "expires_at"),
+            "DS-2099-01-01-01",
+        ],
+    )
+    def test_malformed_row_fails_closed(self, tmp_path, row):
+        import nightly_deepsec_queue as q
+
+        with pytest.raises(ValueError):
+            q.load_accepted(_accepted(tmp_path, [row]))
+
+    def test_ninety_day_window_is_inclusive(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        rows = q.load_accepted(
+            _accepted(
+                tmp_path,
+                [_row("DS-2099-01-01-01", accepted_at="2026-10-01", expires_at="2026-12-30")],
+            )
+        )
+        assert set(rows) == {"DS-2099-01-01-01"}
+
+    def test_duplicate_ids_and_bad_shape_fail_closed(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        with pytest.raises(ValueError):
+            q.load_accepted(
+                _accepted(tmp_path, [_row("DS-2099-01-01-01"), _row("DS-2099-01-01-01")])
+            )
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"version": 1, "accepted": {}}), encoding="utf-8")
+        with pytest.raises(ValueError):
+            q.load_accepted(bad)
+        bad.write_text(json.dumps({"version": 2, "accepted": []}), encoding="utf-8")
+        with pytest.raises(ValueError):
+            q.load_accepted(bad)
+
+    def test_cli_accepts_ledger_and_today(self, tmp_path):
+        item_id = "DS-2099-01-01-01"
+        last = _queue(tmp_path, [{"id": item_id, "action": "Rotate the host key."}])
+        verdicts = tmp_path / "verdicts.json"
+        verdicts.write_text(json.dumps([_open_verdict(item_id)]), encoding="utf-8")
+        ledger = _accepted(tmp_path, [_row(item_id, expires_at="2026-11-10")])
+        base = [
+            "--last-audited", str(last),
+            "--verdicts", str(verdicts),
+            "--accepted-ledger", str(ledger),
+            "--json",
+        ]
+        held = _run_cli(base + ["--today", "2026-11-10"])
+        assert held.returncode == 0, held.stderr
+        payload = json.loads(held.stdout)
+        assert payload["accepted"][0]["id"] == item_id
+        assert payload["expired_acceptances"] == []
+        assert item_id not in payload["next"]
+        lapsed = _run_cli(base + ["--today", "2026-11-11"])
+        assert lapsed.returncode == 0, lapsed.stderr
+        payload = json.loads(lapsed.stdout)
+        assert payload["expired_acceptances"] == [{"id": item_id, "expires_at": "2026-11-10"}]
+        assert "acceptance expired 2026-11-10: re-decide" in payload["next"]
+
+    def test_cli_malformed_ledger_exits_nonzero(self, tmp_path):
+        last = _queue(tmp_path, [{"id": "DS-2099-01-01-01", "action": "x"}])
+        ledger = _accepted(tmp_path, [_row("DS-2099-01-01-01", reason="")])
+        proc = _run_cli(
+            ["--last-audited", str(last), "--accepted-ledger", str(ledger), "--today", TODAY]
+        )
+        assert proc.returncode == 2
+
+
+class TestNextCappedAtThree:
+    def test_next_caps_at_three_with_counts_only_overflow(self):
+        import nightly_deepsec_queue as q
+
+        items = [
+            {"id": "DS-2026-10-05-01", "state": "unverifiable", "action": "U1.", "missing": "m"},
+            {"id": "DS-2026-10-04-01", "state": "open", "action": "O4."},
+            {"id": "DS-2026-10-03-01", "state": "open", "action": "O3."},
+            {"id": "DS-2026-10-02-01", "state": "open", "action": "O2."},
+            {"id": "DS-2026-10-01-01", "state": "closed", "action": "C."},
+            {"id": "DS-2026-10-06-01", "state": "accepted", "action": "A."},
+        ]
+        text = q.next_text(items)
+        lines = text.splitlines()
+        assert len(lines) == 4
+        assert [line.split("**")[1] for line in lines[:3]] == [
+            "DS-2026-10-02-01",
+            "DS-2026-10-03-01",
+            "DS-2026-10-04-01",
+        ]
+        assert lines[3] == "- 1 more operator-only item(s) in the private report."
+        assert "DS-2026-10-05-01" not in text
+        assert "DS-2026-10-06-01" not in text
+
+    def test_ordering_expired_then_open_then_unverifiable_with_severity(self):
+        import nightly_deepsec_queue as q
+
+        items = [
+            {"id": "DS-2026-10-01-01", "state": "unverifiable", "action": "U.",
+             "missing": "m", "severity": "P0"},
+            {"id": "DS-2026-10-02-01", "state": "open", "action": "O-P3.", "severity": "P3"},
+            {"id": "DS-2026-10-03-01", "state": "open", "action": "O-P1.", "severity": "P1"},
+            {"id": "DS-2026-10-09-01", "state": "unverifiable", "action": "EXP.",
+             "missing": "m", "acceptance_expired": "2026-10-20"},
+        ]
+        lines = q.next_text(items).splitlines()
+        ids = [line.split("**")[1] for line in lines[:3]]
+        assert ids == ["DS-2026-10-09-01", "DS-2026-10-03-01", "DS-2026-10-02-01"]
+        assert "(acceptance expired 2026-10-20: re-decide)" in lines[0]
+        assert "(unverifiable)" in lines[0]
+        assert lines[3] == "- 1 more operator-only item(s) in the private report."
+
+    def test_no_overflow_line_at_or_under_three(self):
+        import nightly_deepsec_queue as q
+
+        items = [
+            {"id": f"DS-2026-10-0{n}-01", "state": "open", "action": "A."} for n in (1, 2, 3)
+        ]
+        lines = q.next_text(items).splitlines()
+        assert len(lines) == 3
+        assert "more operator-only" not in "\n".join(lines)
+        assert q.next_text([]) == ""
+
+    def test_reverify_items_keep_full_list(self, tmp_path):
+        import nightly_deepsec_queue as q
+
+        ids = [f"DS-2026-10-1{n}-01" for n in range(5)]
+        last = _queue(tmp_path, [{"id": i, "action": "Act."} for i in ids])
+        result = q.reverify(
+            last_audited_path=last,
+            verdicts=[_open_verdict(i) for i in ids],
+            today=q.parse_date(TODAY),
+        )
+        assert {i["id"] for i in result["items"]} >= set(ids)
+        assert result["next"].splitlines()[-1] == (
+            "- 2 more operator-only item(s) in the private report."
+        )
+
+
+class TestPromptStatesCapAndAcceptance:
+    def test_prompt_states_cap_overflow_and_ledger_rules(self):
+        text = _prompt()
+        start = text.index("## Operator-only re-verify (every phase)")
+        section = text[start:text.index("## Remediation mode")]
+        assert "`accepted`" in section
+        assert "docs/security-accepted-risks.json" in section
+        assert "three" in section
+        assert "more operator-only item(s) in the private report" in section
+        assert "never writes" in section
+        assert "re-decide" in section
+        assert "—" not in section

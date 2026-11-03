@@ -109,7 +109,7 @@ def _restart_services(tmp_path: pathlib.Path, *, refresh_rc: int) -> subprocess.
         for name, body in (
             ("prepare_release_transition", "return 0"),
             ("payload_paths_changed", "return 0"),
-            ("stop_services_for_transition", "return 0"),
+            ("stop_services_for_transition", 'prepare_release_transition "$@"; return 0'),
             ("activate_staged_release", "return 0"),
             ("recover_pending_transition", "return 0"),
             ("refresh_control_plane", f"return {refresh_rc}"),
@@ -145,9 +145,9 @@ def test_restart_services_restarts_the_app_tier_when_the_refresh_fails(tmp_path)
     assert result.returncode == 1, result.stdout + result.stderr
     assert result.started, result.calls  # type: ignore[attr-defined]
     assert result.calls == [  # type: ignore[attr-defined]
-        "prepare_release_transition",
         "payload_paths_changed",
         "stop_services_for_transition",
+        "prepare_release_transition",
         "activate_staged_release",
         "refresh_control_plane",
         "start_services_after_transition",
@@ -160,9 +160,9 @@ def test_restart_services_installs_units_only_after_a_successful_refresh(tmp_pat
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.calls == [  # type: ignore[attr-defined]
-        "prepare_release_transition",
         "payload_paths_changed",
         "stop_services_for_transition",
+        "prepare_release_transition",
         "activate_staged_release",
         "refresh_control_plane",
         "start_services_after_transition",
@@ -289,13 +289,13 @@ def _manifested_dropins() -> list[str]:
     """`services/*.service.d/*.conf` entries in the bootstrap manifest.
 
     Not a glob over the tree: `services/radon-.service.d/common.conf` is the
-    systemd prefix-glob fleet drop-in that `setup-vps.sh` copies directly, and
-    it never reaches this gate.
+    systemd prefix-glob fleet drop-in; it has its own `fleet-dropin` gate.
     """
     bootstrap = (CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh").read_text(
         encoding="utf-8"
     )
-    return sorted(set(re.findall(r"^\s*(services/\S+\.service\.d/\S+\.conf)\s*$", bootstrap, re.M)))
+    found = re.findall(r"^\s*(services/\S+\.service\.d/\S+\.conf)\s*$", bootstrap, re.M)
+    return sorted(set(found) - {"services/radon-.service.d/common.conf"})
 
 
 @pytest.mark.parametrize("relative", _manifested_dropins(), ids=lambda r: r.split("/")[1])

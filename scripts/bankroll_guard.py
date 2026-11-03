@@ -11,9 +11,13 @@ client-supplied flag.
 """
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT
@@ -202,6 +206,80 @@ def take_store_close_proven() -> bool:
     global _STORE_CLOSE_PROVEN
     proven, _STORE_CLOSE_PROVEN = _STORE_CLOSE_PROVEN, False
     return proven
+
+
+# DS-2026-10-24-02 residual: the broker re-read above closed the fill-then-close
+# and sequential cases, but `/orders/place` runs one subprocess per order, so two
+# placers could both read a book in which the holding was still unreserved and
+# both be exempted from the loss cap. The claim below is an exclusive
+# cross-process hold on one symbol's closeable size, taken before that read and
+# released only once the order is acknowledged, so the second placer measures a
+# book that already reserves the first order's size. An in-process lock cannot
+# see the contention.
+CLOSE_ADMISSION_LOCK_DIR = Path(__file__).parent.parent / "data" / "close_admission"
+CLOSE_ADMISSION_LOCK_TIMEOUT_SECS = 5.0
+
+
+def _close_admission_lock_path(symbol: Any) -> Path:
+    """One lock file per symbol, named by digest so no symbol escapes the dir."""
+    normalized = str(symbol or "").strip().upper()
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return CLOSE_ADMISSION_LOCK_DIR / f"{digest}.lock"
+
+
+@contextmanager
+def close_admission_claim(
+    symbol: Any,
+    timeout: Optional[float] = None,
+    _clock=time.monotonic,
+    _sleep=time.sleep,
+):
+    """Hold ``symbol``'s closeable size exclusively across processes.
+
+    Yields True while the claim is held. Yields False when another process
+    holds it through ``timeout``, or when the lock directory is unusable: the
+    caller must refuse rather than transmit, because a concurrent placer may
+    be spending the same closeable size.
+    """
+    budget = CLOSE_ADMISSION_LOCK_TIMEOUT_SECS if timeout is None else timeout
+    handle = None
+    try:
+        path = _close_admission_lock_path(symbol)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = path.open("a+", encoding="utf-8")
+    except OSError:  # unusable lock store cannot prove exclusivity
+        if handle is not None:
+            handle.close()
+        yield False
+        return
+
+    deadline = _clock() + max(budget, 0.0)
+    held = False
+    try:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = True
+                break
+            except OSError:
+                if _clock() >= deadline:
+                    break
+                _sleep(0.05)
+        yield held
+    finally:
+        if held:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+CLOSE_ADMISSION_BUSY = {
+    "code": "CLOSE_ADMISSION_BUSY",
+    "message": (
+        "Order refused: another placement is already closing this symbol, so the "
+        "closeable size this order would be exempted against cannot be confirmed. "
+        "Retry once that order is acknowledged."
+    ),
+}
 
 
 @contextmanager

@@ -11,7 +11,7 @@ import json
 import re
 from types import SimpleNamespace
 
-from api.db_http import hrana_execute
+from api.db_http import hrana_execute_many
 from research import book, force_include, identify, triage
 
 POLICY_VERSION = 1
@@ -39,8 +39,16 @@ class Context:
 
 
 def load_context():
-    watch = hrana_execute("SELECT ticker FROM watchlist ORDER BY ticker LIMIT 5001")
-    snapshots = hrana_execute("SELECT json_extract(payload,'$.positions') FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1")
+    # One /v2/pipeline round-trip (PERF-035). The three reads are independent.
+    results = hrana_execute_many([
+        ("SELECT ticker FROM watchlist ORDER BY ticker LIMIT 5001", ()),
+        ("SELECT json_extract(payload,'$.positions') FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1", ()),
+        ("SELECT kind,key FROM research_rule_proposals WHERE status='approved' ORDER BY id LIMIT 5001", ()),
+    ])
+    for result in results:
+        if isinstance(result, Exception):
+            raise result
+    watch, snapshots, approved = results
     try:
         positions = json.loads(snapshots[0][0])
     except (IndexError, TypeError, ValueError):
@@ -50,7 +58,6 @@ def load_context():
     if len(watch) > 5000:
         raise SelectionUnavailable("book_unavailable")
     rules = {}
-    approved = hrana_execute("SELECT kind,key FROM research_rule_proposals WHERE status='approved' ORDER BY id LIMIT 5001")
     if len(approved) > 5000:
         raise SelectionUnavailable("book_unavailable")
     for kind, key in approved:

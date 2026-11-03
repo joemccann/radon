@@ -1,5 +1,5 @@
+import { createRequire } from "node:module";
 import { afterEach, beforeEach } from "vitest";
-import { cleanup } from "@testing-library/react";
 
 type MediaQueryMatcher = (query: string) => boolean;
 
@@ -103,10 +103,27 @@ beforeEach(() => {
 // that corrupted regime-llm-card. Both only surfaced under `--coverage` because
 // instrumentation's slower timing let the leaked async escape.
 //
-// Guarded on `document` so it is a no-op in the node-env (default) tests, where
-// nothing renders and `cleanup()` would otherwise fail on a missing document.
-afterEach(() => {
-  if (typeof document !== "undefined") {
-    cleanup();
-  }
-});
+// The cleanup must come from the @testing-library/react copy the TEST FILE
+// resolves. There are two installs: web/tests/** import
+// web/node_modules/@testing-library/react, everything else the root copy, and
+// each keeps its own registry of mounted roots. A static import here resolved
+// the root copy, so for every web/tests file `cleanup()` unmounted nothing
+// (web/tests/vitest-setup-cleanup.test.tsx). Requiring it relative to the test
+// file returns the instance the test already loaded (vitest externalizes
+// node_modules, so both share Node's module cache), and the call stays
+// synchronous.
+//
+// Registered only when a DOM exists. Most files run in the node environment,
+// where nothing renders; loading RTL there (react-dom, @testing-library/dom)
+// was pure per-file setup cost on every CI shard
+// (web/tests/vitest-setup-node-env.test.ts). The per-call `document` check
+// stays for a test that stubs `document` away.
+if (typeof document !== "undefined") {
+  afterEach(({ task }) => {
+    if (typeof document === "undefined") return;
+    const rtl: typeof import("@testing-library/react") = createRequire(task.file.filepath)(
+      "@testing-library/react",
+    );
+    rtl.cleanup();
+  });
+}

@@ -1,7 +1,7 @@
 [Unit]
+After=radon-model-gateway.service network-online.target
+Wants=radon-model-gateway.service network-online.target
 Description=Radon marketdesk.ai research ingest (PDF, images, voice post) every 5 minutes
-After=network-online.target
-Wants=network-online.target
 # DUR-02 pattern: brake crash loops. systemd StartLimit counts successful
 # oneshot starts, so Burst must exceed the 5-minute cadence inside the window
 # (6 starts / 1800s). Burst=5 parked a healthy 5-minute drain as

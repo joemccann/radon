@@ -816,9 +816,12 @@ class _AccessDeniedClient(_StubClient):
         )
 
 
-def _seed_nightly_dumps(backup_dir, nights=8):
-    """Eight nightly dumps aged 1..8 days (less an hour, so the 7-day one sits
-    inside the window), OLDEST FIRST; only the oldest is past RETENTION_DAYS."""
+def _seed_nightly_dumps(backup_dir, nights=None):
+    """RETENTION_DAYS + 1 nightly dumps aged 1..N days (less an hour, so the
+    window-edge one sits inside it), OLDEST FIRST; only the oldest is past
+    RETENTION_DAYS."""
+    if nights is None:
+        nights = db_backup.RETENTION_DAYS + 1
     assert nights > db_backup.RETENTION_DAYS
     names = []
     for index in range(nights):

@@ -79,7 +79,11 @@ def test_child_env_applies_overrides(secret_env):
 
 def test_responder_grok_runner_strips_secrets(secret_env, captured_run, tmp_path):
     responder._default_grok_runner(["grok", "--version"], cwd=str(tmp_path))
-    assert captured_run[0]["argv"] == ["grok", "--version"]
+    assert captured_run[0]["argv"][:2] == ["grok", "--version"]
+    assert captured_run[0]["argv"][-2] == "--leader-socket"
+    assert captured_run[0]["env"]["GROK_BASE_URL"].startswith("http://127.0.0.1:")
+    assert "local-token" in captured_run[0]["env"]["GROK_AUTH_PROVIDER_COMMAND"]
+    assert "XAI_API_KEY" not in captured_run[0]["env"]
     _assert_clean(captured_run[0].get("env"))
 
 

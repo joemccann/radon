@@ -111,14 +111,15 @@ class TestSafetyAndNoNetwork:
         src = HELPER_PY.read_text(encoding="utf-8")
         assert "https://" not in src
         assert "refresh_model_catalog" not in src
-        assert "DEFAULT_MODELS_CMD" in src
-        assert 'claude models' in src
+        assert 'request("models", {}' in src
+        assert "subprocess" not in src
 
     def test_from_text_does_not_spawn_claude(self, ladder, monkeypatch, tmp_path):
         def boom(*_a, **_k):
             raise AssertionError("catalog fixture must not spawn claude")
 
-        monkeypatch.setattr(ladder.subprocess, "run", boom)
+        from model_gateway import client
+        monkeypatch.setattr(client, "request", boom)
         fixture = tmp_path / "catalog.txt"
         fixture.write_text(MINI_20260921, encoding="utf-8")
         assert ladder.main(["--from-text", str(fixture)]) == 0
@@ -127,18 +128,18 @@ class TestSafetyAndNoNetwork:
         def boom(*_a, **_k):
             raise AssertionError("RADON_WEEKEND_CLAUDE_CATALOG must not spawn claude")
 
-        monkeypatch.setattr(ladder.subprocess, "run", boom)
+        from model_gateway import client
+        monkeypatch.setattr(client, "request", boom)
         fixture = tmp_path / "catalog.txt"
         fixture.write_text(MINI_20260921, encoding="utf-8")
         monkeypatch.setenv("RADON_WEEKEND_CLAUDE_CATALOG", str(fixture))
         assert ladder.resolve_ladder() == ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
 
-    def test_scrubbed_env_drops_billing_keys(self, ladder, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret")
-        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok")
-        env = ladder._scrubbed_env()
-        assert "ANTHROPIC_API_KEY" not in env
-        assert "ANTHROPIC_AUTH_TOKEN" not in env
+    def test_service_catalog_failure_is_safe(self, ladder, monkeypatch):
+        from model_gateway import client
+        monkeypatch.setattr(client, "request", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("private grant diagnostic")))
+        with pytest.raises(RuntimeError, match="gateway catalog unavailable"):
+            ladder.read_live_catalog()
 
 
 class TestCliMain:

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -35,6 +39,9 @@ LITERAL_TWS_BASELINE_COMMITS = {
     # 2026-08-30: PR #184's env-file fixture spelled a fake gateway password;
     # vetted as test data, rewritten to runtime construction afterwards.
     "020865adeff48b7182b7eb81d74a01fc70d00c82",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "6d9429aba132a4783b5a5d0e9987b84d6ff7a35c",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
@@ -54,6 +61,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # prove the redactor scrubs env values; merged before the scan ran. The
     # fixture was rewritten to runtime construction afterwards.
     "38eeecb91eedb3b90966821bff12d5b240d89708",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "d90efb238831202ef3aa954d9f9893391eeb4cc8",
     # 2026-09-02 (PR #125): the secret-store tests spelled fake sample values
     # next to *_TOKEN/*_KEY identifiers; rewritten to runtime construction in
     # the follow-up commit.
@@ -65,6 +75,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # described the secret-store design and trips generic-api-key; the line
     # no longer exists at HEAD.
     "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+    # 2026-10-29 operator history rewrite recreated the commit above under a
+    # new SHA; identical content.
+    "8efc012df3c96131ca605f69d8f5a2dcae7dca2e",
     # 2026-10-01 (PR #837): runner Pushover SENTINEL fixtures next to a
     # token identifier; rewritten to runtime construction afterwards.
     "5643de1d495a887c0d71d7cdc29a27b4ab291c1a",
@@ -231,3 +244,49 @@ def test_literal_rule_still_ignores_interpolation(value: str) -> None:
     rules = _config_rules()
     literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
     assert not literal.search("TWS_" + "PASSWORD" + "=" + value), value
+
+
+GITLEAKS_BIN = os.environ.get("RADON_GITLEAKS_BIN", "gitleaks")
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def test_the_commit_exceptions_still_resolve_over_the_whole_history(tmp_path) -> None:
+    """The baselines above are keyed by commit SHA, so a history rewrite
+    renames every vetted commit and the exceptions quietly stop matching. The
+    mirrored sets still agree with the config while a real scan reports hits,
+    which is how the full-history baseline stopped being zero twice. Only a
+    scan over the actual history catches that, so this asserts the scan is
+    empty rather than that the lists look right.
+    """
+    if shutil.which(GITLEAKS_BIN) is None:
+        pytest.skip("gitleaks is not on PATH; the CI secret-scan job owns this gate")
+    if _git("rev-parse", "--is-shallow-repository") == "true":
+        pytest.skip("shallow clone: the vetted commits are not present to scan")
+    report = tmp_path / "gitleaks.json"
+    result = subprocess.run(
+        [
+            GITLEAKS_BIN, "detect",
+            "--source", str(REPO_ROOT),
+            "--config", str(GITLEAKS_CONFIG),
+            "--redact", "--no-banner",
+            "--exit-code", "0",
+            "--report-format", "json",
+            "--report-path", str(report),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    findings = json.loads(report.read_text(encoding="utf-8") or "[]")
+    # Rule, short commit and path only: a redacted value is still not ours to
+    # print, and the location is what a re-anchor needs.
+    assert [
+        f"{f['RuleID']} {f['Commit'][:12]} {f['File']}:{f['StartLine']}"
+        for f in findings
+    ] == []

@@ -5,7 +5,10 @@
   background: transparent; color: var(--text-muted); cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, scale 120ms ease;
 }
-.strategy-group-trigger:hover, .strategy-group-header > button:hover { background: var(--bg-hover); color: var(--text-primary); }
+@media (hover: hover) and (pointer: fine) {
+  .strategy-group-trigger:hover,
+  .strategy-group-header > button:hover { background: var(--bg-hover); color: var(--text-primary); }
+}
 .strategy-group-trigger:focus-visible, .strategy-group-panel :is(button, input, select):focus-visible {
   outline: 2px solid var(--signal-core); outline-offset: 2px;
 }
@@ -20,7 +23,9 @@
 .strategy-group-body { overflow: auto; padding: 16px; min-height: 0; }
 .strategy-group-body > p { margin: 0 0 16px; font: 13px/1.5 var(--font-sans); color: var(--text-muted); }
 .strategy-group-choice { width: 100%; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 4px; padding: 14px 12px; margin-top: 8px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-subtle); color: var(--text-primary); cursor: pointer; transition: background-color 120ms ease, scale 120ms ease; }
-.strategy-group-choice:hover { background: var(--bg-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .strategy-group-choice:hover { background: var(--bg-hover); }
+}
 .strategy-group-choice strong { font: 600 14px/1.4 var(--font-sans); }
 .strategy-group-choice span { font: 12px/1.5 var(--font-sans); color: var(--text-muted); }
 .strategy-group-panel button:disabled { opacity: .5; cursor: default; }
@@ -29,7 +34,10 @@
 .strategy-group-primary, .strategy-group-secondary, .position-grouping-notice button { min-height: 40px; padding: 8px 12px; font: 500 13px/1.3 var(--font-sans); border: 1px solid var(--line-grid); border-radius: 6px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, scale 120ms ease; }
 .strategy-group-primary { background: var(--signal-core); color: var(--text-on-accent); border-color: var(--signal-core); }
 .strategy-group-secondary, .position-grouping-notice button { background: var(--bg-subtle); color: var(--text-primary); }
-.strategy-group-secondary:hover, .position-grouping-notice button:hover { background: var(--bg-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .strategy-group-secondary:hover,
+  .position-grouping-notice button:hover { background: var(--bg-hover); }
+}
 .strategy-group-leg-list { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
 .strategy-group-leg, .strategy-group-assignment { min-height: 48px; display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line-grid); border-radius: 6px; font: 13px/1.4 var(--font-mono); }
 .strategy-group-leg { cursor: pointer; }

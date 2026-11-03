@@ -85,33 +85,18 @@ sudo -u radon bash -lc "
   cd web && bun install --frozen-lockfile
 "
 
-echo "[4/5] grok CLI as radon (latest stable; LKG is machine-written)"
-if [[ ! -x /home/radon/.local/bin/grok && ! -x /home/radon/.grok/bin/grok ]]; then
-  sudo -u radon bash -lc 'curl -fsSL https://x.ai/cli/install.sh | bash'
-fi
-sudo -u radon mkdir -p /home/radon/.local/bin
-if [[ -x /home/radon/.grok/bin/grok && ! -e /home/radon/.local/bin/grok ]]; then
-  sudo -u radon ln -sf /home/radon/.grok/bin/grok /home/radon/.local/bin/grok
-fi
+echo "[4/5] verify immutable CI model clients as radon"
+# Root never imports application code or executes a provider binary. This
+# protected stage is inspected only by the unprivileged responder identity.
+sudo -u radon /usr/bin/python3.13 -I -S -c \
+  'import sys; sys.path.insert(0,sys.argv[1]); from grok_runtime import managed_manifest; managed_manifest()' \
+  "$STAGED_SCRIPTS"
 install -d -o radon -g radon -m 0750 /var/lib/radon
-# Runtime lock dir (responder-writable) and upgrade scratch (not). The
-# responder unit mounts ~/.grok/{bin,hooks,downloads} read-only; create them
-# so the read-only mount covers them rather than being skipped.
 sudo -u radon install -d -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok-upgrade
-sudo -u radon mkdir -p /home/radon/.grok/bin /home/radon/.grok/hooks /home/radon/.grok/downloads
-# Trusted promote step (DS-2026-09-29-07): the upgrade unit runs a root-owned
-# copy of scripts/ from this stage, never the clone grok can rewrite.
+# Retain only the protected controller copy for bounded rollback compatibility;
+# it is never invoked for native updates, model probes or LKG seeding here.
 bash "$SCRIPT_DIR/install-grok-upgrade-controller.sh" "$STAGED_SCRIPTS"
-if [[ -x /home/radon/.local/bin/grok ]]; then
-  (cd /var/lib/radon/grok-upgrade && sudo -u radon -H \
-    /usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py \
-    --seed-if-missing \
-    --grok-bin /home/radon/.local/bin/grok \
-    --lkg /var/lib/radon/grok_lkg.json) \
-    || echo "warn: LKG seed failed; first upgrade cycle will try again" >&2
-fi
 
-echo "[5/5] device-code login required next"
-echo "  sudo -u radon -H /home/radon/.local/bin/grok login --device-auth"
-echo "  then: systemctl enable --now radon-grok-page-responder.timer radon-grok-upgrade.timer"
-echo "  after control-plane bootstrap has installed the unit files"
+echo "[5/5] private gateway readiness; provider login belongs to the gateway"
+echo "  then: systemctl enable --now radon-grok-page-responder.timer"
+echo "  mutable model upgrade timers are retired; CI owns model-client versions"

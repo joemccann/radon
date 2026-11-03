@@ -2,7 +2,11 @@
 .votes { display: inline-flex; align-items: center; gap: 8px; }
 .vote, .chip, .save { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .vote { min-width: 44px; color: var(--text-secondary); }
-.vote:hover, .chip:hover, .save:hover { background: var(--bg-panel-raised); }
+@media (hover: hover) and (pointer: fine) {
+  .vote:hover,
+  .chip:hover,
+  .save:hover { background: var(--bg-panel-raised); }
+}
 .vote[aria-pressed="true"], .chip[aria-pressed="true"] { border-color: var(--signal-core-text); color: var(--signal-core-text); }
 .root :is(button, textarea):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
 .panel { margin-top: 12px; padding: 16px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-subtle); color: var(--text-primary); font-family: var(--font-sans); text-transform: none; letter-spacing: normal; }

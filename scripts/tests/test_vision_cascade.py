@@ -1,7 +1,7 @@
 """CTA vision cascade: Joe's exact provider order and credit fallthrough.
 
 Order (do not leave a band early):
-  subscription: anthropic -> grok -> cursor -> codex -> antigravity
+  subscription: antigravity -> anthropic -> grok -> cursor -> codex
   nvidia (free endpoints)
   cerebras (cheap paid, last)
 
@@ -25,13 +25,13 @@ import pytest
 # T-498: file-backed subscriptions are opt-in synthetic fixtures.
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
-from clients.vision_cascade import (
-    VISION_CASCADE_ORDER,
-    VISION_CASCADE_TIERS,
-    VisionCascadeExhausted,
+from model_gateway.engine import (
+    MODEL_LADDER_ORDER as VISION_CASCADE_ORDER,
+    MODEL_LADDER_TIERS as VISION_CASCADE_TIERS,
+    ModelLadderExhausted as VisionCascadeExhausted,
     VisionResult,
     extract_via_vision,
-    wired_vision_providers,
+    wired_providers as wired_vision_providers,
 )
 
 
@@ -204,11 +204,11 @@ class _Router:
 class TestCascadeContract:
     def test_order_is_joes_exact_bands(self):
         assert VISION_CASCADE_ORDER == (
+            "antigravity",
             "anthropic",
             "grok",
             "cursor",
             "codex",
-            "antigravity",
             "nvidia",
             "cerebras",
         )
@@ -370,7 +370,7 @@ class TestCreditFallthrough:
 
     def test_antigravity_skips_image_input_so_nvidia_takes_the_vision_turn(self, tmp_path, monkeypatch):
         # Antigravity has no image input; the rung yields without HTTP or agy.
-        import clients.model_ladder as ladder
+        import model_gateway.engine as ladder
 
         monkeypatch.setattr(ladder.subprocess, "run", lambda *a, **k: pytest.fail("agy must not run for images"))
         router = _Router(

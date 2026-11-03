@@ -1,11 +1,11 @@
-"""Hosted Super VL opt-in preserves the ladder's existing response contracts."""
+"""Hosted Nemotron defaults (Super VL vision, Ultra text) keep the ladder's response contracts."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from clients.model_ladder import (
+from model_gateway.engine import (
     accept_tags_payload,
     complete_multimodal_json,
     complete_text_json,
@@ -15,7 +15,8 @@ from clients.model_ladder import (
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
 SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-LLAMA_11B = "meta/llama-3.2-11b-vision-instruct"
+LLAMA_90B = "meta/llama-3.2-90b-vision-instruct"
+ULTRA = "nvidia/nemotron-3-ultra-550b-a55b"
 PNG = b"\x89PNG-test"
 ROWS = [{"underlying": "SPX", "position_today": -0.45}]
 OBJECT = {"tags": ["MACRO", "OPTIONS", "VOLATILITY"]}
@@ -51,9 +52,9 @@ class Capture:
         return next(self.responses)
 
 
-def assert_super_vl_call(call):
+def assert_super_vl_call(call, model=SUPER_VL):
     assert call["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
-    assert call["body"]["model"] == SUPER_VL
+    assert call["body"]["model"] == model
     assert call["body"]["reasoning_effort"] == "none"
     assert call["body"]["stream"] is False
     # HTTP transport streaming still enforces the response byte cap.
@@ -118,15 +119,15 @@ def test_super_vl_failure_retains_legacy_vision_fallback_without_new_controls(ki
     else:
         result = complete_multimodal_json("review", images=[("page", PNG)], env=env, post=post)
         assert result.data == OBJECT
-    assert result.model == LLAMA_11B
+    assert result.model == LLAMA_90B
     assert len(post.calls) == 2
     assert_super_vl_call(post.calls[0])
-    assert post.calls[1]["body"]["model"] == LLAMA_11B
+    assert post.calls[1]["body"]["model"] == LLAMA_90B
     assert_legacy_call(post.calls[1])
 
 
 @pytest.mark.parametrize("kind", ["single", "multimodal", "text"])
-def test_existing_defaults_do_not_receive_super_vl_controls(kind):
+def test_defaults_are_entitled_nemotron_with_reasoning_off(kind):
     post = Capture(completion(ROWS if kind == "single" else OBJECT))
     if kind == "single":
         result = extract_via_vision(PNG, "extract", env=ENV, post=post)
@@ -134,8 +135,17 @@ def test_existing_defaults_do_not_receive_super_vl_controls(kind):
         result = complete_multimodal_json("review", images=[("page", PNG)], env=ENV, post=post)
     else:
         result = complete_text_json("tag", env=ENV, post=post)
-    expected = "nvidia/nemotron-3-super-120b-a12b" if kind == "text" else "meta/llama-3.2-90b-vision-instruct"
+    expected = ULTRA if kind == "text" else SUPER_VL
     assert result.model == expected
+    assert_super_vl_call(post.calls[0], model=expected)
+
+
+def test_llama_vision_pin_receives_no_nemotron_controls():
+    post = Capture(completion(ROWS))
+    result = extract_via_vision(
+        PNG, "extract", env={**ENV, "NVIDIA_VISION_MODEL": LLAMA_90B}, post=post
+    )
+    assert result.model == LLAMA_90B
     assert_legacy_call(post.calls[0])
 
 
@@ -164,7 +174,7 @@ def test_super_vl_invalid_final_content_cannot_bypass_semantic_validation(bad_co
         env={**ENV, "NVIDIA_VISION_MODEL": SUPER_VL}, post=post, accept=accept_tags_payload,
     )
     assert result.data == OBJECT
-    assert result.model == LLAMA_11B
+    assert result.model == LLAMA_90B
     assert len(post.calls) == 2
     assert_super_vl_call(post.calls[0])
     assert_legacy_call(post.calls[1])

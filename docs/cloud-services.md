@@ -156,6 +156,20 @@ Layers, in order:
 
 The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_gateway_ready`. Worst-case gate time ≈ 65s — well inside the CI step budget.
 
+#### Post-deploy hooks and verification
+
+Host work a PR used to list under "Operator Next Steps" (restart a unit,
+requeue Turso rows, run a prepare script, watch a unit's journal) ships as a
+reviewed hook in `cloud/post_deploy/hooks/`, pinned by SHA-256 in
+`cloud/post_deploy/manifest.json`. After the live gate passes, `deploy.sh`
+runs each pending hook once, in numeric order, as `radon`, and records
+completion in `/home/radon/.radon-post-deploy-state.json`. A failed hook pages
+P1 and is retried on the next deploy. The manifest's `verify` checks (unit
+active, journal pattern present or absent, localhost HTTP) run read-only after
+every deploy and page on failure. Neither can roll back a verified release.
+Root-only work (editing `/etc/radon/env`, secrets, 2FA) stays an operator step.
+Format and limits: [`cloud/CLAUDE.md`](../cloud/CLAUDE.md#post-deploy-hooks).
+
 #### Escape hatches
 
 | Env var | Effect |
@@ -347,7 +361,7 @@ TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WE
 
 ### MarketDesk research
 
-`scripts/research/marketdesk_job.py` runs every 5 minutes via `radon-marketdesk.timer` (`*:04/5:41`, `Persistent=false`). Its `runtime-container.conf` drop-in (control plane, pinned in `config/installed-units.sha256` with the unit and timer) runs it in the Python app image: rw private research bind, bridge network, Chromium seccomp profile, 512m `/dev/shm`, env allowlist, read-only ladder grants. It publishes operator-only research posts (Turso-first, idempotent per article through the `marketdesk_articles` ledger) and uploads each PDF to the operator's own Dropbox under `/Radon/MarketDesk/`, mirroring the library chain (`<YYYY>/<Month>/<Mon> <D>/<bank>/...`). Absent `DROPBOX_WRITE_*` credentials skip uploads and record `service_health[marketdesk-dropbox]` as `paused`; the cycle itself heartbeats `marketdesk-research` (15-min windows). Spec: [`marketdesk-research.md`](marketdesk-research.md).
+`scripts/research/marketdesk_job.py` runs every 5 minutes via `radon-marketdesk.timer` (`*:04/5:41`, `Persistent=false`). Its `runtime-container.conf` drop-in (control plane, pinned in `config/installed-units.sha256` with the unit and timer) runs it in the Python app image: rw private research bind, bridge network, Chromium seccomp profile, 512m `/dev/shm`, env allowlist, and the read-only inference socket. Provider grants stay on the model gateway. It publishes operator-only research posts (Turso-first, idempotent per article through the `marketdesk_articles` ledger) and uploads each PDF to the operator's own Dropbox under `/Radon/MarketDesk/`, mirroring the library chain (`<YYYY>/<Month>/<Mon> <D>/<bank>/...`). Absent `DROPBOX_WRITE_*` credentials skip uploads and record `service_health[marketdesk-dropbox]` as `paused`; the cycle itself heartbeats `marketdesk-research` (15-min windows). Spec: [`marketdesk-research.md`](marketdesk-research.md).
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
@@ -491,7 +505,7 @@ bounded.
 |---|---|---|
 | `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=19500` (7,500s lock wait plus 12,000s work budget) |
-| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script, and only those present in B2 once the off-box leg has run (R-445). |
+| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (2) in-script, and only those present in B2 once the off-box leg has run (R-445). |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
 | `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
 
@@ -643,10 +657,11 @@ available; portfolio and media archives cover only their respective data.
 | `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…), and delete `account_margin_samples` older than `MARGIN_SAMPLES_KEEP_DAYS` in [`scripts/db/retention.py`](../scripts/db/retention.py). A sample cited by `position_capital_observations` stays, as does a sample inside `MARGIN_SAMPLES_BRACKET_WINDOW_S` of a fill that no VALID observation covers. Never touches journal or portfolio. Heartbeat: `db-retention`. |
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
+| `radon-research-asset-archive.timer` | **03:40** daily | Research `assets/` and cached `downloads/` → **Backblaze B2** `research/assets/` and `research/downloads/`, HEAD-confirm, then prune local copies past the 30-day hot window (downloads identical to an asset go at once; files unfinished MarketDesk or research work references stay at any age, and a failed reference lookup prunes nothing). Readers fetch pruned assets back from B2. Heartbeat: `research-asset-archive` (48h). `TimeoutStartSec=10800`. Runbook: [operations](operations.md#research-asset-archive). |
 
 ## Subscription tokens (agent CLIs)
 
-`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`, `RandomizedDelaySec=60`). The refresh lead that keeps a one-hour access token from expiring between those fires is owned by [subscription-tokens.md](subscription-tokens.md). The oneshot seals, refreshes and restores the anthropic / codex / grok / antigravity (`agy`) credential files through the existing encrypted secret store. Raw-bearer logins are proved with one real model call a day. AGY is proved with `agy models` on every run and does not use a token endpoint. The unit heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`, `RandomizedDelaySec=60`). Its secret-free host client submits and polls a bounded refresh job on the private model gateway. The managed gateway owns native credential probes, refresh, restoration, provider grants and pinned CLIs; it reaches only the provider-scoped slots through the separate subscription-vault broker, never the store master key. The existing `subscription-tokens` health row, safe re-authentication prompts and original refresh-lock/run budgets remain authoritative. Runbook: [subscription-tokens.md](subscription-tokens.md).
 
 ---
 
@@ -661,9 +676,9 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 
 | Piece | Where | What |
 |---|---|---|
-| `radon-disk-cleanup.timer` | VPS | Weekly **Sun 03:20 UTC**, `RandomizedDelaySec=300`, `Persistent=true`. Clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). |
-| `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only docker socket + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
-| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: stale app images, dangling layers, leaked release worktrees, npm/pip caches, journald. |
+| `radon-disk-cleanup.timer` | VPS | Weekly sweep **Sun 03:20 UTC** plus an hourly **:50 UTC** headroom guard, `RandomizedDelaySec=300`, no `Persistent=` (R-369). The sweep slot is clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). Every timer firing outside Sunday 03:00-03:44 UTC is the guard: it exits at once while free space on `/` is at or above `HEADROOM_THRESHOLD_BYTES` (12 GiB: ~8.3G model admission plus ~3.4G of next-release layers), never waits on a deploy, and otherwise runs every category. A manual `systemctl start` is always the full sweep. |
+| `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only container engines + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
+| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: `app-images` (delegated to `radon-app-runtime prune-locked` with the job's held deploy lock as stdin, on whichever engine the runtime uses), `dangling-images` (`image prune -f` on podman and docker when installed), leaked release worktrees, npm/pip caches, journald, `rotated-logs` (numbered logrotate rotations such as `syslog.2.gz` older than 7 days, only in root-owned directories under `/var/log`, never `/var/log/journal`). `--deploy-locked` is the guard `deploy.sh`'s supervisor runs through `radon-app-runtime reclaim-locked` with its held deploy lock as stdin, after `prune-locked <sha>` and before the inner deploy; it skips `app-images`. Never touches `/var/lib/radon/media` or any DB/data tree. |
 
 ### Demo mirror (`radon-demo-mirror.timer`)
 
@@ -671,24 +686,26 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 |---|---|---|
 | `radon-demo-mirror.timer` | VPS | Daily **21:45 UTC** plus a **23:30 UTC** retry slot, weekends included, `Persistent=true`. A weekday-only schedule aged demo snapshots past the regime routes' 48h budget every weekend, and a pass a deploy SIGTERMed was never re-run. |
 | `radon-demo-mirror.service` | VPS | Oneshot: `migrate.py --demo`, then `demo_seed.py` (re-anchors the synthetic book's expiries to the run date; refuses any non `radon-demo` URL), then `mirror_market_snapshots_to_demo.js`. Heartbeat: `demo-mirror` (26h). Contract: [`demo-environment.md`](demo-environment.md). |
-| `service_health` heartbeat | row `disk-cleanup` | Written on EVERY run — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. 8-day freshness window. |
+| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages. 8-day freshness window. |
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):
 
-- `KEEP_IMAGE_PAIRS = 2` — keeps the `radon-node` / `radon-python` pair matching
-  the live checkout's HEAD **plus** the two newest pairs. An unresolvable HEAD
-  prunes nothing.
+- App images: no constant here. The keep-set is the runtime's
+  [app image prune](operations.md#app-image-prune) (green lines 1 and 2, journal
+  SHAs, any image a running container uses).
 - `RELEASE_MAX_AGE_DAYS = 3` — removes `stage.<sha>.XXXXXX` / `backup.<sha>.XXXXXX`
   worktrees older than that, then drops their stale `.git/worktrees/<name>`
   records by filesystem op (root never runs `git` inside a repo the radon
   account can configure).
 - `JOURNAL_VACUUM_SIZE = "200M"`.
+- `ROTATED_LOG_MAX_AGE_DAYS = 7`, `MAX_ROTATED_LOGS = 500`.
+- `HEADROOM_THRESHOLD_BYTES = 12 GiB` — the guard and deploy reclaim trigger, and the post-run headroom check.
 
 Never touched: the running `ghcr.io/gnzsnz/ib-gateway` and
 `willfarrell/autoheal` images, `/home/radon/radon` (the live tree),
 `~/.cache/{ms-playwright,huggingface,fastembed,radon-wheels}`, and
 `/home/radon/radon-cloud/backups` — DB backup retention is `db_backup.py`'s
-`RETENTION_DAYS = 7` (operator call 2026-08-29; was 30) and changing it is an operator policy call.
+`RETENTION_DAYS = 2` (operator call 2026-10-31; was 7, and 30 before 2026-08-29) and changing it is an operator policy call.
 
 A category that finds nothing is a normal run. A category that RAISES flips
 the heartbeat to `error` but does not fail the unit: a wedged docker daemon
@@ -1335,7 +1352,7 @@ automated off-box push, and is not a backup strategy.
 | Unit | Unchanged `radon-db-backup.service` + `.timer` (09:00 UTC). `TimeoutStartSec=19500` already covers dump + upload. |
 | Target | S3-compatible API to the existing B2 bucket `radon-archive`, prefix **`db_backups/`** (never collides with `portfolio_snapshots/` or `media/`). |
 | Credentials | `RADON_ARCHIVE_S3_*` from `/etc/radon/env` (already required-env). Optional per-field overrides `RADON_DB_BACKUP_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY,REGION}` and `RADON_DB_BACKUP_PREFIX`, same shape as `RADON_MEDIA_BACKUP_S3_*`. |
-| Local retention | `RETENTION_DAYS = 7` since 2026-08-29 (was 30 at cutover), operator policy; B2 is the archive. The off-box leg runs BEFORE the local prune and a dump past the window is unlinked only when it is present in B2 (already listed, or uploaded and size-confirmed tonight); a failed or budget-deferred upload keeps the local copy, so a red `db-backup` row is also a disk-growth signal. Without any B2 config the prune is age-only. |
+| Local retention | `RETENTION_DAYS = 2` since 2026-10-31 (7 from 2026-08-29, 30 at cutover), operator policy; B2 is the archive. The off-box leg runs BEFORE the local prune and a dump past the window is unlinked only when it is present in B2 (already listed, or uploaded and size-confirmed tonight); a failed or budget-deferred upload keeps the local copy, so a red `db-backup` row is also a disk-growth signal. Without any B2 config the prune is age-only. |
 | Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing only the local window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
 | Transport bound | Multipart at 64 MB chunks, 4 threads, botocore `connect_timeout=30` / `read_timeout=300` / 3 attempts, plus a `UPLOAD_BUDGET_SECS = 3600` wall-clock ceiling. |
 | Heartbeat | Existing `db-backup` row, extended detail: `offbox_bucket`, `offbox_prefix`, `offbox_uploaded`, `offbox_bytes_uploaded`, `offbox_deferred`, `offbox_remote_pruned`, and `offbox_error`. Summary gains `; b2 <uploaded>/<planned> (<bytes> B), deferred N, remote pruned N`. |
@@ -1474,3 +1491,25 @@ independent upgrade timer remain unstarted until the explicit handover in
 is pinned by the optional upgrade unit; the existing keeper upgrade path
 keeps its normal runtime when the variable is absent. Rollback restores the
 previous timers through the same recorded handover procedure.
+
+
+### Private model gateway
+
+`radon-model-gateway.service` serves HTTP only through the UID1000 Unix socket
+`/run/radon-model-gateway/gateway.sock` (0700 directory, 0600 socket by default).
+Management uses a separate `/run/radon-model-control/control.sock`, exposed only
+to keeper/catalog jobs and the privileged API. An optional dedicated SSH tunnel
+UID/GID may access allowlisted inference via a 0710 directory and 0660 socket;
+it receives neither management nor vault access. Application
+containers receive only a read-only socket-directory bind; isolated browser
+workers retain bridge networks. Host timer jobs use the same private interface.
+Provider credentials terminate at the gateway, which has a model-only filtered
+environment and no application data, broker grants or secret-store master key.
+Its separate encrypted vault broker remains the only persistence-key holder.
+
+The gateway joins startup ordering and normal deploy readiness, stability,
+restart and rollback checks. A gateway-only image target preserves the existing
+optional CPU Chronos capability without adding Torch to the ordinary API image.
+All three exact-release images must pass CI and pre-pull admission. CLI upgrades
+remain pinned source changes and immutable image deployments. Model weights and
+embedding assets persist only in the private gateway cache.

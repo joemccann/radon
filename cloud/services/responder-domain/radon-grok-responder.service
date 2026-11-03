@@ -1,6 +1,7 @@
 [Unit]
 Description=Radon isolated page responder
-After=network.target
+Wants=radon-model-gateway.service
+After=network.target radon-model-gateway.service
 ConditionPathExists=/var/lib/radon-responder/ready
 StartLimitIntervalSec=0
 
@@ -8,14 +9,16 @@ StartLimitIntervalSec=0
 Type=oneshot
 User=radon-responder
 Group=radon-responder
+SupplementaryGroups=radon-model-connect
 UMask=0027
 WorkingDirectory=/var/lib/radon-responder/repo
 EnvironmentFile=/etc/radon/grok-responder/env
 Environment=GROK_PAGE_NO_DOTENV=1
 Environment=GROK_PAGE_SYNC_REMOTE=1
 Environment=HOME=/var/lib/radon-responder
-Environment=PATH=/var/lib/radon-responder/.local/bin:/var/lib/radon-responder/.grok/bin:/usr/local/bin:/usr/bin:/bin
-Environment=GROK_BIN=/var/lib/radon-responder/.local/bin/grok
+Environment=PATH=/opt/radon-model-clients/current/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GROK_BIN=/opt/radon-model-clients/current/bin/grok
+Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
 Environment=RADON_GROK_LKG_PATH=/var/lib/radon-responder/runtime/grok_lkg.json
 Environment=RADON_GROK_RUNTIME_LOCK=/var/lib/radon-responder/runtime/grok-runtime.lock
 Environment=XDG_CACHE_HOME=/var/lib/radon-responder/cache
@@ -32,8 +35,8 @@ ProtectHome=yes
 ProtectSystem=strict
 RestrictSUIDSGID=yes
 CapabilityBoundingSet=
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
-ReadOnlyPaths=/var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade /var/lib/radon-responder/.grok/bin /var/lib/radon-responder/.grok/hooks /var/lib/radon-responder/.grok/downloads /usr/local/lib/radon/grok-responder
+InaccessiblePaths=-/run/radon-model-control -/run/radon-subscription-vault -/var/lib/radon-responder/.grok/auth.json /var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+ReadOnlyPaths=/opt/radon-model-clients /var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade /var/lib/radon-responder/.grok/bin /var/lib/radon-responder/.grok/hooks /var/lib/radon-responder/.grok/downloads /usr/local/lib/radon/grok-responder
 ReadWritePaths=/var/lib/radon-responder/repo /var/lib/radon-responder/.grok /var/lib/radon-responder/cache /var/lib/radon-responder/runtime/grok-runtime.lock
 
 [Install]

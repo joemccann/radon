@@ -15,9 +15,8 @@
  *      returning empty finals and the canned error).
  *
  * The conversation carries structured content blocks (text / tool_use /
- * tool_result) so the model sees its own calls and their outputs. Anthropic
- * accepts those blocks natively; OpenAI-compatible providers (xAI Grok) map
- * them in `toOpenAiMessages`. String turns from the UI stay strings.
+ * tool_result) so the model sees its own calls and their outputs. The standalone model
+ * gateway preserves those blocks and owns provider-specific translation. String turns from the UI stay strings.
  */
 
 import {
@@ -167,7 +166,9 @@ export function validateAssistantOrderInput(input: Record<string, unknown>): Ass
   ) return null;
   if (type === "stock") return { type, ticker, action, quantity: quantity as number, limit_price: limitPrice };
   if (type === "combo") {
-    if (!Array.isArray(input.legs) || input.legs.length < 2) return null;
+    // Placement always transmits a combo as a BUY envelope (legs carry the
+    // structure); a SELL envelope would confirm a different trade than it sends.
+    if (action !== "BUY" || !Array.isArray(input.legs) || input.legs.length < 2) return null;
     const legs: AssistantOrderComboLeg[] = [];
     for (const raw of input.legs) {
       if (!raw || typeof raw !== "object") return null;

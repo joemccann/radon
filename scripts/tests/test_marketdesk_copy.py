@@ -714,17 +714,41 @@ def test_certify_lets_a_malformed_review_fall_to_the_next_rung() -> None:
     assert accept({"findings": []}) is False
 
 
-def test_copy_with_images_skips_grok() -> None:
-    """grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27)."""
+def test_copy_with_images_binds_to_the_real_ladder_signature() -> None:
+    """A `**kwargs` fake hid a TypeError that failed every article in production
+    (2026-10-31): bind each call against the real gateway client signature."""
+    import inspect
+    from clients.model_ladder import complete_multimodal_json
     seen = {}
 
     def fake(instruction, **kwargs):
+        inspect.signature(complete_multimodal_json).bind(instruction, **kwargs)
         seen.update(kwargs)
         return LadderResult(data=clean(), text="{}", provider="p", model="m")
 
     _call(fake)
-    assert "grok" not in seen["providers"] and seen["providers"][:2] == ("anthropic", "cursor")
-    assert "codex" in seen["providers"]
+    assert seen.get("providers") is None
+
+
+def test_every_ladder_call_site_passes_only_real_parameters() -> None:
+    """Covers the humanizer ask/verify calls too, which only run on a rewrite."""
+    import ast
+    import inspect
+    from clients.model_ladder import complete_multimodal_json, complete_text_json
+    assert inspect.signature(mc.certify).parameters["complete"].default is complete_text_json
+    defaults = {"write_copy": complete_multimodal_json, "certify": complete_text_json}
+    tree = ast.parse(Path(mc.__file__).read_text())
+    checked = 0
+    for fn in ast.walk(tree):
+        if not (isinstance(fn, ast.FunctionDef) and fn.name in defaults):
+            continue
+        allowed = set(inspect.signature(defaults[fn.name]).parameters)
+        for call in ast.walk(fn):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "complete":
+                names = {kw.arg for kw in call.keywords if kw.arg is not None}
+                assert names <= allowed, f"line {call.lineno}: {sorted(names - allowed)}"
+                checked += 1
+    assert checked == 3
 
 
 def test_captions_follow_the_numeric_firewall() -> None:

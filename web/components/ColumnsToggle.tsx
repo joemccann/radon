@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { ChevronDown, Columns3 } from "lucide-react";
 import { useDismissablePopover } from "@/lib/useDismissablePopover";
+import { usePointerPresence } from "@/lib/usePointerPresence";
 
 export type ColumnsToggleEntry<K extends string> = {
   key: K;
@@ -33,20 +34,24 @@ type Props<K extends string> = {
  * Click outside the popover closes it.
  */
 export function ColumnsToggle<K extends string>({ columns, visible, onToggle, onReset, floating = false }: Props<K>) {
-  const [open, setOpen] = useState(false);
+  const { open, mounted, setOpen, props: fade } = usePointerPresence("menu");
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const toggleOpen = () => {
+  const toggleOpen = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (!open && floating && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
       setAnchor({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
     }
-    setOpen((v) => !v);
+    setOpen(!open, event.detail > 0);
+    if (open) buttonRef.current?.focus();
   };
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback((event?: MouseEvent | KeyboardEvent) => {
+    setOpen(false, event?.type === "mousedown");
+    if (event?.type === "keydown") buttonRef.current?.focus();
+  }, [setOpen]);
   useDismissablePopover(containerRef, close, open);
 
   const visibleCount = columns.filter((c) => visible[c.key]).length;
@@ -93,11 +98,12 @@ export function ColumnsToggle<K extends string>({ columns, visible, onToggle, on
         <span className="columns-toggle-count">{visibleCount}/{columns.length}</span>
         <ChevronDown size={10} />
       </button>
-      {open && (
+      {mounted && (
         <div
-          className={`columns-toggle-menu${groups.length ? " columns-toggle-menu--grouped" : ""}`}
+          {...fade}
+          className={`pointer-fade columns-toggle-menu${groups.length ? " columns-toggle-menu--grouped" : ""}`}
           role="menu"
-          style={floating && anchor ? { position: "fixed", top: anchor.top, right: anchor.right } : undefined}
+          style={{ ...fade.style, ...(floating && anchor ? { position: "fixed", top: anchor.top, right: anchor.right } as const : {}) }}
         >
           {columns.filter((col) => !col.group).map(renderItem)}
           {groups.map((group) => {

@@ -94,6 +94,14 @@ class Materializer:
             meta["gap_count"] += 1
             meta["complete"] = False
 
+    def _gap_since_connect(self) -> bool:
+        gap_at = (self.state.get("last_gap") or {}).get("at")
+        connected_at = self.state["connection"].get("connected_at")
+        if not gap_at or not connected_at:
+            return bool(gap_at)
+        parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parse(gap_at) >= parse(connected_at)
+
     def apply(self, channel: str, payload: dict, now: float, ingest_id: int) -> bool:
         if channel not in self.channels or not isinstance(payload, dict):
             self.state["metrics"]["invalid"] += 1
@@ -112,7 +120,10 @@ class Materializer:
             if not meta["acknowledged"]:
                 self.state["status"] = "degraded"
             elif self.state["connection"]["connected"] and all(m["acknowledged"] for m in self.state["channels"].values()):
-                self.state["status"] = "degraded" if self.state["connection"]["gaps"] else "live"
+                # `gaps` is cumulative across restarts; only a gap inside this
+                # connection keeps it degraded. Per-channel gap_count/complete
+                # still disclose the historical holes.
+                self.state["status"] = "degraded" if self._gap_since_connect() else "live"
             return True
         if not meta["acknowledged"]:
             self.state["metrics"]["invalid"] += 1

@@ -15,8 +15,10 @@ import sys
 # The installer may itself run with -I; import only its reviewed source tree.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-LOOPS = ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/", "ci-performance/", "performance/", "security-private-release/")
-CHECKS = ("Secret scan (gitleaks)", "PR body template", "Path filter", "Vitest coverage ratchet", "pytest coverage ratchet", "pytest (cloud al)", "pytest (cloud edge)", "Perimeter smoke (next start + curl)", *(f"Vitest (shard {i}/8)" for i in range(1, 9)), *(f"pytest ({shard})" for shard in ("scripts-ac", "scripts-df", "scripts-i", "scripts-gh", "scripts-jm", "scripts-npsz", "scripts-rs", "scripts-daemons", "rest")))
+# The Mac transport socket (docs/model-gateway.md); the client default is the Linux path.
+MAC_GATEWAY_SOCKET = "/Library/Radon/model-gateway/gateway.sock"
+LOOPS = ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/", "ci-performance/", "performance/", "security-private-release/", "fix/", "feat/", "ci/", "docs/")
+CHECKS = ("Secret scan (gitleaks)", "PR body template", "Path filter", "Vitest coverage ratchet", "pytest coverage ratchet", "pytest (cloud al)", "pytest (cloud heavy)", "pytest (cloud edge)", "Perimeter smoke (next start + curl)", *(f"Vitest (shard {i}/8)" for i in range(1, 9)), *(f"pytest ({shard})" for shard in ("scripts-ac", "scripts-df", "scripts-i", "scripts-gh", "scripts-jm", "scripts-npsz", "scripts-rs", "scripts-daemons", "rest")))
 
 
 def install(*, source: Path, destination: Path, home: Path, python: Path, notifications: Path, activate=False):
@@ -46,12 +48,22 @@ def install(*, source: Path, destination: Path, home: Path, python: Path, notifi
     _trusted(probe_source, uid)
     shutil.copyfile(probe_source, release / "codex_capability_probe.py")
     (release / "codex_capability_probe.py").chmod(0o500)
+    redaction_source = source.with_name("credential_redaction.py")
+    _trusted(redaction_source, uid)
+    shutil.copyfile(redaction_source, release / "credential_redaction.py")
+    (release / "credential_redaction.py").chmod(0o500)
     validator_source = source.parent / "ci/check_pr_body.py"
     _trusted(validator_source, uid)
     (release / "ci").mkdir(mode=0o700)
     shutil.copyfile(validator_source, release / "ci/check_pr_body.py")
     (release / "ci/check_pr_body.py").chmod(0o500)
     (release / "unattended_release.py").chmod(0o500)
+    (release / "model_gateway").mkdir(mode=0o700)
+    for name in ("__init__.py", "client.py", "cli.py", "cli_bridge.py"):
+        helper = source.parent / "model_gateway" / name
+        _trusted(helper, uid)
+        shutil.copyfile(helper, release / "model_gateway" / name)
+        (release / "model_gateway" / name).chmod(0o500)
     policy = destination / "policy.json"
     if not policy.exists():
         policy.write_text(json.dumps({"repository": "joemccann/radon", "authors": ["radon-runner-bot", "joemccann"], "branch_prefixes": LOOPS, "required_checks": CHECKS, "reviewers": ["gpt-6.1-sol", "gpt-6-luna"], "hosts": ["app", "broker"]}, indent=2) + "\n")
@@ -85,7 +97,7 @@ def install(*, source: Path, destination: Path, home: Path, python: Path, notifi
     _trusted(agents, uid, directory=True)
     label = "com.radon.operator-releases"
     plist = agents / f"{label}.plist"
-    config = {"Label": label, "ProgramArguments": [str(python), "-I", str(current / "unattended_release.py"), "--policy", str(policy), "--state", str(destination / "state"), "--hosts", str(hosts), "--notifications", str(credentials)], "EnvironmentVariables": {"HOME": str(home), "PATH": "/opt/homebrew/bin:/usr/bin:/bin"}, "StartInterval": 300, "RunAtLoad": True, "ProcessType": "Background", "StandardOutPath": str(destination / "launchd.log"), "StandardErrorPath": str(destination / "launchd.log")}
+    config = {"Label": label, "ProgramArguments": [str(python), "-I", str(current / "unattended_release.py"), "--policy", str(policy), "--state", str(destination / "state"), "--hosts", str(hosts), "--notifications", str(credentials)], "EnvironmentVariables": {"HOME": str(home), "PATH": "/opt/homebrew/bin:/usr/bin:/bin", "RADON_MODEL_GATEWAY_SOCKET": MAC_GATEWAY_SOCKET}, "StartInterval": 300, "RunAtLoad": True, "ProcessType": "Background", "StandardOutPath": str(destination / "launchd.log"), "StandardErrorPath": str(destination / "launchd.log")}
     # The plist itself must never follow a link into an unrelated file.
     if plist.is_symlink():
         raise PermissionError("LaunchAgent plist is a symlink")

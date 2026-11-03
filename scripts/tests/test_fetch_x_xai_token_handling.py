@@ -2,7 +2,7 @@
 import json
 from unittest.mock import patch
 
-import fetch_x_xai
+from model_gateway import _x_search_backend as fetch_x_xai
 
 
 class _Result:

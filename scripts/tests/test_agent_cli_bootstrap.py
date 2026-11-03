@@ -1,196 +1,60 @@
-"""The bootstrap must never blank a provider key it was asked to carry.
-
-2026-09-07: `~/.radon/agent-cli/env` came back with `NVIDIA_API_KEY=` and
-`CEREBRAS_API_KEY=` empty even though both were exported. The cause is a bash
-3.2 trap — /bin/bash on this runner is 3.2 — in
-
-    local key="$1" cur="${2:-}" val="${!key:-}"
-
-where the indirect expansion runs before `key` is visible, so `val` is empty and
-the carry silently writes nothing. Both fallback rungs then fail
-`provider_ready` and the ladder skips straight past NVIDIA and Cerebras.
-
-These run the real script against a temporary root; none of them touch the
-network or the operator's own agent-cli directory.
-"""
-
+"""The retired bootstrap cannot copy grants, contact vendors, or rewrite settings."""
 from __future__ import annotations
-
 import os
-import shutil
-import subprocess
 from pathlib import Path
-
+import subprocess
 import pytest
-
-REPO = Path(__file__).resolve().parents[2]
-BOOTSTRAP = REPO / "scripts" / "agent_cli_bootstrap.sh"
-# 3.2 is what launchd hands the nightly job; the bug is invisible under 5.x.
-BASH = "/bin/bash"
+ROOT = Path(__file__).resolve().parents[2]
+BOOTSTRAP = ROOT / 'scripts/agent_cli_bootstrap.sh'
 
 
-def _run(tmp_path: Path, env_extra: dict[str, str]) -> subprocess.CompletedProcess:
-    env = {
-        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-        "HOME": str(tmp_path / "home"),
-        "RADON_AGENT_CLI_ROOT": str(tmp_path / "agent-cli"),
-        # No key reaches curl, so /v1/models is never called.
-        **env_extra,
-    }
-    (tmp_path / "home").mkdir(exist_ok=True)
-    return subprocess.run(
-        [BASH, str(BOOTSTRAP)], env=env, capture_output=True, text=True, timeout=120
+def _run(tmp_path, *args):
+    home = tmp_path / 'home'; home.mkdir(exist_ok=True)
+    return subprocess.run(['/bin/bash', str(BOOTSTRAP), *args], env={'PATH': '/usr/bin:/bin', 'HOME': str(home), 'NVIDIA_API_KEY': 'fixture-dollar-$value', 'CEREBRAS_API_KEY': 'fixture-key'}, capture_output=True, text=True, timeout=5)
+
+
+@pytest.mark.parametrize('args', [(), ('--check',)])
+def test_bootstrap_does_not_write_or_disclose_credentials(tmp_path, args):
+    result = _run(tmp_path, *args)
+    assert not (tmp_path / 'home/.radon/agent-cli/env').exists()
+    assert not (tmp_path / 'home/.fx/settings.json').exists()
+    assert 'fixture-' not in result.stdout + result.stderr
+    assert result.returncode in {0, 75}
+
+
+def test_rerun_preserves_existing_operator_settings_and_secrets(tmp_path):
+    fx = tmp_path / 'home/.fx'; fx.mkdir(parents=True)
+    settings = fx / 'settings.json'; settings.write_text('{"theme":"operator"}')
+    secret = tmp_path / 'home/.radon/agent-cli/env'; secret.parent.mkdir(parents=True); secret.write_text('NVIDIA_API_KEY=existing')
+    _run(tmp_path); _run(tmp_path, '--check')
+    assert settings.read_text() == '{"theme":"operator"}'
+    assert secret.read_text() == 'NVIDIA_API_KEY=existing'
+
+
+def test_invalid_argument_refused_before_service_probe(tmp_path):
+    result = _run(tmp_path, '--provision-keys')
+    assert result.returncode == 64
+
+
+def test_bootstrap_only_invokes_trusted_gateway_status_helper(tmp_path):
+    body = BOOTSTRAP.read_text()
+    for forbidden in ('curl ', 'auth.json', 'NVIDIA_API_KEY', 'CEREBRAS_API_KEY', 'write_grok_home', 'write_fx_settings'):
+        assert forbidden not in body
+    home = tmp_path / 'home'
+    home.mkdir()
+    result = subprocess.run(
+        ['/bin/bash', '-x', str(BOOTSTRAP), '--check'],
+        env={'PATH': '/usr/bin:/bin', 'HOME': str(home)},
+        capture_output=True, text=True, timeout=5,
     )
-
-
-def _env_file(tmp_path: Path) -> dict[str, str]:
-    path = tmp_path / "agent-cli" / "env"
-    out = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        out[k] = v
-    return out
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_an_exported_key_reaches_the_env_file(tmp_path):
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
-    written = _env_file(tmp_path)
-    assert written["NVIDIA_API_KEY"] == "nvapi-TEST", (
-        "an exported key was blanked on the way to the env file; the nvidia "
-        f"rung would be skipped every night: {written}"
-    )
-    assert written["CEREBRAS_API_KEY"] == "csk-TEST", written
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_a_rerun_without_the_key_carries_the_stored_one_forward(tmp_path):
-    """Re-running from a shell that lacks the key must not erase it."""
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
-    _run(tmp_path, {})
-    written = _env_file(tmp_path)
-    assert written["NVIDIA_API_KEY"] == "nvapi-TEST", (
-        f"a re-run without the key in the environment erased it: {written}"
-    )
-    assert written["CEREBRAS_API_KEY"] == "csk-TEST", written
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_the_rung_key_is_stable_and_the_model_id_lives_only_here(tmp_path):
-    """The ladder names a config KEY; the vendor id is resolved at provision
-    time so a new model release needs no wrapper edit."""
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
-    for tag, key in (("nvidia", "nvidia-latest"), ("cerebras", "cerebras-latest")):
-        cfg = (tmp_path / "agent-cli" / f"grok-home-{tag}" / "config.toml").read_text(
-            encoding="utf-8"
-        )
-        assert f'[model."{key}"]' in cfg, (tag, cfg)
-        assert "model = " in cfg, (tag, cfg)
-
-
-def test_no_local_declaration_expands_an_indirection_it_also_assigns():
-    """The bash 3.2 trap itself, pinned at the source so it cannot come back."""
-    body = BOOTSTRAP.read_text(encoding="utf-8")
-    for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("local "):
-            continue
-        names = []
-        for part in stripped[len("local ") :].split():
-            name, _, _ = part.partition("=")
-            if "${!" in part:
-                referenced = part.split("${!", 1)[1].split(":", 1)[0].rstrip('}"')
-                assert referenced not in names, (
-                    "bash 3.2 expands ${!x} before x is visible when both are "
-                    f"assigned in one `local`; split them: {stripped}"
-                )
-            names.append(name)
-
-
-# --- fx (2026-09-26) ---------------------------------------------------------
-# The documentation loop runs Vercel fx against NVIDIA NIM. fx reads only
-# $HOME/.fx/settings.json, which the operator also uses interactively, so the
-# bootstrap merges its provider in and leaves every other setting alone.
-
-
-def _fx_settings(tmp_path: Path) -> dict:
-    import json
-
-    return json.loads((tmp_path / "home" / ".fx" / "settings.json").read_text())
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_fx_gets_an_nvidia_provider_that_names_the_key_not_its_value(tmp_path):
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
-    settings = _fx_settings(tmp_path)
-    assert settings["providers"]["nvidia"] == {
-        "protocol": "openai-chat-completions",
-        "base_url": "https://integrate.api.nvidia.com/v1",
-        "auth": {"type": "bearer", "env": "NVIDIA_API_KEY"},
-    }, settings
-    assert settings["models"]["nvidia"] == "nvidia/nemotron-3-ultra-550b-a55b", settings
-    raw = (tmp_path / "home" / ".fx" / "settings.json").read_text()
-    assert "nvapi-TEST" not in raw, "the key value must never land in fx settings"
-    mode = (tmp_path / "home" / ".fx" / "settings.json").stat().st_mode & 0o777
-    assert mode == 0o600, oct(mode)
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_fx_gets_a_paced_nvidia_provider_on_the_loopback_proxy(tmp_path):
-    """2026-09-30: fx:nvidia runs through the runner's NVIDIA pacing proxy."""
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
-    settings = _fx_settings(tmp_path)
-    assert settings["providers"]["nvidia-paced"] == {
-        "protocol": "openai-chat-completions",
-        "base_url": "http://127.0.0.1:18431/v1",
-        "auth": {"type": "bearer", "env": "NVIDIA_API_KEY"},
-    }, settings
-    assert settings["models"]["nvidia-paced"] == settings["models"]["nvidia"], settings
-    assert settings["providers"]["nvidia"]["base_url"] == "https://integrate.api.nvidia.com/v1", (
-        "the operator's direct provider is unchanged")
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_the_paced_provider_follows_the_proxy_port(tmp_path):
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "RADON_NVIDIA_PROXY_PORT": "19999"})
-    assert _fx_settings(tmp_path)["providers"]["nvidia-paced"]["base_url"] == "http://127.0.0.1:19999/v1"
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_fx_gets_a_cerebras_provider_for_the_fx_cerebras_rung(tmp_path):
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST", "CEREBRAS_API_KEY": "csk-TEST"})
-    settings = _fx_settings(tmp_path)
-    assert settings["providers"]["cerebras"] == {
-        "protocol": "openai-chat-completions",
-        "base_url": "https://api.cerebras.ai/v1",
-        "auth": {"type": "bearer", "env": "CEREBRAS_API_KEY"},
-    }, settings
-    assert settings["models"]["cerebras"], settings
-    assert "csk-TEST" not in (tmp_path / "home" / ".fx" / "settings.json").read_text()
-
-
-@pytest.mark.skipif(not Path(BASH).exists(), reason="no /bin/bash")
-def test_fx_settings_the_operator_chose_are_kept(tmp_path):
-    import json
-
-    fx = tmp_path / "home" / ".fx"
-    fx.mkdir(parents=True)
-    (fx / "settings.json").write_text(json.dumps({
-        "provider": "gateway",
-        "theme": "dark",
-        "yolo_acknowledged": True,
-        "models": {"gateway": "anthropic/claude-sonnet-5"},
-        "providers": {"local": {"protocol": "openai-chat-completions",
-                                "base_url": "http://localhost:11434/v1",
-                                "auth": {"type": "none"}}},
-    }))
-    _run(tmp_path, {"NVIDIA_API_KEY": "nvapi-TEST"})
-    settings = _fx_settings(tmp_path)
-    assert settings["provider"] == "gateway", settings
-    assert settings["theme"] == "dark", settings
-    assert settings["yolo_acknowledged"] is True, settings
-    assert settings["models"]["gateway"] == "anthropic/claude-sonnet-5", settings
-    assert "local" in settings["providers"], settings
-    assert "nvidia" in settings["providers"], settings
+    trace = result.stderr
+    helper = '/opt/radon-model-clients/current/lib/model_gateway/cli.py'
+    assert f'+ HELPER={helper}' in trace
+    refused = f'[[ ! -r {helper} ]]' in trace
+    launched = f'+ exec ' in trace and helper in trace and trace.rstrip().endswith(' status')
+    assert refused or launched
+    if refused:
+        assert result.returncode == 75
+        assert 'Model clients are unavailable; deploy the reviewed gateway client release.' in result.stderr
+    else:
+        assert result.returncode == 0

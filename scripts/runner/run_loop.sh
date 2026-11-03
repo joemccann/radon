@@ -20,14 +20,16 @@ RUNNER_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 TIMED_OUT=124
 HOOK_SECS="${RADON_RUNNER_HOOK_SECS:-900}"
 AGENT_PID=""
-CLAUDE_OAUTH=""
 HOOK_PID=""
 PHASE=""
 # The runner, its hooks and helpers resolve binaries only from root- or
 # admin-owned directories; the bot's own CLI dirs go on the agent's PATH alone.
 RUNNER_PATH="${RADON_RUNNER_PATH:-/opt/homebrew/bin:/usr/bin:/bin}"
 CURL_BIN="${RADON_RUNNER_CURL:-/usr/bin/curl}"
-AGENT_PATH_PREFIX="$HOME/.local/bin:$HOME/.grok/bin:$HOME/.bun/bin"
+MODEL_CLIENTS_ROOT="${RADON_MODEL_CLIENTS_ROOT:-/Library/Radon/model-clients/current}"
+MODEL_CLIENT_HELPER="$MODEL_CLIENTS_ROOT/lib/model_gateway/cli.py"
+AGENT_PATH_PREFIX="$RUNNER_DIR/model-bin:$MODEL_CLIENTS_ROOT/bin:$HOME/.bun/bin"
+export RADON_MODEL_GATEWAY_SOCKET="${RADON_MODEL_GATEWAY_SOCKET:-/Library/Radon/model-gateway/gateway.sock}"
 # Every git the runner, its hooks and the agent run reads the root-owned
 # config install.sh writes, never the bot-writable ~/.gitconfig.
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="${RADON_RUNNER_GITCONFIG:-$RUNNER_DIR/gitconfig}"
@@ -101,7 +103,6 @@ _dotenv_set() {
     PUSHOVER_USER) _DOTENV_PUSHOVER_USER="$2" ;;
     PUSHOVER_TOKEN) _DOTENV_PUSHOVER_TOKEN="$2" ;;
     GH_TOKEN) _DOTENV_GH_TOKEN="$2" ;;
-    CLAUDE_CODE_OAUTH_TOKEN) _DOTENV_CLAUDE_TOKEN="$2" ;;
   esac
 }
 
@@ -141,7 +142,6 @@ _dotenv_read_file() {
   _DOTENV_PUSHOVER_USER=""
   _DOTENV_PUSHOVER_TOKEN=""
   _DOTENV_GH_TOKEN=""
-  _DOTENV_CLAUDE_TOKEN=""
   _DOTENV_VAL=""
   [[ -f "$file" && -r "$file" ]] || return 0
   while IFS= read -r line || [[ -n "${line:-}" ]]; do
@@ -180,28 +180,16 @@ _radon_dotenv_path() {
   esac
 }
 
-# Pair from the first source that has BOTH keys (env, Radon dotenv, bot file).
-# GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN load only from the bot file. Values
-# are never logged.
+# GitHub/tool credentials stay with the local runner. Model grants belong only
+# to the standalone service, reached through the supervised local Unix socket.
 load_secrets() {
   local dotenv_path from="" checked
   dotenv_path="$(_radon_dotenv_path)"
-
-  _dotenv_read_file "$SECRETS_FILE" "GH_TOKEN CLAUDE_CODE_OAUTH_TOKEN"
+  _dotenv_read_file "$SECRETS_FILE" "GH_TOKEN"
   if [[ -n "${_DOTENV_GH_TOKEN}" ]]; then
     export GH_TOKEN="$_DOTENV_GH_TOKEN"
   fi
-  # A LaunchDaemon cannot read the bot's login keychain, so the keychain
-  # claude.ai session reads as "Not logged in"; a `claude setup-token` value
-  # bills the same subscription. Held unexported: only claude rungs and the
-  # resolver (which runs `claude models`) receive it.
-  CLAUDE_OAUTH="$_DOTENV_CLAUDE_TOKEN"
   unset CLAUDE_CODE_OAUTH_TOKEN
-  if [[ -n "$CLAUDE_OAUTH" ]]; then
-    log "claude: CLAUDE_CODE_OAUTH_TOKEN present (source: $SECRETS_FILE)"
-  else
-    log "claude: CLAUDE_CODE_OAUTH_TOKEN absent; claude rungs rely on the keychain login"
-  fi
 
   if [[ -n "${PUSHOVER_USER:-}" && -n "${PUSHOVER_TOKEN:-}" ]]; then
     from="env"
@@ -305,10 +293,8 @@ prune_logs() {
 resolve_agents() {
   local out
   [[ -n "$AGENTS_RESOLVER" ]] || return 0
-  # It runs the agent CLI itself (`claude models`), so it gets the agent's
-  # PATH and never the Pushover keys.
-  out="$([[ -z "$CLAUDE_OAUTH" ]] || export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH"
-    env -u PUSHOVER_USER -u PUSHOVER_TOKEN PATH="$AGENT_PATH_PREFIX:$RUNNER_PATH" \
+  # The resolver reads the gateway catalog without model or notification grants.
+  out="$(env -u PUSHOVER_USER -u PUSHOVER_TOKEN PATH="$AGENT_PATH_PREFIX:$RUNNER_PATH" \
     "$TIMEOUT_BIN" 120 "$RUNNER_PYTHON" -I "$RUNNER_DIR/$AGENTS_RESOLVER" --rungs 2>>"$LOG")" || out=""
   out="$(printf '%s' "$out" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
   if [[ -n "$out" ]]; then
@@ -411,71 +397,20 @@ build_prompt() {
 launch_agent() {
   local agent="$1" provider="${2:-}"
   unset PUSHOVER_USER PUSHOVER_TOKEN
-  # A nested agent call (the security loops' Stage 4 claude) uses the same rung.
   export RADON_RUNNER_AGENT="$agent" RADON_RUNNER_MODEL="$provider"
+  # The root-owned client adapter controls model traffic. The existing clone,
+  # approval flags, stdin and process group remain the execution boundary.
+  local helper="$MODEL_CLIENTS_ROOT/lib/model_gateway/cli.py"
   case "$agent" in
-    claude) CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 exec claude -p "$(cat "$PROMPT_FILE")" \
+    claude) CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 exec "$RUNNER_PYTHON" -I "$helper" launch claude -- "$MODEL_CLIENTS_ROOT/bin/claude" -p "$(cat "$PROMPT_FILE")" \
               ${provider:+--model "$provider"} --effort medium --dangerously-skip-permissions --output-format text \
               --disallowedTools ScheduleWakeup Monitor CronCreate < /dev/null ;;
-    codex)  exec codex exec --dangerously-bypass-approvals-and-sandbox -c model_reasoning_effort=medium \
+    codex|agy|fx) exec "$RUNNER_PYTHON" -I "$helper" launch codex -- "$MODEL_CLIENTS_ROOT/bin/codex" exec --dangerously-bypass-approvals-and-sandbox -c model_reasoning_effort=medium \
               --color never - < "$PROMPT_FILE" ;;
-    grok)   exec grok --prompt-file "$PROMPT_FILE" --reasoning-effort medium --cwd "$PWD" \
+    grok) exec "$RUNNER_PYTHON" -I "$helper" launch grok -- "$MODEL_CLIENTS_ROOT/bin/grok" --prompt-file "$PROMPT_FILE" --reasoning-effort medium --cwd "$PWD" \
               --always-approve --output-format plain < /dev/null ;;
-    agy)    exec agy -p="$(cat "$PROMPT_FILE")" --effort medium --dangerously-skip-permissions \
-              --output-format text < /dev/null ;;
-    fx)     [[ "$provider" != nvidia ]] || launch_fx_nvidia
-            FX_PROVIDER="$provider" FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
-              exec fx ask --full-access --no-save < "$PROMPT_FILE" ;;
-    *)      echo "unknown agent $agent" >&2; exit 64 ;;
+    *) echo "unknown agent $agent" >&2; exit 64 ;;
   esac
-}
-
-# fx:nvidia. The NVIDIA key is rate limited per key (about 40 requests a
-# minute) and shared with production; fx is a closed binary that cannot pace
-# itself, so it runs against the loopback proxy in lib/nvidia_rate_limit.py
-# (the `nvidia-paced` provider agent_cli_bootstrap.sh writes). The proxy paces
-# every loop on this host through one state file, honours Retry-After, and
-# trips NVIDIA after persistent 429s or any 401/403. A trip makes this rung
-# exit 75 so the ladder moves on instead of hammering the key.
-NVIDIA_PROXY_PORT="${RADON_NVIDIA_PROXY_PORT:-18431}"
-
-nvidia_tripped() {
-  local until
-  until="$(cat "$RADON_NVIDIA_RATE_STATE.tripped" 2>/dev/null)"
-  until="${until//[[:space:]]/}"
-  [[ "$until" =~ ^[0-9]+$ ]] && (( until > $(date +%s) ))
-}
-
-launch_fx_nvidia() {
-  local pid
-  export RADON_NVIDIA_RATE_STATE="$STATE_DIR/nvidia-rate.json"
-  if nvidia_tripped; then
-    echo "[runner] NVIDIA is paused (rate limited or refused) until $(cat "$RADON_NVIDIA_RATE_STATE.tripped"); skipping fx:nvidia"
-    exit 75
-  fi
-  mkdir -p "$STATE_DIR/logs"
-  # A clean environment: the proxy outlives this session and never needs
-  # the agent's GitHub token.
-  if ! env -i HOME="$HOME" PATH="$RUNNER_PATH" "$RUNNER_PYTHON" -I "$RUNNER_DIR/lib/nvidia_rate_limit.py" \
-      ensure-proxy --port "$NVIDIA_PROXY_PORT" --state "$RADON_NVIDIA_RATE_STATE" \
-      --rpm "${RADON_NVIDIA_RPM:-20}" --log "$STATE_DIR/logs/nvidia-proxy.log"; then
-    echo "[runner] the NVIDIA pacing proxy did not start; not calling NVIDIA unpaced"
-    exit 75
-  fi
-  FX_PROVIDER=nvidia-paced FX_AUTO_UPGRADE=0 FX_SKIP_ONBOARDING=1 FX_DISABLE_KEYCHAIN=1 \
-    fx ask --full-access --no-save < "$PROMPT_FILE" &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if nvidia_tripped; then
-      echo "[runner] NVIDIA stays rate limited or refused; stopping fx:nvidia so the next rung runs (see $STATE_DIR/logs/nvidia-proxy.log)"
-      kill -TERM "$pid" 2>/dev/null
-      wait "$pid"
-      exit 75
-    fi
-    sleep "${RADON_NVIDIA_WATCH_SECS:-10}"
-  done
-  wait "$pid"
-  exit $?
 }
 
 # pid<TAB>cwd for every process this user owns.
@@ -574,7 +509,6 @@ run_agent() {
     # The security prompts' native audit workflows resolve the clone from it.
     export PROMPT_FILE RADON_REPO_ROOT="$WORK"
     export PATH="$AGENT_PATH_PREFIX:$PATH"
-    [[ "$agent" != claude || -z "$CLAUDE_OAUTH" ]] || export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH"
     [[ "$GH_GUARD" != 1 ]] || export PATH="$RUNNER_DIR/guard/$LOOP:$PATH"
     exec "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$TIMEOUT_SECS" \
       /bin/bash "$SELF" --launch "$agent" "$provider" ) >> "$LOG" 2>&1 &

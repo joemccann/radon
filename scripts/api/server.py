@@ -113,6 +113,9 @@ try:
 except ImportError:
     pass
 
+from model_gateway.client import scrub_model_secrets
+scrub_model_secrets()
+
 logger = logging.getLogger("radon.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -921,7 +924,10 @@ async def lifespan(app: FastAPI):
 
     # Stored credentials next, same contract: exported into os.environ so
     # every subprocess inherits them; store wins over the deployed .env.
-    exported = await asyncio.to_thread(bootstrap_credentials)
+    try:
+        exported = await asyncio.to_thread(bootstrap_credentials)
+    finally:
+        scrub_model_secrets()
     if exported:
         logger.info("Credentials loaded from secret store: %d", len(exported))
 
@@ -1003,6 +1009,8 @@ app.include_router(streaks_router)
 app.include_router(research_router)
 app.include_router(tradingview_router)
 app.include_router(ai_cycle_router)
+from api.routes.model_gateway import router as model_gateway_router
+app.include_router(model_gateway_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
@@ -3146,6 +3154,12 @@ async def _heartbeat_portfolio_sync_miss(reason: str) -> None:
     the stale bucket can still join ib-gateway-grouped.
     """
     text = _portfolio_sync_miss_reason(reason)
+    if (reason or "").strip() == _IB_COOLDOWN_SKIP_ERROR:
+        # ib_sync.py never ran, so this is not a writer miss. Stamping it
+        # overwrites the real reason from an earlier ib_sync failure and
+        # flags ERROR for a 15s skip while the gateway is healthy.
+        logger.warning("portfolio-sync miss left silent for IB cooldown skip")
+        return
     if not await _portfolio_gateway_allows_miss_heartbeat():
         logger.warning(
             "portfolio-sync miss left silent for gateway grouping: %s",
@@ -4934,6 +4948,23 @@ def _fresh_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
     return _refresh_earnings_payload(cached, dte)
 
 
+def _stored_earnings_cache(ticker: str, dte: Optional[int]) -> Optional[dict]:
+    """Last file for a live miss. Recompute the session window from report_date.
+
+    A frozen ``days_until`` answers an older session. The panel treats that
+    number as earnings risk, so a name can show "no earnings risk" after the
+    date has moved inside the structure window (REL-335 / R-746). A missing
+    marker has no date to recompute and stays as stored. A total live failure
+    with no fresh batch hit is still 502; this is only the fallback row.
+    """
+    cached = _read_cache(_EARNINGS_DATES_DIR / f"{ticker}.json")
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("missing") or not cached.get("report_date"):
+        return cached
+    return _refresh_earnings_payload(cached, dte)
+
+
 @app.get("/earnings")
 async def earnings_batch_get(
     tickers: str = Query(..., description="Comma-separated tickers (max 50)"),
@@ -4983,8 +5014,8 @@ async def earnings_batch_get(
         if live is not None:
             rows.append(live)
             continue
-        stale = _read_cache(_EARNINGS_DATES_DIR / f"{symbol}.json")
-        if isinstance(stale, dict):
+        stale = _stored_earnings_cache(symbol, dte)
+        if stale is not None:
             rows.append(stale)
             continue
         rows.append(_earnings_missing_payload(symbol, dte))
@@ -5025,8 +5056,8 @@ async def earnings_get(
     if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
         return result.data
 
-    cached = _read_cache(_EARNINGS_DATES_DIR / f"{upper}.json")
-    if cached and isinstance(cached, dict):
+    cached = _stored_earnings_cache(upper, dte)
+    if cached is not None:
         return cached
 
     if not result.ok:
@@ -6348,6 +6379,9 @@ _IB_CONN_REFUSED_PATTERNS = (
 # subsequent attempts for this many seconds to avoid churn.
 _IB_SCRIPT_COOLDOWN_SECS = 15.0
 _ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
+# Returned when the cooldown skips a spawn. The script never ran, so callers
+# must not record it as a writer failure.
+_IB_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying shortly."
 
 # Scripts that transmit orders are NOT idempotent: a connection-flavored
 # failure can surface after placeOrder already reached IB, so the automatic
@@ -6432,10 +6466,7 @@ async def _run_ib_script_with_recovery(
             "Skipping %s — IB cooldown active (%.1fs since last failure, %ds cooldown)",
             script, elapsed, _IB_SCRIPT_COOLDOWN_SECS,
         )
-        return ScriptResult(
-            ok=False,
-            error="IB Gateway connection recently failed. Retrying shortly.",
-        )
+        return ScriptResult(ok=False, error=_IB_COOLDOWN_SKIP_ERROR)
 
     # Layer 2: Pre-flight pool check
     if not _pool_has_any_connection():

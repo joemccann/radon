@@ -9,7 +9,7 @@ Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `t
 ## Key Behaviors
 
 - **Headless Playwright** replaces chrome-cdp. Every 6h renew the product cookie through the same-account Firebase seed `MARKETDESK_FIREBASE_REFRESH_TOKEN`, bound to `THEMARKETEAR_EMAIL`; `THEMARKETEAR_PASSWORD` is optional legacy fallback. Cookie/localStorage state is `data/newsfeed-storage.json`; own rotated grant is `data/newsfeed-firebase.json` (both 0600). Require advanced expiry and real premium content. `cdp.js` is a back-compat shim.
-- **IPv4 forced** for `themarketear.com` CDN and `api.anthropic.com` (vision tagger) — AAAA-unreachable from residential IPv6.
+- **IPv4 forced** for `themarketear.com` CDN (model networking is gateway-owned) — AAAA-unreachable from residential IPv6.
 - **Cookie-gated images:** `media.js` accepts a `getCookieHeader` callback; Playwright `context.cookies()` follows `/images/<hash>.png` 301 → digitaloceanspaces.
 - **Rollover** at 500 KB → archive + keep ⌈N × 0.2⌉. `mergePosts` preserves `tags`.
 
@@ -19,8 +19,8 @@ Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `t
 
 Router: vision tagger for posts with images; text tagger otherwise.
 
-- **Vision tagger:** `claude-haiku-4-5`, ~$0.003 / post.
-- **Text tagger:** shared model ladder (`complete_text_json`) via `scripts/clients/model_ladder_cli.py`. Order: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras last. Soft-fail when no keyed provider works.
+- **Vision tagger:** sends bounded local image bytes and captions to the standalone gateway, which selects an image-capable provider.
+- **Text tagger:** same private gateway JSON interface with `purpose: newsfeed-tags`; the service owns Antigravity-first routing, optional SLM mode and shadow metrics, authentication and refresh. Soft-fail when the gateway cannot complete.
 - Optional local rung `slm-tagger` (ahead of paid/subscription rungs) behind `RADON_SLM_TAGGER_MODE` (default `off`). Closed vocabulary: exactly 3 uppercase kebab tags validated against live taxonomy; invalid or unknown tags abstain and fall through. Does not coin tags. Distill/reviewer never see the rung.
 - Exactly **3 tags per post**, free-form on the ladder; SLM is closed-vocabulary.
 - **Naming** (`__normaliseTags`): UPPERCASE, multi-word `UPPERCASE-KEBAB-CASE` (`PUT-CALL-RATIO`), allowed `A-Z 0-9 - &`, case-insensitive dedup.
@@ -82,3 +82,5 @@ A Playwright scrape mid-flight does not observe the abort; before this the unit
 lived until systemd's 90 s SIGKILL, longer than the deploy waits for it to go
 inactive, and three releases rolled back on 2026-08-24. Test:
 `web/tests/newsfeed-shutdown.test.ts`.
+
+Both taggers retain exactly three normalized tags. Rejected normalized results continue only with a service-issued traversal token; caller code never iterates providers or resets the service budget. The shared Node client bounds request/response bytes and total time and forwards cancellation.

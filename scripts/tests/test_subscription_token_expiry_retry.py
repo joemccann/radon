@@ -14,8 +14,8 @@ import pytest
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
 import subscription_tokens as st
-from clients import model_ladder
-from clients.model_ladder import complete_multimodal_json
+from model_gateway import engine as model_ladder
+from model_gateway.engine import complete_multimodal_json
 
 EXPIRED_BODY = json.dumps(
     {

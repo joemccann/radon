@@ -6,9 +6,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, sanitizeXShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import styles from "./NewsfeedShare.module.css";
+import { usePointerPresence } from "@/lib/usePointerPresence";
 
 export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; imageUrl?: string }) {
-  const [open, setOpen] = useState(false);
+  const { open, mounted, setOpen, props: fade } = usePointerPresence("panel");
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   return <div className={styles.root} data-newsfeed-share onKeyDown={event => {
@@ -16,12 +17,12 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") event.stopPropagation();
   }} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()}>
     <button type="button" className={styles.trigger} ref={trigger} aria-expanded={open} aria-controls={open ? panelId : undefined}
-      onClick={() => setOpen(value => !value)}><Share2 size={15} aria-hidden /> Share</button>
-    {open ? <SharePanel panelId={panelId} key={post.id} post={post} imageUrl={imageUrl} /> : null}
+      onClick={event => { setOpen(!open, event.detail > 0); if (open) trigger.current?.focus(); }}><Share2 size={15} aria-hidden /> Share</button>
+    {mounted ? <SharePanel panelId={panelId} key={post.id} post={post} imageUrl={imageUrl} visible={open} fade={fade} /> : null}
   </div>;
 }
 
-function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
+function SharePanel({ post, imageUrl, panelId, visible, fade }: { post: SharePost; imageUrl?: string; panelId: string; visible: boolean; fade: ReturnType<typeof usePointerPresence>["props"] }) {
   const id = useId();
   const [caption, setCaption] = useState(() => buildShareCaption(post));
   const [preview, setPreview] = useState<string>();
@@ -33,13 +34,22 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const controller = useRef<AbortController | null>(null);
   const active = useRef(true);
+  const exportGeneration = useRef(0);
+  const wasVisible = useRef(visible);
 
   useEffect(() => {
-    active.current = true;
-    return () => { active.current = false; controller.current?.abort(); };
-  }, []);
+    if (visible && !wasVisible.current) { setCaption(buildShareCaption(post)); setMessage(""); }
+    wasVisible.current = visible;
+  }, [visible, post]);
 
   useEffect(() => {
+    active.current = visible;
+    if (!visible) { controller.current?.abort(); setBusy(false); }
+    return () => { active.current = false; exportGeneration.current++; controller.current?.abort(); };
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     let url: string | undefined;
     canvas.current = null;
@@ -54,15 +64,16 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setPreview(url);
     }).catch(err => { if (!cancelled) setError(userErrorMessage(err, "Could not prepare the image. Retry to export.")); });
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [post, imageUrl, attempt]);
+  }, [visible, post, imageUrl, attempt]);
 
   async function download(video: boolean) {
-    if (!canvas.current || busy) return;
+    if (!visible || !canvas.current || busy) return;
     setBusy(true); setError(""); setMessage("");
     controller.current = new AbortController();
+    const generation = ++exportGeneration.current;
     try {
       const blob = video ? await canvasToMp4(canvas.current, controller.current.signal) : await canvasToPng(canvas.current);
-      if (!active.current) return;
+      if (!active.current || generation !== exportGeneration.current) return;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -71,18 +82,24 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
       setMessage(video ? "Video downloaded. Upload it in Instagram or TikTok and paste your caption." : "Image downloaded. Add it to your Story or attach it to your X post.");
     } catch (err) {
-      if (active.current && !(err instanceof DOMException && err.name === "AbortError")) {
+      if (active.current && generation === exportGeneration.current && !(err instanceof DOMException && err.name === "AbortError")) {
         setError(userErrorMessage(err, "Export failed. Try again."));
       }
-    } finally { if (active.current) setBusy(false); }
+    } finally { if (active.current && generation === exportGeneration.current) setBusy(false); }
   }
 
   async function copyCaption() {
-    try { await navigator.clipboard.writeText(sanitizeXShareText(caption)); setMessage("Caption copied."); }
-    catch { setError("Copy unavailable. Select and copy the caption below."); }
+    if (!visible) return;
+    const generation = exportGeneration.current;
+    try {
+      await navigator.clipboard.writeText(sanitizeXShareText(caption));
+      if (active.current && generation === exportGeneration.current) setMessage("Caption copied.");
+    } catch {
+      if (active.current && generation === exportGeneration.current) setError("Copy unavailable. Select and copy the caption below.");
+    }
   }
 
-  return <section id={panelId} className={styles.panel} aria-label="Share news item" aria-busy={busy}>
+  return <section {...fade} id={panelId} className={`pointer-fade ${styles.panel}`} aria-label="Share news item" aria-busy={busy}>
     <div className={styles.heading}><strong>Share this analysis</strong><span>1080 × 1920</span></div>
     <div className={styles.layout}>
       <div className={styles.preview}>

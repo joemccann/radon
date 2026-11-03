@@ -12008,3 +12008,109 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy 2.11.7. Roo
 | 3 | 19,366 passed / 12 skipped / 63 subtests (186.89s) | 5 failed / 11,662 passed / 21 skipped / 1,176 files (179.70s) | 42 failed / 3,484 passed / 31 skipped (913.54s) | 0 added / 0 removed |
 
 Base cloud at `e3b77881` on this Mac: 42 failed / 3,484 passed / 31 skipped (949.13s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
+
+## Delta audit 2026-10-30
+
+The newest trusted checkpoint on issue #83 is `audited-through: e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9`. That commit is not an ancestor of `origin/main` after a history rewrite. The same subject and author date on `origin/main` is `2c130201bf4a8a670fc4dadd5e1d35169eefb5fd`. Those two trees differ by eight deleted PNGs and zero line changes. The range read is `2c130201..3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964`: 97 commits, 94 paths. No open `testing/` pull request. Numbering continues at T-574. The checkpoint carried no open verified finding.
+
+`ci.yml`, `vitest.config.ts`, and the coverage thresholds are unchanged in that range. No new `skip` or `xfail`. Re-triaged `TEST_LOG.md` and `NEW_FINDINGS`: T-492, T-493, and T-495 have later DONE rows. Other source in the range already has an executing test (relay listener, signals refresh timeouts, earnings cache, retired research health, marketdesk jobs, credential redaction). Not filed. Codemap import edges miss some of those importers; `rg` confirmed the imports.
+
+Not filed: the five `await import("../next.config.mjs")` Vitest cases still time out at 5000ms. Together they still timed out at 60000ms (5 failed / 24 passed). A direct import of `web/next.config.mjs` measured 72006ms. `robots-noindex.test.ts` alone passed 7 tests at a 120s ceiling in 74.83s. The committed ceiling was not raised. `cloud/tests` on this Mac matches the base SHA (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`). Caddy is on PATH. Linux CI is the authority for that suite.
+
+Delta tests, three times: 18 root Python files, 932 passed each time; `cloud/tests/test_app_image_runner_disk.py`, 5 passed each time; 9 web files, 153 passed each time.
+
+### T-574 — P1 — a rate-limited ticker refresh exits 0
+
+`scripts/uw_research.py` returned 0 from `_scheduled_cycle_ok` for every CLI mode. `POST /uw/research/refresh` runs `["--ticker", symbol]` (`scripts/api/routes/uw_research.py:108`) and treats `returncode == 0` as success (`scripts/api/subprocess.py:492`, `scripts/api/routes/uw_research.py:118`). A finished cycle whose every section is `rate_limited` then looked complete and started the 60s success cooldown while the retained snapshot stayed stale. The hourly oneshot is the caller that passes `--scheduled`. Existing tests only passed `--scheduled`. `docs/uw-advanced-research.md` described the exit-0 rule without limiting it to that flag.
+
+Acceptance: `main(["--ticker", "SPY", "--json"])` exits 1 when every section is `rate_limited`, does not record scheduled health, keeps the retained observation timestamps, and does not print the provider body. The same cycle with `--scheduled` still exits 0 and records partial health. Schema and mixed failures still exit 1.
+
+Audited through: 3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964 on 2026-10-30 — 1 new finding
+
+## Remediation 2026-10-30
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-574 | DONE | Before the guard, `test_ticker_refresh_stays_failed_when_every_section_is_rate_limited` failed `assert 0 == 1` on `main(["--ticker", "SPY", "--json"])` (1 failed in 1.02s). Exit 0 for an all-section rate limit now requires `args.scheduled` (`scripts/uw_research.py:456`). `scripts/tests/test_uw_advanced_research.py` passed 42. That file plus `scripts/api/tests/test_uw_research_routes.py` passed 59 twice. Owner doc `docs/uw-advanced-research.md` and the oneshot runbook say the same. |
+
+### Closing gates 2026-10-30
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH. Root pytest exit 0 each round. Vitest exit 1 each round on the same five `next.config.mjs` imports (`Test timed out in 5000ms`): `csp-img-src-allowlist.test.ts`, `csp-nonce.test.ts`, `cta-output-tracing-config.test.ts`, `next-security-headers.test.ts`, `robots-noindex.test.ts`. Those five still timed out together at 60000ms. One of them passed 7 tests alone at a 120s ceiling. Cloud exit 1 each round on the same 42 nodes as each other and as `2c130201` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `2c130201` |
+|---|---|---|---|---|
+| 1 | 19,422 passed / 12 skipped / 63 subtests (126.47s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (147.16s) | 42 failed / 3,486 passed / 31 skipped (876.21s) | 0 added / 0 removed |
+| 2 | 19,422 passed / 12 skipped / 63 subtests (186.29s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (366.23s) | 42 failed / 3,486 passed / 31 skipped (1165.28s) | 0 added / 0 removed |
+| 3 | 19,422 passed / 12 skipped / 63 subtests (201.06s) | 5 failed / 11,613 passed / 21 skipped / 1,174 files (272.85s) | 42 failed / 3,486 passed / 31 skipped (848.75s) | 0 added / 0 removed |
+
+Base cloud at `2c130201` on this Mac: 42 failed / 3,484 passed / 31 skipped (1211.63s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Head passed two more tests than the base and added no failure. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.
+## Delta audit 2026-10-31
+
+Range `3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964..3ce7f24af5e8b6a143b976efeafc441208ad1322`: 17 commits / 297 paths. Newest trusted checkpoint is the 2026-10-30 collaborator comment on issue #83 (`audited-through: 3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964`). It carried no open verified finding. Open draft #1352 (`testing/2026-10-30`) owns T-574, so tonight starts at T-575. Coverage thresholds did not drop. `web/e2e/mobile-native-platform.spec.ts` and `web/e2e/mobile-pointer-fades.spec.ts` are listed in `ci.yml`. No new `skip` or `xfail` without a linked finding. `web/lib/usePointerPresence.ts` is exercised by `web/tests/pointer-fade-presence.test.tsx`. The gateway cutover touches most of the suite, so the three closing gates are the delta rerun. Four files touched before T-578 and T-579 passed 24 on each of three focused runs.
+
+Re-triaged TEST_LOG and NEW_FINDINGS against later DONE entries. Older OPEN and BLOCKED rows T-488, T-490, T-492, T-493, and T-495 are DONE or operator-completed. The checkpoint carries no still-open verified finding.
+
+Not filed: `scripts/tests/test_model_gateway_cli_config.py:87` still greps `_default_grok_runner` because `web` behavioral tests already assert `--leader-socket` and `GROK_BASE_URL`. `cloud/tests/test_model_clients_darwin_build.py` skips when `node` is absent; `node` is on PATH here. `scripts/tests/test_model_gateway_credentials.py:109` still bounds a sibling wait at 0.2s and passed every full pytest. `cloud/tests` on this Mac matches `3ce7f24a` (bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`). Caddy is on PATH. Linux CI is the authority for that suite.
+
+### T-575 — P1 — nightly launch checks the helper name, not the exec
+
+`scripts/tests/test_model_gateway_cli_config.py` (before this night) required `model_gateway/cli.py` inside the `launch_agent` slice and rejected the literals `exec agy ` and `exec fx `. The real branch is `scripts/runner/run_loop.sh:405` through `:410`: `claude` launches `claude`, `codex|agy|fx` launches `codex`, and `grok` launches `grok`, each through `exec "$RUNNER_PYTHON" -I "$helper"`. Replacing the `agy|fx` arm with `exec "$MODEL_CLIENTS_ROOT/bin/$agent"` left the text search green. The recording python then saw argv `['DIRECT']`.
+
+Acceptance: each of `claude`, `codex`, `agy`, `fx`, and `grok` execs the recording python with `-I`, `lib/model_gateway/cli.py`, `launch`, and the mapped kind (`agy` and `fx` are `codex`). A comment that still names the helper does not pass. Direct exec of the client binary fails with argv `DIRECT`.
+
+### T-576 — P1 — bootstrap status is a string search
+
+`scripts/tests/test_agent_cli_bootstrap.py` and the bootstrap case in `scripts/tests/test_model_gateway_managed_clients.py` (before this night) treated `model_gateway/cli.py` in the file text as proof that status ran. `scripts/agent_cli_bootstrap.sh:6` assigns `HELPER` and `:11` execs `status`, or `:7` refuses a missing helper with exit 75. Commenting the helper path and `exit 0` left the old file at 6 passed and wrote no secrets.
+
+Acceptance: `bash -x` shows the executed `HELPER=` assignment and either the `[[ ! -r` refusal (exit 75 and the unavailable sentence) or an exec of that helper ending in ` status` (exit 0). `curl `, `auth.json`, and the provider key names stay absent from the file. A comment plus `exit 0` fails.
+
+### T-577 — P1 — release identity is a flag substring
+
+`scripts/tests/test_ci_release_identity.py` (before this night) searched the workflow text for `--ci-version --expected-sha`. Both release steps call `python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA"` (`.github/workflows/ci.yml:1571` and `.github/workflows/app-images.yml:259`). Leaving those flags only in a comment and invoking python with no arguments left the old file at 3 passed. The recording python then saw argv `['scripts/release_version.py']`.
+
+Acceptance: both steps run, and argv is `scripts/release_version.py`, `--ci-version`, `--expected-sha`, and `GITHUB_SHA`. Deploy still needs the tag job, the tag job still requires deploy success, and the tag ref is `refs/tags/${tag}`. A comment that names the flags fails.
+
+### T-578 — P1 — a drip resets the stream deadline by sleeping
+
+`scripts/tests/test_model_gateway_service.py` (before this night) slept 0.025s between stream bytes. `scripts/model_gateway/engine.py:777` calls `scoped_timeout(120)` after each chunk. On this Mac the httpx read of 0.12s plus the sleep raised `RuntimeError: network:ReadTimeout` while that check was still present. Jumping the injected clock from 0.0 to 1.0 after `{"ok":` and before `true}` raises `ModelResponseError` code `deadline_exceeded`. Removing the per-chunk check returned success (`DID NOT RAISE`).
+
+Acceptance: the body yields two chunks, the clock crosses the 0.5s attempt deadline between them, and the code is `deadline_exceeded`. The product check stays. The sleep server does not come back.
+
+### T-579 — P2 — cancel success is then judged by the clock
+
+`test_credential_lock_wait_observes_cancellation` already raised `cancelled` and then failed `(elapsed) >= 0.2` at 0.211s and 0.360s. The broker stub still fails the test if it is called. The release timer at 0.35s is what used to stand in for "stopped early."
+
+Acceptance: the code is `cancelled` and the lock-release event is unset, so the wait did not run out the 0.35s timer. `if False and state.cancelled()` reaches the broker and fails. The 0.2s bound is not widened.
+
+### T-580 — P2 — a stalled vault is judged by the clock after it already stopped
+
+`test_real_stalled_vault_stops_at_request_deadline_or_disconnect` with cancellation already raised `cancelled` and then failed the same 0.2s bound at about 0.215s. The vault thread sets `finished` only after `stop.wait(1)`. The failed lookup must leave `NVIDIA_API_KEY` at `old-key`.
+
+Acceptance: the stall was entered, the code is `cancelled` or `deadline_exceeded`, `finished` is unset, and the key is still `old-key`. The same cancel no-op raises `GatewayError: Model credential store is unavailable` on the cancelled case. The 0.2s bound is not widened. The sibling deadline case at `scripts/tests/test_model_gateway_credentials.py:109` is unchanged.
+
+Follow-on range `3ce7f24af5e8b6a143b976efeafc441208ad1322..38154af2ef580c8156dd5f1ae5c92b39b1201bb6`: 2 commits / 6 paths (pull request #1362). `scripts/api/db_http.py:147` retires the keep-alive socket before an unproven write, and `scripts/tests/test_hrana_http_keepalive.py:708` publishes through a peer that drops a reused second request. A write that reused the read socket would leave `connections == 1`. A resent commit would raise `requests` above 2 (`:724`). Reads inside 30s still share one connection (`:742`). The sibling 5s pool is a different client and is not the publication path (`:752`). No new finding.
+
+Audited through: 38154af2ef580c8156dd5f1ae5c92b39b1201bb6 on 2026-10-31 — 6 new findings
+
+## Remediation 2026-10-31
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-575 | DONE | Direct `exec "$MODEL_CLIENTS_ROOT/bin/$agent"` for `agy` and `fx` left the old text search green and failed the new run with argv `['DIRECT']`. Restored `scripts/runner/run_loop.sh`. `test_runner_agent_entrypoints_have_no_private_provider_cli_escape` passed. Product source unchanged. |
+| T-576 | DONE | A comment plus `exit 0` left the old bootstrap file at 6 passed and failed the trace (`HELPER=` absent). Restored `scripts/agent_cli_bootstrap.sh`. The trace shows the refusal and exit 75. Removed the helper-path text search from `test_bootstrap_is_status_only_and_never_touches_provider_secrets`. Product source unchanged. |
+| T-577 | DONE | Flags left only in a comment left the old file at 3 passed and recorded argv `['scripts/release_version.py']`. Restored both workflow steps. The recording argv is the script, `--ci-version`, `--expected-sha`, and the 40-character SHA. Product source unchanged. |
+| T-578 | DONE | Deleting `scoped_timeout(120)` at `scripts/model_gateway/engine.py:777` made the clock test return the parsed body (`DID NOT RAISE`). Restored the check. The two-yield body fails with `deadline_exceeded`. Product source unchanged. |
+| T-579 | DONE | `if False and state.cancelled()` reached the broker (`cancelled request reached broker`). Restored `scripts/model_gateway/engine.py`. The cancel case passes with `released` unset. Product source unchanged. |
+| T-580 | DONE | The same cancel no-op raised `GatewayError: Model credential store is unavailable` on the cancelled stall. Restored the engine. Both parameter cases passed on five serial runs. Product source unchanged. |
+
+### Closing gates 2026-10-31
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1, Vitest 4.1.12. Root pytest exit 0 each round. Vitest exit 0 each round. One earlier Vitest attempt under load failed three files at the 5000ms default (`portfolio-startup-performance-contract.test.ts`, `regime-route-cache-selection.test.ts`, `strength-confirmation-scanner.test.tsx`); those three passed 23 tests alone in 2.89s, and the rerun is round 3. Cloud exit 1 each round on the same 42 nodes as each other and as `3ce7f24a` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `3ce7f24a` |
+|---|---|---|---|---|
+| 1 | 19,735 passed / 12 skipped / 63 subtests (153.30s) | 11,592 passed / 21 skipped / 1,180 files (110.90s) | 42 failed / 3,743 passed / 23 skipped (1016.99s) | 0 added / 0 removed |
+| 2 | 19,735 passed / 12 skipped / 63 subtests (155.89s) | 11,592 passed / 21 skipped / 1,180 files (112.43s) | 42 failed / 3,743 passed / 23 skipped (980.55s) | 0 added / 0 removed |
+| 3 | 19,735 passed / 12 skipped / 63 subtests (220.64s) | 11,592 passed / 21 skipped / 1,180 files (132.58s) | 42 failed / 3,743 passed / 23 skipped (924.32s) | 0 added / 0 removed |
+
+Base cloud at `3ce7f24a` on this Mac: 42 failed / 3,743 passed / 23 skipped (939.76s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 9 in `test_sync_control_plane.py`, 6 in `test_control_service_wiring.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud error is bash 3.2 `pin[@]` unbound at `cloud/scripts/sync-control-plane.sh:56`.

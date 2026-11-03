@@ -16,9 +16,13 @@
 .header p,.muted { color: var(--text-muted); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .button,.primary { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line-grid); border-radius: var(--radius); background: var(--bg-panel); color: var(--text-primary); text-decoration: none; font-weight: 550; }
-.button:hover:not(:disabled) { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .button:hover:not(:disabled) { background: var(--bg-subtle); }
+}
 .primary { background: var(--signal-core); color: var(--text-on-accent); border-color: var(--signal-core); }
-.primary:hover:not(:disabled) { filter: brightness(.94); }
+@media (hover: hover) and (pointer: fine) {
+  .primary:hover:not(:disabled) { filter: brightness(.94); }
+}
 .layout { display: grid; grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); gap: 36px; border-top: 1px solid var(--line-grid); padding-top: 24px; }
 .sources { padding-right: 28px; border-right: 1px solid var(--line-grid); min-width: 0; }
 .sources details { margin-bottom: 20px; }
@@ -35,7 +39,9 @@
 .tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--line-grid); gap: 4px; margin: -8px 0 28px; }
 .tab { padding: 10px 12px; min-width: 44px; border: 0; background: transparent; color: var(--text-muted); border-bottom: 2px solid transparent; }
 .tab[aria-pressed=true] { color: var(--signal-core); border-bottom-color: var(--signal-core); font-weight: 600; }
-.tab:hover { background: var(--bg-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover { background: var(--bg-subtle); }
+}
 .empty { padding: 38px 0; max-width: 65ch; }
 .empty h2 { font-size: 28px; }
 .empty ol { padding-left: 22px; color: var(--text-muted); }

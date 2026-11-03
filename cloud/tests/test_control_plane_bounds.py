@@ -38,13 +38,13 @@ class TestPostCommitSyncIsNotFatal:
             "committed by this point; the helper's exit 76 just means main "
             "moved during the deploy, which is a benign race"
         )
-        assert src.count("sync_scheduled_units || log_warn") == 3, (
-            "all three call sites are post-verification"
+        assert src.count("sync_scheduled_units || log_warn") == 4, (
+            "all four call sites are post-verification"
         )
 
     def test_the_warning_names_the_consequence(self):
         src = DEPLOY.read_text()
-        assert src.count("the next deploy will republish them") == 3
+        assert src.count("the next deploy will republish them") == 4
 
 
 # --------------------------------------------------------------------------

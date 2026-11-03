@@ -115,9 +115,14 @@ HUMANIZE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 TITLE_MAX = 180
 CONTENT_MAX = 2500
 CAPTION_MAX = 180
+# Image and text copy both use the shared ladder order (grok included). A read
+# timeout cools that provider down for the rest of this process, so one slow
+# grok-4.6 image call (153s or the 120s cap on 2026-10-27) is not repeated for
+# every article in the 270s cycle.
 # grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27), which spends most of
 # the cycle's 270s budget before codex answers. It still answers text-only calls (the humanizer) in 30-45s.
-IMAGE_PROVIDERS = tuple(name for name in MODEL_LADDER_ORDER if name != "grok")
+# Antigravity's CLI accepts text only; retain every image for a capable rung.
+IMAGE_PROVIDERS = tuple(name for name in MODEL_LADDER_ORDER if name not in {"grok", "antigravity"})
 TAGS_MAX = 10
 BODY_MAX = 12000
 _TAG_RE = re.compile(r"^[A-Z0-9][A-Z0-9&-]{0,63}$")
@@ -520,7 +525,6 @@ def write_copy(
             require_end_turn=True,
             accept=accept,
             log_prefix="marketdesk",
-            providers=IMAGE_PROVIDERS if images else None,
         )
 
     try:

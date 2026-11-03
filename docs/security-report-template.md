@@ -33,6 +33,19 @@ pins the headings and rules.
 11. Nothing is omitted for brevity. Every candidate the engines produced this
     phase appears in Findings or Rejected with its reason. Complete beats
     short.
+12. Coverage is stated, never implied. A stage whose engine did not cover its
+    whole scope (a non-zero or 75 exit, missing auth, a missing completion
+    marker, an exit 0 with no evidence of its own) is `not reviewed` in
+    Stages and is named in the Coverage limits row with the reason. Zero
+    findings over a range that was not reviewed is `NOT_REVIEWED`, never
+    `COMPLETE`.
+13. Operator actions hold at most three items, highest severity first. When
+    more remain, the last line is a count (`<n> more in the open queue`), not
+    a list. An item the operator accepted as a risk is not an action: it goes
+    in Accepted risks with its reason, date and expiry from
+    `docs/security-accepted-risks.json`, and comes back as an action to
+    re-decide the day that acceptance expires. The agent never writes an
+    acceptance.
 
 ## Template
 
@@ -45,10 +58,12 @@ pins the headings and rules.
 |---|---|
 | Run id | `<run-id>` |
 | Cycle | `<runner STAMP>` |
-| Status | COMPLETE / INCOMPLETE / OPERATOR_REQUIRED |
+| Status | COMPLETE / INCOMPLETE / OPERATOR_REQUIRED / NOT_REVIEWED |
 | Head | `<8-char sha>` |
 | Last audited | `<8-char sha>` |
 | Range | `<from>..<to>` (<n> commits) |
+| Unreviewed | <n> commits since `<YYYY-MM-DD>` (<reason>), or 0 |
+| Coverage limits | What this phase did not review and why, or none |
 | Started / ended | `<UTC>Z` / `<UTC>Z` (<minutes> min) |
 | Findings | <verified> verified (<P0> P0, <P1> P1, <P2> P2, <P3> P3), <rejected> rejected |
 | Fixed | <done>/<verified> (<n> public on `<branch>`, <n> private) |
@@ -58,6 +73,8 @@ pins the headings and rules.
 ## Operator actions
 
 1. **<Verb first>**: exact command or decision, with the path or URL.
+
+At most three. Overflow is one line: `<n> more in the open queue.`
 
 ## Closed tonight
 
@@ -69,12 +86,21 @@ Next again.
 |---|---|---|
 | `DS-...` | `2026-09-24` | PR #689, `e5c4e627`, `path` L39-47 |
 
+## Accepted risks
+
+Only rows from `docs/security-accepted-risks.json` that have not expired.
+Omit the section when there are none.
+
+| Id | Reason | Accepted | Expires |
+|---|---|---|---|
+| `DS-...` | One sentence. | `2026-10-31` | `2026-12-31` |
+
 ## Stages
 
 | Stage | Outcome | Detail |
 |---|---|---|
 | Preflight | complete | tool pin, auth method, route, markers |
-| <engine> | complete / OPERATOR_REQUIRED / INCOMPLETE | rc values, counts, timing |
+| <engine> | complete / not reviewed / OPERATOR_REQUIRED / INCOMPLETE | rc values, counts, timing |
 | Verification | complete | candidates, groups, agents |
 | Archive | complete | <n> files, checksum-verified, path |
 | Audited SHA | advanced to `<sha>` / not advanced (<why>) | |

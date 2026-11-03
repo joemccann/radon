@@ -552,7 +552,7 @@ def _import_failure():
 
 
 def test_build_embedder_defaults_fastembed_cache_to_user_cache(monkeypatch, capsys):
-    from knowledge import embed as embed_mod
+    from model_gateway import _embedding_backend as embed_mod
 
     monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
     monkeypatch.setattr(embed_mod, "_import_text_embedding", _import_failure)
@@ -563,7 +563,7 @@ def test_build_embedder_defaults_fastembed_cache_to_user_cache(monkeypatch, caps
 
 
 def test_build_embedder_keeps_explicit_cache_path(monkeypatch, capsys):
-    from knowledge import embed as embed_mod
+    from model_gateway import _embedding_backend as embed_mod
 
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", "/custom/fastembed-cache")
     monkeypatch.setattr(embed_mod, "_import_text_embedding", _import_failure)

@@ -471,6 +471,45 @@ def test_priority_cannot_override_publication_source_or_pdf_policy(db, change):
     assert db.execute('SELECT attempts FROM marketdesk_pdf_queue WHERE article_id=?', (priority,)).fetchone() == (0,)
 
 
+def test_failing_priority_row_cannot_starve_ordinary_backlog(db):
+    # Production 2026-10-29..31: one priority report answered HTTP 500 on every
+    # attempt (77) and its 15 minute retry won every 30 minute account slot.
+    ordinary, priority = priority_pair(db)
+    store.prioritize([priority])
+    current = NOW
+    for _ in range(store.PRIORITY_MAX_FAILURES):
+        work = store.claim_next(now=current)
+        assert work.article_id == priority
+        store.retry(work, 'http_500', now=current, backoff_seconds=900)
+        current = datetime.fromisoformat(
+            db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchone()[0])
+    assert store.claim_next(now=current).article_id == ordinary
+
+
+def test_item_failures_escalate_item_backoff_but_not_quota_clock(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    current = NOW
+    for expected in (900, 1800, 3600, 7200):
+        work = store.claim_next(now=current)
+        assert work is not None
+        store.retry(work, 'http_500', now=current, backoff_seconds=900)
+        due = datetime.fromisoformat(db.execute('SELECT next_attempt_at FROM marketdesk_pdf_queue').fetchone()[0])
+        assert due == max(current + timedelta(seconds=expected), current + timedelta(seconds=1800))
+        assert db.execute('SELECT quota_failures FROM marketdesk_pdf_throttle').fetchone() == (0,)
+        current = due
+
+
+def test_item_backoff_is_capped_at_one_day(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    work = store.claim_next(now=NOW)
+    db.execute('UPDATE marketdesk_pdf_queue SET attempts=77')
+    store.retry(work, 'http_500', now=NOW, backoff_seconds=900)
+    due = datetime.fromisoformat(db.execute('SELECT next_attempt_at FROM marketdesk_pdf_queue').fetchone()[0])
+    assert due == NOW + timedelta(days=1)
+
+
 def test_priority_still_obeys_account_backoff_and_token_lease(db):
     _, priority = priority_pair(db)
     store.prioritize([priority])

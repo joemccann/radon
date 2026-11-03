@@ -160,11 +160,12 @@ def test_existing_snapshot_tampering_is_rejected(setup, monkeypatch):
     with pytest.raises(RuntimeError, match='digest'): probe.snapshot_binary(binary, directory)
 
 
-@pytest.mark.parametrize('stdout, stderr, code, accepted', [(b'', b'Logged in using ChatGPT\n', 0, True), (b'Logged in using an API key\n', b'', 0, False), (b'', b'Logged in using ChatGPT\n', 1, False), (b'', b'unknown status', 0, False)])
-def test_subscription_login_status_captures_stderr_privately(setup, monkeypatch, stdout, stderr, code, accepted):
-    from types import SimpleNamespace
+@pytest.mark.parametrize('providers, accepted', [(['codex'], True), (['grok'], False), ([], False), (None, False), ('codex', False)])
+def test_subscription_capability_requires_gateway_codex(setup, monkeypatch, providers, accepted):
+    from model_gateway import client
     binary, options, directory = setup
-    monkeypatch.setattr(probe.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr))
+    monkeypatch.setattr(probe.subprocess,'run',lambda *a,**kw:pytest.fail('native grants are service-owned'))
+    monkeypatch.setattr(client,'request',lambda *a,**kw:{'providers':providers})
     if accepted: probe.assert_subscription(binary, {'HOME': str(directory)})
     else:
         with pytest.raises(RuntimeError, match='subscription'): probe.assert_subscription(binary, {'HOME': str(directory)})

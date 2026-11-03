@@ -6,6 +6,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
+Environment=RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon

@@ -65,6 +65,8 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
         "private_security_release.py",
         "operator_runtime_refresh.py",
         "codex_capability_probe.py",
+        "credential_redaction.py",
+        "model_gateway",
         "ci",
     }
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o500 for path in installed_release.iterdir() if path.is_file())
@@ -76,11 +78,21 @@ def test_operator_installer_writes_scoped_plist_policy_and_notification_credenti
     )
     assert isolated_help.returncode == 0, isolated_help.stderr
     assert "--policy" in isolated_help.stdout
+    private_import = _REAL_SUBPROCESS_RUN(
+        [sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import private_security_release",
+         str(installed_release)],
+        capture_output=True,
+        text=True,
+    )
+    assert private_import.returncode == 0, private_import.stderr
     assert config["StartInterval"] == 300
     assert config["RunAtLoad"] is True
     assert config["EnvironmentVariables"] == {
         "HOME": str(home),
         "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+        # Reviews reach the model service only through the Mac transport socket;
+        # the client default is the Linux /run path, which does not exist here.
+        "RADON_MODEL_GATEWAY_SOCKET": "/Library/Radon/model-gateway/gateway.sock",
     }
     assert "GH_TOKEN" not in str(config) and "PUSHOVER_TOKEN" not in str(config)
 
@@ -316,3 +328,23 @@ os.replace = replace_then_kill"""
 
     recovered = ur.FileStateStore(state_path, owner_uid=owner_uid)
     assert expected_claim in {key for key, _ in recovered.pending_releases()}
+
+
+def test_default_policy_auto_merges_every_operator_branch_prefix():
+    # Operator decision 2026-11-01: the coordinator releases every branch
+    # family, not only the nightly loops. .github/, review and CI gates stay.
+    for prefix in ("fix/", "feat/", "ci/", "docs/"):
+        assert prefix in installer.LOOPS
+    for loop in ("security/", "security-deepsec/", "reliability/", "testing/", "documentation/",
+                 "ci-performance/", "performance/", "security-private-release/"):
+        assert loop in installer.LOOPS
+    policy = ur.TrustedPolicy(repository="joemccann/radon", authors=("radon-runner-bot", "joemccann"),
+                              branch_prefixes=installer.LOOPS, required_checks=installer.CHECKS)
+    pr = SimpleNamespace(repository="joemccann/radon", draft=False, base_branch="main", author="joemccann",
+                         head_branch="fix/grok-page-ledger-timeout", head_sha="a" * 40, diff_digest="d" * 64)
+    assert ur._eligible(pr, policy)
+    assert ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "feat/x"}), policy)
+    # Unlisted families, and near-miss names, still wait for a human.
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "cursor/x"}), policy)
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "head_branch": "fixes/x"}), policy)
+    assert not ur._eligible(SimpleNamespace(**{**vars(pr), "author": "someone-else"}), policy)

@@ -3,19 +3,10 @@
 // data/tag_taxonomy.json by the caller (scraper or backfill). The existing
 // taxonomy is shown to the model as context to encourage reuse.
 //
-// Provider: shared model ladder (`scripts/clients/model_ladder.py`) via a
-// thin Python CLI so Node cannot drift from Joe's order:
-//   subscription: anthropic -> grok -> cursor -> codex -> antigravity
-//   nvidia (free)
-//   cerebras (cheap paid, last)
-// Soft-fails (returns null) when no keyed provider works.
-
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
-const LADDER_CLI = fileURLToPath(new URL("../clients/model_ladder_cli.py", import.meta.url));
-// Bound on ONE ladder walk; a timeout is a per-post tagging failure, never a
-// cycle hang. R-466.
+// Provider routing, subscription grants and optional SLM shadow mode are
+// owned by the standalone model gateway. Node sends no caller credentials.
+import { completeJson as gatewayCompleteJson } from "../model_gateway/client.js";
+import { recordSlmShadow } from "../db/writer.js";
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 // All tags are uppercase. Multi-word concepts are kebab-cased then uppercased
@@ -103,62 +94,21 @@ function buildUserPrompt(post) {
   return `Title: ${title}\nBody: ${content}`;
 }
 
-function resolvePythonBin() {
-  const override = process.env.RADON_PYTHON_BIN;
-  if (typeof override === "string" && override.trim()) return override.trim();
-  return "python3.13";
-}
-
-export function completeViaLadder({
-  system,
-  instruction,
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
-  spawnImpl = spawn,
-  pythonBin = resolvePythonBin(),
-  cliPath = LADDER_CLI,
-} = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnImpl(pythonBin, [cliPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
-    });
-    let stdout = "";
-    let settled = false;
-    const finish = (err, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (err) reject(err);
-      else resolve(value);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new Error("tagger timeout"));
-    }, timeoutMs);
-
-    child.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on("data", () => {});
-    child.on("error", (err) => finish(err));
-    child.on("close", () => {
-      try {
-        const parsed = JSON.parse(stdout);
-        if (parsed && parsed.ok && parsed.data) finish(null, parsed.data);
-        else finish(null, null);
-      } catch {
-        finish(null, null);
+export function completeViaLadder({ system, instruction, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, requestImpl, post_id, taxonomy, writeShadow = recordSlmShadow } = {}) {
+  return gatewayCompleteJson({
+    system, instruction, ...(Array.isArray(taxonomy) ? { taxonomy: taxonomy.slice(0, 4096).filter(value => typeof value === "string" && value.length <= 128) } : {}), ...(typeof post_id === "string" && post_id.length <= 256 ? { post_id } : {}), accept: "tags", purpose: "newsfeed-tags", max_tokens: 800,
+    read_timeout: Math.max(1, timeoutMs / 1000),
+  }, {
+    timeoutMs, ...(requestImpl ? { requestImpl } : {}),
+    accept: data => normaliseTags(data?.tags).slice(0, 3).length === 3,
+    onResult: result => {
+      if (result.shadow && typeof result.shadow === "object") {
+        // Telemetry never consumes the remaining inference deadline. The
+        // existing DB writer bounds retries and logs only a safe failure.
+        try { Promise.resolve(writeShadow(result.shadow)).catch(() => console.warn("[tagger] SLM telemetry write dropped")); }
+        catch { console.warn("[tagger] SLM telemetry write dropped"); }
       }
-    });
-
-    child.stdin.write(JSON.stringify({
-      system,
-      instruction,
-      accept: "tags",
-      max_tokens: 800,
-      timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),
-    }));
-    child.stdin.end();
+    },
   });
 }
 
@@ -166,8 +116,7 @@ export function createTagger({
   completeJson,
   getTaxonomySnapshot,
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
-  spawnImpl,
-  pythonBin,
+  requestImpl,
 } = {}) {
   if (typeof getTaxonomySnapshot !== "function") {
     throw new Error("createTagger: getTaxonomySnapshot callback is required");
@@ -177,8 +126,7 @@ export function createTagger({
     : (args) => completeViaLadder({
       ...args,
       timeoutMs: args.timeoutMs ?? timeoutMs,
-      spawnImpl,
-      pythonBin,
+      requestImpl,
     });
 
   async function tagPost(post) {
@@ -189,7 +137,9 @@ export function createTagger({
         timer = setTimeout(() => reject(new Error("tagger timeout")), timeoutMs);
         Promise.resolve(complete({
           system: buildSystemPrompt(taxonomy),
+          taxonomy,
           instruction: buildUserPrompt(post),
+          ...(typeof post.id === "string" ? { post_id: post.id.slice(0, 256) } : {}),
           timeoutMs,
         })).then(resolve, reject);
       });

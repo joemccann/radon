@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 import sqlite3
+import time
 
 import pytest
 import requests
@@ -134,6 +135,25 @@ def test_retry_after_is_shared_with_other_workers(monkeypatch, retry_after):
     assert state["embargo_until"] == now + 120
     with pytest.raises(gov.AdmissionError):
         gov.reserve("another-account-token", timeout=0)
+
+
+@pytest.mark.parametrize("headers", [{}, {"Retry-After": "soon"}])
+def test_burst_429_without_retry_after_is_a_short_embargo(monkeypatch, headers):
+    # 2026-10-28..30 leap: every UW request on the host was admitted in one
+    # burst per 60.x s (57 bursts/hour, median 14 req/min against a 96 cap).
+    # A header-less burst 429 armed a 60s account-wide embargo each minute.
+    now = datetime(2026, 10, 30, 14, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gov.time, "time", lambda: now)
+    state = gov.observe(TOKEN, 429, headers)
+    assert now < state["embargo_until"] <= now + gov.MISSING_RETRY_AFTER_SECONDS
+    assert gov.MISSING_RETRY_AFTER_SECONDS <= 5.0
+
+
+def test_waiter_is_admitted_soon_after_a_headerless_burst_429():
+    gov.observe(TOKEN, 429, {})
+    started = time.monotonic()
+    gov.reserve(TOKEN, priority="standard", timeout=10)
+    assert time.monotonic() - started <= gov.MISSING_RETRY_AFTER_SECONDS + 0.5
 
 
 def test_daily_429_embargo_lasts_until_verified_reset(monkeypatch):

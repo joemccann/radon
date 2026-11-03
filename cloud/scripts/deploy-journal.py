@@ -18,6 +18,7 @@ PHASES = {
     "promoting",
     "target_unverified",
     "verified",
+    "finalization_pending",
 }
 
 

@@ -1076,3 +1076,14 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-334 / R-745 | DONE | RED 1 failed, 6 passed in `test_exit_orders_ack.py` (the status-callback permId left the journal PENDING and the sell was cancelled). GREEN 7 passed in that file; 52 passed across exit-order ack, guard durability, exit orders, and the legacy halt service. Catalog parity 13 passed. Event-odds pin 1 passed. Permanent drills 120 passed, 1 warning. | An exit acknowledgement now accepts a nonzero int permId from `Order` or `OrderStatus`. A bool is still ignored. A missing id on both objects still cancels and leaves the journal PENDING. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-10-31
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-336 / R-747 | DONE | RED 2 failed (`TimeoutError` on the order-executor probe and on the third bridge call). GREEN 23 passed in `scripts/api/tests/test_model_gateway_route.py` (`-n auto`). Catalog parity 15 passed. Permanent drills 120 passed, 1 warning. | Model chat and forecast run on a two-thread `radon-model-bridge` pool. A third call returns 503 `saturated` and does not start another gateway request. The default executor stays free for order preflight and the working-order read. No catch was widened and no retry was added. |
+## Nightly remediation 2026-10-30
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-335 / R-746 | DONE | RED 1 failed, 4 passed in `test_earnings_cache_budget.py` (`days_until` stayed 40). GREEN 16 passed across `test_earnings_cache_budget.py` and `test_earnings_route.py`; focused `-n auto` rerun 24 passed including service registration. Catalog parity 13 passed. Permanent drills 120 passed, 1 warning. | A live earnings miss now recomputes `days_until` and `within_dte` from `report_date` for the request. A missing marker is unchanged. A batch whose every ticker missed cache still returns 502. No catch was widened and no retry was added. |

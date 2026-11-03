@@ -28,7 +28,9 @@
 .periods { display: flex; gap: 5px; }
 .periods button { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: 550 12px var(--font-sans); cursor: pointer; }
 .periods button[aria-pressed="true"]:not(:disabled) { background: color-mix(in srgb, var(--positive) 9%, transparent); color: var(--signal-core-text); }
-.periods button:hover:not(:disabled) { background: var(--bg-panel-raised); }
+@media (hover: hover) and (pointer: fine) {
+  .periods button:hover:not(:disabled) { background: var(--bg-panel-raised); }
+}
 .periods button:disabled { opacity: 0.45; cursor: not-allowed; }
 .chartNote { margin: 4px 0 0; padding-bottom: 12px; border-bottom: 1px solid var(--line-grid); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .historyEmpty { display: flex; flex-direction: column; justify-content: center; min-height: 166px; padding: 18px 0; }
@@ -41,7 +43,9 @@
 .metrics dt { margin-bottom: 9px; color: var(--text-muted); font-size: 12px; }
 .metrics dd { margin: 0; font-size: clamp(17px, 1.55vw, 23px); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -0.035em; overflow-wrap: anywhere; }
 .textLink { display: inline-flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 44px; color: var(--signal-core-text); font-size: 12px; font-weight: 550; text-decoration: none; }
-.textLink:hover { text-decoration: underline; text-underline-offset: 4px; }
+@media (hover: hover) and (pointer: fine) {
+  .textLink:hover { text-decoration: underline; text-underline-offset: 4px; }
+}
 .sectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sectionHeading h2 { margin: 0; font-size: 19px; line-height: 1.4; font-weight: 550; letter-spacing: -0.025em; }
 .sectionHeading h2 > span { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 5px; margin-left: 6px; border-radius: 5px; background: var(--bg-panel-raised); color: var(--text-muted); font-size: 12px; letter-spacing: 0; vertical-align: middle; }
@@ -50,7 +54,9 @@
 .positionHead > span:last-child { text-align: right; }
 .positionList { list-style: none; padding: 0; margin: 0; }
 .position { display: grid; grid-template-columns: 1fr 1.15fr 0.8fr; align-items: center; gap: 16px; min-height: 74px; padding: 13px 0; border-bottom: 1px solid var(--line-grid); color: inherit; text-decoration: none; }
-.position:hover { background: var(--bg-panel); }
+@media (hover: hover) and (pointer: fine) {
+  .position:hover { background: var(--bg-panel); }
+}
 .security { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .security > span:last-child { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .security strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }

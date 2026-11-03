@@ -337,7 +337,17 @@ for sizing/eval is unchanged.
   against the broker book with its own resting remainder replaced. When that
   modify has no permanent id yet, only the same account and order number is
   replaced; another account's working order that reused the number still
-  counts against the size (REL-332).
+  counts against the size (REL-332). `/orders/place` runs one subprocess per
+  order, so the broker re-check alone still let two placers read the same
+  unreserved holding and both be exempted. A close-exempted order holds an
+  exclusive cross-process claim on its symbol's closeable size, from that
+  live-book read until the order is acknowledged, so the second placer
+  measures a book that already reserves the first order's size. The claim is
+  one lock file per symbol under `data/close_admission/`; a claim another
+  placement already holds, or a lock store that cannot be written, refuses
+  the order with `CLOSE_ADMISSION_BUSY` rather than transmitting. Orders that
+  are not close-exempted never take the claim, so ordinary placement is not
+  serialized (`scripts/tests/test_close_admission_serialization.py`).
 
 `RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
 signs (§F). Once `=1`, prod warns and still places unless mode is `block`.

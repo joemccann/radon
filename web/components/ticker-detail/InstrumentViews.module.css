@@ -199,8 +199,10 @@
     border-radius: var(--radius);
   }
 
-  :global(.instrument-workspace) .views :global(.news-open-link:hover) {
-    background: var(--bg-hover);
+  @media (hover: hover) and (pointer: fine) {
+    :global(.instrument-workspace) .views :global(.news-open-link:hover) {
+      background: var(--bg-hover);
+    }
   }
 
   :global(.instrument-workspace) .views :global(.news-open-link:focus-visible) {

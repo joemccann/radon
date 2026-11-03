@@ -150,3 +150,50 @@ async def test_portfolio_sync_success_does_not_stamp_error(monkeypatch):
     payload = await server.portfolio_sync()
     assert payload["bankroll"] == 1
     assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_portfolio_sync_cooldown_skip_does_not_stamp_error(monkeypatch):
+    """2026-10-31: portfolio-sync showed ERROR "IB Gateway connection
+    recently failed" while /health was authenticated. That text is the
+    synthetic skip from the shared 15s IB cooldown in
+    _run_ib_script_with_recovery: ib_sync.py never ran. Stamping it as a
+    writer error overwrote the real failure reason and logged a ~16s ERROR
+    blip on every healthy-gateway cooldown (daily 23:45:12Z). A skipped
+    tick is not a writer miss; orders-sync already stays silent on it."""
+    captured = _capture(monkeypatch)
+
+    async def fake_sync():
+        return _fail(server._IB_COOLDOWN_SKIP_ERROR)
+
+    async def fake_gw(pool_status=None, pool=None):
+        return {
+            "port_listening": True,
+            "upstream_dead": False,
+            "auth_state": "authenticated",
+        }
+
+    monkeypatch.setattr(server, "_coordinated_portfolio_sync", fake_sync)
+    monkeypatch.setattr(server, "check_ib_gateway", fake_gw)
+
+    with pytest.raises(HTTPException) as exc:
+        await server.portfolio_sync()
+
+    assert exc.value.status_code == 502
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_ib_cooldown_returns_the_skip_marker(monkeypatch):
+    """The cooldown skip and the heartbeat check must share one string."""
+    monkeypatch.setattr(server, "_ib_last_failure", server.time.monotonic())
+
+    async def must_not_run(*a, **k):
+        raise AssertionError("cooldown must skip the spawn")
+
+    monkeypatch.setattr(server, "run_script_raw", must_not_run)
+    monkeypatch.setattr(server, "run_script", must_not_run)
+
+    result = await server._run_ib_script_with_recovery("ib_sync.py", [], raw=True)
+    assert result.ok is False
+    assert result.error == server._IB_COOLDOWN_SKIP_ERROR

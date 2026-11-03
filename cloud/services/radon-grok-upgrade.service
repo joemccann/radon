@@ -14,6 +14,8 @@ After=network.target
 # Until setup-grok-page-responder.sh has installed the controller the fire
 # is skipped; the 26h grok-upgrade heartbeat then goes stale and pages.
 ConditionPathExists=/usr/local/lib/radon/grok-upgrade/scripts/grok_upgrade.py
+# Retained only for rollback; managed clients upgrade exclusively through CI.
+ConditionPathExists=!/opt/radon-model-clients/current/manifest.json
 StartLimitIntervalSec=300
 StartLimitBurst=3
 

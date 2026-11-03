@@ -367,42 +367,21 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-class TestAnthropicCallerIsSubscriptionOnly:
-    """Subscriptions only (2026-09-18): the CTA copy caller meters the Claude
-    Max grant through the shared ladder resolver, never the SDK + API key."""
+class TestCtaCallerUsesCredentialOwningGateway:
+    def test_candidate_env_credentials_never_cross_the_wire(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(cta_llm, "gateway_request", lambda operation, payload, **kw: seen.append((operation, payload)) or {"text": "SPX copy"})
+        assert cta_llm._anthropic_caller(system="You write posts.", user="draft", model="claude-opus-5", env={"CLAUDE_CODE_OAUTH_TOKEN": "secret"}) == "SPX copy"
+        assert seen[0][0] == "chat"
+        assert seen[0][1]["system"] == "You write posts."
+        assert "secret" not in repr(seen)
 
-    def test_uses_the_grant_as_a_bearer_with_the_identity_block(self):
-        seen: dict = {}
-
-        class _Resp:
-            status_code = 200
-
-            def json(self):
-                return {"content": [{"type": "text", "text": "SPX copy"}]}
-
-        def post(url, *, headers, json, timeout):
-            seen.update({"url": url, "headers": headers, "json": json})
-            return _Resp()
-
-        text = cta_llm._anthropic_caller(
-            system="You write posts.",
-            user="draft",
-            model="claude-opus-5",
-            env={"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat-test"},
-            post=post,
-        )
-        assert text == "SPX copy"
-        assert seen["url"] == "https://api.anthropic.com/v1/messages"
-        assert seen["headers"]["authorization"] == "Bearer sk-ant-oat-test"
-        assert seen["headers"]["anthropic-beta"] == "oauth-2025-04-20"
-        assert "x-api-key" not in seen["headers"]
-        assert seen["json"]["system"][0]["text"].startswith("You are Claude Code")
-        assert seen["json"]["system"][1] == {"type": "text", "text": "You write posts."}
-
-    def test_a_prepaid_key_alone_is_refused(self):
-        with pytest.raises(RuntimeError, match="subscription"):
-            cta_llm._anthropic_caller(
-                system="s", user="u", model="m",
-                env={"ANTHROPIC_API_KEY": "sk-ant-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1"},
-                post=lambda *a, **k: pytest.fail("must not call the API"),
-            )
+    def test_gateway_failure_never_uses_local_prepaid_or_transport(self, monkeypatch):
+        from model_gateway.client import GatewayError
+        def unavailable(*args, **kwargs):
+            raise GatewayError("unavailable")
+        monkeypatch.setattr(cta_llm, "gateway_request", unavailable)
+        with pytest.raises(GatewayError):
+            cta_llm._anthropic_caller(system="s", user="u", model="m",
+                env={"ANTHROPIC_API_KEY": "prepaid"},
+                post=lambda *a, **k: pytest.fail("must not call a provider from the consumer"))

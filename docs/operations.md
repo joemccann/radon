@@ -200,6 +200,43 @@ notices (REL-158 / R-439). It drops lifecycle, PID and timeout-control fields,
 including those mixed into an otherwise valid datagram. The proxy socket stays
 0600 and is owned by the container user.
 
+Gateway status receives `RADON_DEPLOY_SHA` only from the managed runtime
+after validating the already-selected gateway image repository and full SHA.
+Its reported version must match that immutable image; caller/host dotenv values
+and a later checkout lookup cannot replace the identity.
+
+Preparatory model-cache migration and CLI-export containers remove inherited
+`NOTIFY_SOCKET`; they cannot replace the service's main PID with a short-lived
+Podman conmon. The foreground runtime retains its filtered notify proxy.
+Before prestage allocation, after exact image pulls and just before teardown,
+`sudo /usr/local/sbin/radon-app-runtime check-model-space` checks fixed destination
+filesystems using UID1000-available bytes (`f_bavail`) and available inodes.
+Root-reserved blocks do not count. The shared 4KiB-volume budget is
+5144893312 bytes/3209 inodes, including archive/tree peaks from the pinned
+per-release CLI bounds (enforced at export and CI-checked against the exact
+image), pinned model-cache assets not already present at their digest (+545128448
+bytes when absent) and an explicit 1GiB/1024-inode runtime/recovery margin.
+Unchanged client payloads are hardlinked into the new SHA; retention keeps the
+selected release plus the previous one once older releases age past two hours.
+No threshold override or data pruning occurs; insufficient or unknown capacity
+refuses before stopping consumers and never triggers a fallback host build.
+Promotion repeats the capacity check. Recovery instead hash-verifies existing
+immutable clients/exports, without allocating another payload or applying the
+fresh-install threshold. Missing/corrupt recovery artifacts fail closed.
+Cache-ref failures remove temporary files, preserve canonical refs and report
+a safe errno name with exit78; they never reset provider pacing state.
+
+Optional prestage defers without worktree allocation or a prestage marker when
+the old control plane lacks the exact read-only disk-check sudo grant. Normal
+deployment remains mandatory after trusted control-plane sync; an available
+checker refusing capacity returns78 and cannot become a fallback build.
+
+First-cutover model rollback preserves the independent privileged floor,
+canonical legacy files omitted from the old manifest, and pending recovery
+receipts. Temporary `/etc/radon` hardening has a root-owned, fsynced permission
+intent so kill/reboot retries recover its exact original mode without widening
+unrelated directories. See [model gateway rollback](model-gateway.md#upgrades-and-rollback).
+
 **Container stop (2026-09-25).** Each app drop-in runs
 `ExecStop=radon-app-runtime halt %n <grace>`, which stops the container by
 name through the engine (`stop --time <grace>`: SIGTERM to the container
@@ -223,39 +260,30 @@ replaced after validation. A symlink, an unexpected owner, or a generation
 mismatch exits 78 and does not start the container. A filesystem that does not
 implement the ioctl keeps the device and inode check.
 
-**Subscription credential binds (2026-09-18).** `radon-app-runtime` also
-binds the operator's CLI subscription grants, each read-only and only when the
-directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex`,
-`/home/radon/.claude` and `/home/radon/.local/bin` (the `agy` CLI the antigravity
-rung shells out to) land at
-the same paths inside the containers whose unit
-runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
-`radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
-`os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/explain` and
-`/api/assistant`. The retired `/api/newsfeed/share` route returns `410` without
-a model call; the 2026-09-19 missing-subscription share incident is historical.
-Never the whole home directory, and never
-into the relay. `radon-api` holds the secret-store key group, so it never
-gets `~/.local/bin`: its antigravity rung runs the image's integrity-pinned
-`/usr/local/bin/agy` (`docker/app/vendor-clis/`). Antigravity is the one read-write grant: `agy` refreshes its
-token and writes logs and project state on every run, so
-`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config` (Google's
-fixed paths) are bound read-write into `radon-api`, `radon-research` and
-`radon-nextjs` and shared with the host, keeping one rotating
-token store. Newsfeed renders third-party content and gets no antigravity bind
-(its ladder falls past that rung). `radon-marketdesk` renders third-party
-content too: it gets the read-only `.grok`, `.codex` and `.claude` grants, no
-antigravity bind and no `~/.local/bin` (the Python image ships pinned CLIs). The rest of `~/.gemini` (the retired Gemini CLI's `oauth_creds.json`) is never mounted.
-The Python and Next.js model ladders use the
-[subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
-Those tiers never fall back to a prepaid key: the opt-in flag was removed
-(operator policy 2026-10-26), and `radon-app-runtime` strips prepaid Anthropic,
-xAI and OpenAI keys from every container env. Funding a prepaid wallet does
-not recover a missing subscription.
-NVIDIA and Cerebras have separate rung policies in that owner. Check subscription
-availability and the credential binds before changing billing policy.
-`radon-subscription-tokens`
-keeps the files live on the host ([subscription-tokens.md](subscription-tokens.md)).
+**Subscription credential binds.** Only `radon-model-gateway` receives the
+operator CLI grant directories, and only when each directory exists:
+`/home/radon/.grok`, `/home/radon/.codex`, `/home/radon/.claude`,
+`/home/radon/.gemini/antigravity-cli` and `/home/radon/.gemini/config`.
+Those binds are read-write inside the gateway. `HOME=/home/radon` stays pinned.
+`radon-api`, `radon-newsfeed`, `radon-research`, `radon-nextjs` and
+`radon-marketdesk` do not mount provider grants. They receive the private
+inference socket read-only and `RADON_MODEL_GATEWAY_REQUIRED=1`. `radon-api`
+also receives the management socket read-only. Do not mount provider grants
+into a consumer to repair a model failure. Next.js still hosts
+`/api/newsfeed/explain` and `/api/assistant`, which call the gateway. The
+retired `/api/newsfeed/share` route returns `410` without a model call.
+Never the whole home directory, and never into the relay. Provider CLIs are
+the gateway image's pinned binaries, not a host `~/.local/bin` mount. The
+retired Gemini CLI `oauth_creds.json` is not a mounted grant.
+The shared model ladder must never fall back to a prepaid key: the opt-in flag was removed,
+and `radon-app-runtime` strips prepaid Anthropic, xAI and OpenAI keys from
+every container. It also strips provider tokens and model API keys from every
+container except the gateway. Funding a prepaid wallet does not recover a
+missing subscription. Billing policy stays in
+[the subscription auth owner](oauth-subscription-auth.md#radon-http-model-ladder-server).
+The gateway keeps the grant files live
+([subscription-tokens.md](subscription-tokens.md),
+[model-gateway.md](model-gateway.md)).
 
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
 directory, and the container is granted that gid at start with
@@ -275,13 +303,11 @@ bytes. Two things still do, and neither is closed by this channel. First, a
 plaintext copy of the master key at
 `/home/radon/radon/data/secret_store/secret_store.key`, owned by `radon`, named
 by `RADON_SECRET_STORE_KEY_FILE` in `/etc/radon/env` (the seed the credstore
-was encrypted from). Remove it with the cutover below. Second, the `radon-api`
-container gets a writable, radon-writable `~/.gemini/antigravity-cli` while it
-holds the key group. The `agy` binary itself is image-owned and
-integrity-pinned (host `~/.local/bin` is not mounted into the API), but agy
-state the host account can rewrite still reaches a key-holding process. That
-gap stays open until the API's agy rung moves out of the key-holding
-container.
+was encrypted from). Remove it with the cutover below. The writable Antigravity
+grant no longer shares the API container that holds the key group. That grant
+is on `radon-model-gateway`, which does not receive the secret-store master key.
+The vault broker remains the key holder. Do not put the Antigravity directory
+back on `radon-api`.
 
 **Secret-store key cutover (operator, once, after 16:00 ET and only once the
 DS-2026-10-05-05 deploy is green).** Before that deploy the four units still
@@ -454,9 +480,9 @@ If the host still refuses the sandbox at launch,
 `chromium sandbox unavailable`; `PLAYWRIGHT_CHROMIUM_SANDBOX=0` in
 `/etc/radon/env` forces that mode. Also,
 `radon-app-runtime` hands it a filtered env file — only the keys the
-newsfeed code reads (`NODE_ENV`, model-ladder keys: the Claude grant token, NVIDIA and `CEREBRAS_API_KEY` last,
-Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and
-`RADON_NEWSFEED_*`), never the full production secret set — and starts its
+newsfeed code reads (`NODE_ENV`, Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`,
+replica toggles, and `RADON_NEWSFEED_*`), never provider tokens or model API
+keys and never the full production secret set, and starts its
 container on an isolated bridge network (egress only) instead of the host
 stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
@@ -644,12 +670,12 @@ and vendor application updates retain independent activity checks. See
 - **Claude only, never fable.** `ALLOWED_AGENTS=claude` refuses any other rung (exit 2, one page, before cloning). `AGENTS_RESOLVER=lib/security_claude_ladder.py` lists the bot's `claude models`, skips the newest tier and prints `claude:<model>` rungs; empty or failed output keeps `AGENTS="claude:claude-opus-5 claude:claude-sonnet-5"` and is logged. Every claude launch passes `--model <rung> --effort medium`, `--disallowedTools ScheduleWakeup Monitor CronCreate` and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, and exports `RADON_RUNNER_MODEL` so the prompt's nested Stage 4 `claude` uses the same model.
 - **Subscription only.** `AGENT_UNSET` lists every API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway name the installed Claude Code honors (the per-name review is in [security-approved-tools.md](security-approved-tools.md)), plus `OPENAI_API_KEY`, `CODEX_API_KEY` and `PW_TEST_CONNECT_WS_ENDPOINT`. The runner unsets each and logs `IGNORING: <NAME>`, never the value. `AGENT_ENV` sets `RADON_LADDER_NO_AUTH_FILES=1` and `RADON_WEEKEND_BROWSER_HOST=unavailable:disabled`. The daemon's environment also carries `DISABLE_AUTOUPDATER=1` (rail 8).
 - **Pre-run hook** (`scripts/runner/hooks/security_pre.sh`, root-owned): asserts the phase runs in `~/radon-runner/work/<loop>` with `origin` = the loop's repository; `REFUSED`s (exit 2, no agent) a credential file (`.env`, `web/.env`, the retired IB-mode overlay) and what `unset` cannot reach: a key line in `.env.local`, `.env.*.local` or any `.deepsec/**/.env*`, or an `apiKeyHelper` / reroute `env` entry in the bot's `~/.claude/settings.json`, `.claude/settings*.json` or the managed settings. Flag names count only when truthy (1/true/yes). The `refused=` reason names the class only (the public issue gets exit 2 and not the reason); the offending file goes to the private runner log. Then it runs `claude_cli_env_drift.py --notify` against the bot's claude (non-fatal; one page per CLI version with unreviewed env names), fetches, detaches at the newest CI-green `main` from `nightly_green_base.py` (REL-187), `git clean`s everything but `KEEP_PATHS` and `.venv`, keeps the bare `$LOOP_STATE/held.git`, writes `audit-context.md` for the audit phase and arms the branch-only deliver record before deliver (R-611). Every hook git call pins `core.hooksPath=/dev/null` and `core.fsmonitor=false`.
-- **Post-run hook** (`scripts/runner/hooks/security_post.sh`): the phase is `OK` only with a column-0 `SECURITY-NIGHTLY PHASE COMPLETE:` / `SECURITY-DEEPSEC PHASE COMPLETE:` line in this phase's own log slice (R-535; a recital does not count); `TRUNCATED` on the background-ceiling marker, `TIMEOUT` on rc 124, `FAILED (exit N)` otherwise, `INCOMPLETE (exit 0 without the phase-completion marker)` without the stamp. Deliver additionally needs its verdict: the durable record `$LOOP_STATE/.<loop>-deliver/record.json` first (R-613), then the slice's `NIGHTLY DELIVER READY:` / `NIGHTLY DELIVER INCOMPLETE:` line, and every URL must be a same-repo OPEN PR on the loop's prefix (`gh pr view -R joemccann/radon`). A branch-only `launched` record falls through to the verdict line. It then publishes the private report and posts the dead-man.
+- **Post-run hook** (`scripts/runner/hooks/security_post.sh`): the phase is `OK` only with a column-0 `SECURITY-NIGHTLY PHASE COMPLETE:` / `SECURITY-DEEPSEC PHASE COMPLETE:` line in this phase's own log slice (R-535; a recital does not count, nor does a line inside a fenced code block or one still carrying the `<run-id>` placeholder); an audit posts `audited-through` only when the private `last-audited.json` checkpoint names the pinned head; agent exit 75 is `INCOMPLETE (exit 75)`; `TRUNCATED` on the background-ceiling marker, `TIMEOUT` on rc 124, `FAILED (exit N)` otherwise, `INCOMPLETE (exit 0 without the phase-completion marker)` without the stamp. Deliver additionally needs its verdict: the durable record `$LOOP_STATE/.<loop>-deliver/record.json` first (R-613), then the slice's `NIGHTLY DELIVER READY:` / `NIGHTLY DELIVER INCOMPLETE:` line, and every URL must be a same-repo OPEN PR on the loop's prefix (`gh pr view -R joemccann/radon`). A branch-only `launched` record falls through to the verdict line. It then publishes the private report and posts the dead-man.
 - **Private operator reports.** At the end of every phase the agent writes `$RADON_RUNNER_LOOP_STATE/scratch/latest-report-<phase>.md`. The post-run hook (never the agent) takes it only if it is newer than the phase start and not a symlink, redacts known secret shapes, and pushes it to the PRIVATE repository `joemccann/radon-security-reports` at `reports/<loop>/<YYYY-MM-DD>/<phase>.md` from a fresh `mktemp` clone, over `ssh -i ~/.radon-runner-reports-key -o IdentitiesOnly=yes` with GitHub's published ed25519 host key pinned in a `mktemp` known-hosts file (`StrictHostKeyChecking=yes`). The key is the bot's, outside every clone, never exported and named only in that hook. The page links it as `url` / `url_title` "Open private report"; a page without it says `(no private report this phase)`. The public rolling issue never carries the link or the content (rail 7). Never make that repository public.
-- **Dead-man reporting.** Each phase posts one public comment that is only the machine-readable phase line (`<!-- radon-phase loop=<loop> phase=<phase> exit=<n> ... -->`, the same fields on the next line, and `audited-through: <sha>` only for an audit that exited 0) on the rolling issue labelled `security-nightly` or `security-deepsec`, creating the issue if absent, and one Pushover. Finding text, PR numbers, paths, secrets and the refusal class do not go on that issue. The harness writes the exit from the process status, including when the phase is killed. Older comments are pruned with `nightly_issue_prune.py` only after the new comment's post is confirmed and its numeric id is kept (R-612, R-657). The agent never writes an issue: the root-owned `gh` guard (`GH_GUARD=1`, `/usr/local/radon-runner/guard/<loop>/gh`, loop name and real `gh` baked in) routes every `pr` / `api` / `issue` / `alias` call through `nightly_pr_guard.py`, which refuses merges, aliases, unguarded PR creation and, for these two loops, any issue write. A missing daily comment means the runner did not fire.
+- **Dead-man reporting.** Each phase posts one public comment that is only the machine-readable phase line (`<!-- radon-phase loop=<loop> phase=<phase> exit=<n> ... -->`, the same fields on the next line, and `audited-through: <sha>` only for an audit that exited 0, then a counts-only `unreviewed: <n> commits since <date>, reason <token>` line whenever `origin/main` is ahead of the loop's private `last-audited.json` checkpoint, so a scanner rc 75 or an audit that never advanced the checkpoint shows publicly as a growing count; see `docs/runner.md` § Phase status line) on the rolling issue labelled `security-nightly` or `security-deepsec`, creating the issue if absent, and one Pushover. Finding text, PR numbers, paths, secrets and the refusal class do not go on that issue. The harness writes the exit from the process status, including when the phase is killed. Older comments are pruned with `nightly_issue_prune.py` only after the new comment's post is confirmed and its numeric id is kept (R-612, R-657). The agent never writes an issue: the root-owned `gh` guard (`GH_GUARD=1`, `/usr/local/radon-runner/guard/<loop>/gh`, loop name and real `gh` baked in) routes every `pr` / `api` / `issue` / `alias` call through `nightly_pr_guard.py`, which refuses merges, aliases, unguarded PR creation and, for these two loops, any issue write. A missing daily comment means the runner did not fire.
 - **Killed mid-phase.** On SIGTERM (a bootout, launchd's `ExitTimeOut` of 60, a reboot) the runner kills the agent's process group, reaps leftovers, pages `KILLED` first, then gives the post-run hook 10 seconds for the dead-man, and exits 143.
 - **Leftover processes.** After every agent the runner kills the process group, then every bot-owned process whose cwd is under the loop's clone or state, plus pids the agent listed in `$RADON_RUNNER_PIDFILE` that started during the phase. Other loops have their own clone and state, so they are never touched.
-- **Night-to-night state.** `$RADON_RUNNER_LOOP_STATE` (`/Users/_radonbot/radon-runner/state/<loop>`, mode 700) is never deleted by the runner: `scratch/` (run-records, `last-audited.json`, reports, `rclone.conf` for the private archive), `.<loop>-deliver/`, `held.git` (unreleased P0/P1 branches, never pushed to origin), `keep/` and the drift-page stamps. The post-run hook prunes `scratch/` run dirs older than 30 days. Releasing a held P0/P1 is still an operator-written `released: <finding-id>` line in the private run-record (docs/runner.md). DeepSec `last-audited.json` also holds a durable `closed_queue`. Before any operator-only item is listed in a PR Next section, `scripts/nightly_deepsec_queue.py reverify` checks it against evidence (`open` / `closed` / `unverifiable`) and the committed ledger `docs/security-deepsec-closed.json` (sanitized IDs only). Closed items stay in private state and are not re-listed in Next; they appear once in that night's deliver report as closed tonight. Confirm `DS-2026-09-20-03` on the next fire: it is seeded `closed` (PR #689, `e5c4e627`, `cloud/scripts/setup-vps.sh` L39-47) and must show in closed tonight once, then only in `closed_queue`.
+- **Night-to-night state.** `$RADON_RUNNER_LOOP_STATE` (`/Users/_radonbot/radon-runner/state/<loop>`, mode 700) is never deleted by the runner: `scratch/` (run-records, `last-audited.json`, reports, `rclone.conf` for the private archive), `.<loop>-deliver/`, `held.git` (unreleased P0/P1 branches, never pushed to origin), `keep/` and the drift-page stamps. The post-run hook prunes `scratch/` run dirs older than 30 days. Releasing a held P0/P1 is still an operator-written `released: <finding-id>` line in the private run-record (docs/runner.md). DeepSec `last-audited.json` also holds a durable `closed_queue`. Before any operator-only item is listed in a PR Next section, `scripts/nightly_deepsec_queue.py reverify` checks it against evidence (`open` / `closed` / `unverifiable`) and the committed ledger `docs/security-deepsec-closed.json` (sanitized IDs only). Closed items stay in private state and are not re-listed in Next; they appear once in that night's deliver report as closed tonight. Confirm `DS-2026-09-20-03` on the next fire: it is seeded `closed` (PR #689, `e5c4e627`, `cloud/scripts/setup-vps.sh` L39-47) and must show in closed tonight once, then only in `closed_queue`. To stop an operator-only item from repeating nightly without fixing it, add a row to `docs/security-accepted-risks.json` by PR (id, `reason`, `accepted_at`, `expires_at` at most 90 days later, `accepted_by`); it drops out of Next until it expires, then returns marked `re-decide`. Next shows at most three items plus a counts line; the rest are in the private report.
 - **DeepSec workspace.** `KEEP_PATHS=".deepsec data/radon"` moves the operator-bootstrapped `.deepsec/` workspace and DeepSec's incremental `data/radon/` state aside before the re-clone and back after it, at the same clone path, so DeepSec's recorded `rootPath` stays valid. DeepSec itself stays operator-bootstrapped (rail 8): a missing or mis-pinned `.deepsec/` workspace is `OPERATOR_REQUIRED`, never an install trigger. Run from the clone root, DeepSec's reviewer is its vendored Codex SDK on the bot's own `codex` login. A `failed` DeepSec status is operator-only: first confirm the job with `sudo launchctl print system/com.radon.runner.security-deepsec`. Do not bootstrap or restart DeepSec from a nightly run.
 
 **Cycle shape (security and DeepSec).** `audit` records verified findings; `remediate` implements EVERY verified source-actionable finding as root-cause commits on one dated branch `<loop>/<YYYY-MM-DD>`; `deliver` formats ONE substantive PR via `scripts/github_pr_output.py`, publishes through `scripts/nightly_publish.py`, polls CI with `scripts/nightly_deliver.py watch`, fixes red checks on the branch (PR bodies pass `nightly_issue_format.sanitize`, which shares its run-identifier rules with the publication gate through `scripts/credential_redaction.py` so the two cannot drift, also redacts multi-line private-key blocks, complete or cut off, quoted values containing an escaped quote, YAML block-scalar values and triple-delimited values that span lines, matches a credential key name from the credential WORD onward so no prefix length evades it, and keeps the quota ladder's `claude.ai/settings/usage` page only when sentence punctuation alone follows it, redacting the whole token otherwise), and ends by printing the verdict line the post-run hook turns into the phase's final notification. Deliver runs even when remediate exited non-zero (committed fixes are durable; CI decides). The loop never merges: the operator merges from the Pushover / issue line. An INCOMPLETE deliver records branch + PR number outside the clone (`$RADON_RUNNER_LOOP_STATE/.<loop>-deliver/record.json`, via `RADON_WEEKEND_ROOT`; the security loops also mirror it in their private run-record) and the next fire resumes that branch and PR before opening a new one. A green deliver records the head SHA it watched (`record --status green --head-sha <sha>`); only a green carries one, and the post-run hook re-reads that PR's live head and check rollup before it reports anything ready to merge, so a push after the watch step, a rollup that is not wholly successful, a rollup with no entries at all, or a green with no recorded SHA all read as INCOMPLETE.
@@ -686,7 +712,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-refresh.timer` | [Unit schedule](../cloud/services/radon-refresh.timer) | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |
-| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras |
+| `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh. Vision cascade: antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 16:20 ET | SPX pct above 50d MA over pct above 200d MA (20 min after the close, across DST). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
 | `radon-rsi-oversold.timer` | daily 16:40 ET | SPX pct of members with Wilder RSI(14) strictly below 30 (40 min after the close; 20 min behind ma-ratio so the shared member-close store is already fresh). Spec: [`indicators/rsi-oversold.md`](indicators/rsi-oversold.md) |
@@ -882,6 +908,63 @@ use it only as the deliberate prior configuration.
 **Escalation:** retain sanitized refusal and unit-status evidence and involve
 the operator if required callers remain blocked or an unlisted caller retains
 bypass under enforcement.
+
+### Weekly live drift check (`scripts/security_live_drift.py`)
+
+The security loops review code only, and the policy and trust tests above are
+offline. This weekly job compares the repo with what is live. It makes no
+model calls and only reads: one Tailscale API GET, one BatchMode ssh command,
+`gh api` GETs. Expected state lives in
+[the live baseline](security-live-baseline.json); change it in the same PR as
+the reviewed live change it records. [Tests](../scripts/tests/test_security_live_drift.py)
+pin the parsing, the exit codes and the redaction.
+
+| Check | Live source | Expected |
+|---|---|---|
+| `tailnet_policy` | `GET /api/v2/tailnet/-/acl` | `cloud/tailscale/policy.hujson`, order-insensitive, `__OPERATOR_LOGIN__` bound from live `group:operator` |
+| `tailnet_trust` | `ssh -o BatchMode=yes root@radon-app` with a fixed command that prints only `PRESENT`/`ABSENT` and `LOG`/`ENFORCING` tokens for `RADON_TAILNET_TRUST_MODE` in `/etc/radon/env` | enforcing, per the narrowing runbook above |
+| `github:<repo>:*` | rulesets, `main` protection, deploy keys (id, title, read_only only), `security_and_analysis`, for `joemccann/radon` and `joemccann/radon-security-reports` | the baseline |
+
+It runs as the `com.radon.security-live-drift` LaunchAgent in the operator's
+account on the Mac mini, Sunday 15:17 local. Not the `_radonbot` runner:
+the check needs the operator's admin `gh` login and root ssh to the app host,
+and every nightly agent can read the bot's home. Install or refresh it from a
+reviewed clone of `main` (no sudo); re-run after changing the policy or the
+baseline, since the job reads its installed snapshot:
+
+```bash
+python3.13 scripts/install_security_live_drift.py --activate
+```
+
+**Credentials the operator provisions** (paths are in the plist, values never are):
+
+1. **Tailscale.** An OAuth client with only the `policy_file:read` scope,
+   stored as `client_id=` and `client_secret=` lines in
+   `~/.local/share/radon-security-live-drift/tailscale-oauth.env`, mode 0600,
+   owned by the operator. Absent or group-readable: `operator_required`.
+2. **GitHub.** None while the operator's own `gh` login is admin on both
+   repos. For least privilege, put a fine-grained token with Administration:
+   read and Metadata: read on both repos in `github-token` (0600) in the same
+   directory; the job then uses it instead of the `gh` login.
+3. **ssh.** The operator's existing BatchMode root ssh to `radon-app` (the
+   release coordinator uses the same path). Nothing new.
+
+**Output.** The private report (the [report template](security-report-template.md)
+rules, summary table first, a Coverage limits row) is written 0600 to
+`~/.local/share/radon-security-live-drift/reports/live-drift-<date>.md`. It is
+not pushed to `joemccann/radon-security-reports`: that path uses the bot's
+write deploy key, and this job stays read-only. `launchd.log` beside it holds
+only the public line,
+`radon-live-drift ts=<utc> ok=N drift=N operator_required=N error=N`, which never
+carries names, ids, ACL contents, hostnames or values.
+
+**Exit codes:** 0 all ok, 1 drift, 75 operator required or incomplete, 2 usage.
+**Manual run:** `python3.13 -I ~/.local/share/radon-security-live-drift/current/scripts/security_live_drift.py --repo-root ~/.local/share/radon-security-live-drift/current --checks github --out /tmp/drift.md`.
+**Stop conditions:** the job changes nothing. A drift row is reconciled by the
+owning runbook (policy, trust narrowing, branch protection), never by editing
+the baseline to match without review.
+**Rollback:** `launchctl bootout gui/$(id -u)/com.radon.security-live-drift`
+and remove its plist.
 
 ### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
 
@@ -1212,24 +1295,26 @@ and prints `installed_sha` plus `host_role` only after manifest verification.
 
 ### App image prune
 
-`pull <sha>` and the no-argument `prune` delete different tags. Both take the deploy lock without blocking and skip when they cannot, when rollback state is invalid, or when no running app container is using a managed image. A tag a running app container still references is kept.
+`pull <sha>`, the no-argument `prune` and `prune-locked [<sha>]` delete different tags. `pull <sha>` and `prune` take the deploy lock without blocking and skip when they cannot. `prune-locked` runs inside a deploy-lock holder and takes the caller's held lock descriptor as stdin instead (a second open of the lock conflicts with that hold, which is why the old in-deploy prune skipped every time, #1012). It skips with `image prune skipped: stdin is not the held deploy lock` or `deploy lock is held by another process` otherwise. Every prune skips when rollback state is invalid or when no running app container is using a managed image. A tag a running app container still references is kept.
 
-Every `pull` holds the pull lock (`/run/radon-app-runtime/image-pull.lock`, shared) from before the first layer fetch until the verb exits, past pair verification. Both prunes take that lock exclusively without blocking and print `image prune skipped: app image pull in progress` while another pull holds it. A no-argument prune started while prepull is pulling therefore skips instead of deleting the pair prepull is fetching. A pull waits up to 300 seconds for a running prune, then exits 75. Neither lock waits on the other, so a pull under the deploy lock cannot deadlock.
+Every `pull` holds the pull lock (`/run/radon-app-runtime/image-pull.lock`, shared) from before the first layer fetch until the verb exits, past pair verification. Every prune takes that lock exclusively without blocking and print `image prune skipped: app image pull in progress` while another pull holds it. A no-argument prune started while prepull is pulling therefore skips instead of deleting the pair prepull is fetching. A pull waits up to 300 seconds for a running prune, then exits 75. Neither lock waits on the other, so a pull under the deploy lock cannot deadlock.
 
-`pull <sha>` protects that SHA. When the transition journal exists it also protects both journal SHAs and does not read the green marker. When the journal is absent it protects green-marker line 1 and does not add green-marker line 2. `pull` from `deploy.sh` holds the deploy lock, so this prune skips. The CI prepull job runs `pull` without the deploy lock, so this prune runs.
+`pull <sha>` prunes before it fetches any layer, then pulls. It protects that SHA. When the transition journal exists it also protects both journal SHAs and does not read the green marker. When the journal is absent it protects green-marker line 1 and does not add green-marker line 2. `pull` from `deploy.sh` holds the deploy lock, so this prune skips. The CI prepull job runs `pull` without the deploy lock, so this prune runs unless prestage holds the lock.
 
-The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it only after a green deploy, and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
+`prune-locked <sha>` protects that SHA, green-marker line 1 and line 2 when line 2 is valid, or the SHA plus both journal SHAs while a journal exists. `deploy.sh`'s supervisor calls it with FD 9 as stdin after it takes the deploy lock and recovers any pending transition, before the inner deploy builds, pulls or runs model disk admission (prestage included; an ungranted call is skipped with a warning). Deploy order: `prune-locked`, then admission and build (or a loaded prestage), `pull <sha>` (its own prune skips under the deploy lock), admission, teardown admission. Root's weekly `disk_cleanup.py` calls `prune-locked` with no SHA and its own held lock; that form keeps the no-argument `prune` keep-set below. Right after `prune-locked`, the supervisor runs `reclaim-locked` (no argument, same FD 9 as stdin): `disk_cleanup.py --deploy-locked` exits at once when `/` has at least `HEADROOM_THRESHOLD_BYTES` free, and otherwise reclaims every non-image category and heartbeats `disk-cleanup` (`error` when headroom is still short). Ungranted or failed, it is skipped with a warning and admission decides as before.
+
+The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it after the supervisor closes the lock fd, after a green deploy and after a failed one (a failed deploy leaves the green marker alone, so its target set goes), and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
 
 - **Symptom:** the app disk fills with `ghcr.io/joemccann/radon-python` and `radon-node` SHA tags, or prepull reports `exact release image pair is incomplete after pull`.
 - **Prerequisites:** the deploy lock is a regular file, rollback state parses, and a running app container is present. Otherwise the verb skips.
 - **Blast radius:** `rmi` of SHA tags outside the keep-set above. Gateway images are outside this sweep. A skip leaves the extra tags on disk.
-- **Safe diagnosis:** name the verb before deleting anything. `pull <sha>` and no-argument `prune` do not protect the same lines.
-- **Stop conditions:** do not prune from prestage. A prune that skips with `app image pull in progress` is working as designed; do not retry it until prepull exits.
+- **Safe diagnosis:** name the verb before deleting anything. `pull <sha>`, `prune-locked` and no-argument `prune` do not protect the same lines.
+- **Stop conditions:** do not run the no-argument prune from prestage. A prune that skips with `app image pull in progress` is working as designed; do not retry it until prepull exits.
 - **Verification:** the command prints removed tags or `image prune skipped`, and the running pair plus green-marker line 2 are still local. `cloud/tests/test_app_runtime.py` and `cloud/tests/test_sync_control_plane.py` pin the keep-set.
 - **Rollback:** line 2 is the previous pair. If a `pull <sha>` already removed it, do not invent a local image from a deleted tag. Follow the deploy rollback in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md).
 - **Escalation:** a pull that exits 75 on the pull lock is a failed prepull, not a failed production deploy. The deploy job pulls the pair again under the deploy lock.
 
-Manual run, as radon, only when no deploy lock is held: `sudo -n /usr/local/sbin/radon-app-runtime prune`. It skips on its own while a pull holds the pull lock.
+Manual run, as radon, only when no deploy lock is held: `sudo -n /usr/local/sbin/radon-app-runtime prune`. It skips on its own while a pull holds the pull lock. Never run `prune-locked` by hand during a deploy: hand it only a lock descriptor you hold.
 
 The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
 gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
@@ -1240,10 +1325,17 @@ gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
 `gh run list --workflow=ci.yml --limit 1`. The app version tag is `v` plus
-the history fold from `scripts/release_version.py`. The `release-tag` job
-pushes it after that deploy succeeds, including when earlier test jobs were
-skipped. Root and web `package.json` version fields are a fallback when that
-history is unavailable, and they can lag the tag. For the exact privileged bootstrap,
+the shared build identity from `scripts/release_version.py --ci-version
+--expected-sha "$GITHUB_SHA"`. Both image selection and `release-tag` validate
+canonical semver and the exact checkout SHA; selector failure stops the step
+before output or tagging. The tag job runs after deployment succeeds, including
+when earlier test jobs were skipped, and never moves an existing tag.
+
+The original 0.7.0 history baseline remains unchanged. When that history is
+missing or disconnected after a history rewrite, the existing web `package.json`
+fallback labels both the built app and its tag. Package fields can lag earlier
+tags; this fallback does not reconstruct monotonic semver or restore purged
+objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.
@@ -1257,7 +1349,8 @@ restart-managed` and `recover` now run `retire_research_watcher`: an enabled
 watcher is `disable --now`ed, a hand-started one is stopped, and either
 outcome is non-fatal. The unit file, its drop-in, the 150s research stop wait
 and the read-only API research bind stay. The text below is the historical
-activation contract for the retired unit; do not re-enable it.
+activation contract for the retired unit; do not re-enable it. Current app
+containers do not receive those grant directories. Only `radon-model-gateway` does.
 
 The research worker executes the Python image's pinned `claude`, `codex`,
 `grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
@@ -1284,8 +1377,9 @@ The API credential staging/cleanup contract remains in force when research mount
 of the host state (no data, media or lease binds), plus the newsfeed's
 isolation (the job reads the marketdesk.ai JSON API over HTTPS, no
 browser): bridge network, `/etc/radon/seccomp/chromium.json` (start refused
-without it), `--shm-size 512m` and an env allowlist (Turso, ladder,
-`THEMARKETEAR_*`, `MARKETDESK_*`, `DROPBOX_WRITE_*`).
+without it), `--shm-size 512m`, an env allowlist (Turso, `THEMARKETEAR_*`,
+`MARKETDESK_*`, `DROPBOX_WRITE_*`) and the read-only inference socket.
+Provider grants and model API keys stay on the gateway.
 `TimeoutStartSec=270`, `StartLimitBurst=10` per 1800s. Heartbeats
 `marketdesk-research` (`service_cycle`) and `marketdesk-dropbox` (`ok`, `paused`
 when write credentials are absent, `error`), both 15 minutes. Runbook:
@@ -1313,7 +1407,7 @@ publication. See [archive limits and recovery](marketdesk-pdf-archive.md).
 
 ### Research evidence archive
 
-`radon-research-archive.timer` fires every Sunday at 04:20 UTC, after the 03:20 disk-cleanup pass (`RandomizedDelaySec=900`, `Persistent=true`). It was monthly until 2026-10-21, when a month of evidence (about 0.5G a day) filled the 75G app host disk mid-deploy. Its `runtime-container.conf` drop-in runs `scripts/research/archive.py` through `radon-app-runtime` with the same read/write private research bind as the worker and nothing else (no data, media, lease or subscription binds), so it needs no new host grant. It uploads `evidence/<key>/` directories to the `RADON_ARCHIVE_S3_*` bucket under `research/evidence/<YYYY-MM>/<key>/`. `RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/`. The job does not use `RADON_ARCHIVE_S3_PREFIX`. Each object is stored with `Content-MD5` and the SHA-256 in object metadata, then HEAD-verifies size and SHA-256. A directory is pruned only when every file verified, its `state.sqlite` work row is still settled (or absent), and each file is unchanged since verification. Candidates are at least 7 days old (a rolling cutoff, not the month start); pending or processing work is skipped. `assets/` (served to subscribers) and `downloads/` (cached PDFs that queued reviews hash-check) are never touched. Per-run ceilings: 20 GiB, 20,000 directories. The run also stops opening new directories after 3 hours, inside the 4-hour unit timeout, so the process can exit and heartbeat before systemd kills it. Heartbeat `research-archive` (9-day window). An ok heartbeat does not mean the backlog is empty: the JSON summary can count remaining directories in `skipped.deadline` or `skipped.budget`, and those directories stay on disk for the next run. Missing B2 credentials fail closed with no deletes.
+`radon-research-archive.timer` fires every Sunday at 04:20 UTC, after the 03:20 disk-cleanup pass (`RandomizedDelaySec=900`, `Persistent=true`). It was monthly until 2026-10-21, when a month of evidence (about 0.5G a day) filled the 75G app host disk mid-deploy. Its `runtime-container.conf` drop-in runs `scripts/research/archive.py` through `radon-app-runtime` with the same read/write private research bind as the worker and nothing else (no data, media, lease or subscription binds), so it needs no new host grant. It uploads `evidence/<key>/` directories to the `RADON_ARCHIVE_S3_*` bucket under `research/evidence/<YYYY-MM>/<key>/`. `RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/`. The job does not use `RADON_ARCHIVE_S3_PREFIX`. Each object is stored with `Content-MD5` and the SHA-256 in object metadata, then HEAD-verifies size and SHA-256. A directory is pruned only when every file verified, its `state.sqlite` work row is still settled (or absent), and each file is unchanged since verification. Candidates are at least 7 days old (a rolling cutoff, not the month start); pending or processing work is skipped. `assets/` (served to subscribers) and `downloads/` (cached PDFs that queued reviews hash-check) are never touched here; the daily [research asset archive](#research-asset-archive) owns them. Per-run ceilings: 20 GiB, 20,000 directories. The run also stops opening new directories after 3 hours, inside the 4-hour unit timeout, so the process can exit and heartbeat before systemd kills it. Heartbeat `research-archive` (9-day window). An ok heartbeat does not mean the backlog is empty: the JSON summary can count remaining directories in `skipped.deadline` or `skipped.budget`, and those directories stay on disk for the next run. Missing B2 credentials fail closed with no deletes.
 
 Operator commands (app host, as root):
 
@@ -1332,6 +1426,36 @@ A dry run (no B2 calls, no deletes) needs the private bind, so run it inside the
 - **Verification:** `pruned_dirs` counts only directories removed after HEAD verification. `skipped.deadline` and `skipped.budget` are still local.
 - **Rollback:** copy the `research/evidence/<YYYY-MM>/<key>/` objects back into `evidence/<key>/` through the container bind.
 - **Escalation:** a stale 9-day heartbeat or a repeating error is a backup gap. Do not delete evidence by hand to clear it.
+
+### Research asset archive
+
+`radon-research-asset-archive.timer` fires daily at 03:40 UTC (`RandomizedDelaySec=600`, `Persistent=true`). Daily, not weekly: on 2026-10-31 `assets/` held 17,590 files (6.5G) and grew about 0.14G a day on a 75G app host disk at 92%. After the first backfill a run is one HEAD per local asset plus the day's new uploads. Its `runtime-container.conf` drop-in is byte-identical to the evidence archive's: `scripts/research/asset_archive.py` runs through `radon-app-runtime` with only the read/write private research bind, so it needs no new host grant.
+
+- **Assets.** Every `assets/<sha256>.<ext>` is uploaded to `research/assets/<name>` with `Content-MD5` and its SHA-256 in object metadata, then HEAD-confirmed: size equal, SHA-256 equal to the name. A confirmed object is not re-read or re-uploaded. A local copy is unlinked only when it confirmed in that run, its last use (newer of mtime and atime, read before the job opens it) is more than `HOT_WINDOW_DAYS` (30) old, and its size and mtime are unchanged. The job reads with `O_NOATIME`, so it never keeps a file warm. Reads through the API's read-only bind do not update atime either; only research-container reads do.
+- **Read-through.** `research.assets.read_asset` is the only asset reader (FastAPI `/newsfeed/research/files/{asset}` and `/newsfeed/research/evidence/{asset}`, publication validation, MarketDesk jobs, `store_asset`). On a local miss it GETs `research/assets/<name>` with a 5-second connect timeout and a 20-second whole-transfer deadline (inside the web proxy's 30 seconds), checks size, format and SHA-256, and re-caches the file when the bind is writable. The API bind is read-only, so the API serves from memory. Missing credentials, a missing object or a digest mismatch is a 404. The MarketDesk units do not receive B2 credentials, so the pruner never removes what they still need (next bullet).
+- **Pending references.** Before pruning, the job loads the SHA-256 of every file unfinished work points at and keeps it at any age (`skipped.referenced`): from Turso, `marketdesk_articles` rows not yet terminal or still in the Dropbox upload outbox (the `pending_uploads` predicate), and `marketdesk_pdf_queue` rows not downloaded or not yet attached to their post; locally, MarketDesk PDF receipts and `pending` research outbox payloads. If any lookup fails (Turso down, unreadable `state.sqlite`), the run still uploads and confirms, deletes nothing, and heartbeats error.
+- **Downloads.** `downloads/*.pdf` are Dropbox-reader caches. A file that `pending` or `processing` work still needs (the `sha256(path_lower + "\0" + rev)` download name, or that work's `ingestion.pdf` path) is never touched; neither is one younger than an hour. A file byte-identical to an asset confirmed in that run, or already confirmed in B2, is unlinked. A unique file past the hot window is uploaded to `research/downloads/<name>`, confirmed, then unlinked. The in-flight set is re-read just before deleting. Without `state.sqlite`, downloads are left alone (`skipped.no_state`).
+- **First run.** Measured read-only on 2026-10-31: 1.89G of assets past the window (3,260 files by mtime and atime), 4.19G of downloads identical to an asset (4,726 files), and 0.62G of unique downloads older than 30 days (689 files). No work row was pending or processing. Expected reclaim is about 6.7G after uploading about 7.2G, less whatever unfinished MarketDesk work references (not measured).
+
+Per-run ceilings: 20 GiB of uploads and a 2-hour deadline inside the 3-hour unit timeout. Heartbeat `research-asset-archive` (48-hour window) is ok or error and carries `uploaded_bytes`, `pruned_bytes`, the file counts and `skipped`. An ok heartbeat can still leave work in `skipped.deadline` or `skipped.budget`. `RADON_RESEARCH_ARCHIVE_PREFIX` overrides `research/` for both jobs. Missing B2 credentials fail closed with no deletes.
+
+Operator commands (app host, as root):
+
+```bash
+systemctl start radon-research-asset-archive.service        # run now
+journalctl -u radon-research-asset-archive.service -n 50    # JSON summary line
+```
+
+A dry run (no B2 calls, no deletes) runs inside the research container: `python scripts/research/asset_archive.py --dry-run`. `--no-prune` uploads and confirms without deleting.
+
+- **Symptom:** the `research-asset-archive` row is error or stale, the research volume grows again, or old research documents 404.
+- **Prerequisites:** the private research bind and complete `RADON_ARCHIVE_S3_*` credentials, also present in the API container for read-through.
+- **Blast radius:** only B2-confirmed assets past the window, downloads identical to a confirmed asset, and archived unique downloads are removed locally. Pending or processing work keeps its download.
+- **Safe diagnosis:** read the JSON summary; `errors` lists the first 20 files. A 404 on an old document with credentials present means the object is missing from `research/assets/`.
+- **Stop conditions:** missing credentials exit 2 and delete nothing. A failed pending-reference lookup deletes nothing that run. A file that fails upload or confirmation stays on disk and the heartbeat is error.
+- **Verification:** `pruned_assets` and `pruned_downloads` count only files removed after confirmation in B2.
+- **Rollback:** disable the timer. To restore locally, copy `research/assets/<name>` objects back into `assets/` through the container bind; reads re-cache on demand anyway.
+- **Escalation:** a stale 48-hour heartbeat or a repeating error is a backup gap. Do not delete assets by hand.
 
 ## Host swap
 
@@ -1359,19 +1483,19 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 
 ## NVIDIA model settings in the restricted newsfeed runtime
 
-The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` explicitly into `radon-newsfeed.service`; arbitrary `NVIDIA_*` keys remain excluded. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart the affected consumer. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart to roll back.
+The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` into `radon-model-gateway`; arbitrary other `NVIDIA_*` keys stay excluded, and those three names do not reach `radon-newsfeed.service`. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart `radon-model-gateway.service`. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart the gateway to roll back.
 
 
 ## Subscription keeper environment publication
 
 `setup-vps.sh` installs the root-owned subscription environment publisher and seeds
-`/etc/radon/subscription-tokens/env` before activating the keeper. Each deploy
+`/etc/radon/subscription-tokens/env` before activating units. Each deploy
 refreshes that allowlist through `radon-deploy-root publish-subscription-env` after
 canonical environment validation and before builds or service changes. Publication
 failure aborts the deploy. The derived directory is root-private; see
 [subscription token operations](subscription-tokens.md) for its supported inputs
-and rollback. The keeper keeps its existing uid and native provider credential
-locations.
+and rollback. The timer and the gateway container do not load this derived file.
+The gateway's filtered copy of `/etc/radon/env` supplies the keeper token.
 
 ### Deploy lock transition
 

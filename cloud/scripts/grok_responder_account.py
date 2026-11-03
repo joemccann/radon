@@ -35,7 +35,11 @@ OPTIONAL_UNITS = (
     "radon-grok-responder.service", "radon-grok-responder.timer",
     "radon-grok-responder-upgrade.service", "radon-grok-responder-upgrade.timer",
 )
-NEW_TIMERS = ("radon-grok-responder.timer", "radon-grok-responder-upgrade.timer")
+NEW_TIMERS = ("radon-grok-responder.timer",)
+RETIRED_TIMER = "radon-grok-responder-upgrade.timer"
+MODEL_GROUP = "radon-model-connect"
+MODEL_ROOT = Path("/opt/radon-model-clients/current")
+MODEL_SOCKET = "/run/radon-model-gateway/gateway.sock"
 OLD_TIMER = "radon-grok-page-responder.timer"
 OPERATOR_FLAGS = ("GROK_PAGE_RESPONDER", "GROK_PAGE_AUTOSHIP", "GROK_PAGE_MAX_ACTIONS_PER_DAY")
 
@@ -66,7 +70,8 @@ def trusted_tree(path: Path, *, owner_uid=0):
 
 def native_env():
     return {"HOME": str(ACCOUNT_HOME), "USER": ACCOUNT, "LOGNAME": ACCOUNT,
-            "PATH": str(ACCOUNT_HOME / ".local/bin") + ":/usr/local/bin:/usr/bin:/bin",
+            "PATH": str(MODEL_ROOT / "bin") + ":/usr/local/bin:/usr/bin:/bin",
+            "RADON_MODEL_GATEWAY_SOCKET": MODEL_SOCKET,
             "LANG": "C.UTF-8", "GROK_PAGE_NO_DOTENV": "1"}
 
 
@@ -106,7 +111,7 @@ def derive_environment(production_text, existing_text):
         if re.fullmatch(r"[0-9]{1,4}", value):
             lines.append(f"{name}={value}")
     lines += ["GROK_PAGE_AUTOPUSH=0", "GROK_PAGE_NO_DOTENV=1", "GROK_PAGE_SYNC_REMOTE=1",
-              "GROK_BIN=" + str(ACCOUNT_HOME / ".local/bin/grok")]
+              "GROK_BIN=" + str(MODEL_ROOT / "bin/grok"), "RADON_MODEL_GATEWAY_SOCKET=" + MODEL_SOCKET]
     return "\n".join(lines) + "\n"
 
 
@@ -136,7 +141,7 @@ def root_directory(path: Path, mode=0o700):
     path.chmod(mode)
 
 
-def atomic_root_file(path: Path, content: bytes, mode=0o600, *, owner_uid=0):
+def atomic_root_file(path: Path, content: bytes, mode=0o600, *, owner_uid=0, owner_gid=None):
     trusted_tree(path.parent, owner_uid=owner_uid)
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     temporary = "." + path.name + "." + secrets.token_hex(12)
@@ -151,6 +156,8 @@ def atomic_root_file(path: Path, content: bytes, mode=0o600, *, owner_uid=0):
         with os.fdopen(fd, "wb") as stream:
             stream.write(content)
             stream.flush()
+            if owner_gid is not None:
+                os.fchown(stream.fileno(), owner_uid, owner_gid)
             os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
         os.rename(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
@@ -185,20 +192,50 @@ def owned_directory(path, uid, gid, mode):
 
 
 def ensure_native_cli():
-    """Prepare the service command as its account, without rewriting an existing slot."""
-    canonical = ACCOUNT_HOME / ".local/bin/grok"
-    native = ACCOUNT_HOME / ".grok/bin/grok"
-    if as_account(["/usr/bin/test", "-x", canonical], check=False).returncode:
-        if as_account(["/usr/bin/test", "-x", native], check=False).returncode:
-            as_account(["/bin/bash", "-c", "set -euo pipefail; curl -fsSL https://x.ai/cli/install.sh | bash"])
-    as_account(["/bin/sh", "-c", """set -eu
-canonical="$1"
-native="$2"
-if [ ! -e "$canonical" ] && [ ! -L "$canonical" ] && [ -f "$native" ] && [ -x "$native" ]; then
-    /bin/ln -s -- "$native" "$canonical"
-fi
-[ -f "$canonical" ] && [ -x "$canonical" ]
-""", "grok-native-layout", canonical, native])
+    """Verify the root-owned CI receipt as the responder, never install a CLI."""
+    proof = ("import sys;sys.path.insert(0,sys.argv[1]);"
+             "from grok_runtime import managed_manifest;managed_manifest()")
+    as_account(["/usr/bin/python3.13", "-I", "-S", "-c", proof, CODE_ROOT / "scripts"])
+
+
+def derive_model_environment(original, uid, gid):
+    if any(type(value) is not int or value <= 0 or value == 1000 for value in (uid, gid)):
+        raise MaintenanceError("invalid dedicated model identity")
+    values = parse_env(original)
+    existing_gid = unquote(values.get("RADON_MODEL_TUNNEL_GID", ""))
+    if existing_gid and existing_gid != str(gid):
+        raise MaintenanceError("model admission group differs from existing transport")
+    peers = unquote(values.get("RADON_MODEL_CLIENT_UIDS", ""))
+    if peers and not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*){0,15}", peers):
+        raise MaintenanceError("invalid existing model peer list")
+    allowed = {int(value) for value in peers.split(",") if value}
+    allowed.add(uid)
+    if 1000 in allowed or len(allowed) > 16:
+        raise MaintenanceError("model peer admission exceeds its scope")
+    updates = {"RADON_MODEL_TUNNEL_GID": str(gid), "RADON_MODEL_CLIENT_UIDS": ",".join(map(str, sorted(allowed)))}
+    lines = [line for line in original.splitlines() if line.partition("=")[0] not in updates]
+    return "\n".join(lines + [name + "=" + value for name, value in updates.items()]) + "\n"
+
+
+def admit_model_client(account):
+    try:
+        group = grp.getgrnam(MODEL_GROUP)
+    except KeyError:
+        run(["/usr/sbin/groupadd", "--system", MODEL_GROUP])
+        group = grp.getgrnam(MODEL_GROUP)
+    if account.pw_gid in {0, 1000}:
+        raise MaintenanceError("responder primary group has application authority")
+    pickup = grp.getgrnam(PICKUP_GROUP)
+    allowed_groups = {account.pw_gid, pickup.gr_gid, group.gr_gid}
+    if set(os.getgrouplist(ACCOUNT, account.pw_gid)) - allowed_groups:
+        raise MaintenanceError("responder account has unrelated supplemental groups")
+    original = read_root_file(PRODUCTION_ENV)
+    updated = derive_model_environment(original, account.pw_uid, group.gr_gid)
+    run(["/usr/sbin/usermod", "-aG", MODEL_GROUP, ACCOUNT])
+    metadata = PRODUCTION_ENV.stat()
+    if original != updated:
+        atomic_root_file(PRODUCTION_ENV, updated.encode(), stat.S_IMODE(metadata.st_mode), owner_gid=metadata.st_gid)
+        run(["/usr/bin/systemctl", "try-restart", "radon-model-gateway.service"])
 
 
 def install_responder_code(stage: Path):
@@ -227,6 +264,7 @@ def publish_optional_units(stage: Path):
     root_directory(INSTALLED_HELPER.parent, 0o755)
     atomic_root_file(INSTALLED_HELPER, Path(__file__).read_bytes(), 0o644)
     run(["/usr/bin/systemctl", "daemon-reload"])
+    run(["/usr/bin/systemctl", "disable", "--now", RETIRED_TIMER])
 
 
 def _responder_idle():
@@ -245,6 +283,12 @@ def refresh(stage: Path):
         raise MaintenanceError("refresh requires the prepared responder marker")
     _responder_idle()
     install_responder_code(stage)
+    account = pwd.getpwnam(ACCOUNT)
+    admit_model_client(account)
+    ensure_native_cli()
+    production = read_root_file(PRODUCTION_ENV)
+    existing = read_root_file(PRIVATE_DIR / "env")
+    atomic_root_file(PRIVATE_DIR / "env", derive_environment(production, existing).encode())
     _responder_idle()
     publish_optional_units(stage)
 
@@ -272,7 +316,15 @@ def prepare(stage: Path):
         pickup_group = grp.getgrnam(PICKUP_GROUP)
     for member in (ACCOUNT, "radon"):
         run(["/usr/sbin/usermod", "-aG", PICKUP_GROUP, member])
-    if set(os.getgrouplist(ACCOUNT, account.pw_gid)) - {account.pw_gid, pickup_group.gr_gid}:
+    allowed_groups = {account.pw_gid, pickup_group.gr_gid}
+    try:
+        model_gid = grp.getgrnam(MODEL_GROUP).gr_gid
+        if model_gid in {0, 1000}:
+            raise MaintenanceError("model group aliases an application authority")
+        allowed_groups.add(model_gid)
+    except KeyError:
+        pass
+    if set(os.getgrouplist(ACCOUNT, account.pw_gid)) - allowed_groups:
         raise MaintenanceError("responder account has unrelated supplemental groups")
     for child in (".grok", ".local", "runtime", "upgrade", "cache"):
         owned_directory(ACCOUNT_HOME / child, account.pw_uid, account.pw_gid, 0o700)
@@ -297,7 +349,6 @@ def prepare(stage: Path):
     trusted_tree(Path(bun).resolve())
     for directory in (repo, repo / "web"):
         as_account([bun, "install", "--frozen-lockfile"], cwd=directory)
-    ensure_native_cli()
     as_account(["/usr/bin/touch", ACCOUNT_HOME / "runtime/grok-runtime.lock"])
     as_account(["/usr/bin/chmod", "0600", ACCOUNT_HOME / "runtime/grok-runtime.lock"])
     root_directory(PRIVATE_DIR)
@@ -307,6 +358,8 @@ def prepare(stage: Path):
     atomic_root_file(PRIVATE_DIR / "env", derive_environment(production, existing).encode())
     run(["/bin/bash", stage / "cloud/scripts/install-grok-upgrade-controller.sh", stage / "scripts", CONTROLLER])
     install_responder_code(stage)
+    admit_model_client(account)
+    ensure_native_cli()
     publish_optional_units(stage)
 
 
@@ -373,18 +426,12 @@ def handover(*, forward: bool, runner=run, marker=READY):
 
 
 def verify_authentication():
-    account = pwd.getpwnam(ACCOUNT)
-    auth = ACCOUNT_HOME / ".grok/auth.json"
-    meta = auth.lstat()
-    if not stat.S_ISREG(meta.st_mode) or meta.st_uid != account.pw_uid or meta.st_mode & 0o077:
-        raise MaintenanceError("dedicated native authentication is not ready")
-    proof = ("import os,sys;sys.path.insert(0,sys.argv[1]);"
-             "from subscription_tokens import PROVIDERS,default_probe,PROBE_OK;"
-             "sys.exit(default_probe(PROVIDERS['grok'],sys.argv[2],dict(os.environ)) != PROBE_OK)")
-    as_account(["/usr/bin/python3.13", "-E", "-S", "-c", proof,
-                CONTROLLER / "scripts", ACCOUNT_HOME / ".local/bin/grok"], timeout=180)
-    as_account(["/usr/bin/python3.13", "-E", "-S", CONTROLLER / "scripts/grok_upgrade.py", "--seed-if-missing",
-                "--grok-bin", ACCOUNT_HOME / ".local/bin/grok", "--lkg", ACCOUNT_HOME / "runtime/grok_lkg.json"])
+    ensure_native_cli()
+    proof = ("import sys;sys.path.insert(0,sys.argv[1]);"
+             "from model_gateway.client import request;"
+             "status=request('status',{},timeout_seconds=20);"
+             "sys.exit(status.get('status')!='ok' or 'grok' not in status.get('providers',[]))")
+    as_account(["/usr/bin/python3.13", "-I", "-S", "-c", proof, CODE_ROOT / "scripts"], timeout=30)
 
 
 def verify_pickup_and_pending_work():

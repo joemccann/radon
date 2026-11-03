@@ -99,10 +99,6 @@ def require_idle():
         raise RuntimeError('maintenance deferred: an agent or reviewer is active')
 
 
-def codex_update_command(brew):
-    return [brew, 'upgrade', '--cask', 'codex']
-
-
 def rollback(workspace, backup):
     for name in PACKAGE_PATHS:
         old, current = backup / name, workspace / name
@@ -148,24 +144,15 @@ def smoke(stage, policy, *, inference):
     codex = str(stage / 'node_modules/.bin/codex')
     if policy['codex'] not in run([codex, '--version'], cwd=stage): raise RuntimeError('bundled Codex version mismatch')
     if inference:
-        # Both login and SDK inference must work as the account that runs scans.
-        require_subscription_status(run([codex, 'login', 'status'], cwd=stage, include_stderr=True))
-        script = '''import {Codex} from '@openai/codex-sdk';
-const sdk = new Codex({codexPathOverride:process.argv[1],config:{features:{plugins:false,remote_plugin:false}}});
-const t = sdk.startThread({model:process.argv[2],sandboxMode:'read-only',approvalPolicy:'never',skipGitRepoCheck:true});
-const result = await t.run('Reply exactly RADON_TOOLCHAIN_OK. Do not use tools.');
-if(result.finalResponse.trim() !== 'RADON_TOOLCHAIN_OK')process.exit(1);
-'''
-        with tempfile.TemporaryDirectory(prefix='radon-reviewer-smoke-') as fixture:
-            # Node resolves the SDK in stage, but the model's working directory
-            # is an empty fixture, never the private state or operator repo.
-            script = script.replace("skipGitRepoCheck:true", 'skipGitRepoCheck:true,workingDirectory:' + json.dumps(fixture))
-            run(['/opt/homebrew/bin/node', '--input-type=module', '-e', script, codex, policy['smoke_model']], cwd=stage, timeout=180)
+        from model_gateway.client import request as gateway_request
+        reply = gateway_request('chat', {'messages': [{'role': 'user', 'content': 'Reply exactly RADON_TOOLCHAIN_OK.'}], 'maxTokens': 32}, timeout_seconds=120)
+        if reply.get('text', '').strip() != 'RADON_TOOLCHAIN_OK':
+            raise RuntimeError('model gateway smoke failed')
 
 
 def resolved_policy(policy):
     candidate = dict(policy)
-    for name, package in [('deepsec', 'deepsec'), ('codex', '@openai/codex')]:
+    for name, package in [('deepsec', 'deepsec')]:
         version = run(['/opt/homebrew/bin/npm', 'view', package, 'dist-tags.latest', '--registry=https://registry.npmjs.org'])
         if not re.fullmatch(r'\d+\.\d+\.\d+', version):
             raise RuntimeError('registry stable release is not an exact version')
@@ -174,14 +161,15 @@ def resolved_policy(policy):
         if target < baseline or (name == 'deepsec' and target[0] != baseline[0]):
             raise RuntimeError('registry release is outside the approved upgrade family')
         candidate[name] = version
-    # CLI and SDK must publish the same version before the pair can move.
-    run(['/opt/homebrew/bin/npm', 'view', '@openai/codex-sdk@' + candidate['codex'], 'version', '--registry=https://registry.npmjs.org'])
+    # Model CLI and SDK pins move only through reviewed CI/package-lock changes.
     return candidate
 
 
 def candidate_allowed(candidate, policy):
     if candidate == policy: return True
     if not policy.get('automatic_stable_updates'): return False
+    if candidate.get('codex') != policy.get('codex'):
+        return False
     for name in ('deepsec', 'codex'):
         if not re.fullmatch(r'\d+\.\d+\.\d+', candidate.get(name, '')): return False
         baseline = tuple(map(int, policy[name].split('.')))
@@ -320,6 +308,8 @@ def update_desktop(policy):
     run([brew, 'update'], timeout=600)
     results = []
     for cask, app in policy['desktop_casks'].items():
+        if cask == 'codex':
+            results.append({'tool': cask, 'status': 'managed-by-gateway-ci'}); continue
         if cask not in installed:
             results.append({'tool': cask, 'status': 'not-managed-by-homebrew'}); continue
         if tool_busy(cask, app):
@@ -333,18 +323,9 @@ def update_desktop(policy):
 
 
 def update_native():
-    result = []
-    for relative, args in [('.local/bin/claude', ['update']), ('.grok/bin/grok', ['update', '--stable']), ('.local/bin/agy', ['update']), ('.local/bin/muse', ['--version'])]:
-        binary = Path.home() / relative
-        if not binary.exists(): continue
-        if tool_busy(binary.name, operator_native=True):
-            result.append({'tool': binary.name, 'status': 'deferred-running-tool'}); continue
-        try:
-            run((['/usr/bin/env', 'MUSE_UPDATE_INTERVAL_SECONDS=0'] if binary.name == 'muse' else []) + [str(binary), *args], timeout=900)
-            result.append({'tool': binary.name, 'status': 'updated-or-current'})
-        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            result.append({'tool': binary.name, 'status': 'update-failed', 'reason': str(exc)})
-    return result
+    # Native model clients are immutable CI artifacts. The legacy maintenance
+    # entry point must not download, auto-update or reauthenticate them.
+    return [{'tool': 'model-clients', 'status': 'managed-by-gateway-ci'}]
 
 
 def main(argv=None):

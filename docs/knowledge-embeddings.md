@@ -9,6 +9,16 @@ The `knowledge` table carries two vector columns:
 | `embedding` | BAAI/bge-small-en-v1.5 | 384 | exact `vector_distance_cos` scan | Automatic fallback; ingest dual-writes by default. No ANN index after 0090. |
 | `embedding_v2` | nvidia/nemotron-3-embed-1b | 2048 | exact `vector_distance_cos` scan | Live default for queries and ingest (2026-09-25). No ANN index. |
 
+## Model service boundary
+
+All embedding inference runs in the standalone model gateway. The compatibility
+client in `scripts/knowledge/embed.py` sends text, an explicit `384` or `2048`
+space, and `query` or `passage` through the private socket. It neither loads a
+native model nor reads provider credentials. The gateway owns the NVIDIA
+transport and cached local BAAI model. Query coverage checks, ingest dual-writes,
+and FTS fallback remain in the knowledge client; a failed 2048-d request is never
+returned as a 384-d vector.
+
 ## Query resolution
 
 `scripts/knowledge/embed.py:resolve_query_vector` selects the query vector:

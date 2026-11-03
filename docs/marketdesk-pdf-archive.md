@@ -62,6 +62,12 @@ currently excluded/withdrawn priority rows do not block other permitted work;
 selection refresh processes stale priority rows first. Preference persists across
 restarts; completed membership is inert and needs no operator cleanup.
 
+A report that fails on its own (any non-quota code, such as a provider
+`http_500` for one file) doubles its item retry delay per attempt, capped at one
+day and never earlier than the account clock. After `PRIORITY_MAX_FAILURES` (3)
+attempts ending in such a failure, a priority row stops reserving precedence, so
+one bad file cannot starve the backlog. It keeps its place when due.
+
 One cycle admits at most one PDF. The global minimum interval is 1,800 seconds
 (30 minutes). `MARKETDESK_PDF_MIN_INTERVAL_SECONDS` can increase it; existing
 values below 1,800 are clamped in both the worker and the store. Admission is

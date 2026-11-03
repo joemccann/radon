@@ -290,11 +290,10 @@ def test_operator_contract_names_the_scoped_token_and_rollout():
 
 def test_service_and_publication_lifecycle_contracts():
     unit = (CLOUD / "services/radon-subscription-tokens.service").read_text()
-    assert f"EnvironmentFile={TARGET}" in unit
-    assert "EnvironmentFile=/etc/radon/env\n" not in unit
-    assert TARGET in next(line for line in unit.splitlines() if line.startswith("InaccessiblePaths="))
-    assert "RADON_SUBSCRIPTION_VAULT_SOCKET=/run/radon-subscription-vault/vault.sock" in unit
-    assert "Environment=RADON_DB_NO_REPLICA=1" in unit
+    assert "EnvironmentFile=" not in unit
+    assert "scripts.model_gateway.refresh_cli" in unit
+    assert "RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock" in unit
+    assert "RADON_SUBSCRIPTION_VAULT_SOCKET=" not in unit
     helper = (CLOUD / "scripts/deploy-root-helper.sh").read_text()
     assert "publish-subscription-env)" in helper
     assert "/usr/local/lib/radon/subscription_service_env.py" in helper
@@ -367,6 +366,8 @@ printf 'sudo:%s\\n' "$*" >> "$CALLS"
 if [[ "${1:-}" == -l ]]; then
   shift
   [[ "${1:-}" == -- ]] && shift
+  # This fixture varies subscription publication, not the unrelated disk grant.
+  [[ "$1" != /usr/local/sbin/radon-app-runtime || "$2" != check-model-space ]] || exit 0
   [[ "$1" == "$HELPER" && "$2" == publish-mcp-env ]]
   exit "$?"
 fi

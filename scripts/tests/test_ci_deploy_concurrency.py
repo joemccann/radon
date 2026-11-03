@@ -16,6 +16,7 @@ import os
 import subprocess
 import re
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -43,6 +44,17 @@ TEST_JOBS = (
     "py-coverage",
     "cloud-tests",
     "perimeter-smoke",
+)
+# The `pytest (cloud heavy)` shard: the three cloud modules whose serial
+# time set the al wall under loadfile. On CI (run 41335275763) al still ran
+# 171s after the first two moved out: test_bootstrap_control_plane.py (45
+# tests of 5-10s subprocess drills, 129s serial locally) pinned one worker.
+# Every test in these modules builds its own tmp_path sandbox, so heavy
+# distributes them per test instead of per module.
+CLOUD_HEAVY_MODULES = (
+    "cloud/tests/test_app_runtime.py",
+    "cloud/tests/test_bootstrap_control_plane.py",
+    "cloud/tests/test_deploy_corrections.py",
 )
 
 
@@ -270,21 +282,28 @@ def test_ci_runs_cloud_infra_pytest() -> None:
 def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     matrix = cloud["strategy"]["matrix"]
-    # CIP-009: al and mz merged — the ~25-job gate fan-out queued one shard
-    # ~37s past the 20-slot concurrency cap, and the late start set the wall.
-    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge"]
+    # CIP-009: al and mz merged when one shard queued ~37s for a runner slot.
+    # The account cap is 40 concurrent jobs, not 20 (repo-wide running jobs
+    # plateaued at exactly 40, 2026-10-29..11-01). heavy carries the two
+    # ~90s modules that each pinned one al loadfile worker and set the PR
+    # critical path (cloud al 181s of a 13s + 181s path).
+    assert [str(shard) for shard in matrix["shard"]] == ["al", "heavy", "edge"]
     rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
     assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
     assert rows["al"] == "cloud/tests/test_[a-z]*.py"
+    assert rows["heavy"].split() == list(CLOUD_HEAVY_MODULES)
     omits = {
         str(row["shard"]): str(row.get("omit", ""))
         for row in matrix["include"]
     }
-    assert omits["al"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert omits["al"].split() == ["cloud/tests/test_caddy_edge_timeouts.py", *CLOUD_HEAVY_MODULES]
+    assert omits["heavy"] == ""
     assert "matrix.omit" in _job_commands(cloud)
     assert "selected" in _job_commands(cloud)
     caddy_step = next(step for step in cloud["steps"] if step.get("name") == "Install caddy (edge mechanism tests)")
-    assert "edge" in caddy_step["if"]
+    # Every cloud shard installs caddy, so no module skips on a missing binary
+    # whichever shard it lands on (T-322 was the third such recurrence).
+    assert "matrix.shard" not in caddy_step.get("if", "")
     assert "--durations=25" in _job_commands(cloud)
     assert "--durations=25" in _job_commands(_workflow()["jobs"]["py-tests"])
 
@@ -737,7 +756,7 @@ def test_release_tag_script_tags_the_deployed_sha_and_pushes_only_that_ref(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     sha = "c" * 40
     assert lines == [
-        "python3 scripts/release_version.py",
+        f"python3 scripts/release_version.py --ci-version --expected-sha {'c' * 40}",
         "git rev-parse -q --verify refs/tags/v1.2.3",
         f"git tag v1.2.3 {sha}",
         "git push origin refs/tags/v1.2.3",
@@ -749,7 +768,7 @@ def test_release_tag_script_leaves_an_existing_tag_where_it_is(tmp_path: Path) -
     assert result.returncode == 0, result.stdout + result.stderr
     assert "already tagged" in result.stdout
     assert lines == [
-        "python3 scripts/release_version.py",
+        f"python3 scripts/release_version.py --ci-version --expected-sha {'c' * 40}",
         "git rev-parse -q --verify refs/tags/v1.2.3",
         "git rev-list -n 1 v1.2.3",
     ]
@@ -783,20 +802,56 @@ def test_py_coverage_installs_coverage_only() -> None:
     assert "python -m coverage combine" in commands
 
 
-def test_bun_jobs_cache_the_install_store() -> None:
+def test_bun_jobs_do_not_cache_the_install_store() -> None:
+    """The bun store cache cost more than the install it saved.
+
+    1,177/1,177 Vitest jobs hit the ~/.bun/install/cache entry, but the
+    restore took 10-14s (p50 12s) and the install after it took <=2s. The
+    Playwright jobs install the same two lockfiles with no cache in ~3s each.
+    Both bun projects must still install from their frozen lockfiles.
+    """
     jobs = _workflow()["jobs"]
-    pin = "5a3ec84eff668545956fd18022155c47e93e2684"
     for name in ("web-tests", "perimeter-smoke"):
-        cache = next(
+        steps = jobs[name]["steps"]
+        bun_caches = [
             step
-            for step in jobs[name]["steps"]
-            if "actions/cache@" in step.get("uses", "")
+            for step in steps
+            if "actions/cache" in step.get("uses", "")
+            and ".bun" in str(step.get("with", {}).get("path", ""))
+        ]
+        assert not bun_caches, (
+            f"{name}: a bun store cache restore (p50 12s) is slower than the "
+            "uncached install (<=2s)"
         )
-        assert pin in cache["uses"]
-        assert "~/.bun/install/cache" in str(cache["with"]["path"])
-        key = str(cache["with"]["key"])
-        assert "bun.lock" in key
-        assert "web/bun.lock" in key
+        lines = [
+            line.strip().rstrip("&").strip()
+            for line in _job_commands(jobs[name]).splitlines()
+        ]
+        assert "bun install --frozen-lockfile" in lines, f"{name}: root project"
+        assert "bun install --frozen-lockfile --cwd web" in lines, f"{name}: web project"
+
+
+def test_parallel_bun_installs_fail_the_step_when_either_fails() -> None:
+    """A bare `wait` returns 0 whatever its children exited with.
+
+    With the store cache gone every install reaches the registry, so a failed
+    install must fail the install step instead of surfacing later as a module
+    resolution error inside a test shard. Each background PID is awaited by
+    name; `wait "$pid"` returns that child's status and bash -e stops there.
+    """
+    jobs = _workflow()["jobs"]
+    for name in ("web-tests", "perimeter-smoke"):
+        install = next(
+            str(step["run"])
+            for step in jobs[name]["steps"]
+            if "bun install --frozen-lockfile" in str(step.get("run", ""))
+        )
+        lines = [line.strip() for line in install.splitlines() if line.strip()]
+        assert "wait" not in lines, f"{name}: bare wait masks a failed install"
+        pids = [line.split("=", 1)[0] for line in lines if line.endswith("=$!")]
+        assert len(pids) == 2, f"{name}: capture both install PIDs: {lines}"
+        for pid in pids:
+            assert f'wait "${pid}"' in lines, f"{name}: wait on {pid} by PID"
 
 
 def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:
@@ -1007,8 +1062,97 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     rows = {str(row["shard"]): row for row in cloud["strategy"]["matrix"]["include"]}
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
+    # Per-test distribution: under loadfile the largest heavy module is the
+    # shard floor, which is the wall this shard exists to remove.
+    assert rows["heavy"]["xdist"] == "-n auto --dist load"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
+
+
+def _modern_bash() -> str | None:
+    for candidate in (shutil.which("bash"), "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"):
+        if not candidate or not os.path.exists(candidate):
+            continue
+        probe = subprocess.run(
+            [candidate, "-c", 'echo "${BASH_VERSINFO[0]}"'], capture_output=True, text=True, timeout=10
+        )
+        if probe.returncode == 0 and probe.stdout.strip().isdigit() and int(probe.stdout) >= 4:
+            return candidate
+    return None
+
+
+def test_every_python_matrix_shard_is_a_declared_required_check() -> None:
+    """A shard missing from the offline mirror is a check `main` may not
+    require: its failure would not block a merge once protection syncs."""
+    jobs = _workflow()["jobs"]
+    declared = _declared_required_status_checks()
+    for name in ("py-tests", "cloud-tests"):
+        template = jobs[name]["name"]
+        for shard in jobs[name]["strategy"]["matrix"]["shard"]:
+            context = template.replace("${{ matrix.shard }}", str(shard))
+            assert context in declared, f"{context} is not in {REQUIRED_STATUS_CHECKS.name}"
+
+
+def test_cloud_shard_run_step_selects_each_module_exactly_once(tmp_path: Path) -> None:
+    """Execute the real `Run cloud shard` script per matrix row with pytest
+    stubbed out. The partition tests above model `paths` / `omit` in Python;
+    this proves the bash that CI runs agrees, including an `omit` that names
+    several files and a `paths` that names several files."""
+    bash = _modern_bash()
+    if bash is None:
+        pytest.skip("the run step uses mapfile; no bash >= 4 on this host")
+    root = WORKFLOW.parents[2]
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    (run_step,) = [step for step in cloud["steps"] if step.get("name") == "Run cloud shard"]
+    stub = tmp_path / "python"
+    stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    seen: dict[str, list[str]] = {}
+    for row in cloud["strategy"]["matrix"]["include"]:
+        script = run_step["run"]
+        for key in ("paths", "omit", "xdist"):
+            script = script.replace("${{ matrix.%s }}" % key, str(row.get(key, "")))
+        assert "${{" not in script, script
+        result = subprocess.run(
+            [bash, "-c", script], cwd=root, env=env, capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, (row["shard"], result.stderr)
+        args = result.stdout.split("\n")
+        assert args[:2] == ["-m", "pytest"], args[:3]
+        if row["xdist"]:
+            assert str(row["xdist"]) in " ".join(args), (row["shard"], args)
+        for target in args:
+            if target.startswith("cloud/tests/"):
+                seen.setdefault(target, []).append(str(row["shard"]))
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    assert set(seen) == on_disk, sorted(on_disk ^ set(seen))[:6]
+    twice = {path: shards for path, shards in seen.items() if len(shards) != 1}
+    assert not twice, twice
+    assert {seen[path][0] for path in CLOUD_HEAVY_MODULES} == {"heavy"}
+
+
+def test_cloud_shard_run_step_fails_when_a_named_path_matches_nothing(tmp_path: Path) -> None:
+    """A renamed heavy module must fail the shard, not silently shrink it."""
+    bash = _modern_bash()
+    if bash is None:
+        pytest.skip("the run step uses mapfile; no bash >= 4 on this host")
+    root = WORKFLOW.parents[2]
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    (run_step,) = [step for step in cloud["steps"] if step.get("name") == "Run cloud shard"]
+    stub = tmp_path / "python"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    script = (
+        run_step["run"]
+        .replace("${{ matrix.paths }}", "cloud/tests/test_app_runtime.py cloud/tests/test_gone.py")
+        .replace("${{ matrix.omit }}", "")
+        .replace("${{ matrix.xdist }}", "")
+    )
+    result = subprocess.run([bash, "-c", script], cwd=root, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0
+    assert "cloud/tests/test_gone.py" in result.stderr
 
 
 def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:

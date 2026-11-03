@@ -12,7 +12,7 @@ import {
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { buildDemoSeasonality } from "@/lib/demo/fixtures/tickerInfo";
 import { countedUwFetch } from "@/lib/uwCountedFetch";
-import { anthropicRequestAuth } from "@/lib/llm/provider";
+import { chat } from "@/lib/llm/provider";
 
 export const runtime = "nodejs";
 
@@ -32,9 +32,6 @@ type CacheEntry = {
   source: "uw" | "uw+equityclock" | "equityclock";
   data: MonthData[];
 };
-
-// Subscription-only Anthropic auth (Claude Max grant); see lib/llm/subscriptionAuth.ts.
-const resolveAnthropic = () => anthropicRequestAuth();
 
 /** Cache dir: data/seasonality_cache/ relative to project root */
 function cacheDir(): string {
@@ -84,47 +81,40 @@ Rules:
 - Return ONLY the JSON array, no markdown, no explanation`;
 
 async function extractViaVision(ticker: string, requestId: string): Promise<MonthData[] | null> {
-  const anthropic = resolveAnthropic();
-  if (!anthropic) return null;
-
   const imageUrl = `https://charts.equityclock.com/seasonal_charts/${encodeURIComponent(ticker)}_sheet.png`;
-
-  // Verify the image exists before sending to Vision
+  const imageLimit = 5 * 1024 * 1024;
   try {
-    const headRes = await fetch(imageUrl, { method: "HEAD", cache: "no-store" });
-    if (!headRes.ok) return null;
-  } catch {
-    return null;
-  }
-
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      cache: "no-store",
-      headers: anthropic.headers,
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        ...(anthropic.system() ? { system: anthropic.system() } : {}),
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: { type: "url", url: imageUrl },
-              },
-              { type: "text", text: EXTRACTION_PROMPT },
-            ],
-          },
-        ],
-      }),
+    // Only this fixed vendor host is fetched; redirects and oversized bodies
+    // are rejected before model work. The gateway receives bytes, never URLs.
+    const image = await fetch(imageUrl, {
+      cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000),
     });
-
-    if (!res.ok) return null;
-
-    const json = await res.json();
-    const text = json.content?.find((b: { type: string; text?: string }) => b.type === "text")?.text;
+    if (!image.ok || !image.body || image.headers.get("content-type")?.split(";")[0] !== "image/png") return null;
+    if (Number(image.headers.get("content-length")) > imageLimit) {
+      await image.body.cancel();
+      return null;
+    }
+    const reader = image.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > imageLimit) { await reader.cancel(); return null; }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    if (!size) return null;
+    const result = await chat({
+      maxTokens: 1024, timeoutMs: 45_000,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.concat(chunks).toString("base64") } },
+        { type: "text", text: EXTRACTION_PROMPT },
+      ] }],
+    });
+    const text = result.text;
     if (!text) return null;
 
     // Strip markdown fences if present (```json ... ```)

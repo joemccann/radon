@@ -23,6 +23,12 @@ DEFAULT_RPM = 120
 DEFAULT_DAILY_LIMIT = 40_000
 RESERVE_FRACTION = 0.20
 MAX_WAIT_SECONDS = 120.0  # Explicit scanner waits can cross a 60s window; default stays 5s.
+# A 429 with no usable Retry-After is UW's burst limit (the minute window is
+# this governor's own job). Pre-governor clients backed off 1-2s per request.
+# A 60s default froze every UW caller on the host after each burst 429 and
+# released them together into the next one: leap ran 57 bursts/hour at
+# ~14 req/min (2026-10-28..30) instead of finishing.
+MISSING_RETRY_AFTER_SECONDS = 2.0
 ET = ZoneInfo("America/New_York")
 
 
@@ -217,7 +223,7 @@ def _retry_after(headers: Mapping, now: float) -> float:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return min(86400.0, max(0.0, parsed.timestamp() - now))
     except (ValueError, TypeError, OverflowError):
-        return 60.0
+        return MISSING_RETRY_AFTER_SECONDS
 
 
 def observe(token: str, status: int, headers: Mapping, *, reservation: int | None = None, daily_exhausted: bool = False) -> dict:

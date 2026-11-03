@@ -1,5 +1,6 @@
 """Observe a pinned CLI's actual model request before granting live review access."""
 from __future__ import annotations
+from contextlib import contextmanager
 import hashlib
 import http.server
 import json
@@ -66,11 +67,20 @@ def snapshot_binary(source: Path, directory: Path) -> Path:
 
 
 def assert_subscription(binary: Path, environment: dict[str, str]) -> None:
-    result = subprocess.run([str(binary), 'login', 'status'], env=environment, stdin=subprocess.DEVNULL,
-                            capture_output=True, timeout=30)
-    status = (result.stdout + result.stderr).decode(errors='replace')
-    if result.returncode or not re.search(r'^\s*logged in using chatgpt\s*$', status, re.I | re.M):
-        raise RuntimeError('subscription reviewer login is unavailable')
+    from model_gateway.client import request
+    inventory = request('status', {}, timeout_seconds=20)
+    providers = inventory.get('providers')
+    if not isinstance(providers, list) or 'codex' not in providers:
+        raise RuntimeError('subscription reviewer login is unavailable in the model service')
+
+
+@contextmanager
+def gateway_review(binary: Path, options: list[str], environment: dict[str, str]):
+    """Change transport/auth only; retain signed bytes and all no-tool options."""
+    from model_gateway import cli
+    with cli.bridge(timeout_seconds=900) as handle:
+        with cli.configured_cli('codex', [str(binary), *options], handle.url, handle.token, env=environment) as configured:
+            yield configured
 
 
 def tool_free_catalog(models: list[str]) -> dict:

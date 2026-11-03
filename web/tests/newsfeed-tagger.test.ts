@@ -95,58 +95,14 @@ describe("createTagger.tagPost (open vocabulary)", () => {
   });
 });
 
-describe("completeViaLadder (Python CLI bridge)", () => {
-  it("spawns model_ladder_cli.py with accept=tags and never calls cerebras.ai", async () => {
-    let stdin = "";
-    const spawnImpl = vi.fn((_bin: string, args: string[]) => {
-      const listeners: Record<string, Array<(value?: unknown) => void>> = {
-        data: [],
-        close: [],
-        error: [],
-      };
-      return {
-        stdin: {
-          write(chunk: string) { stdin += chunk; },
-          end() {
-            queueMicrotask(() => {
-              for (const fn of listeners.data) {
-                fn(JSON.stringify({
-                  ok: true,
-                  data: { tags: ["PUTS", "OPTIONS", "POSITIONING"] },
-                  provider: "anthropic",
-                }));
-              }
-              for (const fn of listeners.close) fn(0);
-            });
-          },
-        },
-        stdout: { on(ev: string, fn: (value?: unknown) => void) { if (ev === "data") listeners.data.push(fn); } },
-        stderr: { on() {} },
-        on(ev: string, fn: (value?: unknown) => void) {
-          if (ev === "close" || ev === "error") listeners[ev].push(fn);
-        },
-        kill() {},
-        args,
-      };
-    });
-
+describe("completeViaLadder (standalone gateway)", () => {
+  it("uses the same UDS service with centralized tagging purpose and no provider walk", async () => {
+    const requestImpl = vi.fn().mockResolvedValue({ data: { tags: ["PUTS", "OPTIONS", "POSITIONING"] } });
     const { completeViaLadder } = await import("../../scripts/newsfeed/tagger.js");
-    const data = await completeViaLadder({
-      system: "Pick EXACTLY 3 tags",
-      instruction: "Title: X\nBody: Y",
-      spawnImpl: spawnImpl as never,
-      pythonBin: "python3.13",
-    });
-
-    expect(data).toEqual({ tags: ["PUTS", "OPTIONS", "POSITIONING"] });
-    expect(spawnImpl).toHaveBeenCalledTimes(1);
-    const [, args] = spawnImpl.mock.calls[0];
-    expect(args[0]).toMatch(/model_ladder_cli\.py$/);
-    const payload = JSON.parse(stdin);
-    expect(payload.accept).toBe("tags");
-    expect(payload.system).toMatch(/EXACTLY 3 tags/);
-    expect(JSON.stringify(payload)).not.toMatch(/cerebras\.ai/);
-    expect(JSON.stringify(payload)).not.toMatch(/gpt-oss-120b/);
+    await expect(completeViaLadder({ system: "System", instruction: "Title", requestImpl })).resolves.toEqual({ tags: ["PUTS", "OPTIONS", "POSITIONING"] });
+    expect(requestImpl.mock.calls[0][0]).toBe("json");
+    expect(requestImpl.mock.calls[0][1]).toMatchObject({ purpose: "newsfeed-tags", accept: "tags", instruction: "Title" });
+    expect(requestImpl.mock.calls[0][1]).not.toHaveProperty("providers");
   });
 });
 

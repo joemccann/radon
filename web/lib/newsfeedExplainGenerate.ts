@@ -1,5 +1,5 @@
 import { assertHumanizedCopy, assertLocalHumanizer } from "./humanizer";
-import { alternateProvider, chat, resolveProvider, type LlmContentBlock, type LlmProviderName } from "@/lib/llm/provider";
+import { chat, type LlmContentBlock } from "@/lib/llm/provider";
 import {
   EXPLAIN_THIN_MESSAGE,
   NEWSFEED_EXPLAIN_SYSTEM,
@@ -27,8 +27,6 @@ type ExplainOptions = {
   token?: string;
 };
 
-type Provider = Exclude<LlmProviderName, "grok">;
-
 const flights = new Map<string, Promise<ExplainResult>>();
 
 export function resetExplainSingleFlight(): void {
@@ -44,15 +42,6 @@ function thinResult(): ExplainResult {
     provider: "",
     hasImage: false,
   };
-}
-
-function pickProvider(hasImages: boolean): { provider: Provider; sendImages: boolean } {
-  const primary = resolveProvider();
-  if (!hasImages) return { provider: primary, sendImages: false };
-  if (primary === "anthropic" || primary === "xai") return { provider: primary, sendImages: true };
-  const alternate = alternateProvider(primary);
-  if (alternate === "anthropic" || alternate === "xai") return { provider: alternate, sendImages: true };
-  return { provider: primary, sendImages: false };
 }
 
 function callerAbortError(signal: AbortSignal): DOMException {
@@ -106,12 +95,9 @@ async function draftExplanation(
   if (input.title.length + input.content.length < 40 && loaded.length === 0) {
     return thinResult();
   }
-  const { provider, sendImages } = pickProvider(loaded.length > 0);
-  const images = sendImages ? loaded : [];
+  const images = loaded;
   onStage("drafting");
   const result = await chat({
-    provider,
-    fallback: false,
     system: NEWSFEED_EXPLAIN_SYSTEM,
     messages: [{
       role: "user",
@@ -128,7 +114,7 @@ async function draftExplanation(
   onStage("checking");
   const explanation = stripExplainDisclaimer(result.text);
   if (!explanation) throw new Error("Empty explanation");
-  await assertHumanizedCopy({ content: explanation }, { provider, signal, timeoutMs: EXPLAIN_BUDGET_MS });
+  await assertHumanizedCopy({ content: explanation }, { signal, timeoutMs: EXPLAIN_BUDGET_MS });
   const hasImage = images.length > 0;
   await writeExplainCache({
     postId: input.postId,

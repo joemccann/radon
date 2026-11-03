@@ -34,9 +34,11 @@
   transform: translateY(0.5px);
 }
 
-.trigger:hover:not(:disabled),
-.panel button:hover:not(:disabled) {
-  background: var(--bg-panel-raised);
+@media (hover: hover) and (pointer: fine) {
+  .trigger:hover:not(:disabled),
+  .panel button:hover:not(:disabled) {
+    background: var(--bg-panel-raised);
+  }
 }
 
 .trigger:active:not(:disabled),

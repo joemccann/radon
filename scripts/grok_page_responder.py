@@ -493,6 +493,15 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
         "against main. Never `git push origin main`. Never merge. "
         "If a deploy is in flight, wait."
         if autopush and autoship
+        else (
+            "AUTOPUSH is off on this host: commit on a `fix/<short-slug>` "
+            "branch and do not push. The Mac mini pickup pushes that branch "
+            "and opens the PR from your commit body. Do not list pushing the "
+            "branch, opening the PR, or AUTOPUSH under ## Still open; if "
+            "nothing else remains, write: Nothing beyond review and merge "
+            "after CI is green."
+        )
+        if autoship
         else "AUTOPUSH is off: do not push."
     )
     return (
@@ -892,8 +901,9 @@ def _harden_controller_against_child() -> None:
 
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     _harden_controller_against_child()
-    return subprocess.run(
-        cmd,
+    from model_gateway.cli import run
+    return run(
+        "grok", cmd,
         capture_output=True,
         text=True,
         timeout=kwargs.get("timeout", GROK_TIMEOUT_SECS),

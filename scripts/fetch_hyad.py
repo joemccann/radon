@@ -360,7 +360,7 @@ def _is_unchanged(row: dict[str, Any], stored: Optional[dict[str, Any]]) -> bool
 def _write_json_cache(payload: dict[str, Any]) -> None:
     HYAD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = HYAD_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, HYAD_JSON)
 
 

@@ -7,10 +7,12 @@ production. Their prepaid console keys are never read or sent, and the old
 with one stderr warning that names it (never its value).
 
 Guard: no non-test file in the source tree may name those variables, outside
-an explicit allowlist of files that only redact, scrub or deny them.
+an explicit allowlist of files that only redact, scrub or deny them, plus
+AST-owned scrub literals and the DeepSec ephemeral loopback-token assignment.
 """
 from __future__ import annotations
 
+import ast
 import io
 import json
 import re
@@ -19,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from clients import model_ladder, prepaid_denylist
+from model_gateway import engine as model_ladder
+from clients import prepaid_denylist
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,10 +45,10 @@ UNSCANNED_PREFIXES = ("docs/", "tasks/", "tools/codemap/", "TEST_AUDIT.md", "TES
 
 # Every entry must say why naming a prepaid variable there is not reading it.
 ALLOWLIST = {
+    "cloud/services/radon-.service.d/common.conf": "UnsetEnvironment strips these names from consumer processes; never reads them",
     "scripts/credential_redaction.py": "redacts the values out of logs and reports",
     "scripts/clients/prepaid_denylist.json": "the deny list: names to ignore and warn about",
     "web/lib/llm/prepaidDenylist.ts": "the web copy of the deny list (parity-tested below)",
-    "scripts/security_claude_ladder.py": "BILLING_REROUTE_KEYS: scrubbed from the claude CLI child env",
     "scripts/runner/loops/security.env": "AGENT_UNSET: scrubbed from the agent CLI env",
     "scripts/runner/loops/security-deepsec.env": "AGENT_UNSET: scrubbed from the agent CLI env",
     "cloud/scripts/radon-app-runtime.sh": "render_env_file deletes these lines from every container env",
@@ -78,6 +81,58 @@ def _tracked_files() -> list[str]:
     return [p for p in out.split("\0") if p and not p.startswith(UNSCANNED_PREFIXES)]
 
 
+def _gateway_owned_name_nodes(rel: str, text: str) -> list[ast.AST]:
+    """Allow exact scrub literals/local-token writes, never a whole gateway file."""
+    if rel not in {"scripts/model_gateway/client.py", "scripts/model_gateway/cli.py"}:
+        return []
+    tree = ast.parse(text)
+    owned = []
+    if rel.endswith("/client.py"):
+        for statement in tree.body:
+            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                continue
+            target, value = statement.targets[0], statement.value
+            if (not isinstance(target, ast.Name) or target.id != "MODEL_SECRET_ENV"
+                    or not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name)
+                    or value.func.id != "frozenset" or value.keywords or len(value.args) != 1
+                    or not isinstance(value.args[0], ast.Set)):
+                continue
+            members = value.args[0].elts
+            if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in members):
+                owned.extend(item for item in members if item.value in PREPAID_NAMES)
+    else:
+        expected_call = ast.dump(ast.parse(
+            "child.update(OPENAI_BASE_URL=url + '/v1', OPENAI_API_KEY=token)"
+        ).body[0].value, include_attributes=False)
+        expected_branch = ast.dump(ast.parse("kind == 'deepsec'", mode="eval").body,
+                                   include_attributes=False)
+        for function in tree.body:
+            if not isinstance(function, ast.FunctionDef) or function.name != "configured_cli":
+                continue
+            for branch in ast.walk(function):
+                if not isinstance(branch, ast.If) or ast.dump(branch.test, include_attributes=False) != expected_branch:
+                    continue
+                for statement in branch.body:
+                    if (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+                            and ast.dump(statement.value, include_attributes=False) == expected_call):
+                        owned.extend(keyword for keyword in statement.value.keywords
+                                     if keyword.arg == "OPENAI_API_KEY")
+    return owned
+
+
+def _prepaid_name_violations(rel: str, text: str) -> list[str]:
+    owned = _gateway_owned_name_nodes(rel, text)
+    offenders = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for match in NAME_RE.finditer(line):
+            if any(node.lineno == lineno == node.end_lineno
+                   and node.col_offset <= match.start() < match.end() <= node.end_col_offset
+                   for node in owned):
+                continue
+            offenders.append(f"{rel}:{lineno}: {match.group(1)}")
+    return offenders
+
+
 def test_no_source_file_names_a_prepaid_key_or_the_hatch():
     offenders: list[str] = []
     for rel in _tracked_files():
@@ -90,11 +145,44 @@ def test_no_source_file_names_a_prepaid_key_or_the_hatch():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for lineno, line in enumerate(text.splitlines(), 1):
-            match = NAME_RE.search(line)
-            if match:
-                offenders.append(f"{rel}:{lineno}: {match.group(1)}")
+        offenders.extend(_prepaid_name_violations(rel, text))
     assert not offenders, "prepaid key / hatch named outside the allowlist:\n" + "\n".join(offenders)
+
+
+@pytest.mark.parametrize("relative,source", [
+    ("scripts/model_gateway/client.py", "key = os.environ.get('OPENAI_API_KEY')"),
+    ("scripts/model_gateway/client.py", "MODEL_SECRET_ENV = frozenset({os.environ.get('OPENAI_API_KEY')})"),
+    ("scripts/model_gateway/cli.py", "key = env.get('OPENAI_API_KEY')"),
+    ("scripts/model_gateway/new_backend.py", "key = env.get('OPENAI_API_KEY')"),
+    ("scripts/model_gateway/cli.py", "def configured_cli():\n    if kind == 'deepsec':\n        child.update(OPENAI_BASE_URL='https://api.openai.com/v1', OPENAI_API_KEY=token)"),
+    ("scripts/model_gateway/cli.py", "def configured_cli():\n    if kind == 'deepsec':\n        child.update(OPENAI_BASE_URL=url + '/v1', OPENAI_API_KEY=env.get('OPENAI_API_KEY'))"),
+])
+def test_gateway_policy_rejects_vendor_auth_reads_and_nonlocal_assignments(relative, source):
+    assert _prepaid_name_violations(relative, source)
+
+
+def test_gateway_scrubs_prepaid_env_and_deepsec_receives_only_loopback_token(tmp_path, monkeypatch):
+    from model_gateway import client, cli
+
+    hostile = {name: f"forbidden-{name}" for name in PREPAID_NAMES
+               if name != "RADON_LADDER_ALLOW_PREPAID"}
+    for name, value in hostile.items():
+        monkeypatch.setenv(name, value)
+    client.scrub_model_secrets()
+    assert all(name not in client.os.environ for name in hostile if name in client.MODEL_SECRET_ENV)
+    command = ["/trusted/deepsec", "process", "--agent", "codex"]
+    with cli.configured_cli("deepsec", command, "http://127.0.0.1:12345", "local-app-token",
+                            env={**hostile, "GH_TOKEN": "tool-token"}, state_dir=tmp_path) as (args, child):
+        assert args == command
+        assert child["OPENAI_API_KEY"] == "local-app-token"
+        assert child["OPENAI_BASE_URL"] == "http://127.0.0.1:12345/v1"
+        assert child["GH_TOKEN"] == "tool-token"
+        assert not set(hostile.values()).intersection(child.values())
+        assert all(name not in child for name in hostile if name != "OPENAI_API_KEY")
+    with pytest.raises(ValueError, match="private bridge"):
+        with cli.configured_cli("deepsec", command, "https://api.openai.com", "local-app-token",
+                                env=hostile, state_dir=tmp_path):
+            pytest.fail("A vendor endpoint cannot receive the app-scoped bridge token")
 
 
 def test_the_hatch_is_gone_from_docs_too():

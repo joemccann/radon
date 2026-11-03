@@ -9,7 +9,7 @@ Credentials (project root .env, loaded via a local fallback loader):
   MENTHORQ_PASS  — MenthorQ password
 
 Vision cascade (credit/billing/quota/hard-fail fallthrough):
-  anthropic -> grok -> cursor (unwired skip) -> codex -> antigravity -> nvidia -> cerebras
+  antigravity -> anthropic -> grok -> cursor (unwired skip) -> codex -> nvidia -> cerebras
   Subscription grants only for the first band (see clients/model_ladder.py);
   NVIDIA_API_KEY, CEREBRAS_API_KEY for the last two.
 

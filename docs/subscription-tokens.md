@@ -7,12 +7,17 @@ directory on the app VPS. Missing or unusable subscription credentials can make
 a ladder rung unavailable. Billing and fallback policy belong to the
 [model authentication owner](oauth-subscription-auth.md#radon-http-model-ladder-server).
 
-`scripts/subscription_tokens` maintains those credential files. On every
-run it evaluates each provider, refreshes what it can refresh, restores what it
-can restore from the vault, proves raw-bearer logins once a day and AGY through
-its authenticated native CLI on every run,
-and when a grant is truly dead it starts the CLI's own login and pages the
-operator the link.
+`scripts/subscription_tokens` still evaluates each provider, but the timer does
+not run it. `radon-subscription-tokens.service` runs
+`python -m scripts.model_gateway.refresh_cli`. That client posts `refresh`
+mode `once` to the management socket and polls until the gateway job finishes.
+The gateway then refreshes what it can refresh, restores what it can restore
+from the vault, proves raw-bearer logins once a day and AGY through its
+authenticated native CLI on every run, and when a grant is truly dead starts
+the CLI's own login and pages the operator the link. The timer has no provider
+grants. Its `InaccessiblePaths` hide `/etc/radon/env`,
+`/etc/radon/subscription-tokens/env`, the vault socket and the host grant
+directories. It does not open the vault.
 
 Timer, unit files and heartbeat row: see [cloud-services.md](cloud-services.md).
 Protocol background for the OAuth flows: see
@@ -32,9 +37,8 @@ throwaway home so no live credential was touched.
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
 | antigravity (`agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models` only; native CLI owns authentication and renewal | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
-`grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
-daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
-them too.
+Production probes use the gateway image's pinned CLIs. The timer `PATH` is
+`/usr/local/bin:/usr/bin:/bin` and does not run `~/.local/bin`.
 
 ### Antigravity native authentication ownership (2026-10-17)
 
@@ -115,18 +119,21 @@ in its own process group, with stdin closed, and is killed as a group on timeout
 
 ### Service environment lifecycle
 
-The host unit reads `/etc/radon/subscription-tokens/env`, a root-owned `0600`
-file in a root-owned `0700` directory. The trusted publisher selects
+The timer does not read `/etc/radon/subscription-tokens/env`. Deploy still
+publishes that root-owned `0600` file in a root-owned `0700` directory. The
+gateway container takes `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` from
+`/etc/radon/env` and presents it as `TURSO_AUTH_TOKEN` in its filtered
+environment. The trusted publisher selects
 `TURSO_DB_URL`, `PUSHOVER_USER`, `PUSHOVER_TOKEN` and the optional
 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` directory overrides. The derived file's
 `TURSO_AUTH_TOKEN` is `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` from
 `/etc/radon/env`: a table-scoped Turso token for `service_health`
 (`data_read`, `data_add`, `data_update`) and `service_health_events`
-(`data_add`). The operator `TURSO_AUTH_TOKEN` is never copied. The keeper
-and database clients stay unchanged and still read `TURSO_AUTH_TOKEN` from
-this derived file. The vault socket and replica policy remain fixed unit
-settings. Provider credential locations and the keeper's `radon` UID remain
-unchanged.
+(`data_add`). The operator `TURSO_AUTH_TOKEN` is never copied into that file. No current unit loads it. The gateway refresh reads the remapped keeper token from its
+filtered container environment, rebuilt from `/etc/radon/env` when
+`radon-model-gateway.service` starts. Other containers keep the operator
+`TURSO_AUTH_TOKEN` and drop `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN`. Editing
+the derived file does not change a running refresh.
 
 Write `TURSO_SUBSCRIPTION_KEEPER_AUTH_TOKEN` in `/etc/radon/env` before the
 next deploy. The next deploy stops if that variable is missing or its
@@ -148,12 +155,13 @@ file intact and stop that publication/deploy.
 The publisher follows no directory or file links and publishes by descriptor
 into its private directory. It never logs or prints token values.
 
-For an explicit refresh after editing the canonical root environment, run
-`sudo -n /usr/local/sbin/radon-deploy-root publish-subscription-env`. Do not
-change the unit to load the full production environment. Retain the derived
-file and trusted publisher when rolling application code back; no native
-login, vault credential, or CLI credential file is copied or replaced. This
-change narrows the keeper's inputs; it does not change host UID isolation.
+For an explicit refresh after editing `/etc/radon/env`, publish with
+`sudo -n /usr/local/sbin/radon-deploy-root publish-subscription-env`, then
+restart `radon-model-gateway.service`. Publication alone does not reload the
+gateway. Do not point the timer unit at either environment file. Retain the
+derived file and trusted publisher when rolling application code back; no native
+login, vault credential, or CLI credential file is copied or replaced. The
+publisher narrows the derived file's inputs. It does not change host UID isolation.
 
 Contract: `cloud/tests/test_subscription_service_env.py`.
 
@@ -311,12 +319,13 @@ ssh radon@radon-app 'sudo systemctl start radon-subscription-tokens.service'
 ssh radon@radon-app 'systemctl status radon-subscription-tokens.service'
 ```
 
-Run sealing and restoration through the unit. The unit never holds the
-decrypted key (DS-2026-10-05-05): it names the socket of
-`radon-subscription-vault.service`, the broker that runs inside
-`radon-app-runtime`, opens the configured database with the key staged for its
-container, and serves only the four CLI credential slots. The unit `Wants=` the
-broker, so starting the unit starts it. A bare SSH shell does not inherit that
+Run sealing and restoration by starting the timer unit, which only submits the
+gateway job. The timer never holds the decrypted key. The timer journal shows
+`subscription refresh: completed` and does not open the vault.
+`radon-model-gateway` wants `radon-subscription-vault.service`. The broker
+runs inside `radon-app-runtime`, opens the configured database with the key
+staged for its container, and serves only the four CLI credential slots. Provider probe output
+is on `radon-model-gateway.service`. A bare SSH shell does not inherit that
 context and can open a different store or fail key validation. Do not run
 `--seal` or `--restore` from that shell.
 
@@ -349,10 +358,11 @@ ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -m scripts.subscri
 ssh radon@radon-app 'cd /home/radon/radon && .venv/bin/python -m scripts.subscription_tokens --check --json'
 ```
 
-`--once` is the mode the timer runs: evaluate, heal and (when due) probe every
-provider, then exit. It starts no CLI work it cannot finish inside
-`RUN_BUDGET_SECONDS` (1500s), under the unit's `TimeoutStartSec=1700`, so a slow
-run still ends with a sidecar and a heartbeat.
+`--once` is the mode the gateway refresh job runs inside the image: evaluate,
+heal and (when due) probe every provider, then exit. The timer only submits
+that job. The job starts no CLI work it cannot finish inside
+`RUN_BUDGET_SECONDS` (1500s). The timer's `TimeoutStartSec=1700` bounds the
+client wait, so a slow run still ends with a sidecar and a heartbeat.
 
 ---
 
@@ -377,9 +387,8 @@ logged, put in an exception message, written to the sidecar, sent to Pushover,
 or recorded in `service_health`. Token material is rendered as
 `<redacted len=N>`. CLI output is classified and discarded, never logged. The
 OAuth client ids in the provider table are the vendors' published public-client
-ids, not secrets. The daemon runs as `radon` with `UMask=0077`; the vault is
-the existing encrypted secret store, so there is no second crypto system to
-rotate or back up. Its key is delivered by systemd `LoadCredentialEncrypted` to
-the `radon-subscription-vault` broker container only; the daemon, which runs
-the third-party CLIs, reaches the vault over the broker socket and never holds
-the key.
+ids, not secrets. The vault is the existing encrypted secret store, so there is no second crypto
+system to rotate or back up. Its key is delivered by systemd
+`LoadCredentialEncrypted` to the `radon-subscription-vault` broker container
+only. The gateway refresh reaches that broker over its socket and never holds
+the key. The timer does not open the socket.

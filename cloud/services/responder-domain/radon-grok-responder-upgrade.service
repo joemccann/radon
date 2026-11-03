@@ -1,7 +1,9 @@
 [Unit]
-Description=Radon isolated responder runtime upgrade
-After=network.target
+Description=Radon isolated responder model gateway readiness (legacy unit name)
+Wants=radon-model-gateway.service
+After=network.target radon-model-gateway.service
 ConditionPathExists=/var/lib/radon-responder/ready
+ConditionPathExists=/opt/radon-model-clients/current/manifest.json
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
@@ -9,16 +11,17 @@ StartLimitBurst=3
 Type=oneshot
 User=radon-responder
 Group=radon-responder
+SupplementaryGroups=radon-model-connect
 UMask=0027
 WorkingDirectory=/var/lib/radon-responder/upgrade
 EnvironmentFile=/etc/radon/grok-responder/env
 Environment=GROK_PAGE_NO_DOTENV=1
 Environment=HOME=/var/lib/radon-responder
-Environment=PATH=/var/lib/radon-responder/.local/bin:/var/lib/radon-responder/.grok/bin:/usr/local/bin:/usr/bin:/bin
-Environment=GROK_UPGRADE_DOMAIN=responder
+Environment=PATH=/opt/radon-model-clients/current/bin:/usr/local/bin:/usr/bin:/bin
+Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder-upgrade/scripts/grok_upgrade.py --grok-bin /var/lib/radon-responder/.local/bin/grok --live-bin /var/lib/radon-responder/.local/bin/grok --alias-bin /var/lib/radon-responder/.grok/bin/grok --lkg /var/lib/radon-responder/runtime/grok_lkg.json --lock /var/lib/radon-responder/runtime/grok-runtime.lock --scratch /var/lib/radon-responder/upgrade
-TimeoutStartSec=1200
+ExecStart=/usr/bin/python3.13 -I -S /opt/radon-model-clients/current/lib/model_gateway/cli.py status
+TimeoutStartSec=60
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
@@ -28,8 +31,8 @@ ProtectHome=yes
 ProtectSystem=strict
 RestrictSUIDSGID=yes
 CapabilityBoundingSet=
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /var/lib/radon-responder/repo -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
-ReadWritePaths=/var/lib/radon-responder/.grok /var/lib/radon-responder/.local /var/lib/radon-responder/runtime /var/lib/radon-responder/upgrade
+InaccessiblePaths=-/run/radon-model-control -/run/radon-subscription-vault -/var/lib/radon-responder/.grok /var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /var/lib/radon-responder/repo -/etc/radon/env /etc/radon/grok-responder -/var/lib/radon/flex-secrets -/var/lib/radon/rh-mcp
+ReadOnlyPaths=/opt/radon-model-clients
 
 [Install]
 WantedBy=multi-user.target

@@ -110,9 +110,9 @@ class TestSelectPrunable:
         assert db_backup.select_prunable(entries, now) == []
 
     def test_local_retention_is_the_operator_window(self):
-        # 2026-08-29: 7 days on-box, B2 holds a year. Thirty days of ~570 MB
-        # dumps were 13 G of the 75 G root fs the night it filled.
-        assert db_backup.RETENTION_DAYS == 7
+        # 2026-10-31: 2 days on-box, B2 holds a year. Seven ~550 MB dumps
+        # held 3.6 G while deploys refused for want of ~2 G (ENOSPC).
+        assert db_backup.RETENTION_DAYS == 2
         assert db_backup.REMOTE_RETENTION_DAYS > db_backup.RETENTION_DAYS
 
     def test_never_touches_non_dump_files(self):

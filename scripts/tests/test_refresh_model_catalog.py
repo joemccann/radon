@@ -27,7 +27,9 @@ from pathlib import Path
 
 import pytest
 
-from refresh_model_catalog import (
+from db import writer
+
+from model_gateway._catalog_backend import (
     PROVIDERS,
     build_output,
     label_for,
@@ -257,7 +259,7 @@ class TestProviderKeys:
         assert [p for p in PROVIDERS if provider_key(p)] == []
 
     def test_anthropic_model_list_sends_the_grant_as_bearer(self, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         seen = []
 
@@ -316,19 +318,19 @@ def turso_catalog():
 
 @pytest.fixture()
 def persist_calls(tmp_path, monkeypatch, turso_catalog):
-    import refresh_model_catalog as mod
+    from model_gateway import _catalog_backend as mod
 
     calls: list[tuple] = []
     monkeypatch.setattr(mod, "LLM_MODELS_JSON", tmp_path / "llm_models.json")
-    monkeypatch.setattr(mod.writer, "get_llm_model_catalog_rows",
+    monkeypatch.setattr(writer, "get_llm_model_catalog_rows",
                         lambda: [dict(row) for row in turso_catalog], raising=False)
-    monkeypatch.setattr(mod.writer, "ensure_no_replica_for_writers",
+    monkeypatch.setattr(writer, "ensure_no_replica_for_writers",
                         lambda: calls.append(("guard",)))
-    monkeypatch.setattr(mod.writer, "upsert_llm_model_catalog_rows",
+    monkeypatch.setattr(writer, "upsert_llm_model_catalog_rows",
                         lambda rows, refreshed_at=None: calls.append(("rows", len(rows))))
-    monkeypatch.setattr(mod.writer, "upsert_scan_snapshot",
+    monkeypatch.setattr(writer, "upsert_scan_snapshot",
                         lambda service, scan_time, payload: calls.append(("snapshot", service)))
-    monkeypatch.setattr(mod.writer, "record_service_health",
+    monkeypatch.setattr(writer, "record_service_health",
                         lambda service, state, **kw: calls.append(
                             ("health", service, state, kw.get("error"))))
     return calls
@@ -340,7 +342,7 @@ def _health_rows(calls: list[tuple]) -> list[tuple]:
 
 class TestPersistResult:
     def test_writes_in_order_then_the_json_fallback(self, persist_calls):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         scan_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         rows = [{"provider": "anthropic", "model_id": "claude-opus-5",
@@ -364,7 +366,7 @@ class TestPersistResult:
         must say so - an ``ok`` here is the NF-9 shape (R-455): the 26h
         alarm can never fire on a catalog that is silently aging.
         """
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         scan_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         payload = build_output(rows=[], scan_time=scan_time, preferred="anthropic")
@@ -409,7 +411,7 @@ class TestRun:
     def test_a_provider_with_no_key_produces_no_row_and_no_exception(
         self, persist_calls, clean_env
     ):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         monkey = clean_env
@@ -423,7 +425,7 @@ class TestRun:
         assert ("rows", 1) in persist_calls
 
     def test_every_keyed_provider_is_polled(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.grok_grant("xai-test")
@@ -439,7 +441,7 @@ class TestRun:
         assert payload["defaultId"] == "grok-4.6"
 
     def test_a_failing_provider_keeps_its_previous_row(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         stale = (date.today() - timedelta(days=3)).isoformat()
         mod.LLM_MODELS_JSON.write_text(json.dumps({
@@ -469,7 +471,7 @@ class TestRun:
         assert by_provider["anthropic"]["model_id"] == "claude-opus-5"
 
     def test_an_empty_response_keeps_the_previous_row(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         stale = (date.today() - timedelta(days=3)).isoformat()
         mod.LLM_MODELS_JSON.write_text(json.dumps({
@@ -485,7 +487,7 @@ class TestRun:
         assert payload["models"][0]["refreshed_at"] == stale
 
     def test_override_wins_over_discovery_end_to_end(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("ANTHROPIC_MODEL", "claude-opus-4-8")
@@ -503,7 +505,7 @@ class TestRun:
     def test_every_keyed_provider_failing_is_not_an_ok_heartbeat(self, persist_calls, clean_env):
         """R-455: a revoked key that 401s nightly must not look like a
         healthy daily run with today's finished_at."""
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.grok_grant("xai-test")
@@ -526,7 +528,7 @@ class TestRun:
         assert "401" in error["message"]
 
     def test_a_carried_forward_provider_is_reported_by_run(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         stale = (date.today() - timedelta(days=3)).isoformat()
         mod.LLM_MODELS_JSON.write_text(json.dumps({
@@ -555,7 +557,7 @@ class TestRun:
     ):
         """R-455/R-458: a Turso failure in the upsert used to exit with a
         traceback and no row at all, invisible until the 26h window."""
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
@@ -563,7 +565,7 @@ class TestRun:
         def turso_down(rows, refreshed_at=None):
             raise ConnectionError("Hrana stream closed")
 
-        clean_env.setattr(mod.writer, "upsert_llm_model_catalog_rows", turso_down)
+        clean_env.setattr(writer, "upsert_llm_model_catalog_rows", turso_down)
 
         assert mod.main([]) == 1
 
@@ -578,7 +580,7 @@ class TestRun:
     ):
         """R-456: the carry-forward guarantee must not depend on a
         host-local file that is ephemeral on the VPS."""
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         stale = (date.today() - timedelta(days=5)).isoformat()
         turso_catalog.append({"provider": "xai", "model_id": "grok-4.5",
@@ -603,7 +605,7 @@ class TestRun:
         assert ("rows", 2) in persist_calls
 
     def test_turso_rows_win_over_a_lagging_json(self, persist_calls, clean_env, turso_catalog):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         turso_catalog.append({"provider": "xai", "model_id": "grok-4.5",
                               "display_name": "GROK 4.5", "refreshed_at": "turso-stamp"})
@@ -625,12 +627,12 @@ class TestRun:
         assert payload["models"][0]["refreshed_at"] == "turso-stamp"
 
     def test_json_still_seeds_previous_when_turso_is_unreachable(self, persist_calls, clean_env):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         def turso_down():
             raise ConnectionError("Hrana stream closed")
 
-        clean_env.setattr(mod.writer, "get_llm_model_catalog_rows", turso_down)
+        clean_env.setattr(writer, "get_llm_model_catalog_rows", turso_down)
         mod.LLM_MODELS_JSON.write_text(json.dumps({
             "models": [{"provider": "xai", "model_id": "grok-4.5",
                         "display_name": "GROK 4.5", "refreshed_at": "json-stamp"}],
@@ -652,7 +654,7 @@ class TestFetchBounds:
     def test_anthropic_pagination_terminates_within_the_page_cap(self, monkeypatch):
         """R-458: a server that answers has_more: true forever (or with a
         repeating last_id) used to spin until systemd killed the unit."""
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         pages: list[str] = []
 
@@ -671,7 +673,7 @@ class TestFetchBounds:
         assert 1 < len(pages) <= mod.ANTHROPIC_MAX_PAGES
 
     def test_anthropic_pagination_still_follows_a_finite_cursor(self, monkeypatch):
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         def two_pages(url, headers):
             if "after_id" in url:
@@ -688,7 +690,7 @@ class TestFetchBounds:
         cannot consume the unit's TimeoutStartSec and lose the whole run."""
         import time
 
-        import refresh_model_catalog as mod
+        from model_gateway import _catalog_backend as mod
 
         mod.LLM_MODELS_JSON.write_text(json.dumps({
             "models": [{"provider": "anthropic", "model_id": "claude-opus-4-8",
@@ -822,3 +824,26 @@ class TestStorage:
             {"provider": "xai", "model_id": "grok-4.5",
              "display_name": "GROK 4.5", "refreshed_at": "r1"},
         ]
+
+
+def test_catalog_facade_scrubs_model_grants_before_lookup_and_persistence(monkeypatch):
+    import os
+    import refresh_model_catalog as facade
+    from model_gateway.client import MODEL_SECRET_ENV
+    for name in MODEL_SECRET_ENV:monkeypatch.setenv(name,'fake-model-grant')
+    retained={'TURSO_AUTH_TOKEN':'db-grant','TURSO_DB_URL':'libsql://fixture','UW_TOKEN':'source-grant','GH_TOKEN':'tool-grant'}
+    for name,value in retained.items():monkeypatch.setenv(name,value)
+    stages=[]
+    def check(stage):
+        assert not (MODEL_SECRET_ENV & os.environ.keys())
+        assert {name:os.environ[name] for name in retained}==retained
+        stages.append(stage)
+    def previous():check('previous');return {}
+    payload={'scan_time':'2026-10-30T00:00:00+00:00','models':[],'defaultId':''}
+    def lookup(*args,**kwargs):check('gateway');return {'catalog':payload,'rows':[],'failed':{}}
+    def persist(*args):check('persist')
+    monkeypatch.setattr(facade,'load_previous',previous)
+    monkeypatch.setattr(facade,'gateway_request',lookup)
+    monkeypatch.setattr(facade,'persist_result',persist)
+    assert facade.run(payload['scan_time'])==payload
+    assert stages==['previous','gateway','persist']

@@ -978,3 +978,128 @@ def test_budget_truncated_scan_still_writes_the_partial_cache(tmp_path, monkeypa
     assert payload["status"] == "degraded"
     assert payload["scan_budget_spent"] is True
     assert payload["deferred_tickers"] == ["MSFT"]
+
+
+def _prior_leap_cache(cache, *, universe, deferred, rows):
+    """A previous run's data/leap.json, in the shape main() writes."""
+    cache.write_text(json.dumps({
+        "scan_time": "2026-10-30T14:57:10",
+        "min_gap": 10.0,
+        "universe": universe,
+        "requested_tickers": ["AAPL", "GOOG", "MSFT"],
+        "results": rows,
+        "deferred_tickers": deferred,
+    }))
+
+
+def _cached_row(ticker, **extra):
+    row = {"ticker": ticker, "price": 100.0, "hv_20": 20.0, "hv_60": 18.0,
+           "hv_252": 16.0, "current_iv": 15.0, "iv_rank": 40.0, "leap_count": 0,
+           "best_gap": 5.0, "is_mispriced": False, "best_leap": None}
+    row.update(extra)
+    return row
+
+
+def _run_preset_main(tmp_path, monkeypatch, cache, fake_scan):
+    health: list = []
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(
+        leap_scanner_uw, "mirror_scan_snapshot",
+        lambda *a, **k: health.append(k.get("health_error")),
+    )
+    monkeypatch.setattr(leap_scanner_uw, "should_block_universe_scan", lambda: False)
+    monkeypatch.setattr(
+        leap_scanner_uw, "resolve_scan_inputs",
+        lambda explicit, preset: (["AAPL", "GOOG", "MSFT"], "preset:largecaps"),
+    )
+    monkeypatch.setattr(leap_scanner_uw, "scan_universe", fake_scan)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["leap_scanner_uw.py", "--preset", "largecaps", "--json",
+         "--output", str(tmp_path / "report.html")],
+    )
+    code = leap_scanner_uw.main()
+    return code, json.loads(cache.read_text()), health
+
+
+def test_preset_scan_starts_with_the_names_the_last_run_deferred(tmp_path, monkeypatch):
+    """2026-10-30: 53 names (TROW..ZTS) deferred in preset order. Nothing
+    carried them to the next run, so the same tail was never rescanned.
+    The next run must queue them first.
+    """
+    cache = tmp_path / "leap.json"
+    _prior_leap_cache(cache, universe="preset:largecaps", deferred=["MSFT"],
+                      rows=[_cached_row("AAPL"), _cached_row("GOOG")])
+    seen: dict = {}
+
+    def fake_scan(tickers, min_gap, workers=16, failed_tickers=None,
+                  provider_failures=None, deferred_tickers=None, deadline=None):
+        seen["order"] = list(tickers)
+        return [_one_scan_result(t) for t in tickers]
+
+    code, payload, health = _run_preset_main(tmp_path, monkeypatch, cache, fake_scan)
+
+    assert seen["order"] == ["MSFT", "AAPL", "GOOG"]
+    assert code == 0
+    assert payload["requested_tickers"] == ["AAPL", "GOOG", "MSFT"]
+    assert health[-1] is None
+
+
+def test_budget_stop_covered_by_last_runs_fresh_rows_is_not_an_error(tmp_path, monkeypatch):
+    """A rotated budget stop is a designed partial: the deferred name was
+    scanned fresh one run ago. Its row is carried (stamped with that run's
+    scan time) instead of dropped, and the heartbeat is ok.
+    """
+    cache = tmp_path / "leap.json"
+    _prior_leap_cache(cache, universe="preset:largecaps", deferred=[],
+                      rows=[_cached_row("AAPL"), _cached_row("GOOG"), _cached_row("MSFT")])
+
+    def fake_scan(tickers, min_gap, workers=16, failed_tickers=None,
+                  provider_failures=None, deferred_tickers=None, deadline=None):
+        deferred_tickers.append("MSFT")
+        return [_one_scan_result("AAPL"), _one_scan_result("GOOG")]
+
+    code, payload, health = _run_preset_main(tmp_path, monkeypatch, cache, fake_scan)
+
+    assert code == 0
+    assert health[-1] is None
+    rows = {row["ticker"]: row for row in payload["results"]}
+    assert set(rows) == {"AAPL", "GOOG", "MSFT"}
+    assert rows["MSFT"]["carried_from"] == "2026-10-30T14:57:10"
+    assert "carried_from" not in rows["AAPL"]
+    assert payload["deferred_tickers"] == ["MSFT"]
+    assert payload["carried_tickers"] == ["MSFT"]
+    assert payload["scan_budget_spent"] is True
+
+
+@pytest.mark.parametrize(
+    "universe, prior_rows",
+    [
+        # Deferred twice running: the carried row is already a run old.
+        ("preset:largecaps", [_cached_row("MSFT", carried_from="2026-10-29T14:57:18")]),
+        # The last run never produced the name at all.
+        ("preset:largecaps", [_cached_row("AAPL")]),
+        # A different universe's cache is not this universe's last run.
+        ("explicit", [_cached_row("MSFT")]),
+    ],
+)
+def test_budget_stop_without_a_fresh_prior_row_stays_an_error(
+    tmp_path, monkeypatch, universe, prior_rows
+):
+    """The hole is real when rotation cannot cover it: R-744 still holds."""
+    cache = tmp_path / "leap.json"
+    _prior_leap_cache(cache, universe=universe, deferred=[], rows=prior_rows)
+
+    def fake_scan(tickers, min_gap, workers=16, failed_tickers=None,
+                  provider_failures=None, deferred_tickers=None, deadline=None):
+        deferred_tickers.append("MSFT")
+        return [_one_scan_result("AAPL"), _one_scan_result("GOOG")]
+
+    code, payload, health = _run_preset_main(tmp_path, monkeypatch, cache, fake_scan)
+
+    assert code == 1
+    assert health[-1]["class"] == "scan_budget_spent"
+    assert "1 names deferred" in health[-1]["message"]
+    assert "1 uncovered" in health[-1]["message"]
+    assert payload["status"] == "degraded"
+    assert "MSFT" not in {row["ticker"] for row in payload["results"]}

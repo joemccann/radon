@@ -12,6 +12,11 @@ banner and phase-stamp wording.
     radon-phase loop=testing phase=audit exit=0 audited-through=<sha> ts=<utc>
     audited-through: <sha>
 
+An optional counts-only coverage line follows, from the security post-run
+hook: ``unreviewed: <n> commits since <YYYY-MM-DD>, reason <token>`` (or
+``unreviewed: unknown, reason <token>``). It names how much of ``main`` the
+loop's private checkpoint has not reviewed, never which commits.
+
 ``audited-through`` is present only when the audit phase exited 0. The colon
 form is the cursor ``nightly_audit_context`` and ``nightly_issue_prune``
 already match. A non-zero exit never advances that cursor.
@@ -59,6 +64,12 @@ _HTML = re.compile(r"<!--\s*radon-phase\s+(?P<fields>[^>]*?)\s*-->")
 _VISIBLE = re.compile(r"(?m)^radon-phase\s+(?P<fields>\S.*?)\s*$")
 _FIELD = re.compile(r"(?:^|\s)(loop|phase|exit|audited-through|ts)=(\S+)")
 _MARKER = re.compile(r"audited-through:?\**\s*`?([0-9a-f]{7,40})\b", re.IGNORECASE)
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_REASON = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+_UNREVIEWED = re.compile(
+    r"(?m)^unreviewed: (?:(?P<count>\d{1,6}) commits since (?P<since>\d{4}-\d{2}-\d{2})|unknown),"
+    r" reason (?P<reason>[a-z0-9][a-z0-9-]{0,39})$"
+)
 
 # Older dead-man banners (docs/dead-man-comment-format.md).
 _BANNER = re.compile(
@@ -137,11 +148,16 @@ def format_phase_comment(
     exit_code: int,
     audited_through: str = "",
     timestamp: str,
+    unreviewed_count: int | str | None = None,
+    unreviewed_since: str = "",
+    unreviewed_reason: str = "",
 ) -> str:
     """HTML comment, the same fields on a visible line, and the cursor.
 
     The sha is included only for ``phase=audit`` with exit 0. Anything else
     is dropped so a failed or non-audit phase cannot move the checkpoint.
+    The unreviewed line is appended only for a positive count (or
+    ``"unknown"``) with a valid date and reason token.
     """
     loop_token = (loop or "").strip()
     phase_token = (phase or "").strip()
@@ -165,7 +181,38 @@ def format_phase_comment(
     lines = [f"<!-- radon-phase {fields} -->", f"radon-phase {fields}"]
     if sha:
         lines.append(f"audited-through: {sha}")
+    unreviewed = unreviewed_line(unreviewed_count, unreviewed_since, unreviewed_reason)
+    if unreviewed:
+        lines.append(unreviewed)
     return "\n".join(lines) + "\n"
+
+
+def unreviewed_line(count: int | str | None, since: str = "", reason: str = "") -> str:
+    """The counts-only coverage line, or "" when there is nothing valid to say."""
+    if not _REASON.match(reason or ""):
+        return ""
+    if count == "unknown":
+        return f"unreviewed: unknown, reason {reason}"
+    try:
+        n = int(count)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0 or n > 999999 or not _DATE.match(since or ""):
+        return ""
+    return f"unreviewed: {n} commits since {since}, reason {reason}"
+
+
+def parse_unreviewed(body: str) -> dict | None:
+    """``{"count": int | None, "since": str, "reason": str}`` or None."""
+    match = _UNREVIEWED.search(body or "")
+    if not match:
+        return None
+    count = match.group("count")
+    return {
+        "count": int(count) if count is not None else None,
+        "since": match.group("since") or "",
+        "reason": match.group("reason"),
+    }
 
 
 def _fields(raw: str) -> dict[str, str] | None:

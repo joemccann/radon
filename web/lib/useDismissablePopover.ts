@@ -9,22 +9,23 @@ import { useEffect, type RefObject } from "react";
  * only while `enabled` is true, so callers that gate on an `open` flag pass that
  * flag and callers that always listen pass `true`.
  *
- * `onClose` runs when either dismissal fires.
+ * `onClose` receives the native dismissal event so a caller can distinguish
+ * pointer dismissal from an immediate keyboard dismissal.
  */
 export function useDismissablePopover(
   ref: RefObject<HTMLElement | null>,
-  onClose: () => void,
+  onClose: (event?: MouseEvent | KeyboardEvent) => void,
   enabled = true,
 ) {
   useEffect(() => {
     if (!enabled) return;
     const onDocMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
+        onClose(e);
       }
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onClose(e);
     };
     document.addEventListener("mousedown", onDocMouseDown);
     document.addEventListener("keydown", onEsc);

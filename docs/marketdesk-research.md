@@ -12,7 +12,7 @@ Every discovered article is persisted before slow processing. Pending rows repla
 
 PDF archiving uses the authenticated JSON operation `GET /files/<id>/blob` on
 https://marketdesk.ai; only the separate archive follows its authorized file redirect.
-The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. A Turso wire failure while seeding, selecting, or acknowledging a PDF does the same: the error row stays and the oneshot exits 0 so the next timer can retry. The classifier uses the chained exception type, including a timeout, a connection reset, and HTTP 502, 503, or 504. A statement error, including a missing table, still exits 1. Other download failures still exit 1.
+The independent [PDF archive service](marketdesk-pdf-archive.md) applies stricter PDF-only book/relevance selection, 30-minute account pacing and durable 6/12/24-hour quota backoff before retrying provider-authorized PDF access. The provider currently reports previews unavailable and downloads available, but no separate working download route has been verified. Its normal authenticated PDF operation can remain quota-blocked while newsfeed publication continues. No provider allowance is bypassed. A persisted `preview_quota` or `download_quota` deferral keeps the `marketdesk-pdf` error row and the archive oneshot exits 0. A Turso wire failure while seeding, selecting, or acknowledging a PDF does the same: the error row stays and the oneshot exits 0 so the next timer can retry. The classifier uses the chained exception type, including a timeout, a connection reset, and HTTP 502, 503, or 504. A statement error, including a missing table, still exits 1. Other download failures still exit 1. A report that fails on its own (such as a provider `http_500` for one file) backs off per item and loses priority after three such failures, so it cannot starve the backlog.
 
 
 `radon-marketdesk.timer` replaced the shared-folder Dropbox watcher
@@ -244,7 +244,12 @@ caption keys that do not match the attached images, structural humanize tells
 length limits. The figures are attached to the request
 (`complete_multimodal_json`), so captions are read off the images. Ladder
 exhaustion leaves the article unpublished (see the attempt rules above). The
-ladder is `scripts/clients/model_ladder.py`. The image copy call skips grok
+ladder is `scripts/clients/model_ladder.py`. Image and text copy use that
+shared order, grok included. One provider's unreadable or incomplete reply
+fails over to the next rung. A read timeout cools that provider down for the
+rest of the process, so the 2026-10-27 grok-4.6 image timeouts (153s, or the
+120s cap) are not repeated for every article in the 270s cycle. Captions obey the same
+ladder is `scripts/clients/model_ladder.py`. Text-only editorial requests start with Antigravity, then Anthropic, Grok, Cursor, Codex, NVIDIA and Cerebras; quota failures fall through. The image copy call skips text-only Antigravity and grok
 (`IMAGE_PROVIDERS`): grok-4.6 took 153s or hit the 120s read timeout on every
 image call (2026-10-27), most of the 270s cycle budget. Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
@@ -327,12 +332,13 @@ app image through `radon-app-runtime`:
   (`/etc/radon/seccomp/chromium.json`, refused if missing or untrusted) and a
   512m `/dev/shm`, the same isolation as the newsfeed. The job no longer runs a
   browser; the isolation stays because it still parses third-party content;
-- an env allowlist: Turso, the model ladder keys, `THEMARKETEAR_*`,
-  `MARKETDESK_*` and `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB
-  and Clerk secrets never enter the container;
-- read-only `.grok`, `.codex` and `.claude` ladder grants, and no writable
-  Antigravity grant (third-party content), so its ladder falls past
-  antigravity.
+- an env allowlist: Turso, `THEMARKETEAR_*`, `MARKETDESK_*` and
+  `DROPBOX_WRITE_*`. The read-only `DROPBOX_*` reader, B2, IB, Clerk secrets,
+  provider tokens and model API keys never enter the container;
+- the private inference socket, read-only, with `RADON_MODEL_GATEWAY_REQUIRED=1`.
+  No subscription grant directory is mounted here. Antigravity isolation runs
+  inside `radon-model-gateway`, which owns the canonical grants. See
+  [the model gateway](model-gateway.md).
 
 The radon-api container keeps its read-only research bind, so existing and new
 research assets are served by the same authenticated route.
@@ -347,6 +353,10 @@ research assets are served by the same authenticated route.
 Both rows are registered in `scripts/watchdog/services.py` and
 `web/lib/serviceHealthWindows.ts`, and both map to `radon-marketdesk.service` in
 `scripts/api/service_log_units.json` for the admin log view.
+
+A stored `dropbox-research` row is not one of these writers. Readers mark it
+retired and the watchdog does not page it. The operator stop is
+[retired dropbox research health](incident-runbook.md#retired-dropbox-research-health).
 
 ## Operator steps before enabling in production
 

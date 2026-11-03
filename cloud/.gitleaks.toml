@@ -42,6 +42,9 @@ commits = [
   # the scan ran. Not a credential; the fixture was rewritten to runtime
   # construction in the next commit so no later SHA re-trips the rule.
   "020865adeff48b7182b7eb81d74a01fc70d00c82",
+  # 2026-10-29: an operator history rewrite recreated the commit above under
+  # a new SHA with an identical fixture; no new content.
+  "6d9429aba132a4783b5a5d0e9987b84d6ff7a35c",
 ]
 
 [[rules]]
@@ -86,6 +89,9 @@ commits = [
   # valid credential, nothing to rotate. The fixture was rewritten to runtime
   # construction in the next commit so no later SHA re-trips the rule.
   "38eeecb91eedb3b90966821bff12d5b240d89708",
+  # 2026-10-29: an operator history rewrite recreated the commit above under
+  # a new SHA with an identical fixture; no new content.
+  "d90efb238831202ef3aa954d9f9893391eeb4cc8",
   # 2026-10-12 (PR #1045): the journal-redaction tests spelled FAKE colon-form
   # values (api_key / auth_token) to prove the /admin log redactor scrubs
   # them. Never valid credentials, nothing to rotate. Rewritten to runtime
@@ -107,6 +113,9 @@ commits = [
   # immutable merged commit; never a secret, nothing to rotate. The line no
   # longer exists at HEAD.
   "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+  # 2026-10-29: an operator history rewrite recreated the commit above under
+  # a new SHA with an identical line; no new content.
+  "8efc012df3c96131ca605f69d8f5a2dcae7dca2e",
   # 2026-10-01 (PR #837): runner Pushover tests spelled SENTINEL fixtures
   # next to a token identifier. Never a credential, nothing to rotate.
   # Rewritten to runtime construction in the follow-up commit.

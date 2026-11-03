@@ -120,3 +120,7 @@ claimed. Do not add another recovery action or relax the quote-age gate.
 ## News article reader
 
 `NewsfeedLightbox` uses a centered viewport-bounded frame and persistent Close/article controls. `NewsfeedGallery` owns image navigation, source captions, thumbnails, swipe and enlarge/zoom. Gallery keyboard navigation must never advance articles; text inputs retain arrow keys. Escape exits enlargement before dismissing. Desktop copy scrolls independently; mobile uses one scroll document under the toolbar. Preserve source, bookmark, Explain and Share. Regression: `newsfeed-gallery.test.tsx`, `newsfeed-research-media.spec.ts`.
+
+## Shared model gateway
+
+All production model inference uses `lib/llm/provider.ts`, which calls authenticated FastAPI `/model-gateway/chat`. The standalone model service owns provider ordering, capability filtering, catalog, subscription credentials and refresh. Next.js must not read provider grants, contact model vendors or spawn inference processes. Preserve images, native tool history, total deadlines, cancellation and publication checks. `/api/models` reflects the live service catalog. Local `ASSISTANT_MOCK` is the offline test seam. See `web/CLAUDE.md` for the complete contract.

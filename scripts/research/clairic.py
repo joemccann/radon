@@ -1,31 +1,20 @@
-"""Optional Cloudflare Workers AI report date for research.identify.
-
-CLAIRIC_DATES_ENABLED and CLAIRIC_DATE_SANITY_ENABLED both default off.
-Off, identify() keeps today's date ladder and writes no date_flag.
-The HTTP call uses the stdlib (no new dependency). Credentials are
-CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN from the process environment
-(/etc/radon/env on the research host). A missing credential, timeout, or
-API error logs one line and leaves the ladder date unchanged.
-"""
+"""Optional report-date inference through the private model gateway; date gates stay local."""
 from __future__ import annotations
+from model_gateway.client import GatewayError, request as gateway_request
+from model_gateway.contracts import ClairicError, MissingCredentials
 
 import json
 import re
 import sys
-import urllib.error
-import urllib.request
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-API = "https://api.cloudflare.com/client/v4"
-MODEL_PATH = "/ai/run/@cf/cloudflare/clairic"
 PASS_TOKENS = 8192
 CHARS_PER_TOKEN = 4
 TIMEOUT_S = 10
 MAX_RESPONSE_BYTES = 65_536
 STALE_DAYS = 45
 CONFIDENCE_MIN = 0.9
-_ACCOUNT_RE = re.compile(r"[0-9a-fA-F]{32}")
 _ISO_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 REPORT_DATE_FIELD = {
@@ -46,15 +35,8 @@ PUBLISHER_FIELD = {
 }
 
 
-class ClairicError(Exception):
-    def __init__(self, reason):
-        super().__init__(reason)
-        self.reason = reason
 
 
-class MissingCredentials(ClairicError):
-    def __init__(self):
-        super().__init__("missing_credentials")
 
 
 def _enabled(name, env):
@@ -120,52 +102,23 @@ def build_request(pages, folder_date):
     return body
 
 
-def _credentials(env):
-    account = (env.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
-    token = (env.get("CLOUDFLARE_API_TOKEN") or "").strip()
-    if not _ACCOUNT_RE.fullmatch(account) or not token or any(c in token for c in "\r\n"):
-        raise MissingCredentials()
-    return account, token
 
 
-def _endpoint(account):
-    return f"{API}/accounts/{account}{MODEL_PATH}"
 
 
 def fetch_report_date(pages, folder_date, env=None, opener=None):
-    import os
-    env = os.environ if env is None else env
-    account, token = _credentials(env)
     body = build_request(pages, folder_date)
     if not body["state"].strip():
         raise ClairicError("empty_state")
-    raw = json.dumps(body).encode()
-    request = urllib.request.Request(
-        _endpoint(account),
-        data=raw,
-        method="POST",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    open_url = opener or urllib.request.urlopen
     try:
-        with open_url(request, timeout=TIMEOUT_S) as response:
-            payload = response.read(MAX_RESPONSE_BYTES + 1)
-    except TimeoutError as exc:
-        raise ClairicError("timeout") from exc
-    except urllib.error.HTTPError as exc:
-        raise ClairicError(f"http_{exc.code}") from exc
-    except urllib.error.URLError as exc:
-        reason = "timeout" if isinstance(getattr(exc, "reason", None), TimeoutError) else "transport"
-        raise ClairicError(reason) from exc
-    except OSError as exc:
-        raise ClairicError("transport") from exc
-    if len(payload) > MAX_RESPONSE_BYTES:
-        raise ClairicError("bad_response")
-    try:
-        parsed = json.loads(payload.decode())
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise ClairicError("bad_response") from exc
-    return _report_date(parsed)
+        reply = gateway_request("clairic", {"state": body["state"],
+            "folder_date": body.get("reference_date"),
+            "include_publisher": "publisher" in body["fields"]}, timeout_seconds=15)
+    except GatewayError as exc:
+        if exc.code == "missing_credentials":
+            raise MissingCredentials() from exc
+        raise ClairicError(exc.code) from exc
+    return reply.get("date"), reply.get("confidence")
 
 
 def _report_date(payload):

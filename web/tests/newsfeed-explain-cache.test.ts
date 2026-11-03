@@ -11,13 +11,10 @@ const MIGRATION = readFileSync(
   "utf8",
 );
 
-const { chat, resolveProvider } = vi.hoisted(() => ({
-  chat: vi.fn(),
-  resolveProvider: vi.fn(() => "anthropic"),
-}));
+const { chat } = vi.hoisted(() => ({ chat: vi.fn() }));
 vi.mock("@/lib/llm/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/llm/provider")>();
-  return { ...actual, chat, resolveProvider, alternateProvider: () => "xai" };
+  return { ...actual, chat };
 });
 
 let db: Client;
@@ -162,6 +159,19 @@ describe("newsfeed explain cache and generate", () => {
     expect(out.explanation).not.toMatch(/investment advice/i);
     const stored = await db.execute("SELECT explanation FROM newsfeed_explanations");
     expect(String(stored.rows[0].explanation)).toBe("The auction paid plants to stay available.");
+  });
+
+  it("retains admitted images and delegates routing and fallback to the model service", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } })));
+    chat.mockResolvedValue({ text: "The auction paid plants to stay available.", provider: "anthropic", model: "vision" });
+    const { explainNewsfeedPost } = await import("@/lib/newsfeedExplainGenerate");
+    const result = await explainNewsfeedPost({ ...input, imageUrls: ["https://media.radon.run/chart.png"] }, { signal: new AbortController().signal, onStage: () => {} });
+    expect(result.hasImage).toBe(true);
+    expect(chat.mock.calls[0][0].messages[0].content[0]).toMatchObject({ type: "image", source: { type: "base64", data: "iVBORw==" } });
+    expect(chat.mock.calls[0][0]).not.toHaveProperty("provider");
+    expect(chat.mock.calls[0][0]).not.toHaveProperty("fallback");
+    expect(editorialReview).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 
   it("refuses loopback image fetches before a socket opens", async () => {

@@ -81,8 +81,10 @@
     cursor: pointer;
   }
 
-  :global(.chain-first-cockpit) .recenter:hover:not(:disabled) {
-    background: var(--bg-hover);
+  @media (hover: hover) and (pointer: fine) {
+    :global(.chain-first-cockpit) .recenter:hover:not(:disabled) {
+      background: var(--bg-hover);
+    }
   }
 
   :global(.chain-first-cockpit) .recenter:disabled {

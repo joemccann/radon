@@ -316,6 +316,11 @@ def test_refresh_updates_code_and_units_without_rebuilding_the_clone(tmp_path, m
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(maintenance, "run", runner)
+    monkeypatch.setattr(maintenance, "pwd", SimpleNamespace(getpwnam=lambda _: SimpleNamespace(pw_uid=32000)))
+    monkeypatch.setattr(maintenance, "admit_model_client", lambda account: calls.append(["gateway-peer", str(account.pw_uid)]))
+    monkeypatch.setattr(maintenance, "ensure_native_cli", lambda: calls.append(["verify-ci-receipt"]))
+    production = "TURSO_DB_URL=fixture\nGROK_RESPONDER_TURSO_AUTH_TOKEN=fixture\nPUSHOVER_USER=fixture\nPUSHOVER_TOKEN=fixture\n"
+    monkeypatch.setattr(maintenance, "read_root_file", lambda path: production if path == maintenance.PRODUCTION_ENV else "GROK_PAGE_RESPONDER=1\n")
     maintenance.refresh(stage)
     assert (home / "repo" / "marker").read_text(encoding="utf-8") == "preserve\n"
     assert ready.read_text(encoding="utf-8") == "ready\n"

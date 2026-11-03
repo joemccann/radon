@@ -1,6 +1,7 @@
 [Unit]
+After=radon-model-gateway.service network.target
+Wants=radon-model-gateway.service
 Description=Radon Next.js frontend
-After=network.target
 
 # DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)

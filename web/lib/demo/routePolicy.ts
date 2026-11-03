@@ -346,7 +346,7 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   // ── infrastructure ───────────────────────────────────────────────────────
   "/api/flex-token": { GET: { mode: "infra", note: "Disk token metadata; absent on Vercel." } },
   "/api/models": {
-    GET: { mode: "infra", tables: ["llm_model_catalog"], note: "Model picker catalog; built-in fallback." },
+    GET: { mode: "backend", endpoints: ["/model-gateway/models"], note: "Service-owned model catalog; no local provider grants or fallback." },
   },
   "/api/prices": {
     GET: { mode: "infra", note: "Deprecated: static 405." },

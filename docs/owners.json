@@ -158,9 +158,23 @@
     },
     {
       "id": "model-ladder",
-      "globs": ["scripts/clients/model_ladder.py"],
-      "owners": ["docs/dropbox-research.md"],
-      "note": "Shared HTTP ladder byte cap and subscription auth matrix. Vision HTTP rungs gained the 2,000,000-byte stream cap without an owner update (DOC-144). Weekend CLI ladders are a separate contract."
+      "globs": [
+        "scripts/clients/model_ladder.py",
+        "scripts/model_gateway/**",
+        "scripts/ci/check_model_cli_transport.py",
+        "scripts/api/routes/model_gateway.py",
+        "cloud/scripts/model_clients.py",
+        "cloud/scripts/model_transport.py",
+        "cloud/scripts/model_pacing.py",
+        "cloud/scripts/model_gateway_rollback.py",
+        "cloud/scripts/check_model_transport.py",
+        "cloud/scripts/mac_model_gateway.py",
+        "cloud/services/radon-model-gateway*",
+        "docker/app/vendor-clis/**",
+        "web/lib/llm/provider.ts"
+      ],
+      "owners": ["docs/dropbox-research.md", "docs/model-gateway.md"],
+      "note": "Standalone model gateway, public compatibility facade, provider transports, auth/refresh boundaries and coding CLI adapters."
     },
     {
       "id": "health-probes",

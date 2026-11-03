@@ -51,7 +51,7 @@ _FENCE_OPEN = "<!-- image-derived -->"
 _FENCE_CLOSE = "<!-- /image-derived -->"
 
 DEFAULT_MODELS = ("nvidia/nemotron-parse",)
-NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+from model_gateway.client import request as gateway_request
 _PICTURE_KINDS = {"chart", "picture", "image"}
 _TITLE_KINDS = {"title", "section-header", "header", "section_header"}
 _BREAKER = {"degraded", "empty", "length", "timeout", "network", "malformed", "duplicated"}
@@ -81,7 +81,7 @@ def parser_mode(env: dict | None = None) -> str:
         return "nemotron"
     if explicit:
         return "local"
-    if (source.get("NVIDIA_API_KEY") or "").strip():
+    if _gateway_ocr_available():
         return "nemotron"
     return "local"
 
@@ -231,7 +231,7 @@ def parse_document(pdf_path, output, *, post=None, sleep=None, monotonic=None, j
     if parser_mode() != "nemotron":
         _stamp_local(local)
         return write_evidence(output, local)
-    if post is None and not os.environ.get("NVIDIA_API_KEY", "").strip():
+    if post is None and not _gateway_ocr_available():
         local["fallback_reason"] = "missing_api_key"
         local["fallback_attempts"] = []
         _stamp_local(local)
@@ -557,54 +557,20 @@ class _CapturingPost:
 
 
 def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline):
-    from clients.model_ladder import (
-        _classify_http_failure, _default_post, _nvidia_limiter, _nvidia_max_wait, _request,
-    )
-
-    sender = _CapturingPost(post or _default_post)
-    # One NVIDIA key, one host-wide pace shared with the ladder, embeddings and
-    # the nightly fx loops (scripts/nvidia_rate_limit.py).
-    limiter = _nvidia_limiter(os.environ, post or _default_post)
-    key = os.environ.get("NVIDIA_API_KEY", "").strip() or ("test-key" if post else "")
-    if not key:
-        raise PageParseError("missing_api_key")
-    headers = {"authorization": f"Bearer {key}", "content-type": "application/json"}
-    timeout = _float_env("RADON_RESEARCH_PARSE_PAGE_TIMEOUT_S", 25.0)
-    retries = _int_env("RADON_RESEARCH_PARSE_MAX_RETRIES", 2, 0, 5)
-    delay = 0.5
-    last = "empty"
-    for attempt in range(retries + 1):
-        if _clock(monotonic) >= deadline:
-            raise PageParseError("budget")
-        if limiter is not None and not limiter.acquire(_nvidia_max_wait(os.environ)):
-            raise PageParseError("http_429")
-        try:
-            status, text, payload = _request(sender, NVIDIA_CHAT_URL, headers, body, timeout=timeout)
-        except RuntimeError as exc:
-            last = "timeout" if "timeout" in str(exc).lower() else "network"
-            if attempt >= retries or not _retryable(last):
-                raise PageParseError(last) from exc
-            _sleep(min(delay, 8.0) + _jitter(jitter), sleep)
-            delay = min(delay * 2, 8.0)
-            continue
-        if limiter is not None:
-            if status == 429:
-                limiter.note_429(_retry_after(sender.headers))
-            elif status in (401, 403):
-                limiter.note_auth_failure(status)
-            elif status == 200:
-                limiter.note_success()
-        failure = _failure_reason(model, status, text or "", payload, _classify_http_failure)
-        if failure is None:
-            return payload
-        last = failure
-        if attempt >= retries or not _retryable(failure):
-            raise PageParseError(failure)
-        retry_after = _retry_after(sender.headers)
-        wait = min(retry_after, 8.0) if retry_after is not None else min(delay, 8.0)
-        _sleep(max(0.0, wait) + _jitter(jitter), sleep)
-        delay = min(delay * 2, 8.0)
-    raise PageParseError(last)
+    """Native transport/retries live in the gateway; local extraction gates remain here."""
+    image = None
+    for message in body.get("messages", []):
+        for block in message.get("content", []):
+            if block.get("type") == "image_url":
+                image = block.get("image_url", {}).get("url", "").partition(",")[2]
+    if not image:
+        raise PageParseError("malformed")
+    remaining = max(0.1, deadline - _clock(monotonic))
+    try:
+        return gateway_request("ocr", {"model": model, "image": image,
+            "timeout_seconds": min(remaining, 270)}, timeout_seconds=min(remaining + 10, 280))["payload"]
+    except Exception as exc:
+        raise PageParseError("gateway_unavailable") from exc
 
 
 def _retryable(reason: str) -> bool:
@@ -768,7 +734,7 @@ def _meaningful(text: str) -> bool:
 
 
 def _openai_text(payload: dict) -> str:
-    from clients.model_ladder import _text_from_openai
+    from model_gateway.contracts import text_from_openai as _text_from_openai
     return _text_from_openai(payload)
 
 
@@ -899,3 +865,11 @@ def _float_env(name: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _gateway_ocr_available() -> bool:
+    try:
+        status = gateway_request("status", {}, timeout_seconds=10)
+        return status.get("capabilities", {}).get("ocr", "nvidia" in status.get("providers", [])) is True
+    except Exception:
+        return False

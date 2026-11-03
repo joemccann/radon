@@ -26,7 +26,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from clients.model_ladder import LadderResult, ModelLadderExhausted  # noqa: E402
 from knowledge import distill as distill_mod  # noqa: E402
-from knowledge import embed as embed_mod  # noqa: E402
+from model_gateway import _embedding_backend as embed_mod  # noqa: E402
 from knowledge import ingest as ingest_mod  # noqa: E402
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 
@@ -393,13 +393,15 @@ class TestGetEmbedder:
     ):
         calls = []
         class Model:
-            def __init__(self, name):
-                pass
+            def __init__(self, name, **kwargs):
+                assert kwargs == {"specific_model_path": "/verified/model", "local_files_only": True}
             def embed(self, texts, batch_size=256):
                 calls.append(batch_size)
                 for text in texts:
                     yield [float(text)] * embed_mod.EMBEDDING_DIM
         monkeypatch.setattr(embed_mod, "_import_text_embedding", lambda: Model)
+        from model_gateway import artifacts
+        monkeypatch.setattr(artifacts, "embedding_snapshot", lambda: "/verified/model")
         vectors = embed_mod.get_embedder()([str(i) for i in range(201)])
         assert calls == [16]
         assert len(vectors) == 201

@@ -5,9 +5,8 @@ Policy (Joe 2026-09-21): list the Mini Claude Code catalog, skip the newest
 generation, run the prior / second-newest first, then the rest. Anthropic
 keeps shipping top-tier models; a static opus pin goes stale.
 
-Catalog source is the same subscription CLI the security loops launch
-(`claude models`). This module never calls the Anthropic HTTP API and unsets
-every billing-reroute key before spawning Claude Code.
+Catalog source is the standalone service cached inventory. This module never
+calls a provider or launches an inference CLI. Fixture text remains accepted.
 
 Order: by capability TIER, never by print order. `claude models` is not a
 catalog subcommand; the session model answers in prose and lists itself
@@ -32,8 +31,6 @@ import argparse
 import json
 import os
 import re
-import shlex
-import subprocess
 import sys
 from typing import Iterable
 
@@ -44,46 +41,6 @@ SAFETY_LADDER = ("claude-opus-5", "claude-sonnet-5")
 CLAUDE_ID_RE = re.compile(r"claude-[a-z0-9]+(?:[-.][a-z0-9\[\]]+)+", re.I)
 DATE_SUFFIX_RE = re.compile(r"-20\d{6}$")
 BRACKET_RE = re.compile(r"\[.*?\]")
-
-# Also in loops/security*.env AGENT_UNSET, which run_loop.sh applies first. Catalog discovery must not start
-# billing a prepaid Anthropic path.
-BILLING_REROUTE_KEYS = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_API_KEY",
-    "CLAUDE_CODE_API_BASE_URL",
-    "CLAUDE_CODE_HFI_BEARER_TOKEN",
-    "CLAUDE_API_KEY",
-    "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
-    "CLAUDE_CODE_GATEWAY_TOKEN",
-    "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
-    "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
-    "CLAUDE_CODE_HOST_CREDS_FILE",
-    "ANTHROPIC_UNIX_SOCKET",
-    "ANTHROPIC_PROFILE",
-    "ANTHROPIC_FEDERATION_RULE_ID",
-    "ANTHROPIC_ORGANIZATION_ID",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "ANTHROPIC_AWS_API_KEY",
-    "ANTHROPIC_AWS_BASE_URL",
-    "ANTHROPIC_BEDROCK_BASE_URL",
-    "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
-    "ANTHROPIC_VERTEX_BASE_URL",
-    "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
-    "ANTHROPIC_FOUNDRY_API_KEY",
-    "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
-    "ANTHROPIC_FOUNDRY_BASE_URL",
-    "ANTHROPIC_FOUNDRY_RESOURCE",
-    "ANTHROPIC_IDENTITY_TOKEN",
-    "ANTHROPIC_IDENTITY_TOKEN_FILE",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "CLAUDE_CODE_USE_GATEWAY",
-)
-
-DEFAULT_MODELS_CMD = "claude models"
 
 
 def family_key(model_id: str) -> str:
@@ -182,34 +139,19 @@ def ladder_from_text(text: str) -> list[str]:
     return skip_newest(extract_ids(text))
 
 
-def _scrubbed_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in BILLING_REROUTE_KEYS}
-    return env
-
-
-def read_live_catalog(cmd: str | None = None, timeout: float = 20.0) -> str:
-    """Run the subscription `claude models` command. No API key path."""
-    raw = cmd or os.environ.get("RADON_WEEKEND_CLAUDE_MODELS_CMD") or DEFAULT_MODELS_CMD
-    argv = shlex.split(raw)
-    if not argv:
-        raise RuntimeError("empty claude models command")
+def read_live_catalog(timeout: float = 20.0) -> str:
+    """Read the service-owned full inventory; never invoke an inference CLI."""
+    # Installed resolver is invoked with Python -I; only its root-owned lib
+    # directory is admitted, never the agent-writable working clone.
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from model_gateway.client import request
     try:
-        proc = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=_scrubbed_env(),
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"claude models failed: {exc}") from exc
-    text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    if proc.returncode != 0 and not extract_ids(text):
-        raise RuntimeError(
-            f"claude models exited {proc.returncode}: {(proc.stderr or proc.stdout or '').strip()[:200]}"
-        )
-    return text
+        catalog = request("models", {}, timeout_seconds=timeout)
+    except Exception as exc:
+        raise RuntimeError("model gateway catalog unavailable") from exc
+    rows = [row for row in catalog.get("models", []) if isinstance(row, dict) and row.get("provider") == "anthropic"]
+    return json.dumps({"models": rows})
 
 
 def resolve_ladder(text: str | None = None) -> list[str]:

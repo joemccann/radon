@@ -245,7 +245,8 @@ class TestImageBuildCarriesPublicEnv:
         jobs = parsed["jobs"]
         assert "python-image" in jobs
         assert "node-image" in jobs
-        assert "needs" not in jobs["python-image"]
+        assert jobs["python-image"].get("needs") == "darwin-clients"
+        assert "node-image" not in jobs["python-image"].get("needs", [])
         assert "needs" not in jobs["node-image"]
         concurrency = parsed.get("concurrency") or jobs["python-image"].get("concurrency")
         assert concurrency
@@ -302,7 +303,7 @@ def _run_image_cache_selector(
 
 def _parse_github_output(text: str) -> tuple[str, str]:
     cache_from = ""
-    cache_to = ""
+    cache_to = None
     lines = text.splitlines()
     index = 0
     while index < len(lines):
@@ -318,7 +319,8 @@ def _parse_github_output(text: str) -> tuple[str, str]:
         elif line.startswith("cache_to="):
             cache_to = line.split("=", 1)[1]
         index += 1
-    assert cache_from and cache_to
+    # An empty cache_to is a deliberate "export nothing"; a missing line is not.
+    assert cache_from and cache_to is not None
     return cache_from, cache_to
 
 
@@ -367,9 +369,14 @@ class TestImageBuildUsesRemoteCache:
         setup_steps = [step for step in steps if step.get("uses") == SETUP_BUILDX_ACTION]
         build_steps = [step for step in steps if step.get("uses") == BUILD_PUSH_ACTION]
         assert len(setup_steps) == 1
-        assert len(build_steps) == 1
-
-        config = build_steps[0]["with"]
+        assert len(build_steps) == (2 if job_name == "python-image" else 1)
+        ordinary = [step for step in build_steps if step["with"].get("target") != "model-gateway"]
+        assert len(ordinary) == 1
+        if job_name == "python-image":
+            gateway = [step for step in build_steps if step["with"].get("target") == "model-gateway"]
+            assert len(gateway) == 1
+            assert "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}" in gateway[0]["with"]["tags"]
+        config = ordinary[0]["with"]
         assert config["context"] == "."
         assert config["file"] == dockerfile
         assert config["platforms"] == "linux/amd64"
@@ -416,9 +423,21 @@ class TestImageBuildUsesRemoteCache:
         ]
         assert warm_to == missing_to
         assert ":latest" not in warm_to and "github.sha" not in warm_to
-        assert pr_from == f"type=gha,scope={scope}"
-        assert pr_to == f"type=gha,mode=max,scope={scope}"
-        assert "packages:write" not in pr_to
+        # Pull requests read main's public registry cache and export nothing:
+        # a GHA export cost ~41s (python) and ~289s (gateway) per PR on run
+        # 41261010191 while the repo cache sat over its 10 GB limit.
+        pr_warm_from, pr_warm_to = _run_image_cache_selector(
+            jobs[job_name],
+            ref="refs/pull/1/merge",
+            event="pull_request",
+            inspect_status=0,
+        )
+        assert pr_from.splitlines() == [
+            f"type=registry,ref=ghcr.io/joemccann/{image}:buildcache",
+            f"type=gha,scope={scope}",
+        ]
+        assert pr_to == ""
+        assert (pr_warm_from, pr_warm_to) == (pr_from, pr_to)
 
     def test_python_and_node_do_not_share_a_cache_scope(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]

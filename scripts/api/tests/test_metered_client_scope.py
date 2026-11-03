@@ -9,7 +9,7 @@ gap passes CI. Two UW-metered assistant lanes shipped that way.
 This file closes that blind spot from the other direction, without reading the
 denylist to decide what to look at. It derives the metered surface from the
 handlers themselves -- every FastAPI route whose handler reaches the Unusual
-Whales client or the TradingView MCP bridge, directly or through a helper in
+Whales client, TradingView MCP bridge, or standalone model gateway, directly or through a helper in
 the same module -- and requires each one to be EITHER denied to the demo
 service principal OR declared as a `backend` endpoint the demo frontend
 actually proxies (`web/lib/demo/routePolicy.ts`). A new metered route that is
@@ -33,7 +33,7 @@ REPO_ROOT = API_DIR.parent.parent
 ROUTE_POLICY_TS = REPO_ROOT / "web" / "lib" / "demo" / "routePolicy.ts"
 
 # Modules whose import graph bills a third-party account per call.
-METERED_CLIENT_MODULES = ("clients.uw_client", "clients.tradingview_client")
+METERED_CLIENT_MODULES = ("clients.uw_client", "clients.tradingview_client", "model_gateway", "model_gateway.client")
 
 _HTTP_VERBS = {"get", "post", "put", "patch", "delete"}
 
@@ -45,7 +45,7 @@ def _api_source_files() -> list[Path]:
 
 
 def _metered_names(tree: ast.AST) -> set[str]:
-    """Names bound in this module from a metered client module, including the
+    """Names bound in this module from a metered client or gateway, including the
     function-local `from clients.uw_client import UWClient` form."""
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -160,10 +160,10 @@ def _proxied_backend_endpoints() -> set[str]:
 METERED_ROUTES = _metered_routes()
 
 
-def _is_denied(path: str) -> bool:
-    from scripts.api.auth import SERVICE_TOKEN_DENIED_PREFIXES
+def _is_denied(path: str, method: str) -> bool:
+    from scripts.api.auth import service_token_path_allowed
 
-    return path.startswith(tuple(SERVICE_TOKEN_DENIED_PREFIXES))
+    return not service_token_path_allowed(path, method)
 
 
 def _is_proxied(path: str, endpoints: set[str]) -> bool:
@@ -183,9 +183,10 @@ class TestMeteredRoutesAreScoped:
         assert len(METERED_ROUTES) >= 6, (
             "The metered-route analysis found "
             f"{len(METERED_ROUTES)} routes ({METERED_ROUTES}). It is meant to "
-            "find the UW and TradingView handlers; if the import or decorator "
+            "find the UW, TradingView and model-gateway handlers; if the import or decorator "
             "shape changed, fix the analysis rather than deleting this guard."
         )
+        assert {('GET','/model-gateway/{operation}'),('POST','/model-gateway/{operation}')} <= set(METERED_ROUTES)
 
     @pytest.mark.parametrize(
         ("verb", "path"),
@@ -194,7 +195,7 @@ class TestMeteredRoutesAreScoped:
     )
     def test_metered_route_is_denied_or_proxied(self, verb, path):
         endpoints = _proxied_backend_endpoints()
-        denied = _is_denied(path)
+        denied = _is_denied(path, verb)
         proxied = _is_proxied(path, endpoints)
         assert denied or proxied, (
             f"{verb} {path} spends a metered third-party credential and is "
@@ -216,7 +217,7 @@ class TestMeteredRoutesAreScoped:
         """A denied path that a demo route also proxies is a broken deployment,
         not a tighter scope."""
         endpoints = _proxied_backend_endpoints()
-        assert not (_is_denied(path) and _is_proxied(path, endpoints)), (
+        assert not (_is_denied(path, verb) and _is_proxied(path, endpoints)), (
             f"{verb} {path} is denied to the service principal AND declared as "
             "a proxied `backend` endpoint in routePolicy.ts. The demo route "
             "will 401; reconcile the two."

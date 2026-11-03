@@ -178,6 +178,7 @@ def _run(
     extra_env: dict[str, str] | None = None,
     docker_body: str | None = None,
     timeout: float = 10,
+    stdin=None,
 ) -> subprocess.CompletedProcess[str]:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
@@ -208,6 +209,7 @@ exit 0
         capture_output=True,
         text=True,
         timeout=timeout,
+        stdin=stdin,
     )
     result.docker_log = docker_log  # type: ignore[attr-defined]
     result.proxy_dir = env["RADON_TEST_NOTIFY_PROXY_DIR"]  # type: ignore[attr-defined]
@@ -229,7 +231,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull [<sha>]|prune|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
@@ -303,6 +305,7 @@ def test_pull_with_matching_digests_skips_layer_pulls_and_prunes_stale_pairs(tmp
     assert removed == sorted([
         f"rmi ghcr.io/joemccann/radon-node:{stale}",
         f"rmi ghcr.io/joemccann/radon-python:{stale}",
+        f"rmi ghcr.io/joemccann/radon-model-gateway:{stale}",
     ])
     assert "gnzsnz" not in "\n".join(lines) and "ib-gateway" not in "\n".join(lines)
 
@@ -328,6 +331,7 @@ exit 0
 
 _NODE = "ghcr.io/joemccann/radon-node"
 _PY = "ghcr.io/joemccann/radon-python"
+_MODEL = "ghcr.io/joemccann/radon-model-gateway"
 _CUR, _PREV, _STALE1, _STALE2 = "a" * 40, "b" * 40, "c" * 40, "e" * 40
 
 
@@ -361,7 +365,7 @@ def _prune(tmp_path: Path, *, green: str | None, tags: str, running: str | None 
 
 
 def _rmi(*shas: str) -> list[str]:
-    return sorted(f"rmi {repo}:{sha}" for sha in shas for repo in (_NODE, _PY))
+    return sorted(f"rmi {repo}:{sha}" for sha in shas for repo in (_NODE, _PY, _MODEL))
 
 
 def test_prune_keeps_running_and_previous_green_and_removes_every_stale_tag(tmp_path: Path) -> None:
@@ -384,7 +388,7 @@ def test_prune_never_removes_an_image_a_running_container_uses(tmp_path: Path) -
         running=f"{_NODE}:{_STALE1} {_PY}:{_CUR}",
     )
     assert result.returncode == 0, result.stderr
-    assert removed == [f"rmi {_PY}:{_STALE1}"]
+    assert removed == sorted([f"rmi {_PY}:{_STALE1}", f"rmi {_MODEL}:{_STALE1}"])
 
 
 def test_prune_removes_nothing_while_the_deploy_lock_is_held(tmp_path: Path) -> None:
@@ -451,6 +455,244 @@ def test_prune_takes_no_argument(tmp_path: Path) -> None:
     result = _run(tmp_path, ["prune", _STALE1])
     assert result.returncode != 0
     assert "usage:" in result.stderr
+
+
+# --- Lock-held prune (prune-locked) -------------------------------------------
+# A refused deploy left its pulled set on disk forever: the only prune ran after
+# a green deploy, and an in-deploy prune took a SECOND open of the deploy lock
+# and conflicted with the lock its own caller held (#1012). `prune-locked`
+# takes the caller's held deploy-lock descriptor as stdin and proves it owns it.
+
+
+def _prune_locked(tmp_path: Path, *, green: str | None, tags: str, args: list[str],
+                  stdin_mode: str = "held", running: str | None = None,
+                  journal: str | None = None):
+    import fcntl
+    _runtime_env(tmp_path)
+    lock = tmp_path / "state" / "deploy.lock"
+    marker = tmp_path / "prune-green"
+    journal_file = tmp_path / "prune-transition.json"
+    marker.unlink(missing_ok=True)
+    journal_file.unlink(missing_ok=True)
+    if green is not None:
+        marker.write_text(green)
+    if journal is not None:
+        journal_file.write_text(journal)
+    log = tmp_path / "docker.log"
+    log.unlink(missing_ok=True)
+    holder = open(lock, "r")
+    other = None
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if stdin_mode == "held":
+            stdin = holder
+        elif stdin_mode == "foreign":
+            # Somebody else holds the lock; the caller only opened the file.
+            other = open(lock, "r")
+            stdin = other
+        elif stdin_mode == "not-the-lock":
+            other = open(tmp_path / "env", "r")
+            stdin = other
+        else:
+            raise AssertionError(stdin_mode)
+        result = _run(
+            tmp_path,
+            ["prune-locked", *args],
+            extra_env={
+                "RADON_TEST_GREEN_MARKER": str(marker),
+                "RADON_TEST_TRANSITION_JOURNAL": str(journal_file),
+                "RADON_STUB_TAGS": tags,
+                "RADON_STUB_RUNNING": running if running is not None else f"{_NODE}:{_CUR} {_PY}:{_CUR}",
+            },
+            docker_body=_PRUNE_DOCKER,
+            stdin=stdin,
+        )
+        # The caller still owns its lock after the pruner exits.
+        probe = open(lock, "r")
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            probe.close()
+    finally:
+        if other is not None:
+            other.close()
+        holder.close()
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, sorted(line for line in lines if line.startswith("rmi "))
+
+
+_TARGET = "f" * 40
+
+
+def test_prune_locked_under_the_callers_deploy_lock_keeps_running_previous_and_target(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"latest {_CUR} {_PREV} {_TARGET} {_STALE1} {_STALE2} weird-tag",
+        args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert "image prune skipped" not in result.stderr
+    assert removed == _rmi(_STALE1, _STALE2)
+
+
+def test_prune_locked_removes_a_refused_deploys_set(tmp_path: Path) -> None:
+    # Production 2026-10-31: live 38154af, refused 707c642 still local. The next
+    # deploy's prune must drop the refused set before it pulls or admits.
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_STALE1}",
+        args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_with_a_target_does_not_need_a_previous_release(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n", tags=f"{_CUR} {_TARGET} {_STALE1}", args=[_TARGET],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_without_a_target_keeps_both_green_lines(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_PREV} {_STALE1}", args=[],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_STALE1)
+
+
+def test_prune_locked_without_a_target_skips_without_a_previous_release(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n", tags=f"{_CUR} {_STALE1}", args=[],
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped" in result.stderr
+
+
+def test_prune_locked_never_removes_an_image_a_running_container_uses(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n{_PREV}\n",
+        tags=f"{_CUR} {_STALE1}",
+        args=[_TARGET],
+        running=f"{_NODE}:{_STALE1} {_PY}:{_CUR}",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == sorted([f"rmi {_PY}:{_STALE1}", f"rmi {_MODEL}:{_STALE1}"])
+
+
+def test_prune_locked_with_a_pending_transition_protects_both_journal_shas(tmp_path: Path) -> None:
+    journal = json.dumps({"version": 1, "requested_sha": _STALE1, "previous_sha": _PREV})
+    result, removed = _prune_locked(
+        tmp_path,
+        green=f"{_CUR}\n",
+        tags=f"{_CUR} {_PREV} {_STALE1} {_STALE2} {_TARGET}",
+        args=[_TARGET],
+        running=f"{_NODE}:{_PREV} {_PY}:{_PREV}",
+        journal=journal,
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == _rmi(_CUR, _STALE2)
+
+
+def test_prune_locked_refuses_a_lock_held_by_someone_else(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        stdin_mode="foreign",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped" in result.stderr
+
+
+def test_prune_locked_refuses_stdin_that_is_not_the_deploy_lock(tmp_path: Path) -> None:
+    result, removed = _prune_locked(
+        tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        stdin_mode="not-the-lock",
+    )
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped: stdin is not the held deploy lock" in result.stderr
+
+
+def test_prune_locked_skips_while_another_pull_holds_the_pull_lock(tmp_path: Path) -> None:
+    import fcntl
+    held = _hold(_pull_lock(tmp_path), fcntl.LOCK_SH)
+    try:
+        result, removed = _prune_locked(
+            tmp_path, green=f"{_CUR}\n{_PREV}\n", tags=f"{_CUR} {_STALE1}", args=[_TARGET],
+        )
+    finally:
+        held.close()
+    assert result.returncode == 0, result.stderr
+    assert removed == []
+    assert "image prune skipped: app image pull in progress" in result.stderr
+
+
+@pytest.mark.parametrize("bad", ["abc", "F" * 40, "g" * 40, "a" * 41])
+def test_prune_locked_takes_only_a_40_hex_sha(tmp_path: Path, bad: str) -> None:
+    result = _run(tmp_path, ["prune-locked", bad])
+    assert result.returncode == 64
+    log = result.docker_log  # type: ignore[attr-defined]
+    assert not log.exists() or "rmi " not in log.read_text(encoding="utf-8")
+
+
+def test_prune_locked_takes_at_most_one_argument(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["prune-locked", _TARGET, _TARGET])
+    assert result.returncode == 64
+    assert "usage:" in result.stderr
+
+
+# `pull <sha>` prunes BEFORE fetching layers: the CI prepull pulled 3.4G into a
+# full disk first and only then pruned (2026-10-31 Caddy ENOSPC).
+_PULL_AFTER_PRUNE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+case "$1 $2" in
+  "manifest inspect") exit 0 ;;
+  "image inspect") [[ -f "${{RADON_STUB_PULL_DIR}}/${{3##*/}}" ]]; exit $? ;;
+  "ps --format")
+    for image in ${{RADON_STUB_RUNNING:-}}; do printf '%s\\n' "$image"; done
+    ;;
+  "images --format")
+    for t in ${{RADON_STUB_TAGS:-}}; do printf '%s:%s\\n' "$4" "$t"; done
+    ;;
+esac
+if [[ "$1" == "pull" ]]; then
+  touch "${{RADON_STUB_PULL_DIR}}/${{2##*/}}"
+fi
+exit 0
+"""
+
+
+def test_pull_prunes_stale_sets_before_fetching_any_layer(tmp_path: Path) -> None:
+    pull_dir = tmp_path / "pulled"
+    pull_dir.mkdir()
+    marker = tmp_path / "pull-green"
+    marker.write_text(f"{_CUR}\n{_PREV}\n")
+    result = _run(
+        tmp_path,
+        ["pull", _TARGET],
+        extra_env={
+            "RADON_STUB_PULL_DIR": str(pull_dir),
+            "RADON_TEST_GREEN_MARKER": str(marker),
+            "RADON_TEST_TRANSITION_JOURNAL": str(tmp_path / "none.json"),
+            "RADON_STUB_TAGS": f"{_CUR} {_STALE1}",
+            "RADON_STUB_RUNNING": f"{_NODE}:{_CUR} {_PY}:{_CUR}",
+        },
+        docker_body=_PULL_AFTER_PRUNE_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+    rmis = [i for i, line in enumerate(lines) if line.startswith("rmi ")]
+    pulls = [i for i, line in enumerate(lines) if line.startswith("pull ")]
+    assert sorted(lines[i] for i in rmis) == _rmi(_STALE1)
+    assert pulls and max(rmis) < min(pulls), lines
 
 
 # --- Pull lock (PR #1020 follow-up) -------------------------------------------
@@ -631,7 +873,7 @@ fi
 if [[ "$1" == "pull" ]]; then
   touch "${{RADON_STUB_PULL_DIR}}/${{2##*/}}"
   for _ in $(seq 1 80); do
-    [[ "$(find "${{RADON_STUB_PULL_DIR}}" -type f | wc -l | tr -d ' ')" == "2" ]] && exit 0
+    [[ "$(find "${{RADON_STUB_PULL_DIR}}" -type f | wc -l | tr -d ' ')" == "3" ]] && exit 0
     sleep 0.025
   done
   exit 42
@@ -640,7 +882,7 @@ exit 0
 """
 
 
-def test_missing_release_pair_pulls_both_images_concurrently(tmp_path: Path) -> None:
+def test_missing_release_set_pulls_all_images_concurrently(tmp_path: Path) -> None:
     target = "a" * 40
     pull_dir = tmp_path / "pull-sync"
     pull_dir.mkdir()
@@ -879,10 +1121,12 @@ def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) 
     # Directory provisioning also uses Python; fail only the notify proxy.
     failing_python = tmp_path / "failing-python"
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    model_socket_dir = shlex.quote(str(tmp_path / 'state' / 'model-gateway'))
+    model_control_dir = shlex.quote(str(tmp_path / 'state' / 'model-control'))
     data_dir = shlex.quote(str(tmp_path / 'data'))
     media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {lease_dir} || "${{3:-}}" == {model_socket_dir} || "${{3:-}}" == {model_control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     # The injected proxy never binds. Exercise all admission polls without
     # paying their sleep delay on the shared runner; keep the timeout intact.
     _write_executable(tmp_path / "sleep", "#!/bin/bash\nexit 0\n")
@@ -1381,11 +1625,13 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    model_socket_dir = shlex.quote(str(tmp_path / 'state' / 'model-gateway'))
+    model_control_dir = shlex.quote(str(tmp_path / 'state' / 'model-control'))
     control_dir = shlex.quote(str(tmp_path / 'state' / 'control'))
     data_dir = shlex.quote(str(tmp_path / 'data'))
     media_dir = shlex.quote(str(tmp_path / 'media'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{3:-}}" == {private_anchor} || "${{3:-}}" == {secret_store} || "${{3:-}}" == {lease_dir} || "${{3:-}}" == {model_socket_dir} || "${{3:-}}" == {model_control_dir} || "${{3:-}}" == {control_dir} || "${{3:-}}" == {data_dir} || "${{3:-}}" == {media_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -1748,8 +1994,13 @@ def test_sudoers_grants_exact_pull_not_run() -> None:
     assert "/usr/local/sbin/radon-app-runtime pull [0-9a-f]*" in text
     assert "radon-app-runtime pull *" not in text
     # Post-deploy cleanup verb: listed in full, no argument, no wildcard.
-    assert "/usr/local/sbin/radon-app-runtime prune" in text
+    assert "/usr/local/sbin/radon-app-runtime prune," in text
     assert "radon-app-runtime prune *" not in text
+    # The lock-held prune takes the release SHA only, like `pull`; root's
+    # weekly sweep calls the no-SHA form directly, never through sudo.
+    assert "/usr/local/sbin/radon-app-runtime prune-locked [0-9a-f]*" in text
+    assert "radon-app-runtime prune-locked *" not in text
+    assert "radon-app-runtime prune-locked," not in text
     assert "radon-app-runtime run" not in text
     assert "radon-app-runtime *" not in text
     assert "docker.sock" not in text
@@ -1865,7 +2116,6 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     assert rendered.read_text(encoding="utf-8") == (
         "NODE_ENV=production\n"
         "# comment stays\n"
-        "CEREBRAS_API_KEY=csk-abc$1\n"
         + UNQUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS=it''s\n"
         "PLAIN=unquoted\n"
@@ -1903,7 +2153,8 @@ def test_run_strips_prepaid_provider_keys_from_every_container_env(
     rendered = Path(match.group(1)).read_text(encoding="utf-8")
     assert "prepaid-" not in rendered
     keys = {line.split("=", 1)[0] for line in rendered.splitlines() if "=" in line}
-    assert {"NODE_ENV", "CLAUDE_CODE_OAUTH_TOKEN", "CEREBRAS_API_KEY"} <= keys
+    assert "NODE_ENV" in keys
+    assert not {"CLAUDE_CODE_OAUTH_TOKEN", "CEREBRAS_API_KEY"} & keys
     assert "prepaid-" in host_env.read_text(encoding="utf-8")  # host file untouched
 
 
@@ -1958,10 +2209,6 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "NODE_ENV",
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "ANTIGRAVITY_MODEL",
-        "NVIDIA_API_KEY",
-        "CEREBRAS_API_KEY",
         "RADON_PYTHON_BIN",
         "RADON_NEWSFEED_HEADLESS",
         "RADON_MEDIA_REMOTE",
@@ -1992,7 +2239,7 @@ def test_run_newsfeed_env_file_preserves_explicit_nvidia_model_controls(
     )
     original = host_env.read_text(encoding="utf-8")
     result = _run(
-        tmp_path, ["run", "radon-newsfeed.service"],
+        tmp_path, ["run", "radon-model-gateway.service"],
         extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
     )
     assert result.returncode == 0, result.stderr + result.stdout
@@ -2004,7 +2251,7 @@ def test_run_newsfeed_env_file_preserves_explicit_nvidia_model_controls(
         for line in rendered.read_text(encoding="utf-8").splitlines()
         if "=" in line and not line.startswith("#")
     )
-    assert values == {"NODE_ENV": "production", **model_values}
+    assert values == model_values
     assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
     assert host_env.read_text(encoding="utf-8") == original
 
@@ -2115,6 +2362,19 @@ def test_research_archive_runtime_gets_only_the_private_research_bind(tmp_path):
     assert "CREDENTIALS_DIRECTORY" not in log
 
 
+def test_research_asset_archive_runtime_gets_only_the_private_research_bind(tmp_path):
+    result = _run(tmp_path, ["run", "radon-research-asset-archive.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text()
+    assert "radon-python:" in log and "python scripts/research/asset_archive.py" in log
+    assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:rw" in log
+    assert ":/var/lib/radon/media" not in log
+    assert ":/home/radon/radon/data" not in log
+    assert ":/var/lib/radon/ib-lease" not in log
+    assert "/.claude:" not in log and "/.codex:" not in log
+    assert "CREDENTIALS_DIRECTORY" not in log
+
+
 def test_api_research_mount_is_read_only(tmp_path):
     result = _run(tmp_path, ["run", "radon-api.service"])
     assert result.returncode == 0, result.stderr
@@ -2166,17 +2426,7 @@ def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
     assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")
 
 
-# -- subscription credential binds (2026-09-18) ------------------------------
-#
-# The operator's subscription grants (~/.grok/auth.json, ~/.codex/auth.json,
-# ~/.claude/.credentials.json) are what the model ladders must meter against,
-# never the prepaid API keys. radon-subscription-tokens keeps those files live
-# on the HOST, but no app container could see them, so every container-side
-# ladder rung silently fell back to prepaid keys (the xAI team then ran out of
-# credits and the newsfeed voice rewrite died). Bind each dir read-only when it
-# exists and pin HOME so both Path.home() and os.homedir() land on it. Next.js
-# hosts /api/newsfeed/share and /api/assistant, so it is an LLM consumer too.
-# Relay still gets no binds.
+# -- the gateway is the sole subscription credential owner -------------------
 
 
 def _subscription_home(tmp_path: Path) -> Path:
@@ -2199,27 +2449,22 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    # agy refreshes its grant and writes logs/state on every run (live
-    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
-    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
-        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
-    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:" not in log
-    assert ".claude:" not in log  # absent on this host: not mounted
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
-@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".local/bin"))
+@pytest.mark.parametrize("cred_dir", (".claude", ".gemini/config", ".codex"))
 def test_run_refuses_a_symlinked_subscription_bind_source(tmp_path: Path, cred_dir: str) -> None:
     """Subscription dirs sit in radon's home; a link there is refused, not bound."""
     home = _subscription_home(tmp_path)
     _swap_for_link(home / cred_dir, tmp_path / "subscription-elsewhere")
     result = _run(
         tmp_path,
-        ["run", "radon-nextjs.service"],
+        ["run", "radon-model-gateway.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 78, result.stderr
@@ -2235,15 +2480,11 @@ def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
-    # agy refreshes its grant and writes logs/state on every run (live
-    # 2026-10-02: read-only binds -> "You are not logged into Antigravity").
-    for agy_dir in (".gemini/antigravity-cli", ".gemini/config"):
-        assert f"{home}/{agy_dir}:/home/radon/{agy_dir}:rw" in log
-    assert f"{home}/.gemini:" not in log  # retired Gemini CLI creds stay out
-    assert f"{home}/.local/bin:" not in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
@@ -2257,9 +2498,11 @@ def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) 
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log
 
 
@@ -2283,14 +2526,12 @@ def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert f"{home}/.grok:/home/radon/.grok:ro" in log
-    # Newsfeed renders third-party content: it gets no read-write grant the
-    # host shares with other units, so the antigravity dirs stay unmounted.
-    assert ".gemini" not in log
-    for bind in log.split():
-        if bind.startswith(f"{home}/"):
-            assert bind.endswith(":ro"), bind
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
+    assert "HOME=/home/radon" in log
 
 
 def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
@@ -2591,9 +2832,6 @@ def test_marketdesk_env_file_carries_only_its_allowlisted_keys(tmp_path: Path) -
     assert {
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "NVIDIA_API_KEY",
-        "CEREBRAS_API_KEY",
         "THEMARKETEAR_EMAIL",
         "THEMARKETEAR_PASSWORD",
         "MARKETDESK_FIREBASE_REFRESH_TOKEN",
@@ -2638,12 +2876,9 @@ def test_marketdesk_binds_read_only_ladder_grants_only(tmp_path: Path) -> None:
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
-    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    for cred in (".grok", ".codex", ".claude"):
-        assert f"{home}/{cred}:/home/radon/{cred}:ro" in log
-    # Third-party Chromium content: no writable grant the host shares, so the
-    # ladder falls past antigravity here, as on the newsfeed.
-    assert f"{home}/.gemini" not in log
-    # The Python image ships pinned provider CLIs.
-    assert f"{home}/.local/bin:" not in log
+    log = _run_line(result)
+    assert "/run/radon-model-gateway:ro" in log
+    assert "RADON_MODEL_GATEWAY_REQUIRED=1" in log
+    for grant in (".grok", ".codex", ".claude", ".gemini", ".local/bin"):
+        assert f"{home}/{grant}" not in log
     assert "HOME=/home/radon" in log

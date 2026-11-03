@@ -212,7 +212,7 @@ def build_output(
 def _write_json_cache(payload: dict[str, Any]) -> None:
     YIELD_CURVE_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = YIELD_CURVE_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, YIELD_CURVE_JSON)
 
 

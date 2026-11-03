@@ -4,8 +4,10 @@ name: App-plane images
 # slower image, not python+node+four sequential pushes. Each image exports
 # both registry tags in one BuildKit operation. Main writes an isolated
 # registry build cache on that same package (tag buildcache, never a deploy
-# ref). Pull requests keep an isolated GHA cache because this workflow's
-# pull_request caller has no packages:write token.
+# ref). Pull requests read that public buildcache anonymously and export no
+# cache: their caller has no packages:write token, and a GHA export cost
+# 288.5s of the gateway build on PR run 41261010191 while the repo Actions
+# cache sat at 13.7 GB against its 10 GB limit and evicted itself.
 # Main CI calls this workflow and gates deploy on the exact SHA pair. Pull
 # requests invoke it directly as a build-only image contract.
 
@@ -22,11 +24,18 @@ concurrency:
 
 jobs:
   python-image:
+    needs: darwin-clients
     name: Build python image
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify model-only SSH and read-only export boundary
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openssh-server
+          sudo env GITHUB_ACTIONS=true python3 -I cloud/scripts/check_model_transport.py
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
       # Private 7.7GB runners still ENOSPC while Docker loads the image
@@ -72,9 +81,45 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "python image input hash refused; building"
           fi
+      # The input hash covers the image, not the steps a hit skips. Those
+      # also read this workflow and, for the gateway bounds check, the
+      # dockerignored cloud/scripts/model_clients.py. Main skips them on a hit
+      # too, so a pull request editing either must build, smoke and check.
+      # Only "unchanged" allows a PR lookup; no base, a failed fetch or a
+      # failed diff leaves it unset and builds.
+      - name: Find pull request edits outside the image inputs
+        id: unhashed
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHON_UNHASHED: .github/workflows/app-images.yml
+          GATEWAY_UNHASHED: .github/workflows/app-images.yml cloud/scripts/model_clients.py
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+              || ! git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+            echo "pull request base unavailable; building both images"
+            exit 0
+          fi
+          # Unquoted on purpose: each list is space-separated repo paths.
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $PYTHON_UNHASHED; then
+            echo "python=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the python image input hash; building it"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $GATEWAY_UNHASHED; then
+            echo "gateway=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the model gateway input hash; building it"
+          fi
+      # Main retags a hit. A pull request only looks the tag up (public, no
+      # login) and on a hit skips the build and smoke main already ran on
+      # these exact inputs; it holds no packages:write token and never writes.
       - name: Reuse identical python image
         id: reuse
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.python == 'unchanged')
         run: |
           set -euo pipefail
           source="${{ steps.pyimage.outputs.tag }}"
@@ -92,6 +137,11 @@ jobs:
           if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
             echo "hit=false" >> "$GITHUB_OUTPUT"
             echo "no smoked image for ${source}; building"
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ] || [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "main already built and smoked ${source}; skipping the build"
             exit 0
           fi
           source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
@@ -114,7 +164,8 @@ jobs:
           # GHA cache export kept this job, and deploy behind it, after GHCR
           # already had the exact SHA (403s on run 37664940638, 104s on run
           # 37472489871). Registry cache mounts those blobs. buildcache is
-          # not a deploy tag. PRs cannot push packages, so they stay on GHA.
+          # not a deploy tag. PRs cannot push packages, so they read main's
+          # public buildcache and export nothing (the GHA export was ~41s).
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
@@ -129,11 +180,14 @@ jobs:
               echo "cache_to=type=registry,ref=${IMAGE_REPO}:buildcache,mode=max"
             } >> "$GITHUB_OUTPUT"
           else
+            # No inspect first: the gateway build below already reads these
+            # public refs unconditionally on PRs.
             {
               echo "cache_from<<EOF"
+              echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
-              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+              echo "cache_to="
             } >> "$GITHUB_OUTPUT"
           fi
       - name: Build and publish python image
@@ -174,6 +228,83 @@ jobs:
             exit 0
           fi
 
+      # Same read-only pull request lookup as the python image: a hit skips
+      # the build, smoke and bounds check main already ran on these inputs.
+      - name: Reuse identical model gateway image
+        id: reuse-gateway
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'pull_request' && steps.unhashed.outputs.gateway == 'unchanged')
+        run: |
+          set -euo pipefail
+          hash="${{ steps.pyimage.outputs.hash }}"
+          if ! printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source="ghcr.io/joemccann/radon-model-gateway:ihash-${hash}"
+          target="ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
+          if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ] || [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source_raw="$(docker buildx imagetools inspect "$source" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          docker buildx imagetools create -t "$target" -t ghcr.io/joemccann/radon-model-gateway:latest "$source"
+          target_raw="$(docker buildx imagetools inspect "$target" --raw | sha256sum | awk 'NR==1 { print $1 }')"
+          test -n "$source_raw" && test "$source_raw" = "$target_raw"
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+      - name: Build and publish model gateway image
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: docker/app/Dockerfile.python
+          target: model-gateway
+          platforms: linux/amd64
+          load: true
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          tags: |
+            ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}
+            ghcr.io/joemccann/radon-model-gateway:latest
+          cache-from: |
+            type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache
+            type=registry,ref=ghcr.io/joemccann/radon-python:buildcache
+            type=gha,scope=radon-model-gateway
+            type=gha,scope=radon-python
+          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache,mode=max' || '' }}
+          provenance: false
+      - name: Smoke model gateway runtime
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          docker run --rm --pull=never --init --user 1000:1000 --network none \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python \
+            ghcr.io/joemccann/radon-model-gateway:${{ github.sha }} \
+            -c "import importlib.metadata; import chronos, torch; from scripts.model_gateway import server; assert importlib.metadata.version('chronos-forecasting') == '2.3.0'; assert torch.__version__ == '2.12.1+cpu'; assert torch.version.cuda is None"
+      # Production admits model-client disk from pinned per-release bounds and
+      # refuses exports past them. Run the production export code against
+      # this exact image so a bundle that outgrows its pin fails here.
+      - name: Enforce pinned model client disk bounds
+        if: steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci/check_model_client_bounds.py \
+            --engine docker --scratch "$RUNNER_TEMP" \
+            --image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
+      - name: Record model gateway image input hash
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse-gateway.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          hash="${{ steps.pyimage.outputs.hash }}"
+          if ! printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{64}$'; then exit 0; fi
+          if ! docker buildx imagetools create \
+              -t "ghcr.io/joemccann/radon-model-gateway:ihash-${hash}" \
+              "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"; then
+            echo "::warning title=model gateway image index::the next identical commit will rebuild"
+          fi
+
   node-image:
     name: Build node image
     runs-on: ubuntu-24.04
@@ -186,7 +317,10 @@ jobs:
           fetch-depth: 0
       - name: Derive release version
         id: release
-        run: echo "version=$(python3 scripts/release_version.py)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA")"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Validate public build environment
         env:
           # NEXT_PUBLIC_* are COMPILE-TIME inlined by the Next build, so an
@@ -244,7 +378,8 @@ jobs:
         run: |
           set -euo pipefail
           # Same boundary as the python image: do not hold the exact-SHA
-          # publish on a GHA cache upload. buildcache is not a deploy tag.
+          # publish on a GHA cache upload, and PRs export no cache at all.
+          # buildcache is not a deploy tag.
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
@@ -261,9 +396,10 @@ jobs:
           else
             {
               echo "cache_from<<EOF"
+              echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
-              echo "cache_to=type=gha,mode=max,scope=${GHA_SCOPE}"
+              echo "cache_to="
             } >> "$GITHUB_OUTPUT"
           fi
       - name: Build and publish node image
@@ -285,3 +421,32 @@ jobs:
           cache-from: ${{ steps.image-cache.outputs.cache_from }}
           cache-to: ${{ steps.image-cache.outputs.cache_to }}
           provenance: false
+
+
+  # The same native bytes exported by the gateway image must execute with
+  # streaming/tool protocol compatibility on their actual target platform.
+  darwin-clients:
+    name: Verify Darwin model clients
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Materialize locked native clients
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          cd docker/app/vendor-clis
+          npm ci --ignore-scripts --include=optional --os=darwin --cpu=arm64 --no-audit --no-fund
+          node install-darwin.cjs --helpers "$GITHUB_WORKSPACE/scripts/model_gateway" --output "$RUNNER_TEMP/radon-darwin"
+      - name: Verify native signatures and offline model transport
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/radon-darwin"
+          for cli in claude codex grok rg; do
+            codesign --verify --strict --all-architectures "$payload/bin/$cli"
+          done
+          /usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))' \
+            "$(command -v python3)" scripts/ci/check_model_cli_transport.py \
+            --network-isolated --clients-root "$payload" --versions-file "$payload/package.json"

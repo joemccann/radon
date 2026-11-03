@@ -22,6 +22,11 @@ HASH = re.compile(r"[a-f0-9]{64}\Z")
 LEASE_SECONDS = 600
 MIN_INTERVAL_SECONDS = 1800
 QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
+# A report that keeps failing on its own (e.g. provider HTTP 500 for one file)
+# backs off exponentially and, after this many attempts, stops reserving
+# priority precedence, so one bad file cannot starve the rest of the backlog.
+PRIORITY_MAX_FAILURES = 3
+_QUOTA_SQL = ",".join("'" + code + "'" for code in sorted(QUOTA_ERRORS))
 # Trust the article pipeline's source, duplicate, accuracy and writing gates.
 # Recheck at claim time so legacy discovery rows cannot bypass publication.
 ELIGIBLE_IDS = """SELECT a.article_id FROM marketdesk_articles a
@@ -145,8 +150,10 @@ def _priority_gate():
     # Evaluate in the claim SQL too, so a concurrent operator update cannot let
     # ordinary work overtake a newly configured, eligible priority cohort.
     # Future retry/active lease rows still reserve precedence, never a download.
+    # A priority row whose own downloads keep failing loses that reservation.
     return ("(priority=1 OR NOT EXISTS(SELECT 1 FROM marketdesk_pdf_queue pq WHERE pq.priority=1 "
             "AND pq.status!='downloaded' AND pq.article_id IN (" + ELIGIBLE_IDS + ") "
+            f"AND (pq.attempts<{PRIORITY_MAX_FAILURES} OR pq.last_error IS NULL OR pq.last_error IN ({_QUOTA_SQL})) "
             "AND pq.article_id IN (" + _selected() + ")))")
 
 
@@ -224,7 +231,13 @@ def retry(work, error, *, now=None, backoff_seconds=900):
          (_stamp(_time(now) + timedelta(seconds=delay)), code, work.article_id, work.token)),
         ("UPDATE marketdesk_pdf_queue SET status='pending',next_attempt_at=(SELECT next_attempt_at FROM marketdesk_pdf_throttle WHERE singleton=1),"
          "last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
-         (code, _stamp(now), work.article_id, work.token)),
+         (code, _stamp(now), work.article_id, work.token)) if quota else
+        # Item failure: this report's own clock doubles per attempt (capped at a
+        # day) and never runs ahead of the shared account clock.
+        ("UPDATE marketdesk_pdf_queue SET status='pending',next_attempt_at=MAX((SELECT next_attempt_at FROM marketdesk_pdf_throttle WHERE singleton=1),"
+         "strftime('%Y-%m-%dT%H:%M:%f+00:00',?, '+' || MIN(86400,? * (1 << MIN(MAX(attempts-1,0),7))) || ' seconds')),"
+         "last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
+         (_stamp(now), delay, code, _stamp(now), work.article_id, work.token)),
     ])
 
 

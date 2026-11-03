@@ -126,6 +126,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # path_filter.py reads commits and trees only (merge-base and
+          # `git diff --no-renames --name-only`), so skip every historical
+          # blob: the full-history clone was 9s against 3s at depth 1, and
+          # this job gates every other one. test_ci_blobless_checkout.py.
+          filter: blob:none
       - id: filter
         # BASE_SHA is the PR base on pull_request and EMPTY on push: on a push
         # path_filter.py resolves the base itself as the newest main SHA whose
@@ -246,25 +251,36 @@ jobs:
     env:
       NODE_ENV: test
       ASSISTANT_MOCK: "1"
+    # PR path gating is STEP level: the job-level `if` above must stay true
+    # on every PR or the matrix never expands and the required shard checks
+    # never report. When the path filter says web is unchanged (it fails
+    # closed: unknown paths set web=true), the notice step runs and every
+    # other step skips, so the check reports success in seconds. Pushes
+    # already require web == 'true' at job level, so every step runs there.
+    # scripts/tests/test_ci_pr_path_gating_web.py pins this.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Vitest skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No ~/.bun/install/cache step: every Vitest job hit it, but the restore
+      # took 10-14s (p50 12s) and the install after it took <=2s.
+      - if: needs.changes.outputs.web == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.4"
       # The repo has TWO bun projects: the root one provides vitest + the
       # cross-cutting vitest.config.ts (which imports `vitest/config`), and
       # web/ provides the app modules the tests import (@/lib, react, ...).
       # Install BOTH or the root config fails to load with ERR_MODULE_NOT_FOUND.
-      - run: |
+      - if: needs.changes.outputs.web == 'true'
+        run: |
           bun install --frozen-lockfile &
+          root=$!
           bun install --frozen-lockfile --cwd web &
-          wait
+          web=$!
+          wait "$root"
+          wait "$web"
       # Run the FULL vitest config from the repo root (lib/tools + site/lib +
       # web/tests), NOT `bun run test` — that script restricts to web/tests and
       # silently skips ~9 files / ~68 tests (incl. site/lib/theme). vitest + the
@@ -290,7 +306,8 @@ jobs:
       # Shards zero the per-job coverage thresholds: each shard only executes
       # an eighth of the tests, so the ratchet would false-fail. web-coverage merges
       # istanbul JSON and applies vitest.config.ts lines/functions/branches.
-      - run: >-
+      - if: needs.changes.outputs.web == 'true'
+        run: >-
           bunx vitest run --config vitest.config.ts --coverage
           --shard=${{ matrix.shard }}/8
           --coverage.reporter=json
@@ -298,7 +315,8 @@ jobs:
           --coverage.thresholds.lines=0
           --coverage.thresholds.functions=0
           --coverage.thresholds.branches=0
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vitest-coverage-${{ matrix.shard }}
           path: coverage/shard-${{ matrix.shard }}
@@ -308,32 +326,43 @@ jobs:
 
   web-coverage:
     name: Vitest coverage ratchet
-    needs: [web-tests]
+    # `changes` is read by the step gates below: when web-tests skipped its
+    # steps no shard artifact exists, and the merge would fail on the gap.
+    needs: [changes, web-tests]
     if: needs.web-tests.result == 'success'
     runs-on: ubuntu-24.04
     concurrency:
       group: ci-web-coverage-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Vitest coverage skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             scripts/ci/merge_vitest_coverage.py
             vitest.config.ts
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: vitest-coverage-*
           path: coverage-artifacts
       # --expect-shards must match the web-tests shard count above. The merge
       # downloads with a glob, so without it a partial artifact download was
       # gated as if it were the whole suite. R-241.
-      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
+      - if: needs.changes.outputs.web == 'true'
+        run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
 
   py-tests:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
+    # No step reads the path filter: Python tests read every tracked tree
+    # (`git ls-files` scans, docs globs, web files), so no PR diff is provably
+    # unread, and python=false only skips pushes, whose PR ran everything.
+    # test_ci_pr_path_gating_python.py.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
@@ -350,8 +379,10 @@ jobs:
         # 10-45s wall-floor modules at t=0 instead of alone at the tail.
         # PYTEST_SHARD_LEAD_MODULES in test_ci_deploy_concurrency.py pins them.
         # CIP-009: rest-api merged into rest (39s + 40s, both well under the
-        # ~103s shard wall) — the ~25-job fan-out queued one shard ~37s past
-        # the 20-slot concurrency cap and the late start set the gate wall.
+        # ~103s shard wall) after one shard queued ~37s for a runner slot and
+        # the late start set the gate wall. The cap is 40 concurrent jobs
+        # account-wide, shared by every run in flight (repo-wide running jobs
+        # plateaued at exactly 40, 2026-10-29..11-01), not 20.
         shard: [scripts-ac, scripts-df, scripts-i, scripts-gh, scripts-jm, scripts-npsz, scripts-rs, scripts-daemons, rest]
         include:
           - shard: scripts-ac
@@ -388,6 +419,12 @@ jobs:
           # for every commit from 424e66da on. A non-empty string is truthy, so
           # '0' survives the ||. DOC-038.
           fetch-depth: ${{ matrix.shard == 'scripts-df' && '0' || '1' }}
+          # The docs contract diffs names and reads messages, so the scripts-df
+          # history needs no old blobs; a ledger it reads at the base is fetched
+          # on demand. Depth-1 shards stay unfiltered: there the filter only
+          # splits one fetch into two (5.3-6.1s became 9.0-9.5s, 3 rounds,
+          # 2026-11-01). An empty filter is no filter. test_ci_blobless_checkout.py.
+          filter: ${{ matrix.shard == 'scripts-df' && 'blob:none' || '' }}
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
         with:
           python-version: "3.13"
@@ -524,15 +561,25 @@ jobs:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
     # Required PR checks must run even when the changed paths are docs-only.
+    # No step reads the path filter, as in py-tests.
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # CIP-009: mz (28s) merged into al (44s) to cut the gate fan-out
-        # below the 20-slot concurrency cap; edge stays isolated (serial
-        # Caddy wall-clock mechanism).
-        shard: [al, edge]
+        # CIP-009: mz (28s) merged into al (44s) after a gate shard queued for
+        # a runner slot; edge stays isolated (serial Caddy wall-clock
+        # mechanism). The cap is 40 concurrent jobs account-wide, shared by
+        # every run in flight (repo-wide running jobs plateaued at exactly
+        # 40, 2026-10-29..11-01), not 20.
+        # heavy: the three modules whose serial time set the al wall under
+        # loadfile, and al (181s) was the PR critical path behind the 13s
+        # path filter. Moving only test_app_runtime.py and
+        # test_deploy_corrections.py left al at 171s on CI (run 41335275763):
+        # test_bootstrap_control_plane.py (45 subprocess drills of 5-10s)
+        # still pinned one worker. Each test builds its own tmp_path sandbox,
+        # so heavy distributes per test (--dist load), not per module.
+        shard: [al, heavy, edge]
         # CIP-001: al ran 765 tests serially in 91s while pytest-xdist was
         # already installed. edge is the Caddy wall-clock mechanism shard and
         # stays serial; loadfile keeps test_caddyfile.py's restart-window
@@ -540,8 +587,12 @@ jobs:
         include:
           - shard: al
             paths: "cloud/tests/test_[a-z]*.py"
-            omit: "cloud/tests/test_caddy_edge_timeouts.py"
+            omit: "cloud/tests/test_caddy_edge_timeouts.py cloud/tests/test_app_runtime.py cloud/tests/test_bootstrap_control_plane.py cloud/tests/test_deploy_corrections.py"
             xdist: "-n auto --dist loadfile"
+          - shard: heavy
+            paths: "cloud/tests/test_app_runtime.py cloud/tests/test_bootstrap_control_plane.py cloud/tests/test_deploy_corrections.py"
+            omit: ""
+            xdist: "-n auto --dist load"
           - shard: edge
             paths: "cloud/tests/test_caddy_edge_timeouts.py"
             omit: ""
@@ -576,9 +627,9 @@ jobs:
       # `al` collects cloud/tests/test_caddyfile.py::TestRestartWindowMechanism,
       # the executable proof that a request arriving during the deploy restart
       # window is held and served rather than 502'd; it is gated on the same
-      # binary, so the install runs on both shards (T-322, third recurrence).
+      # binary, so the install runs on every shard (T-322, third recurrence):
+      # a module moved between shards never newly skips for want of it.
       - name: Install caddy (edge mechanism tests)
-        if: matrix.shard == 'edge' || matrix.shard == 'al'
         run: |
           set -euo pipefail
           # v2.11.4 was the latest stable release tag on 2026-09-02.
@@ -607,21 +658,29 @@ jobs:
       # import path `tests.conftest`. Running it after unit pytest serialized
       # ~60s onto the deploy critical path.
       # pytest does not apply --ignore to an explicitly expanded CLI target.
-      # Expand the row first, remove its exact omission, then pass only the
-      # selected files so the Caddy mechanism module runs solely on edge.
+      # Expand the row first, remove its exact omissions, then pass only the
+      # selected files so each omitted module runs solely on its own shard.
+      # `paths` and `omit` are space-separated; a path that matches no file
+      # fails the shard instead of silently shrinking it.
       - name: Run cloud shard
         run: |
           set -euo pipefail
-          paths='${{ matrix.paths }}'
-          omit='${{ matrix.omit }}'
-          mapfile -t selected < <(compgen -G "$paths" | sort)
-          if [[ -n "$omit" ]]; then
-            kept=()
-            for target in "${selected[@]}"; do
-              [[ "$target" == "$omit" ]] || kept+=("$target")
-            done
-            selected=("${kept[@]}")
-          fi
+          read -r -a patterns <<< '${{ matrix.paths }}'
+          omit=' ${{ matrix.omit }} '
+          selected=()
+          for pattern in "${patterns[@]}"; do
+            mapfile -t matched < <(compgen -G "$pattern" | sort)
+            if (( ${#matched[@]} == 0 )); then
+              echo "cloud shard path ${pattern} matched no file" >&2
+              exit 1
+            fi
+            selected+=("${matched[@]}")
+          done
+          kept=()
+          for target in "${selected[@]}"; do
+            [[ "$omit" == *" ${target} "* ]] || kept+=("$target")
+          done
+          selected=("${kept[@]}")
           if (( ${#selected[@]} == 0 )); then
             echo "cloud shard selected no tests" >&2
             exit 1
@@ -652,32 +711,39 @@ jobs:
       # authorized curl is the only request-time proof that the timing-safe
       # Web Crypto compare runs in the real Edge middleware runtime.
       RADON_PROBE_FRESHNESS_TOKEN: rpf_ci_perimeter_smoke_dummy
+    # Step-level PR path gating, same contract as web-tests: the job-level
+    # `if` stays as is, a web-unchanged PR runs only the notice step.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - if: needs.changes.outputs.web != 'true'
+        run: echo "::notice title=Perimeter smoke skipped::path filter reports no web change; every step is skipped"
+      - if: needs.changes.outputs.web == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No bun store cache, same evidence as web-tests.
+      - if: needs.changes.outputs.web == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.4"
       # Both bun projects, same as web-tests: next.config aliases @tools to
       # the root lib/tools, so the build resolves modules from BOTH trees.
-      - run: |
+      - if: needs.changes.outputs.web == 'true'
+        run: |
           bun install --frozen-lockfile &
+          root=$!
           bun install --frozen-lockfile --cwd web &
-          wait
+          web=$!
+          wait "$root"
+          wait "$web"
       # Static half of the Edge-runtime guard: the no-restricted-syntax
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
       # the gate; `next start` + curl below is the dynamic half.
-      - run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts lib/sameOrigin.ts
+      - if: needs.changes.outputs.web == 'true'
+        run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts lib/sameOrigin.ts
         working-directory: web
       # Locked build constraint: web/package.json `build` is
       # `next build --experimental-build-mode=compile` (see web/CLAUDE.md).
-      - run: bun run build
+      - if: needs.changes.outputs.web == 'true'
+        run: bun run build
         working-directory: web
       # Request-time perimeter assertions against the real production server.
       # This is the only gate that catches the Edge-runtime crash class
@@ -685,6 +751,7 @@ jobs:
       # production 500s on EVERY route at request time, 2026-05-15) and
       # default-deny regressions (world-callable /api/*, 60fcca8 era).
       - name: next start + perimeter curls
+        if: needs.changes.outputs.web == 'true'
         working-directory: web
         run: |
           bunx next start -p 3000 &
@@ -727,21 +794,29 @@ jobs:
           exit $fail
 
   e2e-financial-smoke:
-    name: Playwright P0-financial smoke (non-gating, shard ${{ matrix.shard }}/3)
+    name: Playwright P0-financial smoke (non-gating, shard ${{ matrix.shard }}/2)
     # CIP-009: defer behind secret-scan (the app-images pattern) so the t=0
-    # gate fan-out stays at the 20-job concurrency cap and no pytest gate
-    # shard queues for a slot. Still non-gating for deploy.
+    # gate fan-out does not take a concurrency slot from a gate shard. The
+    # account cap is 40 concurrent jobs (repo-wide running jobs plateau at
+    # exactly 40 across 2026-10-29..11-01), not the 20 first assumed here,
+    # and every in-flight run shares it. Still non-gating for deploy.
     needs: [changes, secret-scan]
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     # One serial `playwright test` (workers=1) ran ~263s and made this the
-    # longest PR check. Playwright --shard splits the curated files across
-    # parallel jobs; each builds its own bundle. Pinned by
+    # longest PR check. Three 1-worker shards paid ~65s of duplicated setup
+    # each (container init 25s, next build 28s, apt 6s, bun 6s) plus ~18s of
+    # uploads. One job on `--workers=3` (run 41335275763) ran specs for 291s
+    # and the job for 444s: three browsers plus `next start` saturate the 4
+    # vCPU runner, and it became the longest check agents wait on. Two
+    # shards on `--workers=2` pay the setup twice, not three times;
+    # fullyParallel:false still spreads FILES across workers.
+    # web/playwright.config.ts keeps workers: 1 for local runs. Pinned by
     # scripts/tests/test_ci_e2e_smoke_shards.py.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2]
     # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
     # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
     # instance (pk_test_) answered every cookie-less browser navigation with a
@@ -801,7 +876,7 @@ jobs:
       - name: Run curated P0-financial specs
         working-directory: web
         run: >-
-          npx playwright test --shard=${{ matrix.shard }}/3
+          npx playwright test --shard=${{ matrix.shard }}/2 --workers=2
           e2e/account-metric-cards.spec.ts
           e2e/order-combo.spec.ts
           e2e/realized-pnl.spec.ts
@@ -838,6 +913,8 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/mobile-price-format.spec.ts
           e2e/mobile-search-focus.spec.ts
+          e2e/mobile-native-platform.spec.ts
+          e2e/mobile-pointer-fades.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/portfolio-orders-polling.spec.ts
           e2e/portfolio-request-cadence.spec.ts
@@ -1566,8 +1643,10 @@ jobs:
       - name: Tag the deployed version
         run: |
           set -euo pipefail
-          tag="v$(python3 scripts/release_version.py)"
-          # A docs-only commit keeps the previous version; its tag stays put.
+          version="$(python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA")"
+          tag="v${version}"
+          # An unchanged build label (including the no-history package fallback)
+          # keeps its existing tag; never retag an already published version.
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already tagged at $(git rev-list -n 1 "${tag}")"
             exit 0

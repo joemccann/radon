@@ -1,4 +1,4 @@
-"""Grok upgrade units copy on setup and are enabled by default."""
+"""Legacy mutable-upgrade units remain rollback artifacts, never new timers."""
 from pathlib import Path
 import os
 import re
@@ -13,7 +13,7 @@ UNITS = (
 )
 
 
-def test_setup_vps_inventories_and_enables_grok_upgrade(tmp_path):
+def test_setup_vps_inventories_but_does_not_enable_mutable_grok_upgrade(tmp_path):
     setup = SETUP.read_text(encoding="utf-8")
     inventory = re.search(r"readonly SERVICE_FILES=\(.*?\n\)", setup, re.S).group(0)
     for unit in UNITS:
@@ -39,13 +39,13 @@ def test_setup_vps_inventories_and_enables_grok_upgrade(tmp_path):
     calls = log.read_text()
     assert "radon-api.service" in calls
     for unit in UNITS:
-        assert unit in calls
+        assert f"enable {unit}" not in calls
 
 
-def test_owner_doc_records_grok_upgrade_enabled():
+def test_owner_doc_records_grok_upgrade_retirement():
     text = OWNER.read_text(encoding="utf-8")
     assert "radon-grok-upgrade.{service,timer}" in text
-    assert "enable_services` enables both" in text
+    assert "never enables the mutable updater" in text
     assert "test_grok_upgrade_setup.py" in text
 
 

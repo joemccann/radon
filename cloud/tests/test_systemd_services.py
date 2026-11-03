@@ -51,6 +51,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-portfolio-archive.timer",
     "radon-research-archive.service",
     "radon-research-archive.timer",
+    "radon-research-asset-archive.service",
+    "radon-research-asset-archive.timer",
     "radon-marketdesk.service",
     "radon-marketdesk.timer",
     "radon-marketdesk-pdf.service",
@@ -109,6 +111,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-subscription-tokens.service",
     "radon-subscription-tokens.timer",
     "radon-subscription-vault.service",
+    "radon-model-gateway.service",
     "radon-llm-index.service",
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
@@ -213,7 +216,6 @@ IB_GATEWAY_DEPENDENTS = [
 
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
-    "radon-subscription-tokens.service": "/etc/radon/subscription-tokens/env",
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
     "radon-grok-upgrade.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
@@ -319,30 +321,22 @@ class TestSubscriptionTokens:
         assert svc["user"] == "radon"
         assert svc["umask"] == "0077"
         assert svc["workingdirectory"] == "/home/radon/radon"
-        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES[self.SERVICE]
+        assert "environmentfile" not in svc
 
-    def test_reaches_the_vault_through_the_broker_without_the_key(self, unit, services_dir):
-        # DS-2026-10-05-05: this unit runs third-party CLIs out of
-        # radon-writable directories, so it never loads the master key. The
-        # broker radon-subscription-vault (inside radon-app-runtime) does.
+    def test_calls_the_gateway_without_credentials(self, unit, services_dir):
         svc = unit(self.SERVICE)["Service"]
         assert "loadcredentialencrypted" not in svc
         assert "execstartpre" not in svc
-        lines = (services_dir / self.SERVICE).read_text(
-            encoding="utf-8"
-        ).splitlines()
-        assert (
-            "Environment=RADON_SUBSCRIPTION_VAULT_SOCKET="
-            "/run/radon-subscription-vault/vault.sock"
-        ) in lines
+        lines = (services_dir / self.SERVICE).read_text().splitlines()
+        assert "Environment=RADON_MODEL_CONTROL_SOCKET=/run/radon-model-control/control.sock" in lines
         section = unit(self.SERVICE)["Unit"]
-        assert section["wants"] == "radon-subscription-vault.service"
-        assert "radon-subscription-vault.service" in section["after"].split()
+        assert section["wants"] == "radon-model-gateway.service"
+        assert "radon-model-gateway.service" in section["after"].split()
 
     def test_runs_the_once_mode_within_a_finite_budget(self, unit):
         svc = unit(self.SERVICE)["Service"]
         assert svc["execstart"].endswith(
-            "/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once"
+            "/home/radon/radon/.venv/bin/python -m scripts.model_gateway.refresh_cli"
         )
         # A oneshot that outlives its own slot blocks every later refresh.
         assert int(svc["timeoutstartsec"]) < 1800
@@ -357,21 +351,15 @@ class TestSubscriptionTokens:
         svc = unit(self.SERVICE)["Service"]
         assert svc["successexitstatus"] == "1"
 
-    def test_owns_the_state_directory_its_sidecar_lives_in(self, unit):
-        # The sidecar under /var/lib/radon carries the 12h page cooldowns and
-        # the consecutive-error streak. Without an owned state directory the
-        # write fails and both reset on every run, so a needs_reauth provider
-        # would page every 30 minutes forever.
+    def test_rpc_client_has_no_local_subscription_state(self, unit):
+        # The daemon owns the persistent sidecar through its narrow state bind.
         svc = unit(self.SERVICE)["Service"]
-        assert svc["statedirectory"] == "radon"
-        assert svc["statedirectorymode"] == "0750"
+        assert "statedirectory" not in svc
+        assert "scripts.model_gateway.refresh_cli" in svc["execstart"]
 
     def test_sandboxes_the_third_party_cli_runs(self, unit):
-        # The unit executes unpinned third-party CLIs (agy, grok, codex) out
-        # of radon-writable ~/.local/bin with the full production env file
-        # loaded. It cannot use ProtectSystem=strict (it rewrites credential
-        # files across /home/radon), but privilege escalation, setuid
-        # payloads, shared /tmp, and retained capabilities are all closable.
+        # The timer is now a secret-free RPC client, and retains its host
+        # privilege, temporary-directory and capability restrictions.
         svc = unit(self.SERVICE)["Service"]
         assert svc["nonewprivileges"] == "yes"
         assert svc["privatetmp"] == "yes"
@@ -673,6 +661,31 @@ class TestResearchArchive:
         assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in dropin.splitlines()
 
 
+class TestResearchAssetArchive:
+    """Daily research asset/download archive to B2, confirm-before-prune."""
+
+    def test_oneshot_runs_the_asset_archive_with_a_bounded_budget(self, unit):
+        svc = unit("radon-research-asset-archive.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon" and svc["umask"] == "0077"
+        assert svc["environmentfile"] == "/etc/radon/env"
+        assert svc["execstart"] == (
+            "/home/radon/radon/.venv/bin/python "
+            "/home/radon/radon/scripts/research/asset_archive.py"
+        )
+        assert 3600 <= int(svc["timeoutstartsec"]) <= 4 * 3600
+
+    def test_timer_fires_daily_after_disk_cleanup_before_the_evidence_run(self, unit):
+        timer = unit("radon-research-asset-archive.timer")["Timer"]
+        assert timer["oncalendar"] == "*-*-* 03:40:00 UTC"
+        assert timer["persistent"] == "true"
+        assert 0 < int(timer["randomizeddelaysec"]) <= 900
+
+    def test_runs_in_the_container_that_owns_the_private_bind(self, services_dir):
+        dropin = (services_dir / "radon-research-asset-archive.service.d" / "runtime-container.conf").read_text()
+        assert dropin == (services_dir / "radon-research-archive.service.d" / "runtime-container.conf").read_text()
+
+
 class TestMarketDeskResearch:
     """5-minute marketdesk.ai research ingest that replaced the shared-folder
     Dropbox watcher (docs/marketdesk-research.md)."""
@@ -949,7 +962,7 @@ class TestSecurityRemediationSchedules:
     def test_cta_sync_documents_vision_cascade_order(self, services_dir):
         raw = (services_dir / "radon-cta-sync.service").read_text()
         assert (
-            "anthropic -> grok -> cursor -> codex -> antigravity -> nvidia -> cerebras"
+            "antigravity -> anthropic -> grok -> cursor -> codex -> nvidia -> cerebras"
             in raw
         )
 

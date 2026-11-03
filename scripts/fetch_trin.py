@@ -547,7 +547,7 @@ def diff_new_daily(cached: list[DailyRow], merged: list[DailyRow]) -> list[Daily
 def _write_json_cache(payload: dict[str, Any]) -> None:
     TRIN_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = TRIN_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, TRIN_JSON)
 
 

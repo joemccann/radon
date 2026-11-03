@@ -454,11 +454,6 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # on a live lock stays silent on purpose, so the window absorbs one full
     # grok run (GROK_TIMEOUT_SECS = 1h) plus bookkeeping. 90m.
     "grok-page-responder": {"open": 90 * _MIN, "closed": 90 * _MIN, "requires_ib": False},
-    # grok-upgrade — daily 07:40 UTC track-latest CLI/model smoke + auto-promote
-    # (scripts/grok_upgrade.py via radon-grok-upgrade.timer). Pure xAI CLI +
-    # Turso heartbeat, no IB. 26h window = daily cadence + timer jitter.
-    "grok-upgrade": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    "grok-responder-upgrade": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # portfolio-archive — portfolio_snapshots cold-archive oneshot
     # (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
     # on the VPS, 06:52 UTC daily). 48h window mirrors
@@ -470,6 +465,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 04:20 UTC). 9d window = one week + jitter + a 2-day grace, mirrors
     # web/lib/serviceHealthWindows.ts. B2 + local disk, no IB.
     "research-archive": {"open": 9 * _DAY, "closed": 9 * _DAY, "requires_ib": False},
+    # research-asset-archive — daily research asset + download archive to B2,
+    # confirm, then prune past a 30-day hot window
+    # (scripts/research/asset_archive.py via radon-research-asset-archive.timer,
+    # 03:40 UTC). 48h window mirrors web/lib/serviceHealthWindows.ts and the
+    # other nightly B2 jobs. B2 + local disk, no IB.
+    "research-asset-archive": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
     # db-retention — daily keep-latest sweep for append-only scan tables
     # (scripts/db_retention_sweep.py via radon-db-retention.timer).
     "db-retention": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
@@ -589,11 +590,6 @@ BUCKETS: dict[str, list[str]] = {
     "daily": [
         "uw-research",
         "cash-flow-sync",
-        # Daily 07:40 UTC Grok CLI/model track-latest upgrade. A missed
-        # promote leaves the live symlink on last-known-good; the 26h
-        # window pages before a second night is lost.
-        "grok-upgrade",
-        "grok-responder-upgrade",
         # Daily 07:00 UTC Chronos-2 backfill + calibration. Nothing observed
         # it: the unit wrote no row on any path, so a throwing backfill left
         # the forecast tables silently not advancing. R-402.
@@ -742,6 +738,8 @@ BUCKETS: dict[str, list[str]] = {
         "portfolio-archive",
         # Weekly research evidence archive to B2, 9-day window.
         "research-archive",
+        # Daily research asset/download archive to B2, 48h window.
+        "research-asset-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.

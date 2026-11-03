@@ -1,7 +1,7 @@
 import { runAssistantLoop, type AssistantTurn } from "../../lib/assistant/loop";
 
 // Runs under tsx so the same alias and server-module resolution as the app
-// applies. The browser test points the provider at its loopback fixture only.
+// applies. The browser test points RADON_API_URL at its loopback gateway fixture.
 async function main() {
   let input = "";
   for await (const chunk of process.stdin) input += chunk;

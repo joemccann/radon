@@ -28,8 +28,9 @@ def test_active_or_unknown_runner_defers_update():
     assert not toolchain.runners_idle('could not find service')
 
 
-def test_brew_cask_owner_never_uses_npm():
-    assert toolchain.codex_update_command('/opt/homebrew/bin/brew') == ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'codex']
+def test_model_cli_update_command_is_retired():
+    assert not hasattr(toolchain, 'codex_update_command')
+    assert toolchain.update_native() == [{'tool': 'model-clients', 'status': 'managed-by-gateway-ci'}]
 
 
 def test_promotion_keeps_original_for_rollback(tmp_path):
@@ -102,7 +103,7 @@ def test_desktop_defers_only_busy_tool(monkeypatch):
     calls=[]
     monkeypatch.setattr(toolchain, 'tool_busy', lambda *a, **k: True)
     monkeypatch.setattr(toolchain, 'run', lambda args, **kw: calls.append(args) or ('codex' if args[1:]==['list','--cask'] else ''))
-    assert toolchain.update_desktop({'desktop_casks': {'codex': None}}) == [{'tool':'codex','status':'deferred-running-tool'}]
+    assert toolchain.update_desktop({'desktop_casks': {'codex': None}}) == [{'tool':'codex','status':'managed-by-gateway-ci'}]
     assert not any('upgrade' in x for x in calls)
 
 
@@ -113,20 +114,21 @@ def test_desktop_codex_updates_homebrew_owner(monkeypatch):
         calls.append(args)
         return 'codex' if args[1:] == ['list', '--cask'] else ''
     monkeypatch.setattr(toolchain, 'run', fake_run)
-    assert toolchain.update_desktop({'desktop_casks': {'codex': None}})[0]['status'] == 'updated-or-current'
-    assert ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'codex'] in calls
+    assert toolchain.update_desktop({'desktop_casks': {'codex': None}})[0]['status'] == 'managed-by-gateway-ci'
+    assert ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'codex'] not in calls
     assert all('npm' not in str(x) for x in calls)
 
 
 def test_missing_app_manager_does_not_claim_update(monkeypatch):
     monkeypatch.setattr(toolchain, 'tool_busy', lambda *a, **kw: False)
     monkeypatch.setattr(toolchain, 'run', lambda *a, **k: '')
-    assert toolchain.update_desktop({'desktop_casks': {'codex': None}}) == [{'tool': 'codex', 'status': 'not-managed-by-homebrew'}]
+    assert toolchain.update_desktop({'desktop_casks': {'codex': None}}) == [{'tool': 'codex', 'status': 'managed-by-gateway-ci'}]
 
 
 def test_automatic_policy_accepts_forward_stable_pair_only():
     base = {'deepsec':'2.3.8','codex':'0.162.1','smoke_model':'gpt-6.1-sol','automatic_stable_updates':True}
-    assert toolchain.candidate_allowed(dict(base, deepsec='2.4.0',codex='0.163.0'), base)
+    assert toolchain.candidate_allowed(dict(base, deepsec='2.4.0'), base)
+    assert not toolchain.candidate_allowed(dict(base, codex='0.163.0'), base)
     assert not toolchain.candidate_allowed(dict(base, deepsec='3.0.0'), base)
     assert not toolchain.candidate_allowed(dict(base, codex='0.145.0'), base)
     assert not toolchain.candidate_allowed(dict(base, codex='latest'), base)
@@ -141,8 +143,8 @@ def test_resolver_requires_matching_published_sdk(monkeypatch):
         return '2.3.9' if args[2] == 'deepsec' else '0.163.0'
     monkeypatch.setattr(toolchain,'run',fake)
     got=toolchain.resolved_policy({'deepsec':'2.3.8','codex':'0.162.1'})
-    assert got == {'deepsec':'2.3.9','codex':'0.163.0'}
-    assert calls[-1][2] == '@openai/codex-sdk@0.163.0'
+    assert got == {'deepsec':'2.3.9','codex':'0.162.1'}
+    assert len(calls) == 1 and calls[0][2] == 'deepsec'
     assert all('--registry=https://registry.npmjs.org' in args for args in calls)
 
 
@@ -218,7 +220,7 @@ def test_active_shared_codex_does_not_block_unrelated_app(monkeypatch):
     def capture(args,**kw): calls.append(args);return fake(args,**kw)
     monkeypatch.setattr(toolchain,'run',capture)
     result=toolchain.update_desktop({'desktop_casks':{'codex':None,'obsidian':'Obsidian.app'}})
-    assert result == [{'tool':'codex','status':'deferred-running-tool'},{'tool':'obsidian','status':'updated-or-current'}]
+    assert result == [{'tool':'codex','status':'managed-by-gateway-ci'},{'tool':'obsidian','status':'updated-or-current'}]
     assert ['/opt/homebrew/bin/brew','upgrade','--cask','obsidian'] in calls
     assert ['/opt/homebrew/bin/brew','upgrade','--cask','codex'] not in calls
 
@@ -236,7 +238,7 @@ def test_bot_native_action_never_invokes_homebrew(tmp_path,monkeypatch):
     calls=[];monkeypatch.setattr(toolchain,'run',lambda args,**k:calls.append(args) or '')
     policy=tmp_path/'policy.json';policy.write_text('{}')
     assert toolchain.main(['native','--policy',str(policy),'--release-root',str(tmp_path/'state')])==0
-    assert gates == [{}] and calls == [[str(binary),'update']]
+    assert gates == [{}] and calls == []
 
 
 def test_bot_native_refuses_operator_account_before_gate(tmp_path,monkeypatch):
@@ -257,13 +259,16 @@ def test_sdk_accepts_normal_chatgpt_status():
     toolchain.require_subscription_status('Logged in using ChatGPT\n')
 
 
-def test_stored_api_login_is_refused_before_model_inference(tmp_path,monkeypatch):
+def test_toolchain_inference_smoke_uses_only_gateway(tmp_path, monkeypatch):
+    from model_gateway import client
     policy={'deepsec':'2.3.8','codex':'0.162.1','smoke_model':'gpt-6.1-sol'}
     for package,version in [('deepsec','2.3.8'),('@openai/codex','0.162.1'),('@openai/codex-sdk','0.162.1')]:
         path=tmp_path/'node_modules'/package/'package.json';path.parent.mkdir(parents=True);path.write_text(json.dumps({'version':version}))
-    def fake(args,**kw):
-        if args[0]=='/opt/homebrew/bin/node':pytest.fail('API-key credential must never reach model inference')
-        return 'Logged in using API key: fixture-redacted' if args[1:]==['login','status'] else 'codex-cli 0.162.1'
-    monkeypatch.setattr(toolchain,'run',fake)
-    with pytest.raises(RuntimeError,match='ChatGPT subscription'):
-        toolchain.smoke(tmp_path,policy,inference=True)
+    calls=[]
+    monkeypatch.setattr(toolchain,'run',lambda args,**kw:calls.append(args) or 'codex-cli 0.162.1')
+    seen=[]
+    monkeypatch.setattr(client,'request',lambda operation,payload,**kw:seen.append((operation,payload)) or {'text':'RADON_TOOLCHAIN_OK'})
+    toolchain.smoke(tmp_path,policy,inference=True)
+    assert len(calls)==2 and all('--version' in command for command in calls)
+    assert seen[0][0]=='chat'
+    assert not any('login' in command or '/opt/homebrew/bin/node' in command for command in calls)

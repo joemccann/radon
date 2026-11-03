@@ -457,3 +457,18 @@ def test_catalogue_renders_nemotron_chart_candidates(tmp_path):
     nemotron = next(row for row in found if row.get("origin") == "nemotron")
     png = tmp_path / "out" / nemotron["image_file"]
     assert png.is_file() and png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.fixture(autouse=True)
+def _native_ocr_unit_boundary(monkeypatch):
+    """Domain/parser tests retain injected native responses behind the service seam."""
+    import os
+    from research import nemotron_parse as consumer
+    from model_gateway import _ocr_backend as backend
+    def transport(*args, **kwargs):
+        try:
+            return backend._post_with_retries(*args, **kwargs)
+        except backend.PageParseError as exc:
+            raise consumer.PageParseError(exc.reason) from exc
+    monkeypatch.setattr(consumer, "_post_with_retries", transport)
+    monkeypatch.setattr(consumer, "_gateway_ocr_available", lambda: bool(os.environ.get("NVIDIA_API_KEY")))
