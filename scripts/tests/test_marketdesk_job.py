@@ -646,6 +646,92 @@ def test_runnable_by_path_imports_without_side_effects():
     assert result.returncode == 0, result.stderr
 
 
+def test_pdf_enqueue_read_timeout_still_publishes(world, db):
+    """A Turso read timeout on the archive queue must not fail the oneshot.
+
+    Production wrapped that timeout as DbHttpError and exited 1 before the
+    article was published. The queue write is only valid after publication,
+    and the PDF timer seeds a miss.
+    """
+    from api.db_http import DbHttpError
+
+    world.refs = [make_ref("EnqueueTO01", title="Rates note")]
+    deps = build_deps(world)
+    calls = []
+
+    def enqueue(ref):
+        row = ledger(db, ref.article_id)
+        calls.append((ref.article_id, None if row is None else row["status"]))
+        raise DbHttpError("TimeoutError: The read operation timed out")
+
+    deps.enqueue_pdf = enqueue
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts["published"] == 1
+    assert calls == [("EnqueueTO01", "published")]
+    assert ledger(db, "EnqueueTO01")["status"] == "published"
+    assert health_for(world, "marketdesk-research")[-1][1] == "ok"
+
+
+def test_unpublished_article_does_not_enqueue_pdf(world, db):
+    world.refs = [make_ref("NoEnqueue01", title="Waiting", hours_ago=1)]
+    world.summary = []
+    deps = build_deps(world)
+    calls = []
+    deps.enqueue_pdf = lambda ref: calls.append(ref.article_id)
+    counts = job.run_cycle(env={**ENV, "MARKETDESK_SUMMARY_WAIT_HOURS": "6"}, deps=deps)
+    assert counts["published"] == 0 and counts["pending"] == 1
+    assert calls == []
+    assert ledger(db, "NoEnqueue01")["last_error"] == "summary_pending"
+
+
+def test_pdf_enqueue_stop_still_ends_the_cycle_after_publish(world, db):
+    world.refs = [make_ref("EnqueueStop1", title="Rates note")]
+    deps = build_deps(world)
+
+    def enqueue(ref):
+        assert ledger(db, ref.article_id)["status"] == "published"
+        raise job.CycleTerminated("terminated by SIGTERM: the cycle exceeded its time budget or was stopped")
+
+    deps.enqueue_pdf = enqueue
+    with pytest.raises(job.CycleTerminated):
+        job.run_cycle(env=dict(ENV), deps=deps)
+    assert ledger(db, "EnqueueStop1")["status"] == "published"
+    assert world.published
+
+
+def test_article_ledger_read_timeout_still_fails_the_cycle(world, db, monkeypatch):
+    from api.db_http import DbHttpError
+
+    world.refs = [make_ref("LedgerTO0001", title="Rates note")]
+
+    def boom():
+        raise DbHttpError("TimeoutError: The read operation timed out")
+
+    monkeypatch.setattr(store, "published_fingerprints", boom)
+    with pytest.raises(DbHttpError, match="read operation timed out"):
+        run(world)
+    saved = ledger(db, "LedgerTO0001")
+    assert saved["status"] == "pending"
+    assert health_for(world, "marketdesk-research")[-1][1] == "error"
+
+
+def test_crash_heal_enqueues_pdf_only_after_publish(world, db):
+    ref = make_ref("HealEnq0001")
+    world.refs = [ref]
+    deps = build_deps(world)
+    calls = []
+    deps.enqueue_pdf = lambda item: calls.append((item.article_id, ledger(db, item.article_id)["status"]))
+    job.run_cycle(env=dict(ENV), deps=deps)
+    assert calls == [(ref.article_id, "published")]
+    db.execute("UPDATE marketdesk_articles SET status='pending', post_id=NULL WHERE article_id=?", (ref.article_id,))
+    calls.clear()
+    world.published.clear()
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts["healed"] == 1 and counts["published"] == 0
+    assert calls == [(ref.article_id, "published")]
+    assert world.published == []
+
+
 def test_default_deps_wire_real_modules():
     deps = job.default_deps()
     from research import dropbox_writer, marketdesk_auth, marketdesk_copy, marketdesk_scrape

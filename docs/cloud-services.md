@@ -438,7 +438,10 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   with the caller's own token; allowlisted operator token (the same
   `ALLOWED_USER_IDS` FastAPI enforces, failing CLOSED when empty) →
   `operator_*` reads proxied to the local Next.js routes with the caller's
-  own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
+  own token. When `CLERK_AUTHORIZED_PARTIES` is set, the operator rung also
+  requires the token's `azp` to be listed (or absent), the same app binding
+  FastAPI and the Next.js middleware apply; demo-trial tokens are unaffected.
+  No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
   JWKS lookups are capped at `MAX_JWKS_INFLIGHT` (4) concurrent verifications;
   a caller past the cap gets a retryable `503 authentication unavailable`

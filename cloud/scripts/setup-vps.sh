@@ -2124,7 +2124,7 @@ write_mcp_env() {
     return 1
   fi
   chmod 0600 "$mcp_env_tmp"
-  grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
+  grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|CLERK_AUTHORIZED_PARTIES|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
   if [[ "${RADON_POLICY_SKIP_CHOWN:-0}" != "1" ]]; then
     # root:radon, not radon:radon (DS-2026-10-18-04). This file is the public
     # MCP auth boundary and radon-mcp only needs to READ it; leaving it owned
