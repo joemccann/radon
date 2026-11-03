@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import io
 import json
 import subprocess
@@ -97,3 +98,50 @@ def test_app_images_enforces_bounds_on_the_exact_built_gateway_image():
     assert "scripts/ci/check_model_client_bounds.py" in step["run"]
     assert '--image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"' in step["run"]
     assert "continue-on-error" not in step
+
+
+def test_checker_uses_ci_export_budget_but_production_default_is_unchanged(tmp_path, monkeypatch):
+    module = checker()
+    api = module.load_model_clients()
+    assert api.EXPORT_DEADLINE_SECONDS == 60
+    assert inspect.signature(api.export_from_image).parameters["deadline_seconds"].default == 60
+    seen = []
+    real = api.export_from_image
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("deadline_seconds"))
+        return real(*args, **kwargs)
+
+    api.export_from_image = spy
+    monkeypatch.setattr(module, "load_model_clients", lambda: api)
+    module.measure(fake_engine(tmp_path), "image", str(tmp_path))
+    assert seen == [module.CI_EXPORT_DEADLINE_SECONDS] * 2
+    assert module.CI_EXPORT_DEADLINE_SECONDS == 300
+    assert module.CI_EXPORT_DEADLINE_SECONDS > api.EXPORT_DEADLINE_SECONDS
+    seen.clear()
+    assert module.main([
+        "--engine", fake_engine(tmp_path), "--image", "image", "--scratch", str(tmp_path),
+        "--export-deadline", "120",
+    ]) == 0
+    assert seen == [120.0, 120.0]
+
+
+def test_pin_hint_is_only_for_size_failures(tmp_path, monkeypatch, capsys):
+    module = checker()
+    api = module.load_model_clients()
+    monkeypatch.setattr(module, "load_model_clients", lambda: api)
+
+    def export_error(exc: BaseException) -> str:
+        def _export(*_args, **_kwargs):
+            raise exc
+        api.export_from_image = _export
+        assert module.main(["--engine", "engine", "--image", "image", "--scratch", str(tmp_path)]) == 1
+        return capsys.readouterr().err
+
+    timeout_err = export_error(TimeoutError("client export deadline"))
+    assert "TimeoutError: client export deadline" in timeout_err
+    assert "Raise the pins" not in timeout_err
+    assert "Raise the pins" not in export_error(ValueError("client export failed"))
+    size_err = export_error(ValueError("client export exceeds bounds"))
+    assert "ValueError: client export exceeds bounds" in size_err
+    assert "Raise the pins in cloud/scripts/model_clients.py" in size_err

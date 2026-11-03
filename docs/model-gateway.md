@@ -190,7 +190,10 @@ The gateway pins NVIDIA pacing state to
 Operator RPM, trip threshold, cooldown and wait limits survive environment
 filtering. Before stopping managed containers, root captures only validated
 numeric account clocks as UID1000, including `.tripped` markers; it also
-rechecks each fixed unit immediately before stopping it. Python snapshots
+rechecks each fixed unit immediately before stopping it. Every
+`radon-app-runtime` app unit must be in `model_pacing.UNITS`: `halt` runs the
+recheck as ExecStop, and an unlisted unit exits 64 and marks a clean run
+failed. Python snapshots
 join the existing account lock for at most 250ms. Captured clocks are staged
 privately, mounted read-only into the unprivileged image migrator, and merged
 without weakening existing deadlines. Per-source digest receipts prevent an
