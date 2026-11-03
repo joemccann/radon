@@ -140,12 +140,37 @@ def write_health_row(state: str, detail: str) -> None:
         log(f"service_health write failed (non-fatal): {err}")
 
 
+def _valid_state(raw: object) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    wedges = raw.get("consecutive_wedges", 0)
+    epoch = raw.get("last_restart_epoch", 0)
+    return (
+        isinstance(wedges, int) and not isinstance(wedges, bool) and wedges >= 0
+        and isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and epoch >= 0
+        and raw.get("last_state", "ok") in ("ok", "error")
+    )
+
+
 def load_state() -> dict:
     try:
         with open(STATE_PATH, encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
+            raw = json.load(fh)
+    except FileNotFoundError:
         return {"consecutive_wedges": 0, "last_restart_epoch": 0, "last_state": "ok"}
+    except Exception as err:
+        raw = err
+    if _valid_state(raw):
+        return {
+            "consecutive_wedges": raw.get("consecutive_wedges", 0),
+            "last_restart_epoch": raw.get("last_restart_epoch", 0),
+            "last_state": raw.get("last_state", "ok"),
+        }
+    # The last restart time is unknowable. Treating it as "never" would let
+    # the next wedge restart at once, inside a cooldown that may be running,
+    # so hold the cooldown from now instead.
+    log(f"state file unreadable ({raw!r:.200}); holding the restart cooldown")
+    return {"consecutive_wedges": 0, "last_restart_epoch": time.time(), "last_state": "error"}
 
 
 def save_state(state: dict) -> None:
@@ -165,7 +190,7 @@ def restart_nextjs() -> None:
     )
 
 
-def main() -> None:
+def main() -> int:
     state = load_state()
     verdict, reason = probe_nextjs_db_read()
 
@@ -179,7 +204,7 @@ def main() -> None:
         save_state({"consecutive_wedges": 0,
                     "last_restart_epoch": state.get("last_restart_epoch", 0),
                     "last_state": "ok"})
-        return
+        return 0
 
     if verdict == "unknown":
         # Auth perimeter or missing probe token — not a Turso wedge, but not
@@ -199,7 +224,7 @@ def main() -> None:
             "last_restart_epoch": state.get("last_restart_epoch", 0),
             "last_state": state.get("last_state", "ok"),
         })
-        return
+        return 0
 
     if not python_can_read_turso():
         # Upstream Turso outage — a Next.js restart fixes nothing.
@@ -207,7 +232,7 @@ def main() -> None:
         state["consecutive_wedges"] = 0
         state["last_state"] = "error"
         save_state(state)
-        return
+        return 0
 
     state["consecutive_wedges"] = state.get("consecutive_wedges", 0) + 1
     state["last_state"] = "error"
@@ -217,15 +242,29 @@ def main() -> None:
     cooled_down = now - state.get("last_restart_epoch", 0) >= RESTART_COOLDOWN_S
     if state["consecutive_wedges"] >= CONSECUTIVE_WEDGES_TO_RESTART and cooled_down:
         log("restarting radon-nextjs.service (in-process Turso wedge, Turso itself healthy)")
-        write_health_row("error", f"in-process Turso wedge; restarted radon-nextjs ({reason})")
-        restart_nextjs()
+        # Persist the attempt first: a restart that fails, hangs past its
+        # bound or kills this process still starts the cooldown.
         state["consecutive_wedges"] = 0
         state["last_restart_epoch"] = now
-    elif state["consecutive_wedges"] >= CONSECUTIVE_WEDGES_TO_RESTART:
+        save_state(state)
+        try:
+            restart_nextjs()
+        except (subprocess.SubprocessError, OSError) as err:
+            log(f"restart failed: {err}")
+            write_health_row(
+                "error",
+                f"in-process Turso wedge; restart of radon-nextjs failed ({err}); "
+                f"next attempt after the cooldown ({reason})",
+            )
+            return 1
+        write_health_row("error", f"in-process Turso wedge; restarted radon-nextjs ({reason})")
+        return 0
+    if state["consecutive_wedges"] >= CONSECUTIVE_WEDGES_TO_RESTART:
         log("wedge persists but restart is inside the 10 min cooldown; standing down")
 
     save_state(state)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
