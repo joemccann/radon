@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ib_insync import Option, LimitOrder
+from ib_insync import Option, LimitOrder, StopLimitOrder, StopOrder
 
 from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
@@ -173,6 +173,8 @@ class ExitOrdersHandler(BaseHandler):
                         # leg when the row predates the field.
                         "held_contracts": trade.get("contracts"),
                         "contract_spec": section.get("contract_spec"),
+                        # Stop leg only: a journal limit makes it a STP LMT.
+                        "limit_price": section.get("limit_price"),
                         "action": "SELL",  # Exit orders are sells
                         "journal_trade_id": journal_trade_id,
                     })
@@ -400,6 +402,35 @@ class ExitOrdersHandler(BaseHandler):
             return None
         return round(float(value), 4)
 
+    @classmethod
+    def _working_price_key(cls, order: Any) -> Optional[float]:
+        """The price that identifies a working exit leg: the trigger
+        (``auxPrice``) for a stop, the limit for anything else. IB reports
+        a STP order's ``lmtPrice`` as unset, so keying on it alone never
+        matched a live stop and the next cycle placed a second one."""
+        order_type = getattr(order, "orderType", None)
+        if isinstance(order_type, str) and order_type.upper().startswith("STP"):
+            return cls._limit_price_key(getattr(order, "auxPrice", None))
+        return cls._limit_price_key(getattr(order, "lmtPrice", None))
+
+    @staticmethod
+    def _exit_order(order_info: Dict[str, Any], contracts: Any, oca_group: str) -> Any:
+        """The broker order for one exit leg.
+
+        The target is a SELL limit. The stop is a SELL stop triggered at
+        the stop price (a stop-limit when the journal carries a limit): a
+        SELL limit at a stop price below the market is marketable and
+        closes the position on placement.
+        """
+        common = dict(tif="GTC", ocaGroup=oca_group, ocaType=1)
+        price = order_info["target_price"]
+        if order_info["order_type"] != "stop":
+            return LimitOrder("SELL", contracts, price, **common)
+        limit_price = order_info.get("limit_price")
+        if limit_price is not None:
+            return StopLimitOrder("SELL", contracts, limit_price, price, **common)
+        return StopOrder("SELL", contracts, price, **common)
+
     def _active_sell_index(self, client: Any) -> Dict[Any, list]:
         """Working SELL orders at IB, grouped by conId and localSymbol.
 
@@ -423,7 +454,7 @@ class ExitOrdersHandler(BaseHandler):
             contract = getattr(trade, "contract", None)
             con_id = getattr(contract, "conId", None)
             local_symbol = getattr(contract, "localSymbol", None)
-            entry = (self._limit_price_key(getattr(order, "lmtPrice", None)), trade)
+            entry = (self._working_price_key(order), trade)
             if isinstance(con_id, int) and con_id:
                 index.setdefault(("conid", con_id), []).append(entry)
             if isinstance(local_symbol, str) and local_symbol:
@@ -728,14 +759,7 @@ class ExitOrdersHandler(BaseHandler):
                         # Place the order. Both exit legs of one journal
                         # row share an OCA group so the first fill cancels
                         # the sibling at IB, not one cycle later here.
-                        limit_order = LimitOrder(
-                            action="SELL",
-                            totalQuantity=contracts,
-                            lmtPrice=target_price,
-                            tif="GTC",
-                            ocaGroup=oca_group,
-                            ocaType=1,
-                        )
+                        exit_order = self._exit_order(order_info, contracts, oca_group)
 
                         # R-427: this was the only order-placing path left in
                         # the repo with the halt and NOT the limits, and unlike
@@ -756,7 +780,7 @@ class ExitOrdersHandler(BaseHandler):
                             contract.localSymbol,
                             order_info["order_type"],
                         )
-                        refusal_params = (contracts, target_price)
+                        refusal_params = (contracts, target_price, order_info.get("limit_price"))
                         if self._limit_refusals.get(refusal_key) == refusal_params:
                             # Already refused with these exact parameters; a
                             # re-place would be re-refused identically.
@@ -776,12 +800,17 @@ class ExitOrdersHandler(BaseHandler):
                                 f"position remains unprotected"
                             ))
                             continue
-                        violation = check_order_limits({
+                        limit_params = {
                             "type": "option",
                             "quantity": contracts,
                             "symbol": ticker,
                             "limitPrice": target_price,
-                        })
+                        }
+                        if order_info["order_type"] == "stop":
+                            limit_params["stopPrice"] = target_price
+                            if order_info.get("limit_price") is not None:
+                                limit_params["limitPrice"] = order_info["limit_price"]
+                        violation = check_order_limits(limit_params)
                         if violation is None:
                             self._limit_refusals.pop(refusal_key, None)
                         if violation:
@@ -805,7 +834,7 @@ class ExitOrdersHandler(BaseHandler):
                             self._limit_refusals[refusal_key] = refusal_params
                             continue
 
-                        trade = client.place_order(contract, limit_order)
+                        trade = client.place_order(contract, exit_order)
 
                         confirmed, ack_status = self._confirm_placement(client, trade)
                         if not confirmed:
