@@ -152,6 +152,17 @@ def _assert_release_snapshot(root: Path, snapshot: dict[str, bytes]) -> None:
     assert runtime.stdout.strip() == "old-runtime-ok"
 
 
+JOURNAL_FORWARD_PHASES = (
+    "prepared",
+    "backup_started",
+    "backup_complete",
+    "promoting",
+    "target_unverified",
+    "verified",
+    "finalization_pending",
+)
+
+
 def _write_transition_journal(
     path: Path,
     requested: str,
@@ -160,6 +171,7 @@ def _write_transition_journal(
     backup: Path,
     phase: str,
 ) -> None:
+    """Create a prepared journal, then walk the helper's allowed transitions."""
     subprocess.run(
         [
             sys.executable,
@@ -170,10 +182,15 @@ def _write_transition_journal(
             previous,
             str(stage),
             str(backup),
-            phase,
+            "prepared",
         ],
         check=True,
     )
+    for step in JOURNAL_FORWARD_PHASES[1 : JOURNAL_FORWARD_PHASES.index(phase) + 1]:
+        subprocess.run(
+            [sys.executable, str(JOURNAL_HELPER), "phase", str(path), step],
+            check=True,
+        )
 
 
 def _transition_env(live: Path, releases: Path, journal: Path) -> dict[str, str]:
@@ -1142,8 +1159,10 @@ for relative in artifacts[:2]:
     shutil.move(stage / relative, destination)
 subprocess.run([
     sys.executable, {str(JOURNAL_HELPER)!r}, "write", {str(journal)!r},
-    {self.REQUESTED!r}, {self.PREVIOUS!r}, {str(stage)!r}, {str(backup)!r}, "promoting"
+    {self.REQUESTED!r}, {self.PREVIOUS!r}, {str(stage)!r}, {str(backup)!r}, "prepared"
 ], check=True)
+for step in ("backup_started", "backup_complete", "promoting"):
+    subprocess.run([sys.executable, {str(JOURNAL_HELPER)!r}, "phase", {str(journal)!r}, step], check=True)
 os.kill(os.getpid(), signal.SIGKILL)
 """,
             encoding="utf-8",

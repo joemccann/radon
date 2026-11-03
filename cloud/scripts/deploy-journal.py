@@ -11,15 +11,32 @@ from pathlib import Path
 
 
 FIELDS = ("requested_sha", "previous_sha", "stage_dir", "backup_dir", "phase")
-PHASES = {
-    "prepared",
-    "backup_started",
-    "backup_complete",
-    "promoting",
-    "target_unverified",
-    "verified",
-    "finalization_pending",
+INITIAL_PHASE = "prepared"
+# The only phase moves deploy.sh makes. activate_staged_release walks
+# prepared..target_unverified, main() marks verified after the live gate, and
+# recover_pending_transition marks (and on retry re-marks) finalization_pending
+# for a release root already committed. Restoring the previous release
+# removes the journal; it never writes a phase.
+TRANSITIONS: dict[str, frozenset[str]] = {
+    "prepared": frozenset({"backup_started"}),
+    "backup_started": frozenset({"backup_complete"}),
+    "backup_complete": frozenset({"promoting"}),
+    "promoting": frozenset({"target_unverified"}),
+    "target_unverified": frozenset({"verified"}),
+    "verified": frozenset({"finalization_pending"}),
+    "finalization_pending": frozenset({"finalization_pending"}),
 }
+PHASES = frozenset(TRANSITIONS)
+
+
+class TransitionRefused(ValueError):
+    """A phase move the table does not allow."""
+
+
+def transition(current: str, target: str) -> str:
+    if target not in TRANSITIONS.get(current, frozenset()):
+        raise TransitionRefused(f"refused phase transition {current} -> {target}")
+    return target
 
 
 def sync_directory(path: Path) -> None:
@@ -64,15 +81,22 @@ def main() -> int:
 
     if command == "write" and len(sys.argv) == 8:
         state = dict(zip(FIELDS, sys.argv[3:], strict=True))
-        if state["phase"] not in PHASES:
+        if state["phase"] != INITIAL_PHASE:
             return 2
+        if path.exists() or path.is_symlink():
+            print(f"deploy journal error: a transition is already pending: {path}", file=sys.stderr)
+            return 3
         write_state(path, state)
         return 0
     if command == "phase" and len(sys.argv) == 4:
         state = read_state(path)
         if sys.argv[3] not in PHASES:
             return 2
-        state["phase"] = sys.argv[3]
+        try:
+            state["phase"] = transition(state["phase"], sys.argv[3])
+        except TransitionRefused as exc:
+            print(f"deploy journal error: {exc}", file=sys.stderr)
+            return 3
         write_state(path, state)
         return 0
     if command == "read" and len(sys.argv) == 3:
