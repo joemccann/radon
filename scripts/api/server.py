@@ -2755,8 +2755,23 @@ async def uw_usage_record(
 
 
 FLOW_TAB_COOLDOWN_S = 3600  # hourly VPS timer + SCAN cache
-_flow_tab_last: dict[str, float] = {}
-_flow_tab_locks: dict[str, asyncio.Lock] = {}
+_FLOW_TAB_GATES: dict[str, ScanGate] = {}
+
+
+def _preset_scan_gate(name: str, cooldown_s: float) -> ScanGate:
+    """A cooldown-only ScanGate (no failure backoff) for a route that served
+    its own bare monotonic float. ``never`` is -inf, so a freshly booted host
+    whose monotonic clock is below the cooldown still runs its first scan.
+    The clock is late-bound so a patched ``time.monotonic`` reaches it."""
+    return ScanGate(name, cooldown_s=cooldown_s, failure_backoff_s=0,
+                    clock=lambda: time.monotonic())
+
+
+def _flow_tab_gate(name: str) -> ScanGate:
+    gate = _FLOW_TAB_GATES.get(name)
+    if gate is None:
+        gate = _FLOW_TAB_GATES[name] = _preset_scan_gate(name, FLOW_TAB_COOLDOWN_S)
+    return gate
 
 
 async def _run_flow_tab(
@@ -2781,14 +2796,13 @@ async def _run_flow_tab(
     if test_mode:
         return await demo_scan_response(demo_key, demo_payload)
     cache_path = DATA_DIR / cache_name
-    lock = _flow_tab_locks.setdefault(name, asyncio.Lock())
-    now = time.monotonic()
-    if not force and now - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+    gate = _flow_tab_gate(name)
+    if not force and gate.in_cooldown():
         cached = _read_cache(cache_path)
         if cached:
             return cached
-    async with lock:
-        if not force and time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+    async with gate.lock:
+        if not force and gate.in_cooldown():
             cached = _read_cache(cache_path)
             if cached:
                 return cached
@@ -2798,7 +2812,7 @@ async def _run_flow_tab(
         if result.data and result.data.get("error"):
             raise HTTPException(status_code=400, detail=result.data["error"])
         _write_cache(cache_path, result.data)
-        _flow_tab_last[name] = time.monotonic()
+        gate.mark_success()
         return result.data
 
 
@@ -4347,9 +4361,8 @@ async def vcg_share():
 
 # ── LEAP (IV Mispricing Scanner) ────────────────────────────────────
 
-_leap_last_scan: float = 0.0
-_leap_scan_lock: Optional[asyncio.Lock] = None
 LEAP_COOLDOWN_S = 600  # 10 min — LEAP scans are slow + low-cadence
+_LEAP_GATE = _preset_scan_gate("leap", LEAP_COOLDOWN_S)
 LEAP_PRESET_TIMEOUT_S = 3600
 LEAP_TICKER_TIMEOUT_S = 300
 _SCAN_TICKER_LIST_MAX = 25
@@ -4407,6 +4420,14 @@ def _preset_cooldown_429(name: str, last_scan: float, cooldown_s: float) -> HTTP
     (a different preset, an explicit-ticker overwrite) is refused, never
     re-spawned — varying `preset` used to bypass the window entirely."""
     remaining = max(0.0, cooldown_s - (time.monotonic() - last_scan))
+    return _cooldown_429(name, remaining)
+
+
+def _gate_cooldown_429(gate: ScanGate) -> HTTPException:
+    return _cooldown_429(gate.name, gate.retry_after())
+
+
+def _cooldown_429(name: str, remaining: float) -> HTTPException:
     retry_after = str(max(1, int(remaining) + 1))
     return HTTPException(
         status_code=429,
@@ -4433,23 +4454,19 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         return await demo_scan_response(
             "leap-scan", {"scan_time": "", "min_gap": min_gap, "results": []}
         )
-    global _leap_last_scan, _leap_scan_lock
-    import time as _time
-    if _leap_scan_lock is None:
-        _leap_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _LEAP_GATE
     is_ticker_scan = bool(requested)
-    if not is_ticker_scan and now - _leap_last_scan < LEAP_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
-        raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
-    async with _leap_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
+        raise _gate_cooldown_429(gate)
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
-            raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
+            raise _gate_cooldown_429(gate)
         workers = app_preferences.get_int("RADON_LEAP_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
@@ -4471,7 +4488,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _leap_last_scan = time.monotonic()
+            gate.mark_success()
         # The leap scanner subprocess wrote the JSON cache atomically AND
         # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
@@ -4486,9 +4503,8 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
 
 # ── Theta Harvester (short-strangle theta scanner) ──────────────────
 
-_theta_last_scan: float = 0.0
-_theta_scan_lock: Optional[asyncio.Lock] = None
 THETA_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
+_THETA_GATE = _preset_scan_gate("theta", THETA_COOLDOWN_S)
 
 
 # Route defaults mirror theta_harvester_scanner.py's MIN_DTE / MAX_DTE / no-credit-floor.
@@ -4555,8 +4571,6 @@ async def theta_harvester_scan(
     data/theta_harvester.json and records its own service_health row. Cooldown
     mirrors LEAP/GARCH to protect UW quotas and is keyed on preset + params.
     """
-    global _theta_last_scan, _theta_scan_lock
-    import time as _time
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
@@ -4585,16 +4599,14 @@ async def theta_harvester_scan(
                 "results": [],
             },
         )
-    if _theta_scan_lock is None:
-        _theta_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _THETA_GATE
     is_ticker_scan = bool(ticker)
-    if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
             return cached
-    async with _theta_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
@@ -4619,7 +4631,7 @@ async def theta_harvester_scan(
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _theta_last_scan = time.monotonic()
+            gate.mark_success()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
@@ -4638,9 +4650,8 @@ async def theta_harvester_scan(
 
 # ── 7-Step Strength Confirmation scanner ───────────────────────────
 
-_strength_last_scan: float = 0.0
-_strength_scan_lock: Optional[asyncio.Lock] = None
 STRENGTH_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
+_STRENGTH_GATE = _preset_scan_gate("strength", STRENGTH_COOLDOWN_S)
 
 
 def _strength_cache_matches_preset(cached: Any, preset: str) -> bool:
@@ -4658,8 +4669,6 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
     The script writes data/strength_confirmation.json and records its own
     service_health row. Ticker scans bypass preset cooldown for operator probes.
     """
-    global _strength_last_scan, _strength_scan_lock
-    import time as _time
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
@@ -4677,16 +4686,14 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
                 "results": [],
             },
         )
-    if _strength_scan_lock is None:
-        _strength_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _STRENGTH_GATE
     is_ticker_scan = bool(ticker)
-    if not is_ticker_scan and now - _strength_last_scan < STRENGTH_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
         if _strength_cache_matches_preset(cached, preset):
             return cached
-    async with _strength_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
@@ -4706,7 +4713,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _strength_last_scan = time.monotonic()
+            gate.mark_success()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")

@@ -16,6 +16,14 @@ from api import auth, server
 from api.subprocess import ScriptResult
 
 
+def _gate(name, cooldown_s, *, armed):
+    """A fresh route gate; ``armed`` = a preset scan just succeeded."""
+    gate = server._preset_scan_gate(name, cooldown_s)
+    if armed:
+        gate.mark_success()
+    return gate
+
+
 @pytest.fixture(autouse=True)
 def localhost_bypass(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
@@ -48,9 +56,7 @@ def _preset_payload():
 
 
 def test_leap_ticker_scan_bypasses_preset_cooldown(monkeypatch):
-    seeded = time.monotonic()
-    monkeypatch.setattr(server, "_leap_last_scan", seeded)
-    monkeypatch.setattr(server, "_leap_scan_lock", None)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=True))
 
     payload = _explicit_payload()
     calls: list[tuple[str, list[str], int | None]] = []
@@ -74,15 +80,16 @@ def test_leap_ticker_scan_bypasses_preset_cooldown(monkeypatch):
             300,
         )
     ]
-    # A ticker scan must NOT advance the preset cooldown.
-    assert server._leap_last_scan == seeded
+    # A ticker scan must NOT advance (arm) the preset cooldown.
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=False))
+    assert client.post("/leap/scan?tickers=nvda,amd").status_code == 200
+    assert not server._LEAP_GATE.in_cooldown()
 
 
 def test_leap_preset_scan_inside_cooldown_never_serves_explicit_cache(monkeypatch):
     """An explicit-ticker cache never satisfies a preset request, and inside
     the window the route refuses (429) rather than re-spawning."""
-    monkeypatch.setattr(server, "_leap_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_leap_scan_lock", None)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=True))
 
     async def fake_run_script(*_args, **_kwargs):
         raise AssertionError("cooldown must not re-scan on a cache miss")
@@ -98,8 +105,7 @@ def test_leap_preset_scan_inside_cooldown_never_serves_explicit_cache(monkeypatc
 
 
 def test_leap_cooldown_is_keyed_on_route_not_preset(monkeypatch):
-    monkeypatch.setattr(server, "_leap_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_leap_scan_lock", None)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=True))
 
     calls: list[tuple[str, list[str], int | None]] = []
 
@@ -117,7 +123,7 @@ def test_leap_cooldown_is_keyed_on_route_not_preset(monkeypatch):
     assert 1 <= int(blocked.headers["Retry-After"]) <= server.LEAP_COOLDOWN_S
     assert calls == []
 
-    monkeypatch.setattr(server, "_leap_last_scan", -1e9)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=False))
     assert client.post("/leap/scan?preset=semis").status_code == 200
     assert calls == [
         (
@@ -129,8 +135,7 @@ def test_leap_cooldown_is_keyed_on_route_not_preset(monkeypatch):
 
 
 def test_leap_cooldown_serves_matching_preset_cache(monkeypatch):
-    monkeypatch.setattr(server, "_leap_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_leap_scan_lock", None)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=True))
 
     async def fake_run_script(*_args, **_kwargs):
         raise AssertionError("cooldown hit with matching cache must not re-scan")
@@ -173,8 +178,7 @@ def test_leap_rejects_too_many_tickers(monkeypatch):
 
 
 def test_leap_omitted_preset_forwards_largecaps(monkeypatch):
-    monkeypatch.setattr(server, "_leap_last_scan", -1e9)
-    monkeypatch.setattr(server, "_leap_scan_lock", None)
+    monkeypatch.setattr(server, "_LEAP_GATE", _gate("leap", server.LEAP_COOLDOWN_S, armed=False))
 
     payload = {
         "scan_time": "2026-08-13T14:00:00",
