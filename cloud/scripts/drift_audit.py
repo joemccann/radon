@@ -100,6 +100,12 @@ OPTIONAL_RESPONDER_UNITS = frozenset({
     "radon-grok-responder.service", "radon-grok-responder.timer",
     "radon-grok-responder-upgrade.service", "radon-grok-responder-upgrade.timer",
 })
+# DS-2026-10-29-01: nothing provisions the legacy radon-UID responder any more.
+# An existing host keeps its installed copy for rollback, so a present copy is
+# still compared; an absent one is the intended end state, not drift.
+ROLLBACK_RETAINED_UNITS = frozenset({
+    "radon-grok-page-responder.service", "radon-grok-page-responder.timer",
+})
 SUDOERS_DIR = Path("/etc/sudoers.d")
 SERVICE_NAME = "config-drift"
 SUMMARY_CAP = 1500
@@ -760,6 +766,8 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
         if live_path is None:
             if name in role_skipped:
                 known_untracked.append(f"role-skipped:{name}")
+                continue
+            if name in ROLLBACK_RETAINED_UNITS:
                 continue
             drifts.append({"id": f"not-installed:{name}", "detail": f"services/{name}"})
             continue

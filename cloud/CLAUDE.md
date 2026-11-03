@@ -871,6 +871,14 @@ gateway-owned refresh. Legacy updater bodies remain rollback artifacts,
 guarded off once the managed manifest exists. Migration details remain in
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 
+DS-2026-10-29-01: the legacy radon-UID `radon-grok-page-responder.{service,timer}`
+is not in `installed-units.sha256`, `auto-sync-units.txt` or the `setup-vps.sh`
+inventory. No installer removes an installed copy, so the deploy is safe while
+it still pages; finalization moves timer ownership. Its committed bodies are
+frozen rollback sources (`ROLLBACK_RETAINED` in
+`tests/test_unit_install_acknowledgment.py`, `ROLLBACK_RETAINED_UNITS` in
+`scripts/drift_audit.py`: present copies are compared, absence is not drift).
+
 `setup-vps.sh` inventories `radon-research-archive.{service,timer}` and
 `enable_services` enables the timer: Sunday 04:20 UTC, moves
 settled private research `evidence/` to B2 (`research/` prefix), verifies,
