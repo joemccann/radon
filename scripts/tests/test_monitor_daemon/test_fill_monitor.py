@@ -416,6 +416,13 @@ class TestFillMonitorJournalPersistence:
     Mirror inline via db.writer.upsert_journal_entry.
     """
 
+    @pytest.fixture(autouse=True)
+    def _flat_prior_journal(self):
+        """Prior-qty lookup reads a flat journal (a failed lookup refuses
+        the label, §1 #11)."""
+        with patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
+            yield
+
     def _make_partial_fill_trade(self):
         mock_trade = MagicMock()
         mock_trade.order.orderId = 5
@@ -526,6 +533,13 @@ class TestFillMonitorTradeIdUniqueness:
     orders (IB orderIds restart per session/clientId) — and JOURNAL_UPSERT_SQL
     is ON CONFLICT(trade_id) DO UPDATE, so the second fill destructively
     overwrote the first order's journal row."""
+
+    @pytest.fixture(autouse=True)
+    def _flat_prior_journal(self):
+        """Prior-qty lookup reads a flat journal (a failed lookup refuses
+        the label, §1 #11)."""
+        with patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
+            yield
 
     @staticmethod
     def _trade(symbol, con_id, perm_id, strike=90.0):

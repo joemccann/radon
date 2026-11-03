@@ -43,6 +43,7 @@ from zoneinfo import ZoneInfo
 
 from .base import BaseHandler
 from utils.exec_ids import exec_id_root
+from utils.journal_action import OPTION_ACTIONS, Action, action_sign, classify_fill
 
 try:
     from db.writer import upsert_journal_entry  # type: ignore
@@ -69,17 +70,14 @@ JOURNAL_LOOKBACK_DAYS = 1100
 # the 1100-day window must never ride one unbounded fetch).
 JOURNAL_SCAN_PAGE_ROWS = 500
 
-# Signed contribution of each option action to the contract's net quantity.
-_ACTION_SIGNS = {
-    "BUY_OPTION": 1,
-    "BUY_TO_CLOSE": 1,
-    "SELL_OPTION": -1,
-    "SELL_TO_OPEN": -1,
-}
+# Signed contribution of each option action to the contract's net quantity
+# (shared convention, utils.journal_action). Any other label is ambiguous.
+_ACTION_SIGNS = {action.value: action_sign(action.value) for action in OPTION_ACTIONS}
 
 # Flex rehydrate writes completed round trips as a single row — both sides
-# already netted, so it contributes nothing to the open quantity.
-_ROUND_TRIP_ACTION = "CLOSED"
+# already netted, so it contributes nothing to the open quantity (the same
+# 0 journal_basis._signed_qty gives it).
+_ROUND_TRIP_ACTION = Action.CLOSED.value
 
 # OCC option symbol as the rehydrate writer stores it in ticker
 # ("SPCX  260807C00150000"); the real-time daemon stores the bare root.
@@ -369,6 +367,14 @@ def _executed_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]
     )
 
 
+def _close_action(net: int) -> str:
+    """The shared closing label for flattening a residual of signed ``net``."""
+    label = classify_fill("SLD" if net > 0 else "BOT", "OPT", prior_qty=net, fill_qty=abs(net))
+    if label is None:
+        raise ValueError(f"journal-expiry-sweep: cannot label a close of net {net}")
+    return label.action.value
+
+
 class ExpirySweepHandler(BaseHandler):
     """Daily sweep that flattens journal positions left open past expiry."""
 
@@ -520,7 +526,7 @@ class ExpirySweepHandler(BaseHandler):
             "ticker": ticker,
             "date": expiry_iso,
             "decision": "IB_AUTO_IMPORT",
-            "action": "SELL_OPTION" if net > 0 else "BUY_TO_CLOSE",
+            "action": _close_action(net),
             "contracts": abs(net),
             "strike": payload.get("strike"),
             "right": payload.get("right"),

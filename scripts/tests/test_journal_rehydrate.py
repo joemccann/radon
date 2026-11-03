@@ -834,11 +834,23 @@ class TestAssignmentImport:
         )
         assert imported == 1
         new = updated["trades"][-1]
-        assert new["action"] == "SELL"
+        # No journaled stock: the delivery opens a short (shared classifier,
+        # §1 #11), never a phantom close.
+        assert new["action"] == "SELL_TO_OPEN"
         assert new["shares"] == 1000
         assert new["fill_price"] == 460.0
         assert new["date"] == "2026-08-03"
         assert new["ib_codes"] == "A"
+
+    def test_covered_share_delivery_imports_as_stock_sell(self):
+        existing = self._existing_with_open()
+        existing["trades"].append({
+            "id": 2, "date": "2026-07-01", "ticker": "MSFT", "action": "BUY",
+            "shares": 1000, "structure": "Long Stock (STK)", "ib_exec_id": "STK-OPEN",
+        })
+        updated, imported, _, _ = rehydrate_from_executions([self._delivery_exec()], existing)
+        assert imported == 1
+        assert updated["trades"][-1]["action"] == "SELL"
 
     def test_rerun_after_assignment_import_is_idempotent(self):
         execs = [self._open_exec(), self._assignment_exec(), self._delivery_exec()]

@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 from .base import BaseHandler, et_session_date
 from utils.outcome_metrics import record_outcome
 from clients.ib_client import IBClient, DEFAULT_HOST
+from utils.journal_action import classify_fill, structure_side
 
 try:
     # Mirror detected fills inline to the Turso journal table so a process
@@ -343,34 +344,9 @@ class FillMonitorHandler(BaseHandler):
             logger.warning("fill_monitor: orders snapshot mirror failed: %s", exc)
     
     @staticmethod
-    def _side_to_action(side_label: str, sec_type: str, prior_qty: float = 0.0) -> str:
-        """Map order side + prior signed qty → journal action label.
-
-        Mirrors journal_sync._side_to_action so fill_monitor and journal_sync
-        do not diverge (buy-to-cover short → BUY_TO_CLOSE, sell-to-close long
-        → SELL_OPTION).
-        """
-        upper = (side_label or "").upper()
-        if upper == "BUY":
-            if sec_type == "STK":
-                return "BUY"
-            return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
-        if upper == "SELL":
-            if sec_type == "STK":
-                return "SELL"
-            return "SELL_OPTION" if prior_qty > 0 else "SELL_TO_OPEN"
-        return "BUY" if sec_type == "STK" else "BUY_OPTION"
-
-    @staticmethod
     def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
         type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
-        a = (action or "").upper()
-        if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
-            side_label = "Long"
-        elif a == "SELL_TO_OPEN":
-            side_label = "Short"
-        else:
-            side_label = "Closed"
+        side_label = structure_side(action)
         if sec_type in ("OPT", "BAG") and strike is not None and right:
             right_label = "Call" if right in ("C", "CALL") else "Put" if right in ("P", "PUT") else right
             exp = str(expiry) if expiry else ""
@@ -387,12 +363,17 @@ class FillMonitorHandler(BaseHandler):
             return f"{side_label} {right_label} ${strike_val}{suffix}"
         return f"{side_label} {type_label} ({sec_type})"
 
-    def _lookup_prior_qty(self, contract: Any) -> float:
+    def _lookup_prior_qty(self, contract: Any) -> Optional[float]:
+        """Signed prior journal qty, or None when it cannot be read.
+
+        None refuses the label: defaulting to 0 wrote a close as a phantom
+        SELL_TO_OPEN. journal_sync re-imports the execution next cycle.
+        """
         if get_db is None or prior_net_qty_for_contract is None:
-            return 0.0
+            return None
         ticker = getattr(contract, "symbol", None)
         if not ticker:
-            return 0.0
+            return None
         sec_type = getattr(contract, "secType", "STK") or "STK"
         try:
             db = get_db()
@@ -411,7 +392,7 @@ class FillMonitorHandler(BaseHandler):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("fill_monitor: prior-qty lookup failed for %s: %s", ticker, exc)
-            return 0.0
+            return None
 
     def _persist_fill_to_journal(
         self,
@@ -451,11 +432,19 @@ class FillMonitorHandler(BaseHandler):
         )
 
         sec_type = getattr(contract, "secType", "STK") or "STK"
-        side_label = "BUY" if str(order.action).upper() == "BUY" else "SELL"
-        prior_qty = self._lookup_prior_qty(contract)
-        action = self._side_to_action(side_label, sec_type, prior_qty=prior_qty)
-
         newly_filled = fill_info.get("newly_filled", 0)
+        label = classify_fill(
+            getattr(order, "action", None), sec_type, self._lookup_prior_qty(contract), newly_filled
+        )
+        if label is None:
+            logger.warning(
+                "fill_monitor: no journal label for order %s (side %r, prior qty unknown "
+                "or unreadable); journal_sync imports the execution",
+                order_id, getattr(order, "action", None),
+            )
+            return
+        action = label.action.value
+
         increment_price = self._increment_price(fill_info)
         multiplier = 100 if sec_type in ("OPT", "BAG") else 1
         total_cost = float(newly_filled) * float(increment_price) * multiplier
@@ -483,6 +472,7 @@ class FillMonitorHandler(BaseHandler):
             "newly_filled": newly_filled,
             "notes": f"Imported from fill_monitor on {filled_at}",
         }
+        payload.update(label.payload_fields())
         if sec_type in ("OPT", "BAG"):
             payload["contracts"] = int(abs(newly_filled))
             if strike is not None:
