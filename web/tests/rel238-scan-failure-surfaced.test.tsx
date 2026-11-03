@@ -265,21 +265,31 @@ describe("GET /api/gex staleness (R-660)", () => {
   });
 
   it("keeps HIT + is_stale: false for a fresh closed-market snapshot", async () => {
-    mockRadonFetch.mockResolvedValue({});
-    const { mostRecentSessionDate } = await import("../lib/marketSession");
-    mockReadFile.mockResolvedValue(JSON.stringify({
-      scan_time: `${mostRecentSessionDate()}T19:59:00Z`,
-      market_open: false,
-      ticker: "SPX",
-      net_gex: 222,
-      history: [],
-    }));
+    // The route reads the real clock for "is the market open now". Pin it to a
+    // Saturday so the market is closed; on the wall clock this failed every
+    // weekday between 09:30 and 16:00 ET.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-07T15:00:00Z"));
+    try {
+      mockRadonFetch.mockResolvedValue({});
+      const { mostRecentSessionDate } = await import("../lib/marketSession");
+      mockReadFile.mockResolvedValue(JSON.stringify({
+        // Friday 15:59 ET, the last scan of the most recent session.
+        scan_time: `${mostRecentSessionDate()}T20:59:00Z`,
+        market_open: false,
+        ticker: "SPX",
+        net_gex: 222,
+        history: [],
+      }));
 
-    const { GET } = await import("../app/api/gex/route");
-    const res = await GET();
-    expect(res.headers.get("X-Cache-State")).toBe("HIT");
-    const body = await res.json();
-    expect(body.is_stale).toBe(false);
+      const { GET } = await import("../app/api/gex/route");
+      const res = await GET();
+      expect(res.headers.get("X-Cache-State")).toBe("HIT");
+      const body = await res.json();
+      expect(body.is_stale).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
