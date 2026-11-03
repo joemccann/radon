@@ -1231,6 +1231,7 @@ async function executeToolUnscoped(
     }
     if (name === "fetch_backend") {
       const data = await runFetchBackend(input, principal, budget);
+      budget.retrievedRead = true;
       return { ok: true, data: fencePayload(data) };
     }
     if (!tool.run) {
@@ -1257,6 +1258,9 @@ async function executeToolUnscoped(
       if (refusal) return { ok: false, error: refusal };
     }
     const data = await tool.run(input, principal.token);
+    // Isolated results never re-enter a tool-capable round; the catalog
+    // listing is Radon's own text.
+    if (name !== "list_apis" && !isIsolatedResultTool(name)) budget.retrievedRead = true;
     // RC-B7: every non-knowledge result is neutralized + fenced before it
     // enters the model's instruction stream (knowledge tools go through the
     // loop's isolation pass instead).
