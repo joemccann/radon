@@ -479,6 +479,113 @@ def test_non_5xx_reason_inside_deploy_window_pages(tmp_path, monkeypatch) -> Non
     assert outcome.severity == "P1"
 
 
+def test_deploy_stop_clean_caddy_floor_with_healthd_down_is_suppressed(
+    tmp_path, monkeypatch
+) -> None:
+    # 2026-11-01 03:36Z: Deploy via SSH had already stop-cleaned radon-health.
+    # The off-box probe recorded the Caddy floor, and :8330 could not confirm
+    # the serving path. That unread aggregate is the stop, not a second outage.
+    from scripts.watchdog import external_probe
+    import urllib.error
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=1, detail="status_unreachable:caddy"
+        ),
+    )
+    _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
+
+    def _refuse(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    with patch.object(external_probe.urllib.request, "urlopen", _refuse):
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is False
+    assert outcome.status == "healthy"
+    assert outcome.severity is None
+    assert "deploy window" in outcome.message
+    assert "healthd stopped" in outcome.message
+
+
+def test_caddy_floor_with_healthd_down_outside_deploy_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+    import urllib.error
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=1, detail="status_unreachable:caddy"
+        ),
+    )
+    _deploy_marker(tmp_path, monkeypatch)
+
+    def _refuse(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    with patch.object(external_probe.urllib.request, "urlopen", _refuse):
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_caddy_floor_with_readable_down_aggregate_during_deploy_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=1, detail="status_unreachable:caddy"
+        ),
+    )
+    _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":3,"ok":false,"overall_state":"down",'
+        b'"generated_at":"2026-11-01T03:36:00Z"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_raw_502_with_healthd_down_during_deploy_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+    import urllib.error
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=1, detail="status_http_502"),
+    )
+    _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
+
+    def _refuse(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    with patch.object(external_probe.urllib.request, "urlopen", _refuse):
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
 def test_deploy_window_caddy_status_unreachable_is_suppressed(
     tmp_path, monkeypatch
 ) -> None:
