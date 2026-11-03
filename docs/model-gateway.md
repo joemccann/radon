@@ -66,13 +66,17 @@ or capacity probe cannot fall back to a host compile. Promotion rechecks before
 writing; concurrent disk growth can still cause a later refusal.
 
 Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
-bundle when the local engine reports the same image id for another exact
-`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tag. It hardlinks those bytes,
-rewrites only the release SHA, re-checks every hash, and activates the Linux
-selector. It does not move the Darwin selector; that still happens at commit.
-A tree that already exists for the deploying SHA is not proof, because the
-registry tag can move. A missing tag, a different image id, a corrupt donor,
-or an inspect failure exports from the image as before.
+bundle when the local engine reports the same image id. Donors are exact
+`ghcr.io/joemccann/radon-model-gateway:<40 hex>` tags, the same image id
+listed under `localhost/ghcr.io/...` after a prune untagged the donor SHA,
+or a Linux receipt that already recorded that image id. It hardlinks those
+bytes, rewrites only the release SHA, re-checks every hash, and activates
+the Linux selector. It does not move the Darwin selector; that still happens
+at commit. A tree that already exists for the deploying SHA is not proof,
+because the registry tag can move. A missing tag, a different image id, a
+corrupt donor, or an inspect failure exports from the image as before.
+A successful export records the image id on the new receipt so the next
+identical image does not need the donor tag.
 
 Gateway-era recovery verifies and reuses the already-installed exact Linux
 executables/helpers and Darwin bundle using immutable receipts and hashes. It
