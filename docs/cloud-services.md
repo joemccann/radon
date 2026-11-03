@@ -382,9 +382,13 @@ journald on the VPS is on-box only (capped at 1G) and the only copy: `ForwardToS
 
 ### Grok P1 responder (dedicated VPS clone)
 
-`radon-grok-page-responder.timer` claims `watchdog_pages` from
+After [finalization](grok-page-responder.md#finalize-and-verify),
+`radon-grok-responder.timer` claims `watchdog_pages` as the isolated
+`radon-responder` account. Until then, and after a rollback, the legacy
+`radon-grok-page-responder.timer` claims them from
 `/home/radon/radon-page-responder` with a stripped env
-(`/home/radon/radon-page-responder.env`). It must not use
+(`/home/radon/radon-page-responder.env`). Nothing provisions that legacy pair
+(DS-2026-10-29-01); an existing host keeps its copy only as the rollback target. It must not use
 `/home/radon/radon` or `/home/radon/radon-cloud/.env`. Laptop launchd is
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).

@@ -385,6 +385,15 @@ def _unit_active(name, runner=run):
     return state not in {"inactive", "failed"}
 
 
+def _unit_installed(name, runner=run):
+    """Hosts provisioned after DS-2026-10-29-01 never receive the legacy unit."""
+    result = runner(["/usr/bin/systemctl", "show", "--property=LoadState", "--value", name], check=False)
+    state = result.stdout.strip()
+    if result.returncode or state not in {"loaded", "not-found"}:
+        raise MaintenanceError("legacy responder unit state is unavailable; retry after inspection")
+    return state == "loaded"
+
+
 def handover(*, forward: bool, runner=run, marker=READY):
     """Switch timer ownership without killing an in-flight responder run."""
     source_timers = (OLD_TIMER,) if forward else NEW_TIMERS
@@ -394,6 +403,8 @@ def handover(*, forward: bool, runner=run, marker=READY):
     for workload in workloads:
         if _unit_active(workload, runner):
             raise MaintenanceError("responder workload is active; retry after it finishes")
+    if forward:
+        source_timers = tuple(timer for timer in source_timers if _unit_installed(timer, runner))
     try:
         for timer in source_timers:
             runner(["/usr/bin/systemctl", "disable", "--now", timer])

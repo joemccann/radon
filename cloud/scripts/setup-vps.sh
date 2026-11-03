@@ -113,8 +113,6 @@ readonly SERVICE_FILES=(
   radon-ib-watchdog.timer
   radon-incident-watchdog.service
   radon-incident-watchdog.timer
-  radon-grok-page-responder.service
-  radon-grok-page-responder.timer
   radon-grok-upgrade.service
   radon-grok-upgrade.timer
   radon-flex-pull.service

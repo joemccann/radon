@@ -739,7 +739,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-leap.timer` | Mon-Fri 10:00 ET | LEAP IV-mispricing scan via FastAPI. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-garch.timer` | Mon-Fri 14:00 / 17:00 / 20:00 UTC | GARCH convergence scan via FastAPI, 3x per RTH session. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-incident-watchdog.timer` | every 5 min | Writes `data/incidents/`. Cases: [`incident-runbook.md`](incident-runbook.md) |
-| `radon-grok-page-responder.timer` | 30s after last cycle | Headless Grok auto-fix from dedicated clone. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
+| `radon-grok-page-responder.timer` | 30s after last cycle | Legacy radon-UID Grok auto-fix. Live until the isolated `radon-grok-responder.timer` is finalized, then the rollback target only. Not installed by `setup-vps.sh` or any deploy (DS-2026-10-29-01). Spec: [`grok-page-responder.md`](grok-page-responder.md) |
 | `radon-grok-upgrade.timer` | daily 07:40 UTC, enabled | Track-latest Grok CLI/model. Smoke on scratch, auto-promote on pass, stay on last-known-good on fail. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
 
 The autonomous timers retired Radon's previous "data only refreshes when a browser tab is open" failure mode. Some surfaces remain on-demand by design (`scanner`, `discover`, `flow-analysis`, `analyst-ratings`, `gex-scan`, `orders-read-compare`).

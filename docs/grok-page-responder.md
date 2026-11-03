@@ -3,7 +3,10 @@
 Operator loop for iPhone P1 service pages. Full playbook:
 [`incident-runbook.md`](incident-runbook.md). Brand voice: no hype.
 
-Primary host is Hetzner: `radon-grok-page-responder.timer` against
+Primary host is Hetzner. The responder is the isolated `radon-responder`
+account (`radon-grok-responder.timer`, clone `/var/lib/radon-responder/repo`)
+once [finalized](#finalize-and-verify). Until then the legacy radon-UID
+`radon-grok-page-responder.timer` runs against
 `/home/radon/radon-page-responder`. Laptop launchd is off. Do not run
 the fixer against `/home/radon/radon`. Cloud options that were rejected
 (Cursor Cloud Agents, weekend clone) are in
@@ -28,6 +31,31 @@ disabled and records their root-owned inventory at
 The daily drift auditor then compares them, including drop-ins, against their
 canonical nested sources. Rollback retains that inventory and those disabled
 units, so their configuration remains observable.
+
+### Legacy unit retirement (DS-2026-10-29-01)
+
+Nothing provisions the legacy radon-UID pair
+`radon-grok-page-responder.{service,timer}` any more. It is absent from
+`cloud/config/installed-units.sha256`, `cloud/config/auto-sync-units.txt` and
+the `setup-vps.sh` inventory, so `install-units`, `sync-scheduled-units` and a
+fresh host build never install, refresh or enable it. The isolated account is
+the only provisioned responder.
+
+Deploying that change is safe while the legacy timer is still the live
+responder. No installer removes, stops or disables a unit that has left the
+manifest, so the installed legacy copy keeps paging until finalization moves
+timer ownership. Do not treat a green deploy as the cutover.
+
+The committed bodies stay in `cloud/services/` as the reviewed rollback source.
+They are frozen at the installed content
+(`cloud/tests/test_unit_install_acknowledgment.py`), because an edit could
+never reach a host. The drift auditor still compares an installed legacy copy
+and reports `unit-mismatch`, but an absent copy is not drift.
+
+Finalization on a host that never had the legacy unit skips its timer. A
+legacy `LoadState` other than `loaded` or `not-found` stops finalization before
+any timer changes. Rollback needs the installed legacy copy; on such a host,
+install it first from a trusted stage (see [Rollback](#rollback-the-account-migration)).
 
 ### Prepare the optional account
 
@@ -139,7 +167,10 @@ systemctl is-enabled radon-grok-page-responder.timer
 
 Finalization verifies the installed unit hashes and deployed action policy,
 the immutable native-client receipt and gateway readiness, then checks pickup
-readability and refuses unmerged legacy work. Only then does it disable the
+readability and refuses unmerged legacy work: every `fix/*` head in the legacy
+clone must be an ancestor of that clone's `origin/main`, including heads that
+already have an open PR. Keep any other head under `refs/archive/<branch>` and
+delete the branch. Only then does it disable the
 legacy responder timer, publish the root-owned readiness marker and enable
 `radon-grok-responder.timer`. An active legacy responder stops handover;
 retry after that run finishes. An enable failure restores the previous timer.
@@ -162,6 +193,25 @@ authentication files or rewrites either clone. A failed legacy enable restores
 the new domain's readiness and timers. The optional upgrade health row is
 retired by one exact root-owned database operation; if telemetry retirement
 fails after legacy restoration, rerun rollback to finish that operation.
+
+Rollback enables the installed legacy copy. Check it first with
+`systemctl show radon-grok-page-responder.timer -p LoadState --value`. If that
+prints `not-found`, install the frozen pair from a trusted stage
+before rollback:
+
+```bash
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+STORE=/opt/radon-provision/radon.git
+SHA="$(git ls-remote https://github.com/joemccann/radon.git refs/heads/main | cut -f1)"
+git --git-dir="$STORE" cat-file -e "${SHA}^{commit}"
+for unit in radon-grok-page-responder.service radon-grok-page-responder.timer; do
+  git --git-dir="$STORE" cat-file blob "${SHA}:cloud/services/${unit}" > "/etc/systemd/system/${unit}"
+  chmod 0644 "/etc/systemd/system/${unit}"
+done
+systemctl daemon-reload
+```
+
+The legacy clone and stripped env must also exist ([Install (VPS)](#install-vps)).
 
 Restore the Mac pickup source to
 `ssh://radon@radon-app/home/radon/radon-page-responder` and reload its launch
@@ -209,7 +259,11 @@ anonymous 401/403, unknown probes, ops-only (secret/host/restart).
 
 ## Install (VPS)
 
-As root, from a root-only stage of the provision store (the script refuses,
+New hosts use the isolated account ([Prepare](#prepare-the-optional-account),
+then [Finalize](#finalize-and-verify)). This legacy clone and stripped env
+remain only as the rollback target; no deploy or host build installs or
+enables the legacy unit pair (DS-2026-10-29-01). To rebuild that target as
+root, from a root-only stage of the provision store (the script refuses,
 exit 77, to run from any tree radon can write, such as the deploy checkout):
 
 ```bash
@@ -221,9 +275,10 @@ STAGE="$(mktemp -d /opt/radon-provision/grok-setup.XXXXXX)"
 git --git-dir="$STORE" -c tar.umask=022 archive "$SHA" cloud scripts | tar -x -C "$STAGE"
 bash "$STAGE/cloud/scripts/setup-grok-page-responder.sh"
 rm -rf "$STAGE"
-/usr/local/sbin/radon-deploy-root sync-control-plane   # installs the unit
-systemctl enable --now radon-grok-page-responder.timer
 ```
+
+Do not enable the legacy timer by hand while the isolated domain is ready;
+use [rollback](#rollback-the-account-migration), which moves timer ownership.
 
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only, plus fixed managed-client and inference-socket settings). Provider
@@ -309,9 +364,12 @@ refuses a dirty tree, including untracked dependency caches.
 ## Verify
 
 ```bash
-systemctl is-active radon-grok-page-responder.timer
-journalctl -u radon-grok-page-responder -n 20 --no-pager
+systemctl is-active radon-grok-responder.timer
+journalctl -u radon-grok-responder -n 20 --no-pager
 ```
+
+Before finalization, or after a rollback, the live unit is
+`radon-grok-page-responder`.
 
 ## Open-PR path: the Mac mini picks the branch up
 
@@ -750,9 +808,11 @@ running` every 30 seconds.
 | `scripts/grok_upgrade.py` | Retained legacy rollback controller; no scheduled updater |
 | `cloud/scripts/install-grok-upgrade-controller.sh` | Installs that copy under `/usr/local/lib/radon/grok-upgrade` |
 | `/opt/radon-model-clients/current/manifest.json` | Root-promoted immutable client receipt |
-| `cloud/services/radon-grok-page-responder.*` | VPS timer |
+| `cloud/services/responder-domain/radon-grok-responder.*` | Isolated responder timer (operator-installed) |
+| `cloud/services/radon-grok-page-responder.*` | Legacy timer; frozen rollback source, never provisioned |
 | `cloud/services/radon-grok-upgrade.*` | Read-only gateway readiness service; timer disabled |
-| `cloud/scripts/setup-grok-page-responder.sh` | Clone, stripped env and managed client verification |
+| `cloud/scripts/setup-grok-page-responder.sh` | Legacy rollback clone, stripped env and managed client verification |
+| `cloud/scripts/grok_responder_account.py` | Isolated account prepare, refresh, finalize, rollback |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
 
