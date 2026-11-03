@@ -1017,13 +1017,17 @@ documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
 Before managed services start, `radon-app-runtime install-model-clients`
 exports the exact gateway image's CLI payloads and Node runtime through a
 network-disabled, unprivileged container. When the new exact SHA's local
-image id matches another exact `radon-model-gateway:<40 hex>` tag whose
-Linux and Darwin receipts already verify, or both images carry the same
-`radon.model-clients.payload-sha256` label, promotion copies those immutable
-bytes, rewrites only the release SHA, re-checks every receipt hash, and
-does not start the export container. A missing tag, a different image id
+image id matches another exact `radon-model-gateway:<40 hex>` tag (including
+a `localhost/ghcr.io/...` name after prune removed the donor SHA tag) or a
+verified Linux receipt that recorded that image id, or both images carry the
+same `radon.model-clients.payload-sha256` label, promotion copies those
+immutable bytes, rewrites only the release SHA, re-checks every receipt hash,
+and does not start the export container. A missing tag, a different image id
 without a matching payload label, a missing label, or a receipt mismatch
-exports exactly as before. The root-owned `model_clients.py`
+exports exactly as before. Export writes the image id onto the new receipt so
+the next identical image can reuse without the donor tag. The payload label
+hashes `docker/app/Dockerfile.python` too, so a base-image digest bump (the
+exported `node` comes from it) never reuses old clients. The root-owned `model_clients.py`
 installer admits bounded safe archive members, verifies pinned package metadata
 and executable hashes, and atomically selects an immutable
 `/opt/radon-model-clients/<release-SHA>` through `current`. Consumers use
