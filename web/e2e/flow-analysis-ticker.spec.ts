@@ -336,58 +336,62 @@ test.describe("Flow Analysis per-ticker route", () => {
    * serving a cache with no upper age, and DARK POOL AGGREGATE / OPTIONS FLOW
    * BIAS looked byte-identical to a fresh scan. The operator found the gap by
    * reading ISO dates in the history table. */
-  test("a served cache names its age above the figures it produced", async ({ page }) => {
-    await setupBaseMocks(page);
-    const DAYS_OLD = 73;
-    // Age is counted in ET calendar days. Subtracting 73 x 24h from "now" crosses
-    // a DST change for part of the year and lands one ET day off near midnight,
-    // so stamp 16:00 UTC (midday ET in both EST and EDT) on the calendar day
-    // exactly DAYS_OLD ET days before today.
-    const todayEt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-    const isoDay = new Date(Date.parse(`${todayEt}T00:00:00Z`) - DAYS_OLD * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    const stamped = new Date(`${isoDay}T16:00:00Z`);
-    const cached = bullishReport("AMZN", stamped.toISOString());
+  for (const pinned of [null, "2026-11-02T04:04:00Z"]) {
+    test(`a served cache names its age above the figures it produced${pinned ? ` (clock ${pinned})` : ""}`, async ({ page }) => {
+      const now = pinned ? new Date(pinned) : new Date();
+      if (pinned) await page.clock.setFixedTime(now);
+      await setupBaseMocks(page);
+      const DAYS_OLD = 73;
+      // The label counts America/New_York calendar days, so step back in ET
+      // dates on a UTC-midnight anchor: 73 x 24h crosses a DST change and
+      // lands one ET date short for an hour each night (2026-11-02 04:04Z).
+      const etToday = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(now);
+      const isoDay = new Date(Date.parse(`${etToday}T00:00:00Z`) - DAYS_OLD * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      // 16:00Z is midday ET under EDT (12:00) and EST (11:00): never off the date.
+      const stamped = new Date(`${isoDay}T16:00:00Z`);
+      const cached = bullishReport("AMZN", stamped.toISOString());
 
-    await page.route("**/api/flow-analysis/AMZN**", async (route) => {
-      if (route.request().method() === "GET") {
+      await page.route("**/api/flow-analysis/AMZN**", async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(cached),
+          });
+          return;
+        }
+        // What the route returns when its own wait elapses: the cache, marked.
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify(cached),
+          headers: { "X-Sync-Warning": "Radon API unavailable - serving cached data" },
+          body: JSON.stringify({ ...cached, is_stale: true }),
         });
-        return;
-      }
-      // What the route returns when its own wait elapses: the cache, marked.
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        headers: { "X-Sync-Warning": "Radon API unavailable - serving cached data" },
-        body: JSON.stringify({ ...cached, is_stale: true }),
       });
+
+      await page.goto("/flow-analysis/AMZN");
+
+      const strip = page.getByTestId("flow-stale-age");
+      await expect(strip).toBeVisible();
+      await expect(strip).toContainText(isoDay);
+      await expect(strip).toContainText(`${DAYS_OLD} days old`);
+
+      // The dating must be readable without scrolling past the aggregate.
+      const aggregate = page.locator(".section", { hasText: "Dark Pool Aggregate" }).first();
+      const stripBox = await strip.boundingBox();
+      const aggBox = await aggregate.boundingBox();
+      expect(stripBox!.y).toBeLessThan(aggBox!.y);
+
+      await expect(page.getByTestId("flow-hero-stale")).toContainText(isoDay);
     });
-
-    await page.goto("/flow-analysis/AMZN");
-
-    const strip = page.getByTestId("flow-stale-age");
-    await expect(strip).toBeVisible();
-    await expect(strip).toContainText(isoDay);
-    await expect(strip).toContainText(`${DAYS_OLD} days old`);
-
-    // The dating must be readable without scrolling past the aggregate.
-    const aggregate = page.locator(".section", { hasText: "Dark Pool Aggregate" }).first();
-    const stripBox = await strip.boundingBox();
-    const aggBox = await aggregate.boundingBox();
-    expect(stripBox!.y).toBeLessThan(aggBox!.y);
-
-    await expect(page.getByTestId("flow-hero-stale")).toContainText(isoDay);
-  });
+  }
 
   test("a cached report stays on screen with a live scan indicator until the scan lands", async ({ page }) => {
     await setupBaseMocks(page);
