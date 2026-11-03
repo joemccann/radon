@@ -59,6 +59,17 @@ async function callApi(
   return execute("call_api", input, principal, budget);
 }
 
+async function watchlistPost(
+  budget: { spawnAttempts: number },
+  symbol = "VST",
+) {
+  return callApi(
+    { method: "POST", path: "/api/watchlist", body: { symbol } },
+    PRINCIPAL,
+    budget,
+  );
+}
+
 function watchlistFrom(data: unknown): Array<{ symbol: string }> {
   const payload = data as { excerpt?: string; watchlist?: Array<{ symbol: string }> };
   if (typeof payload.excerpt === "string") {
@@ -192,6 +203,51 @@ describe("assistant call_api catalog client", () => {
       createAssistantTurnBudget(),
     );
     expect(fresh.ok).toBe(true);
+  });
+
+  it("refuses a workspace mutation after fetch_backend in the same turn", async () => {
+    const { createAssistantTurnBudget } = await import("@/lib/assistant/dispatch");
+    mocks.radonFetch.mockResolvedValue({ ticker: "AAPL", last: 190 });
+    const budget = createAssistantTurnBudget();
+    const read = await execute(
+      "fetch_backend",
+      { method: "GET", path: "/quote/AAPL" },
+      PRINCIPAL,
+      budget,
+    );
+    expect(read.ok).toBe(true);
+
+    const posted = await watchlistPost(budget);
+    expect(posted.ok).toBe(false);
+    expect(posted.error).toMatch(/Workspace changes are refused after a data read/);
+    const rows = await db.execute("SELECT symbol FROM user_watchlist");
+    expect(rows.rows).toHaveLength(0);
+  });
+
+  it("refuses a workspace mutation after a named read tool in the same turn", async () => {
+    const { createAssistantTurnBudget } = await import("@/lib/assistant/dispatch");
+    mocks.radonFetch.mockResolvedValue({ ticker: "AAPL", last: 190 });
+    const budget = createAssistantTurnBudget();
+    const read = await execute("get_quote", { ticker: "AAPL" }, PRINCIPAL, budget);
+    expect(read.ok).toBe(true);
+
+    const posted = await watchlistPost(budget);
+    expect(posted.ok).toBe(false);
+    expect(posted.error).toMatch(/Workspace changes are refused after a data read/);
+    const rows = await db.execute("SELECT symbol FROM user_watchlist");
+    expect(rows.rows).toHaveLength(0);
+  });
+
+  it("still mutates after list_apis in the same turn", async () => {
+    const { createAssistantTurnBudget } = await import("@/lib/assistant/dispatch");
+    const budget = createAssistantTurnBudget();
+    const listed = await execute("list_apis", { q: "watchlist" }, PRINCIPAL, budget);
+    expect(listed.ok).toBe(true);
+
+    const posted = await watchlistPost(budget);
+    expect(posted.ok).toBe(true);
+    const rows = await db.execute("SELECT symbol FROM user_watchlist");
+    expect(rows.rows).toHaveLength(1);
   });
 
   it("A7 oversized FastAPI payload is truncated", async () => {
