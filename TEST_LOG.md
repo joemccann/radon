@@ -1380,3 +1380,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-581 | DONE | Red: Codex 429 with `try again in 2 days` then cleared process/`_dead_until` hit chatgpt.com again (`codex:http_599`). Green: named-reset 429 persists and the next oneshot is `codex:rate_limited_cooldown` with zero chatgpt.com calls; a bare 429 does not persist. Unit file 4 passed; cooldown+NVIDIA 12 passed; `test_model_ladder.py` 138 passed; cluster 269 passed. |
+
+## 2026-11-03
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-582 | DONE | Deleting the two `retrievedRead` assignments in `web/lib/assistant/tools.ts` left the `call_api` case green and failed the new `fetch_backend` and `get_quote` cases (2 failed / 17 passed, watchlist POST `ok` true). Restored the assignments. File 19 passed on three runs. Product source unchanged. Closing rounds: root pytest r1/r2 xdist credentials clock flake then serial 11 passed; r3 20,227 passed / 12 skipped / 63 subtests. Vitest 11,604 passed / 21 skipped / 1,182 files each round. Cloud 42 failed / 3,960 passed / 23 skipped each round, 0 added / 0 removed against `157938f5`. |
