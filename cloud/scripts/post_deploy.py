@@ -7,10 +7,13 @@ marker is written and its transition is committed. Two things happen:
 1. Hooks. Each reviewed script in `cloud/post_deploy/hooks/` that
    `cloud/post_deploy/manifest.json` pins by SHA-256 runs once, in numeric
    order, as the deploy user (never root). Completion is fsynced to a state
-   file, so a later deploy skips it. A failed, timed-out or interrupted hook
-   stays pending, stops the hooks after it, is paged, and is retried on the
-   next deploy. Hooks must be idempotent: a crash between a hook's side effect
-   and its completion record reruns it.
+   file, so a later deploy skips it. A failed or timed-out hook stays
+   pending, stops the hooks after it, is paged, and is retried on the next
+   deploy. A hook whose runner died mid-run (its record still says `running`)
+   is rerun only when its manifest entry declares `"idempotent": true`;
+   otherwise it is marked `interrupted`, blocks the hooks after it and is
+   paged on every deploy until a reviewed manifest change declares it
+   idempotent or retires it.
 2. Verification. The manifest's declarative `verify` checks (unit active,
    journal pattern present/absent in a window, localhost HTTP probe) run after
    every deploy. They only read. Any failure is paged.
@@ -74,7 +77,7 @@ JOURNAL_UNIT_RE = re.compile(r"^radon-[a-z0-9]+(?:-[a-z0-9]+)*\.service$")
 CHECK_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LOCAL_URL_RE = re.compile(r"^http://(?:localhost|127\.0\.0\.1):([0-9]{2,5})(/[A-Za-z0-9._~/?=&%-]*)?$")
 
-HOOK_KEYS = {"id", "sha256", "description", "timeout_seconds"}
+HOOK_KEYS = {"id", "sha256", "description", "timeout_seconds", "idempotent"}
 CHECK_COMMON = {"id", "type", "description", "wait_seconds"}
 CHECK_KEYS = {
     "unit_active": CHECK_COMMON | {"unit"},
@@ -97,6 +100,7 @@ class Hook:
     sha256: str
     interpreter: str
     timeout: int
+    idempotent: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,6 +186,8 @@ def load_manifest(root: Path, *, euid: Optional[int] = None, check_owner: bool =
             raise Refusal(f"{where}: description is required")
         _int_field(entry, "timeout_seconds", low=1, high=MAX_HOOK_TIMEOUT,
                    default=DEFAULT_HOOK_TIMEOUT, where=where)
+        if "idempotent" in entry and not isinstance(entry["idempotent"], bool):
+            raise Refusal(f"{where}: idempotent must be true or false")
     return data
 
 
@@ -230,6 +236,7 @@ def validate_tree(root: Path, manifest: dict, *, euid: int, check_owner: bool = 
             sha256=digest,
             interpreter="python" if path.suffix == ".py" else "bash",
             timeout=entry.get("timeout_seconds", DEFAULT_HOOK_TIMEOUT),
+            idempotent=entry.get("idempotent", False),
         ))
     return sorted(hooks, key=lambda hook: hook.number)
 
@@ -449,6 +456,22 @@ def run_hooks(hooks: list[Hook], *, state_path: Path, ctx: HookContext, pager: P
                     problems.append(f"{hook.id} changed after it completed; it will not rerun. "
                                     f"Add a new numbered hook instead.")
                 continue
+            # We hold the runner lock, so a `running` record belongs to a run
+            # that died mid-hook. Its side effects may be half applied.
+            if record.get("status") in ("running", "interrupted") and not hook.idempotent:
+                if record.get("status") == "running":
+                    record["status"] = "interrupted"
+                    record["interrupted_seen_at"] = _now_iso()
+                    save_state(state_path, state)
+                problems.append(
+                    f"{hook.id} was interrupted mid-run (attempt {record.get('attempts')}, started "
+                    f"{record.get('started_at', 'unknown')}) and is not declared idempotent, so it "
+                    "will not rerun. Check its effect on the host, then either set "
+                    '"idempotent": true on its manifest entry or retire it. Later hooks wait.'
+                )
+                break
+            if record.get("status") == "running":
+                log(f"{hook.id} was interrupted mid-run; rerunning (declared idempotent)")
             remaining = deadline - time.monotonic()
             if remaining < 1:
                 problems.append(f"{hook.id} and later hooks deferred: post-deploy hook budget "
