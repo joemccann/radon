@@ -15,8 +15,11 @@ module; see `cash_flow_sync._FLEX_THROTTLE_CODES`.
 State machine:
 
     success      → counter reset to 0, no embargo.
-    throttle hit → counter++; embargo = THROTTLE_EMBARGO[counter-1].
-    transient    → no escalation; embargo = SOFT_EMBARGO_SECS (one cycle).
+    throttle hit → counter++; embargo = THROTTLE_EMBARGO_SECS[counter-1].
+    transient    → no escalation; embargo = SOFT_RETRY_COOLDOWN_SECS (5m).
+    corrupt      → an unparseable deadline is replaced by now + the 1h cap
+                   the first time ``is_blocked`` reads it (fail closed, but
+                   never forever: the only other reset is a success).
 
 Embargo schedule (capped at 1h):
 
@@ -64,7 +67,7 @@ SOFT_EMBARGO_SECS = 0
 
 
 class FlexThrottleError(RuntimeError):
-    """Raised when IBKR returns a documented throttle code (1001/1018/1019).
+    """Raised when IBKR returns its one documented rate-limit code, 1018.
 
     The daemon handler intercepts this specifically to advance the
     circuit breaker without retrying — every retry burns the
@@ -119,8 +122,8 @@ def record_soft_failure(
 
     The cooldown is intentionally bounded (5 min default) so a transient
     EOD-spike "not ready" failure at 17:00 ET still recovers within the
-    same trading day. Throttle (1001/1018/1019) errors take a different
-    path with the exponential `record_throttle` ladder (24h+).
+    same trading day. A 1018 throttle takes the `record_throttle` ladder
+    instead (90s → 5m → 15m → 1h cap).
     """
     return {
         "throttle_count": int(state.get("throttle_count") or 0),
@@ -145,6 +148,11 @@ def is_blocked(state: Dict[str, Any], *, now_utc: datetime) -> bool:
     the token-wide embargo standing the caller down behind it, nothing else
     bounds this path, so a corrupt persisted string put the handler straight
     back onto the endpoint that throttled it.
+
+    The closed state is bounded: the corrupt value is replaced IN `state`
+    by now + the ladder cap, so the caller's persisted state heals and the
+    breaker reopens after at most one hour. Left as is, it blocked forever,
+    because the only other reset is a success the block prevents.
     """
     raw = state.get("blocked_until")
     if not raw:
@@ -152,7 +160,12 @@ def is_blocked(state: Dict[str, Any], *, now_utc: datetime) -> bool:
     try:
         until = datetime.fromisoformat(raw)
     except (ValueError, TypeError):
-        log.warning("throttle blocked_until is unparseable (%r) — staying blocked", raw)
+        bounded = now_utc + timedelta(seconds=THROTTLE_EMBARGO_SECS[-1])
+        log.warning(
+            "throttle blocked_until is unparseable (%r) — staying blocked until %s",
+            raw, bounded.isoformat(),
+        )
+        state["blocked_until"] = bounded.isoformat()
         return True
     if until.tzinfo is None:
         until = until.replace(tzinfo=timezone.utc)
