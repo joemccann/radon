@@ -420,17 +420,21 @@ def record_verb(verb: str, now: float | None = None) -> None:
         _persist_verb_history(dict(_verb_wall_history))
 
 
-def broker_lease() -> dict | None:
-    """The 2FA push lease on disk, or None. Cheap read: no orphan probe."""
+def broker_lease(now: float | None = None) -> dict | None:
+    """The 2FA push lease that would refuse a login, or None.
+
+    Classified by the same ``ib_2fa_lock.classify_lease`` rule the helper's
+    acquire honours, so the app never disarms an action the helper would
+    accept. The orphan probe only runs for a lease past its grace window
+    (bounded: ORPHAN_CONFIRM_PROBES connects) and outside the lease guard.
+    """
     try:
         with ib_2fa_lock._guard(exclusive=False, timeout_secs=1.0):
             lock = ib_2fa_lock._read_lock_file()
     except Exception:  # noqa: BLE001 - status must never fail on the lease read
         return None
-    if lock is None:
-        return None
-    now = time.time()
-    if lock.is_expired(now):
+    now = time.time() if now is None else now
+    if ib_2fa_lock.classify_lease(lock, now) is not ib_2fa_lock.LeaseState.HELD:
         return None
     return {
         "holder": lock.holder,
