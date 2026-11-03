@@ -239,3 +239,14 @@ def test_an_escaped_environment_value_is_redacted():
     out = _redact_input('Environment="UW_TOKEN\\x3dlive_NOTREAL123"\nRADON_MODE=hetzner')
     assert "live_NOTREAL123" not in out, out
     assert "RADON_MODE=hetzner" in out, out
+
+
+# The capture promises no secret values, and the notification recipient key
+# is a credential even though its name carries no TOKEN/SECRET marker.
+def test_the_notification_recipient_key_is_redacted():
+    for out in (
+        _redact_dotenv("PUSHOVER_USER=live_NOTREAL123\nRADON_MODE=hetzner"),
+        _redact_input('Environment="PUSHOVER_USER=live_NOTREAL123"\nRADON_MODE=hetzner'),
+    ):
+        assert "live_NOTREAL123" not in out, out
+        assert "RADON_MODE=hetzner" in out, out

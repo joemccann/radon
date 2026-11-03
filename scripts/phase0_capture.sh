@@ -15,7 +15,7 @@ sec() { printf '\n\n========== %s ==========\n' "$1"; }
 # multi-line value were keyed on nothing and fell through the catch-all. The
 # header above states a guarantee, so the key is resolved through a systemd
 # `Environment=` wrapper and a quoted value is consumed to its real close.
-SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET'
+SECRET_KEY_PATTERN='TOKEN|SECRET|PASSWORD|PASS|APIKEY|API_KEY|_KEY|PUBLISHABLE|JWKS|DSN|WEBHOOK|CLIENT_SECRET|PUSHOVER'
 # Unit files. Env files go through redact_dotenv below.
 redact() {
   awk -v secret="$SECRET_KEY_PATTERN" '
