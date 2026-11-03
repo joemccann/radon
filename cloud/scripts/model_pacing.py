@@ -16,7 +16,7 @@ import sys
 import secrets
 import time
 
-UNITS=('radon-api.service','radon-research.service','radon-research-archive.service','radon-marketdesk.service','radon-marketdesk-pdf.service','radon-monitor.service','radon-uw-research.service','radon-ai-cycle.service','radon-ai-cycle-backfill.service','radon-aa-frontier-refresh.service')
+UNITS=('radon-api.service','radon-research.service','radon-research-archive.service','radon-research-asset-archive.service','radon-marketdesk.service','radon-marketdesk-pdf.service','radon-monitor.service','radon-uw-research.service','radon-ai-cycle.service','radon-ai-cycle-backfill.service','radon-aa-frontier-refresh.service')
 NODE_UNITS=('radon-newsfeed.service','radon-nextjs.service','radon-relay.service')
 UNITS=(*UNITS,*NODE_UNITS,'radon-model-gateway.service','radon-subscription-vault.service','radon-uw-stream.service')
 DESTINATION=Path('/var/lib/radon-private/model-gateway/pacing-imports')

@@ -73,7 +73,10 @@ def configured_cli(kind, command, url, token, *, env=None, state_dir=None):
             config.chmod(0o600)
             # Pinned Grok1.0.70 accepts the supported external-auth command.
             # It returns only the short-lived loopback application token.
-            child.update(GROK_CONFIG_PATH=str(config), GROK_AUTH_PATH=str(folder / 'auth.json'), GROK_MODELS_BASE_URL=url + '/v1', GROK_MODELS_LIST_URL=url + '/v1/models', GROK_BASE_URL=url + '/v1', GROK_AUTH_PROVIDER_COMMAND=shlex.join([sys.executable, '-I', str(Path(__file__).resolve()), 'local-token']))
+            # GROK_HOME is private bridge state too: sandboxed callers hide the
+            # operator's ~/.grok, and grok aborts when it cannot read
+            # requirements.toml there.
+            child.update(GROK_HOME=str(folder), GROK_CONFIG_PATH=str(config),GROK_AUTH_PATH=str(folder / 'auth.json'), GROK_MODELS_BASE_URL=url + '/v1', GROK_MODELS_LIST_URL=url + '/v1/models', GROK_BASE_URL=url + '/v1', GROK_AUTH_PROVIDER_COMMAND=shlex.join([sys.executable, '-I', str(Path(__file__).resolve()), 'local-token']))
             args += ['--leader-socket', str(folder / 'leader.sock')]
         yield args, child
 
