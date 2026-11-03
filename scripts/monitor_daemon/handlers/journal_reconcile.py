@@ -58,6 +58,10 @@ RECONCILE_INTERVAL = 86_400
 # the registrations in web/lib/serviceHealthWindows.ts + scripts/watchdog/services.py.
 SERVICE_NAME = "journal-reconcile"
 
+# ``error.cause`` this handler records for a journal-gap finding: the only
+# error heal_journal_reconcile_if_recovered may clear.
+GAP_CAUSE = "journal_gap"
+
 # Look back this many calendar days when scanning executed_orders.
 RECONCILE_WINDOW_DAYS = 7
 
@@ -309,6 +313,23 @@ class JournalReconcileHandler(BaseHandler):
 
         return self._build_result(exec_items, gaps)
 
+    def _ensure_cycle_heartbeat(self, result: Any, *, started_at: str) -> None:
+        """A gap finding is recorded with ``cause: journal_gap`` so the heal
+        on other writers' paths can tell it from a failure of this handler."""
+        if (
+            not self._cycle_health_recorded
+            and isinstance(result, dict)
+            and result.get("gaps_found")
+            and result.get("error")
+        ):
+            self.record_cycle_health(
+                "error",
+                started_at=started_at,
+                error={"message": str(result["error"]), "cause": GAP_CAUSE},
+            )
+            return
+        super()._ensure_cycle_heartbeat(result, started_at=started_at)
+
     # -- helpers -----------------------------------------------------------
 
     @staticmethod
@@ -383,21 +404,35 @@ class JournalReconcileHandler(BaseHandler):
         return result
 
 
-def _service_health_state(db: Any, service: str) -> "str | None":
-    """Current ``service_health.state`` for ``service`` (None when no row)."""
+def _service_health_row(db: Any, service: str) -> "tuple[str | None, str | None]":
+    """``(state, error cause)`` of ``service``'s service_health row.
+
+    (None, None) when there is no row; the cause is None when the recorded
+    error carries none (a crash, a DB outage, a pre-cause row).
+    """
     cursor = db.execute(
-        "SELECT state FROM service_health WHERE service = ?",
+        "SELECT state, last_error FROM service_health WHERE service = ?",
         (service,),
     )
     rows = cursor.fetchall()
     if not rows:
-        return None
-    return rows[0][0]
+        return None, None
+    state, last_error = rows[0][0], rows[0][1]
+    try:
+        error = json.loads(last_error) if last_error else None
+    except (TypeError, ValueError):
+        error = None
+    cause = error.get("cause") if isinstance(error, dict) else None
+    return state, cause
 
 
 def heal_journal_reconcile_if_recovered(db: Any) -> bool:
     """Flip the journal-reconcile service_health row from error → ok the moment
     its flagged gaps are actually journaled.
+
+    Only an error whose recorded cause is a journal gap (``GAP_CAUSE``) is
+    healed: this runs on OTHER writers' paths, which cannot vouch for any
+    other failure of the reconcile handler (a DB outage, a crash).
 
     Without this, a daily handler that latches ``state=error`` keeps the
     watchdog re-alerting for up to 24h after a backfill closes the gap (the
@@ -415,7 +450,7 @@ def heal_journal_reconcile_if_recovered(db: Any) -> bool:
         return False
 
     try:
-        if _service_health_state(db, SERVICE_NAME) != "error":
+        if _service_health_row(db, SERVICE_NAME) != ("error", GAP_CAUSE):
             return False
     except Exception as exc:  # noqa: BLE001 — never let a heal probe crash a write path
         logger.warning("journal-reconcile heal: state read failed: %s", exc)
