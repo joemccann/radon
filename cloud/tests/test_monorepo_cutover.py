@@ -401,10 +401,21 @@ def test_precloud_rollback_keeps_immutable_journal_support(tmp_path: Path) -> No
             previous,
             str(stage),
             str(backup),
-            "target_unverified",
+            "prepared",
         ],
         check=True,
     )
+    for step in ("backup_started", "backup_complete", "promoting", "target_unverified"):
+        subprocess.run(
+            [
+                shutil.which("python3") or "python3",
+                str(runner_scripts / "deploy-journal.py"),
+                "phase",
+                str(journal),
+                step,
+            ],
+            check=True,
+        )
 
     shell = f"""
 set -euo pipefail

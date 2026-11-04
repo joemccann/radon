@@ -3,6 +3,22 @@ set -euo pipefail
 
 # Single authoritative IB Gateway container lifecycle path. All callers use
 # this helper; Docker and systemd never cycle the container directly.
+#
+# Exit codes (scripts/api/services.py and scripts/ib_gateway_remote/serve.py
+# map 73/74/75; `radon start|restart` relays them unchanged):
+#   0    done (start of a running container is a no-op)
+#   1    refused or failed: app role, lease CLI missing, container not up
+#   2    usage, bad timeout budget; `status`: state unknown
+#   73   IBKR operator hold active (`radon ib resume` clears it); not now
+#   74   control busy: deploy/control lock held, lifecycle mutex busy,
+#        unresolved prior transition, or an invalid inherited lock proof
+#   75   2FA push lease held by another cycle; retry after it clears
+#   78   the root docker shim refused an untrusted env or compose file
+#   124  a bounded Docker call timed out
+# `status`: 0 running, 1 stopped, 2 unknown, 74 transition pending.
+# Lock order for every mutation: deploy lock, then lifecycle mutex.
+# deploy-root-helper.sh exit codes are a separate namespace: no caller relays
+# them to a consumer of this table.
 
 # Running the helper as root would create root-owned lease guard files and
 # break the radon-owned API/watchdog control planes. Self-demote defensively;
@@ -99,7 +115,8 @@ acquire_deploy_lock() {
     if inherited_lock_is_valid \
       "${RADON_DEPLOY_LOCKED:-0}" "${RADON_DEPLOY_LOCK_FD:-}" "$DEPLOY_LOCK_PATH"; then
       if [[ -n "$LEGACY_DEPLOY_LOCK_PATH" ]]; then
-        inherited_lock_is_valid "1" "${RADON_DEPLOY_LEGACY_LOCK_FD:-}" "$LEGACY_DEPLOY_LOCK_PATH" || return 74
+        inherited_lock_is_valid "1" "${RADON_DEPLOY_LEGACY_LOCK_FD:-}" "$LEGACY_DEPLOY_LOCK_PATH" \
+          || return "$CONTROL_BUSY_RC"
       fi
       return 0
     fi
@@ -224,6 +241,16 @@ env["RADON_IB_CONTROL_LOCKED"] = "1"
 env["RADON_IB_CONTROL_LOCK_FD"] = str(fd)
 os.execve(script, [script, *args], env)
 PY
+}
+
+# Drop an inherited lifecycle mutex so the deploy lock can be taken first.
+# The re-exec under the deploy lock retakes the mutex and re-observes.
+release_lifecycle_mutex() {
+  local fd="${RADON_IB_CONTROL_LOCK_FD:-}"
+  if [[ "${RADON_IB_CONTROL_LOCKED:-0}" == "1" && "$fd" =~ ^[0-9]+$ ]]; then
+    exec {fd}<&-
+  fi
+  unset RADON_IB_CONTROL_LOCKED RADON_IB_CONTROL_LOCK_FD
 }
 
 run_bounded() {
@@ -550,6 +577,7 @@ release_any_lease() {
 }
 
 stop_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   compose_to_state stopped stop compose-down
   # A stopped container has no login session, so no IBKR push can still be
@@ -569,15 +597,21 @@ case "${1:-}" in
     # the deploy lock only when Docker will actually be mutated.
     acquire_lifecycle_mutex "$@"
     refuse_while_operator_hold
-    if [[ -e "$TRANSITION_PATH" ]]; then
+    if [[ "${RADON_DEPLOY_LOCKED:-0}" != "1" ]]; then
+      if [[ ! -e "$TRANSITION_PATH" ]] && container_running; then
+        echo "IB Gateway container already running; no lease acquired"
+        exit 0
+      fi
+      # Mutation needed. Never wait for the deploy lock while holding the
+      # mutex: release it, take the deploy lock (re-exec), retake the mutex.
+      release_lifecycle_mutex
       acquire_deploy_lock "$@"
-      reconcile_pending_transition
     fi
+    reconcile_pending_transition
     if container_running; then
       echo "IB Gateway container already running; no lease acquired"
       exit 0
     fi
-    acquire_deploy_lock "$@"
     start_gateway
     ;;
   restart)

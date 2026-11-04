@@ -1604,3 +1604,74 @@ def test_compatibility_lock_refuses_without_blocking_or_retaining_lease(control_
     assert not log.exists()
     with primary.open() as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+# --- Audit 2026-11-03 §1#19: lock order, app-role stop, exit-code table ------
+
+
+def test_stop_on_app_role_is_refused_without_touching_docker(control_env):
+    env, state, log, _lock = control_env
+    env["RADON_HOST_ROLE"] = "app"
+    state.write_text("running\n")
+
+    result = _run_control(env, "stop")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "running"
+    assert not log.exists() or "compose-" not in log.read_text()
+
+
+def _order_probe_python(tmp_path: Path) -> tuple[Path, Path]:
+    """LOCK_PYTHON wrapper recording whether the lifecycle mutex is held at
+    the moment the helper asks for the deploy lock."""
+    order_log = tmp_path / "lock-order.log"
+    wrapper = tmp_path / "lock-python"
+    _write_executable(
+        wrapper,
+        f"""#!/bin/sh
+if [ "${{1:-}}" = -I ] && [ "${{2:-}}" = - ] && [ "${{3:-}}" = "$RADON_DEPLOY_LOCK_FILE" ]; then
+  {sys.executable} -I -c '
+import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print("mutex-free")
+except BlockingIOError:
+    print("mutex-held")
+' "$RADON_IB_CONTROL_GUARD_PATH" >> "{order_log}"
+fi
+exec {sys.executable} "$@"
+""",
+    )
+    return wrapper, order_log
+
+
+@pytest.mark.parametrize("verb", ["start", "restart", "stop"])
+def test_deploy_lock_is_always_taken_before_the_lifecycle_mutex(
+    control_env, tmp_path, verb,
+):
+    env, state, _log, _lock = control_env
+    state.write_text("stopped\n" if verb == "start" else "running\n")
+    wrapper, order_log = _order_probe_python(tmp_path)
+    env["RADON_LOCK_PYTHON"] = str(wrapper)
+
+    result = _run_control(env, verb)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    observations = order_log.read_text().split()
+    assert observations, "helper never asked for the deploy lock"
+    assert set(observations) == {"mutex-free"}, observations
+
+
+def test_exit_codes_are_documented_once_at_the_top():
+    text = CONTROL.read_text()
+    header = text[: text.index("APP_DIR=")]
+    for code, meaning in (("73", "operator hold"), ("74", "busy"), ("75", "lease")):
+        assert re.search(rf"^#\s+{code}\s.*{meaning}", header, re.M | re.I), code
+    assert re.search(r"^OPERATOR_HOLD_RC=73$", text, re.M)
+    assert re.search(r"^CONTROL_BUSY_RC=74$", text, re.M)
+    assert re.search(r"^LEASE_HELD_RC=75$", text, re.M)
+    body = text[text.index("acquire_deploy_lock() {"):]
+    # Every busy refusal in shell uses the named constant, not a bare literal.
+    assert not re.search(r"\breturn 74\b", body)
