@@ -1436,6 +1436,44 @@ def test_retired_relevance_holds_replay_automatically_outside_listing_once(world
     assert run(world)['requeued'] == 0 and len(world.published) == 1
 
 
+def test_copy_rejection_reasons_reach_the_ledger_and_research_health(world, db):
+    from clients.model_ladder import ModelLadderExhausted
+    from research import marketdesk_copy
+    world.refs = [make_ref("Reject001", title="EURUSD source report")]
+    world.summary = ["The curve moved 12bp."]
+    deps = build_deps(world)
+    secret = "sk-" + "n" * 24
+    marker = "UNIQUE_DRAFT_BODY_" + secret
+
+    def rejecting(**kwargs):
+        def complete(prompt, **options):
+            draft = {
+                "title": "Rates source",
+                "content": "The curve moved 999bp.\n\n" + marker,
+                "captions": {key: "Curve positioning" for key, _ in kwargs["images"]},
+                "tags": ["RATES"],
+                "tickers": [],
+            }
+            assert options["accept"](draft) is False
+            raise ModelLadderExhausted(
+                "Model ladder exhausted. tried=anthropic:unparseable grok:network:ReadTimeout codex:http_429;"
+            )
+        return marketdesk_copy.write_copy(**kwargs, complete=complete)
+
+    deps.write_copy = rejecting
+    with pytest.raises(job.ArticlesFailed) as info:
+        job.run_cycle(env=dict(ENV), deps=deps)
+    saved = ledger(db, "Reject001")
+    assert saved["status"] == "pending" and saved["attempts"] == 0
+    assert "unsupported_number" in saved["last_error"] and "999" in saved["last_error"]
+    assert secret not in saved["last_error"] and "UNIQUE_DRAFT_BODY" not in saved["last_error"]
+    assert len(saved["last_error"]) <= 300
+    health = research_errors(world)
+    assert health and "unsupported_number" in health[0]
+    assert secret not in health[0] and "UNIQUE_DRAFT_BODY" not in health[0]
+    assert "unsupported_number" in str(info.value)
+
+
 def test_all_suitable_policy_still_blocks_unsupported_generated_numbers(world, db):
     from research import marketdesk_copy
     world.refs = [make_ref('Factual001', title='EURUSD source report')]
