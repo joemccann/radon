@@ -113,6 +113,8 @@ class TestVersionIsRecordedWithTheStatements:
         executed: list[str] = []
 
         class _Cursor:
+            rowcount = 1  # wins the migration lock
+
             def __init__(self, rows):
                 self._rows = rows
 

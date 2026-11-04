@@ -388,7 +388,9 @@ class TestMigrateEntrypointArgv:
 
         def fake_connect(libsql, url, token):
             connected.append((url, token))
-            return MagicMock()
+            db = MagicMock()
+            db.execute.return_value.rowcount = 1  # wins the migration lock
+            return db
 
         monkeypatch.setattr(migrate_module, "_connect_with_retry", fake_connect)
         monkeypatch.setattr(migrate_module, "apply_pending_migrations", lambda db: 0)
@@ -702,6 +704,84 @@ class TestManualMigration:
         ]
         assert migrate_module._newest_migration_version() == max(automatic)
         assert drop[0] not in automatic
+
+
+class TestMigrationLock:
+    """§3.4: two migrators against one Turso (laptop `bun run db:migrate` and a
+    radon-api boot) relied on "already exists" to survive each other. One
+    advisory row lock, the same statements in migrate.py and migrate.ts."""
+
+    def _conn(self, tmp_path: Path):
+        import sqlite3
+
+        return sqlite3.connect(str(tmp_path / "lock.db"))
+
+    def test_a_second_migrator_is_refused_while_the_first_holds_the_lock(
+        self, migrate_module, tmp_path
+    ):
+        first, second = self._conn(tmp_path), self._conn(tmp_path)
+        with migrate_module.migration_lock(first, owner="a"):
+            with pytest.raises(migrate_module.MigrationLockBusy):
+                with migrate_module.migration_lock(second, owner="b"):
+                    pytest.fail("two migrators held the lock at once")
+        with migrate_module.migration_lock(second, owner="b"):
+            pass
+
+    def test_release_is_bound_to_the_owner(self, migrate_module, tmp_path):
+        first, second = self._conn(tmp_path), self._conn(tmp_path)
+        assert migrate_module._acquire_migration_lock(first, "a", 120) is True
+        first.execute("UPDATE schema_migrations_lock SET expires_at = '2000-01-01 00:00:00'")
+        first.commit()
+        assert migrate_module._acquire_migration_lock(second, "b", 120) is True
+        migrate_module._release_migration_lock(first, "a")
+        rows = second.execute("SELECT owner FROM schema_migrations_lock").fetchall()
+        assert rows == [("b",)], "a dead holder's late release dropped the live lock"
+
+    def test_an_expired_lock_is_taken_over(self, migrate_module, tmp_path):
+        first, second = self._conn(tmp_path), self._conn(tmp_path)
+        assert migrate_module._acquire_migration_lock(first, "a", 120) is True
+        assert migrate_module._acquire_migration_lock(second, "b", 120) is False
+        first.execute("UPDATE schema_migrations_lock SET expires_at = '2000-01-01 00:00:00'")
+        first.commit()
+        assert migrate_module._acquire_migration_lock(second, "b", 120) is True
+
+    def test_migrate_applies_under_the_lock_and_releases_it(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        conn = self._conn(tmp_path)
+        held: list = []
+
+        def apply(db):
+            held.append(db.execute("SELECT owner FROM schema_migrations_lock").fetchall())
+            return 0
+
+        monkeypatch.setattr(migrate_module, "_connect_with_retry", lambda *_a: conn)
+        monkeypatch.setattr(migrate_module, "apply_pending_migrations", apply)
+        migrate_module._migrate(MagicMock(), "libsql://x", "tok", "prod")
+        assert len(held) == 1 and len(held[0]) == 1, f"apply ran without the lock: {held}"
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations_lock").fetchone() == (0,)
+
+    def test_a_busy_lock_exits_tempfail_without_applying(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        holder, conn = self._conn(tmp_path), self._conn(tmp_path)
+        assert migrate_module._acquire_migration_lock(holder, "other-host", 120) is True
+        monkeypatch.setattr(migrate_module, "_connect_with_retry", lambda *_a: conn)
+        monkeypatch.setattr(
+            migrate_module, "apply_pending_migrations", lambda _db: pytest.fail("applied while locked")
+        )
+        with pytest.raises(SystemExit) as exc:
+            migrate_module._migrate(MagicMock(), "libsql://x", "tok", "prod")
+        assert exc.value.code == migrate_module.EXIT_DATABASE_UNREACHABLE
+
+    def test_migrate_ts_uses_the_same_lock_statements(self, migrate_module):
+        ts = (Path(__file__).resolve().parents[1] / "db" / "migrate.ts").read_text()
+        for sql in (
+            migrate_module.MIGRATION_LOCK_TABLE_SQL,
+            migrate_module.MIGRATION_LOCK_ACQUIRE_SQL,
+            migrate_module.MIGRATION_LOCK_RELEASE_SQL,
+        ):
+            assert sql in ts, f"migrate.ts drifted from migrate.py: {sql}"
 
 
 def test_rel108_library_main_requires_explicit_target_arguments(migrate_module, monkeypatch):
