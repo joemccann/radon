@@ -12,6 +12,14 @@ import { fmtPrice, legPriceKey, resolveClosingBasis, resolveNaturalSpreadQuote }
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
+import CancelOrderDialog from "@/components/CancelOrderDialog";
+import {
+  isOrderDialogInFlight,
+  ORDER_NO_LONGER_WORKING,
+  orderRefOf,
+  resolveLiveOrder,
+  useOrderDialogMachine,
+} from "@/lib/orders/orderDialogMachine";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
@@ -99,13 +107,14 @@ function ExistingOrderRow({
   order,
   prices,
   onModify,
+  onCancel,
 }: {
   order: OpenOrder;
   prices: Record<string, PriceData>;
   onModify: (order: OpenOrder) => void;
+  onCancel: (order: OpenOrder) => void;
 }) {
-  const { pendingCancels, pendingModifies, requestCancel } = useOrderActions();
-  const [actionLoading, setActionLoading] = useState(false);
+  const { pendingCancels, pendingModifies } = useOrderActions();
 
   const isPendingCancel = pendingCancels.has(order.permId);
   const isPendingModify = pendingModifies.has(order.permId);
@@ -136,12 +145,6 @@ function ExistingOrderRow({
       { riskFreeRate },
     ).perContract;
   }, [order, prices, riskFreeRate]);
-
-  const handleCancel = useCallback(async () => {
-    setActionLoading(true);
-    await requestCancel(order);
-    setActionLoading(false);
-  }, [order, requestCancel]);
 
   // Contract description
   const c = order.contract;
@@ -203,10 +206,9 @@ function ExistingOrderRow({
           </button>
           <button
             className="btn-order-action btn-cancel"
-            onClick={handleCancel}
-            disabled={actionLoading}
+            onClick={() => onCancel(order)}
           >
-            {actionLoading ? "..." : "CANCEL"}
+            CANCEL
           </button>
         </div>
       )}
@@ -1112,35 +1114,95 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
   const isCombo = position != null && position.legs.length > 1 && position.structure_type !== "Stock";
   const isIndex = isIndexSymbol(ticker);
 
-  const { requestModify } = useOrderActions();
+  const { requestModify, requestCancel, pushNotification } = useOrderActions();
   // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
   // owner surface supplies real connectivity.
   const { connected, ibConnected, marketDataDegraded } = useRealtimePrices();
   // REL-236 / NF-3: relay pings continue when the broker feed is down.
   const feedConnected = connected && ibConnected && !marketDataDegraded;
-  const [modifyTarget, setModifyTarget] = useState<OpenOrder | null>(null);
-  const [modifyLoading, setModifyLoading] = useState(false);
+  // The dialogs hold order IDENTITY; the live order is re-resolved from the
+  // polled `openOrders` every render so ModifyOrderModal sees live fills.
+  const { state: dialog, send: sendDialog, nextRequestId } = useOrderDialogMachine();
+  const liveTarget = useMemo((): OpenOrder | null | undefined => {
+    if (dialog.phase === "confirmCancel") return resolveLiveOrder(dialog.ref, openOrders);
+    if (dialog.phase === "editing" && dialog.subject.kind === "single") {
+      return resolveLiveOrder(dialog.subject.ref, openOrders);
+    }
+    return undefined;
+  }, [dialog, openOrders]);
+
+  const targetGone = liveTarget === null;
+  useEffect(() => {
+    if (!targetGone) return;
+    if (sendDialog({ type: "targetGone" })) {
+      pushNotification({ type: "warning", message: ORDER_NO_LONGER_WORKING });
+    }
+  }, [targetGone, sendDialog, pushNotification]);
+
+  const closeDialog = useCallback(() => {
+    sendDialog({ type: "close" });
+  }, [sendDialog]);
+
+  const openModify = useCallback((order: OpenOrder) => {
+    sendDialog({ type: "openModify", subject: { kind: "single", ref: orderRefOf(order) } });
+  }, [sendDialog]);
+
+  const openCancel = useCallback((order: OpenOrder) => {
+    sendDialog({ type: "openCancel", ref: orderRefOf(order) });
+  }, [sendDialog]);
 
   const handleModifyConfirm = useCallback(async (request: ModifyOrderRequest) => {
-    if (!modifyTarget) return;
-    setModifyLoading(true);
-    await requestModify(modifyTarget, request);
-    setModifyLoading(false);
-    setModifyTarget(null);
-  }, [modifyTarget, requestModify]);
+    if (dialog.phase !== "editing" || !liveTarget) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitModify", requestId, modalOrder: liveTarget })) return;
+    try {
+      await requestModify(liveTarget, request);
+    } finally {
+      sendDialog({ type: "settled", requestId });
+    }
+  }, [dialog.phase, liveTarget, nextRequestId, sendDialog, requestModify]);
+
+  const handleCancelConfirm = useCallback(async () => {
+    if (dialog.phase !== "confirmCancel" || !liveTarget) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitCancel", requestId, orders: [liveTarget] })) return;
+    try {
+      await requestCancel(liveTarget);
+    } finally {
+      sendDialog({ type: "settled", requestId });
+    }
+  }, [dialog.phase, liveTarget, nextRequestId, sendDialog, requestCancel]);
 
   return (
     <>
+      <CancelOrderDialog
+        order={
+          dialog.phase === "confirmCancel"
+            ? liveTarget ?? null
+            : dialog.phase === "cancelling"
+              ? dialog.orders[0]
+              : null
+        }
+        loading={dialog.phase === "cancelling"}
+        onConfirm={handleCancelConfirm}
+        onClose={closeDialog}
+      />
       <ModifyOrderModal
-        order={modifyTarget}
-        loading={modifyLoading}
+        order={
+          dialog.phase === "modifying"
+            ? dialog.modalOrder
+            : dialog.phase === "editing"
+              ? liveTarget ?? null
+              : null
+        }
+        loading={isOrderDialogInFlight(dialog)}
         prices={prices}
         portfolio={portfolio}
         // R-112: a close-out must count the SELL combos already working.
         openOrders={{ open_orders: openOrders }}
         feedConnected={feedConnected}
         onConfirm={handleModifyConfirm}
-        onClose={() => setModifyTarget(null)}
+        onClose={closeDialog}
       />
 
       <div className="order-tab">
@@ -1225,7 +1287,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
           <div className="existing-orders-section">
             <div className="existing-orders-title">Open Orders ({openOrders.length})</div>
             {openOrders.map((o) => (
-              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={setModifyTarget} />
+              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={openModify} onCancel={openCancel} />
             ))}
           </div>
         )}

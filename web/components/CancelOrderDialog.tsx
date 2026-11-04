@@ -39,7 +39,7 @@ export default function CancelOrderDialog({
           : "Orders";
     const anyPartial = multi.some((o) => o.filled > 0 && o.remaining > 0);
     return (
-      <Modal open onClose={onClose} title="Cancel Orders">
+      <Modal open onClose={onClose} title="Cancel Orders" dismissible={!loading}>
         <div className="cancel-dialog">
           <div className="cancel-order-details">
             <div className="cancel-detail-row">
@@ -87,7 +87,7 @@ export default function CancelOrderDialog({
   const partiallyFilled = target.filled > 0 && target.remaining > 0;
 
   return (
-    <Modal open={!!target} onClose={onClose} title="Cancel Order">
+    <Modal open={!!target} onClose={onClose} title="Cancel Order" dismissible={!loading}>
       <div className="cancel-dialog">
         <div className="cancel-order-details">
           <div className="cancel-detail-row">
