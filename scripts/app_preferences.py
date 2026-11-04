@@ -773,26 +773,29 @@ def apply_env_overlay() -> Dict[str, str]:
     ever touched.
     """
     global _OVERLAY_WRITTEN
-    written: Dict[str, str] = {}
-    for pref in REGISTRY:
-        with _LOCK:
-            row = _SNAPSHOT.get(pref.key)
-        resolved = _resolve_from(pref, row)
-        if resolved.source != "db":
-            continue
-        encoded = _encode(pref, resolved.value)
-        if pref.key not in _OVERLAY_ORIGINAL:
-            _OVERLAY_ORIGINAL[pref.key] = os.environ.get(pref.key)
-        os.environ[pref.key] = encoded
-        written[pref.key] = encoded
+    # One apply at a time, snapshot read through _OVERLAY_WRITTEN update
+    # (§1#17). The refresh worker and a request thread used to interleave: a
+    # stale apply that read the wider cap before a save then wrote it over
+    # the tighter one, and ib_place_order.py inherited it until next refresh.
+    with _LOCK:
+        written: Dict[str, str] = {}
+        for pref in REGISTRY:
+            resolved = _resolve_from(pref, _SNAPSHOT.get(pref.key))
+            if resolved.source != "db":
+                continue
+            encoded = _encode(pref, resolved.value)
+            if pref.key not in _OVERLAY_ORIGINAL:
+                _OVERLAY_ORIGINAL[pref.key] = os.environ.get(pref.key)
+            os.environ[pref.key] = encoded
+            written[pref.key] = encoded
 
-    for key in list(_OVERLAY_WRITTEN):
-        if key in written:
-            continue
-        original = _OVERLAY_ORIGINAL.pop(key, None)
-        if original is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = original
-    _OVERLAY_WRITTEN = written
-    return dict(written)
+        for key in list(_OVERLAY_WRITTEN):
+            if key in written:
+                continue
+            original = _OVERLAY_ORIGINAL.pop(key, None)
+            if original is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original
+        _OVERLAY_WRITTEN = written
+        return dict(written)
