@@ -1755,6 +1755,7 @@ def _run_ladder(
         rung_codes = [entry.split(":", 1)[1] for entry in attempted[rung_start:]]
         if provider_won:
             _dead_until.pop(name, None)
+            provider_cooldown.clear(name, env)
         elif rung_codes and all(code in _DEAD_RUNG_CODES for code in rung_codes):
             _dead_until[name] = _dead_clock() + _DEAD_RUNG_TTL_S
         if provider_won:
