@@ -22,7 +22,9 @@ import {
 export type ConnectionState = "connected" | "ib_offline" | "relay_offline";
 
 /** Authoritative IB auth state from FastAPI /health.ib_gateway.auth_state.
- *  Mirrors scripts/api/ib_gateway.py auth-state machine. */
+ *  Mirrors scripts/api/ib_gateway.py auth-state machine (`_derive_auth_state`
+ *  plus cloud-mode `remote`: TCP alone cannot tell authenticated from
+ *  awaiting_2fa, so the relay's broker report decides). */
 export type IBAuthState =
   | "authenticated"
   | "awaiting_2fa"
@@ -30,8 +32,21 @@ export type IBAuthState =
   | "unknown"
   | "remote";
 
-/** Authoritative IB service state from FastAPI /health.ib_gateway.service_state. */
-export type IBServiceState = "healthy" | "unhealthy" | "starting" | "unknown";
+/** Authoritative IB service state from FastAPI /health.ib_gateway.service_state.
+ *  Literal backend vocabulary (scripts/api/ib_gateway.py):
+ *    docker  `_check_docker`: healthy | unhealthy | starting | restarting | stopped | unknown
+ *    cloud   `_check_cloud`:  reachable | unhealthy | unreachable
+ *  launchd reports the raw IBC status string; anything unrecognised is
+ *  treated as no verdict and the relay broker report decides. */
+export type IBServiceState =
+  | "healthy"
+  | "reachable"
+  | "unhealthy"
+  | "starting"
+  | "restarting"
+  | "stopped"
+  | "unreachable"
+  | "unknown";
 
 /** Display-level status the footer/banner derive from the combined signal.
  *  Single source of truth so footer (sidebar) and banner (ConnectionBanner)
@@ -53,7 +68,8 @@ export type IBDisplayStatus =
 export type IBStatusState = {
   /** WebSocket to our realtime server is open */
   wsConnected: boolean;
-  /** IB Gateway is connected (reported by relay WS) — DO NOT trust this for
+  /** IB Gateway is connected (reported by relay WS on the CURRENT socket;
+   *  false until that socket's first status frame) — DO NOT trust this for
    *  UI labels; the WS flag derives from the relay's long-held ib_insync
    *  socket which can stay "connected" while IB Gateway is actually sitting
    *  at the 2FA prompt (half-open socket, TCP alive but API mute). The
@@ -63,9 +79,8 @@ export type IBStatusState = {
   ibConnected: boolean;
   /** Timestamp when connection was lost (null = connected) */
   disconnectedSince: number | null;
-  /** Derived three-state legacy connection status (WS+ibConnected). Kept
-   *  for ConnectionBanner backward-compat. New consumers should read
-   *  `displayStatus` instead. */
+  /** Legacy three-state projection of `displayStatus` (kept for
+   *  backward-compat). New consumers should read `displayStatus`. */
   connectionState: ConnectionState;
   /** Authoritative IB auth state from FastAPI /health. */
   authState: IBAuthState | null;
@@ -82,6 +97,47 @@ type StatusMessage = {
   market_data_degraded?: boolean;
   ib_connected: boolean;
 };
+
+/** Relay status-socket machine. Broker and market-data state exist only while
+ *  the socket is open and start `unknown` on every fresh socket, so a
+ *  previous session's report can never stand in for the current one. */
+export type IBRelayState =
+  | { phase: "down"; disconnectedSince: number | null }
+  | {
+      phase: "open";
+      broker: "unknown" | "connected" | "disconnected";
+      marketDataDegraded: boolean;
+      disconnectedSince: number | null;
+    };
+
+export type IBRelayEvent =
+  | { type: "open" }
+  | { type: "status"; ibConnected: boolean; marketDataDegraded: boolean; at: number }
+  | { type: "down"; at: number };
+
+export function ibRelayTransition(state: IBRelayState, event: IBRelayEvent): IBRelayState {
+  switch (event.type) {
+    case "open":
+      return {
+        phase: "open",
+        broker: "unknown",
+        marketDataDegraded: false,
+        disconnectedSince: state.disconnectedSince,
+      };
+    case "status":
+      if (state.phase !== "open") return state;
+      return {
+        phase: "open",
+        broker: event.ibConnected ? "connected" : "disconnected",
+        marketDataDegraded: event.marketDataDegraded,
+        disconnectedSince: event.ibConnected ? null : (state.disconnectedSince ?? event.at),
+      };
+    case "down":
+      return { phase: "down", disconnectedSince: state.disconnectedSince ?? event.at };
+  }
+}
+
+const INITIAL_RELAY: IBRelayState = { phase: "down", disconnectedSince: null };
 
 type PingMessage = {
   type: "ping";
@@ -115,24 +171,46 @@ type HealthPayload = {
   };
 };
 
-function deriveDisplayStatus(args: {
-  marketDataDegraded?: boolean;
-  wsConnected: boolean;
-  ibConnected: boolean;
+export function deriveDisplayStatus(args: {
+  relay: IBRelayState;
   authState: IBAuthState | null;
   serviceState: IBServiceState | null;
   upstreamDead: boolean | null;
 }): IBDisplayStatus {
+  const { relay, authState, serviceState } = args;
   // /health is the source of truth when we have it. Order matters — pick the
   // most severe applicable state first.
-  if (!args.wsConnected) return "relay_offline";
-  if (args.upstreamDead === true || args.authState === "unreachable") return "unreachable";
-  if (args.authState === "awaiting_2fa") return "awaiting_2fa";
-  if (args.serviceState === "unhealthy" || args.marketDataDegraded) return "unhealthy";
-  if (args.authState === "unknown" || args.serviceState === "unknown") return "unhealthy";
-  if (args.authState === "authenticated" && args.serviceState === "healthy") return "connected";
-  // Fall back to the legacy WS-relay flag when /health hasn't responded yet.
-  if (args.ibConnected) return "connected";
+  if (relay.phase !== "open") return "relay_offline";
+  if (args.upstreamDead === true || authState === "unreachable" || serviceState === "unreachable") {
+    return "unreachable";
+  }
+  if (serviceState === "stopped") return "ib_offline";
+  if (authState === "awaiting_2fa") return "awaiting_2fa";
+  if (
+    serviceState === "unhealthy" ||
+    serviceState === "starting" ||
+    serviceState === "restarting" ||
+    relay.marketDataDegraded
+  ) {
+    return "unhealthy";
+  }
+  if (authState === "unknown" || serviceState === "unknown") return "unhealthy";
+  if (authState === "authenticated" && (serviceState === "healthy" || serviceState === "reachable")) {
+    return "connected";
+  }
+  // No /health verdict yet, auth_state `remote`, or a non-docker service
+  // string: the relay's report on THIS socket decides. Unknown is not
+  // connected (fail closed).
+  if (relay.broker === "connected") return "connected";
+  if (relay.broker === "disconnected") return "ib_offline";
+  return "unhealthy";
+}
+
+/** Legacy three-state projection, derived from the same verdict as the chip
+ *  so the two can never disagree. */
+export function legacyConnectionState(display: IBDisplayStatus): ConnectionState {
+  if (display === "connected" || display === "demo") return "connected";
+  if (display === "relay_offline") return "relay_offline";
   return "ib_offline";
 }
 
@@ -264,17 +342,16 @@ function IBStatusCoreProvider({
   children: ReactNode;
   getToken: (() => Promise<string | null>) | undefined;
 }) {
-  const [wsConnected, setWsConnected] = useState(false);
-  const [marketDataDegraded, setMarketDataDegraded] = useState(false);
-  const [ibConnected, setIbConnected] = useState(true); // assume connected until told otherwise
-  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
+  const [relay, setRelay] = useState<IBRelayState>(INITIAL_RELAY);
+  const dispatchRelay = useCallback((event: IBRelayEvent) => {
+    setRelay((prev) => ibRelayTransition(prev, event));
+  }, []);
   const [authState, setAuthState] = useState<IBAuthState | null>(null);
   const [serviceState, setServiceState] = useState<IBServiceState | null>(null);
   const [upstreamDead, setUpstreamDead] = useState<boolean | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
-  const prevConnectedRef = useRef<boolean | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stalenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -337,7 +414,7 @@ function IBStatusCoreProvider({
     ws.onopen = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
       clearOpenTimer();
-      setWsConnected(true);
+      dispatchRelay({ type: "open" });
       strategyRef.current.reset();
       lastMessageRef.current = Date.now();
 
@@ -365,17 +442,12 @@ function IBStatusCoreProvider({
         }
 
         if (msg.type === "status") {
-          const nowConnected = (msg as StatusMessage).ib_connected;
-          setIbConnected(nowConnected);
-          setMarketDataDegraded(msg.market_data_degraded === true);
-
-          if (nowConnected) {
-            setDisconnectedSince(null);
-          } else {
-            setDisconnectedSince((prev) => prev ?? Date.now());
-          }
-
-          prevConnectedRef.current = nowConnected;
+          dispatchRelay({
+            type: "status",
+            ibConnected: msg.ib_connected === true,
+            marketDataDegraded: msg.market_data_degraded === true,
+            at: Date.now(),
+          });
         }
       } catch {
         // ignore parse errors for non-status messages
@@ -385,15 +457,9 @@ function IBStatusCoreProvider({
     ws.onclose = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
       clearOpenTimer();
-      setWsConnected(false);
       clearStalenessTimer();
-
-      // If WS drops, treat as disconnected
-      if (prevConnectedRef.current !== false) {
-        setIbConnected(false);
-        setDisconnectedSince((prev) => prev ?? Date.now());
-        prevConnectedRef.current = false;
-      }
+      // A dropped socket discards its broker / market-data report.
+      dispatchRelay({ type: "down", at: Date.now() });
 
       // Schedule reconnect with backoff
       if (strategyRef.current.canRetry()) {
@@ -417,9 +483,7 @@ function IBStatusCoreProvider({
         openSocket(url);
       } catch {
         if (gen !== socketGenRef.current || !mountedRef.current) return;
-        setWsConnected(false);
-        setIbConnected(false);
-        setDisconnectedSince((prev) => prev ?? Date.now());
+        dispatchRelay({ type: "down", at: Date.now() });
         if (strategyRef.current.canRetry()) {
           const delay = strategyRef.current.nextDelay();
           reconnectTimerRef.current = setTimeout(() => {
@@ -428,7 +492,7 @@ function IBStatusCoreProvider({
         }
       }
     })();
-  }, [socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
+  }, [socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, dispatchRelay]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -520,22 +584,11 @@ function IBStatusCoreProvider({
     };
   }, []);
 
-  // Derive three-state connection status (legacy)
-  const connectionState: ConnectionState =
-    wsConnected && ibConnected
-      ? "connected"
-      : wsConnected && !ibConnected
-        ? "ib_offline"
-        : "relay_offline";
-
-  const displayStatus = deriveDisplayStatus({
-    marketDataDegraded,
-    wsConnected,
-    ibConnected,
-    authState,
-    serviceState,
-    upstreamDead,
-  });
+  const displayStatus = deriveDisplayStatus({ relay, authState, serviceState, upstreamDead });
+  const connectionState = legacyConnectionState(displayStatus);
+  const wsConnected = relay.phase === "open";
+  const ibConnected = relay.phase === "open" && relay.broker === "connected";
+  const { disconnectedSince } = relay;
 
   return (
     <IBStatusContext.Provider
