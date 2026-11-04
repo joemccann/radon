@@ -1,11 +1,12 @@
 "use client";
 
 import OrderErrorBanner from "@/components/OrderErrorBanner";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { OrderRiskGate, type OrderRiskInput, type OrderRiskState } from "@/lib/order";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { placeOrderFeedback, type PlaceOrderFeedback } from "@/lib/orders/placeOrderFeedback";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 import type { PortfolioData } from "@/lib/types";
 
 export type OrderAction = "BUY" | "SELL";
@@ -23,7 +24,22 @@ export interface ListedOrderFormValues {
   tif: OrderTif;
 }
 
+const PLACE_URL = "/api/orders/place";
+
+/** Form values bound to the contract they were entered for. */
+type ContractForm = ListedOrderFormValues & { contract: string | null };
+
+function blankForm(contract: string | null): ContractForm {
+  return { contract, action: "BUY", quantity: "1", limitPrice: "", tif: "DAY" };
+}
+
 export interface ListedContractOrderFormProps {
+  /**
+   * Identity of the selected contract (conId). The action / quantity / limit
+   * / TIF the operator typed belong to that contract: a different key starts
+   * a blank form, so an old limit can never go out on a new contract.
+   */
+  contractKey: string | null;
   /** Eyebrow row content (symbol + venue metadata). */
   eyebrow: ReactNode;
   /**
@@ -103,6 +119,7 @@ export interface ListedContractOrderFormProps {
  * behaviour is identical to the per-form implementations it replaced.
  */
 export function ListedContractOrderForm({
+  contractKey,
   eyebrow,
   contractSelector,
   multiplier,
@@ -120,11 +137,18 @@ export function ListedContractOrderForm({
   submitLabel,
   submitDisabled,
 }: ListedContractOrderFormProps) {
-  const [action, setAction] = useState<OrderAction>("BUY");
-  const [quantity, setQuantity] = useState<string>("1");
-  const [limitPrice, setLimitPrice] = useState<string>("");
-  const [tif, setTif] = useState<OrderTif>("DAY");
+  const [form, setForm] = useState<ContractForm>(() => blankForm(contractKey));
+  // Values typed for another contract are never shown or sent.
+  const current = form.contract === contractKey ? form : blankForm(contractKey);
+  const { action, quantity, limitPrice, tif } = current;
+  const update = (patch: Partial<ListedOrderFormValues>) =>
+    setForm((prev) => ({ ...(prev.contract === contractKey ? prev : blankForm(contractKey)), ...patch }));
+  const setAction = (next: OrderAction) => update({ action: next });
+  const setQuantity = (next: string) => update({ quantity: next });
+  const setLimitPrice = (next: string) => update({ limitPrice: next });
+  const setTif = (next: OrderTif) => update({ tif: next });
   const [submitting, setSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitOk, setSubmitOk] = useState<PlaceOrderFeedback | null>(null);
   const [riskSnapshot, setRiskSnapshot] = useState<{
@@ -152,9 +176,23 @@ export function ListedContractOrderForm({
     riskInput != null &&
     riskSnapshot?.input === riskInput &&
     riskSnapshot.state.okToSubmit === true;
+  const maxLossUnbounded =
+    riskSnapshot?.input === riskInput && riskSnapshot?.state.summary.maxLossUnbounded === true;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Two-step gate, same machine as the other tickets: Review arms for the
+  // exact POST body; any change (contract included, via conId) disarms.
+  const submit = buildSubmit(values);
+  const payload = "payload" in submit ? submit.payload : null;
+  const payloadKey = payload == null ? null : canonicalPayloadKey({ url: PLACE_URL, body: payload });
+  const confirm = useArmedConfirm(payloadKey);
+  const armed = confirm.armed;
+  const transmitArmed = !maxLossUnbounded || confirm.acknowledged;
+
+  // Form submit (the Review button, or Enter in any field) only ever reviews.
+  // Transmit is a separate button, so Enter can never send.
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (armed) return;
     setSubmitError(null);
     setSubmitOk(null);
 
@@ -162,32 +200,44 @@ export function ListedContractOrderForm({
       setSubmitError("Portfolio risk is still resolving. Review again before submitting.");
       return;
     }
-
-    const result = buildSubmit(values);
-    if ("error" in result) {
-      setSubmitError(result.error);
+    if ("error" in submit) {
+      setSubmitError(submit.error);
       return;
     }
+    confirm.arm();
+  };
 
+  const handleTransmit = async () => {
+    if (!armed || payload == null || "error" in submit) return;
+    if (!riskPermitsSubmit || !transmitArmed || submitDisabled) return;
+    // `submitting` is state and invisible to a second call in the same tick.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setSubmitError(null);
+    setSubmitOk(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/orders/place", {
+      const res = await fetch(PLACE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(result.payload),
+        body: JSON.stringify(payload),
         cache: "no-store",
       });
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         throw new Error((body.error as string) ?? `Order failed (${res.status})`);
       }
-      setSubmitOk(placeOrderFeedback(body, result.successText));
+      setSubmitOk(placeOrderFeedback(body, submit.successText));
+      confirm.disarm();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Order failed");
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   };
+
+  const label = typeof submitLabel === "function" ? submitLabel(action) : submitLabel;
 
   return (
     <form className="futures-order-form" onSubmit={handleSubmit}>
@@ -291,13 +341,55 @@ export function ListedContractOrderForm({
         onState={captureRiskState}
       />
 
-      <button
-        type="submit"
-        disabled={submitting || submitDisabled || !riskPermitsSubmit}
-        className="futures-form-submit"
-      >
-        {submitting ? "Submitting…" : typeof submitLabel === "function" ? submitLabel(action) : submitLabel}
-      </button>
+      {armed && maxLossUnbounded && (
+        <div className="ticket-unbounded" data-testid="ticket-unbounded-warning">
+          <label className="ticket-unbounded-row">
+            <input
+              type="checkbox"
+              data-testid="ticket-unbounded-ack"
+              checked={confirm.acknowledged}
+              onChange={(e) => confirm.setAcknowledged(e.target.checked)}
+            />
+            <span>MAX LOSS UNBOUNDED. Loss grows without limit. Acknowledge to enable transmit.</span>
+          </label>
+        </div>
+      )}
+
+      {armed ? (
+        <div className="order-confirm-row">
+          <button
+            type="button"
+            className="btn-secondary"
+            data-testid="listed-order-back"
+            onClick={confirm.disarm}
+            disabled={submitting}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            className="futures-form-submit"
+            data-testid="listed-order-transmit"
+            onClick={handleTransmit}
+            disabled={submitting || submitDisabled || !riskPermitsSubmit || !transmitArmed}
+          >
+            {submitting
+              ? "Submitting…"
+              : transmitArmed
+                ? `Transmit ${label}`
+                : "Transmit: awaiting acknowledgement"}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="submit"
+          data-testid="listed-order-review"
+          disabled={submitting || submitDisabled || !riskPermitsSubmit}
+          className="futures-form-submit"
+        >
+          {`Review ${label}`}
+        </button>
+      )}
 
       <OrderErrorBanner error={submitError} />
       {submitOk && (

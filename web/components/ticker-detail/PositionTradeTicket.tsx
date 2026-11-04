@@ -2,7 +2,7 @@
 
 import ErrorToast from "@/components/ErrorToast";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import type { OrdersData, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -158,6 +158,9 @@ export default function PositionTradeTicket({
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // `loading` is state and invisible to a second call in the same tick; the
+  // ref is what actually stops a double-send (R-281).
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
 
@@ -229,13 +232,14 @@ export default function PositionTradeTicket({
     // Re-evaluate age on the click: a ticket can sit idle after review.
     const currentQuoteGate = quoteSubmitGate({ quoteTimestamp: asOf, feedConnected });
     if (!currentQuoteGate.open) { setError(currentQuoteGate.reason); return; }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
       const guard = checkNakedShortRisk(built.payload as OrderPayload, toNakedShortPortfolio(portfolio));
       if (!guard.allowed) {
         setError(guard.reason ?? "Order blocked: naked short exposure");
-        setLoading(false);
         return;
       }
       const extra = !isComboTarget ? ibPlaceFields(orderType, parsedPrice, parsedStop) : {};
@@ -262,6 +266,7 @@ export default function PositionTradeTicket({
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [isValid, confirmStep, built, okToSubmit, asOf, feedConnected, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, isComboTarget, orderType, parsedPrice, parsedStop]);
