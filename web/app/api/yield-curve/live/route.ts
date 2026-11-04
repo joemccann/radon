@@ -44,7 +44,7 @@ interface LegQuote {
 }
 
 let cached: { payload: Record<string, unknown>; at: number } | null = null;
-let refreshInFlight: Promise<Record<string, unknown>> | null = null;
+let refreshInFlight: Promise<Record<string, unknown> | null> | null = null;
 let negativeUntil = 0;
 
 async function fetchLegQuote(symbol: string): Promise<LegQuote | null> {
