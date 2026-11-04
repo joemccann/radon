@@ -593,6 +593,7 @@ export default function ChatPanel({
                 onState={setRiskState}
               />
               <ApprovalGate
+                key={proposal.toolUseId}
                 title="Confirmation required"
                 body={proposal.summary}
                 quote={

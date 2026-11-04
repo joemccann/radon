@@ -269,7 +269,12 @@ export class StartupTracker {
    * Mark a process as complete with its status and message
    */
   complete(name: string, status: "success" | "warning" | "error", message: string) {
-    if (!this.processes.has(name)) {
+    // Each process reports once: pending -> terminal. A second report (a
+    // timeout followed by the killed child's close handler) is ignored so the
+    // count tracks distinct processes, not calls.
+    const current = this.processes.get(name);
+    if (current && current.status !== "pending") return;
+    if (!current) {
       // Process wasn't registered, add it dynamically
       this.processes.set(name, { status: "pending" });
       this.total = this.processes.size;

@@ -433,7 +433,7 @@ describe("<Ib2faControls /> — gateway power", () => {
     expect(btn.textContent).toBe("Stopping...");
   });
 
-  it("flips the button to Start Gateway immediately after a confirmed Stop (optimistic)", async () => {
+  it("leaves the armed state at once after a confirmed Stop, without arming Start early", async () => {
     const onStopGateway = vi.fn().mockResolvedValue(true);
     render(
       <Ib2faControls
@@ -453,10 +453,13 @@ describe("<Ib2faControls /> — gateway power", () => {
       target: { value: "radon-ib-gateway.service" },
     });
     fireEvent.click(screen.getByTestId("admin-confirm-action"));
-    // The gatewayUnit prop is still "active", but the button flips at once.
+    // The gatewayUnit prop is still "active": the button leaves Stop at once
+    // but shows the unconfirmed stop as in-transition, so Start stays disarmed.
     await waitFor(() =>
-      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stopping..."),
     );
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("gateway-start-button") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("absent or failed power callbacks never change optimistic gateway state", async () => {
@@ -528,9 +531,9 @@ describe("<Ib2faControls /> — gateway power", () => {
     });
     fireEvent.click(screen.getByTestId("admin-confirm-action"));
     await waitFor(() =>
-      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stopping..."),
     );
-    // Poll catches up to inactive: the override matches + clears, still Start.
+    // Poll catches up to inactive: the intent matches + clears, now Start.
     rerender(props(gatewayUnit("inactive", "dead")));
     await waitFor(() =>
       expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),

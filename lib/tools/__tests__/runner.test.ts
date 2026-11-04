@@ -141,6 +141,67 @@ describe("resolvePythonBin", () => {
   });
 });
 
+// Timeout and truncation are distinct failures. A SIGKILL from the timeout
+// used to read as an ordinary non-zero exit, and stdout cut at maxOutput was
+// reported as "Invalid JSON". A fake interpreter (RADON_PYTHON_BIN) drives
+// each case without needing Python.
+describe("runScript failure kinds", () => {
+  let scratch: string;
+
+  function fakeInterpreter(body: string): void {
+    const bin = join(scratch, "fake-python");
+    writeFileSync(bin, `#!/bin/sh\n${body}\n`);
+    chmodSync(bin, 0o755);
+    process.env.RADON_PYTHON_BIN = bin;
+    _resetRootCache();
+  }
+
+  beforeEach(() => {
+    scratch = join(tmpdir(), `radon-runner-kinds-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(scratch, "scripts"), { recursive: true });
+    writeFileSync(join(scratch, "scripts", "job.py"), "# driven by the fake interpreter\n");
+  });
+
+  afterEach(() => {
+    delete process.env.RADON_PYTHON_BIN;
+    _resetRootCache();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("reports a timeout kill as timedOut, not as an ordinary failure", async () => {
+    fakeInterpreter("exec sleep 5");
+    const result = await runScript("scripts/job.py", { cwd: scratch, timeout: 150 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.timedOut).toBe(true);
+      expect(result.stderr).toContain("timed out after 150ms");
+    }
+  });
+
+  it("does not flag an ordinary non-zero exit as a timeout", async () => {
+    fakeInterpreter("echo boom >&2; exit 3");
+    const result = await runScript("scripts/job.py", { cwd: scratch, timeout: 5_000 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.exitCode).toBe(3);
+      expect(result.timedOut).toBeFalsy();
+      expect(result.stderr).toContain("boom");
+    }
+  });
+
+  it("reports stdout past maxOutput as truncated, not as invalid JSON", async () => {
+    // 400 x's inside a JSON string: valid JSON, well past maxOutput.
+    fakeInterpreter(`printf '{"rows":"%s"}' "$(head -c 400 /dev/zero | tr '\\0' x)"`);
+    const result = await runScript("scripts/job.py", { cwd: scratch, timeout: 5_000, maxOutput: 100 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.truncated).toBe(true);
+      expect(result.stderr).toContain("exceeded 100 chars");
+      expect(result.stderr).not.toContain("Invalid JSON");
+    }
+  });
+});
+
 // Sanity test: the live repo root resolves to "python3.13" unless
 // RADON_PYTHON_BIN is set to an existing file. Tests run without that
 // env so the result must be the bare interpreter name.
