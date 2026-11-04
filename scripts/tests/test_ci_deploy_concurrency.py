@@ -811,7 +811,7 @@ def test_bun_jobs_do_not_cache_the_install_store() -> None:
     Both bun projects must still install from their frozen lockfiles.
     """
     jobs = _workflow()["jobs"]
-    for name in ("web-tests", "perimeter-smoke"):
+    for name in ("web-tests", "perimeter-smoke", "lint-typecheck"):
         steps = jobs[name]["steps"]
         bun_caches = [
             step
@@ -840,7 +840,7 @@ def test_parallel_bun_installs_fail_the_step_when_either_fails() -> None:
     name; `wait "$pid"` returns that child's status and bash -e stops there.
     """
     jobs = _workflow()["jobs"]
-    for name in ("web-tests", "perimeter-smoke"):
+    for name in ("web-tests", "perimeter-smoke", "lint-typecheck"):
         install = next(
             str(step["run"])
             for step in jobs[name]["steps"]
@@ -857,7 +857,7 @@ def test_parallel_bun_installs_fail_the_step_when_either_fails() -> None:
 def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:
     root = Path(__file__).resolve().parents[2]
     expected = {
-        root / ".github/workflows/ci.yml": 4,
+        root / ".github/workflows/ci.yml": 5,
         root / ".github/workflows/tester-army.yml": 1,
     }
     action = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
@@ -879,7 +879,7 @@ def test_every_workflow_setup_bun_pin_is_1_4_4() -> None:
 
 def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
     workflow = _workflow()
-    for job_name in ("web-tests", "perimeter-smoke"):
+    for job_name in ("web-tests", "perimeter-smoke", "lint-typecheck"):
         setup_bun = next(
             step for step in workflow["jobs"][job_name]["steps"]
             if "oven-sh/setup-bun" in step.get("uses", "")
@@ -1079,6 +1079,23 @@ def _modern_bash() -> str | None:
         if probe.returncode == 0 and probe.stdout.strip().isdigit() and int(probe.stdout) >= 4:
             return candidate
     return None
+
+
+def test_scripts_gh_and_scripts_daemons_remain_separate_required_checks() -> None:
+    """One matrix row reports one check name.
+
+    scripts-gh and scripts-daemons are both declared required checks. Folding
+    their paths into one row would stop the other name from reporting. A
+    required check that never reports blocks the merge; a success stub would
+    still take a runner and would not fail when those tests fail.
+    """
+    jobs = _workflow()["jobs"]
+    shards = [str(item) for item in jobs["py-tests"]["strategy"]["matrix"]["shard"]]
+    assert "scripts-gh" in shards
+    assert "scripts-daemons" in shards
+    declared = _declared_required_status_checks()
+    assert "pytest (scripts-gh)" in declared
+    assert "pytest (scripts-daemons)" in declared
 
 
 def test_every_python_matrix_shard_is_a_declared_required_check() -> None:

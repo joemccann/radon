@@ -297,6 +297,10 @@ CROSS_TREE_CONTRACTS = (
         patterns=("web/bun.lock",),
         tests=("scripts/tests/test_bun_lock_platforms.py",),
     ),
+    CrossTreeContract(
+        patterns=("web/package.json", "web/.oxlintrc.json"),
+        tests=("scripts/tests/test_ci_lint_typecheck_job.py",),
+    ),
 )
 
 
