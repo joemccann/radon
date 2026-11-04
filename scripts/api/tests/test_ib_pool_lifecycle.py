@@ -57,7 +57,6 @@ async def test_disconnect_waits_for_active_role_lease(monkeypatch):
     pool = pool_module.IBPool()
     client = _FakeClient()
     pool._clients["sync"] = client
-    pool._connected["sync"] = True
     release = asyncio.Event()
     acquired = asyncio.Event()
 
@@ -84,7 +83,6 @@ async def test_disconnect_blocks_reconnect_of_an_already_drained_role(monkeypatc
     sync_client = _FakeClient()
     orders_client = _FakeClient()
     pool._clients.update({"sync": sync_client, "orders": orders_client})
-    pool._connected.update({"sync": True, "orders": True})
 
     release_orders = asyncio.Event()
     orders_acquired = asyncio.Event()

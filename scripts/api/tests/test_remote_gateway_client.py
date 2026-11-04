@@ -287,7 +287,7 @@ class TestLoginsRefusedWhileHeld:
         assert "restart" not in _helper_log(tmp_path)
         assert "start" not in _helper_log(tmp_path)
 
-    def test_broker_423_maps_to_423_when_the_mirror_missed_it(self, broker, client, hold_env, monkeypatch):
+    def test_unknown_mirror_refuses_423_without_a_login(self, broker, client, hold_env, monkeypatch, wire):
         broker(rc=0, stdout="running")
 
         async def unknown():
@@ -296,8 +296,11 @@ class TestLoginsRefusedWhileHeld:
         monkeypatch.setattr(services, "operator_hold_state", unknown)
         hold_env.set_hold("flatten", "ssh:joe")
         resp = client.post("/admin/services/radon-ib-gateway.service/restart")
+        # An unknown hold is refused on the app host before any login POST.
         assert resp.status_code == 423, resp.text
         assert resp.json()["detail"]["returncode"] == services.OPERATOR_HOLD_RC
+        assert resp.json()["detail"]["refusal"] == "operator_hold_unknown"
+        assert _posts(wire) == []
 
     def test_stop_is_still_allowed_while_held(self, broker, client, hold_env, tmp_path):
         broker(rc=0, stdout="ok")

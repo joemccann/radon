@@ -108,14 +108,12 @@ class IBPool:
         self._port = port
         self._clients: Dict[str, IBClient] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
-        self._connected: Dict[str, bool] = {}
         self._lifecycle_lock = asyncio.Lock()
         self._lifecycle_transition = False
         self._disposals: set = set()
 
         for role in POOL_ROLES:
             self._locks[role] = asyncio.Lock()
-            self._connected[role] = False
 
     async def connect_all(self) -> Dict[str, bool]:
         """Connect all pool roles. Returns status per role.
@@ -156,7 +154,6 @@ class IBPool:
                             self._host, self._port, client_id, 10,
                         )
                         self._clients[role] = client
-                        self._connected[role] = True
                         status[role] = True
                         logger.info("IB pool: %s connected (client_id=%d)", role, client_id)
                         break
@@ -165,7 +162,6 @@ class IBPool:
                             logger.info("IB pool: %s attempt %d failed, retrying in 2s: %s", role, attempt + 1, e)
                             await asyncio.sleep(2)
                         else:
-                            self._connected[role] = False
                             status[role] = False
                             logger.warning("IB pool: %s failed to connect after 3 attempts: %s", role, e)
 
@@ -192,7 +188,6 @@ class IBPool:
                     logger.info("IB pool: %s disconnected", role)
                 except Exception as e:
                     logger.warning("IB pool: %s disconnect error: %s", role, e)
-                self._connected[role] = False
 
     def get(self, role: str) -> Optional[IBClient]:
         """Get the client for a role (may be None if not connected)."""
@@ -229,7 +224,6 @@ class IBPool:
         was_current = self._clients.get(role) is client
         if was_current:
             self._clients.pop(role, None)
-            self._connected[role] = False
             logger.warning("IB pool: retired quarantined %s client", role)
         self._dispose_out_of_band(role, client)
         return was_current
@@ -272,11 +266,9 @@ class IBPool:
                 self._host, self._port, client_id, 5,
             )
             self._clients[role] = client
-            self._connected[role] = True
             logger.info("IB pool: %s reconnected (client_id=%d)", role, client_id)
             return True
         except Exception as e:
-            self._connected[role] = False
             logger.warning("IB pool: %s reconnect failed: %s", role, e)
             return False
 

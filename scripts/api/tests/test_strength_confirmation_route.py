@@ -9,6 +9,14 @@ from api import auth, server
 from api.subprocess import ScriptResult
 
 
+def _gate(name, cooldown_s, *, armed):
+    """A fresh route gate; ``armed`` = a preset scan just succeeded."""
+    gate = server._preset_scan_gate(name, cooldown_s)
+    if armed:
+        gate.mark_success()
+    return gate
+
+
 @pytest.fixture(autouse=True)
 def force_live_mode(monkeypatch):
     """Pin test_mode False — RADON_API_TEST_MODE leaks process-wide from
@@ -28,8 +36,7 @@ def test_strength_confirmation_preset_scan_second_post_inside_hourly_window_retu
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
-    monkeypatch.setattr(server, "_strength_last_scan", -1e9)
-    monkeypatch.setattr(server, "_strength_scan_lock", None)
+    monkeypatch.setattr(server, "_STRENGTH_GATE", _gate("strength", server.STRENGTH_COOLDOWN_S, armed=False))
 
     payload = {
         "scan_time": "2026-06-24T16:00:00Z",
@@ -64,8 +71,7 @@ def test_strength_confirmation_preset_scan_second_post_inside_hourly_window_retu
 def test_strength_confirmation_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_strength_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_strength_scan_lock", None)
+    monkeypatch.setattr(server, "_STRENGTH_GATE", _gate("strength", server.STRENGTH_COOLDOWN_S, armed=True))
 
     payload = {
         "scan_time": "2026-06-24T16:00:00Z",
@@ -97,8 +103,7 @@ def test_strength_confirmation_ticker_scan_bypasses_preset_cooldown(monkeypatch)
 def test_strength_confirmation_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_strength_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_strength_scan_lock", None)
+    monkeypatch.setattr(server, "_STRENGTH_GATE", _gate("strength", server.STRENGTH_COOLDOWN_S, armed=True))
 
     explicit_payload = {
         "scan_time": "2026-06-24T16:00:00Z",

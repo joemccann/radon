@@ -25,6 +25,7 @@ import uuid
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 
@@ -64,9 +65,7 @@ from api.ib_gateway import (
     ensure_ib_gateway,
     restart_ib_gateway,
     recover_stuck_pool,
-    is_docker_mode,
     is_cloud_mode,
-    is_launchd_mode,
     reset_restart_backoff,
 )
 from api import ib_gateway
@@ -380,12 +379,70 @@ async def _coordinated_orders_sync(*, fresh: bool = False) -> _IBSyncOutcome:
 # See feedback_ib_pool_stuck_after_2fa.md.
 POOL_RECOVERY_COOLDOWN_SECS = 60.0
 POOL_RECOVERY_MAX_BEFORE_RESTART = 3
+# The escalation is os._exit, which wipes this process's memory. The last
+# self-exit is therefore kept in a host-local file that survives it: a pool
+# still wedged after one self-restart inside this window stands down instead
+# of exiting every 3-4 minutes forever (below systemd's StartLimitBurst).
+POOL_RECOVERY_SELF_EXIT_WINDOW_SECS = 3600.0
+POOL_RECOVERY_STATE_FILE = Path(
+    os.environ.get("RADON_POOL_RECOVERY_STATE", str(DATA_DIR / "pool_recovery_state.json"))
+)
 
 _pool_recovery_state: dict = {
     "in_progress": False,       # single-flight: skip overlapping ticks
     "last_attempt_at": 0.0,     # epoch seconds; cooldown gate
     "consecutive_failures": 0,  # verified-fail count → escalation ladder
 }
+
+
+class PoolEscalation(str, Enum):
+    NONE = "none"
+    SELF_EXIT = "self_exit"
+    STAND_DOWN = "stand_down"
+
+
+_UNREADABLE = object()
+
+
+def _pool_escalation(
+    failures: int, last_self_exit_at: Optional[float], *, now: float,
+) -> PoolEscalation:
+    """The one escalation decision. ``last_self_exit_at`` None = no record."""
+    if failures < POOL_RECOVERY_MAX_BEFORE_RESTART:
+        return PoolEscalation.NONE
+    if last_self_exit_at is not None and now - last_self_exit_at < POOL_RECOVERY_SELF_EXIT_WINDOW_SECS:
+        return PoolEscalation.STAND_DOWN
+    return PoolEscalation.SELF_EXIT
+
+
+def _read_last_pool_self_exit():
+    """Epoch of the last recorded self-exit, None when absent, or _UNREADABLE."""
+    try:
+        raw = POOL_RECOVERY_STATE_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return _UNREADABLE
+    try:
+        value = json.loads(raw).get("last_self_exit_at")
+    except (ValueError, AttributeError):
+        return _UNREADABLE
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _UNREADABLE
+    return float(value)
+
+
+def _record_pool_self_exit(now: float) -> bool:
+    """Persist the self-exit before it happens. False = do not exit."""
+    path = POOL_RECOVERY_STATE_FILE
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps({"last_self_exit_at": now}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.error("pool recovery: cannot record self-exit at %s: %s", path, exc)
+        return False
+    return True
 
 
 def _restart_radon_api_self() -> None:
@@ -404,7 +461,7 @@ def _restart_radon_api_self() -> None:
     os._exit(1)
 
 
-async def _recover_stuck_pool_guarded() -> None:
+async def _recover_stuck_pool_guarded(*, allow_self_exit: bool = True) -> None:
     """Single-flight + cooldown + escalation wrapper around recover_stuck_pool.
 
     Runs inside the heartbeat try/except so a probe/reconnect error can never
@@ -471,8 +528,30 @@ async def _recover_stuck_pool_guarded() -> None:
         "pool recovery: verified-fail %d/%d (Gateway authenticated, pool still stuck)",
         failures, POOL_RECOVERY_MAX_BEFORE_RESTART,
     )
-    if failures >= POOL_RECOVERY_MAX_BEFORE_RESTART:
-        _pool_recovery_state["consecutive_failures"] = 0
+    if failures < POOL_RECOVERY_MAX_BEFORE_RESTART:
+        return
+    _pool_recovery_state["consecutive_failures"] = 0
+    last_exit = _read_last_pool_self_exit()
+    if last_exit is _UNREADABLE:
+        logger.error(
+            "pool recovery: self-exit record %s unreadable; standing down "
+            "(fail safe: no restart storm)", POOL_RECOVERY_STATE_FILE,
+        )
+        return
+    now = time.time()
+    decision = _pool_escalation(failures, last_exit, now=now)
+    if decision is PoolEscalation.STAND_DOWN:
+        logger.error(
+            "pool recovery: pool still stuck after a self-restart %.0fs ago; "
+            "standing down for the %.0fs window. Operator: "
+            "`systemctl restart radon-api.service` once the Gateway is verified.",
+            now - last_exit, POOL_RECOVERY_SELF_EXIT_WINDOW_SECS,
+        )
+        return
+    if decision is PoolEscalation.SELF_EXIT and not allow_self_exit:
+        logger.error("pool recovery: self-exit withheld: IBKR operator hold state unknown")
+        return
+    if decision is PoolEscalation.SELF_EXIT and _record_pool_self_exit(now):
         _restart_radon_api_self()
 
 
@@ -498,7 +577,7 @@ async def _ib_recovery_heartbeat_tick() -> None:
         # uses the shared IBKR login. Pool reconnects and the radon-api
         # self-restart ladder have nothing to recover; stand down.
         hold = await admin_services.operator_hold_state()
-        if hold and hold.get("held"):
+        if admin_services.operator_hold_blocks(hold, mutating=False):
             if not _pool_recovery_state.get("held_logged"):
                 logger.warning("IB recovery heartbeat standing down: IBKR operator hold %s", hold)
                 _pool_recovery_state["held_logged"] = True
@@ -506,7 +585,11 @@ async def _ib_recovery_heartbeat_tick() -> None:
             return
         _pool_recovery_state["held_logged"] = False
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
-        await _recover_stuck_pool_guarded()
+        # Same policy as _control_gateway: an unknown hold (None) withholds the
+        # mutating step (the radon-api self-exit); pool reconnects still run.
+        await _recover_stuck_pool_guarded(
+            allow_self_exit=not admin_services.operator_hold_blocks(hold, mutating=True),
+        )
     except Exception:
         logger.exception("IB recovery heartbeat tick failed")
 
@@ -711,23 +794,14 @@ async def _run_script_retrying_capacity(
 ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS = 3
 _orders_sync_consecutive_sheds = 0
 
-# _run_ib_script_with_recovery returns these only after it has already
-# decided the gateway is down (cloud mode, lock-aware watchdog, preflight
-# port closed, or the short cooldown that follows). They are not a writer
-# miss while the gateway is up. Heartbeating them latches a last_error the
-# IB grouper does not treat as an outage; later silent ticks then page
+# _run_ib_script_with_recovery returns a gateway-down verdict only after it
+# has already decided the gateway is down (cloud mode, lock-aware watchdog,
+# preflight port closed, or the short cooldown that follows). They are not a
+# writer miss while the gateway is up. Heartbeating them latches a last_error
+# the IB grouper does not treat as an outage; later silent ticks then page
 # orders-sync during an operator hold.
-_GATEWAY_DOWN_SYNC_MARKERS = (
-    "ib gateway is not responding",
-    "ib gateway is not accepting connections",
-    "ib gateway is down and restart failed",
-    "ib gateway connection recently failed",
-)
-
-
 def _orders_sync_failure_is_gateway_down(error: object) -> bool:
-    hay = str(error or "").lower()
-    return any(marker in hay for marker in _GATEWAY_DOWN_SYNC_MARKERS)
+    return ib_gateway.classify_ib_failure(error) is ib_gateway.IBFailure.GATEWAY_DOWN
 
 
 def _reset_orders_sync_shed_state() -> None:
@@ -2255,22 +2329,26 @@ async def health_lite():
         )
     except Exception as exc:  # never let a passive health probe consume a worker
         logger.warning(
-            "/health/lite gateway probe %s after %.1fs; returning degraded status",
+            "/health/lite gateway probe %s after %.1fs; returning unknown status",
             "timed out" if isinstance(exc, asyncio.TimeoutError) else f"raised {type(exc).__name__}",
             HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
         )
-        gw = {}
+        gw = None
     # REL-303 / R-722: only observed booleans confirm a hold or release.
     # Broker status loss and probe timeout must remain unknown to the relay.
-    hold = gw.get("operator_hold")
+    observed = gw if gw is not None else {}
+    hold = observed.get("operator_hold")
     held = hold.get("held") if isinstance(hold, dict) else None
+    # A probe that never answered observed nothing: its port and upstream
+    # fields are unknown (null), never a confirmed down.
+    missing_bool = None if gw is None else False
     return {
         "status": "ok",
         "dependencies": await dependencies,
-        "auth_state": gw.get("auth_state", "unknown"),
-        "service_state": gw.get("service_state", "unknown"),
-        "upstream_dead": gw.get("upstream_dead", False),
-        "port_listening": gw.get("port_listening", False),
+        "auth_state": observed.get("auth_state", ib_gateway.AuthState.UNKNOWN.value),
+        "service_state": observed.get("service_state", "unknown"),
+        "upstream_dead": observed.get("upstream_dead", missing_bool),
+        "port_listening": observed.get("port_listening", missing_bool),
         # Account-free three-valued observation: true, false, or unknown.
         "operator_hold": held if type(held) is bool else None,
         "loop_lag_ms": round(loop_lag_ms, 3),
@@ -2388,6 +2466,17 @@ def _gateway_unit_controllable() -> bool:
     )
 
 
+def _ib_restart_refusal_reason(action) -> str:
+    """The /ib/restart failure reason. A held 2FA lease keeps its historical
+    name; every other typed refusal is named for what it is."""
+    refusal = getattr(action, "refusal", None)
+    if refusal and refusal != admin_services.RefusalReason.LEASE_HELD.value:
+        return refusal
+    if refusal or action.returncode == admin_services.PUSH_LOCK_HELD_RC:
+        return "2fa_push_in_flight"
+    return "unit_restart_failed"
+
+
 @app.post("/ib/restart")
 async def ib_restart():
     """Restart IB Gateway via IBC service, then reconnect pool.
@@ -2408,8 +2497,12 @@ async def ib_restart():
     the operator off the shared IBKR username. The relay's stale-data
     escalation lands here too and treats 423 as "stand down".
     """
+    # A confirmed hold answers 423 here without touching anything. An
+    # unknown hold is refused where a login would start: _control_gateway
+    # (the restart_ib_gateway fallback never logs in on the app role, the
+    # only host whose hold can be unknown).
     hold = await admin_services.operator_hold_state()
-    if hold and hold.get("held"):
+    if admin_services.operator_hold_blocks(hold, mutating=False):
         raise HTTPException(
             status_code=423,
             detail={
@@ -2433,8 +2526,8 @@ async def ib_restart():
         if action.returncode == admin_services.OPERATOR_HOLD_RC:
             raise HTTPException(
                 status_code=423,
-                detail={"restarted": False, "reason": "operator_hold", "code": "OPERATOR_HOLD",
-                        "error": action.detail},
+                detail={"restarted": False, "reason": action.refusal or "operator_hold",
+                        "code": "OPERATOR_HOLD", "error": action.detail},
             )
         raise HTTPException(
             status_code=503,
@@ -2442,9 +2535,7 @@ async def ib_restart():
                 "restarted": False,
                 "gateway_mode": "cloud",
                 "via": admin_services.GATEWAY_UNIT,
-                "reason": "2fa_push_in_flight"
-                if action.returncode == admin_services.PUSH_LOCK_HELD_RC
-                else "unit_restart_failed",
+                "reason": _ib_restart_refusal_reason(action),
                 "error": action.detail,
             },
         )
@@ -2535,8 +2626,8 @@ def _admin_actor(request: Request) -> str:
 
 def _audit_admin_action(actor: str, result) -> None:
     logger.info(
-        "admin service action actor=%s unit=%s action=%s ok=%s rc=%s detail=%s",
-        actor, result.unit, result.action, result.ok, result.returncode,
+        "admin service action actor=%s unit=%s action=%s ok=%s pending=%s rc=%s detail=%s",
+        actor, result.unit, result.action, result.ok, getattr(result, "pending", False), result.returncode,
         (result.detail or "")[:200],
     )
 
@@ -2595,6 +2686,13 @@ async def admin_service_action(unit: str, action: str, request: Request):
             # timeout, not a caller error.
             raise HTTPException(status_code=504, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
+    return _admin_action_response(result)
+
+
+def _admin_action_response(result):
+    """202 for an action the host daemon accepted but has not run yet."""
+    if result.pending:
+        return JSONResponse(status_code=202, content=result.to_dict())
     return result.to_dict()
 
 
@@ -2614,7 +2712,7 @@ async def admin_stack_restart(request: Request):
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
-    return result.to_dict()
+    return _admin_action_response(result)
 
 
 # ---------------------------------------------------------------------------
@@ -2657,8 +2755,23 @@ async def uw_usage_record(
 
 
 FLOW_TAB_COOLDOWN_S = 3600  # hourly VPS timer + SCAN cache
-_flow_tab_last: dict[str, float] = {}
-_flow_tab_locks: dict[str, asyncio.Lock] = {}
+_FLOW_TAB_GATES: dict[str, ScanGate] = {}
+
+
+def _preset_scan_gate(name: str, cooldown_s: float) -> ScanGate:
+    """A cooldown-only ScanGate (no failure backoff) for a route that served
+    its own bare monotonic float. ``never`` is -inf, so a freshly booted host
+    whose monotonic clock is below the cooldown still runs its first scan.
+    The clock is late-bound so a patched ``time.monotonic`` reaches it."""
+    return ScanGate(name, cooldown_s=cooldown_s, failure_backoff_s=0,
+                    clock=lambda: time.monotonic())
+
+
+def _flow_tab_gate(name: str) -> ScanGate:
+    gate = _FLOW_TAB_GATES.get(name)
+    if gate is None:
+        gate = _FLOW_TAB_GATES[name] = _preset_scan_gate(name, FLOW_TAB_COOLDOWN_S)
+    return gate
 
 
 async def _run_flow_tab(
@@ -2683,14 +2796,13 @@ async def _run_flow_tab(
     if test_mode:
         return await demo_scan_response(demo_key, demo_payload)
     cache_path = DATA_DIR / cache_name
-    lock = _flow_tab_locks.setdefault(name, asyncio.Lock())
-    now = time.monotonic()
-    if not force and now - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+    gate = _flow_tab_gate(name)
+    if not force and gate.in_cooldown():
         cached = _read_cache(cache_path)
         if cached:
             return cached
-    async with lock:
-        if not force and time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+    async with gate.lock:
+        if not force and gate.in_cooldown():
             cached = _read_cache(cache_path)
             if cached:
                 return cached
@@ -2700,7 +2812,7 @@ async def _run_flow_tab(
         if result.data and result.data.get("error"):
             raise HTTPException(status_code=400, detail=result.data["error"])
         _write_cache(cache_path, result.data)
-        _flow_tab_last[name] = time.monotonic()
+        gate.mark_success()
         return result.data
 
 
@@ -4284,9 +4396,8 @@ async def vcg_share():
 
 # ── LEAP (IV Mispricing Scanner) ────────────────────────────────────
 
-_leap_last_scan: float = 0.0
-_leap_scan_lock: Optional[asyncio.Lock] = None
 LEAP_COOLDOWN_S = 600  # 10 min — LEAP scans are slow + low-cadence
+_LEAP_GATE = _preset_scan_gate("leap", LEAP_COOLDOWN_S)
 LEAP_PRESET_TIMEOUT_S = 3600
 LEAP_TICKER_TIMEOUT_S = 300
 _SCAN_TICKER_LIST_MAX = 25
@@ -4344,6 +4455,14 @@ def _preset_cooldown_429(name: str, last_scan: float, cooldown_s: float) -> HTTP
     (a different preset, an explicit-ticker overwrite) is refused, never
     re-spawned — varying `preset` used to bypass the window entirely."""
     remaining = max(0.0, cooldown_s - (time.monotonic() - last_scan))
+    return _cooldown_429(name, remaining)
+
+
+def _gate_cooldown_429(gate: ScanGate) -> HTTPException:
+    return _cooldown_429(gate.name, gate.retry_after())
+
+
+def _cooldown_429(name: str, remaining: float) -> HTTPException:
     retry_after = str(max(1, int(remaining) + 1))
     return HTTPException(
         status_code=429,
@@ -4370,23 +4489,19 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         return await demo_scan_response(
             "leap-scan", {"scan_time": "", "min_gap": min_gap, "results": []}
         )
-    global _leap_last_scan, _leap_scan_lock
-    import time as _time
-    if _leap_scan_lock is None:
-        _leap_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _LEAP_GATE
     is_ticker_scan = bool(requested)
-    if not is_ticker_scan and now - _leap_last_scan < LEAP_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
-        raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
-    async with _leap_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
+        raise _gate_cooldown_429(gate)
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
-            raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
+            raise _gate_cooldown_429(gate)
         workers = app_preferences.get_int("RADON_LEAP_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
@@ -4408,7 +4523,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _leap_last_scan = time.monotonic()
+            gate.mark_success()
         # The leap scanner subprocess wrote the JSON cache atomically AND
         # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
@@ -4423,9 +4538,8 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
 
 # ── Theta Harvester (short-strangle theta scanner) ──────────────────
 
-_theta_last_scan: float = 0.0
-_theta_scan_lock: Optional[asyncio.Lock] = None
 THETA_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
+_THETA_GATE = _preset_scan_gate("theta", THETA_COOLDOWN_S)
 
 
 # Route defaults mirror theta_harvester_scanner.py's MIN_DTE / MAX_DTE / no-credit-floor.
@@ -4492,8 +4606,6 @@ async def theta_harvester_scan(
     data/theta_harvester.json and records its own service_health row. Cooldown
     mirrors LEAP/GARCH to protect UW quotas and is keyed on preset + params.
     """
-    global _theta_last_scan, _theta_scan_lock
-    import time as _time
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
@@ -4522,16 +4634,14 @@ async def theta_harvester_scan(
                 "results": [],
             },
         )
-    if _theta_scan_lock is None:
-        _theta_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _THETA_GATE
     is_ticker_scan = bool(ticker)
-    if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
             return cached
-    async with _theta_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
@@ -4556,7 +4666,7 @@ async def theta_harvester_scan(
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _theta_last_scan = time.monotonic()
+            gate.mark_success()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
@@ -4575,9 +4685,8 @@ async def theta_harvester_scan(
 
 # ── 7-Step Strength Confirmation scanner ───────────────────────────
 
-_strength_last_scan: float = 0.0
-_strength_scan_lock: Optional[asyncio.Lock] = None
 STRENGTH_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
+_STRENGTH_GATE = _preset_scan_gate("strength", STRENGTH_COOLDOWN_S)
 
 
 def _strength_cache_matches_preset(cached: Any, preset: str) -> bool:
@@ -4595,8 +4704,6 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
     The script writes data/strength_confirmation.json and records its own
     service_health row. Ticker scans bypass preset cooldown for operator probes.
     """
-    global _strength_last_scan, _strength_scan_lock
-    import time as _time
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
@@ -4614,16 +4721,14 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
                 "results": [],
             },
         )
-    if _strength_scan_lock is None:
-        _strength_scan_lock = asyncio.Lock()
-    now = time.monotonic()
+    gate = _STRENGTH_GATE
     is_ticker_scan = bool(ticker)
-    if not is_ticker_scan and now - _strength_last_scan < STRENGTH_COOLDOWN_S:
+    if not is_ticker_scan and gate.in_cooldown():
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
         if _strength_cache_matches_preset(cached, preset):
             return cached
-    async with _strength_scan_lock:
-        if not is_ticker_scan and time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
+    async with gate.lock:
+        if not is_ticker_scan and gate.in_cooldown():
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
@@ -4643,7 +4748,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _strength_last_scan = time.monotonic()
+            gate.mark_success()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
@@ -6397,26 +6502,14 @@ async def ticker_ratings(ticker: str):
 # IB Gateway auto-recovery
 # ---------------------------------------------------------------------------
 
-_IB_CONN_REFUSED_PATTERNS = (
-    "Connect call failed",
-    "ECONNREFUSED",
-    "Connection refused",
-    "TimeoutError",
-    "API connection failed",
-    "Failed to connect to IB",
-    "IBConnectionError",
-    "Make sure API port",
-    "Connectivity between IBKR and",
-    "request timed out",
-)
-
-# Cooldown: after an IB subprocess fails with a connection error, skip
-# subsequent attempts for this many seconds to avoid churn.
+# Cooldown: after a CONFIRMED gateway-down verdict, skip subsequent attempts
+# for this many seconds to avoid churn. 0.0 = clear, else the monotonic time
+# it was armed. Only _arm_ib_cooldown / _clear_ib_cooldown write it.
 _IB_SCRIPT_COOLDOWN_SECS = 15.0
-_ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
+_ib_last_failure: float = 0.0
 # Returned when the cooldown skips a spawn. The script never ran, so callers
 # must not record it as a writer failure.
-_IB_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying shortly."
+_IB_COOLDOWN_SKIP_ERROR = ib_gateway.GATEWAY_COOLDOWN_SKIP_ERROR
 
 # Scripts that transmit orders are NOT idempotent: a connection-flavored
 # failure can surface after placeOrder already reached IB, so the automatic
@@ -6426,7 +6519,52 @@ _NON_IDEMPOTENT_IB_SCRIPTS = frozenset({"ib_place_order.py"})
 
 def _is_ib_connection_error(error_msg: str) -> bool:
     """Check if an error message indicates IB Gateway is unreachable."""
-    return any(p in (error_msg or "") for p in _IB_CONN_REFUSED_PATTERNS)
+    return ib_gateway.classify_ib_failure(error_msg) is ib_gateway.IBFailure.CONNECTION
+
+
+def _arm_ib_cooldown() -> None:
+    global _ib_last_failure
+    _ib_last_failure = time.monotonic()
+
+
+def _clear_ib_cooldown() -> None:
+    global _ib_last_failure
+    _ib_last_failure = 0.0
+
+
+def _ib_cooldown_active(now: float) -> bool:
+    return _ib_last_failure > 0 and (now - _ib_last_failure) < _IB_SCRIPT_COOLDOWN_SECS
+
+
+def _is_order_cancel(script: str, args: list) -> bool:
+    """A cancel removes risk; a gateway-down verdict must never refuse it."""
+    return script == "ib_order_manage.py" and bool(args) and args[0] == "cancel"
+
+
+def _placement_outcome(script: str, result: ScriptResult) -> Optional[dict]:
+    """The indeterminate placement outcome recovery must carry, or None.
+
+    A completed placement subprocess reports it as ``indeterminate: true``.
+    A failed one whose text already says the outcome is unknown (timeout,
+    no-retry) is lifted into the same structured shape, so a recovery
+    rewrite of the connection error cannot turn it into a retryable 502.
+    """
+    if script not in _NON_IDEMPOTENT_IB_SCRIPTS:
+        return None
+    data = getattr(result, "data", None)
+    if isinstance(data, dict) and data.get("indeterminate") is True:
+        return data
+    if not result.ok and _is_indeterminate_place_failure(result.error):
+        return {
+            "status": "error",
+            "indeterminate": True,
+            "message": (
+                "Order outcome INDETERMINATE: the placement subprocess failed "
+                "after it may have transmitted. CHECK OPEN ORDERS before "
+                f"re-placing. Upstream: {result.error}"
+            ),
+        }
+    return None
 
 
 def _pool_has_any_connection() -> bool:
@@ -6447,12 +6585,12 @@ def _should_auto_restart_ib_gateway_after_runtime_failure() -> bool:
     """Runtime subprocess failures should not churn a local launchd/IBC session.
 
     Startup still uses ensure_ib_gateway(); this only governs mid-session recovery.
+    Every known mode delegates recovery (cloud: the remote host; docker and
+    launchd: the lock-aware watchdog). An unrecognized IB_GATEWAY_MODE used to
+    fall through to True; a config typo must fail safe, so nothing returns
+    True. The restart branch below stays as the legacy harness seam.
     """
-    if is_cloud_mode() or is_docker_mode():
-        return False
-    if is_launchd_mode():
-        return False
-    return True
+    return False
 
 
 async def _working_open_order_perm_ids() -> list:
@@ -6490,12 +6628,12 @@ async def _run_ib_script_with_recovery(
     those with "Invalid JSON output" because run_script greedily parses
     the first '{' it finds in the status text.
     """
-    global _ib_last_failure
     _runner = run_script_raw if raw else run_script
 
-    # Layer 1: Cooldown — skip if a recent failure occurred
+    # Layer 1: Cooldown — skip after a recent confirmed gateway-down verdict.
+    # Never for a cancel: it removes risk and the verdict may be stale.
     now = time.monotonic()
-    if _ib_last_failure > 0 and (now - _ib_last_failure) < _IB_SCRIPT_COOLDOWN_SECS:
+    if _ib_cooldown_active(now) and not _is_order_cancel(script, args):
         elapsed = now - _ib_last_failure
         logger.debug(
             "Skipping %s — IB cooldown active (%.1fs since last failure, %ds cooldown)",
@@ -6512,15 +6650,12 @@ async def _run_ib_script_with_recovery(
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if not port_ok or upstream_dead:
-            _ib_last_failure = now
+            _arm_ib_cooldown()
             logger.warning(
                 "Skipping %s — Gateway down (port=%s, upstream_dead=%s), pool disconnected",
                 script, port_ok, upstream_dead,
             )
-            return ScriptResult(
-                ok=False,
-                error="IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
-            )
+            return ScriptResult(ok=False, error=ib_gateway.GATEWAY_NOT_ACCEPTING_ERROR)
 
         # REL-017 (R-008): an awaiting-2FA Gateway keeps the API socket open,
         # so the port check above passes and a placement subprocess would burn
@@ -6543,38 +6678,31 @@ async def _run_ib_script_with_recovery(
 
     result = await _runner(script, args, timeout=timeout)
 
-    # Recovery guidance must not erase a placing subprocess's explicit
-    # post-transmit uncertainty or broker identity. Raw/read scripts and
-    # deterministic pre-transmit failures retain their existing behavior.
-    result_data = getattr(result, "data", None)
-    placement_outcome = (
-        result_data
-        if script in _NON_IDEMPOTENT_IB_SCRIPTS
-        and isinstance(result_data, dict)
-        and result_data.get("indeterminate") is True
-        else None
-    )
+    # Recovery guidance must not erase a placing subprocess's post-transmit
+    # uncertainty or broker identity, whether the script reported it as data
+    # or only in its error text. Read scripts keep their existing behavior.
+    placement_outcome = _placement_outcome(script, result)
 
-    # Clear cooldown on success
     if result.ok:
-        _ib_last_failure = 0.0
+        _clear_ib_cooldown()
 
     if not result.ok and _is_ib_connection_error(result.error):
-        # Set cooldown to prevent churn from repeated failures
-        _ib_last_failure = time.monotonic()
-
-        # Verify Gateway is actually down before restarting
+        # Verify Gateway is actually down before arming the cooldown or
+        # restarting. A connection-flavored error from a healthy Gateway (a
+        # slow read's timeout) is that script's failure, not an outage.
         gw_status = await check_ib_gateway()
         port_ok = gw_status.get("port_listening", False)
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if port_ok and not upstream_dead:
-            # Gateway is healthy — subprocess failed for other reasons
+            _clear_ib_cooldown()
             logger.warning(
-                "Script %s failed but Gateway is healthy — not restarting (cooldown %ds)",
-                script, _IB_SCRIPT_COOLDOWN_SECS,
+                "Script %s failed but Gateway is healthy — not restarting, cooldown not armed",
+                script,
             )
             return result
+
+        _arm_ib_cooldown()
 
         if not _should_auto_restart_ib_gateway_after_runtime_failure():
             if is_cloud_mode():
@@ -6585,7 +6713,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error="IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
+                    error=ib_gateway.GATEWAY_NOT_RESPONDING_CLOUD_ERROR,
                 )
             else:
                 logger.warning(
@@ -6596,10 +6724,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error=(
-                        "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
-                        "approve any existing IBKR Mobile 2FA prompt."
-                    ),
+                    error=ib_gateway.GATEWAY_NOT_RESPONDING_MANAGED_ERROR,
                 )
         else:
             working_perm_ids = await _working_open_order_perm_ids()
@@ -6615,7 +6740,7 @@ async def _run_ib_script_with_recovery(
             gw_result = await restart_ib_gateway()
 
             if gw_result.get("restarted") and gw_result.get("port_listening"):
-                _ib_last_failure = 0.0  # Clear cooldown after successful restart
+                _clear_ib_cooldown()
                 if ib_pool:
                     await ib_pool.disconnect_all()
                     await ib_pool.connect_all()
@@ -6645,7 +6770,7 @@ async def _run_ib_script_with_recovery(
                 result = ScriptResult(
                     ok=False,
                     data=placement_outcome,
-                    error=f"IB Gateway is down and restart failed. {gw_result.get('error', '')}".strip()
+                    error=f"{ib_gateway.GATEWAY_RESTART_FAILED_PREFIX} {gw_result.get('error', '')}".strip()
                         + " Check IBKR Mobile for 2FA approval.",
                 )
 

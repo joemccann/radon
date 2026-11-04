@@ -38,6 +38,7 @@ import urllib.request
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -399,6 +400,52 @@ async def list_units() -> List[str]:
     return units or list(_PLACEHOLDER_UNITS)
 
 
+class GatewayPowerState(str, Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+    TRANSITIONING = "transitioning"
+    UNKNOWN = "unknown"
+
+
+# The helper's ``status`` verb (cloud/scripts/ib-gateway-control.sh) answers
+# with an exit code AND one word; both must agree. Anything else, including a
+# word buried in other output, is UNKNOWN.
+_HELPER_STATUS_POWER = {
+    (0, "running"): GatewayPowerState.RUNNING,
+    (1, "stopped"): GatewayPowerState.STOPPED,
+    (74, "transition-pending"): GatewayPowerState.TRANSITIONING,
+}
+
+# GatewayPowerState -> the systemd-shaped (active_state, sub_state) the UI's
+# gatewayPowerState reads.
+_POWER_UNIT_STATES = {
+    GatewayPowerState.RUNNING: ("active", "running"),
+    GatewayPowerState.STOPPED: ("inactive", "dead"),
+    GatewayPowerState.TRANSITIONING: ("activating", "transition-pending"),
+    GatewayPowerState.UNKNOWN: ("unknown", "unknown"),
+}
+
+
+def gateway_power_state(returncode: object, word: object) -> GatewayPowerState:
+    """Power state from the helper status exit code and its one-word answer."""
+    if isinstance(returncode, bool) or not isinstance(returncode, int):
+        return GatewayPowerState.UNKNOWN
+    return _HELPER_STATUS_POWER.get(
+        (returncode, str(word or "").strip()), GatewayPowerState.UNKNOWN
+    )
+
+
+def _broker_power_state(status: int, payload: object) -> GatewayPowerState:
+    """Power state from the broker /status reply (its helper rc + state)."""
+    if status == -1 or not isinstance(payload, dict):
+        return GatewayPowerState.UNKNOWN
+    return gateway_power_state(_remote_returncode(payload, status), payload.get("state"))
+
+
+def _apply_power(status: "UnitStatus", power: GatewayPowerState) -> None:
+    status.active_state, status.sub_state = _POWER_UNIT_STATES[power]
+
+
 async def show_unit(unit: str) -> UnitStatus:
     """Return a :class:`UnitStatus` snapshot for a single unit.
 
@@ -422,19 +469,11 @@ async def show_unit(unit: str) -> UnitStatus:
         )
         if not is_remote_gateway_configured():
             return status
-        remote = await remote_gateway_action("status")
+        http_status, payload = await _remote_status()
         status.can_control = True
-        if "transition-pending" in remote.detail:
-            # REL-172 (R-475): mid-restart on the broker. `activating` is what
-            # gatewayPowerState reads as transitional, so Start stays disarmed.
-            status.active_state = "activating"
-            status.sub_state = "transition-pending"
-        elif remote.ok and "running" in remote.detail:
-            status.active_state = "active"
-            status.sub_state = "running"
-        elif "stopped" in remote.detail:
-            status.active_state = "inactive"
-            status.sub_state = "dead"
+        # REL-172 (R-475): a pending transition reads `activating`, which
+        # gatewayPowerState treats as transitional, so Start stays disarmed.
+        _apply_power(status, _broker_power_state(http_status, payload))
         return status
 
     if not is_systemd_available():
@@ -493,15 +532,7 @@ async def show_unit(unit: str) -> UnitStatus:
     helper_stdout, _helper_stderr, helper_rc = await _run_gateway_helper(
         "status", timeout=15.0,
     )
-    if helper_rc == 0 and helper_stdout == "running":
-        status.active_state = "active"
-        status.sub_state = "running"
-    elif helper_stdout == "stopped":
-        status.active_state = "inactive"
-        status.sub_state = "dead"
-    else:
-        status.active_state = "unknown"
-        status.sub_state = "unknown"
+    _apply_power(status, gateway_power_state(helper_rc, helper_stdout))
     status.can_control = True
     return status
 
@@ -726,6 +757,11 @@ _remote_status_guard = threading.Lock()
 _remote_status_inflight: Optional[Future] = None
 _remote_status_started: float = 0.0
 _remote_status_cache: Optional[tuple[float, tuple[int, dict]]] = None
+# Bumped by every reset. A probe answers with the generation it started in;
+# only a current-generation answer may fill the cache, so a probe that began
+# before set_operator_hold cannot reinstate the old hold.
+_remote_status_generation: int = 0
+_remote_status_inflight_generation: int = 0
 # REL-200 (R-561): urlopen's timeout bounds per-socket ops, not the total —
 # a one-byte-every-4s broker wedges the probe forever. Past this dwell the
 # in-flight future is abandoned (thread left to die with its socket) and a
@@ -736,19 +772,28 @@ REMOTE_STATUS_ABANDON_AFTER_S = 3 * REMOTE_STATUS_TIMEOUT_S
 def _reset_remote_status_cache() -> None:
     """Test hook: forget the cached probe and the in-flight handle."""
     global _remote_status_inflight, _remote_status_cache, _remote_status_started
+    global _remote_status_generation
     with _remote_status_guard:
         _remote_status_inflight = None
         _remote_status_cache = None
         _remote_status_started = 0.0
+        _remote_status_generation += 1
 
 
 def _remote_status_future() -> Future:
-    """The one in-flight status probe, started if none is running.
+    """The one in-flight status probe, started if none is running."""
+    return _remote_status_future_with_generation()[0]
+
+
+def _remote_status_future_with_generation() -> tuple[Future, int]:
+    """The one in-flight status probe and its generation, started if none is
+    running.
 
     REL-200 (R-561): an in-flight probe older than the abandonment dwell is
     dropped and replaced — its worker thread dies with its wedged socket.
     """
     global _remote_status_inflight, _remote_status_started
+    global _remote_status_inflight_generation
     with _remote_status_guard:
         stale = (
             _remote_status_inflight is not None
@@ -767,7 +812,8 @@ def _remote_status_future() -> Future:
                 _remote_http, "status", REMOTE_STATUS_TIMEOUT_S
             )
             _remote_status_started = time.monotonic()
-        return _remote_status_inflight
+            _remote_status_inflight_generation = _remote_status_generation
+        return _remote_status_inflight, _remote_status_inflight_generation
 
 
 async def _remote_status() -> tuple[int, dict]:
@@ -783,7 +829,7 @@ async def _remote_status() -> tuple[int, dict]:
     cached = _remote_status_cache
     if cached is not None and time.monotonic() - cached[0] < REMOTE_STATUS_CACHE_S:
         return cached[1]
-    future = _remote_status_future()
+    future, generation = _remote_status_future_with_generation()
     try:
         result = await asyncio.wait_for(
             asyncio.wrap_future(future), timeout=REMOTE_STATUS_TIMEOUT_S + 0.5
@@ -797,7 +843,8 @@ async def _remote_status() -> tuple[int, dict]:
             ),
         }
     with _remote_status_guard:
-        _remote_status_cache = (time.monotonic(), result)
+        if generation == _remote_status_generation:
+            _remote_status_cache = (time.monotonic(), result)
     return result
 
 
@@ -824,10 +871,15 @@ async def remote_gateway_action(action: str) -> ActionResult:
         payload = {"ok": False, "detail": "broker reply is not an object", "malformed": True}
     detail = str(payload.get("detail") or payload.get("state") or payload.get("error") or "")
     if status == OPERATOR_HOLD_RC or payload.get("code") == "OPERATOR_HOLD":
-        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC)
+        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC,
+                            refusal=RefusalReason.OPERATOR_HOLD.value)
     rc = _remote_returncode(payload, status)
     if status == 409 or rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC, PUSH_LOCK_HELD_RC}:
-        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+        reason = (
+            RefusalReason.LEASE_HELD if rc == GATEWAY_LEASE_HELD_RC else RefusalReason.CONTROL_BUSY
+        )
+        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC,
+                            refusal=reason.value)
     ok = bool(payload.get("ok")) or (action == "status" and payload.get("state") in {"running", "stopped"})
     if ok:
         return ActionResult(GATEWAY_UNIT, action, True, detail or f"remote {action} HTTP {status}", rc)
@@ -865,6 +917,31 @@ OPERATOR_HOLD_DETAIL = (
 )
 
 
+OPERATOR_HOLD_UNKNOWN_DETAIL = (
+    "IBKR operator hold state is unknown (the broker status could not be "
+    "read), so no Gateway login is started. Retry once the broker answers."
+)
+# Lifecycle verbs that log the Gateway in to IBKR.
+GATEWAY_LOGIN_ACTIONS = frozenset({"start", "restart"})
+
+
+async def _hold_unknown_returncode() -> int:
+    """Route sentinel for an unknown hold: 423 (locked until confirmed clear),
+    except an unreachable broker channel on the app role, which stays 504."""
+    if host_role() != "app":
+        return OPERATOR_HOLD_RC
+    status, _payload = await _remote_status()
+    return REMOTE_UNREACHABLE_RC if status == -1 else OPERATOR_HOLD_RC
+
+
+def operator_hold_blocks(hold: Optional[dict], *, mutating: bool) -> bool:
+    """The one operator-hold policy: a confirmed hold blocks everything it
+    gates; an unknown hold (None) blocks mutating actions only."""
+    if hold is None:
+        return mutating
+    return bool(hold.get("held"))
+
+
 def _normalize_hold(raw: object) -> Optional[dict]:
     if not isinstance(raw, dict) or "held" not in raw:
         return None
@@ -878,7 +955,7 @@ async def operator_hold_state() -> Optional[dict]:
     """The IBKR operator hold as this host can see it, or None when unknown.
 
     App role: the broker's /status (cached, coalesced). Anywhere else: the
-    local flag. Unknown never refuses anything here; the broker still does.
+    local flag. Callers apply :func:`operator_hold_blocks` to the result.
     """
     if host_role() == "app":
         if not is_remote_gateway_configured():
@@ -959,15 +1036,33 @@ async def rotate_gateway_password(values: Dict[str, str], actor: str) -> tuple[i
     return status, clean
 
 
+class RefusalReason(str, Enum):
+    """Why a lifecycle action was refused before it ran."""
+
+    LEASE_HELD = "lease_held"                  # a 2FA push lease is active
+    CONTROL_BUSY = "control_busy"              # helper/operator lock, transition, cooldown
+    DEPLOY_LOCK_HELD = "deploy_lock_held"      # this host's deploy/control flock
+    OPERATOR_HOLD = "operator_hold"            # IBKR operator hold is set
+    OPERATOR_HOLD_UNKNOWN = "operator_hold_unknown"  # hold state could not be read
+
+
 @dataclass
 class ActionResult:
-    """Outcome of a start/stop/restart call against a single unit."""
+    """Outcome of a start/stop/restart call against a single unit.
+
+    ``returncode`` keeps its route-facing sentinels (PUSH_LOCK_HELD_RC,
+    OPERATOR_HOLD_RC); ``refusal`` names which refusal it was.
+    """
 
     unit: str
     action: str
     ok: bool
     detail: str
     returncode: int
+    refusal: Optional[str] = None
+    # Accepted by the host daemon but not yet run (it cycles this process).
+    # The outcome is unknown until the panel reconnects; never a success.
+    pending: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1023,9 +1118,11 @@ async def _control_via_host(request: dict, unit: str, action: str, timeout: floa
     raw_rc = reply.get("returncode")
     rc = raw_rc if isinstance(raw_rc, int) and not isinstance(raw_rc, bool) else REMOTE_BAD_REPLY_RC
     if reply.get("ok") is True:
-        return ActionResult(unit, action, True, detail or f"{action} accepted", 0)
+        pending = reply.get("pending") is True or reply.get("accepted") is True
+        return ActionResult(unit, action, True, detail or f"{action} accepted", 0, pending=pending)
     if rc == OPERATOR_LOCK_HELD_RC:
-        return ActionResult(unit, action, False, detail or "deploy/control lock held", PUSH_LOCK_HELD_RC)
+        return ActionResult(unit, action, False, detail or "deploy/control lock held", PUSH_LOCK_HELD_RC,
+                            refusal=RefusalReason.CONTROL_BUSY.value)
     if reply.get("refused"):
         return ActionResult(unit, action, False, detail or "refused by host control", -1)
     if rc in {0, -1}:
@@ -1057,7 +1154,8 @@ async def _control_unit_under_deploy_lock(unit: str, action: str) -> ActionResul
                     raise OSError("deploy lock changed while opening")
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                return ActionResult(unit, action, False, "deploy/control lock held", PUSH_LOCK_HELD_RC)
+                return ActionResult(unit, action, False, "deploy/control lock held", PUSH_LOCK_HELD_RC,
+                                    refusal=RefusalReason.DEPLOY_LOCK_HELD.value)
             except OSError as exc:
                 return ActionResult(unit, action, False, f"cannot open deploy/control lock at {path}: {exc}", -1)
         stdout, stderr, rc = await _systemctl(action, unit, timeout=SYSTEMCTL_MUTATION_TIMEOUT_S)
@@ -1100,22 +1198,27 @@ def is_gateway_control_available() -> bool:
 
 async def _control_gateway(action: str) -> ActionResult:
     """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
-    if action in {"start", "restart"}:
+    if host_role() == "app" and not is_remote_gateway_configured():
+        return ActionResult(
+            GATEWAY_UNIT,
+            action,
+            False,
+            "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
+            -1,
+        )
+    if action in GATEWAY_LOGIN_ACTIONS:
         # Fast refusal from the mirrored hold: no login request leaves this
         # host. The broker daemon and helper refuse too; this one is ours.
         hold = await operator_hold_state()
-        if hold and hold.get("held"):
+        if operator_hold_blocks(hold, mutating=True):
             logger.warning("Gateway %s refused: IBKR operator hold %s", action, hold)
-            return ActionResult(GATEWAY_UNIT, action, False, OPERATOR_HOLD_DETAIL, OPERATOR_HOLD_RC)
+            if hold is None:
+                return ActionResult(GATEWAY_UNIT, action, False, OPERATOR_HOLD_UNKNOWN_DETAIL,
+                                    await _hold_unknown_returncode(),
+                                    refusal=RefusalReason.OPERATOR_HOLD_UNKNOWN.value)
+            return ActionResult(GATEWAY_UNIT, action, False, OPERATOR_HOLD_DETAIL, OPERATOR_HOLD_RC,
+                                refusal=RefusalReason.OPERATOR_HOLD.value)
     if host_role() == "app":
-        if not is_remote_gateway_configured():
-            return ActionResult(
-                GATEWAY_UNIT,
-                action,
-                False,
-                "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
-                -1,
-            )
         return await remote_gateway_action(action)
     if not is_gateway_control_available():
         return ActionResult(
@@ -1131,10 +1234,14 @@ async def _control_gateway(action: str) -> ActionResult:
     )
     detail = stderr or stdout or f"Gateway control exited with rc={rc}"
     if rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC}:
-        logger.warning("admin Gateway %s refused by active 2FA lease: %s", action, detail)
-        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+        reason = (
+            RefusalReason.LEASE_HELD if rc == GATEWAY_LEASE_HELD_RC else RefusalReason.CONTROL_BUSY
+        )
+        logger.warning("admin Gateway %s refused (%s): %s", action, reason.value, detail)
+        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC, refusal=reason.value)
     if rc == HELPER_OPERATOR_HOLD_RC:
-        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC)
+        return ActionResult(GATEWAY_UNIT, action, False, detail, OPERATOR_HOLD_RC,
+                            refusal=RefusalReason.OPERATOR_HOLD.value)
     return ActionResult(GATEWAY_UNIT, action, rc == 0, detail, rc)
 
 
@@ -1294,5 +1401,6 @@ async def restart_full_stack(actor: str = "unknown") -> ActionResult:
     if rc == GATEWAY_CONTROL_BUSY_RC:
         return ActionResult(
             "radon-stack", "restart", False, detail, PUSH_LOCK_HELD_RC,
+            refusal=RefusalReason.CONTROL_BUSY.value,
         )
     return ActionResult("radon-stack", "restart", rc == 0, detail, rc)

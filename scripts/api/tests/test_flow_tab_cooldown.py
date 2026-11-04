@@ -30,7 +30,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
     from scripts.api import server
 
     monkeypatch.setattr(server, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(server, "_flow_tab_last", {})
+    monkeypatch.setattr(server, "_FLOW_TAB_GATES", {})
     monkeypatch.setattr(server, "FLOW_TAB_COOLDOWN_S", 3600)
     return tmp_path
 
@@ -209,8 +209,10 @@ def test_at_cooldown_boundary_plain_post_is_cached_but_force_spends(client, monk
     from scripts.api import server
 
     with patch("scripts.api.server.run_script", side_effect=_stub_ok) as run_mock:
+        scanned_at = time.monotonic()
         client.post("/scan")
-        server._flow_tab_last["scan"] = time.monotonic() - (server.FLOW_TAB_COOLDOWN_S - 1)
+        # One second short of the window (the gate's clock reads time.monotonic).
+        monkeypatch.setattr(time, "monotonic", lambda: scanned_at + server.FLOW_TAB_COOLDOWN_S - 1)
         plain = client.post("/scan")
         assert plain.status_code == 200
         assert run_mock.call_count == 1

@@ -111,6 +111,9 @@ def app_host(monkeypatch, tmp_path):
     monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
     monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
     monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
+    # The real broker /status always carries a hold; confirm it clear so the
+    # unknown-hold refusal is not what these wire tests observe.
+    monkeypatch.setattr(admin_services, "operator_hold_state", AsyncMock(return_value={"held": False}))
     # Never let a test clear the host's real 2FA push lock.
     monkeypatch.setattr(server, "reset_restart_backoff", lambda: {"reset": True})
 
@@ -268,6 +271,7 @@ class TestCloudDelegate:
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
         remote = AsyncMock(return_value=_ok_result())
+        monkeypatch.setattr(admin_services, "operator_hold_state", AsyncMock(return_value={"held": False}))
         with patch.object(admin_services, "remote_gateway_action", new=remote):
             resp = client.post("/ib/restart", headers=_auth_headers())
         assert resp.status_code == 200

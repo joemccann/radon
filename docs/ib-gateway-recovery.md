@@ -149,12 +149,14 @@ Per-process. `restart_ib_gateway()` runs a `managedAccounts()` probe post-restar
 
 Backoff applies to the next restart attempt by THIS process. Cross-process backoff is the push lock above.
 
+**Not applicable in cloud mode (production).** `restart_ib_gateway()` returns before this gate when `IB_GATEWAY_MODE=cloud`: the cloud helper owns the lease and the Gateway cycle, so the ladder never advances. `/health` reports `restart_backoff.applicable: false` with `gateway_mode: "cloud"` and omits the ladder fields (`attempt_count`, `next_attempt_in_secs`, `next_attempt_after`, `last_attempt_at`, `last_outcome`); `push_lock` is still reported. The ladder runs only on the legacy `docker` / `launchd` harness, where `applicable: true`.
+
 ### 3. Watchdog stuck-2FA self-heal (2026-05-20)
 
 `is_stuck_awaiting_2fa()` fires when ALL of:
 - `auth_state == "awaiting_2fa"`
 - `push_lock_active == false`
-- `next_attempt_in_secs <= 0`
+- `next_attempt_in_secs <= 0` (absent in cloud mode, where the ladder is not applicable, so this term never defers)
 
 After **3 consecutive stuck cycles (~3 min)**, the watchdog acquires the push lock and starts `radon-ib-gateway-preheld-restart.service`. That fixed adapter verifies the exact watchdog holder, consumes that lease fingerprint once, and delegates the Docker cycle to the production helper without acquiring a second lease.
 
@@ -178,7 +180,7 @@ A failure *inside radon-api*, not the gateway: after the user approves the 2FA p
 
 **Why the earlier (2026-05-19) edge fix never worked:** it called `pool.reconnect_all()` on the `awaiting_2fa → authenticated` edge, but `auth_state` is *derived from the pool* (`_derive_auth_state` → authenticated only when a role is connected WITH accounts). While the pool is wedged every heartbeat derives `awaiting_2fa`, so the edge never fires and `_auth_transition_state` latches at `awaiting_2fa` — an external approval is invisible to the process forever. Circular dependency.
 
-**The fix — `recover_stuck_pool` (`scripts/api/ib_gateway.py`), level-triggered + pool-independent, run from `_ib_recovery_heartbeat_tick` (15s) via `_recover_stuck_pool_guarded` (`server.py`):** healthy pool → no-op; disconnected slot + an independent `_probe_authenticated()` (throwaway clientId 98) that is NOT authenticated → genuine 2FA wait, do nothing (never touches the gateway/lock, ZERO pushes); disconnected slot + probe authenticated → `reconnect_all()` then RE-READ the pool, success iff a role is now connected WITH accounts. Single-flight + 60s cooldown; only a *verified* failure (probe authenticated yet pool still stuck) counts toward a 3-strike ladder, after which it self-restarts **radon-api only** (`os._exit(1)` under systemd `Restart=always`; never the gateway), then resets so it cannot loop. Pool reconnects in ~15-60s with no operator action and no new push. Tests: `scripts/api/tests/test_ib_gateway_pool_recovery.py` + `test_pool_recovery_escalation.py`. Follow-up not done: a `pool_stuck` /health flag to keep the watchdog from restarting the gateway on this signature — skipped because the probe is 8s and breaks the fast-/health 2.5s budget; the 15s heartbeat beats the watchdog's ~3-min threshold anyway.
+**The fix — `recover_stuck_pool` (`scripts/api/ib_gateway.py`), level-triggered + pool-independent, run from `_ib_recovery_heartbeat_tick` (15s) via `_recover_stuck_pool_guarded` (`server.py`):** healthy pool → no-op; disconnected slot + an independent `_probe_authenticated()` (throwaway clientId 98) that is NOT authenticated → genuine 2FA wait, do nothing (never touches the gateway/lock, ZERO pushes); disconnected slot + probe authenticated → `reconnect_all()` then RE-READ the pool, success iff a role is now connected WITH accounts. Single-flight + 60s cooldown; only a *verified* failure (probe authenticated yet pool still stuck) counts toward a 3-strike ladder, after which it self-restarts **radon-api only** (`os._exit(1)` under systemd `Restart=always`; never the gateway). The exit wipes the in-memory ladder, so the self-exit time is first written to `data/pool_recovery_state.json` (`RADON_POOL_RECOVERY_STATE` overrides); a second escalation within `POOL_RECOVERY_SELF_EXIT_WINDOW_SECS` (1h) stands down and logs instead of exiting again, and an unreadable or unwritable record also stands down. Pool reconnects in ~15-60s with no operator action and no new push. The auth-transition tracker treats both `awaiting_2fa -> authenticated` and `unreachable -> authenticated` as recovery edges (heal + startup-lease release + reconnect); `restart_ib_gateway` records its observations through the same entrypoint. Tests: `scripts/api/tests/test_ib_gateway_pool_recovery.py` + `test_pool_recovery_escalation.py` + `test_pool_recovery_episode.py`. Follow-up not done: a `pool_stuck` /health flag to keep the watchdog from restarting the gateway on this signature — skipped because the probe is 8s and breaks the fast-/health 2.5s budget; the 15s heartbeat beats the watchdog's ~3-min threshold anyway.
 
 ### 6. Watchdog login-throttle hold (2026-09-26)
 
@@ -214,16 +216,18 @@ Tests: `scripts/tests/test_ib_watchdog_login_throttle.py`, `scripts/tests/test_i
 
 ```json
 {
-  "auth_state": "authenticated" | "awaiting_2fa" | "unauthenticated",
+  "auth_state": "authenticated" | "awaiting_2fa" | "unreachable" | "unknown" | "remote",
   "service_state": "...",
   "upstream_dead": false,
   "restart_backoff": {
-    "push_lock": { "active": false, "expires_at": null },
-    "attempt_count": 0,
-    "next_attempt_in_secs": 0
+    "push_lock": null,
+    "applicable": false,
+    "gateway_mode": "cloud"
   }
 }
 ```
+
+`auth_state` is exactly `ib_gateway.AuthState`; nothing produces `unauthenticated`. `remote` is the cloud TCP-only answer when this process has no pool to judge from, and the health daemon reads it, like `unknown`, as `unknown`. A `/health/lite` probe that times out reports `auth_state: "unknown"` with `port_listening` and `upstream_dead` null, never a confirmed down.
 
 Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin/health` every 15s). Fixed "footer says CONNECTED while banner says degraded".
 
@@ -231,7 +235,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 ## Operator Escape Hatches
 
-`POST /ib/reset-backoff` clears BOTH in-memory backoff AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
+`POST /ib/reset-backoff` clears BOTH in-memory backoff (attempt count, window and last outcome) AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
 
 `/usr/local/bin/radon restart` and the admin Gateway controls delegate to `/usr/local/bin/radon-ib-gateway-control`. A healthy start is a no-op with no lease; a stopped/missing start or any restart atomically acquires the lease before touching Docker.
 
@@ -256,6 +260,10 @@ While held:
 | FastAPI `/ib/restart`, admin Gateway `start\|restart` | `423`, and no request leaves the app host. `stop` still works |
 | FastAPI 15s recovery heartbeat (pool reconnect, radon-api self-restart ladder) | skipped |
 | Relay stale-tick ladder | no `disconnected` error row, no reconnect ladder, no `/ib/restart` escalation. It writes an `ok` row with `reason: operator_hold` |
+
+When the app host cannot read the hold (`operator_hold: null`), `services.operator_hold_blocks` applies one rule: an unknown hold blocks mutating actions only. Admin Gateway `start|restart` (and `/ib/restart` through it) refuse with `refusal: "operator_hold_unknown"` and no login request leaves the host: `504` when the broker channel is unreachable, else `423`. `stop` still runs. The recovery heartbeat keeps checking and reconnecting the pool but withholds the radon-api self-exit.
+
+Lifecycle refusals carry a typed `refusal` in the action result: `lease_held` (2FA lease, helper exit 75), `control_busy` (helper or operator exit 74: lifecycle mutex, deploy lock, pending transition, broker verb cooldown or login throttle), `deploy_lock_held` (this host's deploy/control flock), `operator_hold`, `operator_hold_unknown`. `/ib/restart` reports the refusal as its `reason`, keeping `2fa_push_in_flight` for `lease_held`. The Gateway row's power state comes from the helper `status` exit code and word together (`0 running`, `1 stopped`, `74 transition-pending`); anything else, including a matching word in other output, reads `unknown`.
 | Watchdog IB-outage grouping | IB-dependent failures are absorbed without a page. No `radon restart` advice |
 | IBC 2FA relogin | already off (`TWOFA_TIMEOUT_ACTION=exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT=no`), so no push spam. The daily `AUTO_RESTART_TIME=11:45 PM` token restart only runs while the Gateway is up, which a hold rules out |
 
