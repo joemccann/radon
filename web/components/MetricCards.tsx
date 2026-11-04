@@ -606,6 +606,9 @@ function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
 
 /* ─── Main component ─────────────────────────────────────── */
 
+/** The breakdown modal MetricCards has open, if any. */
+type MetricModal = "fills" | "unrealized" | "dayMove" | "total" | "netLiq" | "dayPnl" | "dividends" | "buyingPower" | "margin" | "excessLiq" | "settledCash" | "ewl" | "prevEwl" | "regT" | "sma" | "cash" | "availFunds" | "initMargin" | "grossPos";
+
 export default function MetricCards({ portfolio, prices, realizedPnl, executedOrders = [], section }: MetricCardsProps) {
   // Section collapse state: Account + Today's P&L expanded by default, rest collapsed
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
@@ -621,27 +624,12 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   }, []);
 
   const [activeMetric, setActiveMetric] = useState<ExposureMetric | null>(null);
-  const [fillsModalOpen, setFillsModalOpen] = useState(false);
-  const [unrealizedModalOpen, setUnrealizedModalOpen] = useState(false);
-  const [dayMoveModalOpen, setDayMoveModalOpen] = useState(false);
-  const [totalModalOpen, setTotalModalOpen] = useState(false);
-  const [netLiqModalOpen, setNetLiqModalOpen] = useState(false);
-  const [dayPnlModalOpen, setDayPnlModalOpen] = useState(false);
-  const [dividendsModalOpen, setDividendsModalOpen] = useState(false);
-  const [buyingPowerModalOpen, setBuyingPowerModalOpen] = useState(false);
-  const [marginModalOpen, setMarginModalOpen] = useState(false);
-  const [excessLiqModalOpen, setExcessLiqModalOpen] = useState(false);
-  const [settledCashModalOpen, setSettledCashModalOpen] = useState(false);
-  // Margin row modals
-  const [ewlModalOpen, setEwlModalOpen] = useState(false);
-  const [prevEwlModalOpen, setPrevEwlModalOpen] = useState(false);
-  const [regTModalOpen, setRegTModalOpen] = useState(false);
-  const [smaModalOpen, setSmaModalOpen] = useState(false);
-  // Capital row modals
-  const [cashModalOpen, setCashModalOpen] = useState(false);
-  const [availFundsModalOpen, setAvailFundsModalOpen] = useState(false);
-  const [initMarginModalOpen, setInitMarginModalOpen] = useState(false);
-  const [grossPosModalOpen, setGrossPosModalOpen] = useState(false);
+  // One breakdown modal at a time: the open modal is a single value, so two
+  // drill-downs can never be open together.
+  const [openModal, setOpenModal] = useState<MetricModal | null>(null);
+  const closeModal = useCallback((modal: MetricModal) => {
+    setOpenModal((current) => (current === modal ? null : current));
+  }, []);
 
   // Match the ET day-cut used by computeRealizedPnlFromFills / /orders so the
   // modal itemizes the same fills the total sums (NEW_FINDINGS wave-2).
@@ -704,10 +692,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
       ? todayUnrealized.pnl : null);
 
   // Breakdown rows (computed lazily — only used when modals open)
-  const unrealizedBreakdownRows = unrealizedModalOpen
+  const unrealizedBreakdownRows = openModal === "unrealized"
     ? computeUnrealizedBreakdown(portfolio)
     : [];
-  const dayMoveBreakdown = dayMoveModalOpen && hasPrices
+  const dayMoveBreakdown = openModal === "dayMove" && hasPrices
     ? computeDayMoveBreakdown(sessionPortfolio, prices!)
     : { rows: [], total: 0 };
 
@@ -726,10 +714,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           hasPrices={!!hasPrices}
           collapsed={collapsed.account}
           onToggle={() => toggle("account")}
-          onNetLiqClick={() => setNetLiqModalOpen(true)}
-          onDayPnlClick={() => setDayPnlModalOpen(true)}
-          onUnrealizedClick={() => setUnrealizedModalOpen(true)}
-          onDividendsClick={() => setDividendsModalOpen(true)}
+          onNetLiqClick={() => setOpenModal("netLiq")}
+          onDayPnlClick={() => setOpenModal("dayPnl")}
+          onUnrealizedClick={() => setOpenModal("unrealized")}
+          onDividendsClick={() => setOpenModal("dividends")}
         />
       ) : (
         <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} unmeasuredBasisCount={unmeasuredBasisCount} />
@@ -741,10 +729,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           acct={acct}
           collapsed={collapsed.risk}
           onToggle={() => toggle("risk")}
-          onBuyingPowerClick={() => setBuyingPowerModalOpen(true)}
-          onMarginClick={() => setMarginModalOpen(true)}
-          onExcessLiqClick={() => setExcessLiqModalOpen(true)}
-          onSettledCashClick={() => setSettledCashModalOpen(true)}
+          onBuyingPowerClick={() => setOpenModal("buyingPower")}
+          onMarginClick={() => setOpenModal("margin")}
+          onExcessLiqClick={() => setOpenModal("excessLiq")}
+          onSettledCashClick={() => setOpenModal("settledCash")}
         />
       )}
 
@@ -754,10 +742,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           acct={acct}
           collapsed={collapsed.margin}
           onToggle={() => toggle("margin")}
-          onEwlClick={() => setEwlModalOpen(true)}
-          onPrevEwlClick={() => setPrevEwlModalOpen(true)}
-          onRegTClick={() => setRegTModalOpen(true)}
-          onSmaClick={() => setSmaModalOpen(true)}
+          onEwlClick={() => setOpenModal("ewl")}
+          onPrevEwlClick={() => setOpenModal("prevEwl")}
+          onRegTClick={() => setOpenModal("regT")}
+          onSmaClick={() => setOpenModal("sma")}
         />
       )}
 
@@ -767,10 +755,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           acct={acct}
           collapsed={collapsed.capital}
           onToggle={() => toggle("capital")}
-          onCashClick={() => setCashModalOpen(true)}
-          onAvailFundsClick={() => setAvailFundsModalOpen(true)}
-          onInitMarginClick={() => setInitMarginModalOpen(true)}
-          onGrossPosClick={() => setGrossPosModalOpen(true)}
+          onCashClick={() => setOpenModal("cash")}
+          onAvailFundsClick={() => setOpenModal("availFunds")}
+          onInitMarginClick={() => setOpenModal("initMargin")}
+          onGrossPosClick={() => setOpenModal("grossPos")}
         />
       )}
 
@@ -793,9 +781,9 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         realizedPnl={realizedPnl}
         collapsed={collapsed.todayPnl}
         onToggle={() => toggle("todayPnl")}
-        onDayMoveClick={() => setDayMoveModalOpen(true)}
-        onRealizedClick={() => setFillsModalOpen(true)}
-        onTotalClick={() => setTotalModalOpen(true)}
+        onDayMoveClick={() => setOpenModal("dayMove")}
+        onRealizedClick={() => setOpenModal("fills")}
+        onTotalClick={() => setOpenModal("total")}
       />
 
       {/* ── Modals ── */}
@@ -813,7 +801,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
 
       {/* ACCOUNT: Unrealized P&L → position-level open P&L (entry cost vs market value) */}
       <PnlBreakdownModal
-        open={unrealizedModalOpen}
+        open={openModal === "unrealized"}
         title="Unrealized P&L: Open Positions"
         formula={
           "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
@@ -827,12 +815,12 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         pctHeader="RETURN %"
         rows={unrealizedBreakdownRows}
         total={acct?.unrealized_pnl ?? pnl}
-        onClose={() => setUnrealizedModalOpen(false)}
+        onClose={() => closeModal("unrealized")}
       />
 
       {/* TODAY'S P&L: Day Move → per-position intraday change (close → current) */}
       <PnlBreakdownModal
-        open={dayMoveModalOpen}
+        open={openModal === "dayMove"}
         title="Day Move: Intraday P&L"
         formula={
           "Day Move = stocks: (last − close) × shares; options: IB reqPnLSingle daily P&L when available, else sign × (last − close) × contracts × multiplier\n" +
@@ -844,22 +832,22 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         col2Header="CURRENT"
         rows={dayMoveBreakdown.rows}
         total={unrealized}
-        onClose={() => setDayMoveModalOpen(false)}
+        onClose={() => closeModal("dayMove")}
       />
 
       {/* TODAY'S P&L: Realized → session fills with P&L (ET day-cut) */}
       <FillsModal
-        open={fillsModalOpen}
+        open={openModal === "fills"}
         fills={todayExecutedFills}
         totalRealizedPnl={realized}
         netLiquidation={acct?.net_liquidation}
-        onClose={() => setFillsModalOpen(false)}
+        onClose={() => closeModal("fills")}
       />
 
       {/* ACCOUNT: Net Liquidation */}
       {acct && (
         <AccountMetricModal
-          open={netLiqModalOpen}
+          open={openModal === "netLiq"}
           title="Net Liquidation Value"
           value={fmtExact(acct.net_liquidation)}
           formula={
@@ -867,14 +855,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers account_summary (reqAccountSummary)\n" +
             "Updated: real-time during market hours"
           }
-          onClose={() => setNetLiqModalOpen(false)}
+          onClose={() => closeModal("netLiq")}
         />
       )}
 
       {/* ACCOUNT: Day P&L */}
       {acct && (
         <AccountMetricModal
-          open={dayPnlModalOpen}
+          open={openModal === "dayPnl"}
           title="Day P&L"
           value={effectiveDayPnl != null ? fmtSignedExact(effectiveDayPnl) : "---"}
           formula={
@@ -884,14 +872,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
               : "Source: Current prices versus prior-session closes, estimated\n") +
             "Note: Includes all open positions across stocks, options, and other instruments"
           }
-          onClose={() => setDayPnlModalOpen(false)}
+          onClose={() => closeModal("dayPnl")}
         />
       )}
 
       {/* ACCOUNT: Dividends */}
       {acct && (
         <AccountMetricModal
-          open={dividendsModalOpen}
+          open={openModal === "dividends"}
           title="Accrued Dividends"
           value={fmtExact(acct.dividends)}
           formula={
@@ -899,14 +887,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers account_summary (DividendReceivedYear)\n" +
             "Note: Represents dividends accrued in the current calendar year"
           }
-          onClose={() => setDividendsModalOpen(false)}
+          onClose={() => closeModal("dividends")}
         />
       )}
 
       {/* RISK: Buying Power */}
       {acct && (
         <AccountMetricModal
-          open={buyingPowerModalOpen}
+          open={openModal === "buyingPower"}
           title="Buying Power"
           value={fmtExact(acct.buying_power)}
           formula={
@@ -915,14 +903,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "= Excess Liquidity × Margin Multiplier\n" +
             "Note: For a Reg T margin account, typically 4× excess liquidity for day trades"
           }
-          onClose={() => setBuyingPowerModalOpen(false)}
+          onClose={() => closeModal("buyingPower")}
         />
       )}
 
       {/* RISK: Maintenance Margin */}
       {acct && (
         <AccountMetricModal
-          open={marginModalOpen}
+          open={openModal === "margin"}
           title="Maintenance Margin"
           value={fmtExact(acct.maintenance_margin)}
           formula={
@@ -930,14 +918,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers account_summary (MaintMarginReq)\n" +
             "If Net Liquidation falls below this, IB may issue a margin call"
           }
-          onClose={() => setMarginModalOpen(false)}
+          onClose={() => closeModal("margin")}
         />
       )}
 
       {/* RISK: Excess Liquidity */}
       {acct && (
         <AccountMetricModal
-          open={excessLiqModalOpen}
+          open={openModal === "excessLiq"}
           title="Excess Liquidity"
           value={fmtExact(acct.excess_liquidity)}
           formula={
@@ -946,14 +934,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "= Safety cushion above margin requirements\n" +
             "Green = healthy buffer | Red = dangerously close to margin call"
           }
-          onClose={() => setExcessLiqModalOpen(false)}
+          onClose={() => closeModal("excessLiq")}
         />
       )}
 
       {/* RISK: Settled Cash */}
       {acct && (
         <AccountMetricModal
-          open={settledCashModalOpen}
+          open={openModal === "settledCash"}
           title="Settled Cash"
           value={fmtSignedExact(acct.settled_cash)}
           formula={
@@ -961,14 +949,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers account_summary (SettledCash)\n" +
             "Negative = you've spent unsettled funds (cash from recent sells not yet settled)"
           }
-          onClose={() => setSettledCashModalOpen(false)}
+          onClose={() => closeModal("settledCash")}
         />
       )}
 
       {/* MARGIN: Equity With Loan */}
       {acct && (
         <AccountMetricModal
-          open={ewlModalOpen}
+          open={openModal === "ewl"}
           title="Equity With Loan Value"
           value={acct.equity_with_loan != null ? fmtExact(acct.equity_with_loan) : "---"}
           formula={
@@ -976,14 +964,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (EquityWithLoanValue)\n" +
             "Excludes US options market value. Used as basis for margin calculations"
           }
-          onClose={() => setEwlModalOpen(false)}
+          onClose={() => closeModal("ewl")}
         />
       )}
 
       {/* MARGIN: Previous Day EWL */}
       {acct && (
         <AccountMetricModal
-          open={prevEwlModalOpen}
+          open={openModal === "prevEwl"}
           title="Previous Day Equity With Loan"
           value={acct.previous_day_ewl != null ? fmtExact(acct.previous_day_ewl) : "---"}
           formula={
@@ -991,14 +979,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (PreviousDayEquityWithLoanValue)\n" +
             "Used for intraday margin checks and SMA calculation"
           }
-          onClose={() => setPrevEwlModalOpen(false)}
+          onClose={() => closeModal("prevEwl")}
         />
       )}
 
       {/* MARGIN: Reg T Equity */}
       {acct && (
         <AccountMetricModal
-          open={regTModalOpen}
+          open={openModal === "regT"}
           title="Regulation T Equity"
           value={acct.reg_t_equity != null ? fmtExact(acct.reg_t_equity) : "---"}
           formula={
@@ -1006,14 +994,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (RegTEquity)\n" +
             "Federal Reserve Board Regulation T equity for margin requirements"
           }
-          onClose={() => setRegTModalOpen(false)}
+          onClose={() => closeModal("regT")}
         />
       )}
 
       {/* MARGIN: SMA */}
       {acct && (
         <AccountMetricModal
-          open={smaModalOpen}
+          open={openModal === "sma"}
           title="Special Memorandum Account"
           value={acct.sma != null ? fmtExact(acct.sma) : "---"}
           formula={
@@ -1022,14 +1010,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "SMA never decreases due to market fluctuations, only from new trades.\n" +
             "Reg T requires SMA >= 0 for new positions"
           }
-          onClose={() => setSmaModalOpen(false)}
+          onClose={() => closeModal("sma")}
         />
       )}
 
       {/* CAPITAL: Cash */}
       {acct && (
         <AccountMetricModal
-          open={cashModalOpen}
+          open={openModal === "cash"}
           title="Total Cash"
           value={acct.cash != null ? fmtSignedExact(acct.cash) : "---"}
           formula={
@@ -1037,14 +1025,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (TotalCashValue)\n" +
             "Includes cash from recent sells that haven't settled yet (T+1/T+2)"
           }
-          onClose={() => setCashModalOpen(false)}
+          onClose={() => closeModal("cash")}
         />
       )}
 
       {/* CAPITAL: Available Funds */}
       {acct && (
         <AccountMetricModal
-          open={availFundsModalOpen}
+          open={openModal === "availFunds"}
           title="Available Funds"
           value={acct.available_funds != null ? fmtExact(acct.available_funds) : "---"}
           formula={
@@ -1052,14 +1040,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (AvailableFunds)\n" +
             "Amount available to open new positions without triggering a margin call"
           }
-          onClose={() => setAvailFundsModalOpen(false)}
+          onClose={() => closeModal("availFunds")}
         />
       )}
 
       {/* CAPITAL: Initial Margin */}
       {acct && (
         <AccountMetricModal
-          open={initMarginModalOpen}
+          open={openModal === "initMargin"}
           title="Initial Margin"
           value={acct.initial_margin != null ? fmtExact(acct.initial_margin) : "---"}
           formula={
@@ -1067,14 +1055,14 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (InitMarginReq)\n" +
             "Higher than Maintenance Margin, must be met when entering a trade"
           }
-          onClose={() => setInitMarginModalOpen(false)}
+          onClose={() => closeModal("initMargin")}
         />
       )}
 
       {/* CAPITAL: Gross Position Value */}
       {acct && (
         <AccountMetricModal
-          open={grossPosModalOpen}
+          open={openModal === "grossPos"}
           title="Securities Gross Position Value"
           value={acct.gross_position_value != null ? fmtExact(acct.gross_position_value) : "---"}
           formula={
@@ -1082,13 +1070,13 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Source: Interactive Brokers accountValues (GrossPositionValue)\n" +
             "Total absolute value of all securities positions"
           }
-          onClose={() => setGrossPosModalOpen(false)}
+          onClose={() => closeModal("grossPos")}
         />
       )}
 
       {/* TODAY'S P&L: Total → formula proof */}
       <PnlBreakdownModal
-        open={totalModalOpen}
+        open={openModal === "total"}
         title="Today's Total P&L"
         formula={
           `Total = Day Move + Realized\n` +
@@ -1120,7 +1108,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         ]}
         total={total}
         totalLabel="COMBINED"
-        onClose={() => setTotalModalOpen(false)}
+        onClose={() => closeModal("total")}
       />
     </>
   );
