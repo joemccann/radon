@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -222,6 +224,65 @@ def test_nothing_changed_selects_nothing(tmp_path: Path) -> None:
     assert pre_push.select([], root=tmp_path).empty
 
 
+def test_python_only_change_skips_lint_and_typecheck(tmp_path: Path) -> None:
+    _touch(tmp_path, "scripts/widget.py", "scripts/tests/test_widget.py")
+    sel = pre_push.select(["scripts/widget.py", "docs/x.md"], root=tmp_path)
+    assert sel.lint_files == ()
+    assert sel.typecheck_files == ()
+
+
+def test_perimeter_and_typecheck_files_are_scoped(tmp_path: Path) -> None:
+    _touch(
+        tmp_path,
+        "web/middleware.ts",
+        "web/lib/chat.ts",
+        "web/tests/chat.test.ts",
+        "web/e2e/new-flow.spec.ts",
+        "lib/tools/api-client.ts",
+        "lib/tools/__tests__/api-client.test.ts",
+        "site/lib/theme.ts",
+    )
+    sel = pre_push.select(
+        [
+            "web/middleware.ts",
+            "web/lib/chat.ts",
+            "web/tests/chat.test.ts",
+            "web/e2e/new-flow.spec.ts",
+            "lib/tools/api-client.ts",
+            "lib/tools/__tests__/api-client.test.ts",
+            "site/lib/theme.ts",
+            "web/lib/deleted.ts",
+        ],
+        root=tmp_path,
+    )
+    assert sel.lint_files == ("web/middleware.ts",)
+    assert sel.typecheck_files == ("lib/tools/api-client.ts", "web/lib/chat.ts", "web/middleware.ts")
+
+
+_ESLINT_BARE_BUILTINS = re.compile(
+    r"ImportDeclaration\[source\.value=/\^\(([^)]+)\)\$/"
+)
+
+
+def test_oxlint_perimeter_matches_the_eslint_builtin_ban() -> None:
+    eslint = (ROOT / "web/eslint.config.mjs").read_text()
+    match = _ESLINT_BARE_BUILTINS.search(eslint)
+    assert match, "eslint perimeter builtin alternation moved"
+    assert "ImportDeclaration[source.value=/^node:/" in eslint
+    ox = json.loads((ROOT / "web/oxlint.perimeter.json").read_text())
+    override = ox["overrides"][0]
+    assert override["files"] == [
+        "middleware.ts",
+        "lib/apiContracts.ts",
+        "lib/probeAuth.ts",
+        "lib/sameOrigin.ts",
+    ]
+    patterns = override["rules"]["no-restricted-imports"][1]["patterns"]
+    groups = [pattern["group"] for pattern in patterns]
+    assert ["node:*", "node:*/*"] in groups
+    assert match.group(1).split("|") in groups
+
+
 # ── main: env skips, refs, merge-base ────────────────────────────────
 
 
@@ -346,6 +407,81 @@ def test_pytest_then_vitest_never_concurrently(tmp_path: Path, monkeypatch) -> N
     assert vitest[-1] == "web/lib/chat.ts"
 
 
+def _executable(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
+
+
+class _ReadingRun(FakeRun):
+    def __init__(self) -> None:
+        super().__init__()
+        self.projects: list[str] = []
+
+    def __call__(self, cmd, **kwargs):
+        if cmd and cmd[0].endswith("tsc") and "-p" in cmd:
+            self.projects.append(Path(cmd[cmd.index("-p") + 1]).read_text())
+        return super().__call__(cmd, **kwargs)
+
+
+def test_static_checks_run_before_pytest_on_changed_files(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _git(repo, "switch", "-q", "-c", "fix/x")
+    head = _commit(repo, "web/middleware.ts", "lib/tools/api-client.ts")
+    _touch(repo, "web/tsconfig.json", "lib/tsconfig.json", "web/oxlint.perimeter.json")
+    _executable(repo / "web/node_modules/.bin/oxlint")
+    _executable(repo / "web/node_modules/.bin/tsc")
+    run = _ReadingRun()
+    assert _main(repo, f"refs/heads/fix/x {head} refs/heads/fix/x {ZERO}\n", run) == 0
+    kinds = []
+    for cmd, _kw in run.calls:
+        if "oxlint" in cmd[0]:
+            kinds.append("oxlint")
+        elif cmd[0].endswith("tsc"):
+            kinds.append("tsc")
+        elif "pytest" in cmd and "-c" not in cmd:
+            kinds.append("pytest")
+    assert kinds[:3] == ["oxlint", "tsc", "tsc"]
+    assert "pytest" in kinds[3:]
+    ox, ox_kw = next((cmd, kw) for cmd, kw in run.calls if "oxlint" in cmd[0])
+    assert ox[1:3] == ["-c", "oxlint.perimeter.json"]
+    assert ox[-1] == "middleware.ts"
+    assert ox_kw["cwd"] == repo / "web"
+    projects = [json.loads(text) for text in run.projects]
+    files = sorted(path for project in projects for path in project["files"])
+    assert any(path.endswith("middleware.ts") for path in files)
+    assert any(path.endswith("api-client.ts") for path in files)
+    assert all(project["include"] == [] for project in projects)
+    assert all(project["compilerOptions"]["noEmit"] is True for project in projects)
+    # The generated project is removed after tsc so it cannot leak into a commit.
+    assert not (repo / "web/node_modules/.cache/radon-pre-push").exists() or not any(
+        (repo / "web/node_modules/.cache/radon-pre-push").glob("tsconfig.*.json")
+    )
+
+
+def test_oxlint_and_tsc_failures_block_the_push(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    _git(repo, "switch", "-q", "-c", "fix/x")
+    head = _commit(repo, "web/lib/chat.ts")
+    _executable(repo / "web/node_modules/.bin/tsc")
+    run = FakeRun(fail="tsc")
+    assert _main(repo, f"refs/heads/fix/x {head} refs/heads/fix/x {ZERO}\n", run) == 1
+    assert "tsc" in capsys.readouterr().err
+    assert not any("pytest" in cmd for cmd in run.commands())
+
+
+def test_missing_oxlint_and_tsc_are_skipped(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    _git(repo, "switch", "-q", "-c", "fix/x")
+    head = _commit(repo, "web/middleware.ts")
+    run = FakeRun()
+    assert _main(repo, f"refs/heads/fix/x {head} refs/heads/fix/x {ZERO}\n", run) == 0
+    assert not any("oxlint" in cmd[0] or "tsc" in cmd[0] for cmd in run.commands())
+    out = capsys.readouterr().out
+    assert "oxlint skipped" in out
+    assert "tsc skipped" in out
+
+
 def test_vitest_is_skipped_without_node_modules(tmp_path: Path, capsys) -> None:
     repo = _repo(tmp_path)
     _git(repo, "switch", "-q", "-c", "fix/x")
@@ -421,6 +557,57 @@ def test_install_respects_a_configured_hooks_path(tmp_path: Path) -> None:
     assert not (repo / ".git" / "hooks" / "pre-push").exists()
 
 
+def test_install_hooks_a_dispatcher_directory_and_runs_once(tmp_path: Path) -> None:
+    # Cloud agent images set core.hooksPath to a dispatcher dir. Git then
+    # ignores .git/hooks, so the shim has to be a pre-push.cursor* script
+    # behind a pre-push -> .dispatcher link.
+    repo = _repo(tmp_path)
+    hooks = tmp_path / "agent-hooks"
+    hooks.mkdir()
+    (hooks / ".dispatcher").write_text(
+        "#!/bin/sh\n"
+        "dir=$(CDPATH= cd -- \"$(dirname \"$0\")\" && pwd)\n"
+        "for hook in \"$dir\"/pre-push.cursor*; do\n"
+        "  [ -x \"$hook\" ] && \"$hook\" \"$@\"\n"
+        "done\n"
+    )
+    (hooks / ".dispatcher").chmod(0o755)
+    legacy = repo / ".git" / "hooks" / "pre-push"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(pre_push.SHIM)
+    _git(repo, "config", "core.hooksPath", str(hooks))
+    assert pre_push.install(repo) == 0
+    assert (hooks / "pre-push").is_symlink()
+    assert os.readlink(hooks / "pre-push") == ".dispatcher"
+    companion = hooks / "pre-push.cursor.radon"
+    assert pre_push.SHIM_MARKER in companion.read_text()
+    assert companion.stat().st_mode & stat.S_IXUSR
+    assert not legacy.exists()  # dispatcher would otherwise run the check twice
+    assert pre_push.install(repo) == 0
+    (repo / ".githooks").mkdir()
+    (repo / ".githooks" / "pre-push").write_text("#!/bin/sh\necho radon-hook\nexit 0\n")
+    done = subprocess.run(
+        [str(hooks / "pre-push"), "origin", "url"],
+        cwd=repo,
+        input="",
+        text=True,
+        capture_output=True,
+    )
+    assert (done.returncode, done.stdout) == (0, "radon-hook\n"), done.stderr
+
+
+def test_install_does_not_replace_a_foreign_dispatcher_pre_push(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    hooks = tmp_path / "agent-hooks"
+    hooks.mkdir()
+    (hooks / ".dispatcher").write_text("#!/bin/sh\nexit 0\n")
+    (hooks / "pre-push").write_text("#!/bin/sh\n# foreign\nexit 3\n")
+    _git(repo, "config", "core.hooksPath", str(hooks))
+    assert pre_push.install(repo) == 0
+    assert (hooks / "pre-push").read_text() == "#!/bin/sh\n# foreign\nexit 3\n"
+    assert not (hooks / "pre-push.cursor.radon").exists()
+
+
 def test_install_outside_a_git_repo_is_a_no_op(tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -470,6 +657,22 @@ def test_prepare_installs_the_shim_and_never_fails() -> None:
     assert "scripts/ci/pre_push.py --install" in prepare
     assert "hooksPath" not in prepare
     assert prepare.rstrip().endswith("|| true")
+
+
+def test_prepare_installs_the_shim_in_a_git_checkout(tmp_path: Path) -> None:
+    # Cloud agent images clone the repo, then `bun install` runs this prepare
+    # script. The script's own --install writes the shim into that checkout.
+    repo = _repo(tmp_path)
+    dest = repo / "scripts" / "ci"
+    dest.mkdir(parents=True)
+    shutil.copy(ROOT / "scripts/ci/pre_push.py", dest / "pre_push.py")
+    shutil.copy(ROOT / "scripts/ci/path_filter.py", dest / "path_filter.py")
+    prepare = json.loads((ROOT / "package.json").read_text())["scripts"]["prepare"]
+    done = subprocess.run(["sh", "-c", prepare], cwd=repo, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    hook = _hooks_dir(repo) / "pre-push"
+    assert pre_push.SHIM_MARKER in hook.read_text()
+    assert hook.stat().st_mode & stat.S_IXUSR
 
 
 def test_prepare_is_silent_and_green_in_a_docker_style_tree(tmp_path: Path) -> None:

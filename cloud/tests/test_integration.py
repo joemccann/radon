@@ -170,9 +170,11 @@ class TestPathConsistency:
 
     def test_setup_vps_references_all_service_files(self, scripts_dir, services_dir):
         setup = read_text(scripts_dir / "setup-vps.sh")
+        # DS-2026-10-29-01: frozen rollback sources that no installer publishes.
+        rollback_retained = {"radon-grok-page-responder.service", "radon-grok-page-responder.timer"}
         service_files = [
             f.name for f in services_dir.iterdir()
-            if f.suffix in (".service", ".timer")
+            if f.suffix in (".service", ".timer") and f.name not in rollback_retained
         ]
         for svc in service_files:
             assert svc in setup, f"setup-vps.sh does not reference {svc}"

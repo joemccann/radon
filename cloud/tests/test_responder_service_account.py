@@ -157,7 +157,7 @@ def test_forward_handover_preserves_a_working_timer_on_each_failure(maintenance,
             raise maintenance.MaintenanceError("synthetic enable failure")
         if failure == "source-disable" and args[1:3] == ["disable", "--now"] and args[-1] == maintenance.OLD_TIMER:
             raise maintenance.MaintenanceError("synthetic disable failure")
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="loaded")
 
     if failure:
         with pytest.raises(maintenance.MaintenanceError):
@@ -293,7 +293,7 @@ def test_handover_refuses_busy_states_before_and_after_timer_disable(maintenance
             return SimpleNamespace(returncode=0, stdout=selected)
         if args[1:3] == ["disable", "--now"]:
             disabled = True
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="loaded")
 
     with pytest.raises(maintenance.MaintenanceError):
         maintenance.handover(forward=forward, runner=runner, marker=marker)
@@ -319,7 +319,7 @@ def test_handover_fails_closed_on_state_lookup_errors(maintenance, tmp_path, res
             return SimpleNamespace(returncode=status, stdout=state)
         if args[1:3] == ["disable", "--now"]:
             disabled = True
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="loaded")
 
     with pytest.raises(maintenance.MaintenanceError):
         maintenance.handover(forward=True, runner=runner, marker=marker)
@@ -368,7 +368,7 @@ def test_state_lookup_transport_errors_leave_no_candidate_timer_enabled(maintena
             return SimpleNamespace(returncode=0, stdout="inactive")
         if args[1:3] == ["disable", "--now"]:
             disabled = True
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="loaded")
 
     with pytest.raises(type(lookup_error)):
         maintenance.handover(forward=True, runner=runner, marker=tmp_path / "ready")
@@ -472,3 +472,85 @@ def test_prepare_registers_gitdir_safety_for_pickup_without_trusting_other_repos
     values = git("config", "--global", "--get-all", "safe.directory").stdout.splitlines()
     assert values == ["/synthetic/prior", str(repo), str(repo / ".git")]
     assert registrations == [str(repo), str(repo / ".git")]
+
+
+# DS-2026-10-29-01: the isolated account is the only provisioned responder.
+LEGACY_UNITS = ("radon-grok-page-responder.service", "radon-grok-page-responder.timer")
+
+
+def _uncommented(path):
+    lines = (line.split("#", 1)[0].strip() for line in path.read_text().splitlines())
+    return [line for line in lines if line]
+
+
+def test_legacy_responder_is_neither_provisioned_nor_auto_synced():
+    import re
+
+    manifest = {line.split("  ", 1)[1] for line in _uncommented(CLOUD / "config/installed-units.sha256")}
+    allowlist = set(_uncommented(CLOUD / "config/auto-sync-units.txt"))
+    setup = (CLOUD / "scripts/setup-vps.sh").read_text()
+    inventory = re.search(r"readonly SERVICE_FILES=\(.*?\n\)", setup, re.S).group(0)
+    for name in LEGACY_UNITS:
+        assert name not in manifest, "install-units would recreate the legacy responder"
+        assert name not in allowlist, "sync-scheduled-units would refresh the legacy responder"
+        assert name not in inventory.split(), "setup-vps would install and enable the legacy responder"
+        # Rollback re-enables the copy already installed on the host. The
+        # committed body stays as the reviewed source for that copy.
+        assert (CLOUD / "services" / name).is_file()
+
+
+def _handover_runner(calls, load_state):
+    def runner(args, **kwargs):
+        calls.append(args)
+        if "--property=ActiveState" in args:
+            return SimpleNamespace(returncode=0, stdout="inactive")
+        if "--property=LoadState" in args:
+            status, state = load_state
+            return SimpleNamespace(returncode=status, stdout=state + "\n")
+        return SimpleNamespace(returncode=0, stdout="")
+    return runner
+
+
+def test_forward_handover_finalizes_a_host_that_never_had_the_legacy_timer(maintenance, tmp_path, monkeypatch):
+    monkeypatch.setattr(maintenance, "atomic_root_file", lambda path, content, mode: path.write_bytes(content))
+    calls = []
+    marker = tmp_path / "ready"
+    maintenance.handover(forward=True, runner=_handover_runner(calls, (0, "not-found")), marker=marker)
+    assert marker.read_bytes() == b"ready\n"
+    assert not any(args[1:3] == ["disable", "--now"] and args[-1] == maintenance.OLD_TIMER for args in calls)
+    assert not any(args[1:3] == ["enable", "--now"] and args[-1] == maintenance.OLD_TIMER for args in calls)
+    for timer in maintenance.NEW_TIMERS:
+        assert ["/usr/bin/systemctl", "enable", "--now", timer] in calls
+
+
+@pytest.mark.parametrize("load_state", [(1, "loaded"), (0, ""), (0, "bad-setting"), (0, "masked"), (0, "loaded\nnot-found")])
+def test_forward_handover_fails_closed_on_an_unknown_legacy_load_state(maintenance, tmp_path, load_state):
+    calls = []
+    marker = tmp_path / "ready"
+    with pytest.raises(maintenance.MaintenanceError):
+        maintenance.handover(forward=True, runner=_handover_runner(calls, load_state), marker=marker)
+    assert not marker.exists()
+    assert not any(args[1:3] in (["enable", "--now"], ["disable", "--now"]) for args in calls)
+
+
+def test_absent_legacy_responder_is_not_drift_but_a_changed_copy_is(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("legacy_drift_audit", CLOUD / "scripts/drift_audit.py")
+    audit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit)
+    repo = tmp_path / "repo"
+    (repo / "services").mkdir(parents=True)
+    live = tmp_path / "systemd"
+    live.mkdir()
+    for name in (*LEGACY_UNITS, "radon-synthetic.service"):
+        (repo / "services" / name).write_text("[Service]\nExecStart=/bin/true\n")
+    (live / "radon-synthetic.service").write_text("[Service]\nExecStart=/bin/true\n")
+    monkeypatch.setattr(audit, "REPO", repo)
+    monkeypatch.setattr(audit, "SYSTEMD_DIR", live)
+    monkeypatch.setattr(audit, "OPTIONAL_RESPONDER_INVENTORY", tmp_path / "absent/installed-units.sha256")
+    monkeypatch.setattr(audit, "resolve_host_role", lambda: "combined")
+    drifts, known = [], []
+    audit._check_units(drifts, known)
+    assert drifts == []
+    (live / LEGACY_UNITS[0]).write_text("[Service]\nExecStart=/bin/false\n")
+    audit._check_units(drifts, known)
+    assert [drift["id"] for drift in drifts] == ["unit-mismatch:" + LEGACY_UNITS[0]]

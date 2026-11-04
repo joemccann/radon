@@ -98,5 +98,6 @@ sudo -u radon install -d -m 0750 /var/lib/radon/grok-runtime /var/lib/radon/grok
 bash "$SCRIPT_DIR/install-grok-upgrade-controller.sh" "$STAGED_SCRIPTS"
 
 echo "[5/5] private gateway readiness; provider login belongs to the gateway"
-echo "  then: systemctl enable --now radon-grok-page-responder.timer"
+echo "  legacy rollback target only: timer ownership moves through"
+echo "  grok_responder_account.py rollback (docs/grok-page-responder.md)"
 echo "  mutable model upgrade timers are retired; CI owns model-client versions"
