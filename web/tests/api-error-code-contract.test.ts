@@ -152,6 +152,7 @@ describe("setup routes: mode gates on the wire", () => {
   for (const pathname of Object.keys(SETUP_ROUTES)) {
     it(`${pathname} is 404 NOT_FOUND once Clerk keys exist`, async () => {
       process.env.CLERK_SECRET_KEY = "sk_live_x";
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_live_x";
       await expectWireError(
         pathname,
         { token: "tok-1", service: "clerk", services: { clerk: { CLERK_SECRET_KEY: "x" } } },
@@ -161,6 +162,15 @@ describe("setup routes: mode gates on the wire", () => {
 
     it(`${pathname} is 403 SETUP_ALREADY_COMPLETE when setup latched but auth is unloaded`, async () => {
       process.env.RADON_SETUP_COMPLETE = "1";
+      await expectWireError(
+        pathname,
+        { token: "tok-1", service: "clerk", services: { clerk: { CLERK_SECRET_KEY: "x" } } },
+        { status: 403, code: "SETUP_ALREADY_COMPLETE" },
+      );
+    });
+
+    it(`${pathname} stays closed on a partial Clerk key pair`, async () => {
+      process.env.CLERK_SECRET_KEY = "sk_live_x";
       await expectWireError(
         pathname,
         { token: "tok-1", service: "clerk", services: { clerk: { CLERK_SECRET_KEY: "x" } } },

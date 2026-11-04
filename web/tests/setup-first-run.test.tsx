@@ -194,6 +194,7 @@ describe("setup API routes", () => {
   it("hard 404 outside setup mode, wrong token 401", async () => {
     process.env.RADON_SETUP_TOKEN = "tok-1";
     process.env.CLERK_SECRET_KEY = "sk_test_x";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_x";
     const closed = await import("../app/api/setup/status/route");
     const res404 = await closed.POST(
       new Request("http://x/api/setup/status", {
@@ -204,6 +205,7 @@ describe("setup API routes", () => {
     expect(res404.status).toBe(404);
 
     delete process.env.CLERK_SECRET_KEY;
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
     vi.resetModules();
     const open = await import("../app/api/setup/status/route");
     const res401 = await open.POST(
