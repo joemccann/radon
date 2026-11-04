@@ -1152,8 +1152,8 @@ class TestMenthorQStorageStatePersistence:
 
         ctx.storage_state.assert_called_once()
         call_kwargs = ctx.storage_state.call_args.kwargs
-        assert call_kwargs.get("path") == str(ss_path), (
-            "persist_storage_state() must write to the configured storage_state_path"
+        assert call_kwargs.get("path") == str(ss_path) + ".tmp", (
+            "persist_storage_state() must stage beside the configured storage_state_path"
         )
         # Parent directory must be created lazily
         assert ss_path.parent.exists()
@@ -1232,7 +1232,7 @@ class TestMenthorQStorageStatePersistence:
         # disk so a process restart sees fresh storage state.
         ctx.storage_state.assert_called()
         path_arg = ctx.storage_state.call_args.kwargs.get("path")
-        assert path_arg == str(ss_path)
+        assert path_arg == str(ss_path) + ".tmp"  # staged, then renamed atomically
 
     def test_get_eod_persists_after_extraction(self, mock_env_creds, mock_playwright, tmp_path):
         """Successful get_eod() refreshes disk-side cookies before returning."""
@@ -1247,4 +1247,4 @@ class TestMenthorQStorageStatePersistence:
 
         ctx.storage_state.assert_called()
         path_arg = ctx.storage_state.call_args.kwargs.get("path")
-        assert path_arg == str(ss_path)
+        assert path_arg == str(ss_path) + ".tmp"  # staged, then renamed atomically

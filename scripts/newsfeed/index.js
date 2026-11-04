@@ -22,6 +22,7 @@ import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 import { createBrowser, NEWSFEED_DEFAULT_STORAGE_PATH } from "./browser.js";
 import { ensureAuthenticated } from "./auth.js";
+import { createAuthGate } from "./authGate.js";
 import { runScrapeCycle } from "./cycle.js";
 import { createDeliveryState } from "./deliveryState.js";
 
@@ -66,7 +67,7 @@ export function createScraper(overrides = {}) {
   const storageStatePath = overrides.storageStatePath || NEWSFEED_DEFAULT_STORAGE_PATH;
 
   let browserHandle = null;
-  let lastAuthAt = 0;
+  const authGate = createAuthGate({ reauthIntervalMs: REAUTH_INTERVAL_MS });
   let lastStoragePersistAt = 0;
   const deliveryState = createDeliveryState(path.join(paths.dataDir, ".delivery-state.json"));
 
@@ -92,8 +93,15 @@ export function createScraper(overrides = {}) {
 
   async function authenticateIfNeeded({ force = false } = {}) {
     const handle = await getBrowser();
-    const elapsed = Date.now() - lastAuthAt;
-    if (!force && lastAuthAt > 0 && elapsed < REAUTH_INTERVAL_MS) {
+    const decision = authGate.decide();
+    if (decision.backoffUntil !== undefined) {
+      // A failed renewal is not retried every cycle: the pre-cycle error row
+      // names the backoff until it lapses.
+      throw new Error(
+        `newsfeed auth backoff until ${new Date(decision.backoffUntil).toISOString()} after a failed renewal`,
+      );
+    }
+    if (!force && !decision.attempt) {
       // Inside the re-auth window we still want disk-side cookies to track
       // the live browser context — otherwise a process restart after the
       // cookies on disk lapse falls back onto the fragile email/password
@@ -102,12 +110,17 @@ export function createScraper(overrides = {}) {
       await persistStorageStateIfDue(handle);
       return;
     }
-    await ensureAuthenticated({
-      context: handle.context,
-      page: handle.page,
-      persistStorageState: handle.persistStorageState,
-    });
-    lastAuthAt = Date.now();
+    try {
+      await ensureAuthenticated({
+        context: handle.context,
+        page: handle.page,
+        persistStorageState: handle.persistStorageState,
+      });
+    } catch (err) {
+      authGate.failed();
+      throw err;
+    }
+    authGate.succeeded();
     lastStoragePersistAt = Date.now();
   }
 
@@ -119,7 +132,7 @@ export function createScraper(overrides = {}) {
   // because a single auth flow can take 30+ seconds and we don't want
   // to block the cycle's persist/upsert pipeline.
   function requestReauth() {
-    lastAuthAt = 0;
+    authGate.requestReauth();
   }
 
   async function persistStorageStateIfDue(handle) {

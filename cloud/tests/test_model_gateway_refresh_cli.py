@@ -67,7 +67,9 @@ def test_timer_payload_is_accepted_by_the_real_lifecycle_manager(monkeypatch):
     def rpc(operation, payload, **kwargs):
         if operation == 'refresh':
             return manager.start(payload)
-        manager.jobs[payload['job_id']].update(status='complete', exit_code=0)
+        job = manager.jobs[payload['job_id']]
+        job.status, job.exit_code, job.result = 'complete', 0, {'providers': []}
         return manager.status(payload)
     assert _module().main([], request=rpc) == 0
-    assert scheduled[0][2] == list(providers)
+    job = manager.jobs[scheduled[0][0]]
+    assert (job.mode, job.providers) == ('once', list(providers))

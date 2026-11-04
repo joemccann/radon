@@ -70,6 +70,22 @@ def note(provider: str, seconds: float, env: Mapping[str, str]) -> None:
         logger.warning("provider cooldown not persisted provider=%s", provider)
 
 
+def clear(provider: str, env: Mapping[str, str]) -> None:
+    """A provider answered: drop its process and persisted cooldown.
+
+    Extend-only writes mean a cooldown can only grow; a success is the one
+    event that proves the reset already happened.
+    """
+    _until.pop(provider, None)
+    path = state_path(env)
+    if provider not in _read(path):
+        return  # The common case: no lock, no write on every answer.
+    try:
+        _rewrite(path, lambda data: data.pop(provider, None))
+    except OSError:
+        logger.warning("provider cooldown not cleared provider=%s", provider)
+
+
 def rate_limited(provider: str, env: Mapping[str, str]) -> bool:
     now = _now()
     if _until.get(provider, 0.0) > now:
@@ -145,8 +161,17 @@ def _read(path: Path) -> dict:
 
 
 def _persist(provider: str, until: float, env: Mapping[str, str]) -> None:
+    """Extend-only: a shorter reset never replaces a longer persisted one."""
     path = state_path(env)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    def extend(data: dict) -> None:
+        data[provider] = max(data.get(provider, 0.0), until)
+
+    _rewrite(path, extend)
+
+
+def _rewrite(path: Path, change) -> None:
     lock_path = path.with_suffix(path.suffix + ".lock")
     with open(lock_path, "a", encoding="utf-8") as lock:
         if fcntl is not None:
@@ -157,7 +182,7 @@ def _persist(provider: str, until: float, env: Mapping[str, str]) -> None:
             for key, value in _read(path).items()
             if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value) > now
         }
-        data[provider] = until
+        change(data)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(data), encoding="utf-8")
         os.chmod(temporary, 0o600)

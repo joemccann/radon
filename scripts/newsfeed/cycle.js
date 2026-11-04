@@ -98,6 +98,20 @@ export async function runScrapeCycle(deps) {
     }
   };
 
+  // `ok` means every delivery landed: no paywall regression and neither the
+  // DB nor the media mirror still dirty. Every branch heartbeats through here.
+  const heartbeatIfClean = async () => {
+    if (paywallDetected || deliveryState.dbDirty || deliveryState.mediaDirty) return;
+    try {
+      await recordServiceHealth("newsfeed-scraper", "ok", {
+        startedAt: cycleStartIso,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn(`[newsfeed] heartbeat write failed: ${err.message}`);
+    }
+  };
+
   if (items.length === 0) {
     // Heartbeat even on truly-empty cycles. Without this, a stale `error`
     // row in service_health (e.g. yesterday's WalConflict) latches the
@@ -136,16 +150,7 @@ export async function runScrapeCycle(deps) {
         }
       }
     }
-    if (!paywallDetected && !deliveryState.dbDirty && !deliveryState.mediaDirty) {
-      try {
-        await recordServiceHealth("newsfeed-scraper", "ok", {
-          startedAt: cycleStartIso,
-          finishedAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn(`[newsfeed] heartbeat write failed: ${err.message}`);
-      }
-    }
+    await heartbeatIfClean();
     console.info(
       `[newsfeed] cycle empty paywalled=${paywalledItems.length} ms=${Date.now() - cycleStart}`,
     );
@@ -187,15 +192,6 @@ export async function runScrapeCycle(deps) {
         await upsertPosts(merged);
         dbWrites += 1;
         await persistDeliveryState({ dbDirty: false });
-        // Preserve the paywall `error` row written upstream — overwriting
-        // it with `ok` here would hide a partial-paywall regression from
-        // the banner. The next clean cycle resolves it back to ok.
-        if (!paywallDetected) {
-          await recordServiceHealth("newsfeed-scraper", "ok", {
-            startedAt: cycleStartIso,
-            finishedAt: new Date().toISOString(),
-          });
-        }
       } catch (err) {
         console.warn(`[newsfeed] db dual-write non-fatal: ${err.message}`);
         try {
@@ -223,6 +219,9 @@ export async function runScrapeCycle(deps) {
       : Promise.resolve();
 
     await Promise.all([upsertTask, pushTask]);
+    // Preserve a paywall `error` row and a pending media push: `ok` only once
+    // both deliveries have landed (heartbeatIfClean).
+    await heartbeatIfClean();
   }
 
   // Pass 2 — slow tag hydration. Runs after the dashboard has already
@@ -265,16 +264,7 @@ export async function runScrapeCycle(deps) {
   // cycle already wrote an `error` row for a paywall detection — we don't
   // want the heartbeat to mask the regression.
   if (!changed && !imagesUpdated && !tagsUpdated) {
-    if (!paywallDetected && !deliveryState.dbDirty && !deliveryState.mediaDirty) {
-      try {
-        await recordServiceHealth("newsfeed-scraper", "ok", {
-          startedAt: cycleStartIso,
-          finishedAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn(`[newsfeed] heartbeat write failed: ${err.message}`);
-      }
-    }
+    await heartbeatIfClean();
     console.info(
       `[newsfeed] cycle nochange N=${merged.length} paywalled=${paywalledItems.length} ms=${Date.now() - cycleStart}`,
     );
