@@ -86,6 +86,8 @@ const DEFAULT_VALUE: RealtimePricesValue = {
   tape: {},
   connected: false,
   ibConnected: false,
+  // Fail closed: no provider means no evidence the requested data is healthy.
+  marketDataDegraded: true,
   ibIssue: null,
   ibStatusMessage: null,
   error: null,
@@ -216,6 +218,7 @@ export function RealtimePricesProvider({ children }: { children: ReactNode }) {
         ...demoSample,
         connected: false,
         ibConnected: false,
+        marketDataDegraded: false,
         ibIssue: null,
         ibStatusMessage: null,
         error: null,
