@@ -19,8 +19,11 @@
  * Shrink linger: a remounting shell first publishes while its portfolio/orders
  * inputs are still re-resolving, which would unsubscribe every held symbol and
  * resubscribe seconds later — a snapshot resync through the side door. Growth
- * applies immediately; removals commit only once the desired set has been
- * stable for SUBSCRIPTION_SHRINK_LINGER_MS. Depth subjects are exempt: they
+ * applies immediately; the first shrink opens a SUBSCRIPTION_SHRINK_LINGER_MS
+ * window during which the set that was streaming when the window opened (the
+ * baseline) stays applied alongside the latest publish. The window closes on
+ * its original deadline and commits whatever is desired then
+ * (`subscriptionLingerTransition`). Depth subjects are exempt: they
  * are a scarce relay resource (~3 tickets) and always track the latest publish
  * exactly.
  *
@@ -134,16 +137,90 @@ const requestKey = (r: RealtimeSubscriptionRequest) =>
   "|" + [...r.depthSymbols].sort().join(",") +
   "|" + (r.depthExpiry ?? "");
 
+/** Shrink-linger machine. `settled`: the wire carries exactly the desired
+ *  set. `lingering`: a shrink is pending; the wire carries baseline ∪ desired,
+ *  where baseline is frozen at the moment the window opened. Freezing it keeps
+ *  every subject that was streaming before the churn alive for the whole
+ *  window (A→B→C no longer drops A on the C publish) while bounding the
+ *  applied set to two publishes' worth (REL-197 / R-563: never an
+ *  accumulated union across windows). */
+export type SubscriptionLingerState =
+  | { phase: "settled"; applied: RealtimeSubscriptionRequest }
+  | {
+      phase: "lingering";
+      baseline: RealtimeSubscriptionRequest;
+      desired: RealtimeSubscriptionRequest;
+      applied: RealtimeSubscriptionRequest;
+    };
+
+export type SubscriptionLingerEvent =
+  | { type: "publish"; next: RealtimeSubscriptionRequest }
+  /** The window's deadline passed: commit the desired set. */
+  | { type: "expire" };
+
+function withBaseline(
+  baseline: RealtimeSubscriptionRequest,
+  next: RealtimeSubscriptionRequest,
+): RealtimeSubscriptionRequest {
+  return {
+    symbols: unionBy(baseline.symbols, next.symbols, (s) => s),
+    contracts: unionBy(baseline.contracts, next.contracts, optionKey),
+    indexes: unionBy(baseline.indexes, next.indexes, indexKeyOf),
+    depthSymbol: next.depthSymbol,
+    depthSymbols: next.depthSymbols,
+    depthExpiry: next.depthExpiry,
+  };
+}
+
+export function subscriptionLingerTransition(
+  state: SubscriptionLingerState,
+  event: SubscriptionLingerEvent,
+): SubscriptionLingerState {
+  if (event.type === "expire") {
+    return state.phase === "lingering" ? { phase: "settled", applied: state.desired } : state;
+  }
+  const { next } = event;
+  const baseline = state.phase === "lingering" ? state.baseline : state.applied;
+  const applied = withBaseline(baseline, next);
+  if (sameL1Set(applied, next)) {
+    // Nothing would be removed (pure growth, or the churn came back to a
+    // superset of the baseline): the window, if any, has nothing to protect.
+    return { phase: "settled", applied: next };
+  }
+  return { phase: "lingering", baseline, desired: next, applied };
+}
+
 export function RealtimePricesProvider({ children }: { children: ReactNode }) {
   const getToken = useRealtimeAuth();
   const demoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
   const [applied, setApplied] = useState<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
   const [demoClock, setDemoClock] = useState(() => new Date());
-  const appliedRef = useRef<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
-  const desiredRef = useRef<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
+  const lingerRef = useRef<SubscriptionLingerState>({ phase: "settled", applied: EMPTY_REQUEST });
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const desiredKeyRef = useRef<string>(requestKey(EMPTY_REQUEST));
+
+  const applyLinger = useCallback((event: SubscriptionLingerEvent) => {
+    const prev = lingerRef.current;
+    const next = subscriptionLingerTransition(prev, event);
+    lingerRef.current = next;
+    if (next.applied !== prev.applied) setApplied(next.applied);
+    if (next.phase === "settled" && shrinkTimerRef.current !== null) {
+      clearTimeout(shrinkTimerRef.current);
+      shrinkTimerRef.current = null;
+    }
+    // The deadline is MONOTONIC: armed when a window opens, never re-armed by
+    // a later publish inside it, so a desired set changing faster than the
+    // linger still commits its unsubscribes within one window.
+    if (next.phase === "lingering" && shrinkTimerRef.current === null) {
+      shrinkTimerRef.current = setTimeout(() => {
+        shrinkTimerRef.current = null;
+        applyLingerRef.current({ type: "expire" });
+      }, SUBSCRIPTION_SHRINK_LINGER_MS);
+    }
+  }, []);
+  const applyLingerRef = useRef(applyLinger);
+  applyLingerRef.current = applyLinger;
 
   const publishSubscriptions = useCallback((next: RealtimeSubscriptionRequest) => {
     // Content-identical republish (a consumer re-rendered with fresh array
@@ -152,35 +229,8 @@ export function RealtimePricesProvider({ children }: { children: ReactNode }) {
     const nextKey = requestKey(next);
     if (nextKey === desiredKeyRef.current) return;
     desiredKeyRef.current = nextKey;
-    // REL-197 (R-563): the linger unions against the PREVIOUS DESIRED set,
-    // never the previously-grown applied set — unioning against applied
-    // compounded every page's symbols for the life of the churn and pushed
-    // the relay past the IB market-data line cap. And the timer deadline is
-    // MONOTONIC: it is never re-armed by a later publish, so a desired set
-    // changing faster than the linger still commits its unsubscribes within
-    // one window (the callback applies whatever is desired when it fires).
-    const previousDesired = desiredRef.current;
-    desiredRef.current = next;
-    const grown: RealtimeSubscriptionRequest = {
-      symbols: unionBy(previousDesired.symbols, next.symbols, (s) => s),
-      contracts: unionBy(previousDesired.contracts, next.contracts, optionKey),
-      indexes: unionBy(previousDesired.indexes, next.indexes, indexKeyOf),
-      depthSymbol: next.depthSymbol,
-      depthSymbols: next.depthSymbols,
-      depthExpiry: next.depthExpiry,
-    };
-    const shrinkPending = !sameL1Set(grown, next);
-    const toApply = shrinkPending ? grown : next;
-    appliedRef.current = toApply;
-    setApplied(toApply);
-    if (shrinkPending && shrinkTimerRef.current === null) {
-      shrinkTimerRef.current = setTimeout(() => {
-        shrinkTimerRef.current = null;
-        appliedRef.current = desiredRef.current;
-        setApplied(desiredRef.current);
-      }, SUBSCRIPTION_SHRINK_LINGER_MS);
-    }
-  }, []);
+    applyLinger({ type: "publish", next });
+  }, [applyLinger]);
 
   useEffect(() => () => {
     if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current);

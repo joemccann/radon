@@ -268,6 +268,43 @@ describe("RealtimePricesProvider — connection survives page navigation", () =>
     expect(wsInstances).toHaveLength(1);
   });
 
+  it("A -> B -> C inside one linger window keeps A streaming until the window closes", async () => {
+    // Audit 2026-11-03 §3.5: the linger unioned against the PREVIOUS DESIRED
+    // set, so a two-stage re-resolve (empty, then orders-only, then full)
+    // dropped the held set on the second publish: the exact flap the linger
+    // exists to prevent.
+    const view = render(
+      <RealtimePricesProvider>
+        <PageShell key="portfolio" request={requestOf(["PLTR", "MSFT", "NVDA"])} />
+      </RealtimePricesProvider>,
+    );
+    await flush();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+
+    for (const symbols of [[], ["NVDA"]]) {
+      view.rerender(
+        <RealtimePricesProvider>
+          <PageShell key="orders" request={requestOf(symbols)} />
+        </RealtimePricesProvider>,
+      );
+      await flush();
+      await advance(1_000);
+    }
+    expect(sentMessages(ws).filter((m) => m.action === "unsubscribe")).toHaveLength(0);
+
+    view.rerender(
+      <RealtimePricesProvider>
+        <PageShell key="orders" request={requestOf(["PLTR", "MSFT", "NVDA"])} />
+      </RealtimePricesProvider>,
+    );
+    await flush();
+    await advance(SUBSCRIPTION_SHRINK_LINGER_MS + 1_000);
+
+    expect(sentMessages(ws).filter((m) => m.action === "unsubscribe")).toHaveLength(0);
+    expect(sentMessages(ws).filter((m) => m.action === "subscribe")).toHaveLength(1);
+  });
+
   it("a genuine drop still reconnects with backoff and a fresh ticket", async () => {
     render(
       <RealtimePricesProvider>
