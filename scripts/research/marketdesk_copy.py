@@ -185,6 +185,42 @@ class CopyOutage(CopyUnavailable):
     transient = True
 
 
+_STORED_ERROR_CAP = 300
+
+
+def _rejection_reasons(rejected: list[tuple[list[str], dict]]) -> str:
+    """Short copy_problems codes. No draft body, no source text."""
+    tokens: list[str] = []
+    for problems, _draft in rejected:
+        for problem in problems:
+            token = safe_error_message(RuntimeError(str(problem)), max_len=64)
+            if not token or token == "RuntimeError" or token in tokens:
+                continue
+            tokens.append(token)
+            if len(tokens) >= 8:
+                break
+        if len(tokens) >= 8:
+            break
+    text = ", ".join(tokens)
+    if len(text) > 180:
+        text = text[:177] + "..."
+    return text
+
+
+def _with_rejection_reasons(exc: BaseException, rejected: list[tuple[list[str], dict]]) -> str:
+    reasons = _rejection_reasons(rejected)
+    if not reasons:
+        return safe_error_message(exc)
+    head = "copy_rejected: " + reasons
+    detail = safe_error_message(exc)
+    room = _STORED_ERROR_CAP - len(head) - 2
+    if not detail or room < 24:
+        return head[:_STORED_ERROR_CAP]
+    if len(detail) > room:
+        detail = detail[: room - 3] + "..."
+    return f"{head}; {detail}"
+
+
 def _every_rung_rejected(message: str) -> bool:
     """True when every tried rung answered and failed validation: a content verdict, not an outage."""
     match = re.search(r"tried=([^;]*);", message)
@@ -533,8 +569,11 @@ def write_copy(
         result = _repair(ask, instruction, rejected)
         if result is None:
             if _every_rung_rejected(str(exc)):  # classify on the full text; the safe message is truncated
+                reasons = _rejection_reasons(rejected)
+                if reasons:
+                    raise CopyUnavailable(_with_rejection_reasons(exc, rejected)) from None
                 raise CopyUnavailable("copy_rejected: every rung failed validation") from None
-            raise CopyOutage(safe_error_message(exc)) from None
+            raise CopyOutage(_with_rejection_reasons(exc, rejected)) from None
     except ModelResponseError as exc:
         raise CopyUnavailable(safe_error_message(exc)) from None
 
