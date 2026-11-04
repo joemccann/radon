@@ -12210,3 +12210,15 @@ Audited through: ab4e6b45315f642423da6bb71a6be8a8e6010be4 on 2026-11-04 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-583 | DONE | Existing allowlist case stayed 1 passed after deleting `CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}` from ExecStart. New interpolation assert failed that mutation (`AssertionError: CLERK_AUTHORIZED_PARTIES`, 1 failed / 1 passed). Dropping the name from all three `MCP_ENV_KEYS` failed `test_every_writer_derives_the_same_key_subset`. Restored product source. Focused `test_rel194_mcp_unit.py` + `test_mcp_env_ownership.py`: 20 passed / 2 skipped (GNU `mv -T` absent). Product source unchanged. |
+
+### Closing gates 2026-11-04
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had one xdist load flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially each time. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other and as origin/main `ab4e6b45` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `ab4e6b45` |
+|---|---|---|---|---|
+| 1 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (129.75s) | 11,610 passed / 21 skipped / 1,184 files (48.06s) | 42 failed / 3,976 passed / 23 skipped (980.70s) | 0 added / 0 removed |
+| 2 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (146.52s) | 11,610 passed / 21 skipped / 1,184 files (88.54s) | 42 failed / 3,976 passed / 23 skipped (1032.59s) | 0 added / 0 removed |
+| 3 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (264.80s) | 11,610 passed / 21 skipped / 1,184 files (118.70s) | 42 failed / 3,976 passed / 23 skipped (1042.04s) | 0 added / 0 removed |
+
+Base cloud at `ab4e6b45` on this Mac (standing sweep before the test commit; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (952.28s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
