@@ -31,6 +31,7 @@ import BottomSheet from "./BottomSheet";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import { placeOrderFeedback, type PlaceOrderFeedback } from "@/lib/orders/placeOrderFeedback";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 import {
   type IbOrderType,
   IB_ORDER_TYPES,
@@ -167,9 +168,11 @@ export default function MobileOrderTicket({
   const [stopPriceText, setStopPriceText] = useState<string>("");
   const [limitPriceText, setLimitPriceText] = useState<string>("");
   const [priceManuallySet, setPriceManuallySet] = useState(false);
-  const [confirmStep, setConfirmStep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const inFlightRef = useRef(false);
+  // The post-placement auto-close. Tracked so closing the sheet (or
+  // unmounting) cancels it instead of letting it fire into a reopened ticket.
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<PlaceOrderFeedback | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
@@ -241,16 +244,9 @@ export default function MobileOrderTicket({
     return `${ticker} ${structure || "Combo"} NET`;
   }, [isCombo, legs, ticker, structure]);
 
-  // Auto-populate to mid on first availability + on structure changes.
-  useEffect(() => {
-    if (priceManuallySet) return;
-    if (signedQuote.mid == null) return;
-    setLimitPriceText(signedQuote.mid.toFixed(2));
-  }, [signedQuote.mid, priceManuallySet]);
-
-  // Reset manual-set AND the confirm step when the leg structure changes
-  // (action/right/strike/qty differ). Any structural edit must drop the
-  // operator back to the build view so they re-review — mirrors desktop.
+  // Reset manual-set when the leg structure changes (action/right/strike/qty
+  // differ). The confirm step needs no reset here: the legs are part of the
+  // armed payload key, so any structural edit already disarms.
   const structureKey = useMemo(
     () => legs.map((l) => `${l.action}-${l.right}-${l.strike}-${l.expiry}-${l.quantity}`).join("|"),
     [legs],
@@ -260,11 +256,7 @@ export default function MobileOrderTicket({
     if (structureKey === lastStructureRef.current) return;
     lastStructureRef.current = structureKey;
     setPriceManuallySet(false);
-    setConfirmStep(false);
   }, [structureKey, lastStructureRef]);
-
-  // Any edit to price or TIF must also invalidate the confirm step.
-  const resetConfirm = () => setConfirmStep(false);
 
   const parsedPrice = parseFloat(limitPriceText);
   const parsedStop = parseFloat(stopPriceText);
@@ -282,6 +274,81 @@ export default function MobileOrderTicket({
         ? Math.abs(parsedPrice)
         : -Math.abs(parsedPrice)
     : NaN;
+
+  // The exact request Send would POST right now. Review arms for its key, and
+  // any change (a quote-driven price, a leg, TIF, order type) disarms.
+  const orderBody = useMemo(() => {
+    if (!isValid) return null;
+    if (isCombo) {
+      const comboOrder = normalizedOrder ?? normalizeComboOrder(legs);
+      return {
+        type: "combo",
+        symbol: ticker,
+        action: getComboEntryAction(comboOrder.legs),
+        quantity: totalQty,
+        limitPrice: signedLimitPrice,
+        tif,
+        legs: comboOrder.legs.map((l) => ({
+          symbol: ticker,
+          secType: "OPT",
+          expiry: normalizeOptionExpiry(l.expiry) ?? l.expiry,
+          strike: l.strike,
+          right: l.right === "C" ? "CALL" : "PUT",
+          action: l.action,
+          ratio: l.quantity,
+          ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
+        })),
+      };
+    }
+    return {
+      type: "option",
+      symbol: ticker,
+      action: legs[0].action,
+      quantity: legs[0].quantity,
+      tif,
+      expiry: normalizeOptionExpiry(legs[0].expiry) ?? legs[0].expiry,
+      strike: legs[0].strike,
+      right: legs[0].right === "C" ? "CALL" : "PUT",
+      ...ibPlaceFields(orderType, parsedPrice, parsedStop),
+    };
+  }, [isValid, isCombo, normalizedOrder, legs, ticker, totalQty, signedLimitPrice, tif, orderType, parsedPrice, parsedStop]);
+  const payloadKey = useMemo(
+    () => (orderBody == null ? null : canonicalPayloadKey({ url: "/api/orders/place", body: orderBody })),
+    [orderBody],
+  );
+  const confirm = useArmedConfirm(payloadKey);
+  const confirmStep = confirm.armed;
+  const { arm, disarm } = confirm;
+  // Any edit to price or TIF must also invalidate the confirm step.
+  const resetConfirm = disarm;
+
+  // Auto-populate to mid on first availability + on structure changes.
+  // Frozen while armed: the reviewed price is the one that is sent.
+  useEffect(() => {
+    if (confirmStep) return;
+    if (priceManuallySet) return;
+    if (signedQuote.mid == null) return;
+    setLimitPriceText(signedQuote.mid.toFixed(2));
+  }, [signedQuote.mid, priceManuallySet, confirmStep]);
+
+  // Closing the sheet ends the ticket session: no armed review, stale
+  // success/error or pending auto-close survives into the next open.
+  useEffect(() => {
+    if (open) return;
+    if (closeTimerRef.current != null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    disarm();
+    setSuccess(null);
+    setError(null);
+  }, [open, disarm]);
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current != null) clearTimeout(closeTimerRef.current);
+    },
+    [],
+  );
 
   // Single-leg close-out detection. Multi-leg combos stay OPEN (Phase-1 scope
   // limit). A SELL against a held LONG (>= qty) is a SELL-to-close; a BUY
@@ -430,10 +497,10 @@ export default function MobileOrderTicket({
     return { sentence: parts.length > 0 ? `${parts.join(" ")}.` : "Loss grows without limit." };
   }, [gateRiskState, payoffLegs, legs.length, signedLimitPrice, spot, totalQty, contractMultiplier]);
 
-  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
-  useEffect(() => {
-    setRiskAcknowledged(false);
-  }, [confirmStep, signedLimitPrice, totalQty, legs.length]);
+  // Belongs to the armed payload: any change to the order drops it, a quote
+  // tick does not.
+  const riskAcknowledged = confirm.acknowledged;
+  const setRiskAcknowledged = confirm.setAcknowledged;
 
   const transmitArmed = unboundedLoss == null || riskAcknowledged;
 
@@ -466,7 +533,7 @@ export default function MobileOrderTicket({
   const handleSubmit = async () => {
     // First tap only advances to confirm (mirror PositionTradeTicket): the
     // Review button sets confirmStep; handleSubmit never places until then.
-    if (!confirmStep) return;
+    if (!confirmStep || orderBody == null) return;
     if (!isValid || !okToSubmit) return;
     // Defence in depth, same as the desktop rail: the disabled button is UI,
     // this is the actual gate. An unbounded-risk order never reaches the wire
@@ -480,42 +547,10 @@ export default function MobileOrderTicket({
     setError(null);
     setSuccess(null);
     try {
-      const comboOrder = normalizedOrder ?? normalizeComboOrder(legs);
-      const body = isCombo
-        ? {
-            type: "combo",
-            symbol: ticker,
-            action: getComboEntryAction(comboOrder.legs),
-            quantity: totalQty,
-            limitPrice: signedLimitPrice,
-            tif,
-            legs: comboOrder.legs.map((l) => ({
-              symbol: ticker,
-              secType: "OPT",
-              expiry: normalizeOptionExpiry(l.expiry) ?? l.expiry,
-              strike: l.strike,
-              right: l.right === "C" ? "CALL" : "PUT",
-              action: l.action,
-              ratio: l.quantity,
-              ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
-            })),
-          }
-        : {
-            type: "option",
-            symbol: ticker,
-            action: legs[0].action,
-            quantity: legs[0].quantity,
-            tif,
-            expiry: normalizeOptionExpiry(legs[0].expiry) ?? legs[0].expiry,
-            strike: legs[0].strike,
-            right: legs[0].right === "C" ? "CALL" : "PUT",
-            ...ibPlaceFields(orderType, parsedPrice, parsedStop),
-          };
-
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(orderBody),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -526,13 +561,15 @@ export default function MobileOrderTicket({
           `Placed ${structure || "Order"} on ${ticker} @ ${fmtPrice(reviewPrice)}`,
         );
         setSuccess(feedback);
-        setConfirmStep(false);
+        disarm();
         // Keep the message visible while the user reads it; clear legs +
         // close the sheet together after a brief delay so the parent doesn't
         // unmount us prematurely (the parent open flag depends on legs.length).
         // A suppressed duplicate needs longer: the operator must register that
         // the order was NOT sent again before the sheet disappears.
-        setTimeout(() => {
+        if (closeTimerRef.current != null) clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = setTimeout(() => {
+          closeTimerRef.current = null;
           onClearLegs();
           onClose();
         }, feedback.deduplicated ? 4_000 : 800);
@@ -616,7 +653,7 @@ export default function MobileOrderTicket({
         <button
           type="button"
           className="mobile-ticket__back tap-target"
-          onClick={() => setConfirmStep(false)}
+          onClick={disarm}
           disabled={submitting}
           data-testid="mobile-order-ticket-back"
         >
@@ -666,7 +703,7 @@ export default function MobileOrderTicket({
         <button
           type="button"
           className={`mobile-ticket__submit${submitColorClass ? ` ${submitColorClass}` : ""}`}
-          onClick={() => setConfirmStep(true)}
+          onClick={arm}
           disabled={!isValid || legs.length === 0}
           data-testid="mobile-order-ticket-review"
         >
