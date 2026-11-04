@@ -10,6 +10,7 @@ import { isCriDataStale } from "@/lib/criStaleness";
 import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { isSkewCacheFresh, matchesInternalsSkewVariant } from "@/lib/internalsSkewCache";
 import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
@@ -451,8 +452,6 @@ function normalizeCriPayload(
   };
 }
 
-let bgScanInFlight = false;
-
 /** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
  *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
 async function readLatestCri(): Promise<{ data: object; path: string } | null> {
@@ -581,24 +580,23 @@ async function isCacheStale(filePath: string, data: Record<string, unknown>): Pr
 }
 
 /** Fire-and-forget: run CRI scan via FastAPI and save results */
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-
-  console.log("[CRI] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 })
-    .then(async (data) => {
-      await mkdir(SCHEDULED_DIR, { recursive: true });
-      const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
-        .replace(" ", "T").slice(0, 16).replace(":", "-");
-      const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
-      const payload = JSON.stringify(data, null, 2);
-      await writeFile(outPath, payload);
-      console.log(`[CRI] Background scan complete → ${outPath}`);
-    })
-    .catch((err) => { console.error("[CRI] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
+async function runCriScanAndArchive(): Promise<void> {
+  const data = await radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 });
+  await mkdir(SCHEDULED_DIR, { recursive: true });
+  const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
+    .replace(" ", "T").slice(0, 16).replace(":", "-");
+  const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
+  await writeFile(outPath, JSON.stringify(data, null, 2));
+  console.log(`[CRI] Background scan archived → ${outPath}`);
 }
+
+// One CRI machine with /api/regime (sharedKey "cri"): both routes revalidate
+// the same /regime/scan, so a scan in flight or backing off in one gates both.
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "CRI",
+  run: runCriScanAndArchive,
+  sharedKey: "cri",
+});
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
