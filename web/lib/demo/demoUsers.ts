@@ -152,6 +152,24 @@ export async function extendDemoUser(params: {
   });
 }
 
+/**
+ * Compensating write: put a row's lifecycle fields back to a prior snapshot
+ * after the Clerk half of an operator action failed (adminActions.ts).
+ */
+export async function restoreDemoUserState(params: {
+  db: DemoDbClient;
+  userId: string;
+  prior: Pick<DemoUserRow, "expires_at" | "status" | "revoked_at">;
+}): Promise<void> {
+  const { db, userId, prior } = params;
+  await db.execute({
+    sql: `UPDATE demo_users
+          SET expires_at = ?, status = ?, revoked_at = ?
+          WHERE user_id = ?`,
+    args: [prior.expires_at, prior.status, prior.revoked_at, userId],
+  });
+}
+
 /** Per-endpoint AI burn for one user today (ET) — for the operator panel. */
 export async function getDemoUserAiUsage(
   db: DemoDbClient,

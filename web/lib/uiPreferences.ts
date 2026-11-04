@@ -24,6 +24,9 @@ export type UiPreferences = {
 const FLUSH_DELAY_MS = 800;
 
 let cache: UiPreferences | null = null;
+// Hydration is tracked apart from `cache`: a save before hydrate fills the
+// cache with local values only, and must not read as "server copy merged".
+let hydrated = false;
 let hydratePromise: Promise<UiPreferences> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -72,7 +75,7 @@ export function mergeUiPreferences(
 }
 
 export function hydrateUiPreferences(): Promise<UiPreferences> {
-  if (cache) return Promise.resolve(cache);
+  if (hydrated && cache) return Promise.resolve(cache);
   if (!hydratePromise) {
     // Start inside the chain so a fetch that throws synchronously (strict
     // test doubles, broken polyfills) lands in the catch below instead of
@@ -86,6 +89,7 @@ export function hydrateUiPreferences(): Promise<UiPreferences> {
       })
       .then((prefs) => {
         cache = mergeUiPreferences(cache, prefs);
+        hydrated = true;
         return cache ?? {};
       })
       .catch(() => {
@@ -106,6 +110,9 @@ function scheduleFlush(): void {
 
 async function flushUiPreferences(): Promise<void> {
   if (!cache) return;
+  // Merge the server copy first (local wins per key) so a save-only session
+  // does not PUT without the server's other preferences.
+  await hydrateUiPreferences();
   try {
     await fetch("/api/profile", {
       method: "PUT",
@@ -135,6 +142,7 @@ export function saveUiColumns(tableId: string, visible: Record<string, boolean>)
 /** Test-only: reset module state between cases. */
 export function __resetUiPreferencesForTests(): void {
   cache = null;
+  hydrated = false;
   hydratePromise = null;
   if (flushTimer) clearTimeout(flushTimer);
   flushTimer = null;
@@ -143,4 +151,5 @@ export function __resetUiPreferencesForTests(): void {
 /** Test-only: seed the in-memory cache without a network round-trip. */
 export function __seedUiPreferencesForTests(prefs: UiPreferences): void {
   cache = prefs;
+  hydrated = true;
 }

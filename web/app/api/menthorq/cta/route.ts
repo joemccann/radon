@@ -339,6 +339,11 @@ function triggerBackgroundSync(expectedDate: string): void {
     bgSyncInFlight = false;
   };
 
+  // The flag clears ONLY when the child is gone (close / spawn error). A
+  // wall-clock reset let the next stale poll spawn a second sync against the
+  // same lock and status file while the first was still running. Node emits
+  // "close" for every exit, including a signal kill, so a dead child always
+  // reopens the gate; a hung one keeps it shut, which is the point.
   if (typeof child.on === "function") {
     child.on("close", (code: number | null) => {
       if (code !== 0) {
@@ -355,7 +360,6 @@ function triggerBackgroundSync(expectedDate: string): void {
       clearInFlight();
     });
   }
-  setTimeout(clearInFlight, 30_000);
 
   if (typeof (child as { unref?: () => void }).unref === "function") {
     (child as { unref: () => void }).unref();

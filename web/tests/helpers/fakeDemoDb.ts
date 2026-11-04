@@ -57,6 +57,14 @@ export function makeFakeDemoDb(): FakeDemoDb {
         return { rows: [] };
       }
 
+      if (sql.includes("UPDATE demo_users") && sql.includes("status = ?, revoked_at = ?")) {
+        const [expires_at, status, revoked_at, user_id] =
+          a as [string | null, DemoUserRow["status"], string | null, string];
+        const row = users.get(user_id);
+        if (row) users.set(user_id, { ...row, expires_at, status, revoked_at });
+        return { rows: [] };
+      }
+
       if (sql.includes("UPDATE demo_users") && sql.includes("status = 'revoked'")) {
         const [revoked_at, user_id] = a as string[];
         const row = users.get(user_id);

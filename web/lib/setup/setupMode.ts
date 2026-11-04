@@ -12,17 +12,33 @@
 
 import { isSetupCompleteFlagSet } from "@/lib/setup/setupCompleteFlag";
 
-function clerkKeysAbsent(
-  publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-  secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
-): boolean {
-  return !(publishableKey || "").trim() && !(secretKey || "").trim();
-}
-
 export function isSetupComplete(
   setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
 ): boolean {
   return isSetupCompleteFlagSet(setupCompleteFlag);
+}
+
+/**
+ * The setup lifecycle, derived in ONE place so the gates are mutually
+ * exclusive and exhaustive:
+ *
+ *   setup          no Clerk key and the wizard has not latched
+ *   misconfigured  latched without keys, OR a partial key pair (either key
+ *                  alone cannot run Clerk, and must not fall through to it)
+ *   configured     both keys present
+ */
+export type SetupPhase = "setup" | "misconfigured" | "configured";
+
+export function resolveSetupPhase(
+  publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
+  setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
+): SetupPhase {
+  const hasPk = Boolean((publishableKey || "").trim());
+  const hasSk = Boolean((secretKey || "").trim());
+  if (hasPk && hasSk) return "configured";
+  if (hasPk || hasSk) return "misconfigured";
+  return isSetupComplete(setupCompleteFlag) ? "misconfigured" : "setup";
 }
 
 export function isSetupMode(
@@ -30,17 +46,16 @@ export function isSetupMode(
   secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
   setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
 ): boolean {
-  if (isSetupComplete(setupCompleteFlag)) return false;
-  return clerkKeysAbsent(publishableKey, secretKey);
+  return resolveSetupPhase(publishableKey, secretKey, setupCompleteFlag) === "setup";
 }
 
-/** Wizard finished but Clerk keys are not loaded in this process yet. */
+/** Clerk keys are not fully loaded in this process: latched without keys, or a partial pair. */
 export function isAuthMisconfigured(
   publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
   setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
 ): boolean {
-  return isSetupComplete(setupCompleteFlag) && clerkKeysAbsent(publishableKey, secretKey);
+  return resolveSetupPhase(publishableKey, secretKey, setupCompleteFlag) === "misconfigured";
 }
 
 export const SETUP_PAGE_PATH = "/setup";
