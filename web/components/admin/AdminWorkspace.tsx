@@ -80,7 +80,8 @@ function useSingleFlight(load: () => Promise<void>): { poll: () => void; refresh
     try {
       for (;;) {
         await load();
-        if (state.current !== "rerunQueued") break;
+        // A refresh may have queued a rerun while load() was awaiting.
+        if ((state.current as FlightState) !== "rerunQueued") break;
         state.current = "running";
       }
     } finally {
