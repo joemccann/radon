@@ -22,10 +22,10 @@ type HaltState = {
 type PendingAction = "halt" | "resume" | "cancel-all" | "kill" | null;
 
 /**
- * What the operator may act on. Halt is only offered on a fresh `active`
- * observation and Resume only on a fresh `halted` one; a pending, failed or
- * stale probe is `unknown` and arms neither, so a last-known value can never
- * pick the action.
+ * What the operator may act on. Resume is only offered on a fresh `halted`
+ * observation; a pending, failed or stale probe is `unknown`, so a last-known
+ * value can never arm it. Halt is the fail-safe direction and idempotent
+ * server-side, so it stays armed unless a fresh observation says `halted`.
  */
 type TradingStatus =
   | { kind: "unknown" }
@@ -43,11 +43,7 @@ function deriveTradingStatus(
   return observed.halted ? { kind: "halted", reason: observed.reason ?? null } : { kind: "active" };
 }
 
-/** AdminWorkspace's shared command lock; resolves `false` when it refuses. */
-type RunCommand = <T>(command: () => Promise<T>) => Promise<T | false>;
-
 const UNKNOWN_STATUS_REASON = "Trading status is unknown. Waiting for a fresh observation.";
-const LOCKED_REASON = "Another command is in progress.";
 
 /**
  * Emergency trading controls (REL-029 / R-053): the browser affordance for
@@ -55,17 +51,10 @@ const LOCKED_REASON = "Another command is in progress.";
  * drains every working order; KILL does both (halt first, then mass-cancel).
  * Each destructive action sits behind a ConfirmDialog, and KILL additionally
  * requires typing the confirm token — the same guardrail class as the
- * order-risk chokepoint.
+ * order-risk chokepoint. These never wait on AdminWorkspace's shared command
+ * lock: a stack restart or 2FA wait must not disarm an emergency stop.
  */
-export default function TradingKillSwitch({
-  compact = false,
-  runCommand,
-  externalPending = false,
-}: {
-  compact?: boolean;
-  runCommand?: RunCommand;
-  externalPending?: boolean;
-}) {
+export default function TradingKillSwitch({ compact = false }: { compact?: boolean }) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({ open: compact && controlsOpen, onClose: () => setControlsOpen(false) });
   const [status, setStatus] = useState<HaltState | null>(null);
@@ -106,7 +95,7 @@ export default function TradingKillSwitch({
     async (action: Exclude<PendingAction, null>) => {
       setPending(action);
       setActionError(null);
-      const send = async (): Promise<true> => {
+      try {
         const needsConfirm = action === "kill" || action === "cancel-all";
         const res = await fetch(`/api/admin/trading/${action}`, {
           method: "POST",
@@ -124,11 +113,6 @@ export default function TradingKillSwitch({
         } else {
           setLastResult(actionResultLine(action, body));
         }
-        return true;
-      };
-      try {
-        const outcome = runCommand ? await runCommand(send) : await send();
-        if (outcome === false) setActionError(`${action} was not sent. ${LOCKED_REASON}`);
       } catch (err) {
         setActionError(
           `${action} failed: ${userErrorMessage(err, "request error")}`,
@@ -139,13 +123,13 @@ export default function TradingKillSwitch({
         void fetchStatus();
       }
     },
-    [fetchStatus, runCommand],
+    [fetchStatus],
   );
 
   const trading = deriveTradingStatus(status, statusError, observedAt, now);
   const statusKnown = trading.kind !== "unknown";
   const halted = trading.kind === "halted";
-  const locked = pending !== null || externalPending;
+  const locked = pending !== null;
   const controls = (
     <section className="admin-card" data-testid="trading-kill-switch">
       <div className="admin-card-header">
@@ -184,8 +168,8 @@ export default function TradingKillSwitch({
             type="button"
             className="admin-btn admin-btn-ghost"
             onClick={() => setConfirmFor("halt")}
-            disabled={locked || trading.kind !== "active"}
-            title={trading.kind === "active" ? "Block all new order placement (working orders stay live)" : UNKNOWN_STATUS_REASON}
+            disabled={locked}
+            title="Block all new order placement (working orders stay live)"
             data-testid="trading-halt-button"
           >
             Halt Trading
@@ -228,8 +212,8 @@ export default function TradingKillSwitch({
         confirmLabel="Halt"
         destructive
         pending={pending === "halt"}
-        confirmDisabled={trading.kind !== "active" || externalPending}
-        disabledReason={externalPending ? LOCKED_REASON : UNKNOWN_STATUS_REASON}
+        confirmDisabled={trading.kind === "halted"}
+        disabledReason="Trading is already halted."
         onConfirm={() => void runAction("halt")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -239,8 +223,8 @@ export default function TradingKillSwitch({
         body="Clears the trading halt. New order placement is allowed again immediately."
         confirmLabel="Resume"
         pending={pending === "resume"}
-        confirmDisabled={trading.kind !== "halted" || externalPending}
-        disabledReason={externalPending ? LOCKED_REASON : UNKNOWN_STATUS_REASON}
+        confirmDisabled={trading.kind !== "halted"}
+        disabledReason={UNKNOWN_STATUS_REASON}
         onConfirm={() => void runAction("resume")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -251,8 +235,6 @@ export default function TradingKillSwitch({
         confirmLabel="Cancel All"
         destructive
         pending={pending === "cancel-all"}
-        confirmDisabled={externalPending}
-        disabledReason={LOCKED_REASON}
         onConfirm={() => void runAction("cancel-all")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -264,8 +246,6 @@ export default function TradingKillSwitch({
         destructive
         requireTyped={KILL_CONFIRM_TOKEN}
         pending={pending === "kill"}
-        confirmDisabled={externalPending}
-        disabledReason={LOCKED_REASON}
         onConfirm={() => void runAction("kill")}
         onCancel={() => setConfirmFor(null)}
       />

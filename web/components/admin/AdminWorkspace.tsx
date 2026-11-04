@@ -573,7 +573,7 @@ export default function AdminWorkspace() {
           <div className={styles.headerActions} role="group" aria-label="Operator controls">
             <button type="button" className={`admin-btn admin-btn-ghost ${styles.tradingTrigger}`} data-testid="gateway-controls-button" aria-haspopup="dialog" aria-expanded={controlsOpen === "gateway"} onClick={() => setControlsOpen("gateway")}>Gateway controls</button>
             <button type="button" className={`admin-btn admin-btn-ghost ${styles.tradingTrigger}`} data-testid="service-controls-button" aria-haspopup="dialog" aria-expanded={controlsOpen === "services"} onClick={() => setControlsOpen("services")}>Service controls</button>
-            <TradingKillSwitch compact runCommand={runCommand} externalPending={commandPending} />
+            <TradingKillSwitch compact />
           </div>
         </header>
         <div className={styles.summary} data-testid="admin-status-summary">

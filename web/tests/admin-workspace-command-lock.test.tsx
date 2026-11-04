@@ -3,8 +3,8 @@
  *
  * AdminWorkspace command lock and post-action refresh, at the wire.
  *
- * - Trading controls share the workspace command lock: while a service
- *   command is in flight, Halt / Cancel All / Kill are disarmed.
+ * - Emergency trading controls never wait on the workspace command lock:
+ *   while a service command is in flight, Kill still reaches the wire.
  * - A command the lock refuses is logged, never dropped silently.
  * - A post-action refresh queues behind an in-flight poll instead of being
  *   dropped, and a unit turning transitional retunes only the services poll.
@@ -79,23 +79,22 @@ afterEach(() => {
 });
 
 describe("AdminWorkspace command lock", () => {
-  it("disarms trading controls while a service command is in flight", async () => {
-    const calls: Call[] = [];
-    let releaseRestart: (r: Response) => void = () => {};
+  it("keeps emergency trading controls armed while a service command is in flight", async () => {
+    const calls: Array<Call & { body: unknown }> = [];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
-      calls.push({ url, method });
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
       if (method === "POST" && url === "/api/admin/services/radon-api.service/restart") {
-        return new Promise<Response>((resolve) => { releaseRestart = resolve; });
+        return new Promise<Response>(() => {});
       }
+      if (method === "POST" && url === "/api/admin/trading/kill") return Promise.resolve(json({ halted: true }));
       if (url === "/api/admin/trading/status") return Promise.resolve(json({ halted: false }));
       if (url === "/api/admin/services") return Promise.resolve(json(SERVICES));
       return Promise.resolve(json(HEALTHY));
     }));
     render(<AdminWorkspace />);
     await settle();
-    expect((screen.getByTestId("trading-kill-button") as HTMLButtonElement).disabled).toBe(false);
 
     await click("service-restart-radon-api.service");
     await click("admin-confirm-action");
@@ -103,12 +102,23 @@ describe("AdminWorkspace command lock", () => {
       "/api/admin/services/radon-api.service/restart",
     ]);
     for (const id of ["trading-halt-button", "trading-cancel-all-button", "trading-kill-button"]) {
-      expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(false);
     }
 
-    await act(async () => { releaseRestart(json({ ok: true, detail: "done" })); });
-    await settle();
-    expect((screen.getByTestId("trading-kill-button") as HTMLButtonElement).disabled).toBe(false);
+    await click("trading-kill-button");
+    const killDialog = screen.getAllByTestId("admin-confirm").find((d) => d.textContent?.includes("Fire the kill switch?"))!;
+    fireEvent.change(within(killDialog).getByTestId("admin-confirm-typed-input"), { target: { value: "KILL" } });
+    await act(async () => {
+      fireEvent.click(within(killDialog).getByTestId("admin-confirm-action"));
+      for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    });
+
+    const posts = calls.filter((c) => c.method === "POST");
+    expect(posts.map((c) => c.url)).toEqual([
+      "/api/admin/services/radon-api.service/restart",
+      "/api/admin/trading/kill",
+    ]);
+    expect(posts[1].body).toEqual({ confirm: true });
   });
 
   it("logs a command the lock refused instead of dropping it silently", async () => {
