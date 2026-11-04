@@ -41,9 +41,11 @@ describe("OrderTab — ModifyOrderModal wiring", () => {
     expect(orderTabSource).toMatch(/import ModifyOrderModal/);
   });
 
-  it("maintains modifyTarget state to control the modify modal", () => {
-    // The component must have state that holds the order being modified
-    expect(orderTabSource).toMatch(/modifyTarget/);
+  it("drives the modify modal from the order-dialog machine (identity, not a snapshot)", () => {
+    // §1 #7: the dialog state names the order by identity; the live order is
+    // re-resolved from openOrders. Behaviour: modify-live-target-owners.test.tsx.
+    expect(orderTabSource).toMatch(/useOrderDialogMachine\(\)/);
+    expect(orderTabSource).toMatch(/resolveLiveOrder\(dialog\.subject\.ref, openOrders\)/);
   });
 
   it("renders <ModifyOrderModal> inside the OrderTab", () => {
@@ -51,9 +53,8 @@ describe("OrderTab — ModifyOrderModal wiring", () => {
     expect(orderTabSource).toMatch(/<ModifyOrderModal/);
   });
 
-  it("closes ModifyOrderModal by clearing modifyTarget", () => {
-    // onClose handler must set modifyTarget to null
-    expect(orderTabSource).toMatch(/setModifyTarget\(null\)/);
+  it("closes ModifyOrderModal through the machine's close event", () => {
+    expect(orderTabSource).toMatch(/sendDialog\(\{ type: "close" \}\)/);
   });
 
   it("calls requestModify from OrderActionsContext on confirm", () => {

@@ -127,6 +127,16 @@ import MobileJournalList from "./mobile/MobileJournalList";
 import SignalCard from "./mobile/SignalCard";
 import MobileFlowSparkline from "./mobile/MobileFlowSparkline";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
+import {
+  isOrderDialogInFlight,
+  ORDER_NO_LONGER_WORKING,
+  orderRefOf,
+  ordersMatchRefs,
+  resolveLiveOrder,
+  resolveLiveOrders,
+  useOrderDialogMachine,
+  type ModifySubject,
+} from "@/lib/orders/orderDialogMachine";
 import SpectralLoader from "./SpectralLoader";
 import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
@@ -3139,7 +3149,7 @@ function OrdersSections({
   prices?: Record<string, PriceData>;
   portfolio?: PortfolioData | null;
 }) {
-  const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
+  const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify, pushNotification } = useOrderActions();
   // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
   // owner surface supplies real connectivity.
   const { connected, ibConnected, marketDataDegraded } = useRealtimePrices();
@@ -3180,14 +3190,9 @@ function OrdersSections({
   );
   const openFilter = useTableFilter(openSort.sorted, extractOpenSearch);
 
-  const [cancelTarget, setCancelTarget] = useState<OpenOrder | null>(null);
-  const [cancelCombo, setCancelCombo] = useState<OpenOrder[] | null>(null);
-  const [modifyTarget, setModifyTarget] = useState<{
-    modalOrder: OpenOrder;
-    requestOrder: OpenOrder;
-    cancelOrders?: ModifyOrderRequest["cancelOrders"];
-  } | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  // One machine for the cancel-confirm and modify dialogs. It stores order
+  // IDENTITY only; the live order is re-resolved from the polled book below.
+  const { state: dialog, send: sendDialog, nextRequestId } = useOrderDialogMachine();
   const [keyboardSelectedKey, setKeyboardSelectedKey] = useState<string | null>(null);
   const [bulkSelectedKeys, setBulkSelectedKeys] = useState<Set<string>>(() => new Set());
   const [openOrdersDensity, setOpenOrdersDensity] = useState<OpenOrdersDensity>(() => {
@@ -3196,73 +3201,114 @@ function OrdersSections({
   });
   const openOrdersFilterRef = useRef<HTMLInputElement>(null);
 
-  const clearCancelDialog = useCallback(() => {
-    setCancelTarget(null);
-    setCancelCombo(null);
-  }, []);
-
   const clearBulkSelection = useCallback(() => {
     setBulkSelectedKeys(new Set());
   }, []);
 
+  // Live resolution of whatever the dialog names. `undefined` = not
+  // applicable or the book is not loaded (never "gone"); null = the order(s)
+  // left the working book.
+  const liveOpenOrders = orders?.open_orders;
+  const liveCancel = useMemo((): OpenOrder[] | null | undefined => {
+    if (!liveOpenOrders) return undefined;
+    if (dialog.phase === "confirmCancel") {
+      const live = resolveLiveOrder(dialog.ref, liveOpenOrders);
+      return live ? [live] : null;
+    }
+    if (dialog.phase === "confirmCancelCombo") {
+      const live = resolveLiveOrders(dialog.refs, liveOpenOrders);
+      return live.length > 0 ? live : null;
+    }
+    return undefined;
+  }, [dialog, liveOpenOrders]);
+
+  const liveModify = useMemo((): {
+    modalOrder: OpenOrder;
+    requestOrder: OpenOrder;
+    cancelOrders?: ModifyOrderRequest["cancelOrders"];
+  } | null | undefined => {
+    if (dialog.phase !== "editing" || !liveOpenOrders) return undefined;
+    const subject = dialog.subject;
+    if (subject.kind === "single") {
+      const live = resolveLiveOrder(subject.ref, liveOpenOrders);
+      return live ? { modalOrder: live, requestOrder: live } : null;
+    }
+    const comboRow = openOrderRows.find(
+      (row) => row.kind === "combo" && ordersMatchRefs(row.orders, subject.refs),
+    );
+    if (!comboRow || comboRow.kind !== "combo") return null;
+    if (resolveLiveOrders(subject.refs, comboRow.orders).length !== subject.refs.length) return null;
+    const target = buildGroupedComboModifyTarget(comboRow);
+    return { modalOrder: target.modalOrder, requestOrder: comboRow.orders[0], cancelOrders: target.cancelOrders };
+  }, [dialog, liveOpenOrders, openOrderRows]);
+
+  // The order filled, was cancelled or left the book while its dialog sat
+  // open: close it with a notice rather than act on a dead order.
+  const dialogTargetGone = liveCancel === null || liveModify === null;
+  useEffect(() => {
+    if (!dialogTargetGone) return;
+    if (sendDialog({ type: "targetGone" })) {
+      pushNotification?.({ type: "warning", message: ORDER_NO_LONGER_WORKING });
+    }
+  }, [dialogTargetGone, sendDialog, pushNotification]);
+
+  const closeDialog = useCallback(() => {
+    sendDialog({ type: "close" });
+  }, [sendDialog]);
+
   const handleCancel = useCallback(async () => {
-    const combo = cancelCombo;
-    const single = cancelTarget;
-    if (!combo?.length && !single) return;
-    setActionLoading(true);
+    if (!liveCancel?.length) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitCancel", requestId, orders: liveCancel })) return;
     try {
-      if (combo && combo.length > 0) {
-        for (const order of combo) {
-          await requestCancel(order);
-        }
-      } else if (single) {
-        await requestCancel(single);
+      for (const order of liveCancel) {
+        await requestCancel(order);
       }
     } finally {
-      setActionLoading(false);
-      clearCancelDialog();
+      sendDialog({ type: "settled", requestId });
       clearBulkSelection();
     }
-  }, [cancelCombo, cancelTarget, requestCancel, clearCancelDialog, clearBulkSelection]);
+  }, [liveCancel, nextRequestId, sendDialog, requestCancel, clearBulkSelection]);
+
+  const openModifyFor = useCallback((single: OpenOrder | null, combo: OpenOrder[] | null) => {
+    const subject: ModifySubject | null = single
+      ? { kind: "single", ref: orderRefOf(single) }
+      : combo && combo.length > 0
+        ? { kind: "combo", refs: combo.map(orderRefOf) }
+        : null;
+    if (subject) sendDialog({ type: "openModify", subject });
+  }, [sendDialog]);
+
+  const openCancelFor = useCallback((single: OpenOrder | null, combo: OpenOrder[] | null) => {
+    if (single) sendDialog({ type: "openCancel", ref: orderRefOf(single) });
+    else if (combo && combo.length > 0) sendDialog({ type: "openCancelCombo", refs: combo.map(orderRefOf) });
+  }, [sendDialog]);
 
   const openModifyForRow = useCallback((row: OpenOrderDisplayRow) => {
     if (row.kind === "combo") {
       if (!row.orders.every((o) => o.orderType === "LMT" || o.orderType === "STP LMT")) return;
-      const target = buildGroupedComboModifyTarget(row);
-      setModifyTarget({
-        modalOrder: target.modalOrder,
-        requestOrder: row.orders[0],
-        cancelOrders: target.cancelOrders,
-      });
+      openModifyFor(null, row.orders);
       return;
     }
     if (row.order.orderType !== "LMT" && row.order.orderType !== "STP LMT") return;
-    setModifyTarget({ modalOrder: row.order, requestOrder: row.order });
-  }, []);
+    openModifyFor(row.order, null);
+  }, [openModifyFor]);
 
   const openCancelForRow = useCallback((row: OpenOrderDisplayRow) => {
-    if (row.kind === "combo") {
-      setCancelTarget(null);
-      setCancelCombo(row.orders);
-      return;
-    }
-    setCancelCombo(null);
-    setCancelTarget(row.order);
-  }, []);
+    if (row.kind === "combo") openCancelFor(null, row.orders);
+    else openCancelFor(row.order, null);
+  }, [openCancelFor]);
 
   const openBulkCancelSelected = useCallback(() => {
-    const orders = flattenSelectedOpenOrders(openFilter.filtered, bulkSelectedKeys);
-    if (orders.length === 0) return;
-    setCancelTarget(null);
-    setCancelCombo(orders);
-  }, [openFilter.filtered, bulkSelectedKeys]);
+    openCancelFor(null, flattenSelectedOpenOrders(openFilter.filtered, bulkSelectedKeys));
+  }, [openFilter.filtered, bulkSelectedKeys, openCancelFor]);
 
   // Desktop open-orders shortcuts: / filter, M modify, X cancel.
   useEffect(() => {
     if (showMobileOrders) return;
 
     function onKeyDown(e: KeyboardEvent) {
-      if (cancelTarget || cancelCombo || modifyTarget) return;
+      if (dialog.phase !== "idle") return;
 
       const action = resolveOrdersShortcut({
         key: e.key,
@@ -3298,9 +3344,7 @@ function OrdersSections({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [
     showMobileOrders,
-    cancelTarget,
-    cancelCombo,
-    modifyTarget,
+    dialog.phase,
     keyboardSelectedKey,
     openFilter.filtered,
     openModifyForRow,
@@ -3332,17 +3376,20 @@ function OrdersSections({
   }, []);
 
   const handleModify = useCallback(async (request: ModifyOrderRequest) => {
-    if (!modifyTarget) return;
-    setActionLoading(true);
-    await requestModify(
-      modifyTarget.requestOrder,
-      modifyTarget.cancelOrders?.length
-        ? { ...request, cancelOrders: modifyTarget.cancelOrders }
-        : request,
-    );
-    setActionLoading(false);
-    setModifyTarget(null);
-  }, [modifyTarget, requestModify]);
+    if (!liveModify) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitModify", requestId, modalOrder: liveModify.modalOrder })) return;
+    try {
+      await requestModify(
+        liveModify.requestOrder,
+        liveModify.cancelOrders?.length
+          ? { ...request, cancelOrders: liveModify.cancelOrders }
+          : request,
+      );
+    } finally {
+      sendDialog({ type: "settled", requestId });
+    }
+  }, [liveModify, nextRequestId, sendDialog, requestModify]);
 
   // Merge cancelled orders into executed list for display (dedupe by permId)
   const allExecutedRows = useMemo(() => {
@@ -3436,22 +3483,34 @@ function OrdersSections({
   return (
     <>
       <CancelOrderDialog
-        order={cancelTarget}
-        orders={cancelCombo}
-        loading={actionLoading}
+        order={
+          dialog.phase === "confirmCancel"
+            ? liveCancel?.[0] ?? null
+            : dialog.phase === "cancelling" && !dialog.combo
+              ? dialog.orders[0]
+              : null
+        }
+        orders={
+          dialog.phase === "confirmCancelCombo"
+            ? liveCancel ?? null
+            : dialog.phase === "cancelling" && dialog.combo
+              ? dialog.orders
+              : null
+        }
+        loading={dialog.phase === "cancelling"}
         onConfirm={handleCancel}
-        onClose={clearCancelDialog}
+        onClose={closeDialog}
       />
       <ModifyOrderModal
-        order={modifyTarget?.modalOrder ?? null}
-        loading={actionLoading}
+        order={dialog.phase === "modifying" ? dialog.modalOrder : liveModify?.modalOrder ?? null}
+        loading={isOrderDialogInFlight(dialog)}
         prices={prices}
         portfolio={portfolio}
         // R-112: the close-out branch must know what is already working.
         openOrders={orders}
         feedConnected={feedConnected}
         onConfirm={handleModify}
-        onClose={() => setModifyTarget(null)}
+        onClose={closeDialog}
       />
 
       <div className="orders-command-strip" data-testid="orders-command-strip">
@@ -3549,32 +3608,8 @@ function OrdersSections({
               pendingCancelPermIds={pendingCancels}
               pendingModifyPermIds={pendingModifies}
               canModify={canModify}
-              onRequestCancel={(single, combo) => {
-                if (single) {
-                  setCancelCombo(null);
-                  setCancelTarget(single);
-                } else if (combo) {
-                  setCancelTarget(null);
-                  setCancelCombo(combo);
-                }
-              }}
-              onRequestModify={(single, combo) => {
-                if (single) {
-                  setModifyTarget({ modalOrder: single, requestOrder: single });
-                } else if (combo && combo.length > 0) {
-                  const comboRow = openFilter.filtered.find(
-                    (row) => row.kind === "combo" && row.orders === combo,
-                  );
-                  if (comboRow && comboRow.kind === "combo") {
-                    const target = buildGroupedComboModifyTarget(comboRow);
-                    setModifyTarget({
-                      modalOrder: target.modalOrder,
-                      requestOrder: combo[0],
-                      cancelOrders: target.cancelOrders,
-                    });
-                  }
-                }
-              }}
+              onRequestCancel={openCancelFor}
+              onRequestModify={openModifyFor}
             />
           ) : (
             <div
@@ -3641,7 +3676,6 @@ function OrdersSections({
                   );
                   if (o.kind === "combo") {
                     const comboCanModify = o.orders.every(canModify);
-                    const comboModifyTarget = buildGroupedComboModifyTarget(o);
                     const isPendingCancel = o.orders.some((order) => pendingCancels.has(order.permId));
                     const isPendingModify = o.orders.some((order) => pendingModifies.has(order.permId));
                     const isPending = isPendingCancel || isPendingModify;
@@ -3751,20 +3785,13 @@ function OrdersSections({
                                 className="btn-order-action btn-modify"
                                 disabled={!comboCanModify}
                                 title={comboCanModify ? "Modify combo order" : MODIFY_DISABLED_TITLE}
-                                onClick={() => setModifyTarget({
-                                  modalOrder: comboModifyTarget.modalOrder,
-                                  requestOrder: o.orders[0],
-                                  cancelOrders: comboModifyTarget.cancelOrders,
-                                })}
+                                onClick={() => openModifyFor(null, o.orders)}
                               >
                                 MODIFY
                               </button>
                               <button
                                 className="btn-order-action btn-cancel"
-                                onClick={() => {
-                                  setCancelTarget(null);
-                                  setCancelCombo(o.orders);
-                                }}
+                                onClick={() => openCancelFor(null, o.orders)}
                               >
                                 CANCEL ALL
                               </button>
@@ -3892,19 +3919,13 @@ function OrdersSections({
                               className="btn-order-action btn-modify"
                               disabled={!canModify(o.order)}
                               title={canModify(o.order) ? "Modify limit price" : MODIFY_DISABLED_TITLE}
-                              onClick={() => setModifyTarget({
-                                modalOrder: o.order,
-                                requestOrder: o.order,
-                              })}
+                              onClick={() => openModifyFor(o.order, null)}
                             >
                               MODIFY
                             </button>
                             <button
                               className="btn-order-action btn-cancel"
-                              onClick={() => {
-                                setCancelCombo(null);
-                                setCancelTarget(o.order);
-                              }}
+                              onClick={() => openCancelFor(o.order, null)}
                             >
                               CANCEL
                             </button>

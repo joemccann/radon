@@ -25,6 +25,7 @@ import {
   type ComboStructureLeg,
 } from "@/lib/order/positionTrade";
 import { availablePositionTradeUnits } from "@/lib/order/selectedLegReservations";
+import { orderIdentityKey } from "@/lib/orders/orderDialogMachine";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { OrderQuoteTelemetry } from "./QuoteTelemetry";
@@ -362,7 +363,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const [outsideRth, setOutsideRth] = useState(() => Boolean(order?.outsideRth));
   const [editableLegs, setEditableLegs] = useState<EditableComboLeg[]>([]);
   // R-633: fills can land WHILE the dialog is open. The quantity field is
-  // seeded once per permId, so `quantityChanged` and the transmitted total
+  // seeded once per order identity, so `quantityChanged` and the transmitted total
   // must be computed against the fill count AT SEED TIME, never the live
   // polled prop — otherwise a price-only submit on an untouched partial
   // order flips quantityChanged and GROWS the order by the mid-edit fill.
@@ -371,8 +372,9 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   );
   const [fillRaceNotice, setFillRaceNotice] = useState<string | null>(null);
 
-  // Reset price only when a different order is selected (by permId), not on every re-render
-  const orderPermId = order?.permId ?? null;
+  // Reset only when a different order is selected, not on every re-render.
+  // permId is 0 until IB acknowledges the order, so key on orderId then.
+  const orderSeedKey = order ? orderIdentityKey(order) : null;
   useEffect(() => {
     if (order?.limitPrice != null) {
       setNewPrice(order.limitPrice.toFixed(2));
@@ -388,7 +390,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     setOutsideRth(Boolean(order?.outsideRth));
     setEditableLegs(buildEditableComboLegs(order));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderPermId]);
+  }, [orderSeedKey]);
 
   const marketPriceData = useMemo(
     () => (order ? resolveOrderPriceData(order, prices, portfolio, editableLegs) : null),
@@ -718,6 +720,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     <Modal
       open={!!order}
       onClose={onClose}
+      dismissible={!loading}
       title="Modify Order"
       className={isComboOrder ? "modify-order-modal modify-order-modal-combo" : "modify-order-modal"}
     >

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from "lucide-react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -35,6 +35,7 @@ import { useRiskFreeRateState } from "@/lib/useRiskFreeRate";
 import { usePriceDirection } from "@/lib/usePriceDirection";
 import TickerLink from "@/components/TickerLink";
 import InstrumentDetailModal from "@/components/InstrumentDetailModal";
+import { useActiveInstrument } from "@/lib/activeInstrument";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
 import PositionStrategyGrouping, { groupingControlsEqual, type PositionStrategyGroupingControls } from "@/components/PositionStrategyGrouping";
@@ -463,11 +464,13 @@ export default function MobilePositionList({ positions, prices, showExpiry = tru
   // null until FRED answers — same gate as the desktop Implied columns (R-229).
   const { rate: riskFreeRate } = useRiskFreeRateState();
 
-  const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
-
-  const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
-    setActiveInstrument({ leg, ticker: pos.ticker, expiry: pos.expiry });
-  }, []);
+  // Same contract as the desktop table: store the leg's identity and follow
+  // the live leg, so a partial close never feeds stale size to the ticket.
+  const {
+    instrument: activeInstrument,
+    open: handleLegClick,
+    close: closeInstrument,
+  } = useActiveInstrument(positions, strategyGrouping?.sourceFor);
 
   if (sorted.length === 0) {
     return (
@@ -489,7 +492,7 @@ export default function MobilePositionList({ positions, prices, showExpiry = tru
           expiry={activeInstrument.expiry}
           prices={prices}
           portfolio={portfolio}
-          onClose={() => setActiveInstrument(null)}
+          onClose={closeInstrument}
         />
       )}
     </div>
