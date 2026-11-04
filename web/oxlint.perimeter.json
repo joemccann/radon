@@ -1,0 +1,68 @@
+{
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off"
+  },
+  "rules": {
+    "no-restricted-imports": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "middleware.ts",
+        "lib/apiContracts.ts",
+        "lib/probeAuth.ts",
+        "lib/sameOrigin.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["node:*", "node:*/*"],
+                "message": "The middleware import graph runs in the Edge runtime, where node: modules are unavailable. Use Web APIs."
+              },
+              {
+                "group": [
+                  "assert",
+                  "async_hooks",
+                  "buffer",
+                  "child_process",
+                  "cluster",
+                  "crypto",
+                  "dgram",
+                  "dns",
+                  "fs",
+                  "http",
+                  "http2",
+                  "https",
+                  "net",
+                  "os",
+                  "path",
+                  "perf_hooks",
+                  "process",
+                  "querystring",
+                  "readline",
+                  "stream",
+                  "string_decoder",
+                  "tls",
+                  "util",
+                  "v8",
+                  "vm",
+                  "worker_threads",
+                  "zlib"
+                ],
+                "message": "The middleware import graph runs in the Edge runtime, where Node builtins are unavailable. Use Web APIs."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
