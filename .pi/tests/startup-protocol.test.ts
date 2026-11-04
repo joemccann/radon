@@ -313,6 +313,27 @@ test("StartupTracker.isComplete should return correct state", async () => {
   assert.strictEqual(tracker.isComplete(), true, "Should be complete now");
 });
 
+test("StartupTracker counts distinct processes, not complete() calls", async () => {
+  const { StartupTracker } = await import("../extensions/startup-protocol.ts");
+  const ui = new MockUI();
+
+  const tracker = new StartupTracker(ui, ["a", "b"]);
+  ui.clear();
+
+  // A timed-out job reports, then its killed child's close handler reports again.
+  tracker.complete("a", "warning", "A timed out");
+  tracker.complete("a", "error", "A exited");
+  assert.strictEqual(tracker.isComplete(), false, "b has not reported yet");
+  assert.strictEqual(ui.notifications.length, 0, "no summary before every process reports");
+  assert.strictEqual(tracker.getStatus("a"), "warning", "the first report for a process stands");
+
+  tracker.complete("b", "success", "B done");
+  assert.strictEqual(tracker.isComplete(), true);
+  assert.strictEqual(ui.notifications.length, 1, "exactly one batched summary");
+  assert.ok(ui.hasMessage("[2/2]"), "b is the second distinct completion");
+  assert.ok(!ui.hasMessage("[3/2]"), "the duplicate is not counted");
+});
+
 test("StartupTracker.getStatus should return process status", async () => {
   const { StartupTracker } = await import("../extensions/startup-protocol.ts");
   const ui = new MockUI();
