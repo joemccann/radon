@@ -3262,3 +3262,60 @@ class TestDocumentation20261102:
         readme = (_ROOT / "cloud/README.md").read_text()
         assert "stop-clean`, `restart-managed`, `recover`" not in readme
         assert "sudoers.d/radon-deploy" in readme
+
+
+class TestDocumentation20261104:
+    """DOC-254: the live P1 pager is the VPS unit, not laptop launchd."""
+
+    def test_operator_pages_do_not_name_laptop_as_the_live_pager(self):
+        owner = (_ROOT / "docs/grok-page-responder.md").read_text()
+        intro = owner.split("## Isolated responder account migration", 1)[0]
+        assert "Laptop launchd is off" in intro
+        assert "radon-grok-responder.timer" in intro
+        timer = (
+            _ROOT / "cloud/services/responder-domain/radon-grok-responder.timer"
+        ).read_text()
+        assert "OnUnitInactiveSec=30" in timer
+
+        ops = (_ROOT / "docs/operations.md").read_text()
+        grok = ops.split("**Grok P1 responder (VPS clone).**", 1)[1]
+        grok = grok.split("\n\n", 1)[0]
+        assert "radon-grok-responder.timer" in grok
+        assert "Laptop launchd is off" in grok
+        assert "laptop `com.radon.grok-page-responder`" not in grok
+
+        watchdog = ops.split("**Watchdog**", 1)[1].split("\n\n", 1)[0]
+        assert "laptop `com.radon.grok-page-responder`" not in watchdog
+        assert "Laptop launchd is off" in watchdog
+
+        table = ops.split("| `radon-incident-watchdog.timer` |", 1)[1]
+        table = table.split("| `radon-grok-upgrade.timer` |", 1)[0]
+        assert "`radon-grok-responder.timer`" in table
+        assert "`radon-grok-page-responder.timer`" in table
+
+        ir = (_ROOT / "docs/incident-runbook.md").read_text()
+        section = ir.split("## Grok auto-response on iPhone P1 pages", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert "radon-grok-responder.timer" in section
+        assert "Laptop launchd is off" in section
+        assert "laptop `com.radon.grok-page-responder`" not in section
+
+        pushover = next(
+            line
+            for line in (_ROOT / "docs/external-services.md").read_text().splitlines()
+            if "**Pushover**" in line
+        )
+        assert "laptop Grok auto-fix" not in pushover
+        assert "VPS Grok auto-fix" in pushover
+        assert "Laptop launchd is off" in pushover
+
+        index = (_ROOT / "docs/README.md").read_text()
+        assert "Grok P1 auto-fix (VPS; laptop launchd off)" in index
+
+        claude = (_ROOT / "scripts/watchdog/CLAUDE.md").read_text()
+        assert "radon-grok-responder" in claude
+        assert "laptop Grok" not in claude
+
+        agents = (_ROOT / "scripts/watchdog/AGENTS.md").read_text()
+        assert "laptop Grok auto-response" not in agents
+        assert "VPS Grok responder" in agents
