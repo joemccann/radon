@@ -51,6 +51,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -337,6 +338,58 @@ def _is_orphaned(lock: PushLock, now: float) -> bool:
     return True
 
 
+class LeaseState(str, Enum):
+    """Every state a lease read can be in. Only ``HELD`` blocks a new push.
+
+    ``FREE``      no lease file.
+    ``EXPIRED``   past its TTL; the holder crashed or forgot to release.
+    ``ORPHANED``  past its grace with the Gateway port confirmed down: no push
+                  can still be in flight behind it (see ``_is_orphaned``).
+    ``HELD``      honoured. Includes an unreadable file (fails closed until
+                  TTL) and a past-grace lease that was not probed.
+    """
+
+    FREE = "free"
+    EXPIRED = "expired"
+    ORPHANED = "orphaned"
+    HELD = "held"
+
+
+def classify_lease(
+    lock: Optional[PushLock], now: float, *, probe: bool = True
+) -> LeaseState:
+    """The one lease classification every reader shares (check, acquire,
+    consume, the broker's /status view).
+
+    ``probe=False`` never opens a socket: a past-grace lease then reads
+    ``HELD``, so an unconfirmed orphan is always honoured. Call this without
+    the guard held; the probe sleeps.
+    """
+    if lock is None:
+        return LeaseState.FREE
+    if lock.is_expired(now):
+        return LeaseState.EXPIRED
+    if probe and _is_orphaned(lock, now):
+        return LeaseState.ORPHANED
+    return LeaseState.HELD
+
+
+def _read_guarded(guard_timeout_secs: Optional[float]) -> Optional[PushLock]:
+    with _guard(exclusive=False, timeout_secs=guard_timeout_secs):
+        return _read_lock_file()
+
+
+def _classify_then_confirm(
+    observed: Optional[PushLock], current: Optional[PushLock], verdict: LeaseState, now: float
+) -> LeaseState:
+    """Re-validate a verdict reached outside the guard against the lease now on
+    disk. A different lease is a new acquisition: classify it unprobed, which
+    honours it unless it is free or expired."""
+    if current == observed:
+        return verdict
+    return classify_lease(current, now, probe=False)
+
+
 def check_2fa_push_lock(
     now: Optional[float] = None,
     *,
@@ -349,15 +402,10 @@ def check_2fa_push_lock(
     one orphaned by a Gateway that is provably down (see ``_is_orphaned``).
     """
     now = now if now is not None else time.time()
-    with _guard(exclusive=False, timeout_secs=guard_timeout_secs):
-        lock = _read_lock_file()
-    if lock is None:
-        return None
-    if lock.is_expired(now):
-        return None
-    if _is_orphaned(lock, now):
-        return None
-    return lock
+    lock = _read_guarded(guard_timeout_secs)
+    if classify_lease(lock, now) is LeaseState.HELD:
+        return lock
+    return None
 
 
 def acquire_2fa_push_lock(
@@ -377,16 +425,18 @@ def acquire_2fa_push_lock(
 
     Holder identity names a component, not a logical operation. Re-acquiring an
     active lease is therefore refused even for the same holder: another call is
-    another Gateway cycle and may mint another push.
+    another Gateway cycle and may mint another push. ``new_lock.acquired_at``
+    is the acquisition token release and consume bind to.
+
+    The orphan probe sleeps, so it runs with no guard held; the exclusive
+    transaction then re-reads and acts only if the probed lease is unchanged.
     """
     now = now if now is not None else time.time()
+    observed = _read_guarded(guard_timeout_secs)
+    verdict = classify_lease(observed, now)
     with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
         existing = _read_lock_file()
-        if (
-            existing is not None
-            and not existing.is_expired(now)
-            and not _is_orphaned(existing, now)
-        ):
+        if _classify_then_confirm(observed, existing, verdict, now) is LeaseState.HELD:
             return (False, existing)
 
         lock = PushLock(
@@ -399,12 +449,29 @@ def acquire_2fa_push_lock(
         return (True, lock)
 
 
+def _names_acquisition(
+    lock: PushLock, expected_holder: Optional[str], expected_acquired_at: Optional[float]
+) -> bool:
+    if expected_holder is not None and lock.holder != expected_holder:
+        return False
+    if expected_acquired_at is not None and lock.acquired_at != expected_acquired_at:
+        return False
+    return True
+
+
 def release_2fa_push_lock(
     *,
     expected_holder: Optional[str] = None,
+    expected_acquired_at: Optional[float] = None,
     guard_timeout_secs: Optional[float] = None,
 ) -> Optional[PushLock]:
     """Clear the lock file. Returns the lock that was held (if any).
+
+    ``expected_acquired_at`` binds the release to one acquisition: a holder
+    whose lease was revoked as orphaned and then re-acquired (by anyone,
+    including the same component) cannot delete the newer lease. Without it
+    only the holder name is compared, which is that ABA hazard; prefer the
+    token whenever the caller kept it.
 
     Idempotent — calling on an already-free lock is a no-op that returns
     None.
@@ -414,7 +481,7 @@ def release_2fa_push_lock(
         existing = _read_lock_file()
         if existing is None:
             return None
-        if expected_holder is not None and existing.holder != expected_holder:
+        if not _names_acquisition(existing, expected_holder, expected_acquired_at):
             return None
         try:
             path.unlink()
@@ -433,26 +500,32 @@ def consume_2fa_push_lock(
     consumed_path: Path,
     *,
     now: Optional[float] = None,
+    expected_acquired_at: Optional[float] = None,
     guard_timeout_secs: Optional[float] = None,
 ) -> tuple[bool, Optional[PushLock]]:
     """Atomically verify and mark one exact active lease as consumed.
 
-    The canonical lease guard remains exclusively held from the holder/expiry
-    check through the durable consumed-marker replace. A concurrent reset,
-    release, or reacquire therefore occurs entirely before or after this CAS,
-    never between validation and marking.
+    The lease must classify ``HELD`` under the same rule ``acquire`` applies:
+    an expired or orphaned lease may be taken over by any other path at any
+    moment, so consuming it would fire a restart behind a lease that no longer
+    guards anything. The orphan probe runs with no guard held; the exclusive
+    guard then stays held from the re-read through the durable consumed-marker
+    replace, so a concurrent reset, release, or reacquire lands entirely
+    before or after this CAS, never between validation and marking.
     """
     now = now if now is not None else time.time()
     consumed_path = Path(consumed_path)
     consumed_guard = consumed_path.with_suffix(consumed_path.suffix + ".guard")
+    observed = _read_guarded(guard_timeout_secs)
+    verdict = classify_lease(observed, now)
     # Bounded for the same reason as remaining_lock_secs: the exclusive guard
     # spans _write_lock_file's fsyncs. R-211.
     with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
         existing = _read_lock_file()
         if (
             existing is None
-            or existing.is_expired(now)
-            or existing.holder != expected_holder
+            or _classify_then_confirm(observed, existing, verdict, now) is not LeaseState.HELD
+            or not _names_acquisition(existing, expected_holder, expected_acquired_at)
         ):
             return False, existing
 
@@ -502,7 +575,10 @@ def remaining_lock_secs(
 # Shell control planes that cannot import this module (the radon operator
 # CLI in radon-cloud/scripts/operator-radon.sh) consult the lock via
 #
-#   python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder>}
+#   python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder> [<acquired_at>]}
+#
+# ``acquire`` prints the lease's ``acquired_at`` token; passing it back to
+# ``release`` / ``consume`` binds them to that one acquisition.
 #
 # Exit codes are the contract: 0 = free / acquired / released,
 # 1 = held by another holder, 2 = usage error. Success markers print to
@@ -511,8 +587,8 @@ def remaining_lock_secs(
 
 _CLI_USAGE = (
     "usage: python3 -m scripts.utils.ib_2fa_lock "
-    "{check|acquire <holder>|release <holder>|release-any"
-    "|consume <holder> <marker-path>}"
+    "{check|acquire <holder>|release <holder> [<acquired_at>]|release-any"
+    "|consume <holder> <marker-path> [<acquired_at>]}"
 )
 
 
@@ -535,22 +611,28 @@ def _cli_acquire(holder: str) -> int:
     acquired, lock = acquire_2fa_push_lock(holder, reason=f"cli acquire by {holder}")
     if acquired:
         assert lock is not None
-        print(f"acquired holder={lock.holder} ttl={remaining_lock_secs()}s")
+        print(
+            f"acquired holder={lock.holder} ttl={remaining_lock_secs()}s "
+            f"acquired_at={lock.acquired_at!r}"
+        )
         return 0
     assert lock is not None
     _print_held(lock)
     return 1
 
 
-def _cli_release(holder: str) -> int:
+def _cli_release(holder: str, acquired_at: Optional[float] = None) -> int:
     lock = check_2fa_push_lock()
     if lock is None:
         print("free")
         return 0
-    if lock.holder != holder:
+    if not _names_acquisition(lock, holder, acquired_at):
         _print_held(lock)
         return 1
-    release_2fa_push_lock(expected_holder=holder)
+    if release_2fa_push_lock(expected_holder=holder, expected_acquired_at=acquired_at) is None:
+        # The lease changed between the check and the release transaction.
+        print(f"not released holder={holder}: lease changed", file=sys.stderr)
+        return 1
     print(f"released holder={holder}")
     return 0
 
@@ -570,18 +652,30 @@ def _cli_release_any() -> int:
     return 0
 
 
-def _cli_consume(holder: str, marker_path: str) -> int:
-    consumed, current = consume_2fa_push_lock(holder, Path(marker_path))
+def _cli_consume(holder: str, marker_path: str, acquired_at: Optional[float] = None) -> int:
+    consumed, current = consume_2fa_push_lock(
+        holder, Path(marker_path), expected_acquired_at=acquired_at,
+    )
     if consumed:
         print(f"consumed holder={holder}")
         return 0
     if current is None or current.is_expired():
         print(f"cannot consume holder={holder}: lease is free or expired", file=sys.stderr)
-    elif current.holder != holder:
+    elif not _names_acquisition(current, holder, acquired_at):
         _print_held(current)
     else:
-        print(f"cannot consume holder={holder}: lease already consumed", file=sys.stderr)
+        print(
+            f"cannot consume holder={holder}: lease already consumed or orphaned",
+            file=sys.stderr,
+        )
     return 1
+
+
+def _token_arg(raw: str) -> Optional[float]:
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def main(argv: list[str]) -> int:
@@ -591,10 +685,14 @@ def main(argv: list[str]) -> int:
         return _cli_acquire(argv[1])
     if len(argv) == 2 and argv[0] == "release":
         return _cli_release(argv[1])
+    if len(argv) == 3 and argv[0] == "release" and _token_arg(argv[2]) is not None:
+        return _cli_release(argv[1], _token_arg(argv[2]))
     if argv == ["release-any"]:
         return _cli_release_any()
     if len(argv) == 3 and argv[0] == "consume":
         return _cli_consume(argv[1], argv[2])
+    if len(argv) == 4 and argv[0] == "consume" and _token_arg(argv[3]) is not None:
+        return _cli_consume(argv[1], argv[2], _token_arg(argv[3]))
     print(_CLI_USAGE, file=sys.stderr)
     return 2
 

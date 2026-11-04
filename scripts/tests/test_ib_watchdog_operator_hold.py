@@ -70,7 +70,7 @@ def test_a_held_cycle_reports_healthy_with_the_hold_reason(tmp_path):
 
 def test_clearing_the_hold_resumes_normal_cycles(tmp_path):
     ib_operator_hold.set_hold("operator web login", "test")
-    ib_operator_hold.clear_hold("test")
+    ib_operator_hold.clear_hold("test", expected_id=ib_operator_hold.ANY_HOLD)
     state, _restart, _health, fetch = _cycle(tmp_path / "state.json", health_reachable=True)
     assert fetch.call_count == 1
     assert state.last_outcome != "operator_hold"
@@ -114,7 +114,7 @@ def test_clearing_the_hold_pages_once_that_recovery_is_back(tmp_path):
     ib_operator_hold.set_hold("flatten", "ssh:joe")
     pages: list = []
     _cycle_paging(tmp_path / "state.json", pages)
-    ib_operator_hold.clear_hold("ssh:joe")
+    ib_operator_hold.clear_hold("ssh:joe", expected_id=ib_operator_hold.ANY_HOLD)
     _cycle_paging(tmp_path / "state.json", pages)
     _cycle_paging(tmp_path / "state.json", pages)
     assert [title for title, _ in pages] == [

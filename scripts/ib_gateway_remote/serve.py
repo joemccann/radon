@@ -8,7 +8,8 @@ Routes:
   GET  /healthz      liveness, no helper
   GET  /status       helper status
   POST /start|stop|restart|reset-lease
-  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor)
+  POST /hold|unhold   IBKR operator hold (JSON body: reason, actor; unhold
+                      takes an optional hold_id for compare-and-clear)
   POST /rotate-password  IB Gateway password rotation (JSON body: password,
                          userid?, actor?). Writes the new value through the
                          root writer (`sudo -n radon-ib-gateway-credential
@@ -33,10 +34,10 @@ from typing import Iterable
 # host, which cannot see this VM's lock file (REL-172, R-475).
 try:
     from utils import ib_2fa_lock, ib_operator_hold
-    from utils.ib_login_throttle import format_utc, login_throttle_retry_at
+    from utils.ib_login_throttle import format_utc, login_throttle_gate
 except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
     from scripts.utils import ib_2fa_lock, ib_operator_hold
-    from scripts.utils.ib_login_throttle import format_utc, login_throttle_retry_at
+    from scripts.utils.ib_login_throttle import format_utc, login_throttle_gate
 
 DEFAULT_BIND = "10.0.0.4"
 DEFAULT_PORT = 8340
@@ -68,6 +69,7 @@ VERBS = MUTATIONS | {"status"}
 HOLD_VERBS = frozenset({"hold", "unhold"})
 HOLD_REASON_MAX = 200
 HOLD_ACTOR_MAX = 80
+HOLD_ID_MAX = 80
 # IB Gateway password rotation. Not a helper verb either: run_helper never
 # sees it. The daemon calls the root writer itself (password on stdin; the
 # helper's own `python - <<'PY'` re-execs replace fd 0, so it cannot carry a
@@ -95,6 +97,16 @@ _COOLDOWN_AFTER: dict[str, tuple[str, ...]] = {
 _rotate_guard = threading.Lock()
 _verb_history: dict[str, float] = {}
 _verb_history_guard = threading.Lock()
+# Gateway mutations admitted by admit_verb and not yet finished. Claimed and
+# released under _verb_history_guard together with the cooldown check and the
+# record, so two daemon threads can never both pass the check (audit
+# 2026-11-03 §3.2).
+_verbs_in_flight: set[str] = set()
+# Helper exits that mean it refused before touching the Gateway: usage (2),
+# operator hold (73), control busy (74), lease held (75), helper missing
+# (127). Every other exit, failures and timeouts included, may already have
+# started a login and sent an IBKR push, so it arms the cooldown.
+HELPER_NOT_ATTEMPTED_RCS = frozenset({2, 73, 74, 75, 127})
 
 
 def _verb_state_file() -> Path | None:
@@ -382,30 +394,72 @@ def run_credential_writer(cfg: dict, values: dict) -> tuple[int | None, str]:
 
 
 def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
-    """Reason a mutation is refused by the per-verb cooldown, else None."""
-    now = time.monotonic() if now is None else now
+    """Reason a mutation is refused by the per-verb cooldown, else None.
+    Read-only; ``admit_verb`` is the check-and-claim callers must use."""
     with _verb_history_guard:
-        for prior in _COOLDOWN_AFTER.get(verb, ()):
-            at = _verb_history.get(prior)
-            if at is None:
-                continue
-            elapsed = now - at
-            if elapsed < VERB_COOLDOWN_S:
-                return (
-                    f"cooldown: {prior} ran {elapsed:.0f}s ago; {verb} allowed in "
-                    f"{VERB_COOLDOWN_S - elapsed:.0f}s (a fresh login now would stack a 2FA push)"
-                )
+        return _cooldown_refusal_locked(verb, now)
+
+
+def _cooldown_refusal_locked(verb: str, now: float | None) -> str | None:
+    now = time.monotonic() if now is None else now
+    for prior in _COOLDOWN_AFTER.get(verb, ()):
+        at = _verb_history.get(prior)
+        if at is None:
+            continue
+        elapsed = now - at
+        if elapsed < VERB_COOLDOWN_S:
+            return (
+                f"cooldown: {prior} ran {elapsed:.0f}s ago; {verb} allowed in "
+                f"{VERB_COOLDOWN_S - elapsed:.0f}s (a fresh login now would stack a 2FA push)"
+            )
     return None
+
+
+def admit_verb(verb: str, now: float | None = None) -> str | None:
+    """Atomically check the cooldown and claim ``verb`` as in flight.
+
+    Returns the refusal reason, or None when admitted; an admitted verb MUST
+    be finished with ``finish_verb`` (try/finally). One Gateway mutation at a
+    time: the helper serializes on its own mutex anyway, and a second login
+    admitted beside a first is exactly a stacked 2FA push.
+    """
+    with _verb_history_guard:
+        if _verbs_in_flight:
+            busy = ", ".join(sorted(_verbs_in_flight))
+            return f"busy: {busy} in progress; retry when it finishes"
+        refusal = _cooldown_refusal_locked(verb, now)
+        if refusal is not None:
+            return refusal
+        _verbs_in_flight.add(verb)
+    return None
+
+
+def finish_verb(verb: str, rc: int | None, *, record: str | None = None) -> None:
+    """Release ``verb``'s claim and, in the same critical section, record the
+    attempt unless the helper refused before acting (``rc`` in
+    HELPER_NOT_ATTEMPTED_RCS). ``rc`` None means nothing ran. ``record``
+    names the verb to record when it differs from the claim."""
+    with _verb_history_guard:
+        _verbs_in_flight.discard(verb)
+        if rc is not None and rc not in HELPER_NOT_ATTEMPTED_RCS:
+            _record_verb_locked(record or verb)
 
 
 def login_throttle_refusal(verb: str, watchdog_state: str, now: float | None = None) -> str | None:
     """Reason a login verb is refused while IBKR throttles logins, else None."""
     if verb not in LOGIN_VERBS:
         return None
-    retry_at = login_throttle_retry_at(Path(watchdog_state))
+    retry_at, unreadable = login_throttle_gate(Path(watchdog_state))
     now = time.time() if now is None else now
     if retry_at is None or now >= retry_at:
         return None
+    if unreadable:
+        # Fail closed: the state may be hiding a live IBKR login throttle.
+        return (
+            "the watchdog state is unreadable, so an IBKR login throttle cannot be "
+            f"ruled out; {verb} is refused until {format_utc(retry_at)} "
+            "(check the watchdog, then restart once and approve the push)."
+        )
     return (
         "IBKR is refusing Gateway logins (too many failed login attempts); "
         f"every {verb} is another failed login. Wait until {format_utc(retry_at)}, "
@@ -415,22 +469,35 @@ def login_throttle_refusal(verb: str, watchdog_state: str, now: float | None = N
 
 def record_verb(verb: str, now: float | None = None) -> None:
     with _verb_history_guard:
-        _verb_history[verb] = time.monotonic() if now is None else now
-        _verb_wall_history[verb] = time.time()
-        _persist_verb_history(dict(_verb_wall_history))
+        _record_verb_locked(verb, now)
 
 
-def broker_lease() -> dict | None:
-    """The 2FA push lease on disk, or None. Cheap read: no orphan probe."""
+def helper_attempted(rc: int) -> bool:
+    """True when a helper exit may have touched the Gateway."""
+    return rc not in HELPER_NOT_ATTEMPTED_RCS
+
+
+def _record_verb_locked(verb: str, now: float | None = None) -> None:
+    _verb_history[verb] = time.monotonic() if now is None else now
+    _verb_wall_history[verb] = time.time()
+    _persist_verb_history(dict(_verb_wall_history))
+
+
+def broker_lease(now: float | None = None) -> dict | None:
+    """The 2FA push lease that would refuse a login, or None.
+
+    Classified by the same ``ib_2fa_lock.classify_lease`` rule the helper's
+    acquire honours, so the app never disarms an action the helper would
+    accept. The orphan probe only runs for a lease past its grace window
+    (bounded: ORPHAN_CONFIRM_PROBES connects) and outside the lease guard.
+    """
     try:
         with ib_2fa_lock._guard(exclusive=False, timeout_secs=1.0):
             lock = ib_2fa_lock._read_lock_file()
     except Exception:  # noqa: BLE001 - status must never fail on the lease read
         return None
-    if lock is None:
-        return None
-    now = time.time()
-    if lock.is_expired(now):
+    now = time.time() if now is None else now
+    if ib_2fa_lock.classify_lease(lock, now) is not ib_2fa_lock.LeaseState.HELD:
         return None
     return {
         "holder": lock.holder,
@@ -580,11 +647,13 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         if not _rotate_guard.acquire(blocking=False):
             return 409, {"ok": False, "code": "ROTATION_IN_PROGRESS",
                          "detail": "a password rotation is already running"}
+        refusal = admit_verb(ROTATE_VERB)
+        if refusal is not None:
+            _rotate_guard.release()
+            return 409, {"ok": False, "code": "LOGIN_BLOCKED",
+                         "reason": "busy" if refusal.startswith("busy") else "cooldown",
+                         "detail": refusal}
         try:
-            refusal = cooldown_refusal(ROTATE_VERB)
-            if refusal is not None:
-                return 409, {"ok": False, "code": "LOGIN_BLOCKED", "reason": "cooldown",
-                             "detail": refusal}
             lease = broker_lease()
             if lease is not None:
                 return 409, {"ok": False, "code": "LOGIN_BLOCKED", "reason": "lease",
@@ -613,8 +682,11 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
 
             rc, detail = run_helper(cfg["helper"], "restart", cfg["timeout"])
             detail = scrub(detail, secrets)
-            if rc == 0:
+            if helper_attempted(rc):
+                # Recorded while the rotation still holds its claim: a failed
+                # restart may already have sent a push.
                 record_verb("restart")
+            if rc == 0:
                 return 200, {"ok": True, "written": True, "restarted": True,
                              "detail": detail or "Gateway restarted"}
             if rc in HELPER_DEFER_RCS:
@@ -626,6 +698,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             return 502, {"ok": False, "written": True, "restarted": False,
                          "code": "RESTART_FAILED", "returncode": rc, "detail": detail}
         finally:
+            finish_verb(ROTATE_VERB, None)
             _rotate_guard.release()
 
     def _operator_hold(self, verb: str, body: bytes) -> None:
@@ -641,8 +714,13 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         actor = "app:" + str(request.get("actor") or "unknown")[:HOLD_ACTOR_MAX]
         if verb == "hold":
             self._set_hold(cfg, request, actor)
-        else:
-            self._clear_hold(cfg, actor)
+            return
+        hold_id = request.get("hold_id")
+        if hold_id is not None and (not isinstance(hold_id, str) or not hold_id
+                                    or len(hold_id) > HOLD_ID_MAX):
+            self._refuse(400, "hold_id must be a hold id string")
+            return
+        self._clear_hold(cfg, actor, hold_id)
 
     def _set_hold(self, cfg: dict, request: dict, actor: str) -> None:
         reason = str(request.get("reason") or "operator hold from the admin panel")[:HOLD_REASON_MAX]
@@ -653,8 +731,9 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError, TypeError) as exc:
             hold_error = str(exc)
         # Stop even when the flag failed: the operator is about to log in.
+        # Never admission-gated: a hold must always be able to stop the Gateway.
         rc, detail = run_helper(cfg["helper"], "stop", cfg["timeout"])
-        if rc == 0:
+        if helper_attempted(rc):
             record_verb("stop")
         payload = {
             "ok": hold_error is None and rc == 0,
@@ -673,9 +752,18 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             payload["detail"] = "hold set; Gateway stopped. Wait ~30s, then log in to IBKR."
         self._ok(payload, 200 if payload["ok"] else 502)
 
-    def _clear_hold(self, cfg: dict, actor: str) -> None:
+    def _clear_hold(self, cfg: dict, actor: str, hold_id: str | None) -> None:
+        # With hold_id this is compare-and-clear: a newer hold (a watchdog
+        # auto-hold, another release) survives an unhold aimed at an older
+        # one. Without it the admin panel's Resume lifts whatever is held,
+        # stated explicitly as ANY_HOLD.
         try:
-            ib_operator_hold.clear_hold(actor)
+            ib_operator_hold.clear_hold(actor, expected_id=hold_id or ib_operator_hold.ANY_HOLD)
+        except ib_operator_hold.HoldChanged as exc:
+            self._ok({"ok": False, "verb": "unhold", "code": "HOLD_CHANGED",
+                      "detail": f"hold not cleared: {exc}; refresh and retry",
+                      "operator_hold": ib_operator_hold.hold_state()}, 409)
+            return
         except OSError as exc:
             self._ok({"ok": False, "verb": "unhold", "detail": f"hold not cleared: {exc}",
                       "operator_hold": ib_operator_hold.hold_state()}, 502)
@@ -688,13 +776,19 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         # Recovery back on, never silently: one login now (one push), unless
         # the cooldown or an IBKR login throttle says a login would hurt. The
         # watchdog owns recovery from there.
-        refusal = cooldown_refusal("start") or login_throttle_refusal("start", cfg["watchdog_state"])
+        refusal = (
+            cooldown_refusal("start")
+            or login_throttle_refusal("start", cfg["watchdog_state"])
+            or admit_verb("start")
+        )
         if refusal is not None:
             start = {"ok": False, "returncode": CONTROL_BUSY_RC, "detail": refusal}
         else:
-            rc, detail = run_helper(cfg["helper"], "start", cfg["timeout"])
-            if rc == 0:
-                record_verb("start")
+            rc = None
+            try:
+                rc, detail = run_helper(cfg["helper"], "start", cfg["timeout"])
+            finally:
+                finish_verb("start", rc)
             start = {"ok": rc == 0, "returncode": rc, "detail": detail}
         self._ok({
             "ok": True,
@@ -722,11 +816,24 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             }, 423)
             return
         if verb in MUTATIONS:
-            refusal = cooldown_refusal(verb) or login_throttle_refusal(verb, cfg["watchdog_state"])
+            # Cooldown first for its message; admit_verb then re-checks and
+            # claims atomically.
+            refusal = (
+                cooldown_refusal(verb)
+                or login_throttle_refusal(verb, cfg["watchdog_state"])
+                or admit_verb(verb)
+            )
             if refusal is not None:
                 self._ok({"ok": False, "verb": verb, "returncode": CONTROL_BUSY_RC, "detail": refusal}, 409)
                 return
-        rc, detail = run_helper(cfg["helper"], verb, cfg["timeout"])
+            rc = None
+            try:
+                rc, detail = run_helper(cfg["helper"], verb, cfg["timeout"])
+            finally:
+                # Records any attempt, failed or timed out, before releasing.
+                finish_verb(verb, rc)
+        else:
+            rc, detail = run_helper(cfg["helper"], verb, cfg["timeout"])
         if verb == "status":
             state = "running" if rc == 0 and detail.strip() == "running" else (
                 "stopped" if "stopped" in detail else "unknown"
@@ -748,7 +855,6 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
             self._ok({"ok": False, "verb": verb, "returncode": rc, "detail": detail}, 409)
             return
         if rc == 0:
-            record_verb(verb)
             self._ok({"ok": True, "verb": verb, "detail": detail, "returncode": 0})
             return
         self._ok({"ok": False, "verb": verb, "detail": detail, "returncode": rc}, 502)

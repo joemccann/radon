@@ -39,14 +39,14 @@ def test_set_hold_then_clear_round_trips(tmp_path):
     hold.set_hold("operator web login", "ssh:test")
     assert hold.is_held() is True
     assert hold.hold_state()["reason"] == "operator web login"
-    hold.clear_hold("ssh:test")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
     assert hold.is_held() is False
 
 
 def test_written_flag_uses_the_canonical_prefix_the_root_shim_reads(tmp_path):
     hold.set_hold("x", "ssh:test")
     assert _hold_file(tmp_path).read_text().startswith('{"held": true')
-    hold.clear_hold("ssh:test")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
     assert _hold_file(tmp_path).read_text().startswith(hold.NOT_HELD_PREFIX)
 
 
@@ -79,7 +79,7 @@ def test_flag_is_world_readable_so_radon_daemons_can_honor_it(tmp_path):
 
 def test_every_change_is_audited(tmp_path):
     hold.set_hold("operator web login", "ssh:test")
-    hold.clear_hold("ssh:test")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
     events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
     assert [event["event"] for event in events] == ["hold", "clear"]
     assert all(event["actor"] == "ssh:test" for event in events)
@@ -121,7 +121,7 @@ def test_a_hold_set_by_a_non_owner_reads_held_and_keeps_who_and_why(tmp_path, mo
 def test_a_non_owner_clears_by_removing_the_flag(tmp_path, monkeypatch):
     hold.set_hold("phone flatten", "app:user_1")
     monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid() + 1))
-    hold.clear_hold("app:user_1")
+    hold.clear_hold("app:user_1", expected_id=hold.ANY_HOLD)
     assert not _hold_file(tmp_path).exists()
     assert hold.is_held() is False
     events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
@@ -162,3 +162,75 @@ def test_non_utf8_hold_remains_readable_and_held(tmp_path, raw, capsys):
     assert hold.main(["status"]) == hold.HELD_RC
     assert json.loads(capsys.readouterr().out)["held"] is True
     assert _hold_file(tmp_path).read_bytes() == raw
+
+
+# --- Compare-and-clear (audit 2026-11-03 §3.2) --------------------------------
+# clear_hold ignored the hold id, so an unhold aimed at one hold deleted a
+# newer one (a watchdog auto-hold, a second operator release).
+
+
+def test_clear_requires_an_explicit_target():
+    hold.set_hold("x", "ssh:test")
+    with pytest.raises(TypeError):
+        hold.clear_hold("ssh:test")  # type: ignore[call-arg]
+    assert hold.is_held() is True
+
+
+def test_clear_with_the_current_id_clears():
+    state = hold.set_hold("x", "ssh:test")
+    cleared = hold.clear_hold("ssh:test", expected_id=state["id"])
+    assert cleared["held"] is False
+    assert cleared["cleared_id"] == state["id"]
+    assert hold.is_held() is False
+
+
+def test_clear_aimed_at_an_older_hold_keeps_the_newer_one(tmp_path):
+    older = hold.set_hold("operator release", "ssh:test")
+    newer = hold.set_hold("IBKR session taken", "auto:ib-watchdog")
+    with pytest.raises(hold.HoldChanged) as err:
+        hold.clear_hold("app:user_1", expected_id=older["id"])
+    assert err.value.current["id"] == newer["id"]
+    assert hold.is_held() is True
+    assert hold.hold_state()["id"] == newer["id"]
+    events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert events[-1]["event"] == "clear-refused"
+
+
+def test_clear_aimed_at_a_hold_that_is_already_gone_is_refused():
+    state = hold.set_hold("x", "ssh:test")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
+    with pytest.raises(hold.HoldChanged):
+        hold.clear_hold("ssh:test", expected_id=state["id"])
+
+
+def test_any_hold_is_the_explicit_unconditional_clear():
+    hold.set_hold("x", "ssh:test")
+    hold.set_hold("y", "auto:ib-watchdog")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
+    assert hold.is_held() is False
+
+
+def test_non_owner_clear_is_also_compare_and_clear(tmp_path, monkeypatch):
+    older = hold.set_hold("phone flatten", "app:user_1")
+    newer = hold.set_hold("phone flatten again", "app:user_1")
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid() + 1))
+    with pytest.raises(hold.HoldChanged):
+        hold.clear_hold("app:user_1", expected_id=older["id"])
+    assert _hold_file(tmp_path).exists()
+    hold.clear_hold("app:user_1", expected_id=newer["id"])
+    assert not _hold_file(tmp_path).exists()
+
+
+def test_cli_clear_with_expected_id(tmp_path, capsys):
+    older = hold.set_hold("x", "ssh:test")
+    hold.set_hold("y", "ssh:test")
+    assert hold.main(["clear", "--actor", "ssh:test", "--expected-id", older["id"]]) == hold.HELD_RC
+    assert hold.is_held() is True
+    assert hold.main(["clear", "--actor", "ssh:test", "--any"]) == 0
+    assert hold.is_held() is False
+
+
+def test_cleared_flag_keeps_the_prefix_the_root_shim_reads(tmp_path):
+    state = hold.set_hold("x", "ssh:test")
+    hold.clear_hold("ssh:test", expected_id=state["id"])
+    assert _hold_file(tmp_path).read_text().startswith(hold.NOT_HELD_PREFIX)
