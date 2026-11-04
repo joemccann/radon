@@ -145,3 +145,29 @@ class TestDispatchMatches:
 
         assert n == 0
         assert called["n"] == 0
+
+
+class TestThrottleFailsClosed:
+    """A throttle that cannot be read or written must hold the rule quiet,
+    not let it fire on every scan."""
+
+    def test_unparseable_last_fired_at_is_throttled(self):
+        rules = [_rule(op=">", threshold=50.0, last_fired_at="not-a-timestamp")]
+        scan_row = {"ticker": "AAPL", "flow_strength": 90.0}
+        assert evaluate_rules(scan_row, rules, now=NOW) == []
+
+    def test_failed_mark_write_does_not_dispatch(self, monkeypatch):
+        import alerts.evaluate as ev
+        import db.client as client_mod
+
+        sent = []
+        monkeypatch.setattr(ev.notify, "dispatch", sent.append)
+
+        def dead_db():
+            raise RuntimeError("turso down")
+
+        monkeypatch.setattr(client_mod, "get_db", dead_db)
+        rules = [_rule(op=">", threshold=50.0)]
+        scan_row = {"ticker": "AAPL", "flow_strength": 90.0}
+        assert ev.evaluate_and_dispatch(scan_row, rules, now=NOW) == 0
+        assert sent == []

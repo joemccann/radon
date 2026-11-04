@@ -2,10 +2,10 @@
 
 ``evaluate_rules(scan_row, rules, now)`` returns the subset of rules whose
 ``(metric op threshold)`` predicate is crossed by the scan row AND that are not
-inside their throttle window. ``evaluate_and_dispatch`` additionally routes each
-match through the EXISTING watchdog notification helper (Pushover P1 +
-service_health heartbeat) and stamps ``last_fired_at`` so the rule cannot
-re-fire until the throttle window elapses.
+inside their throttle window. ``evaluate_and_dispatch`` additionally stamps
+``last_fired_at`` so the rule cannot re-fire until the throttle window elapses,
+then routes each match through the EXISTING watchdog notification helper
+(Pushover P1 + service_health heartbeat). Throttle faults fail closed.
 
 Reuse, not duplication: dispatch builds a ``watchdog.check.CheckOutcome`` and
 hands it to ``watchdog.notify.dispatch`` — the same path the service-health
@@ -82,11 +82,13 @@ def _parse_iso(value: str) -> Optional[datetime]:
 
 
 def _within_throttle(rule: AlertRule, now: datetime) -> bool:
+    """Never fired -> not throttled. A stamp that cannot be parsed fails
+    toward throttled: an unreadable throttle must not fire every scan."""
     if not rule.last_fired_at:
         return False
     last = _parse_iso(rule.last_fired_at)
     if last is None:
-        return False
+        return True
     return (now - last).total_seconds() < DEFAULT_THROTTLE_SECONDS
 
 
@@ -154,18 +156,15 @@ def _build_outcome(match: RuleMatch, now: datetime) -> CheckOutcome:
 
 def _mark_rule_fired(rule: AlertRule, now: datetime) -> None:
     """Stamp ``last_fired_at`` so the rule respects its throttle window.
-    Best-effort; a DB hiccup must never break the scan tail."""
-    try:
-        from db.client import get_db
+    Raises on failure; ``evaluate_and_dispatch`` then holds the alert."""
+    from db.client import get_db
 
-        db = get_db()
-        db.execute(
-            "UPDATE alert_rules SET last_fired_at = ? WHERE id = ?",
-            (now.isoformat().replace("+00:00", "Z"), rule.id),
-        )
-        db.commit()
-    except Exception:  # noqa: BLE001 — telemetry must not kill the scan
-        pass
+    db = get_db()
+    db.execute(
+        "UPDATE alert_rules SET last_fired_at = ? WHERE id = ?",
+        (now.isoformat().replace("+00:00", "Z"), rule.id),
+    )
+    db.commit()
 
 
 def evaluate_and_dispatch(
@@ -174,14 +173,24 @@ def evaluate_and_dispatch(
     *,
     now: Optional[datetime] = None,
 ) -> int:
-    """Evaluate ``scan_row`` against ``rules``, dispatch each match through the
-    watchdog notifier, and stamp ``last_fired_at``. Returns the match count."""
+    """Evaluate ``scan_row`` against ``rules``, stamp ``last_fired_at``, then
+    dispatch each match through the watchdog notifier. Returns the number
+    dispatched.
+
+    The stamp comes first and gates the send: a rule whose throttle cannot
+    be written stays quiet (one missed alert) instead of firing on every
+    scan until the DB recovers.
+    """
     now = now or datetime.now(timezone.utc)
-    matches = evaluate_rules(scan_row, rules, now=now)
-    for match in matches:
+    dispatched = 0
+    for match in evaluate_rules(scan_row, rules, now=now):
+        try:
+            _mark_rule_fired(match.rule, now)
+        except Exception:  # noqa: BLE001 — scan tail must never break on alerts
+            continue
         notify.dispatch(_build_outcome(match, now))
-        _mark_rule_fired(match.rule, now)
-    return len(matches)
+        dispatched += 1
+    return dispatched
 
 
 # ── rule loading (DB) ───────────────────────────────────────────────
