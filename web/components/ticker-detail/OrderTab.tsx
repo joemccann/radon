@@ -1,7 +1,7 @@
 "use client";
 
 import ResearchTicketContext from "@/components/research/ResearchTicketContext";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -325,6 +325,9 @@ function NewOrderForm({
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // R-281: `loading` is render state, so two clicks in one tick both see
+  // false. The ref is the synchronous double-submit guard.
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
 
@@ -532,7 +535,8 @@ function NewOrderForm({
       setConfirmStep(true);
       return;
     }
-    if (!submitPermitted) return;
+    if (!submitPermitted || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
@@ -575,6 +579,7 @@ function NewOrderForm({
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions, submitPermitted]);
@@ -673,8 +678,8 @@ function NewOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); setConfirmStep(false); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); setConfirmStep(false); }}>GTC</button>
         </div>
       </div>
 
@@ -742,6 +747,9 @@ function ComboOrderForm({
   const [tif, setTif] = useState<"DAY" | "GTC">("GTC");
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // R-281: `loading` is render state, so two clicks in one tick both see
+  // false. The ref is the synchronous double-submit guard.
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
   const tickerDetail = useTickerDetailOptional();
@@ -907,7 +915,8 @@ function ComboOrderForm({
       setConfirmStep(true);
       return;
     }
-    if (!submitPermitted) return;
+    if (!submitPermitted || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
@@ -947,6 +956,7 @@ function ComboOrderForm({
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [confirmStep, submitPermitted, legsWithActions, ticker, action, parsedQty, parsedPrice, tif, portfolio, orderActions, position.structure, onOrderPlaced]);
@@ -1061,8 +1071,8 @@ function ComboOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); setConfirmStep(false); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); setConfirmStep(false); }}>GTC</button>
         </div>
       </div>
 
