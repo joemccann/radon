@@ -82,6 +82,13 @@ _FILL_MONITOR_TRADE_ID = re.compile(
 )
 
 
+def _identity(value: Any) -> int:
+    """A positive int IB identity (conId/permId), else 0."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value if value > 0 else 0
+
+
 class JournalSyncHandler(BaseHandler):
     """Append fresh IB executions to the Turso journal."""
 
@@ -773,6 +780,10 @@ class JournalSyncHandler(BaseHandler):
         if db is None:
             db = self._open_db()
         prior_state: Dict[str, float] = {}
+        # Signed qty of fill_monitor mirrors duplicating executions already
+        # journaled or in this batch, per conId (read lazily; False = the
+        # mirror read failed, so every prior is unknown this cycle).
+        mirror_dupes: Any = None
 
         rows: List[Dict[str, Any]] = []
         corrections: List[Dict[str, Any]] = []
@@ -796,7 +807,14 @@ class JournalSyncHandler(BaseHandler):
 
             contract_key = self._fill_contract_key(fill)
             if contract_key and contract_key not in prior_state:
-                prior_state[contract_key] = self._lookup_prior_qty(db, fill)
+                prior = self._lookup_prior_qty(db, fill)
+                if prior is not None:
+                    if mirror_dupes is None:
+                        mirror_dupes = self._mirror_duplicate_qty(db, existing["trades"], fills)
+                    con_id = _identity(getattr(getattr(fill, "contract", None), "conId", None))
+                    dupe = mirror_dupes.get(con_id, 0.0) if mirror_dupes is not False else None
+                    prior = None if dupe is None else prior - dupe
+                prior_state[contract_key] = prior
 
             # Unknown prior (failed lookup) refuses every fill of the contract
             # this cycle; the DB-sourced dedupe re-imports them next cycle.
@@ -833,6 +851,63 @@ class JournalSyncHandler(BaseHandler):
 
             prior_state[contract_key] = prior_qty + self._fill_signed_qty(fill)
         return rows, corrections
+
+    def _mirror_duplicate_qty(
+        self,
+        db: Any,
+        existing_trades: List[Dict[str, Any]],
+        fills: List[Any],
+    ) -> Any:
+        """conId → signed qty of mirror rows that duplicate known executions.
+
+        ``prior_net_qty_for_contract`` sums every journal row, fill_monitor
+        mirrors included. A mirror ``filled-N`` carrying ``newly`` contracts
+        records the order's fills (N-newly, N]; the part of that range the
+        order's execId rows (journaled or in this batch) already cover is
+        counted twice, so a close read its own fill in its prior (a full
+        close labelled SELL_TO_OPEN, a split close a phantom FLIP). Returns
+        False when the mirrors cannot be read.
+        """
+        if db is None:
+            return {}
+        try:
+            rows = self._journal_rows(db, "trade_id, payload", mirrors_only=True)
+        except Exception as exc:  # noqa: BLE001 — unknown prior, never guess
+            logger.warning("journal_sync: mirror read for prior qty failed: %s", exc)
+            return False
+
+        batch = []
+        for fill in fills:
+            execution = getattr(fill, "execution", None)
+            contract = getattr(fill, "contract", None)
+            ib_time = getattr(execution, "time", None)
+            batch.append({
+                "ib_exec_id": self._fill_exec_id(fill),
+                "con_id": _identity(getattr(contract, "conId", None)),
+                "perm_id": _identity(getattr(execution, "permId", None)),
+                "date": et_session_date(ib_time if isinstance(ib_time, datetime) else None),
+                "contracts": abs(self._fill_signed_qty(fill)),
+            })
+        covered = self._exec_qty_by_order(list(existing_trades) + batch)
+
+        dupes: Dict[int, float] = {}
+        for row in rows:
+            match = _FILL_MONITOR_TRADE_ID.match(str(self._row_value(row, 0, "trade_id") or ""))
+            if match is None:
+                continue
+            try:
+                payload = self._decode_journal_payload(self._row_value(row, 1, "payload"))
+            except Exception:  # noqa: BLE001
+                continue
+            order_key = (int(match["con"]), int(match["order"]), match["date"])
+            total = float(match["filled"])
+            newly = abs(self._trade_signed_qty({"action": "BUY", "contracts": payload.get(
+                "newly_filled", payload.get("contracts", payload.get("shares")))}))
+            overlap = min(max(covered.get(order_key, 0.0) - (total - newly), 0.0), newly)
+            if overlap:
+                sign = signed_qty(payload.get("action"), 1)
+                dupes[order_key[0]] = dupes.get(order_key[0], 0.0) + sign * overlap
+        return dupes
 
     @staticmethod
     def _as_correction_of(
