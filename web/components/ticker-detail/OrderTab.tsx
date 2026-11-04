@@ -27,6 +27,7 @@ import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
 import { OrderRiskGate, type OrderRiskInput, useOrderRisk } from "@/lib/order";
 import { heldComboUnits, isPureComboClose } from "@/lib/order/positionTrade";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import {
   type IbOrderType,
@@ -323,7 +324,6 @@ function NewOrderForm({
   const [orderType, setOrderType] = useState<IbOrderType>("LMT");
   const [stopPrice, setStopPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
   // R-281: `loading` is render state, so two clicks in one tick both see
   // false. The ref is the synchronous double-submit guard.
@@ -346,7 +346,7 @@ function NewOrderForm({
     setLimitPrice(p.price.toFixed(2));
     if (p.action) setAction(p.action);
     if (p.quantity != null && quantity.trim() === "") setQuantity(String(p.quantity));
-    setConfirmStep(false);
+    disarm();
     // Intentionally keyed on the nonce alone (see comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillNonce]);
@@ -529,29 +529,31 @@ function NewOrderForm({
   }, [action, parsedQty, ticker, position, portfolio]);
   const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
 
+  // The exact request transmit sends. The confirm step arms for this body,
+  // so any change under it (including a polled `position`) disarms.
+  const placePayload = useMemo(
+    () => isValid
+      ? buildSingleLegOrderPayload({ ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, position, orderType, stopPrice: parsedStop })
+      : null,
+    [isValid, ticker, action, parsedQty, parsedPrice, tif, position, orderType, parsedStop],
+  );
+  const payloadKey = placePayload ? canonicalPayloadKey({ url: "/api/orders/place", body: placePayload }) : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
-    if (!submitPermitted || inFlightRef.current) return;
+    if (!placePayload || !submitPermitted || inFlightRef.current) return;
     inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
 
     try {
-      const payload = buildSingleLegOrderPayload({
-        ticker,
-        action,
-        quantity: parsedQty,
-        limitPrice: parsedPrice,
-        tif,
-        position,
-        orderType,
-        stopPrice: parsedStop,
-      });
+      const payload = placePayload;
 
       // Final naked short guard check before submission
       const guardPortfolio = toNakedShortPortfolio(portfolio);
@@ -573,7 +575,7 @@ function NewOrderForm({
       } else {
         const feedback = placeOrderFeedback(json, `Order placed: ${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`);
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
         onOrderPlaced?.();
       }
     } catch {
@@ -582,7 +584,7 @@ function NewOrderForm({
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions, submitPermitted]);
+  }, [confirmStep, arm, disarm, placePayload, ticker, action, parsedQty, parsedPrice, portfolio, onOrderPlaced, orderActions, submitPermitted]);
 
   return (
     <div className="order-form">
@@ -593,13 +595,13 @@ function NewOrderForm({
         <div className="order-action-buttons">
           <button
             className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
-            onClick={() => { setAction("BUY"); setConfirmStep(false); }}
+            onClick={() => { setAction("BUY"); disarm(); }}
           >
             BUY
           </button>
           <button
             className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
-            onClick={() => { setAction("SELL"); setConfirmStep(false); }}
+            onClick={() => { setAction("SELL"); disarm(); }}
           >
             SELL
           </button>
@@ -611,7 +613,7 @@ function NewOrderForm({
         onChange={(next) => {
           setOrderType(next);
           if (isStopOrderType(next)) setTif("GTC");
-          setConfirmStep(false);
+          disarm();
         }}
       />
 
@@ -623,7 +625,7 @@ function NewOrderForm({
           min="1"
           step="1"
           value={quantity}
-          onChange={(e) => { setQuantity(e.target.value); setConfirmStep(false); }}
+          onChange={(e) => { setQuantity(e.target.value); disarm(); }}
           placeholder="Shares"
         />
       </div>
@@ -639,15 +641,15 @@ function NewOrderForm({
               step="0.01"
               min="0.01"
               value={stopPrice}
-              onChange={(e) => { setStopPrice(e.target.value); setConfirmStep(false); }}
+              onChange={(e) => { setStopPrice(e.target.value); disarm(); }}
               placeholder="0.00"
               data-testid="order-stop-price"
             />
           </div>
           <div className="modify-quick-buttons">
-            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); setConfirmStep(false); } }}>BID</button>
-            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); setConfirmStep(false); } }}>MID</button>
-            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
+            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); disarm(); } }}>BID</button>
+            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); disarm(); } }}>MID</button>
+            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); disarm(); } }}>ASK</button>
           </div>
         </div>
       )}
@@ -663,14 +665,14 @@ function NewOrderForm({
             step="0.01"
             min="0.01"
             value={limitPrice}
-            onChange={(e) => { setLimitPrice(e.target.value); setConfirmStep(false); }}
+            onChange={(e) => { setLimitPrice(e.target.value); disarm(); }}
             placeholder="0.00"
           />
         </div>
         <div className="modify-quick-buttons">
-          <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); setConfirmStep(false); } }}>BID</button>
-          <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); setConfirmStep(false); } }}>MID</button>
-          <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
+          <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); disarm(); } }}>BID</button>
+          <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); disarm(); } }}>MID</button>
+          <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); disarm(); } }}>ASK</button>
         </div>
       </div>
       )}
@@ -678,8 +680,8 @@ function NewOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); setConfirmStep(false); }}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); setConfirmStep(false); }}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); disarm(); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); disarm(); }}>GTC</button>
         </div>
       </div>
 
@@ -705,7 +707,7 @@ function NewOrderForm({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={() => disarm()} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
@@ -745,7 +747,6 @@ function ComboOrderForm({
   const [quantity, setQuantity] = useState(() => String(comboUnits));
   const [limitPrice, setLimitPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("GTC");
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
   // R-281: `loading` is render state, so two clicks in one tick both see
   // false. The ref is the synchronous double-submit guard.
@@ -760,7 +761,7 @@ function ComboOrderForm({
     if (!prefill) return;
     setLimitPrice(prefill.price.toFixed(2));
     if (prefill.action) setAction(prefill.action);
-    setConfirmStep(false);
+    disarm();
     // A repeated click at the same price must still reapply after manual edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillNonce]);
@@ -909,33 +910,36 @@ function ComboOrderForm({
   const riskState = useOrderRisk(riskInput, portfolio);
   const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
 
+  // The exact request transmit sends. Legs and ratios derive from the live
+  // `position`, so the confirm step arms for this body: a polled change to
+  // the held legs disarms instead of transmitting unreviewed ratios.
+  const placePayload = useMemo(() => {
+    if (!isValid) return null;
+    const legs = legsWithActions.map((leg) => ({
+      expiry: leg.expiry,
+      strike: leg.strike!,
+      right: leg.right,
+      action: leg.legAction,
+      ratio: leg.ratio,
+    }));
+    return { type: "combo" as const, symbol: ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, legs };
+  }, [isValid, legsWithActions, ticker, action, parsedQty, parsedPrice, tif]);
+  const payloadKey = placePayload ? canonicalPayloadKey({ url: "/api/orders/place", body: placePayload }) : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
-    if (!submitPermitted || inFlightRef.current) return;
+    if (!placePayload || !submitPermitted || inFlightRef.current) return;
     inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
     try {
-      const legs = legsWithActions.map((leg) => ({
-        expiry: leg.expiry,
-        strike: leg.strike!,
-        right: leg.right,
-        action: leg.legAction,
-        ratio: leg.ratio,
-      }));
-      const guardResult = checkNakedShortRisk({
-        type: "combo",
-        symbol: ticker,
-        action,
-        quantity: parsedQty,
-        limitPrice: parsedPrice,
-        legs,
-      }, toNakedShortPortfolio(portfolio));
+      const guardResult = checkNakedShortRisk(placePayload, toNakedShortPortfolio(portfolio));
       if (!guardResult.allowed) {
         setError(guardResult.reason ?? "Order blocked: naked short exposure");
         return;
@@ -943,14 +947,14 @@ function ComboOrderForm({
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "combo", symbol: ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, legs }),
+        body: JSON.stringify(placePayload),
       });
       const json = await res.json();
       if (!res.ok) setError(json.error || "Order placement failed");
       else {
         const feedback = placeOrderFeedback(json, `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}`);
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
         onOrderPlaced?.();
       }
     } catch {
@@ -959,7 +963,7 @@ function ComboOrderForm({
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, [confirmStep, submitPermitted, legsWithActions, ticker, action, parsedQty, parsedPrice, tif, portfolio, orderActions, position.structure, onOrderPlaced]);
+  }, [confirmStep, arm, disarm, placePayload, submitPermitted, action, parsedQty, parsedPrice, portfolio, orderActions, position.structure, onOrderPlaced]);
 
   return (
     <div className="order-form">
@@ -1013,13 +1017,13 @@ function ComboOrderForm({
         <div className="order-action-buttons">
           <button
             className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
-            onClick={() => { setAction("BUY"); setConfirmStep(false); }}
+            onClick={() => { setAction("BUY"); disarm(); }}
           >
             BUY
           </button>
           <button
             className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
-            onClick={() => { setAction("SELL"); setConfirmStep(false); }}
+            onClick={() => { setAction("SELL"); disarm(); }}
           >
             SELL
           </button>
@@ -1035,7 +1039,7 @@ function ComboOrderForm({
           min="1"
           step="1"
           value={quantity}
-          onChange={(e) => { setQuantity(e.target.value); setConfirmStep(false); }}
+          onChange={(e) => { setQuantity(e.target.value); disarm(); }}
           placeholder="Contracts"
         />
       </div>
@@ -1050,18 +1054,18 @@ function ComboOrderForm({
             type="number"
             step="0.01"
             value={limitPrice}
-            onChange={(e) => { setLimitPrice(e.target.value); setConfirmStep(false); }}
+            onChange={(e) => { setLimitPrice(e.target.value); disarm(); }}
             placeholder="0.00"
           />
         </div>
         <div className="modify-quick-buttons">
-          <button className="btn-quick" disabled={netPrices.bid == null} onClick={() => { if (netPrices.bid != null) { setLimitPrice(netPrices.bid.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.bid == null} onClick={() => { if (netPrices.bid != null) { setLimitPrice(netPrices.bid.toFixed(2)); disarm(); } }}>
             BID{netPrices.bid != null ? ` ${netPrices.bid.toFixed(2)}` : ""}
           </button>
-          <button className="btn-quick" disabled={netPrices.mid == null} onClick={() => { if (netPrices.mid != null) { setLimitPrice(netPrices.mid.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.mid == null} onClick={() => { if (netPrices.mid != null) { setLimitPrice(netPrices.mid.toFixed(2)); disarm(); } }}>
             MID{netPrices.mid != null ? ` ${netPrices.mid.toFixed(2)}` : ""}
           </button>
-          <button className="btn-quick" disabled={netPrices.ask == null} onClick={() => { if (netPrices.ask != null) { setLimitPrice(netPrices.ask.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.ask == null} onClick={() => { if (netPrices.ask != null) { setLimitPrice(netPrices.ask.toFixed(2)); disarm(); } }}>
             ASK{netPrices.ask != null ? ` ${netPrices.ask.toFixed(2)}` : ""}
           </button>
         </div>
@@ -1071,8 +1075,8 @@ function ComboOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); setConfirmStep(false); }}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); setConfirmStep(false); }}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); disarm(); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); disarm(); }}>GTC</button>
         </div>
       </div>
 
@@ -1099,7 +1103,7 @@ function ComboOrderForm({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={() => disarm()} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
