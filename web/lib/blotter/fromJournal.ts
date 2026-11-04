@@ -17,12 +17,14 @@
  *   BlotterTrade with one BlotterExecution. Multi-fill executions are
  *   already collapsed by journal_rehydrate.py (composite ib_exec_id).
  *
- * Status:
+ * Status (labels: scripts/utils/journal_action.py, shared by every writer):
  *   - realized_pnl nonzero  → closed (round-trip materialised)
  *   - BUY_OPTION / BUY      → open long
- *   - SELL_TO_OPEN          → open short
+ *   - SELL_TO_OPEN          → open short (stock or option; legacy SHORT too)
  *   - SELL_OPTION / SELL / BUY_TO_CLOSE / CLOSED → closed
- *   - BUY_TO_CLOSE          → cover short (buy-to-close)
+ *   - BUY_TO_CLOSE          → cover short (stock or option)
+ *   - flip_open_qty > 0     → the fill crossed zero: split into the closing
+ *                             part and an open residual on the other side
  */
 
 export interface JournalTradePayload {
@@ -49,6 +51,8 @@ export interface JournalTradePayload {
   ib_exec_id?: string;
   /** IB Flex `notes` codes, ";"-joined: A=assigned, Ex=exercised, Ep=expired. */
   ib_codes?: string;
+  /** Residual a zero-crossing fill opened on the other side (closing label). */
+  flip_open_qty?: number;
   strike?: number;
   right?: string;
   expiry?: string;
@@ -709,6 +713,63 @@ export function dedupeJournalRows(rows: JournalRow[]): JournalRow[] {
   return rows.filter((_, i) => keepIdx.has(i));
 }
 
+/* ─── Shared journal action labels ─────────────────────────────────────── */
+
+// Legacy labels still in history that mean SELL_TO_OPEN: old ib_reconcile
+// wrote SHORT for a stock short sale. Rows are never rewritten.
+const LEGACY_SHORT_OPEN = new Set(["SHORT", "SHORT_SELL"]);
+
+function canonicalAction(action: unknown): string {
+  const a = typeof action === "string" ? action.toUpperCase() : "";
+  return LEGACY_SHORT_OPEN.has(a) ? "SELL_TO_OPEN" : a;
+}
+
+function scaled(value: unknown, ratio: number): unknown {
+  return typeof value === "number" ? value * ratio : value;
+}
+
+/**
+ * A row whose fill crossed zero carries the closing label plus
+ * `flip_open_qty`. Split it into the closing part (keeps the identity and any
+ * explicit realized fields) and an open residual on the other side, so the
+ * residual position is not lost from the open list.
+ */
+function expandJournalRow(row: JournalRow): JournalRow[] {
+  const p = row?.payload;
+  if (!p || typeof p !== "object") return [row];
+  const action = canonicalAction(p.action);
+  const base: JournalTradePayload = action === p.action ? p : { ...p, action };
+  const qty = resolveQuantity(base);
+  const openQty = typeof base.flip_open_qty === "number" ? base.flip_open_qty : 0;
+  const closingSell = action === "SELL" || action === "SELL_OPTION";
+  if (!(openQty > 0 && openQty < qty) || !(closingSell || action === "BUY_TO_CLOSE")) {
+    return base === p ? [row] : [{ ...row, payload: base }];
+  }
+  const qtyKey = typeof base.contracts === "number" ? "contracts" : "shares";
+  const closeRatio = (qty - openQty) / qty;
+  const openRatio = openQty / qty;
+  const { flip_open_qty: _residual, ...rest } = base;
+  const closing: JournalTradePayload = {
+    ...rest,
+    [qtyKey]: qty - openQty,
+    total_cost: scaled(rest.total_cost, closeRatio) as number | undefined,
+    commission: scaled(rest.commission, closeRatio) as number | undefined,
+  };
+  const {
+    cost_basis: _cb, proceeds: _pr, realized_pnl: _rp, realized_quantity: _rq,
+    total_round_trip_quantity: _rt, ...openFields
+  } = rest;
+  const opening: JournalTradePayload = {
+    ...openFields,
+    action: closingSell ? "SELL_TO_OPEN" : qtyKey === "shares" ? "BUY" : "BUY_OPTION",
+    [qtyKey]: openQty,
+    total_cost: scaled(rest.total_cost, openRatio) as number | undefined,
+    commission: scaled(rest.commission, openRatio) as number | undefined,
+    ib_exec_id: `${rest.ib_exec_id ?? ""}#flip-open`,
+  };
+  return [{ ...row, payload: closing }, { ...row, payload: opening }];
+}
+
 /* ─── Legacy blotter payload integration ───────────────────────────────── */
 
 /**
@@ -804,7 +865,8 @@ export function journalRowsToBlotter(
   // journal_rehydrate composite) BEFORE any P&L synthesis or aggregation
   // sees them — see dedupeJournalRows. Everything below reads dedupedRows,
   // never the raw `rows` param.
-  const dedupedRows = dedupeJournalRows(rows);
+  // Then canonicalize labels and split zero-crossing (flip) rows.
+  const dedupedRows = dedupeJournalRows(rows).flatMap(expandJournalRow);
 
   // Pre-pass: synthesize cost_basis / proceeds / realized_pnl for legacy
   // rows that lack them. Rows that already carry the explicit fields are

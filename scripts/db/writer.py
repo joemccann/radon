@@ -2790,9 +2790,15 @@ def upsert_executed_order(
     db.commit()
 
 
+# app_config key holding the read time of the newest applied open_orders
+# snapshot (the compare-and-set slot for its two writers).
+OPEN_ORDERS_SNAPSHOT_KEY = "open_orders.snapshot_at"
+
+
 def replace_open_orders_for_session(
     open_orders: list[tuple[int, dict[str, Any]]],
-) -> None:
+    snapshot_at: Optional[str] = None,
+) -> bool:
     """Phase 3 — replace the open_orders snapshot without an empty window.
 
     Used by ib_orders.py after a full sync since IB returns the full
@@ -2805,15 +2811,40 @@ def replace_open_orders_for_session(
     any point leaves old rows, new rows, or their union — never an empty
     table while orders are working — and the next 60s sync converges.
     Errors propagate to the caller.
+
+    Two writers (orders-sync, fill_monitor's mirror) replace this table.
+    ``snapshot_at`` (UTC ISO, the time IB was read; default now) orders
+    them: the snapshot first claims the app_config slot with a
+    compare-and-set and is rejected (returns False) when a newer snapshot
+    already holds it. Each row carries its snapshot time in ``updated_at``;
+    the upsert never overwrites a newer row and the delete never removes
+    one, so a slower older writer cannot erase a newer book.
     """
     db = get_db()
-    now = _now_iso()
-    if not open_orders:
-        db.execute("DELETE FROM open_orders")
+    snapshot_at = snapshot_at or _now_iso()
+    db.execute(
+        """
+        INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = excluded.updated_at
+        WHERE excluded.value >= app_config.value
+        """,
+        (OPEN_ORDERS_SNAPSHOT_KEY, snapshot_at, _now_iso()),
+    )
+    claimed = db.execute(
+        "SELECT value FROM app_config WHERE key = ?", (OPEN_ORDERS_SNAPSHOT_KEY,)
+    ).fetchone()
+    if not claimed or claimed[0] != snapshot_at:
         db.commit()
-        return
+        return False
 
-    rows = [(int(perm_id), json.dumps(payload), now) for perm_id, payload in open_orders]
+    if not open_orders:
+        db.execute("DELETE FROM open_orders WHERE updated_at <= ?", (snapshot_at,))
+        db.commit()
+        return True
+
+    rows = [(int(perm_id), json.dumps(payload), snapshot_at) for perm_id, payload in open_orders]
     chunk_size = 200
     for start in range(0, len(rows), chunk_size):
         chunk = rows[start:start + chunk_size]
@@ -2830,16 +2861,18 @@ def replace_open_orders_for_session(
             ON CONFLICT(perm_id) DO UPDATE SET
               payload    = excluded.payload,
               updated_at = excluded.updated_at
+            WHERE excluded.updated_at >= open_orders.updated_at
             """,
             params,
         )
 
     id_placeholders = ", ".join(["?"] * len(rows))
     db.execute(
-        f"DELETE FROM open_orders WHERE perm_id NOT IN ({id_placeholders})",
-        tuple(row[0] for row in rows),
+        f"DELETE FROM open_orders WHERE perm_id NOT IN ({id_placeholders}) AND updated_at <= ?",
+        (*(row[0] for row in rows), snapshot_at),
     )
     db.commit()
+    return True
 
 
 def count_open_orders() -> int:

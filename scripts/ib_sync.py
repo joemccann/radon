@@ -1740,8 +1740,56 @@ def _basis_carry_key(ticker, structure, expiry) -> str:
     return f"{ticker}|{s}|{expiry}"
 
 
-def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_data: Optional[dict] = None, fill_dates: Optional[dict] = None) -> dict:
-    """Convert IB data to the portfolio snapshot payload."""
+def _fill_carry_key(fill) -> Optional[str]:
+    """Contract key a session fill shares with ``_leg_carry_key``."""
+    contract = getattr(fill, "contract", None)
+    sec_type = str(getattr(contract, "secType", "") or "").upper()
+    symbol = getattr(contract, "symbol", None)
+    if not symbol:
+        return None
+    if sec_type == "STK":
+        return f"{symbol}|STK"
+    if sec_type == "OPT":
+        return _journal_basis_key(
+            symbol,
+            getattr(contract, "lastTradeDateOrContractMonth", None),
+            getattr(contract, "right", None),
+            getattr(contract, "strike", None),
+        )
+    return None
+
+
+def _leg_carry_key(ticker, expiry, leg: dict) -> Optional[str]:
+    if leg.get("type") == "Stock":
+        return f"{ticker}|STK"
+    if leg.get("type") in ("Call", "Put"):
+        return _journal_basis_key(ticker, expiry, leg["type"][0], leg.get("strike"))
+    return None
+
+
+def _reopened_since(prior_signed: float, since, fills: list) -> bool:
+    """True when fills after ``since`` took the position through zero.
+
+    Walks the signed position from the prior snapshot's size. Reaching or
+    crossing zero means the lot the prior basis described was closed; what
+    is held now is a new lot, whatever its size.
+    """
+    running = prior_signed
+    for when, signed in sorted(fills, key=lambda item: item[0]):
+        if when <= since:
+            continue
+        running += signed
+        if running == 0 or (running > 0) != (prior_signed > 0):
+            return True
+    return False
+
+
+def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_data: Optional[dict] = None, fill_dates: Optional[dict] = None, session_fills: Optional[list] = None) -> dict:
+    """Convert IB data to the portfolio snapshot payload.
+
+    ``session_fills`` (IB fills of this session) let the basis carry-forward
+    see a close and reopen since the prior snapshot.
+    """
 
     bankroll = account.get('NetLiquidation', account.get('TotalCashValue', 0))
 
@@ -1779,8 +1827,15 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     prev_dates: dict[str, str] = {}
     prev_contract_dates: dict[str, str] = {}
     prev_basis: dict[str, dict] = {}
+    prev_synced_at = None
     try:
         prev = read_latest_portfolio_snapshot() or {}
+        try:
+            prev_synced_at = datetime.fromisoformat(str(prev.get("last_sync") or ""))
+            if prev_synced_at.tzinfo is None:
+                prev_synced_at = None  # a naive time cannot be ordered against fills
+        except ValueError:
+            prev_synced_at = None
         for p in prev.get("positions", []):
             key = f"{p.get('ticker')}|{p.get('structure')}|{p.get('expiry')}"
             ed = p.get("entry_date", "")
@@ -1805,10 +1860,27 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
                     prev_basis[_basis_carry_key(p.get("ticker"), p.get("structure"), p.get("expiry"))] = {
                         "direction": pdir, "contracts": pc, "per_unit": pec / pc
                     }
-            except (TypeError, ValueError):
-                pass
-    except Exception:
-        pass
+            except (TypeError, ValueError) as exc:
+                print(
+                    f"  basis carry: prior snapshot row {p.get('ticker')} {p.get('structure')} "
+                    f"unreadable ({exc}); no carry for it",
+                    file=sys.stderr,
+                )
+    except Exception as exc:  # noqa: BLE001 — dates + carry fall back, but say so
+        print(
+            f"  basis carry / entry dates: previous snapshot unreadable ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+
+    # Signed session fills per contract, for the carry's reopen check.
+    fills_by_key: dict[str, list] = {}
+    for fill in session_fills or []:
+        fill_key = _fill_carry_key(fill)
+        execution = getattr(fill, "execution", None)
+        when = getattr(execution, "time", None)
+        signed = _fill_signed_qty(getattr(execution, "side", None), getattr(execution, "shares", 0))
+        if fill_key and signed and isinstance(when, datetime) and when.tzinfo is not None:
+            fills_by_key.setdefault(fill_key, []).append((when, signed))
 
     for pos in collapsed_positions:
         key = f"{pos.get('ticker')}|{pos.get('structure')}|{pos.get('expiry')}"
@@ -1874,8 +1946,12 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         # differs from IB's avgCost, carry the prior basis forward. Sticky
         # (size-not-increased + basis-differs): corrects the reduce and holds the
         # pin across unchanged syncs, never freezing an add/grow, a direction
-        # flip, or a position IB and the snapshot already agree on. A
-        # journal-corrected leg (avg_cost != ib_avg_cost) wins and is left alone.
+        # flip, or a position IB and the snapshot already agree on. A measured
+        # basis (journal / session fills) wins and is left alone, as does a
+        # journal-corrected leg (avg_cost != ib_avg_cost). Session fills that
+        # took the position through zero since the prior snapshot mean the
+        # prior lot was closed and this is a new one: no carry. A carried leg
+        # says so in ``basis_source``.
         pb = prev_basis.get(_basis_carry_key(ticker, structure, expiry))
         if pb is not None and len(legs) == 1:
             leg0 = legs[0]
@@ -1886,11 +1962,22 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             journal_corrected = (
                 ac is not None and ibc is not None and abs(float(ac) - float(ibc)) > 1e-6
             )
-            session_fill_basis = pos.get("basis_source") == "session_fills"
+            measured_basis = (
+                pos.get("basis_source") == "session_fills"
+                or leg0.get("basis_source") in ("journal", "session_fills")
+            )
             drifted = ibc is not None and abs(pb["per_unit"] - float(ibc)) > 1e-6
+            carry_key = _leg_carry_key(ticker, expiry, leg0)
+            prior_signed = -pb["contracts"] if pb["direction"] == "SHORT" else pb["contracts"]
+            reopened = (
+                prev_synced_at is not None
+                and carry_key is not None
+                and _reopened_since(prior_signed, prev_synced_at, fills_by_key.get(carry_key, []))
+            )
             if (
                 not journal_corrected
-                and not session_fill_basis
+                and not measured_basis
+                and not reopened
                 and drifted
                 and cur_dir == pb["direction"]
                 and 0 < cur_contracts <= pb["contracts"]
@@ -1900,6 +1987,7 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
                 pos["entry_cost"] = round(sign * per_unit * cur_contracts, 2)
                 leg0["avg_cost"] = round(per_unit, 6)
                 leg0["entry_cost"] = round(per_unit * cur_contracts, 2)
+                leg0["basis_source"] = "carried_forward"
 
     # Hydrate only execution-instance-linked v2 capital. Structure similarity
     # and modeled margin are intentionally never accepted here.
@@ -2282,7 +2370,9 @@ def main():
         # Sync or emit JSON if requested
         if args.sync or args.json_output:
             fill_dates = build_fill_dates(client, fills=session_fills)
-            portfolio = convert_to_portfolio_format(account, collapsed, pnl_data, fill_dates=fill_dates)
+            portfolio = convert_to_portfolio_format(
+                account, collapsed, pnl_data, fill_dates=fill_dates, session_fills=session_fills
+            )
 
         if args.sync and portfolio is not None:
             try:

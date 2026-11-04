@@ -227,7 +227,7 @@ class TestFillMonitorIncrementPricing:
     def test_increment_priced_from_execution_delta(self):
         with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls, \
              patch("monitor_daemon.handlers.fill_monitor.upsert_journal_entry") as mock_upsert, \
-             patch("monitor_daemon.handlers.fill_monitor.get_db", None):
+             patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
             mock_client = MagicMock()
             mock_client.get_open_orders.return_value = [self._two_price_partial_trade()]
             mock_cls.return_value = mock_client
@@ -254,7 +254,7 @@ class TestFillMonitorIncrementPricing:
 
         with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls, \
              patch("monitor_daemon.handlers.fill_monitor.upsert_journal_entry") as mock_upsert, \
-             patch("monitor_daemon.handlers.fill_monitor.get_db", None):
+             patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
             mock_client = MagicMock()
             mock_client.get_open_orders.return_value = [trade]
             mock_cls.return_value = mock_client

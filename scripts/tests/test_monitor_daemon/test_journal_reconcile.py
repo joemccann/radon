@@ -488,7 +488,12 @@ def _make_heal_db(
     def _execute(sql: str, params: tuple = ()):
         cursor = MagicMock(spec=["fetchall"])
         if "service_health" in sql:
-            cursor.fetchall.return_value = [(state,)] if state is not None else []
+            # (state, last_error): a latched error carries the gap cause the
+            # handler records (C4); other causes are never healed.
+            gap_error = json.dumps({"message": "gap", "cause": "journal_gap"})
+            cursor.fetchall.return_value = (
+                [(state, gap_error if state == "error" else None)] if state is not None else []
+            )
         elif "executed_orders" in sql:
             cursor.fetchall.return_value = executed_rows
         else:

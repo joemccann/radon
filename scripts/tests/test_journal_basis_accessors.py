@@ -327,10 +327,11 @@ class TestSignedQty:
         """SHORT_SELL prefix also matches the SHORT branch."""
         assert _signed_qty("SHORT_SELL", 2) == pytest.approx(-2.0)
 
-    def test_closed_negative(self):
-        """B9-closed: exact 'CLOSED' label (case-insensitive) → negative."""
-        assert _signed_qty("CLOSED", 8) == pytest.approx(-8.0)
-        assert _signed_qty("closed", 8) == pytest.approx(-8.0)
+    def test_closed_round_trip_is_zero(self):
+        """B9-closed: a 'CLOSED' round trip nets to zero (case-insensitive),
+        the same 0 expiry_sweep gives it (§1 #11)."""
+        assert _signed_qty("CLOSED", 8) == pytest.approx(0.0)
+        assert _signed_qty("closed", 8) == pytest.approx(0.0)
 
     def test_unknown_action_returns_zero(self):
         """B9-uk: unrecognised label → 0.0 (no implicit sign)."""
@@ -545,11 +546,12 @@ class TestPriorNetQtyForContract:
         )
         assert result_t == result_d
 
-    def test_opt_closed_action_counts_as_negative(self):
-        """B9-closed inside B10-opt: 'CLOSED' label reduces net."""
+    def test_opt_closed_round_trip_does_not_move_net(self):
+        """B9-closed inside B10-opt: a 'CLOSED' round trip nets to zero, so
+        a later open (BUY 10) and a later round trip leave net +10."""
         rows = [
-            _tuple_row(self._opt_payload("BUY_OPTION", 10)),
             _tuple_row(self._opt_payload("CLOSED", 10)),
+            _tuple_row(self._opt_payload("BUY_OPTION", 10)),
         ]
         db = _FakeDb(rows)
         qty = prior_net_qty_for_contract(
@@ -560,7 +562,7 @@ class TestPriorNetQtyForContract:
             right="C",
             expiry="20260717",
         )
-        assert qty == pytest.approx(0.0)
+        assert qty == pytest.approx(10.0)
 
     def test_opt_short_action_counts_as_negative(self):
         """B9-short inside B10-opt: 'SHORT' label opens short."""

@@ -16,11 +16,14 @@ Features:
 import subprocess
 import logging
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 from .base import BaseHandler, et_session_date
 from utils.outcome_metrics import record_outcome
 from clients.ib_client import IBClient, DEFAULT_HOST
+from utils.journal_action import classify_fill, structure_side
+from utils.ib_order_status import TERMINAL_FAILED, CancelOutcome, normalize as normalize_status
 
 try:
     # Mirror detected fills inline to the Turso journal table so a process
@@ -36,6 +39,7 @@ try:
     # waiting for the RTH-gated 5-min orders-sync loop.
     from ib_orders import (  # type: ignore
         build_orders_data as build_orders_data_for_mirror,
+        snapshot_time as snapshot_time_for_mirror,
         fetch_executed_orders as fetch_executed_orders_for_mirror,
         fetch_open_orders as fetch_open_orders_for_mirror,
         save_orders as save_orders_snapshot,
@@ -43,6 +47,7 @@ try:
     from db.writer import count_open_orders as count_open_orders_for_mirror  # type: ignore
 except ImportError:  # pragma: no cover
     build_orders_data_for_mirror = None  # type: ignore[assignment]
+    snapshot_time_for_mirror = None  # type: ignore[assignment]
     fetch_executed_orders_for_mirror = None  # type: ignore[assignment]
     fetch_open_orders_for_mirror = None  # type: ignore[assignment]
     save_orders_snapshot = None  # type: ignore[assignment]
@@ -58,6 +63,24 @@ def _identity_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _strict_id(value: Any) -> int:
+    """A positive int IB identity, else 0 (placeholders never coerce)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value if value > 0 else 0
+
+
+def order_key(order: Any) -> Optional[int]:
+    """known_orders key: permId, the one id unique across clients.
+
+    orderId restarts per client and every manual TWS order carries 0 (or a
+    negative id), so keying on it merged unrelated orders. Before IB assigns
+    a permId an API order (positive orderId) is keyed by orderId and
+    re-keyed once the permId arrives; an order with neither is untracked.
+    """
+    return _strict_id(getattr(order, "permId", None)) or _strict_id(getattr(order, "orderId", None)) or None
 
 
 try:
@@ -89,6 +112,16 @@ DEFAULT_IB_PORT = 4001
 DEFAULT_CLIENT_ID: int | str = "auto"
 
 
+# Result-row status per completion outcome (CANCELLED_OR_GONE: no execution
+# and no terminal status recorded, so cancel vs expire cannot be told apart).
+_COMPLETION_STATUS = {
+    CancelOutcome.FILLED: "COMPLETED",
+    CancelOutcome.PARTIALLY_FILLED_THEN_CANCELLED: "PARTIALLY_FILLED_THEN_CANCELLED",
+    CancelOutcome.CANCELLED: "CANCELLED",
+    CancelOutcome.UNKNOWN: "CANCELLED_OR_GONE",
+}
+
+
 class FillMonitorHandler(BaseHandler):
     """Monitor orders for fills."""
 
@@ -108,7 +141,7 @@ class FillMonitorHandler(BaseHandler):
         self.client_id = client_id
         self.send_notifications = send_notifications
 
-        # Track known order states: {order_id: {filled, symbol, etc}}
+        # Track known order states: {order_key: {filled, symbol, etc}}
         self.known_orders: Dict[int, Dict] = {}
 
     def execute(self) -> Dict[str, Any]:
@@ -136,18 +169,29 @@ class FillMonitorHandler(BaseHandler):
 
             # Fetch all open orders
             trades = client.get_open_orders()
-            current_order_ids = set()
-            
+            current_keys = set()
+
             for trade in trades:
                 order = trade.order
                 status = trade.orderStatus
                 contract = trade.contract
-                
+
                 order_id = order.orderId
-                current_order_ids.add(order_id)
-                
+                key = order_key(order)
+                if key is None:
+                    continue
+                perm_id = _strict_id(getattr(order, "permId", None))
+                if perm_id and key not in self.known_orders and order_id in self.known_orders \
+                        and not self.known_orders[order_id].get("perm_id"):
+                    # IB assigned the permId since the last cycle: re-key.
+                    self.known_orders[key] = self.known_orders.pop(order_id)
+                current_keys.add(key)
+
                 order_info = {
                     "order_id": order_id,
+                    "perm_id": perm_id,
+                    "con_id": _strict_id(getattr(contract, "conId", None)),
+                    "sec_type": getattr(contract, "secType", None),
                     "symbol": contract.symbol,
                     "contract": contract.localSymbol,
                     "action": order.action,
@@ -158,23 +202,23 @@ class FillMonitorHandler(BaseHandler):
                     "limit": order.lmtPrice if order.lmtPrice else None,
                     "avg_fill_price": status.avgFillPrice if status.avgFillPrice else None
                 }
-                
+
                 result["orders"].append(order_info)
-                
+
                 # Check if this is a new order
-                if order_id not in self.known_orders:
+                if key not in self.known_orders:
                     result["new_orders"] += 1
                     logger.info(f"New order detected: #{order_id} {order.action} {contract.symbol}")
-                
+
                 # Check for new fills
-                elif order_id in self.known_orders:
-                    prev_filled = self.known_orders[order_id].get("filled", 0)
+                else:
+                    prev_filled = self.known_orders[key].get("filled", 0)
                     current_filled = int(status.filled)
-                    
+
                     if current_filled > prev_filled:
                         newly_filled = current_filled - prev_filled
                         result["partial_fills"] += 1
-                        
+
                         fill_info = {
                             "order_id": order_id,
                             "symbol": contract.symbol,
@@ -188,11 +232,11 @@ class FillMonitorHandler(BaseHandler):
                             # this increment from the cost delta, not the
                             # running average (REL-011 / R-010).
                             "prev_filled": prev_filled,
-                            "prev_avg_price": self.known_orders[order_id].get("avg_fill_price"),
+                            "prev_avg_price": self.known_orders[key].get("avg_fill_price"),
                         }
                         result["fills"].append(fill_info)
                         record_outcome("fill_detected", "success")
-                        
+
                         logger.info(
                             f"Fill detected: #{order_id} {order.action} {newly_filled}x "
                             f"{contract.symbol} @ ${status.avgFillPrice:.2f}"
@@ -207,15 +251,15 @@ class FillMonitorHandler(BaseHandler):
                         # Send notification
                         if self.send_notifications:
                             self._notify_fill(fill_info)
-                
+
                 # Update known state
-                self.known_orders[order_id] = order_info
-            
+                self.known_orders[key] = order_info
+
             # Check for completed orders (no longer in open orders).
             # REL-009 / R-016: "vanished from the snapshot" is NOT proof of
             # a fill — cancels vanish too, and a degraded session returns
             # an empty snapshot for every order at once.
-            completed_ids = set(self.known_orders.keys()) - current_order_ids
+            completed_ids = set(self.known_orders.keys()) - current_keys
 
             if completed_ids and not trades:
                 accounts = client.get_managed_accounts()
@@ -230,12 +274,10 @@ class FillMonitorHandler(BaseHandler):
                     logger.warning(result["error"])
                     return result
 
-            filled_order_ids = None
+            session_fills: list = []
             if completed_ids:
                 try:
-                    filled_order_ids = {
-                        f.execution.orderId for f in client.get_fills()
-                    }
+                    session_fills = list(client.get_fills())
                 except Exception as e:  # noqa: BLE001 — defer, don't guess
                     result["error"] = (
                         f"execution cross-check unavailable ({e}); "
@@ -244,9 +286,11 @@ class FillMonitorHandler(BaseHandler):
                     logger.warning(result["error"])
                     return result
 
-            for order_id in completed_ids:
-                prev_order = self.known_orders[order_id]
-                genuinely_filled = order_id in (filled_order_ids or set())
+            for key in completed_ids:
+                prev_order = self.known_orders[key]
+                order_id = prev_order.get("order_id", key)
+                executions = self._executions_for(prev_order, key, session_fills)
+                outcome = self._completion_outcome(prev_order, executions)
 
                 completed_info = {
                     "order_id": order_id,
@@ -255,14 +299,15 @@ class FillMonitorHandler(BaseHandler):
                     "action": prev_order.get("action"),
                     "quantity": prev_order.get("quantity"),
                     "filled": prev_order.get("filled"),
-                    "status": "COMPLETED" if genuinely_filled else "CANCELLED_OR_GONE",
+                    "status": _COMPLETION_STATUS[outcome],
                 }
                 result["completed"].append(completed_info)
 
-                if genuinely_filled:
+                if executions:
                     result["complete_fills"] += 1
                     record_outcome("filled_order_removed", "success")
                     logger.info(f"Order completed: #{order_id} {prev_order.get('symbol')}")
+                    self._persist_final_increment(prev_order, executions)
                     if self.send_notifications:
                         self._notify_complete(completed_info)
                 else:
@@ -273,7 +318,7 @@ class FillMonitorHandler(BaseHandler):
                     )
 
                 # Remove from tracking (gone either way)
-                del self.known_orders[order_id]
+                del self.known_orders[key]
 
             if result["fills"] or result.get("complete_fills"):
                 self._mirror_ib_orders_snapshot(client)
@@ -302,6 +347,9 @@ class FillMonitorHandler(BaseHandler):
         ):
             return
         try:
+            # Read time BEFORE the fetch: orders this book against the
+            # orders-sync writer's (C3).
+            snapshot_at = snapshot_time_for_mirror() if snapshot_time_for_mirror else None
             open_orders = fetch_open_orders_for_mirror(client)
             # get_open_orders caps its openOrderEnd wait at 0.5s and returns
             # whatever arrived. The same cap that yields an EMPTY book yields a
@@ -311,7 +359,7 @@ class FillMonitorHandler(BaseHandler):
             # Any tracked order missing from the read means the read is not a
             # picture of the book — skip, the next tick is the recovery path.
             returned_ids = {
-                row.get("orderId")
+                order_key(SimpleNamespace(permId=row.get("permId"), orderId=row.get("orderId")))
                 for row in open_orders or []
                 if isinstance(row, dict)
             }
@@ -338,39 +386,18 @@ class FillMonitorHandler(BaseHandler):
                     )
                     return
             executed = fetch_executed_orders_for_mirror(client)
-            save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
+            # No heartbeat: the orders-sync service row belongs to orders-sync.
+            save_orders_snapshot(
+                build_orders_data_for_mirror(open_orders, executed, snapshot_at=snapshot_at),
+                heartbeat=False,
+            )
         except Exception as exc:  # noqa: BLE001 — never crash on mirror failure
             logger.warning("fill_monitor: orders snapshot mirror failed: %s", exc)
     
     @staticmethod
-    def _side_to_action(side_label: str, sec_type: str, prior_qty: float = 0.0) -> str:
-        """Map order side + prior signed qty → journal action label.
-
-        Mirrors journal_sync._side_to_action so fill_monitor and journal_sync
-        do not diverge (buy-to-cover short → BUY_TO_CLOSE, sell-to-close long
-        → SELL_OPTION).
-        """
-        upper = (side_label or "").upper()
-        if upper == "BUY":
-            if sec_type == "STK":
-                return "BUY"
-            return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
-        if upper == "SELL":
-            if sec_type == "STK":
-                return "SELL"
-            return "SELL_OPTION" if prior_qty > 0 else "SELL_TO_OPEN"
-        return "BUY" if sec_type == "STK" else "BUY_OPTION"
-
-    @staticmethod
     def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
         type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
-        a = (action or "").upper()
-        if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
-            side_label = "Long"
-        elif a == "SELL_TO_OPEN":
-            side_label = "Short"
-        else:
-            side_label = "Closed"
+        side_label = structure_side(action)
         if sec_type in ("OPT", "BAG") and strike is not None and right:
             right_label = "Call" if right in ("C", "CALL") else "Put" if right in ("P", "PUT") else right
             exp = str(expiry) if expiry else ""
@@ -387,12 +414,90 @@ class FillMonitorHandler(BaseHandler):
             return f"{side_label} {right_label} ${strike_val}{suffix}"
         return f"{side_label} {type_label} ({sec_type})"
 
-    def _lookup_prior_qty(self, contract: Any) -> float:
+    @staticmethod
+    def _executions_for(prev_order: Dict, key: int, session_fills: list) -> list:
+        """This order's session executions: by permId, else by orderId."""
+        perm_id = prev_order.get("perm_id") or 0
+        order_id = prev_order.get("order_id", key)
+        matched = []
+        for fill in session_fills:
+            execution = getattr(fill, "execution", None)
+            if perm_id:
+                if _strict_id(getattr(execution, "permId", None)) == perm_id:
+                    matched.append(fill)
+            elif getattr(execution, "orderId", None) == order_id:
+                matched.append(fill)
+        return matched
+
+    @staticmethod
+    def _completion_outcome(prev_order: Dict, executions: list) -> CancelOutcome:
+        """Name a vanished order's outcome from its executions + last status."""
+        if executions:
+            total = FillMonitorHandler._execution_total(executions)
+            quantity = prev_order.get("quantity")
+            if total is not None and isinstance(quantity, (int, float)) and 0 < total < quantity:
+                return CancelOutcome.PARTIALLY_FILLED_THEN_CANCELLED
+            return CancelOutcome.FILLED
+        if normalize_status(prev_order.get("status")) in TERMINAL_FAILED:
+            return CancelOutcome.CANCELLED
+        return CancelOutcome.UNKNOWN
+
+    @staticmethod
+    def _execution_total(executions: list) -> Optional[float]:
+        try:
+            return sum(float(f.execution.shares) for f in executions)
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _persist_final_increment(self, prev_order: Dict, executions: list) -> None:
+        """Journal the fill increment that landed after the last cycle.
+
+        Only for a single-contract order whose executions all name its
+        conId (a combo's leg executions cannot be summed against the BAG).
+        """
+        perm_id = prev_order.get("perm_id") or 0
+        con_id = prev_order.get("con_id") or 0
+        if not perm_id or not con_id:
+            return
+        contracts = [getattr(f, "contract", None) for f in executions]
+        if any(_strict_id(getattr(c, "conId", None)) != con_id for c in contracts):
+            return
+        try:
+            total = sum(float(f.execution.shares) for f in executions)
+            notional = sum(float(f.execution.shares) * float(f.execution.price) for f in executions)
+        except (AttributeError, TypeError, ValueError):
+            return
+        prev_filled = int(prev_order.get("filled") or 0)
+        if total <= prev_filled:
+            return
+        total_filled = int(total)
+        fill_info = {
+            "order_id": prev_order.get("order_id"),
+            "symbol": prev_order.get("symbol"),
+            "contract": prev_order.get("contract"),
+            "action": prev_order.get("action"),
+            "newly_filled": total_filled - prev_filled,
+            "total_filled": total_filled,
+            "avg_price": notional / total,
+            "prev_filled": prev_filled,
+            "prev_avg_price": prev_order.get("avg_fill_price"),
+        }
+        order = SimpleNamespace(
+            action=prev_order.get("action"), permId=perm_id, orderId=prev_order.get("order_id"),
+        )
+        self._persist_fill_to_journal(fill_info, contracts[0], order, None)
+
+    def _lookup_prior_qty(self, contract: Any) -> Optional[float]:
+        """Signed prior journal qty, or None when it cannot be read.
+
+        None refuses the label: defaulting to 0 wrote a close as a phantom
+        SELL_TO_OPEN. journal_sync re-imports the execution next cycle.
+        """
         if get_db is None or prior_net_qty_for_contract is None:
-            return 0.0
+            return None
         ticker = getattr(contract, "symbol", None)
         if not ticker:
-            return 0.0
+            return None
         sec_type = getattr(contract, "secType", "STK") or "STK"
         try:
             db = get_db()
@@ -411,7 +516,7 @@ class FillMonitorHandler(BaseHandler):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("fill_monitor: prior-qty lookup failed for %s: %s", ticker, exc)
-            return 0.0
+            return None
 
     def _persist_fill_to_journal(
         self,
@@ -444,18 +549,31 @@ class FillMonitorHandler(BaseHandler):
         # the day; re-detecting the SAME fill state stays idempotent.
         con_id = _identity_int(getattr(contract, "conId", 0))
         perm_id = _identity_int(getattr(order, "permId", 0))
-        order_key = perm_id or order_id
+        if perm_id <= 0:
+            # journal_sync supersedes a mirror only by (conId, permId, date);
+            # an orderId-keyed mirror would be a permanent duplicate. The
+            # execution itself is imported by journal_sync.
+            logger.info("fill_monitor: order %s has no permId yet; mirror skipped", order_id)
+            return
         trade_id = (
-            f"fill-monitor:con-{con_id}:order-{order_key}:"
+            f"fill-monitor:con-{con_id}:order-{perm_id}:"
             f"{fill_date}:filled-{total_filled}"
         )
 
         sec_type = getattr(contract, "secType", "STK") or "STK"
-        side_label = "BUY" if str(order.action).upper() == "BUY" else "SELL"
-        prior_qty = self._lookup_prior_qty(contract)
-        action = self._side_to_action(side_label, sec_type, prior_qty=prior_qty)
-
         newly_filled = fill_info.get("newly_filled", 0)
+        label = classify_fill(
+            getattr(order, "action", None), sec_type, self._lookup_prior_qty(contract), newly_filled
+        )
+        if label is None:
+            logger.warning(
+                "fill_monitor: no journal label for order %s (side %r, prior qty unknown "
+                "or unreadable); journal_sync imports the execution",
+                order_id, getattr(order, "action", None),
+            )
+            return
+        action = label.action.value
+
         increment_price = self._increment_price(fill_info)
         multiplier = 100 if sec_type in ("OPT", "BAG") else 1
         total_cost = float(newly_filled) * float(increment_price) * multiplier
@@ -483,6 +601,7 @@ class FillMonitorHandler(BaseHandler):
             "newly_filled": newly_filled,
             "notes": f"Imported from fill_monitor on {filled_at}",
         }
+        payload.update(label.payload_fields())
         if sec_type in ("OPT", "BAG"):
             payload["contracts"] = int(abs(newly_filled))
             if strike is not None:
