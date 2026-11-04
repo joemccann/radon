@@ -172,6 +172,62 @@ describe("cancel request gate", () => {
     });
     expect(calls.filter((c) => c.url === "/api/orders/cancel")).toHaveLength(1);
   });
+
+  it("two unacknowledged orders (permId 0) are distinct: each cancel reaches the wire and confirms on its own", async () => {
+    const first = order({ orderId: 101, permId: 0, status: "PendingSubmit" });
+    const second = order({ orderId: 102, permId: 0, status: "PendingSubmit" });
+    serve(snapshot([first, second]));
+    const { result } = renderHook(() => useOrderActions(), { wrapper });
+    await act(async () => {
+      await result.current.requestCancel(first);
+    });
+    await act(async () => {
+      await result.current.requestCancel(second);
+    });
+    await act(async () => {
+      await result.current.requestCancel(second);
+    });
+
+    expect(calls.filter((c) => c.url === "/api/orders/cancel")).toEqual([
+      { url: "/api/orders/cancel", method: "POST", body: { orderId: 101, permId: 0 } },
+      { url: "/api/orders/cancel", method: "POST", body: { orderId: 102, permId: 0 } },
+    ]);
+
+    // 101 leaves the book; 102 is still working and stays pending.
+    serve(snapshot([second]));
+    await advance(5_000);
+    expect(result.current.drainNotifications().map((n) => n.message)).toEqual(["AAPL order cancelled"]);
+    expect(result.current.cancelledOrders).toHaveLength(1);
+
+    // 102 is still pending on its own: it confirms once it leaves the book.
+    serve(snapshot([]));
+    await advance(5_000);
+    expect(result.current.drainNotifications().map((n) => n.message)).toEqual(["AAPL order cancelled"]);
+    expect(result.current.pendingCancels.size).toBe(0);
+  });
+
+  it("two unacknowledged orders modified at once keep their own targets", async () => {
+    const first = order({ orderId: 101, permId: 0, status: "PendingSubmit" });
+    const second = order({ orderId: 102, permId: 0, status: "PendingSubmit" });
+    serve(snapshot([{ ...first, limitPrice: 6 }, second]));
+    const { result } = renderHook(() => useOrderActions(), { wrapper });
+    await act(async () => {
+      await result.current.requestModify(first, { newPrice: 6 });
+    });
+    await act(async () => {
+      await result.current.requestModify(second, { newPrice: 7 });
+    });
+    expect(calls.filter((c) => c.url === "/api/orders/modify").map((c) => (c.body as { orderId: number }).orderId)).toEqual([101, 102]);
+
+    await advance(5_000);
+    // 101 shows its new price; 102 has not applied 7 yet.
+    expect(result.current.drainNotifications().map((n) => n.message)).toEqual(["AAPL order confirmed (price $6.00)"]);
+
+    serve(snapshot([{ ...first, limitPrice: 6 }, { ...second, limitPrice: 7 }]));
+    await advance(5_000);
+    expect(result.current.drainNotifications().map((n) => n.message)).toEqual(["AAPL order confirmed (price $7.00)"]);
+    expect(result.current.pendingModifies.size).toBe(0);
+  });
 });
 
 describe("one shared poller against the orders-refresh rate limit", () => {

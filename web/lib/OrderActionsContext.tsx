@@ -15,6 +15,7 @@ import {
   type OrderActionState,
   type Resolution,
 } from "@/lib/orders/orderActionMachine";
+import { orderIdentityKey } from "@/lib/orders/orderDialogMachine";
 
 /** Snapshot of a cancelled order for the executed table */
 export type CancelledOrder = {
@@ -81,18 +82,18 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollInFlightRef = useRef(false);
   const unmountedRef = useRef(false);
-  /** permIds whose cancel POST is on the wire (double-click guard). */
-  const cancelRequestsInFlightRef = useRef<Set<number>>(new Set());
+  /** Order identity keys whose cancel POST is on the wire (double-click guard). */
+  const cancelRequestsInFlightRef = useRef<Set<string>>(new Set());
   const notificationsRef = useRef<Notification[]>([]);
   const ordersUpdaterRef = useRef<((data: OrdersData) => void) | null>(null);
 
   const pendingCancels = useMemo(
-    () => new Map([...machine.cancels].map(([permId, entry]) => [permId, entry.order])),
+    () => new Map([...machine.cancels.values()].map((entry) => [entry.order.permId, entry.order])),
     [machine.cancels],
   );
   const pendingModifies = useMemo(
-    () => new Map<number, PendingModify>([...machine.modifies].map(([permId, entry]) => [
-      permId,
+    () => new Map<number, PendingModify>([...machine.modifies.values()].map((entry) => [
+      entry.order.permId,
       { order: entry.order, newPrice: entry.newPrice, newQuantity: entry.newQuantity },
     ])),
     [machine.modifies],
@@ -112,7 +113,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     const patched: OrdersData = {
       ...data,
       open_orders: data.open_orders.map((o) => {
-        const pm = currentModifies.get(o.permId);
+        const pm = currentModifies.get(orderIdentityKey(o));
         if (!pm) return o;
         return {
           ...o,
@@ -212,10 +213,12 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
 
   const requestCancel = useCallback(async (order: OpenOrder) => {
     const permId = order.permId;
-    // One cancel per permId: a second click while one is on the wire or
-    // awaiting confirmation sends nothing.
-    if (isCancelPending(machineRef.current, permId) || cancelRequestsInFlightRef.current.has(permId)) return;
-    cancelRequestsInFlightRef.current.add(permId);
+    // One cancel per order (permId, else orderId while IB has not assigned
+    // one): a second click while one is on the wire or awaiting
+    // confirmation sends nothing.
+    const key = orderIdentityKey(order);
+    if (isCancelPending(machineRef.current, order) || cancelRequestsInFlightRef.current.has(key)) return;
+    cancelRequestsInFlightRef.current.add(key);
     try {
       const res = await fetch("/api/orders/cancel", {
         method: "POST",
@@ -234,7 +237,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     } catch {
       pushNotification({ type: "error", message: "Cancel request failed" });
     } finally {
-      cancelRequestsInFlightRef.current.delete(permId);
+      cancelRequestsInFlightRef.current.delete(key);
     }
   }, [dispatch, ensurePolling, pushNotification, pushOrdersData]);
 

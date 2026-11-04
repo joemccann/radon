@@ -1,8 +1,9 @@
 /**
  * Cancel / modify confirmation machine (audit 2026-11-03 §1 #2, #3).
  *
- * One entry per permId per action kind, so a cancel and a modify on the same
- * order never share a counter. Every pending entry is confirmed by ONE shared
+ * One entry per order identity (`orderIdentityKey`: permId, else orderId for
+ * an order IB has not acknowledged) per action kind, so a cancel and a modify
+ * on the same order never share a counter. Every pending entry is confirmed by ONE shared
  * poller: `nextRequest` picks a producer refresh (POST /api/orders, rate
  * limited to 4/min per user) at most every REFRESH_MIN_INTERVAL_MS and a
  * cached read (GET) otherwise. A 429 backs the refresh off and is not an
@@ -18,6 +19,7 @@
 
 import type { OpenOrder, OrdersData } from "@/lib/types";
 import { FILLED, TERMINAL_FAILED, normalizeIbOrderStatus } from "./ibOrderStatus";
+import { orderIdentityKey } from "./orderDialogMachine";
 
 export const POLL_INTERVAL_MS = 5_000;
 /** ~2 min of 5s ticks. */
@@ -44,8 +46,9 @@ export type ModifyPending = {
 };
 
 export type OrderActionState = {
-  cancels: ReadonlyMap<number, CancelPending>;
-  modifies: ReadonlyMap<number, ModifyPending>;
+  /** Keyed by `orderIdentityKey`. */
+  cancels: ReadonlyMap<string, CancelPending>;
+  modifies: ReadonlyMap<string, ModifyPending>;
   refresh: { nextAt: number; backoffMs: number };
 };
 
@@ -90,8 +93,8 @@ export function hasPending(state: OrderActionState): boolean {
   return state.cancels.size > 0 || state.modifies.size > 0;
 }
 
-export function isCancelPending(state: OrderActionState, permId: number): boolean {
-  return state.cancels.has(permId);
+export function isCancelPending(state: OrderActionState, order: Pick<OpenOrder, "permId" | "orderId">): boolean {
+  return state.cancels.has(orderIdentityKey(order));
 }
 
 /** Which request the shared poller sends next, or null when nothing is pending. */
@@ -181,16 +184,17 @@ function isPending<T extends { kind: string }>(value: T | { outcome: string }): 
 export function transition(state: OrderActionState, event: OrderActionEvent): Transition {
   switch (event.type) {
     case "cancelRequested": {
-      // A second cancel on a pending permId is a no-op: one confirmation loop.
-      if (state.cancels.has(event.order.permId)) return { state, resolutions: [] };
+      // A second cancel on a pending order is a no-op: one confirmation loop.
+      const key = orderIdentityKey(event.order);
+      if (state.cancels.has(key)) return { state, resolutions: [] };
       const cancels = new Map(state.cancels);
-      cancels.set(event.order.permId, { kind: "cancel", order: event.order, ticks: 0, observedWorking: false });
+      cancels.set(key, { kind: "cancel", order: event.order, ticks: 0, observedWorking: false });
       return { state: { ...state, cancels }, resolutions: [] };
     }
     case "modifyRequested": {
       // A newer modify on the same order supersedes the older target.
       const modifies = new Map(state.modifies);
-      modifies.set(event.order.permId, {
+      modifies.set(orderIdentityKey(event.order), {
         kind: "modify",
         order: event.order,
         newPrice: event.newPrice,
@@ -209,34 +213,34 @@ export function transition(state: OrderActionState, event: OrderActionEvent): Tr
     }
     case "pollFailed": {
       const resolutions: Resolution[] = [];
-      const cancels = new Map<number, CancelPending>();
-      for (const [permId, pending] of state.cancels) {
+      const cancels = new Map<string, CancelPending>();
+      for (const [key, pending] of state.cancels) {
         const next = { ...pending, ticks: pending.ticks + 1 };
         if (next.ticks >= POLL_MAX_TICKS) {
           resolutions.push({ kind: "cancel", pending, outcome: "timedOut", observedWorking: pending.observedWorking });
-        } else cancels.set(permId, next);
+        } else cancels.set(key, next);
       }
-      const modifies = new Map<number, ModifyPending>();
-      for (const [permId, pending] of state.modifies) {
+      const modifies = new Map<string, ModifyPending>();
+      for (const [key, pending] of state.modifies) {
         const next = { ...pending, ticks: pending.ticks + 1 };
         if (next.ticks >= POLL_MAX_TICKS) {
           resolutions.push({ kind: "modify", pending, outcome: "timedOut", observedWorking: pending.observedWorking });
-        } else modifies.set(permId, next);
+        } else modifies.set(key, next);
       }
       return { state: { ...state, cancels, modifies }, resolutions };
     }
     case "snapshot": {
       const resolutions: Resolution[] = [];
-      const cancels = new Map<number, CancelPending>();
-      for (const [permId, pending] of state.cancels) {
+      const cancels = new Map<string, CancelPending>();
+      for (const [key, pending] of state.cancels) {
         const step = cancelStep(pending, observe(pending.order, event.data));
-        if (isPending(step)) cancels.set(permId, step);
+        if (isPending(step)) cancels.set(key, step);
         else resolutions.push({ kind: "cancel", pending, ...step });
       }
-      const modifies = new Map<number, ModifyPending>();
-      for (const [permId, pending] of state.modifies) {
-        const step = modifyStep(pending, observe(pending.order, event.data), state.cancels.has(permId));
-        if (isPending(step)) modifies.set(permId, step);
+      const modifies = new Map<string, ModifyPending>();
+      for (const [key, pending] of state.modifies) {
+        const step = modifyStep(pending, observe(pending.order, event.data), state.cancels.has(key));
+        if (isPending(step)) modifies.set(key, step);
         else resolutions.push({ kind: "modify", pending, ...step });
       }
       const refresh = event.refreshed

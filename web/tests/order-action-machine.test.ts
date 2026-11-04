@@ -79,7 +79,7 @@ describe("orderActionMachine", () => {
     const events = Array.from({ length: POLL_MAX_TICKS * 3 }, (_, i) => ({ type: "rateLimited" as const, now: i }));
     const { state, resolutions } = run(cancelling, events);
     expect(resolutions).toEqual([]);
-    expect(state.cancels.get(1001)?.ticks).toBe(0);
+    expect(state.cancels.get("perm:1001")?.ticks).toBe(0);
   });
 
   it("backs the refresh off on 429 and reads in between", () => {
@@ -115,7 +115,7 @@ describe("orderActionMachine", () => {
       { type: "snapshot", data: snap([order({ status: "PendingCancel" })]), now: 0, refreshed: true },
     ]);
     expect(resolutions).toEqual([]);
-    expect(state.cancels.get(1001)?.ticks).toBe(1);
+    expect(state.cancels.get("perm:1001")?.ticks).toBe(1);
   });
 
   it("failed polls time out as unconfirmed, never as 'still open'", () => {
@@ -131,8 +131,8 @@ describe("orderActionMachine", () => {
       { type: "pollFailed" },
       { type: "modifyRequested", order: order(), newPrice: 6.5 },
     ]);
-    expect(state.cancels.get(1001)?.ticks).toBe(1);
-    expect(state.modifies.get(1001)?.ticks).toBe(0);
+    expect(state.cancels.get("perm:1001")?.ticks).toBe(1);
+    expect(state.modifies.get("perm:1001")?.ticks).toBe(0);
   });
 
   it("a modify on an order its own cancel removed is reported once, by the cancel", () => {
