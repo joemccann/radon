@@ -12,6 +12,7 @@ import {
 } from "./demo/headlinesPolicy";
 import { useRealtimeAuth } from "./RealtimeAuthContext";
 import { ticketBlockedMs } from "./wsTicket";
+import { REALTIME_OPEN_TIMEOUT_MS } from "./realtimeDeadline";
 
 function reconnectDelayMs(attempt: number): number {
   const exponent = Math.min(Math.max(attempt, 0), 10);
@@ -108,6 +109,10 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
     let stopped = false;
     let socket: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Bounds each socket's admission: REALTIME_OPEN_TIMEOUT_MS to reach OPEN,
+    // then the same again for the hub's admit snapshot. The hub otherwise only
+    // speaks when news arrives, so silence after admission is not staleness.
+    let admitDeadline: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
 
     const clearTimer = () => {
@@ -115,6 +120,19 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
         clearTimeout(timer);
         timer = null;
       }
+    };
+    const clearAdmitDeadline = () => {
+      if (admitDeadline != null) {
+        clearTimeout(admitDeadline);
+        admitDeadline = null;
+      }
+    };
+    const armAdmitDeadline = (ws: WebSocket) => {
+      clearAdmitDeadline();
+      admitDeadline = setTimeout(() => {
+        admitDeadline = null;
+        if (!stopped && socket === ws) ws.close();
+      }, REALTIME_OPEN_TIMEOUT_MS);
     };
 
     function applyFrame(frame: ClientFrame) {
@@ -154,22 +172,35 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
           setStatus("down");
           return;
         }
-        socket = new WebSocket(url);
-        socket.onopen = () => {
-          attempt = 0;
+        const ws = new WebSocket(url);
+        socket = ws;
+        armAdmitDeadline(ws);
+        let admitted = false;
+        ws.onopen = () => {
+          if (socket === ws && !admitted) armAdmitDeadline(ws);
         };
-        socket.onmessage = (event) => {
+        ws.onmessage = (event) => {
+          if (!admitted) {
+            // First frame proves the hub admitted us: backoff resets here, not
+            // on OPEN, so a half-open admit cannot retry at the base delay forever.
+            admitted = true;
+            attempt = 0;
+            clearAdmitDeadline();
+          }
           try {
             applyFrame(JSON.parse(String(event.data)) as ClientFrame);
           } catch {
             // drop malformed frames
           }
         };
-        socket.onerror = () => {
+        ws.onerror = () => {
           setStatus("down");
         };
-        socket.onclose = () => {
-          socket = null;
+        ws.onclose = () => {
+          if (socket === ws) {
+            socket = null;
+            clearAdmitDeadline();
+          }
           if (stopped) return;
           setStatus("down");
           const delay = Math.max(reconnectDelayMs(attempt), ticketBlockedMs());
@@ -193,6 +224,7 @@ function useHeadlinesConnection(enabled: boolean): HeadlinesValue {
     return () => {
       stopped = true;
       clearTimer();
+      clearAdmitDeadline();
       socket?.close();
     };
     // REL-246 (R-654): getToken is read via getTokenRef so auth-provider
