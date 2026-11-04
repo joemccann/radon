@@ -72,7 +72,28 @@ class UWAuthError(UWAPIError):
 
 
 class UWRateLimitError(UWAPIError):
-    """Rate limit exceeded (429)."""
+    """Rate limit exceeded (429) or admission refused before the wire.
+
+    ``reason`` is the typed refusal (``uw_governor.RefusalReason``):
+    ``daily_quota`` waits for the 20:00 ET reset, ``burst``/``busy``/``auth``
+    retry within minutes. Callers branch on it, never on message text. A
+    legacy constructor without ``reason`` infers it from UW's daily marker.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response_body: Optional[dict] = None,
+        *,
+        reason: Optional[str] = None,
+    ):
+        if reason is None:
+            reason = "daily_quota" if _UW_DAILY_LIMIT_MARKER in str(message).lower() else "burst"
+        if reason not in uw_governor.REFUSAL_REASONS:
+            raise ValueError(f"unknown UW refusal reason: {reason!r}")
+        self.reason = reason
+        super().__init__(message, status_code=status_code, response_body=response_body)
 
 
 class UWNotFoundError(UWAPIError):
@@ -208,7 +229,7 @@ class UWClient:
                 return self._request(endpoint, params, priority=priority,
                                      wait_timeout=wait_timeout, use_cache=use_cache)
         except TimeoutError:
-            raise UWRateLimitError("UW request is already in progress", status_code=429) from None
+            raise UWRateLimitError("UW request is already in progress", status_code=429, reason="busy") from None
 
     def _request(self, endpoint: str, params: Optional[Dict[str, Any]] = None, *,
                  priority: str = "standard", wait_timeout: float = 5.0,
@@ -255,7 +276,7 @@ class UWClient:
                 try:
                     reservation = uw_governor.reserve(self._token, priority=priority, timeout=wait_timeout)
                 except uw_governor.AdmissionError as exc:
-                    raise UWRateLimitError(str(exc), status_code=429) from None
+                    raise UWRateLimitError(str(exc), status_code=429, reason=exc.reason) from None
             try:
                 options = {"params": params, "timeout": self._timeout, "allow_redirects": False}
                 if self._max_response_bytes is not None:
@@ -314,7 +335,7 @@ class UWClient:
 
             if status == 429:
                 exc = UWRateLimitError(msg, status_code=status, response_body=body)
-                if _UW_DAILY_LIMIT_MARKER in msg.lower():
+                if exc.reason == "daily_quota":
                     raise exc
                 rate_limited += 1
                 if rate_limited > _MAX_RATE_LIMIT_RETRIES:
