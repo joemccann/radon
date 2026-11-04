@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 
 const STATUS_POLL_MS = 5_000;
+const STATUS_STALE_MS = 30_000;
 const KILL_CONFIRM_TOKEN = "KILL";
 
 type HaltState = {
@@ -21,6 +22,34 @@ type HaltState = {
 type PendingAction = "halt" | "resume" | "cancel-all" | "kill" | null;
 
 /**
+ * What the operator may act on. Halt is only offered on a fresh `active`
+ * observation and Resume only on a fresh `halted` one; a pending, failed or
+ * stale probe is `unknown` and arms neither, so a last-known value can never
+ * pick the action.
+ */
+type TradingStatus =
+  | { kind: "unknown" }
+  | { kind: "active" }
+  | { kind: "halted"; reason: string | null };
+
+function deriveTradingStatus(
+  observed: HaltState | null,
+  error: string | null,
+  observedAt: number | null,
+  now: number,
+): TradingStatus {
+  if (observed === null || error !== null || observedAt === null) return { kind: "unknown" };
+  if (now - observedAt > STATUS_STALE_MS) return { kind: "unknown" };
+  return observed.halted ? { kind: "halted", reason: observed.reason ?? null } : { kind: "active" };
+}
+
+/** AdminWorkspace's shared command lock; resolves `false` when it refuses. */
+type RunCommand = <T>(command: () => Promise<T>) => Promise<T | false>;
+
+const UNKNOWN_STATUS_REASON = "Trading status is unknown. Waiting for a fresh observation.";
+const LOCKED_REASON = "Another command is in progress.";
+
+/**
  * Emergency trading controls (REL-029 / R-053): the browser affordance for
  * the REL-004 kill switch. Halt / Resume gate order placement; Cancel All
  * drains every working order; KILL does both (halt first, then mass-cancel).
@@ -28,7 +57,15 @@ type PendingAction = "halt" | "resume" | "cancel-all" | "kill" | null;
  * requires typing the confirm token — the same guardrail class as the
  * order-risk chokepoint.
  */
-export default function TradingKillSwitch({ compact = false }: { compact?: boolean }) {
+export default function TradingKillSwitch({
+  compact = false,
+  runCommand,
+  externalPending = false,
+}: {
+  compact?: boolean;
+  runCommand?: RunCommand;
+  externalPending?: boolean;
+}) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({ open: compact && controlsOpen, onClose: () => setControlsOpen(false) });
   const [status, setStatus] = useState<HaltState | null>(null);
@@ -69,7 +106,7 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
     async (action: Exclude<PendingAction, null>) => {
       setPending(action);
       setActionError(null);
-      try {
+      const send = async (): Promise<true> => {
         const needsConfirm = action === "kill" || action === "cancel-all";
         const res = await fetch(`/api/admin/trading/${action}`, {
           method: "POST",
@@ -87,6 +124,11 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         } else {
           setLastResult(actionResultLine(action, body));
         }
+        return true;
+      };
+      try {
+        const outcome = runCommand ? await runCommand(send) : await send();
+        if (outcome === false) setActionError(`${action} was not sent. ${LOCKED_REASON}`);
       } catch (err) {
         setActionError(
           `${action} failed: ${userErrorMessage(err, "request error")}`,
@@ -97,12 +139,13 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         void fetchStatus();
       }
     },
-    [fetchStatus],
+    [fetchStatus, runCommand],
   );
 
-  const halted = status?.halted === true;
-
-  const statusKnown = status !== null && statusError === null && observedAt !== null && now - observedAt <= 30_000;
+  const trading = deriveTradingStatus(status, statusError, observedAt, now);
+  const statusKnown = trading.kind !== "unknown";
+  const halted = trading.kind === "halted";
+  const locked = pending !== null || externalPending;
   const controls = (
     <section className="admin-card" data-testid="trading-kill-switch">
       <div className="admin-card-header">
@@ -115,33 +158,34 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         </span>
       </div>
 
-      {halted && status?.reason && (
+      {trading.kind === "halted" && trading.reason && (
         <p className="admin-card-note" data-testid="trading-halt-reason">
-          Halt reason: {status.reason}
+          Halt reason: {trading.reason}
         </p>
       )}
       {statusError && <ErrorToast message={statusError} onRetry={() => { void fetchStatus(); }} />}
       {actionError && <ErrorToast message={actionError} />}
 
       <div className="admin-actions-row">
-        {halted ? (
+        {trading.kind !== "active" && (
           <button
             type="button"
             className="admin-btn admin-btn-primary"
             onClick={() => setConfirmFor("resume")}
-            disabled={pending !== null}
-            title="Clear the trading halt so new orders can be placed"
+            disabled={locked || trading.kind !== "halted"}
+            title={trading.kind === "halted" ? "Clear the trading halt so new orders can be placed" : UNKNOWN_STATUS_REASON}
             data-testid="trading-resume-button"
           >
             Resume Trading
           </button>
-        ) : (
+        )}
+        {trading.kind !== "halted" && (
           <button
             type="button"
             className="admin-btn admin-btn-ghost"
             onClick={() => setConfirmFor("halt")}
-            disabled={pending !== null}
-            title="Block all new order placement (working orders stay live)"
+            disabled={locked || trading.kind !== "active"}
+            title={trading.kind === "active" ? "Block all new order placement (working orders stay live)" : UNKNOWN_STATUS_REASON}
             data-testid="trading-halt-button"
           >
             Halt Trading
@@ -152,7 +196,7 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
           type="button"
           className="admin-btn admin-btn-ghost"
           onClick={() => setConfirmFor("cancel-all")}
-          disabled={pending !== null}
+          disabled={locked}
           title="Cancel EVERY working order (master global cancel + drain verify)"
           data-testid="trading-cancel-all-button"
         >
@@ -163,7 +207,7 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
           type="button"
           className="admin-btn admin-btn-danger"
           onClick={() => setConfirmFor("kill")}
-          disabled={pending !== null}
+          disabled={locked}
           title="Kill switch: halt new placements first, then cancel every working order"
           data-testid="trading-kill-button"
         >
@@ -184,6 +228,8 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         confirmLabel="Halt"
         destructive
         pending={pending === "halt"}
+        confirmDisabled={trading.kind !== "active" || externalPending}
+        disabledReason={externalPending ? LOCKED_REASON : UNKNOWN_STATUS_REASON}
         onConfirm={() => void runAction("halt")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -193,6 +239,8 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         body="Clears the trading halt. New order placement is allowed again immediately."
         confirmLabel="Resume"
         pending={pending === "resume"}
+        confirmDisabled={trading.kind !== "halted" || externalPending}
+        disabledReason={externalPending ? LOCKED_REASON : UNKNOWN_STATUS_REASON}
         onConfirm={() => void runAction("resume")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -203,6 +251,8 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         confirmLabel="Cancel All"
         destructive
         pending={pending === "cancel-all"}
+        confirmDisabled={externalPending}
+        disabledReason={LOCKED_REASON}
         onConfirm={() => void runAction("cancel-all")}
         onCancel={() => setConfirmFor(null)}
       />
@@ -214,6 +264,8 @@ export default function TradingKillSwitch({ compact = false }: { compact?: boole
         destructive
         requireTyped={KILL_CONFIRM_TOKEN}
         pending={pending === "kill"}
+        confirmDisabled={externalPending}
+        disabledReason={LOCKED_REASON}
         onConfirm={() => void runAction("kill")}
         onCancel={() => setConfirmFor(null)}
       />
