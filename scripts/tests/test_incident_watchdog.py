@@ -287,8 +287,9 @@ class TestStore:
         assert payload["observations"] == 2
         assert payload["last_seen_at"] == later.isoformat()
 
-    def test_clean_cycle_resolves_open_incidents(self, tmp_path: Path):
+    def test_clean_cycles_resolve_open_incidents(self, tmp_path: Path):
         opened = record_cycle([self.incident()], tmp_path, NOW)
+        record_cycle([], tmp_path, NOW.replace(minute=5))
         later = NOW.replace(minute=10)
         result = record_cycle([], tmp_path, later)
         assert len(result["resolved"]) == 1
@@ -307,6 +308,7 @@ class TestStore:
 
     def test_redetection_after_resolve_opens_a_new_file(self, tmp_path: Path):
         record_cycle([self.incident()], tmp_path, NOW)
+        record_cycle([], tmp_path, NOW.replace(minute=5))
         record_cycle([], tmp_path, NOW.replace(minute=10))
         result = record_cycle([self.incident()], tmp_path, NOW.replace(minute=20))
         assert len(result["opened"]) == 1
@@ -401,6 +403,8 @@ class TestScopedResolution:
 
     def test_unrelated_dead_probe_does_not_block_resolution(self, tmp_path: Path):
         opened = self.open_service_down_incident(tmp_path)
+        record_cycle([], tmp_path, NOW.replace(minute=5),
+                     indeterminate_probes={"freshness"})
         result = record_cycle(
             [], tmp_path, NOW.replace(minute=10),
             indeterminate_probes={"freshness"},
@@ -425,6 +429,8 @@ class TestScopedResolution:
         payload = json.loads(path.read_text())
         payload.pop("probes", None)
         path.write_text(json.dumps(payload))
+        record_cycle([], tmp_path, NOW.replace(minute=5),
+                     indeterminate_probes={"freshness"})
         result = record_cycle(
             [], tmp_path, NOW.replace(minute=10),
             indeterminate_probes={"freshness"},
@@ -440,6 +446,7 @@ class TestScopedResolution:
         findings = healthy_findings()
         findings["freshness"] = unauthorized_freshness()
         monkeypatch.setattr(watchdog_main, "gather_findings", lambda: findings)
+        watchdog_main.run_cycle(tmp_path)
         summary = watchdog_main.run_cycle(tmp_path)
         assert len(summary["resolved"]) == 1
         assert [i["case_id"] for i in summary["incidents"]] == [
@@ -486,3 +493,61 @@ class TestSystemdDashMImport:
         assert proc.returncode == 0, proc.stderr
         assert "db.service_cycle" in proc.stdout
         assert "No module named 'db'" not in proc.stderr
+
+
+class TestIncidentLifecycleMachine:
+    """open -> (clean x RESOLVE_AFTER_CLEAN_CYCLES) -> resolved; duplicates of
+    one fingerprint never strand an open file."""
+
+    def incident(self):
+        return {
+            "case_id": "service-down",
+            "severity": "P1",
+            "title": "FastAPI down",
+            "fingerprint": "service-down:fastapi",
+            "evidence": {},
+            "probes": ["api_lite"],
+        }
+
+    def test_one_clean_cycle_does_not_resolve(self, tmp_path: Path):
+        opened = record_cycle([self.incident()], tmp_path, NOW)
+        result = record_cycle([], tmp_path, NOW.replace(minute=5))
+        assert result["resolved"] == []
+        payload = json.loads(Path(opened["opened"][0]).read_text())
+        assert payload["status"] == "open"
+
+    def test_flap_updates_the_same_file(self, tmp_path: Path):
+        record_cycle([self.incident()], tmp_path, NOW)
+        record_cycle([], tmp_path, NOW.replace(minute=5))
+        result = record_cycle([self.incident()], tmp_path, NOW.replace(minute=10))
+        assert result["opened"] == []
+        assert len(list(tmp_path.glob("incident-*.json"))) == 1
+
+    def test_reobservation_resets_the_clean_streak(self, tmp_path: Path):
+        record_cycle([self.incident()], tmp_path, NOW)
+        record_cycle([], tmp_path, NOW.replace(minute=5))
+        record_cycle([self.incident()], tmp_path, NOW.replace(minute=10))
+        result = record_cycle([], tmp_path, NOW.replace(minute=15))
+        assert result["resolved"] == []
+
+    def test_two_clean_cycles_resolve(self, tmp_path: Path):
+        opened = record_cycle([self.incident()], tmp_path, NOW)
+        record_cycle([], tmp_path, NOW.replace(minute=5))
+        result = record_cycle([], tmp_path, NOW.replace(minute=10))
+        assert result["resolved"] == opened["opened"]
+
+    def test_duplicate_open_fingerprints_are_all_tracked(self, tmp_path: Path):
+        first = record_cycle([self.incident()], tmp_path, NOW)
+        original = json.loads(Path(first["opened"][0]).read_text())
+        dup = tmp_path / "incident-20260803T170000Z-service-down-dup.json"
+        dup.write_text(json.dumps({**original,
+                                   "incident_id": "20260803T170000Z-service-down-dup",
+                                   "detected_at": NOW.replace(minute=1).isoformat()}))
+
+        result = record_cycle([self.incident()], tmp_path, NOW.replace(minute=5))
+        # The oldest file carries the incident; the duplicate is closed, not stranded.
+        assert result["updated"] == first["opened"]
+        assert result["resolved"] == [str(dup)]
+        dup_payload = json.loads(dup.read_text())
+        assert dup_payload["status"] == "resolved"
+        assert dup_payload["duplicate_of"] == original["incident_id"]
