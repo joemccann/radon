@@ -151,8 +151,12 @@ _PACING_CODES = frozenset({
     366,   # No historical data query found for ticker id
 })
 
-# Max retries per reqId for pacing violations
+# Per-reqId pacing violations are COUNTED (and logged) up to this cap; the
+# client does not resend the request itself. Both this counter and the failed
+# contract set are per IB session: reqIds restart at 1 on every connection.
 _MAX_PACING_RETRIES = 3
+# A long-lived pooled client must not grow the failed set without bound.
+_MAX_FAILED_CONTRACTS = 1000
 
 # IB error codes for invalid contracts — don't retry
 _INVALID_CONTRACT_CODES = frozenset({
@@ -353,6 +357,8 @@ class IBClient:
                 *client_id* override is given.
             IBConnectionError: If the connection cannot be established.
         """
+        # A dropped session may never have called disconnect().
+        self._reset_session_state()
         # Resolve client ID
         if client_id == "auto":
             return self._connect_auto_allocate(host, port, timeout)
@@ -445,8 +451,14 @@ class IBClient:
             f"all client IDs {lo}-{hi} in use"
         )
 
+    def _reset_session_state(self) -> None:
+        """Forget per-session error bookkeeping (reqIds are session-scoped)."""
+        self._pacing_retries.clear()
+        self._failed_contracts.clear()
+
     def disconnect(self) -> None:
         """Disconnect from IB. Safe to call when not connected."""
+        self._reset_session_state()
         if self._ib.isConnected():
             self._ib.disconnect()
             self.logger.info("Disconnected from IB")
@@ -563,6 +575,8 @@ class IBClient:
         # Invalid contracts — add to failed set, no retry
         if code in _INVALID_CONTRACT_CODES:
             if contract is not None:
+                if contract not in self._failed_contracts and len(self._failed_contracts) >= _MAX_FAILED_CONTRACTS:
+                    self._failed_contracts.pop()
                 self._failed_contracts.add(contract)
             self.logger.warning(
                 "IB invalid contract %d (reqId=%s): %s (contract=%s)",
