@@ -1665,20 +1665,31 @@ def _run_ladder(
                 attempted.append(f"{name}:token_expired_refreshed")
                 refresh_token(name)
                 fresh = _auth_for(name, env)
-                if fresh is not None:
-                    auth = fresh
-                    try:
-                        status, raw, payload = _invoke_provider(call_provider, name, auth, model)
-                    except ModelResponseError:
-                        raise
-                    except RuntimeError as exc:
-                        code = str(exc) or "network"
-                        attempted.append(f"{name}:{code}")
-                        logger.warning(
-                            "%s provider=%s model=%s failed %s", log_prefix, name, model, code
-                        )
-                        continue
-                    body_text = raw if isinstance(raw, str) else ""
+                if fresh is None or (fresh.token, fresh.account_id) == (auth.token, auth.account_id):
+                    # The gateway refresh is asynchronous (a queued job); the
+                    # credential on disk is still the expired one. Resending
+                    # it is a guaranteed 401, and every model on this rung
+                    # shares it: move to the next rung.
+                    attempted.append(f"{name}:token_refresh_pending")
+                    logger.warning(
+                        "%s provider=%s refresh pending; stale token not resent",
+                        log_prefix,
+                        name,
+                    )
+                    break
+                auth = fresh
+                try:
+                    status, raw, payload = _invoke_provider(call_provider, name, auth, model)
+                except ModelResponseError:
+                    raise
+                except RuntimeError as exc:
+                    code = str(exc) or "network"
+                    attempted.append(f"{name}:{code}")
+                    logger.warning(
+                        "%s provider=%s model=%s failed %s", log_prefix, name, model, code
+                    )
+                    continue
+                body_text = raw if isinstance(raw, str) else ""
             if limiter is not None:
                 if status == 429:
                     limiter.note_429(None)

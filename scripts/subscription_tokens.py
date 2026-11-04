@@ -1821,6 +1821,23 @@ def _health_state(states: Iterable[str]) -> str:
     return "ok" if all(s in HEALTHY_STATES for s in states) else "error"
 
 
+def fleet_heartbeat_state(
+    names: Iterable[str], states: Iterable[str], *, skipped: bool = False
+) -> Optional[str]:
+    """What one pass may write to the fleet-wide ``subscription-tokens`` row.
+
+    None means write nothing. Only a complete, unskipped pass over every
+    provider may report ``ok``: a one-provider or lock-skipped pass saying ok
+    would erase another provider's ``needs_reauth``. Any pass may report error.
+    """
+    if skipped:
+        return None
+    health = _health_state(states)
+    if health == "ok" and set(names) != set(PROVIDERS):
+        return None
+    return health
+
+
 def run(
     mode: str,
     provider_names: Optional[Sequence[str]] = None,
@@ -1930,23 +1947,25 @@ def _run_locked(
         "exit_code": exit_code_for(states),
     }
 
+    fleet = fleet_heartbeat_state(names, states)
     try:
-        rt.heartbeat(
-            SERVICE_NAME,
-            _health_state(states),
-            finished_at=active.now.isoformat(),
-            error=(
-                None
-                if _health_state(states) == "ok"
-                else {
-                    "message": ", ".join(
-                        f"{r.provider}={r.state}"
-                        for r in results
-                        if r.state not in HEALTHY_STATES
-                    )
-                }
-            ),
-        )
+        if fleet is not None:
+            rt.heartbeat(
+                SERVICE_NAME,
+                fleet,
+                finished_at=active.now.isoformat(),
+                error=(
+                    None
+                    if fleet == "ok"
+                    else {
+                        "message": ", ".join(
+                            f"{r.provider}={r.state}"
+                            for r in results
+                            if r.state not in HEALTHY_STATES
+                        )
+                    }
+                ),
+            )
     except Exception as exc:  # noqa: BLE001 - a heartbeat never fails the run
         log.warning("service_health write failed: %s", type(exc).__name__)
 
