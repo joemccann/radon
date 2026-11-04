@@ -422,6 +422,9 @@ class TestExitOrdersJournalFailureGuard:
              patch('monitor_daemon.handlers.exit_orders.Option'), \
              patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
             mock_client = _wire_placeable_ib(mock_cls)
+            # The placed order is still working at IB when the heal lands,
+            # so the cycle-two reconciliation keeps the leg PLACED.
+            mock_client.get_open_orders.return_value = [mock_client.place_order.return_value]
             db = FlakyUpdateJournalDb([_pending_goog_trade()], fail_updates=1)
 
             handler = ExitOrdersHandler(db=db)
@@ -643,7 +646,10 @@ class TestRel185PerLegErrorsAndRefusalLatch:
             # what distinguishes the two legs.
             client.qualify_contracts.side_effect = qualified
 
-            db = _NoTradeIdJournalDb([goog, msft])
+            # Rows without a trade_id are no longer placed at all (see
+            # test_exit_orders_lifecycle.TestGuardIdentity); the latch must
+            # still keep two rows' legs apart.
+            db = FakeJournalDb([goog, msft])
             handler = ExitOrdersHandler(db=db)
             result = handler.execute()
 

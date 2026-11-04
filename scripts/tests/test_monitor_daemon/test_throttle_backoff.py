@@ -153,3 +153,26 @@ class TestThrottleErrorType:
         assert err.code == "1018"
         assert err.message == "Too many requests"
         assert "1018" in str(err)
+
+
+class TestCorruptDeadlineIsBounded:
+    """Audit 2026-11-03 §3.1: a corrupt ``blocked_until`` failed closed with
+    no expiry. The only reset is a successful sync, which a permanently
+    blocked handler can never run, so one bad byte stopped the sync forever.
+    It now fails closed for at most the ladder cap."""
+
+    NOW = datetime(2026, 11, 3, 15, 0, tzinfo=timezone.utc)
+
+    def test_a_corrupt_deadline_blocks_now_and_expires_after_the_cap(self):
+        state = {"throttle_count": 2, "blocked_until": "not-a-timestamp"}
+        cap = timedelta(seconds=THROTTLE_EMBARGO_SECS[-1])
+
+        assert is_blocked(state, now_utc=self.NOW) is True
+        assert is_blocked(state, now_utc=self.NOW + cap - timedelta(seconds=1)) is True
+        assert is_blocked(state, now_utc=self.NOW + cap + timedelta(seconds=1)) is False
+
+    def test_the_bounded_deadline_is_readable_afterwards(self):
+        state = {"throttle_count": 0, "blocked_until": 12345}
+        is_blocked(state, now_utc=self.NOW)
+
+        assert blocked_until(state) == self.NOW + timedelta(seconds=THROTTLE_EMBARGO_SECS[-1])

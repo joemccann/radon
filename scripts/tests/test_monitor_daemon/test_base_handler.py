@@ -7,7 +7,7 @@ RED/GREEN TDD
 
 import pytest
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import sys
@@ -95,7 +95,7 @@ class TestBaseHandlerRun:
         handler.run()
         
         assert handler.last_run is not None
-        assert (datetime.now() - handler.last_run).seconds < 1
+        assert (datetime.now(timezone.utc) - handler.last_run).seconds < 1
     
     def test_run_wraps_result_with_metadata(self):
         """run() wraps execute result with status and timing."""
