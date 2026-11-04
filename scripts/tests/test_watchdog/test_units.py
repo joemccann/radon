@@ -483,8 +483,8 @@ class TestContinuousBucketWiring:
         )
         monkeypatch.setattr(
             wired_cooldown,
-            "active_emergency_services",
-            lambda **kw: ["radon-relay.service"],
+            "active_emergencies",
+            lambda **kw: [("radon-relay.service", "unit")],
         )
         cancelled = []
         resolved = []

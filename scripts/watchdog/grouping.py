@@ -479,6 +479,7 @@ def _mark_grouped_page_delivered(
                 service=outcome.service,
                 severity=outcome.severity,
                 now=now,
+                kind=outcome.kind,
             )
 
 

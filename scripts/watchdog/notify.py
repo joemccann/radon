@@ -555,10 +555,16 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
 
 # ── public entry point ─────────────────────────────────────────────
 
-def _mark_notified_best_effort(*, service: str, severity: str, now) -> None:
-    """Persist cooldown state without putting storage on the paging path."""
+def _mark_notified_best_effort(
+    *, service: str, severity: str, now, kind: Optional[str] = None
+) -> None:
+    """Persist cooldown state without putting storage on the paging path.
+
+    ``kind`` latches the gate to the failure machine that paged, so only a
+    recovery of that kind re-arms it (``cooldown.gate_after_recovery``).
+    """
     try:
-        cooldown_mod.mark_notified(service=service, severity=severity, now=now)
+        cooldown_mod.mark_notified(service=service, severity=severity, kind=kind, now=now)
     except Exception as exc:  # noqa: BLE001 - duplicate delivery beats no delivery
         log.warning(
             "cooldown mark failed for %s/%s; later alerts may repeat: %s",
@@ -625,6 +631,7 @@ def dispatch(
             service=outcome.service,
             severity=outcome.severity,
             now=outcome.now,
+            kind=outcome.kind,
         )
         if outcome.severity == "P1":
             _enqueue_grok_page(outcome)
