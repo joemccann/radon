@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fcntl
 import json
 import os
-import shutil
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from fetch_menthorq_cta import cache_path  # noqa: E402
+from utils.atomic_io import atomic_save  # noqa: E402
 from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 from utils.cta_sync_health import (  # noqa: E402
     ARTIFACT_DIR,
@@ -86,38 +89,20 @@ def build_run_id(started_at: str | None = None) -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _pid_is_alive(pid: int) -> bool:
-    """Return True if the given PID is a running process on this host."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, PermissionError):
-        # ProcessLookupError: no such process
-        # PermissionError: exists but we lack permission (still alive)
-        return isinstance(sys.exc_info()[1], PermissionError)
-
-
-def _clear_stale_lock(lock_dir: Path) -> bool:
-    """Remove lock_dir if held by a dead PID. Returns True if cleared."""
-    lock_file = lock_dir / "lock.json"
-    if not lock_file.exists():
-        shutil.rmtree(lock_dir, ignore_errors=True)
-        return True
-    try:
-        data = json.loads(lock_file.read_text(encoding="utf-8"))
-        pid = int(data.get("pid", 0))
-    except (OSError, json.JSONDecodeError, ValueError):
-        shutil.rmtree(lock_dir, ignore_errors=True)
-        return True
-    if pid and _pid_is_alive(pid):
-        return False
-    shutil.rmtree(lock_dir, ignore_errors=True)
-    return True
-
-
 @contextlib.contextmanager
-def cta_sync_lock(*, target_date: str, run_id: str, lock_dir: Path = LOCK_DIR):
-    lock_dir.parent.mkdir(parents=True, exist_ok=True)
+def cta_sync_lock(*, target_date: str, run_id: str, lock_dir: Path | None = None):
+    """Exclusive, non-blocking flock on `lock_dir/flock`. §3.4.
+
+    The kernel holds the lock and drops it when the holder exits, SIGKILL
+    included, so there is no stale lock to detect and nothing is ever
+    rmtree'd. The old mkdir + lock.json + `os.kill(pid, 0)` scheme let a
+    contender steal a live lock inside the mkdir -> lock.json window, and
+    pid reuse kept a dead one. `lock.json` is now informational only.
+    The flock file is never unlinked: unlinking a flock file lets two
+    processes lock two different inodes.
+    """
+    lock_dir = LOCK_DIR if lock_dir is None else lock_dir
+    lock_dir.mkdir(parents=True, exist_ok=True)
     metadata = {
         "pid": os.getpid(),
         "host": socket.gethostname(),
@@ -125,20 +110,37 @@ def cta_sync_lock(*, target_date: str, run_id: str, lock_dir: Path = LOCK_DIR):
         "target_date": target_date,
         "started_at": utc_now_iso(),
     }
-    try:
-        lock_dir.mkdir()
-    except FileExistsError as exc:
-        if not _clear_stale_lock(lock_dir):
+    with open(lock_dir / "flock", "a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
             raise CtaSyncLockError("CTA sync lock already held by a live process") from exc
         try:
-            lock_dir.mkdir()
-        except FileExistsError as exc2:
-            raise CtaSyncLockError("CTA sync lock already held") from exc2
+            atomic_save(str(lock_dir / "lock.json"), metadata)
+            yield
+        finally:
+            try:
+                (lock_dir / "lock.json").unlink(missing_ok=True)
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _sigterm_raises():
+    """systemd TimeoutStartSec sends SIGTERM; make it unwind like an exception
+    so the holder writes a terminal status instead of leaving `syncing`."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _raise(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, _raise)
     try:
-        (lock_dir / "lock.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         yield
     finally:
-        shutil.rmtree(lock_dir, ignore_errors=True)
+        signal.signal(signal.SIGTERM, previous)
 
 
 def build_status(
@@ -229,7 +231,7 @@ def run_cta_sync(
         return 0
 
     try:
-        with cta_sync_lock(target_date=target, run_id=run_id):
+        with cta_sync_lock(target_date=target, run_id=run_id), _sigterm_raises():
             write_cta_sync_status(
                 build_status(
                     previous,
@@ -245,134 +247,165 @@ def run_cta_sync(
                 )
             )
 
-            attempt_count = 1
-            wait_seconds = 0
-            error_type: str | None = None
-            error_message = "CTA sync failed without stderr output"
-            artifact_payload: dict[str, str] = {}
-
-            while True:
-                if wait_seconds > 0:
-                    sleep_fn(wait_seconds)
-
-                attempt_artifact_dir = ARTIFACT_DIR / f"cta-sync-{run_id}" / f"attempt-{attempt_count:02d}"
-                attempt_artifact_dir.mkdir(parents=True, exist_ok=True)
-
-                # Run fetch in a subprocess to guarantee asyncio isolation.
-                # Playwright sync API conflicts with stale event loops from
-                # previous attempts when retried in-process.
-                fetch_cmd = [
-                    sys.executable,
-                    str(SCRIPT_DIR / "fetch_menthorq_cta.py"),
-                    "--json",
-                    "--date", target,
-                ]
-                if force:
-                    fetch_cmd.append("--force")
-                fetch_timed_out = False
-                try:
-                    fetch_result = subprocess.run(
-                        fetch_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=FETCH_TIMEOUT_S,
-                        cwd=str(SCRIPT_DIR.parent),
-                        env={**os.environ, "MENTHORQ_ARTIFACT_DIR": str(attempt_artifact_dir)},
-                    )
-                    captured_stdout = fetch_result.stdout or ""
-                    captured_stderr = fetch_result.stderr or ""
-                    fetch_returncode = fetch_result.returncode
-                except subprocess.TimeoutExpired as exc:
-                    fetch_timed_out = True
-                    captured_stdout = _subprocess_text(exc.stdout)
-                    captured_stderr = _subprocess_text(exc.stderr) or (
-                        f"fetch_menthorq_cta.py timed out after {FETCH_TIMEOUT_S} seconds\n"
-                    )
-                    fetch_returncode = -1
-                    print(
-                        f"[cta-sync] fetch timed out after {FETCH_TIMEOUT_S}s "
-                        f"(attempt {attempt_count})",
-                        file=sys.stderr,
-                    )
-                if captured_stderr:
-                    print(captured_stderr, end="", file=sys.stderr)
-
-                # Parse payload from JSON stdout
-                payload = None
-                if fetch_returncode == 0 and captured_stdout.strip():
-                    try:
-                        payload = json.loads(captured_stdout)
-                    except json.JSONDecodeError:
-                        pass
-
-                valid, reason = validate_cta_payload(payload, target)
-                artifact_payload = latest_artifacts(artifact_dir=attempt_artifact_dir)
-
-                if valid:
-                    finished_at = utc_now_iso()
-                    status = build_status(
+            try:
+                return _run_attempts(
+                    previous,
+                    run_id=run_id,
+                    target=target,
+                    target_cache=target_cache,
+                    source=source,
+                    started_at=started_at,
+                    force=force,
+                    sleep_fn=sleep_fn,
+                )
+            except BaseException as exc:
+                # Only the holder reaches here, so it owns the status file.
+                write_final_status(
+                    build_status(
                         previous,
                         run_id=run_id,
-                        state="healthy",
+                        state="degraded",
                         target_date=target,
                         source=source,
                         started_at=started_at,
-                        finished_at=finished_at,
-                        latest_available_date=target,
-                        attempt_count=attempt_count,
-                        cache_path_value=str(target_cache),
-                        artifacts=artifact_payload,
-                        message="CTA sync completed successfully",
+                        finished_at=utc_now_iso(),
+                        latest_available_date=latest_available_cta_date(),
+                        attempt_count=0,
+                        error={"type": "interrupted", "message": f"{type(exc).__name__}: {exc}"[:240]},
+                        message="CTA sync interrupted before a final status",
                     )
-                    write_final_status(status)
-                    _dual_write_cta_to_db(target, payload, finished_at)
-                    return 0
+                )
+                raise
+    except CtaSyncLockError:
+        # Not the holder: the status file belongs to the run that is. Writing
+        # `syncing` here stuck once that run had already finished. §3.4.
+        print("CTA sync already running — skipping duplicate trigger", file=sys.stderr)
+        return 0
 
-                error_text = captured_stderr or captured_stdout or reason or "CTA sync returned invalid payload"
-                error_type, error_message = classify_sync_error(error_text)
-                if fetch_timed_out:
-                    error_type = "timeout"
-                backoffs = retry_backoffs_for_error(error_type)
-                if attempt_count >= len(backoffs):
-                    break
 
-                wait_seconds = backoffs[attempt_count]
-                attempt_count += 1
+def _run_attempts(
+    previous: dict[str, Any] | None,
+    *,
+    run_id: str,
+    target: str,
+    target_cache: Path,
+    source: str,
+    started_at: str,
+    force: bool,
+    sleep_fn: Any,
+) -> int:
+    """The fetch/retry loop. Runs only while holding the lock."""
+    attempt_count = 1
+    wait_seconds = 0
+    error_type: str | None = None
+    error_message = "CTA sync failed without stderr output"
+    artifact_payload: dict[str, str] = {}
 
+    while True:
+        if wait_seconds > 0:
+            sleep_fn(wait_seconds)
+
+        attempt_artifact_dir = ARTIFACT_DIR / f"cta-sync-{run_id}" / f"attempt-{attempt_count:02d}"
+        attempt_artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        # Run fetch in a subprocess to guarantee asyncio isolation.
+        # Playwright sync API conflicts with stale event loops from
+        # previous attempts when retried in-process.
+        fetch_cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "fetch_menthorq_cta.py"),
+            "--json",
+            "--date", target,
+        ]
+        if force:
+            fetch_cmd.append("--force")
+        fetch_timed_out = False
+        try:
+            fetch_result = subprocess.run(
+                fetch_cmd,
+                capture_output=True,
+                text=True,
+                timeout=FETCH_TIMEOUT_S,
+                cwd=str(SCRIPT_DIR.parent),
+                env={**os.environ, "MENTHORQ_ARTIFACT_DIR": str(attempt_artifact_dir)},
+            )
+            captured_stdout = fetch_result.stdout or ""
+            captured_stderr = fetch_result.stderr or ""
+            fetch_returncode = fetch_result.returncode
+        except subprocess.TimeoutExpired as exc:
+            fetch_timed_out = True
+            captured_stdout = _subprocess_text(exc.stdout)
+            captured_stderr = _subprocess_text(exc.stderr) or (
+                f"fetch_menthorq_cta.py timed out after {FETCH_TIMEOUT_S} seconds\n"
+            )
+            fetch_returncode = -1
+            print(
+                f"[cta-sync] fetch timed out after {FETCH_TIMEOUT_S}s "
+                f"(attempt {attempt_count})",
+                file=sys.stderr,
+            )
+        if captured_stderr:
+            print(captured_stderr, end="", file=sys.stderr)
+
+        # Parse payload from JSON stdout
+        payload = None
+        if fetch_returncode == 0 and captured_stdout.strip():
+            try:
+                payload = json.loads(captured_stdout)
+            except json.JSONDecodeError:
+                pass
+
+        valid, reason = validate_cta_payload(payload, target)
+        artifact_payload = latest_artifacts(artifact_dir=attempt_artifact_dir)
+
+        if valid:
             finished_at = utc_now_iso()
             status = build_status(
                 previous,
                 run_id=run_id,
-                state="degraded",
+                state="healthy",
                 target_date=target,
                 source=source,
                 started_at=started_at,
                 finished_at=finished_at,
-                latest_available_date=latest_available_cta_date(),
+                latest_available_date=target,
                 attempt_count=attempt_count,
-                error={"type": error_type or "unexpected_failure", "message": error_message},
+                cache_path_value=str(target_cache),
                 artifacts=artifact_payload,
-                message=f"CTA sync failed after {attempt_count} attempt(s)",
+                message="CTA sync completed successfully",
             )
             write_final_status(status)
-            return 1
-    except CtaSyncLockError:
-        finished_at = utc_now_iso()
-        status = build_status(
-            previous,
-            run_id=run_id,
-            state="syncing",
-            target_date=target,
-            source=source,
-            started_at=started_at,
-            finished_at=finished_at,
-            latest_available_date=latest_before,
-            attempt_count=0,
-            message="CTA sync skipped because another run is in progress",
-        )
-        write_cta_sync_status(status)
-        print("CTA sync already running — skipping duplicate trigger", file=sys.stderr)
-        return 0
+            _dual_write_cta_to_db(target, payload, finished_at)
+            return 0
+
+        error_text = captured_stderr or captured_stdout or reason or "CTA sync returned invalid payload"
+        error_type, error_message = classify_sync_error(error_text)
+        if fetch_timed_out:
+            error_type = "timeout"
+        backoffs = retry_backoffs_for_error(error_type)
+        if attempt_count >= len(backoffs):
+            break
+
+        wait_seconds = backoffs[attempt_count]
+        attempt_count += 1
+
+    finished_at = utc_now_iso()
+    status = build_status(
+        previous,
+        run_id=run_id,
+        state="degraded",
+        target_date=target,
+        source=source,
+        started_at=started_at,
+        finished_at=finished_at,
+        latest_available_date=latest_available_cta_date(),
+        attempt_count=attempt_count,
+        error={"type": error_type or "unexpected_failure", "message": error_message},
+        artifacts=artifact_payload,
+        message=f"CTA sync failed after {attempt_count} attempt(s)",
+    )
+    write_final_status(status)
+    return 1
 
 
 def main() -> int:
