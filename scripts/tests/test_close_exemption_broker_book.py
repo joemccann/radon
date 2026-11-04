@@ -459,6 +459,15 @@ def _snapshot_client(mock_ib, *, positions_end, orders_end, open_trades=()):
     mock_ib.qualifyContracts.return_value = [
         SimpleNamespace(conId=1, symbol="TQQQ", secType="STK")
     ]
+    # An admitted close reaches IB, which acknowledges it with a permId.
+    # Without one, the placement is indeterminate (ib_order_status).
+    acked = MagicMock()
+    acked.order.orderId = 99
+    acked.order.permId = 12345
+    acked.orderStatus.status = "Submitted"
+    acked.orderStatus.whyHeld = ""
+    acked.log = []
+    mock_ib.placeOrder.return_value = acked
 
     def req_positions():
         if positions_end:
