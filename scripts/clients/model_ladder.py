@@ -16,9 +16,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 from model_gateway.client import GatewayError, request as gateway_request
 from model_gateway.contracts import (
-    MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, LadderResult, ModelLadderExhausted,
-    ModelResponseError, VisionResult, accept_distill_payload, accept_tags_payload,
-    parse_json_object, parse_json_rows, safe_error_message,
+    MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, MIN_FALLBACK_SLICE_S, LadderResult,
+    ModelLadderExhausted, ModelResponseError, VisionResult, accept_distill_payload,
+    accept_tags_payload, parse_json_object, parse_json_rows, safe_error_message,
 )
 
 
@@ -65,12 +65,22 @@ def complete_multimodal_json(
     seen: set[str] = set()
     observed_attempts: list[str] = []
     deadline = time.monotonic() + read_timeout + 10
+    # A continuation is a rejected draft. The socket wait has to cover the
+    # server's per-rung minimum, not whatever is left of the first attempt.
+    provider_count = len(providers) if providers is not None else len(MODEL_LADDER_ORDER)
+    fallback_wait = MIN_FALLBACK_SLICE_S * max(1, provider_count) + 10
     for _ in range(32):
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if payload.get("continuation"):
+            timeout = max(remaining, fallback_wait)
+        else:
+            if remaining <= 0:
+                raise ModelLadderExhausted("Gateway request deadline exhausted")
+            timeout = remaining
+        if timeout <= 0:
             raise ModelLadderExhausted("Gateway request deadline exhausted")
         try:
-            response = gateway_request("json", payload, timeout_seconds=remaining)
+            response = gateway_request("json", payload, timeout_seconds=timeout)
         except GatewayError as exc:
             if exc.code in {"exhausted", "deadline_exhausted"}:
                 attempts = observed_attempts + list(exc.attempted)

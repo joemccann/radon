@@ -329,3 +329,61 @@ def test_rung_slice_never_starves_and_last_rung_gets_everything():
     assert engine._rung_slice(120, 4) == pytest.approx(60)
     assert engine._rung_slice(40, 4) == pytest.approx(10)  # even-split floor
     assert engine._rung_slice(0, 3) > 0
+
+
+def test_rejected_continuation_gives_each_later_rung_its_minimum(monkeypatch, fresh_rungs):
+    """A caller-rejected first draft must not leave the next rungs a few seconds."""
+    now = [0.0]
+    gateway = service(monkeypatch, clock=lambda: now[0])
+    from model_gateway import engine
+    from model_gateway.contracts import MIN_FALLBACK_SLICE_S
+    monkeypatch.setattr(engine.provider_cooldown, "rate_limited", lambda *_a, **_k: False)
+    slices = []
+
+    def call(name, *a, **kw):
+        slices.append((name, engine.scoped_timeout(300)))
+        if name == "antigravity":
+            now[0] += 79  # uses the generous first slice, then the caller rejects it
+            return answer(name, {"ok": True})
+        if name == "grok":
+            return 503, "busy", {"error": "busy"}
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    payload = {"instruction": "facts", "read_timeout": 120,
+               "providers": ["antigravity", "grok", "codex"]}
+    first = gateway.handle("json", payload)
+    assert slices[0] == ("antigravity", pytest.approx(80))  # success-path slice, unchanged
+    gateway.handle("json", {**payload, "continuation": first["continuation"]})
+    fallback = [(name, timeout) for name, timeout in slices if name != "antigravity"]
+    assert [name for name, _timeout in fallback] == ["grok", "codex"]
+    assert all(timeout >= MIN_FALLBACK_SLICE_S - 0.01 for _name, timeout in fallback)
+
+
+def test_in_engine_rejected_draft_does_not_starve_later_rungs(monkeypatch, fresh_rungs):
+    now = [0.0]
+    from model_gateway import engine
+    from model_gateway.contracts import MIN_FALLBACK_SLICE_S
+    monkeypatch.setattr(engine, "_auth_for", lambda name, env: engine.AuthMaterial("fixture", "subscription", "test"))
+    monkeypatch.setattr(engine, "_model_for", lambda name, env, **kw: name + "-model")
+    monkeypatch.setattr(engine.provider_cooldown, "rate_limited", lambda *_a, **_k: False)
+    slices = []
+
+    def call(name, *a, **kw):
+        slices.append((name, engine.scoped_timeout(300)))
+        if name == "anthropic":
+            now[0] += 70
+            return answer(name, {"ok": False})
+        if name == "grok":
+            return 503, "busy", {"error": "busy"}
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    with engine.attempt_scope(deadline=120, seen=set(), clock=lambda: now[0]):
+        result = engine.complete_multimodal_json(
+            "facts", providers=["anthropic", "grok", "codex"], read_timeout=120,
+            accept=lambda obj: obj.get("ok") is True,
+        )
+    assert slices[0] == ("anthropic", pytest.approx(80))  # success-path slice: 120s minus 20s for each later rung
+    assert result.provider == "codex"
+    assert all(timeout >= MIN_FALLBACK_SLICE_S - 0.01 for name, timeout in slices if name != "anthropic")
