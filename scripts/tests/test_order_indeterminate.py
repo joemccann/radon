@@ -282,3 +282,46 @@ def test_retained_warning_diagnostics_are_bounded_and_credential_scrubbed(tmp_pa
     assert all(len(warning["message"]) <= 512 for warning in warnings)
     assert "synthetic-warning-secret" not in str(warnings)
     assert result["indeterminate"] is True
+
+
+@pytest.mark.parametrize("status", ["", "Unknown"])
+def test_acknowledged_permid_without_status_is_not_reported_unknown(
+    tmp_path, monkeypatch, status
+):
+    """permId != 0 with no broker status is an acknowledgement, never "Unknown".
+
+    The Next.js route reads ``initialStatus`` "Unknown" as "no acknowledgement";
+    an ok result carrying it for an order IB already numbered made the route
+    drop the idempotency key and invite a duplicate placement.
+    """
+    monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
+    client = _mock_client()
+    trade = client.place_order.return_value
+    trade.order.permId = 555001
+    trade.orderStatus.status = status
+    trade.orderStatus.permId = 0
+    trade.orderStatus.filled = 0
+    clock = iter([100.0, 100.1, 200.0])
+    with patch.object(ib_place_order, "IBClient", return_value=client):
+        result = ib_place_order.place_order(_PARAMS, _clock=lambda: next(clock))
+
+    assert result["status"] == "ok", result
+    assert result["permId"] == 555001
+    assert result["initialStatus"] == "PendingSubmit"
+    assert result.get("indeterminate") is not True
+    assert "Unknown" not in result["message"]
+
+
+def test_unrecognised_status_without_permid_is_indeterminate(tmp_path, monkeypatch):
+    """No permId and a status outside the vocabulary is not an acknowledgement."""
+    monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
+    client = _mock_client()
+    client.place_order.return_value.orderStatus.status = "Bogus"
+    client.place_order.return_value.orderStatus.permId = 0
+    clock = iter([100.0, 200.0])
+    with patch.object(ib_place_order, "IBClient", return_value=client):
+        result = ib_place_order.place_order(_PARAMS, _clock=lambda: next(clock))
+
+    assert result["status"] == "error"
+    assert result.get("indeterminate") is True
+    assert result["permId"] == 0

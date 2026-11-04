@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 from clients.ib_timing import PhaseTimer
 from credential_redaction import scrub_credential_text
+from utils import ib_order_status
 
 CLIENT_ID = CLIENT_IDS.get("ib_place_order", 26)
 PORT = DEFAULT_GATEWAY_PORT
@@ -726,7 +727,12 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
 
         order_id = trade.order.orderId
         perm_id = _trade_perm_id(trade)
-        status = (trade.orderStatus.status if trade.orderStatus else "") or "Unknown"
+        status = (trade.orderStatus.status if trade.orderStatus else "") or ib_order_status.UNKNOWN
+        # A nonzero permId IS IB's acknowledgement. Without a status callback
+        # yet, report it as PendingSubmit: "Unknown" means "no acknowledgement"
+        # to every caller, and an ok result carrying it invited a re-place.
+        if perm_id != 0 and status == ib_order_status.UNKNOWN:
+            status = ib_order_status.PENDING_SUBMIT
 
         # Surface any IB error events caught during the wait — with the
         # STRUCTURED code/text fields the terminal-failed builder already
@@ -748,7 +754,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         # A transmitted order without acknowledgement has an unknown outcome.
         # Disconnecting after the bounded wait does not establish rejection;
         # retain its identity so callers reconcile instead of submitting again.
-        if perm_id == 0 and status in ("PendingSubmit", "ApiPending", "Unknown"):
+        if perm_id == 0 and (
+            status in ib_order_status.UNACKNOWLEDGED
+            or ib_order_status.normalize(status) is None
+        ):
             return {
                 "status": "error",
                 "indeterminate": True,
@@ -773,7 +782,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         # SPX-01: the async IB errorEvent (e.g. 201 "shares not available for
         # short sale") can arrive AFTER the poll loop broke on the terminal
         # state.  Grace-wait up to ~1.5s (5×300 ms) for it to land.
-        if status in ("Rejected", "Cancelled", "ApiCancelled", "Inactive"):
+        if status in ib_order_status.TERMINAL_FAILED:
             ib_error_code, ib_error_text = _grace_wait_for_ib_error(
                 client, ib_errors, trade
             )

@@ -29,6 +29,12 @@ import {
   markIndeterminatePlacement,
 } from "@/lib/orders/orderIdempotency";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
+import {
+  type IbOrderStatus,
+  TERMINAL_FAILED,
+  UNACKNOWLEDGED,
+  normalizeIbOrderStatus,
+} from "@/lib/orders/ibOrderStatus";
 import { ordersFreshRefreshInit } from "@/lib/orders/ordersFreshRefresh";
 import { FUTURES_ROOT_MULTIPLIERS } from "@/lib/futuresRootMultipliers";
 
@@ -45,6 +51,27 @@ class OrderRejectedError extends Error {
     super(`Order rejected by IB: ${initialStatus}`);
     this.name = "OrderRejectedError";
   }
+}
+
+/**
+ * Placement result taxonomy, from the shared IB status vocabulary. A nonzero
+ * permId is IB's acknowledgement; without one, an unacknowledged status
+ * ("Unknown" / PendingSubmit / ApiPending) leaves the order's fate unknown.
+ */
+type PlaceOutcome =
+  | { kind: "acknowledged" }
+  | { kind: "rejected"; status: IbOrderStatus }
+  | { kind: "unacknowledged"; status: IbOrderStatus };
+
+function classifyPlaceResult(result: Record<string, unknown>): PlaceOutcome {
+  const status = normalizeIbOrderStatus(result.initialStatus);
+  if (status && TERMINAL_FAILED.has(status)) return { kind: "rejected", status };
+  const permId = Number(result.permId);
+  const acknowledged = Number.isFinite(permId) && permId !== 0;
+  if (!acknowledged && status && UNACKNOWLEDGED.has(status)) {
+    return { kind: "unacknowledged", status };
+  }
+  return { kind: "acknowledged" };
 }
 
 type ComboLeg = {
@@ -468,24 +495,25 @@ export async function POST(request: Request): Promise<Response> {
           }
           throw error;
         });
+        const outcome = classifyPlaceResult(result);
         // IB silent rejection: submitted but immediately cancelled/inactive.
-        const REJECTED_STATUSES = new Set(["Cancelled", "ApiCancelled", "Inactive", "Unknown"]);
-        const status = result.initialStatus as string | undefined;
-        if (status && REJECTED_STATUSES.has(status)) {
-          throw new OrderRejectedError(result, status);
+        if (outcome.kind === "rejected") {
+          throw new OrderRejectedError(result, outcome.status);
+        }
+        // No broker acknowledgement is not a rejection: IB may hold the order.
+        if (outcome.kind === "unacknowledged") {
+          throw markIndeterminatePlacement(
+            new Error(`IB has not acknowledged the order (${outcome.status}, no permId)`),
+          );
         }
         return result;
       });
     } catch (placeErr) {
       invalidateOrdersSnapshotCache();
       if (placeErr instanceof OrderRejectedError) {
-        const reason =
-          placeErr.initialStatus === "Unknown"
-            ? `no acknowledgement (${placeErr.initialStatus}), order may not have reached IB`
-            : placeErr.initialStatus;
         return setNoStoreResponseHeaders(
           jsonApiError({
-            message: `Order rejected by IB: ${reason}`,
+            message: `Order rejected by IB: ${placeErr.initialStatus}`,
             status: 502,
             code: "UPSTREAM_ERROR",
             detail: JSON.stringify(placeErr.result),

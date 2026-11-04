@@ -23,6 +23,14 @@ function isOpaqueEdgeTimeout(res: Response): boolean {
   return !isJson && (res.status === 502 || res.status === 504);
 }
 
+/**
+ * What one cached read means for the poll cadence. Only `failed` walks the
+ * backoff ladder: a sync warning or the edge-pending notice is shown in
+ * `error` but is not a failed read, and a read that was skipped or superseded
+ * by a newer sync observed nothing.
+ */
+type ReadOutcome = "ok" | "warning" | "failed" | "skipped";
+
 type UseOrdersReturn = {
   data: OrdersData | null;
   loading: boolean;
@@ -40,13 +48,7 @@ export function useOrders(
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [error, setErrorState] = useState<string | null>(null);
-  // Mirrored so the poll loop can read the outcome without re-rendering
-  // itself into a new closure. R-263.
-  const setError = useCallback((value: string | null) => {
-    errorRef.current = value;
-    setErrorState(value);
-  }, []);
+  const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncingRef = useRef(false);
@@ -59,7 +61,6 @@ export function useOrders(
   const mountedRef = useRef(true);
   /** Consecutive failed polls, for the backoff ladder. R-263. */
   const failureStreakRef = useRef(0);
-  const errorRef = useRef<string | null>(null);
   const activeRef = useRef(active);
   const pollIntervalRef = useRef(pollIntervalMs);
   const failureRetryUntilRef = useRef(0);
@@ -68,8 +69,8 @@ export function useOrders(
   activeRef.current = active;
   pollIntervalRef.current = pollIntervalMs;
 
-  const fetchOrders = useCallback(async () => {
-    if (readingRef.current) return;
+  const fetchOrders = useCallback(async (): Promise<ReadOutcome> => {
+    if (readingRef.current) return "skipped";
     readingRef.current = true;
     const generation = dataGenerationRef.current;
     let networkResolved = false;
@@ -84,22 +85,25 @@ export function useOrders(
       else reportFetchSuccess();
       if (!res.ok) throw new Error(`Failed to fetch orders (${res.status})`);
       const json = (await res.json()) as OrdersData;
-      if (!mountedRef.current || generation !== dataGenerationRef.current) return;
+      if (!mountedRef.current || generation !== dataGenerationRef.current) return "skipped";
       setData(json);
       setLastSync(json.last_sync || null);
       const warning = res.headers.get("X-Sync-Warning");
       if (warning) {
         warningSnapshotRef.current = json.last_sync || null;
         setError(warning);
-        return;
+        return "warning";
       }
       warningSnapshotRef.current = null;
       setError(null);
+      return "ok";
     } catch (err) {
       if (!networkResolved) reportFetchFailure();
       if (mountedRef.current && generation === dataGenerationRef.current) {
         setError(err instanceof Error ? err.message : "Unknown error");
+        return "failed";
       }
+      return "skipped";
     } finally {
       readingRef.current = false;
       if (mountedRef.current) setLoading(false);
@@ -130,24 +134,25 @@ export function useOrders(
       if (mountedRef.current && activeRef.current) scheduleNext(pollIntervalRef.current);
       return;
     }
-    let failed = false;
+    let outcome: ReadOutcome;
     try {
-      await fetchOrders();
+      outcome = await fetchOrders();
     } catch {
-      failed = true;
+      outcome = "failed";
     }
-    // `fetchOrders` swallows its own error into `errorRef`, so the catch above
-    // is not the failure signal — the mirrored ref is. Resetting the streak on
-    // the way past it pinned every outage to the first rung forever.
-    if (errorRef.current) failed = true;
+    // Only a failed read is a failure. `error` also carries sync warnings and
+    // the edge-pending notice; reading it here backed successes off to 5 min.
+    // A skipped read observed nothing and leaves the streak where it was.
+    const failed = outcome === "failed";
     if (failed) failureStreakRef.current += 1;
-    else failureStreakRef.current = 0;
+    else if (outcome !== "skipped") failureStreakRef.current = 0;
     // And back off on failure. The route answers a Turso outage with 503 by
     // design, and the next poll was still exactly 30s later, forever. R-263.
     const delay = failed
       ? Math.min(MAX_POLL_INTERVAL_MS, POLL_INTERVAL_MS * 2 ** failureStreakRef.current)
       : pollIntervalRef.current;
-    failureRetryUntilRef.current = failed ? Date.now() + delay : 0;
+    if (failed) failureRetryUntilRef.current = Date.now() + delay;
+    else if (outcome !== "skipped") failureRetryUntilRef.current = 0;
     if (mountedRef.current && activeRef.current) scheduleNext(delay);
   }, [fetchOrders, scheduleNext]);
   pollCachedRef.current = pollCached;
