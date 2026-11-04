@@ -57,6 +57,7 @@ import ComboSkewPanel from "@/components/ComboSkewPanel";
 import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
 import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 import { useChainAnchor } from "@/lib/useChainAnchor";
 import ChainSpotBar from "@/components/ChainSpotBar";
 
@@ -362,7 +363,6 @@ function OrderBuilder({
   const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
-  const [confirmStep, setConfirmStep] = useState(false);
 
   const isCombo = legs.length > 1;
   const normalizedOrder = useMemo(() => (isCombo ? normalizeComboOrder(legs) : null), [isCombo, legs]);
@@ -383,6 +383,52 @@ function OrderBuilder({
         ? Math.abs(parsedPrice)
         : -Math.abs(parsedPrice)
     : NaN;
+
+  // The exact request Transmit would send right now. Verify arms for ITS key;
+  // a quote tick, a leg added / flipped / removed by the chain, a URL
+  // prefill, a TIF or price edit all change the key and disarm (§1 #8).
+  const orderBody = useMemo(() => {
+    if (legs.length === 0 || !isValidPrice) return null;
+    if (isCombo) {
+      const comboOrder = normalizedOrder ?? normalizeComboOrder(legs);
+      return {
+        type: "combo",
+        symbol: ticker,
+        action: getComboEntryAction(comboOrder.legs),
+        quantity: totalQty,
+        limitPrice: signedLimitPrice,
+        tif,
+        legs: comboOrder.legs.map((l) => ({
+          symbol: ticker,
+          secType: "OPT",
+          expiry: normalizeOptionExpiry(l.expiry) ?? l.expiry,
+          strike: l.strike,
+          right: l.right === "C" ? "CALL" : "PUT",
+          action: l.action,
+          ratio: l.quantity,
+          ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
+        })),
+      };
+    }
+    return {
+      type: "option",
+      symbol: ticker,
+      action: legs[0].action,
+      quantity: legs[0].quantity,
+      limitPrice: parsedPrice,
+      tif,
+      expiry: normalizeOptionExpiry(legs[0].expiry) ?? legs[0].expiry,
+      strike: legs[0].strike,
+      right: legs[0].right === "C" ? "CALL" : "PUT",
+    };
+  }, [legs, isValidPrice, isCombo, normalizedOrder, ticker, totalQty, signedLimitPrice, tif, parsedPrice]);
+  const payloadKey = useMemo(
+    () => (orderBody == null ? null : canonicalPayloadKey({ url: "/api/orders/place", body: orderBody })),
+    [orderBody],
+  );
+  const confirm = useArmedConfirm(payloadKey);
+  const confirmStep = confirm.armed;
+  const { arm, disarm } = confirm;
 
   // For BID/MID/ASK quote, always use ratio-normalized legs (quantity=1 for single leg)
   // so the quote shows per-unit price, not aggregate (e.g. $1.46 not $73.00 for 50 contracts)
@@ -452,12 +498,14 @@ function OrderBuilder({
     }
   }, [structureKey]);
 
-  // Auto-populate limit price to mid when prices first become available
+  // Auto-populate limit price to mid when prices first become available.
+  // Frozen while armed: the reviewed price is the one that goes out.
   useEffect(() => {
+    if (confirmStep) return;
     if (!priceManuallySet && signedNetPrices.mid != null) {
       setLimitPrice(signedNetPrices.mid.toFixed(2));
     }
-  }, [signedNetPrices.mid, priceManuallySet, structureKey]);
+  }, [signedNetPrices.mid, priceManuallySet, structureKey, confirmStep]);
 
   // Build the chokepoint input. All risk math + portfolio augmentation now
   // lives in `useOrderRisk` (called by `<OrderRiskGate>` below). The chain
@@ -543,13 +591,11 @@ function OrderBuilder({
 
   /**
    * The acknowledgement an operator gives is specific to the order in front of
-   * them, so it resets whenever they leave the review step or change the
-   * order. A stale tick must never arm a different ticket.
+   * them: it belongs to the armed payload key, so leaving review or changing
+   * any part of the order drops it. A quote tick no longer does.
    */
-  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
-  useEffect(() => {
-    setRiskAcknowledged(false);
-  }, [confirmStep, signedLimitPrice, totalQty, structure, legs.length]);
+  const riskAcknowledged = confirm.acknowledged;
+  const setRiskAcknowledged = confirm.setAcknowledged;
 
   /**
    * Real figures for the acknowledgement, from the same exact payoff the risk
@@ -576,10 +622,10 @@ function OrderBuilder({
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
-    if (!submitPermitted) return;
+    if (!submitPermitted || orderBody == null) return;
     // Defence in depth: the disabled button is UI, this is the actual gate.
     // An unbounded-risk order never reaches the wire unacknowledged.
     if (!transmitArmed) return;
@@ -592,43 +638,10 @@ function OrderBuilder({
     setError(null);
 
     try {
-      const isCombo = legs.length > 1;
-      const comboOrder = normalizedOrder ?? normalizeComboOrder(legs);
-      const body = isCombo
-        ? {
-            type: "combo",
-            symbol: ticker,
-            action: getComboEntryAction(comboOrder.legs),
-            quantity: totalQty,
-            limitPrice: signedLimitPrice,
-            tif,
-            legs: comboOrder.legs.map((l) => ({
-              symbol: ticker,
-              secType: "OPT",
-              expiry: normalizeOptionExpiry(l.expiry) ?? l.expiry,
-              strike: l.strike,
-              right: l.right === "C" ? "CALL" : "PUT",
-              action: l.action,
-              ratio: l.quantity,
-              ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
-            })),
-          }
-        : {
-            type: "option",
-            symbol: ticker,
-            action: legs[0].action,
-            quantity: legs[0].quantity,
-            limitPrice: parsedPrice,
-            tif,
-            expiry: normalizeOptionExpiry(legs[0].expiry) ?? legs[0].expiry,
-            strike: legs[0].strike,
-            right: legs[0].right === "C" ? "CALL" : "PUT",
-          };
-
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(orderBody),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -636,7 +649,7 @@ function OrderBuilder({
       } else {
         const feedback = placeOrderFeedback(json, `Order placed: ${structure || "Option"} on ${ticker}`);
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
       }
     } catch {
       setError("Network error placing order");
@@ -646,15 +659,12 @@ function OrderBuilder({
     }
   }, [
     confirmStep,
+    arm,
+    disarm,
     orderActions,
     ticker,
-    legs,
-    parsedPrice,
-    normalizedOrder,
-    totalQty,
-    tif,
+    orderBody,
     structure,
-    signedLimitPrice,
     submitPermitted,
     transmitArmed,
   ]);
@@ -685,9 +695,9 @@ function OrderBuilder({
     (side: OrderQuoteSide, value: number) => {
       setLimitPrice(value.toFixed(2));
       setPriceManuallySet(true);
-      setConfirmStep(false);
+      disarm();
     },
-    [],
+    [disarm],
   );
 
   const riskTeaser = useMemo(() => {
@@ -731,7 +741,7 @@ function OrderBuilder({
             className="btn-secondary order-builder-clear"
             onClick={() => {
               onClearLegs();
-              setConfirmStep(false);
+              disarm();
               setLimitPrice("");
               setPriceManuallySet(false);
               setError(null);
@@ -813,7 +823,7 @@ function OrderBuilder({
                   className={`order-builder-leg-action ${leg.action === "BUY" ? "order-builder-leg-action--buy" : "order-builder-leg-action--sell"}`}
                   onClick={() => {
                     onUpdateLeg(leg.id, { action: leg.action === "BUY" ? "SELL" : "BUY" });
-                    setConfirmStep(false);
+                    disarm();
                   }}
                   title="Toggle buy/sell"
                 >
@@ -840,7 +850,7 @@ function OrderBuilder({
                     const v = parseInt(e.target.value, 10);
                     if (v > 0) {
                       onUpdateLeg(leg.id, { quantity: v });
-                      setConfirmStep(false);
+                      disarm();
                     }
                   }}
                 />
@@ -861,7 +871,7 @@ function OrderBuilder({
                           priceManuallySet: true,
                         });
                         setPriceManuallySet(true);
-                        setConfirmStep(false);
+                        disarm();
                       }}
                     />
                   </div>
@@ -871,7 +881,7 @@ function OrderBuilder({
                   className="order-builder-leg-remove"
                   onClick={() => {
                     onRemoveLeg(leg.id);
-                    setConfirmStep(false);
+                    disarm();
                   }}
                   title="Remove leg"
                 >
@@ -901,7 +911,7 @@ function OrderBuilder({
                 onChange={(e) => {
                   setLimitPrice(e.target.value);
                   setPriceManuallySet(true);
-                  setConfirmStep(false);
+                  disarm();
                 }}
                 placeholder="0.00"
               />
@@ -1032,7 +1042,7 @@ function OrderBuilder({
                 type="button"
                 className="btn-secondary"
                 data-testid="ticket-back"
-                onClick={() => setConfirmStep(false)}
+                onClick={disarm}
                 disabled={loading}
               >
                 Back
