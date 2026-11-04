@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 MIGRATIONS = (
     SCRIPTS / "db" / "migrations" / "0059_flex_deliveries.sql",
     SCRIPTS / "db" / "migrations" / "0063_flex_delivery_claim_status.sql",
+    SCRIPTS / "db" / "migrations" / "0106_flex_delivery_claim_token.sql",
 )
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ACTIVITY_XML = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
@@ -96,19 +97,20 @@ def _rows(db_path: Path) -> list:
 
 class TestClaimAgainstTheRealDriver:
     def test_the_first_claim_wins(self, writer):
-        assert writer.claim_flex_delivery(SHA, classified_as="activity") is True, (
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1") is True, (
             "the first sight of a delivery did not win the claim, so ingest_xml "
             "takes the 'duplicate' branch for EVERY file and no writer ever runs"
         )
 
     def test_the_second_claim_loses(self, writer):
-        writer.claim_flex_delivery(SHA, classified_as="activity")
-        assert writer.claim_flex_delivery(SHA, classified_as="activity") is False
+        writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1")
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1") is False
 
     def test_the_claim_row_survives_a_fresh_connection(self, writer, db_path):
         writer.claim_flex_delivery(
             SHA,
             classified_as="activity",
+            claim_token="t1",
             period_from="20260101",
             period_to="20260814",
             source_path="/inbox/activity.xml",
@@ -119,10 +121,10 @@ class TestClaimAgainstTheRealDriver:
         ], f"the claim was never committed, so the next run cannot see it; {rows}"
 
     def test_release_lets_the_same_file_be_claimed_again(self, writer, db_path):
-        assert writer.claim_flex_delivery(SHA, classified_as="activity") is True
-        writer.release_flex_delivery(SHA)
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1") is True
+        writer.release_flex_delivery(SHA, claim_token="t1")
         assert _rows(db_path) == []
-        assert writer.claim_flex_delivery(SHA, classified_as="activity") is True
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1") is True
 
 
 def _status(db_path: Path) -> list:
@@ -135,31 +137,31 @@ class TestClaimStatusAgainstTheRealDriver:
     """R-436: the lease survives a failed release as `in_progress` and ages out."""
 
     def test_a_fresh_in_progress_lease_is_not_reclaimable(self, writer, db_path):
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1", now=NOW) is True
         assert _status(db_path) == [(SHA, "in_progress")]
         assert writer.flex_delivery_status(SHA) == "in_progress"
         later = NOW + timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S - 1)
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=later) is False
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t2", now=later) is False
 
     def test_a_stale_in_progress_lease_is_reclaimable(self, writer, db_path):
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1", now=NOW) is True
         later = NOW + timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S + 1)
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=later) is True, (
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t2", now=later) is True, (
             "a lease older than one run period stayed unclaimable, so the "
             "outage that failed both the writer and the release wedged the file"
         )
         assert _status(db_path) == [(SHA, "in_progress")]
 
     def test_an_applied_row_is_never_reclaimable(self, writer, db_path):
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
-        assert writer.mark_flex_delivery_applied(SHA) is True
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1", now=NOW) is True
+        assert writer.mark_flex_delivery_applied(SHA, claim_token="t1") is True
         assert _status(db_path) == [(SHA, "applied")]
         assert writer.flex_delivery_status(SHA) == "applied"
         much_later = NOW + timedelta(days=30)
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=much_later) is False
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t2", now=much_later) is False
 
     def test_mark_applied_is_a_no_op_without_a_lease(self, writer, db_path):
-        assert writer.mark_flex_delivery_applied(SHA) is False
+        assert writer.mark_flex_delivery_applied(SHA, claim_token="t1") is False
         assert _status(db_path) == []
 
     def test_a_pre_migration_row_defaults_to_applied(self, writer, db_path):
@@ -172,7 +174,55 @@ class TestClaimStatusAgainstTheRealDriver:
         )
         conn.commit()
         assert writer.flex_delivery_status(SHA) == "applied"
-        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is False
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", claim_token="t1", now=NOW) is False
+
+
+class TestTheLeaseIsBoundToItsClaimant:
+    """§1#16: release and mark_applied are CAS on the claimant's token.
+
+    Run A outlives FLEX_CLAIM_STALE_AFTER_S, run B re-takes the stale lease.
+    A's late release must not delete B's live claim and A's late mark must
+    not flip it to `applied` while B's writers are still running.
+    """
+
+    STALE = timedelta(seconds=1)
+
+    def _steal(self, writer):
+        assert writer.claim_flex_delivery(
+            SHA, classified_as="activity", claim_token="run-a", now=NOW
+        ) is True
+        later = NOW + timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S) + self.STALE
+        assert writer.claim_flex_delivery(
+            SHA, classified_as="activity", claim_token="run-b", now=later
+        ) is True
+
+    def test_a_late_release_does_not_delete_the_new_claimants_row(self, writer, db_path):
+        self._steal(writer)
+        assert writer.release_flex_delivery(SHA, claim_token="run-a") is False
+        assert _status(db_path) == [(SHA, "in_progress")], (
+            "run A's release deleted run B's live claim, so a third run "
+            "re-applies the non-idempotent ingest over B"
+        )
+
+    def test_a_late_mark_does_not_flip_the_new_claimants_row(self, writer, db_path):
+        self._steal(writer)
+        assert writer.mark_flex_delivery_applied(SHA, claim_token="run-a") is False
+        assert _status(db_path) == [(SHA, "in_progress")]
+        assert writer.mark_flex_delivery_applied(SHA, claim_token="run-b") is True
+        assert _status(db_path) == [(SHA, "applied")]
+
+    def test_the_owner_still_releases_its_own_claim(self, writer, db_path):
+        self._steal(writer)
+        assert writer.release_flex_delivery(SHA, claim_token="run-b") is True
+        assert _status(db_path) == []
+
+    def test_release_never_deletes_an_applied_row(self, writer, db_path):
+        assert writer.claim_flex_delivery(
+            SHA, classified_as="activity", claim_token="run-a", now=NOW
+        ) is True
+        assert writer.mark_flex_delivery_applied(SHA, claim_token="run-a") is True
+        assert writer.release_flex_delivery(SHA, claim_token="run-a") is False
+        assert _status(db_path) == [(SHA, "applied")]
 
 
 class TestIngestOverTheRealClaim:

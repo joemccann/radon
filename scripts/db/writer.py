@@ -643,6 +643,7 @@ def claim_flex_delivery(
     content_sha256: str,
     *,
     classified_as: str,
+    claim_token: str,
     period_from: Optional[str] = None,
     period_to: Optional[str] = None,
     source_path: Optional[str] = None,
@@ -664,6 +665,9 @@ def claim_flex_delivery(
     in_progress lease (claimed_at older than FLEX_CLAIM_STALE_AFTER_S), which
     is how the bytes stay retryable when the outage that failed the writer
     also failed the release. R-436.
+
+    `claim_token` names the claimant. Release and mark compare it, so a run
+    that outlived its lease cannot end the lease a second run re-took.
     """
     moment = now or datetime.now(timezone.utc)
     now_iso = moment.isoformat().replace("+00:00", "Z")
@@ -673,8 +677,8 @@ def claim_flex_delivery(
     cursor = db.execute(
         "INSERT INTO flex_deliveries "
         "(content_sha256, classified_as, period_from, period_to, ingested_at, "
-        "source_path, status, claimed_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "source_path, status, claimed_at, claim_token) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(content_sha256) DO UPDATE SET "
         "classified_as = excluded.classified_as, "
         "period_from = excluded.period_from, "
@@ -682,7 +686,8 @@ def claim_flex_delivery(
         "ingested_at = excluded.ingested_at, "
         "source_path = excluded.source_path, "
         "status = excluded.status, "
-        "claimed_at = excluded.claimed_at "
+        "claimed_at = excluded.claimed_at, "
+        "claim_token = excluded.claim_token "
         "WHERE flex_deliveries.status = 'in_progress' "
         "AND flex_deliveries.claimed_at < ?",
         (
@@ -694,6 +699,7 @@ def claim_flex_delivery(
             source_path,
             "in_progress",
             now_iso,
+            claim_token,
             cutoff_iso,
         ),
     )
@@ -706,7 +712,7 @@ def claim_flex_delivery(
     return isinstance(claimed, int) and claimed > 0
 
 
-def release_flex_delivery(content_sha256: str) -> bool:
+def release_flex_delivery(content_sha256: str, *, claim_token: str) -> bool:
     """Release a claim whose ingest did not complete. True when a row was dropped.
 
     The claim is taken BEFORE the writers run, so it is a lease on work in
@@ -715,11 +721,15 @@ def release_flex_delivery(content_sha256: str) -> bool:
     permanently unretryable: the same bytes re-dropped (or re-pulled by the
     08:30 sFTP run) lost the claim, skipped every writer and heartbeated `ok`.
     R-379.
+
+    CAS on the claimant's token and `in_progress`: a lease another run
+    re-took, or an `applied` row, is never this caller's to drop.
     """
     db = get_db()
     result = db.execute(
-        "DELETE FROM flex_deliveries WHERE content_sha256 = ?",
-        (content_sha256,),
+        "DELETE FROM flex_deliveries WHERE content_sha256 = ? "
+        "AND status = 'in_progress' AND claim_token = ?",
+        (content_sha256, claim_token),
     )
     db.commit()
     released = getattr(result, "rowcount", None)
@@ -738,13 +748,16 @@ def flex_delivery_status(content_sha256: str) -> Optional[str]:
     return None if row is None else row[0]
 
 
-def mark_flex_delivery_applied(content_sha256: str) -> bool:
-    """Flip the lease to `applied` after EVERY writer committed. R-436."""
+def mark_flex_delivery_applied(content_sha256: str, *, claim_token: str) -> bool:
+    """Flip the lease to `applied` after EVERY writer committed. R-436.
+
+    False when the caller no longer holds the lease (CAS on its token).
+    """
     db = get_db()
     result = db.execute(
         "UPDATE flex_deliveries SET status = 'applied' "
-        "WHERE content_sha256 = ? AND status = 'in_progress'",
-        (content_sha256,),
+        "WHERE content_sha256 = ? AND status = 'in_progress' AND claim_token = ?",
+        (content_sha256, claim_token),
     )
     db.commit()
     applied = getattr(result, "rowcount", None)
