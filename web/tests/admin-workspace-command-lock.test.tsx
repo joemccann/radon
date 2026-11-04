@@ -5,9 +5,12 @@
  *
  * - Trading controls share the workspace command lock: while a service
  *   command is in flight, Halt / Cancel All / Kill are disarmed.
+ * - A command the lock refuses is logged, never dropped silently.
+ * - A post-action refresh queues behind an in-flight poll instead of being
+ *   dropped, and a unit turning transitional retunes only the services poll.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import AdminWorkspace from "../components/admin/AdminWorkspace";
 import type { AdminHealthPayload, ServicesListResponse } from "../lib/adminTypes";
 
@@ -29,6 +32,24 @@ const SERVICES: ServicesListResponse = {
       can_control: true,
       uptime_secs: 3_600,
     },
+  ],
+};
+
+const GATEWAY_UNIT = "radon-ib-gateway.service";
+
+const SERVICES_WITH_GATEWAY: ServicesListResponse = {
+  supported: true,
+  units: [
+    {
+      unit: GATEWAY_UNIT,
+      load_state: "loaded",
+      active_state: "active",
+      sub_state: "running",
+      description: "IB Gateway",
+      can_control: true,
+      uptime_secs: 7_200,
+    },
+    ...SERVICES.units,
   ],
 };
 
@@ -88,5 +109,117 @@ describe("AdminWorkspace command lock", () => {
     await act(async () => { releaseRestart(json({ ok: true, detail: "done" })); });
     await settle();
     expect((screen.getByTestId("trading-kill-button") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("logs a command the lock refused instead of dropping it silently", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method });
+      if (method === "POST") return new Promise<Response>(() => {});
+      if (url === "/api/admin/services") return Promise.resolve(json(SERVICES_WITH_GATEWAY));
+      return Promise.resolve(json(HEALTHY));
+    }));
+    render(<AdminWorkspace />);
+    await settle();
+
+    // Two confirmations open at once: the gateway Stop and a service restart.
+    await click("gateway-power-button");
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), { target: { value: GATEWAY_UNIT } });
+    await click("service-restart-radon-api.service");
+    const dialogs = screen.getAllByTestId("admin-confirm");
+    const stopDialog = dialogs.find((d) => d.textContent?.includes("Stop the IB Gateway?"))!;
+    const restartDialog = dialogs.find((d) => d !== stopDialog && d.textContent?.includes("radon-api.service"))!;
+
+    // Both confirmed in one tick: the second hits the held lock.
+    await act(async () => {
+      fireEvent.click(within(restartDialog).getByTestId("admin-confirm-action"));
+      fireEvent.click(within(stopDialog).getByTestId("admin-confirm-action"));
+      for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    });
+
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
+      "/api/admin/services/radon-api.service/restart",
+    ]);
+    expect(document.body.textContent).toContain(`${GATEWAY_UNIT} stop`);
+    expect(document.body.textContent).toContain("Not sent. Another command is in progress.");
+  });
+});
+
+describe("AdminWorkspace polling", () => {
+  function countOf(calls: Call[], url: string) {
+    return calls.filter((c) => c.method === "GET" && c.url === url).length;
+  }
+
+  it("re-fetches services after an action even when a poll was in flight", async () => {
+    vi.useFakeTimers();
+    const calls: Call[] = [];
+    let servicesGets = 0;
+    let releasePoll: (r: Response) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method });
+      if (method === "POST") return Promise.resolve(json({ ok: true, detail: "done" }));
+      if (url === "/api/admin/services") {
+        servicesGets += 1;
+        if (servicesGets === 2) return new Promise<Response>((resolve) => { releasePoll = resolve; });
+        return Promise.resolve(json(SERVICES));
+      }
+      return Promise.resolve(json(HEALTHY));
+    }));
+    render(<AdminWorkspace />);
+    await settle();
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    await settle();
+    expect(countOf(calls, "/api/admin/services")).toBe(2);
+
+    await click("service-restart-radon-api.service");
+    await click("admin-confirm-action");
+    await settle();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
+      "/api/admin/services/radon-api.service/restart",
+    ]);
+
+    // The poll that started before the action answers; the post-action
+    // refresh must still run afterwards.
+    await act(async () => { releasePoll(json(SERVICES)); });
+    await settle();
+    expect(countOf(calls, "/api/admin/services")).toBe(3);
+  });
+
+  it("a unit turning transitional retunes the services poll without refetching every source", async () => {
+    vi.useFakeTimers();
+    const calls: Call[] = [];
+    let servicesGets = 0;
+    const transitional: ServicesListResponse = {
+      ...SERVICES,
+      units: [{ ...SERVICES.units[0], active_state: "activating", sub_state: "start" }],
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method ?? "GET" });
+      if (url === "/api/admin/services") {
+        servicesGets += 1;
+        return Promise.resolve(json(servicesGets >= 2 ? transitional : SERVICES));
+      }
+      return Promise.resolve(json(HEALTHY));
+    }));
+    render(<AdminWorkspace />);
+    await settle();
+    expect(countOf(calls, "/api/admin/health")).toBe(1);
+    expect(countOf(calls, "/api/admin/reliability")).toBe(1);
+
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    await settle();
+    // One scheduled health poll; the transitional flip adds no burst.
+    expect(countOf(calls, "/api/admin/health")).toBe(2);
+    expect(countOf(calls, "/api/admin/reliability")).toBe(1);
+    expect(countOf(calls, "/api/admin/services")).toBe(2);
+
+    await act(async () => { vi.advanceTimersByTime(2_000); });
+    await settle();
+    expect(countOf(calls, "/api/admin/services")).toBe(3);
   });
 });
