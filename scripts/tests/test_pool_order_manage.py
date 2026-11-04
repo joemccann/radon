@@ -239,3 +239,109 @@ class TestPoolModifyOrder:
         )
         assert result["status"] == "error"
         assert "LMT" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# §3.1 / §1#1: absence from open orders is not "Cancelled"; the outcome comes
+# from this order's executions, using the shared vocabulary.
+# ---------------------------------------------------------------------------
+
+
+def _execution(perm_id=12345, shares=1, exec_id="e1"):
+    fill = MagicMock()
+    fill.execution.permId = perm_id
+    fill.execution.shares = shares
+    fill.execution.execId = exec_id
+    fill.contract.secType = "OPT"
+    return fill
+
+
+def _gone_client(trade, executions=None, error=None):
+    trade.contract.secType = "OPT"
+    trade.fills = []
+    trade.orderStatus.filled = 0
+    client = MagicMock()
+    client.get_open_orders.side_effect = [[trade], []]
+    client.ib.client.clientId = 26
+    if error is not None:
+        client.get_executions.side_effect = error
+    else:
+        client.get_executions.return_value = executions or []
+    return client
+
+
+class TestPoolCancelOutcome:
+    @pytest.mark.asyncio
+    async def test_gone_with_execution_is_filled_not_cancelled(self):
+        from api.pool_order_manage import pool_cancel_order
+
+        trade = _make_trade(total_qty=1)
+        client = _gone_client(trade, [_execution(shares=1)])
+
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345, poll_interval=0.001)
+
+        assert result["status"] == "error"
+        assert result["cancelOutcome"] == "filled"
+
+    @pytest.mark.asyncio
+    async def test_gone_with_unreadable_executions_is_unknown(self):
+        from api.pool_order_manage import pool_cancel_order
+
+        trade = _make_trade()
+        client = _gone_client(trade, error=RuntimeError("gateway gone"))
+
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345, poll_interval=0.001)
+
+        assert result["status"] == "error"
+        assert result["cancelOutcome"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_gone_with_no_execution_is_cancelled(self):
+        from api.pool_order_manage import pool_cancel_order
+
+        trade = _make_trade()
+        client = _gone_client(trade, [_execution(perm_id=999)])
+
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345, poll_interval=0.001)
+
+        assert result["status"] == "ok"
+        assert result["cancelOutcome"] == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_inactive_after_cancel_settles(self):
+        from api.pool_order_manage import pool_cancel_order
+
+        trade = _make_trade()
+        inactive = _make_trade(status="Inactive")
+        inactive.contract.secType = "OPT"
+        inactive.fills = []
+        inactive.orderStatus.filled = 0
+        client = MagicMock()
+        client.get_open_orders.side_effect = [[trade], [inactive]]
+        client.get_executions.return_value = []
+        client.ib.client.clientId = 26
+
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345,
+                                         max_wait=5.0, poll_interval=0.001)
+
+        assert result["status"] == "ok"
+        assert result["finalStatus"] == "Inactive"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["Inactive", "Rejected"])
+    async def test_terminal_order_is_not_cancelled_or_modified(self, status):
+        from api.pool_order_manage import pool_cancel_order, pool_modify_order
+
+        trade = _make_trade(status=status)
+        client = MagicMock()
+        client.get_open_orders.return_value = [trade]
+        client.ib.client.clientId = 26
+
+        cancel = await pool_cancel_order(client, order_id=10, perm_id=12345, poll_interval=0.001)
+        modify = await pool_modify_order(client, order_id=10, perm_id=12345, new_price=6.0,
+                                         poll_interval=0.001)
+
+        assert cancel["status"] == "error" and status in cancel["message"]
+        assert modify["status"] == "error" and status in modify["message"]
+        client.cancel_order.assert_not_called()
+        client.place_order.assert_not_called()

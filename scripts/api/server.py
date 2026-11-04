@@ -3646,6 +3646,13 @@ def _cancel_already_confirmed(detail: object) -> bool:
     return any(marker in lowered for marker in _CANCEL_ALREADY_CONFIRMED_MARKERS)
 
 
+def _cancel_outcome_of(detail: object) -> Optional[str]:
+    """The cancel subprocess's explicit ``cancelOutcome``, when it sent one."""
+    if isinstance(detail, dict) and isinstance(detail.get("cancelOutcome"), str):
+        return detail["cancelOutcome"]
+    return None
+
+
 async def _cancel_confirmed_at_broker(target: dict) -> bool:
     """Broker-state read behind a confirmed-looking cancel error (REL-233).
 
@@ -3677,19 +3684,27 @@ async def _orders_replace_after_rate_reservation(
     # cancellation rather than trusting the check at entry.
     _refuse_if_trading_halted()
 
+    from utils.ib_order_status import CancelOutcome
+
     cancelled = []
     try:
         for target in cancel_orders:
             try:
                 result = await orders_cancel(_internal_json_request(target))
             except HTTPException as cancel_exc:
-                if not _cancel_already_confirmed(cancel_exc.detail):
+                outcome = _cancel_outcome_of(cancel_exc.detail)
+                if outcome is not None:
+                    # §1#1: the subprocess named the outcome from the broker's
+                    # executions; that outranks any text or snapshot reading.
+                    if outcome != CancelOutcome.CANCELLED.value:
+                        raise
+                elif not _cancel_already_confirmed(cancel_exc.detail):
                     raise
                 # REL-233 (R-638): the Cancelled entry used to be fabricated
                 # from the request. Verify against the broker-state snapshot
                 # before placing the replacement: an order still working (or
                 # with any execution) must not be papered over as Cancelled.
-                if not await _cancel_confirmed_at_broker(target):
+                elif not await _cancel_confirmed_at_broker(target):
                     raise
                 cancelled.append({
                     "orderId": target.get("orderId"),
@@ -3697,6 +3712,24 @@ async def _orders_replace_after_rate_reservation(
                     "status": "Cancelled",
                 })
                 continue
+            result = result or {}
+            outcome = _cancel_outcome_of(result)
+            if outcome != CancelOutcome.CANCELLED.value:
+                # §1#1: a fill (full or partial) in the cancel window, or an
+                # outcome nobody named, must not be followed by a full-size
+                # replacement on top of the execution.
+                raise HTTPException(status_code=502, detail={
+                    **result,
+                    "code": "CANCEL_NOT_CONFIRMED",
+                    "status": "error",
+                    "cancelOutcome": outcome or CancelOutcome.UNKNOWN.value,
+                    "cancelMessage": result.get("message"),
+                    "message": (
+                        f"Replacement not placed: cancel outcome "
+                        f"{outcome or 'not reported'} (orderId={target.get('orderId')}, "
+                        f"permId={target.get('permId')})"
+                    ),
+                })
             cancelled.append({
                 "orderId": target.get("orderId"),
                 "permId": target.get("permId"),
@@ -3737,6 +3770,8 @@ async def orders_cancel(request: Request):
         return {
             "status": "ok",
             "message": "Cancel accepted in test mode",
+            "finalStatus": "Cancelled",
+            "cancelOutcome": "cancelled",
             "echo": body,
         }
 
