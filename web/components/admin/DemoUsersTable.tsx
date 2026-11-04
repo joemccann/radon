@@ -12,6 +12,7 @@ import {
 } from "@/lib/demo/demoUsersView";
 import type { DemoUserRow } from "@/lib/demo/demoUsers";
 import SortTh from "../SortTh";
+import ConfirmDialog from "./ConfirmDialog";
 import { useSort } from "@/lib/useSort";
 
 type DemoSortKey = "email" | "status" | "started" | "expires" | "ai";
@@ -56,7 +57,9 @@ function DemoUsersPanel() {
   const [users, setUsers] = useState<DemoUserWithUsage[] | null>(null);
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Per-user busy set: one action settling never unlocks another user's row.
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [revokeTarget, setRevokeTarget] = useState<DemoUserWithUsage | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -82,7 +85,7 @@ function DemoUsersPanel() {
 
   const act = useCallback(
     async (userId: string, action: "revoke" | "extend") => {
-      setBusyId(userId);
+      setBusyIds((current) => new Set(current).add(userId));
       setActionError(null);
       try {
         const response = await fetch("/api/admin/demo-users", {
@@ -99,7 +102,11 @@ function DemoUsersPanel() {
       } catch {
         setActionError("Action failed. Access state was not changed.");
       } finally {
-        setBusyId(null);
+        setBusyIds((current) => {
+          const next = new Set(current);
+          next.delete(userId);
+          return next;
+        });
       }
     },
     [load],
@@ -124,21 +131,41 @@ function DemoUsersPanel() {
         <p className="admin-card-empty">No demo trials.</p>
       ) : (
         <div className="admin-table-scroll">
-          <DemoUsersDataTable users={users} busyId={busyId} onAct={act} />
+          <DemoUsersDataTable
+            users={users}
+            busyIds={busyIds}
+            onExtend={(u) => { void act(u.user_id, "extend"); }}
+            onRevoke={setRevokeTarget}
+          />
         </div>
       )}
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        destructive
+        title="Revoke demo access"
+        body={`${revokeTarget?.email ?? revokeTarget?.user_id ?? ""} loses demo access immediately.`}
+        confirmLabel="Revoke"
+        onConfirm={() => {
+          const target = revokeTarget;
+          setRevokeTarget(null);
+          if (target) void act(target.user_id, "revoke");
+        }}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </section>
   );
 }
 
 function DemoUsersDataTable({
   users,
-  busyId,
-  onAct,
+  busyIds,
+  onExtend,
+  onRevoke,
 }: {
   users: DemoUserWithUsage[];
-  busyId: string | null;
-  onAct: (userId: string, action: "revoke" | "extend") => void;
+  busyIds: ReadonlySet<string>;
+  onExtend: (user: DemoUserWithUsage) => void;
+  onRevoke: (user: DemoUserWithUsage) => void;
 }) {
   const { sorted, sort, toggle } = useSort(users, demoExtract);
   return (
@@ -156,6 +183,7 @@ function DemoUsersDataTable({
       <tbody>
         {sorted.map((u) => {
           const status = deriveDemoStatus(u);
+          const busy = busyIds.has(u.user_id);
           return (
             <tr key={u.user_id} data-testid={`demo-user-${u.user_id}`}>
               <td className="admin-unit-name">{u.email ?? u.user_id}</td>
@@ -174,16 +202,16 @@ function DemoUsersDataTable({
                   <button
                     type="button"
                     className="admin-btn admin-btn-danger admin-btn-small"
-                    disabled={busyId === u.user_id || status !== "active"}
-                    onClick={() => onAct(u.user_id, "revoke")}
+                    disabled={busy || status !== "active"}
+                    onClick={() => onRevoke(u)}
                   >
                     Revoke
                   </button>
                   <button
                     type="button"
                     className="admin-btn admin-btn-ghost admin-btn-small"
-                    disabled={busyId === u.user_id}
-                    onClick={() => onAct(u.user_id, "extend")}
+                    disabled={busy}
+                    onClick={() => onExtend(u)}
                   >
                     Extend
                   </button>
