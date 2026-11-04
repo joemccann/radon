@@ -124,3 +124,22 @@ describe("ApprovalGate — busy state", () => {
     expect(screen.queryByText("Routing…")).toBeNull();
   });
 });
+
+describe("ApprovalGate — selection belongs to the options it was made from", () => {
+  it("never confirms a selection that is not among the current options", () => {
+    const onConfirm = vi.fn();
+    const props = { body: "proposal", onConfirm, onDismiss: vi.fn() };
+    const { rerender } = render(<ApprovalGate {...props} options={OPTIONS} />);
+    fireEvent.click(screen.getByText("Hold for review"));
+
+    // A new proposal arrives with a different option set.
+    const next: GateOption[] = [
+      { id: "route-b", label: "Route new proposal" },
+      { id: "hold-b", label: "Hold new proposal" },
+    ];
+    rerender(<ApprovalGate {...props} options={next} />);
+    expect(screen.getAllByRole("radio")[0].getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByText("Confirm selection"));
+    expect(onConfirm).toHaveBeenCalledWith("route-b");
+  });
+});
