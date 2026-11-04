@@ -7,9 +7,12 @@ Spec: docs/tradingview-integration.md (Phase 1, "Drain job"). Runs every
 1. Read unprocessed ``tv_alert_events`` rows on an id cursor.
 2. Resolve TradingView symbols to Radon tickers; NULL when unsure.
 3. Mark exact repeats of (alert_name, symbol, interval, bar_time, price)
-   inside 5 seconds as ``duplicate_of`` the first fire.
+   inside 5 seconds as ``duplicate_of`` the first fire; a duplicate is
+   stamped ``processed_at`` at once (it is never digested).
 4. Send ONE normal-priority Pushover digest; nothing when no new rows.
-5. Stamp ``processed_at`` (and ``digest_sent_at`` when the push landed).
+5. Stamp ``processed_at`` and ``digest_sent_at`` on the digested rows only
+   after the push landed. A failed or unconfigured push leaves them
+   unprocessed, so the next cycle retries them.
 6. Prune rows older than 180 days.
 7. ``service_health`` ``tv-alerts-drain`` heartbeat every cycle, so a quiet
    webhook reads dormant, not down.
@@ -159,7 +162,7 @@ def run(now: Optional[datetime] = None) -> dict:
     # the already-processed rows just before it.
     seen: dict[tuple, tuple[int, datetime]] = {}
     cursor = 0
-    processed_ids: list[int] = []
+    processed = 0
 
     while True:
         page = _rows(
@@ -190,11 +193,18 @@ def run(now: Optional[datetime] = None) -> dict:
                 fresh.append(row)
                 if ticker is None:
                     unresolved += 1
-            _execute(
-                "UPDATE tv_alert_events SET ticker = ?, duplicate_of = ?, processed_at = ? WHERE id = ?",
-                (ticker, duplicate_of, _iso(now), row["id"]),
-            )
-            processed_ids.append(row["id"])
+            if duplicate_of is None:
+                # Delivered rows are stamped processed only after the push.
+                _execute(
+                    "UPDATE tv_alert_events SET ticker = ?, duplicate_of = NULL WHERE id = ?",
+                    (ticker, row["id"]),
+                )
+            else:
+                _execute(
+                    "UPDATE tv_alert_events SET ticker = ?, duplicate_of = ?, processed_at = ? WHERE id = ?",
+                    (ticker, duplicate_of, _iso(now), row["id"]),
+                )
+                processed += 1
         cursor = page[-1]["id"]
 
     health_error: Optional[dict] = None
@@ -214,12 +224,15 @@ def run(now: Optional[datetime] = None) -> dict:
             except Exception as exc:  # noqa: BLE001 — surfaced via health, rows stay unstamped
                 health_error = {"message": f"pushover failed: {exc}"[:300]}
             else:
-                for start in range(0, len(processed_ids), PAGE_SIZE):
-                    chunk = processed_ids[start:start + PAGE_SIZE]
+                sent_ids = [row["id"] for row in fresh]
+                for start in range(0, len(sent_ids), PAGE_SIZE):
+                    chunk = sent_ids[start:start + PAGE_SIZE]
                     _execute(
-                        f"UPDATE tv_alert_events SET digest_sent_at = ? WHERE id IN ({','.join('?' * len(chunk))})",
-                        (_iso(now), *chunk),
+                        "UPDATE tv_alert_events SET processed_at = ?, digest_sent_at = ? "
+                        f"WHERE id IN ({','.join('?' * len(chunk))})",
+                        (_iso(now), _iso(now), *chunk),
                     )
+                processed += len(sent_ids)
 
     while True:
         stale = _query(
@@ -232,7 +245,7 @@ def run(now: Optional[datetime] = None) -> dict:
         _execute(f"DELETE FROM tv_alert_events WHERE id IN ({','.join('?' * len(ids))})", ids)
 
     _record_health("error" if health_error else "ok", health_error)
-    return {"processed": len(processed_ids), "digested": len(fresh), "unresolved": unresolved}
+    return {"processed": processed, "digested": len(fresh), "unresolved": unresolved}
 
 
 def _read_timeout(exc: BaseException) -> bool:

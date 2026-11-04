@@ -303,15 +303,48 @@ def _holder_is_running(lock_path: Path) -> bool:
     return True
 
 
-def acquire_lock(lock_path: Path, now: datetime) -> bool:
-    if lock_path.exists():
-        age = now.timestamp() - lock_path.stat().st_mtime
-        if age < LOCK_STALE_SECS and _holder_is_running(lock_path):
-            return False
-        lock_path.unlink(missing_ok=True)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()))
+def _create_lock(lock_path: Path) -> bool:
+    """Atomically create the lock holding our pid; False if it exists."""
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as fh:
+        fh.write(str(os.getpid()))
     return True
+
+
+def _break_stale_lock(lock_path: Path, stale_inode: int) -> None:
+    """Move the lock judged stale aside by rename (only one breaker wins).
+    If a racer already replaced it with a fresh lock, put that one back."""
+    aside = lock_path.with_name(f"{lock_path.name}.stale.{os.getpid()}")
+    try:
+        os.rename(lock_path, aside)
+    except FileNotFoundError:
+        return
+    try:
+        if aside.stat().st_ino != stale_inode:
+            try:
+                os.link(aside, lock_path)
+            except FileExistsError:
+                pass
+    finally:
+        aside.unlink(missing_ok=True)
+
+
+def acquire_lock(lock_path: Path, now: datetime) -> bool:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if _create_lock(lock_path):
+        return True
+    try:
+        held = lock_path.stat()
+    except FileNotFoundError:
+        return _create_lock(lock_path)
+    age = now.timestamp() - held.st_mtime
+    if age < LOCK_STALE_SECS and _holder_is_running(lock_path):
+        return False
+    _break_stale_lock(lock_path, held.st_ino)
+    return _create_lock(lock_path)
 
 
 def build_grok_command(

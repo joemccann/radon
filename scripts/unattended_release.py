@@ -14,6 +14,7 @@ import difflib
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from enum import Enum
 import fcntl
 import hashlib
 import json
@@ -138,6 +139,36 @@ def load_trusted_policy(path, *, owner_uid=0):
     return TrustedPolicy(**data)
 
 
+class ReleaseStatus(str, Enum):
+    CLAIMED = "claimed"
+    MERGED = "merged"
+    GREEN = "green"
+    REJECTED = "rejected"
+
+
+# claim() makes the only entry edge (-> claimed). merged -> merged is the
+# resume path (_finish re-records an accepted merge). green and rejected are
+# terminal: nothing may move a release back.
+RELEASE_TRANSITIONS = {
+    ReleaseStatus.CLAIMED: frozenset({ReleaseStatus.MERGED, ReleaseStatus.REJECTED}),
+    ReleaseStatus.MERGED: frozenset({ReleaseStatus.MERGED, ReleaseStatus.GREEN}),
+    ReleaseStatus.GREEN: frozenset(),
+    ReleaseStatus.REJECTED: frozenset(),
+}
+
+
+def release_transition(current, target):
+    """Return the validated target status; ValueError for any edge not in
+    RELEASE_TRANSITIONS (unknown status, skip, regression, unclaimed key)."""
+    target = ReleaseStatus(target)
+    if current is None:
+        raise ValueError(f"release must be claimed before it can become {target.value}")
+    current = ReleaseStatus(current)
+    if target not in RELEASE_TRANSITIONS[current]:
+        raise ValueError(f"illegal release transition {current.value} -> {target.value}")
+    return target
+
+
 class FileStateStore:
     """Single-writer WAL plus atomic state and a durable notification outbox."""
     def __init__(self, path, *, owner_uid=None):
@@ -245,7 +276,8 @@ class FileStateStore:
         return True
 
     def record(self, key, status, *, merge_sha=None, sync_receipt=None):
-        entry = self.data["releases"].setdefault(key, {})
+        entry = self.data["releases"].get(key)
+        status = release_transition(entry.get("status") if entry else None, status).value
         entry["status"] = status
         if merge_sha:
             entry["merge_sha"] = merge_sha

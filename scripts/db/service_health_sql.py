@@ -19,7 +19,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+# The column has no CHECK constraint; this is the enum. ``warn`` is written by
+# the FastAPI orders-sync shed path and is in web/lib/serviceHealth.ts.
+ServiceHealthState = Literal["ok", "syncing", "warn", "error", "paused"]
+SERVICE_HEALTH_STATES: frozenset[str] = frozenset({"ok", "syncing", "warn", "error", "paused"})
 
 SERVICE_HEALTH_UPSERT_SQL = """
 INSERT INTO service_health (service, state, last_attempt_started_at, last_attempt_finished_at, last_error, updated_at)
@@ -35,7 +40,7 @@ ON CONFLICT(service) DO UPDATE SET
 
 def service_health_upsert_args(
     service: str,
-    state: str,
+    state: ServiceHealthState,
     *,
     started_at: Optional[str] = None,
     finished_at: Optional[str] = None,
@@ -43,9 +48,15 @@ def service_health_upsert_args(
 ) -> tuple:
     """Positional args for :data:`SERVICE_HEALTH_UPSERT_SQL`.
 
-    ``state`` ∈ {'ok', 'syncing', 'error', 'paused'}. ``error`` is JSON-
-    serialized exactly as ``record_service_health`` always has.
+    ``state`` must be in :data:`SERVICE_HEALTH_STATES`; anything else raises
+    ValueError before a row is written. ``error`` is JSON-serialized exactly
+    as ``record_service_health`` always has.
     """
+    if state not in SERVICE_HEALTH_STATES:
+        raise ValueError(
+            f"service_health.state {state!r} for {service!r} is not one of "
+            f"{sorted(SERVICE_HEALTH_STATES)}"
+        )
     return (
         service,
         state,

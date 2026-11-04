@@ -220,19 +220,24 @@ def _reconcile_recovered_emergencies(*, outcomes, now) -> None:
     costs one cheap cooldown read and no network."""
     from . import cooldown, grouping, notify
 
-    active = cooldown.active_emergency_services(now=now)
+    active = cooldown.active_emergencies(now=now)
     if not active:
         return
-    healthy = {o.service for o in outcomes if o.status == "healthy"}
-    for svc in active:
+    healthy = {(o.service, o.kind) for o in outcomes if o.status == "healthy"}
+    healthy_any = {service for service, _kind in healthy}
+    for svc, latched_kind in active:
         if svc == grouping.GROUPED_ALERT_KEY:
             try:
                 auth = (grouping.fetch_health() or {}).get("auth_state") or "unknown"
             except Exception:  # noqa: BLE001
                 auth = "unknown"
             recovered = auth != "unknown" and auth not in grouping.GROUPING_AUTH_STATES
+        elif latched_kind is None:
+            recovered = svc in healthy_any
         else:
-            recovered = svc in healthy
+            # Only the kind that paged can clear its emergency: a fresh
+            # heartbeat (stale healthy) says nothing about a live error.
+            recovered = (svc, latched_kind) in healthy
         if recovered:
             cancel_error = notify.cancel_emergency(svc)
             if not isinstance(cancel_error, str):

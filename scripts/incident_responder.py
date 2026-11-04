@@ -132,6 +132,7 @@ def load_state(state_path: Path) -> dict:
         state = {}
     state.setdefault("analyzed", {})
     state.setdefault("attempts", {})
+    state.setdefault("gave_up", {})
     return state
 
 
@@ -151,14 +152,18 @@ def mark_analyzed(state_path: Path, state: dict, incident_id: str,
 
 def record_failed_attempt(state_path: Path, state: dict, incident_id: str,
                           now: datetime) -> int:
-    """Count a failed analysis; give up (and stop retrying) at the cap."""
+    """Count a failed analysis; give up (and stop retrying) at the cap.
+
+    Per incident: attempts[id] (retrying) -> analyzed[id] | gave_up[id].
+    Giving up is its own terminal state: no diagnosis was recorded.
+    """
     attempts = state.setdefault("attempts", {})
     count = int(attempts.get(incident_id, 0)) + 1
     attempts[incident_id] = count
     if count >= MAX_ANALYSIS_ATTEMPTS:
-        mark_analyzed(state_path, state, incident_id, now)
-    else:
-        save_state(state_path, state)
+        attempts.pop(incident_id, None)
+        state.setdefault("gave_up", {})[incident_id] = now.isoformat()
+    save_state(state_path, state)
     return count
 
 
@@ -179,7 +184,7 @@ def select_new_open_incidents(mirror_dir: Path, state: dict,
                               limit: int = ANALYZE_LIMIT_PER_CYCLE,
                               now: datetime | None = None) -> list[Path]:
     now = now or datetime.now(timezone.utc)
-    analyzed = state.get("analyzed", {})
+    done = {**state.get("analyzed", {}), **state.get("gave_up", {})}
     selected = []
     for path in sorted(mirror_dir.glob("incident-*.json")):
         try:
@@ -190,7 +195,7 @@ def select_new_open_incidents(mirror_dir: Path, state: dict,
             continue
         # Keyed by the same validated stem the diagnosis is filed under, so a
         # malformed or hostile incident_id cannot dodge the dedup state.
-        if safe_incident_stem(payload.get("incident_id"), path) in analyzed:
+        if safe_incident_stem(payload.get("incident_id"), path) in done:
             continue
         if not _is_past_transient_window(payload, now):
             continue
@@ -394,15 +399,47 @@ def notify(note: IncidentNotification, *, cache_dir: Path | None = None) -> str:
         return "failed"
 
 
-def acquire_lock(lock_path: Path, now: datetime) -> bool:
-    if lock_path.exists():
-        age = now.timestamp() - lock_path.stat().st_mtime
-        if age < LOCK_STALE_SECS:
-            return False
-        lock_path.unlink(missing_ok=True)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()))
+def _create_lock(lock_path: Path) -> bool:
+    """Atomically create the lock holding our pid; False if it exists."""
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as fh:
+        fh.write(str(os.getpid()))
     return True
+
+
+def _break_stale_lock(lock_path: Path, stale_inode: int) -> None:
+    """Move the lock judged stale aside by rename (only one breaker wins).
+    If a racer already replaced it with a fresh lock, put that one back."""
+    aside = lock_path.with_name(f"{lock_path.name}.stale.{os.getpid()}")
+    try:
+        os.rename(lock_path, aside)
+    except FileNotFoundError:
+        return
+    try:
+        if aside.stat().st_ino != stale_inode:
+            try:
+                os.link(aside, lock_path)
+            except FileExistsError:
+                pass
+    finally:
+        aside.unlink(missing_ok=True)
+
+
+def acquire_lock(lock_path: Path, now: datetime) -> bool:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if _create_lock(lock_path):
+        return True
+    try:
+        held = lock_path.stat()
+    except FileNotFoundError:
+        return _create_lock(lock_path)
+    if now.timestamp() - held.st_mtime < LOCK_STALE_SECS:
+        return False
+    _break_stale_lock(lock_path, held.st_ino)
+    return _create_lock(lock_path)
 
 
 def analyze(incident_path: Path, repo_root: Path,

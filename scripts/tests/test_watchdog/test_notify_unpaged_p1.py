@@ -205,7 +205,7 @@ class TestDeliveredAlertsStillArmTheCooldown:
             service="portfolio-sync", severity="P1", now=FIVE_MIN_LATER
         ) is False
         rows = _cooldown_rows(db_conn, "portfolio-sync")
-        assert rows and rows[0][2] == "notified", f"cooldown must be armed; got {rows!r}"
+        assert rows and rows[0][2] == "notified:stale", f"cooldown must be armed; got {rows!r}"
 
     def test_pushover_5xx_leaves_cooldown_rearmable(self, db_conn, monkeypatch):
         from watchdog import cooldown, notify
