@@ -24,6 +24,7 @@ import {
   type PlaceOrderTone,
 } from "@/lib/orders/placeOrderFeedback";
 import { quoteSubmitGate } from "@/lib/order/quoteSubmitGate";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 
 export type SingleLegOrderAction = "BUY" | "SELL";
 export type SingleLegOrderTif = "DAY" | "GTC";
@@ -190,49 +191,9 @@ export default function SingleLegOrderTicket({
     setInnerStopPrice(next);
     onStopPriceChange?.(next);
   };
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<PlaceOrderFeedback | null>(null);
-
-  const selectAction = useCallback(
-    (next: SingleLegOrderAction) => {
-      setAction(next);
-      setConfirmStep(false);
-      onActionChange?.(next);
-    },
-    [onActionChange],
-  );
-
-  const selectTif = useCallback(
-    (next: SingleLegOrderTif) => {
-      setTif(next);
-      onTifChange?.(next);
-    },
-    [onTifChange],
-  );
-
-  const setQuickPrice = useCallback(
-    (value: number | null) => {
-      if (value == null) return;
-      if (isStopOrderType(orderType)) {
-        setStopPrice(value.toFixed(2));
-      } else {
-        onLimitPriceChange(value.toFixed(2));
-      }
-      setConfirmStep(false);
-    },
-    [onLimitPriceChange, orderType, setStopPrice],
-  );
-
-  const selectOrderType = (next: IbOrderType) => {
-    setOrderType(next);
-    if (isStopOrderType(next)) {
-      setTif("GTC");
-      onTifChange?.("GTC");
-    }
-    setConfirmStep(false);
-  };
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
@@ -243,6 +204,65 @@ export default function SingleLegOrderTicket({
     stopPrice: parsedStop,
   });
   const formValid = isValid && typePriceValid && !isNaN(parsedQty) && parsedQty > 0;
+
+  // The confirm step arms for what was reviewed: destination (Live vs Paper
+  // `placeUrl`), instrument, action, size, prices, type and TIF. Any change,
+  // including the Paper toggle rendered inside the confirm step itself or a
+  // parent resetting the quantity, disarms (§1 #9).
+  const payloadKey = formValid
+    ? canonicalPayloadKey({
+        url: placeUrl,
+        instrument: riskInput?.ticker ?? null,
+        action,
+        quantity: parsedQty,
+        limitPrice: parsedPrice,
+        stopPrice: parsedStop,
+        orderType,
+        tif,
+      })
+    : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+
+  const selectAction = useCallback(
+    (next: SingleLegOrderAction) => {
+      setAction(next);
+      disarm();
+      onActionChange?.(next);
+    },
+    [onActionChange, disarm],
+  );
+
+  const selectTif = useCallback(
+    (next: SingleLegOrderTif) => {
+      setTif(next);
+      disarm();
+      onTifChange?.(next);
+    },
+    [onTifChange, disarm],
+  );
+
+  const setQuickPrice = useCallback(
+    (value: number | null) => {
+      if (value == null) return;
+      if (isStopOrderType(orderType)) {
+        setStopPrice(value.toFixed(2));
+      } else {
+        onLimitPriceChange(value.toFixed(2));
+      }
+      disarm();
+    },
+    [onLimitPriceChange, orderType, setStopPrice, disarm],
+  );
+
+  const selectOrderType = (next: IbOrderType) => {
+    setOrderType(next);
+    if (isStopOrderType(next)) {
+      setTif("GTC");
+      onTifChange?.("GTC");
+    }
+    disarm();
+  };
+
   const riskState = useOrderRisk(riskInput, portfolio);
   // R-641: stale marks or a disconnected feed disarm submit at the wire.
   const quoteGate = quoteSubmitGate({
@@ -254,7 +274,7 @@ export default function SingleLegOrderTicket({
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!formValid || !quoteGate.open) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
     if (!canSubmit) return;
@@ -294,7 +314,7 @@ export default function SingleLegOrderTicket({
         );
         if (onSuccessToast) onSuccessToast(feedback.message, feedback.tone);
         if (!suppressInlineSuccess) setSuccess(feedback);
-        setConfirmStep(false);
+        disarm();
       }
     } catch {
       setError("Network error placing order");
@@ -303,6 +323,8 @@ export default function SingleLegOrderTicket({
     }
   }, [
     confirmStep,
+    arm,
+    disarm,
     action,
     parsedQty,
     parsedPrice,
@@ -360,7 +382,7 @@ export default function SingleLegOrderTicket({
           value={quantity}
           onChange={(e) => {
             onQuantityChange(e.target.value);
-            setConfirmStep(false);
+            disarm();
           }}
           placeholder={quantityPlaceholder}
         />
@@ -379,7 +401,7 @@ export default function SingleLegOrderTicket({
               value={stopPrice}
               onChange={(e) => {
                 setStopPrice(e.target.value);
-                setConfirmStep(false);
+                disarm();
               }}
               placeholder="0.00"
               data-testid="order-stop-price"
@@ -412,7 +434,7 @@ export default function SingleLegOrderTicket({
               value={limitPrice}
               onChange={(e) => {
                 onLimitPriceChange(e.target.value);
-                setConfirmStep(false);
+                disarm();
               }}
               placeholder="0.00"
             />
@@ -479,7 +501,7 @@ export default function SingleLegOrderTicket({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>
+            <button className="btn-secondary" onClick={disarm} disabled={loading}>
               Back
             </button>
             <button

@@ -37,13 +37,23 @@ export type InstrumentDetailProps = {
 export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onClose, portfolio }: InstrumentDetailProps) {
   const [quantity, setQuantity] = useState(() => String(leg?.contracts ?? ""));
 
+  // Reset to the full held size only when the HELD CONTRACT changes (identity,
+  // direction or broker size). The portfolio poll hands a fresh leg object on
+  // every price refresh; keying on that object overwrote a typed partial-close
+  // quantity with the full size, armed or not (§1 #9).
+  const legIdentity = leg
+    ? [
+        ticker,
+        expiry,
+        leg.con_id ?? `${leg.type}:${leg.strike ?? ""}:${leg.expiry ?? ""}`,
+        leg.direction,
+        leg.contracts,
+      ].join("|")
+    : null;
+  const heldContracts = leg?.contracts;
   useEffect(() => {
-    if (!leg) {
-      setQuantity("");
-      return;
-    }
-    setQuantity(String(leg.contracts));
-  }, [leg, ticker, expiry]);
+    setQuantity(heldContracts == null ? "" : String(heldContracts));
+  }, [legIdentity, heldContracts]);
 
   if (!leg) return null;
 
