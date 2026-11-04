@@ -414,6 +414,57 @@ class TestWrites:
         assert os.environ["RADON_SCANNER_WORKERS"] == "12"
 
 
+class TestOverlayApplyIsSerialized:
+    """§1#17: two overlay applies interleaving must not unwind a tighter cap.
+
+    The refresh worker reads the snapshot (wide cap), a save lands and
+    publishes the tighter cap, then the worker resumes and writes its stale
+    wide value into os.environ. `ib_place_order.py` inherits that until the
+    next refresh.
+    """
+
+    KEY = "RADON_MAX_ORDER_NOTIONAL"
+
+    def test_a_stale_apply_cannot_overwrite_a_newer_tighter_cap(self, monkeypatch):
+        app_preferences.seed_snapshot_for_tests({self.KEY: "200000.0"})
+        real_resolve = app_preferences._resolve_from
+        stale_read = threading.Event()
+        release_stale = threading.Event()
+        stale_thread_name = "stale-overlay"
+
+        def paused_resolve(pref, row):
+            resolved = real_resolve(pref, row)
+            if pref.key == self.KEY and threading.current_thread().name == stale_thread_name:
+                stale_read.set()
+                release_stale.wait(timeout=5)
+            return resolved
+
+        monkeypatch.setattr(app_preferences, "_resolve_from", paused_resolve)
+
+        stale = threading.Thread(
+            target=app_preferences.apply_env_overlay, name=stale_thread_name
+        )
+        stale.start()
+        assert stale_read.wait(timeout=5)
+
+        def tighten():
+            app_preferences.seed_snapshot_for_tests({self.KEY: "50000.0"})
+            app_preferences.apply_env_overlay()
+
+        fresh = threading.Thread(target=tighten, name="fresh-overlay")
+        fresh.start()
+        fresh.join(timeout=0.5)
+        release_stale.set()
+        stale.join(timeout=5)
+        fresh.join(timeout=5)
+        assert not stale.is_alive() and not fresh.is_alive()
+
+        assert os.environ[self.KEY] == "50000.0", (
+            "a stale overlay apply re-exported the WIDER notional cap over "
+            "the operator's tighter one"
+        )
+
+
 class TestOrderLimitsDelegation:
     def test_max_order_qty_reads_the_store(self):
         app_preferences.seed_snapshot_for_tests({"RADON_MAX_ORDER_QTY": "250"})

@@ -1,7 +1,6 @@
 """Tests for CTA sync health ledger and payload validation."""
 
 import json
-import os
 from pathlib import Path
 
 from utils.cta_sync_health import (
@@ -158,12 +157,15 @@ def test_latest_available_cta_date_only_non_date_json_returns_none(tmp_path: Pat
     assert result is None
 
 
-# ── stale lock detection ──────────────────────────────────────────────────────
+# ── lock ownership ────────────────────────────────────────────────────────────
+# The lock is an flock (§3.4): a dead holder's metadata never blocks, and a
+# live holder is refused whatever its metadata says. Kernel-level cases
+# (SIGKILL, the mkdir -> lock.json window) live in test_cta_sync_ownership.py.
 
 
-def test_cta_sync_lock_clears_stale_lock_and_acquires(tmp_path: Path):
-    """Lock held by a dead PID must be cleared so a new run can acquire it."""
-    from cta_sync_service import CtaSyncLockError, cta_sync_lock
+def test_cta_sync_lock_ignores_a_dead_holders_metadata_and_acquires(tmp_path: Path):
+    """Metadata left by a dead run must not block a new run."""
+    from cta_sync_service import cta_sync_lock
 
     lock_dir = tmp_path / "cta-sync.lock"
     lock_dir.mkdir()
@@ -171,28 +173,22 @@ def test_cta_sync_lock_clears_stale_lock_and_acquires(tmp_path: Path):
     (lock_dir / "lock.json").write_text(
         json.dumps({"pid": dead_pid, "run_id": "old", "target_date": "2026-03-18", "started_at": "2026-03-18T03:00:00Z"})
     )
-    assert lock_dir.exists()
 
-    # Should NOT raise — stale lock should be cleared automatically
     acquired = False
     with cta_sync_lock(target_date="2026-03-19", run_id="new-run", lock_dir=lock_dir):
         acquired = True
     assert acquired
-    assert not lock_dir.exists()  # cleaned up after context exit
+    assert not (lock_dir / "lock.json").exists()  # metadata cleaned up after exit
 
 
-def test_cta_sync_lock_raises_when_live_pid_holds_lock(tmp_path: Path):
-    """Lock held by the current (live) process must not be stolen."""
+def test_cta_sync_lock_raises_when_a_live_run_holds_lock(tmp_path: Path):
+    """A lock held by a live run must not be stolen."""
+    import pytest
+
     from cta_sync_service import CtaSyncLockError, cta_sync_lock
 
     lock_dir = tmp_path / "cta-sync.lock"
-    lock_dir.mkdir()
-    live_pid = os.getpid()
-    (lock_dir / "lock.json").write_text(
-        json.dumps({"pid": live_pid, "run_id": "active", "target_date": "2026-03-19", "started_at": "2026-03-19T03:00:00Z"})
-    )
-
-    import pytest
-    with pytest.raises(CtaSyncLockError):
-        with cta_sync_lock(target_date="2026-03-19", run_id="interloper", lock_dir=lock_dir):
-            pass
+    with cta_sync_lock(target_date="2026-03-19", run_id="active", lock_dir=lock_dir):
+        with pytest.raises(CtaSyncLockError):
+            with cta_sync_lock(target_date="2026-03-19", run_id="interloper", lock_dir=lock_dir):
+                pass

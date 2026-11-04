@@ -55,7 +55,7 @@ class TestDuplicateOkNeverOverwritesSameRunError:
         xml = ACTIVITY_XML.read_text()
         # First call: a NEW statement whose cash_flow_sync fails.
         monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *a, **k: True)
-        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True)
+        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d, **_k: True)
         monkeypatch.setattr(cash_flow_sync, "main", lambda _a: 1)
         failing = tmp_path / "new.xml"
         failing.write_text(xml + "<!-- new -->", encoding="utf-8")
@@ -119,7 +119,7 @@ class TestARaisingCashFlowSyncAlsoLatches:
             raise RuntimeError("turso mid-chunk")
 
         monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *a, **k: True)
-        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True)
+        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d, **_k: True)
         monkeypatch.setattr(cash_flow_sync, "main", _boom)
         failing = tmp_path / "new.xml"
         failing.write_text(ACTIVITY_XML.read_text() + "<!-- new -->", encoding="utf-8")
@@ -138,7 +138,7 @@ class TestARaisingCashFlowSyncAlsoLatches:
         xml = ACTIVITY_XML.read_text()
         claims = iter([True, False])
         monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *a, **k: next(claims))
-        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True)
+        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d, **_k: True)
         monkeypatch.setattr(cash_flow_sync, "main", _boom)
         (tmp_path / "a_new.xml").write_text(xml + "<!-- new -->", encoding="utf-8")
         monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied")

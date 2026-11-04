@@ -32,10 +32,10 @@ class TestTwrFailureRetryConverges:
             ingest, "claim_flex_delivery", lambda d, **k: claims.append(d) or True
         )
         monkeypatch.setattr(
-            ingest, "release_flex_delivery", lambda d: released.append(d) or True
+            ingest, "release_flex_delivery", lambda d, **_k: released.append(d) or True
         )
         monkeypatch.setattr(
-            ingest, "mark_flex_delivery_applied", lambda d: applied.append(d) or True
+            ingest, "mark_flex_delivery_applied", lambda d, **_k: applied.append(d) or True
         )
 
         # A REAL cash_flows table, not a call recorder. Recording the argument

@@ -42,20 +42,23 @@ class FakeClaims:
 
     `rows` maps digest -> status. A claim wins on an absent row or on an
     `in_progress` row that has aged past one run period (`age_one_period`);
-    it loses on `applied` and on a fresh `in_progress`.
+    it loses on `applied` and on a fresh `in_progress`. Release and mark are
+    CAS on the claimant's token (§1#16): `owner` maps digest -> token.
     """
 
     def __init__(self) -> None:
         self.rows: dict[str, str] = {}
+        self.owner: dict[str, str] = {}
         self.stale: set[str] = set()
         self.released: list[str] = []
         self.applied: list[str] = []
         self.release_error: Exception | None = None
 
-    def claim(self, digest: str, **_kwargs) -> bool:
+    def claim(self, digest: str, *, claim_token: str, **_kwargs) -> bool:
         status = self.rows.get(digest)
         if status is None or (status == "in_progress" and digest in self.stale):
             self.rows[digest] = "in_progress"
+            self.owner[digest] = claim_token
             self.stale.discard(digest)
             return True
         return False
@@ -63,18 +66,26 @@ class FakeClaims:
     def status(self, digest: str) -> str | None:
         return self.rows.get(digest)
 
-    def mark_applied(self, digest: str) -> bool:
-        if self.rows.get(digest) != "in_progress":
+    def mark_applied(self, digest: str, *, claim_token: str) -> bool:
+        if self.rows.get(digest) != "in_progress" or self.owner.get(digest) != claim_token:
             return False
         self.rows[digest] = "applied"
         self.applied.append(digest)
         return True
 
-    def release(self, digest: str) -> bool:
+    def release(self, digest: str, *, claim_token: str) -> bool:
         self.released.append(digest)
         if self.release_error is not None:
             raise self.release_error
+        if self.rows.get(digest) != "in_progress" or self.owner.get(digest) != claim_token:
+            return False
+        self.owner.pop(digest, None)
         return self.rows.pop(digest, None) is not None
+
+    def steal(self, digest: str, token: str = "other-run") -> None:
+        """A second run re-takes the lease after this one went stale."""
+        self.rows[digest] = "in_progress"
+        self.owner[digest] = token
 
     def age_one_period(self) -> None:
         self.stale = {d for d, s in self.rows.items() if s == "in_progress"}
@@ -212,7 +223,7 @@ class TestTheClaimCarriesItsStatus:
         monkeypatch.setattr(
             ingest,
             "mark_flex_delivery_applied",
-            lambda d: (order.append("applied"), original_mark(d))[1],
+            lambda d, **k: (order.append("applied"), original_mark(d, **k))[1],
         )
 
         xml_text = ACTIVITY.read_text()
@@ -331,6 +342,106 @@ class TestTheClaimCarriesItsStatus:
         assert claims.rows == {ingest._sha256(xml_text): "in_progress"}
 
 
+class TestALostLeaseAbortsTheIngest:
+    """§1#16: a run that no longer owns the lease must not keep writing."""
+
+    def _activity(self, tmp_path):
+        xml_text = ACTIVITY.read_text()
+        path = tmp_path / "activity.xml"
+        path.write_text(xml_text)
+        return xml_text, path
+
+    def test_a_refused_mark_is_not_reported_ok(self, monkeypatch, claims, pages, tmp_path):
+        """A second run stole the lease while our writers ran: not `ok`."""
+        import cash_flow_sync
+        import perf_twr_builder
+
+        xml_text, path = self._activity(tmp_path)
+        digest = ingest._sha256(xml_text)
+        monkeypatch.setattr(perf_twr_builder, "build_and_persist", lambda **_k: {"status": "ok"})
+
+        def _slow_cash(_argv):
+            claims.steal(digest)
+            return 0
+
+        monkeypatch.setattr(cash_flow_sync, "main", _slow_cash)
+        monkeypatch.setattr(ingest, "_lease_held", lambda _lease: True)
+        result = ingest.ingest_xml(xml_text, source_path=str(path))
+        assert result["ok"] is False, f"mark_applied was refused but the run reported ok; {result}"
+        assert result["outcome"] == "lease_lost"
+        assert claims.rows == {digest: "in_progress"}
+        assert claims.owner == {digest: "other-run"}
+        assert [(svc, st) for svc, st, _ in pages if svc == "flex-pull"] == [("flex-pull", "error")]
+
+    def test_a_late_release_leaves_the_new_claimant_alone(self, monkeypatch, claims, pages, tmp_path):
+        import cash_flow_sync
+
+        xml_text, path = self._activity(tmp_path)
+        digest = ingest._sha256(xml_text)
+
+        def _slow_failure(_argv):
+            claims.steal(digest)
+            return 3
+
+        monkeypatch.setattr(cash_flow_sync, "main", _slow_failure)
+        result = ingest.ingest_xml(xml_text, source_path=str(path))
+        assert result["ok"] is False
+        assert claims.rows == {digest: "in_progress"}, (
+            "the stale run's release deleted the live run's claim"
+        )
+        assert claims.owner == {digest: "other-run"}
+
+    def test_an_expired_lease_skips_the_next_writer(self, monkeypatch, claims, pages, tmp_path):
+        """The lease ran out during cash_flow_sync: the TWR persist must not run."""
+        import cash_flow_sync
+        import perf_twr_builder
+        from db import writer
+
+        xml_text, path = self._activity(tmp_path)
+        clock = [1000.0]
+        monkeypatch.setattr(ingest.time, "monotonic", lambda: clock[0])
+
+        def _slow_cash(_argv):
+            clock[0] += writer.FLEX_CLAIM_STALE_AFTER_S
+            return 0
+
+        twr_calls: list = []
+        monkeypatch.setattr(cash_flow_sync, "main", _slow_cash)
+        monkeypatch.setattr(
+            perf_twr_builder, "build_and_persist", lambda **k: twr_calls.append(k) or {"status": "ok"}
+        )
+        result = ingest.ingest_xml(xml_text, source_path=str(path))
+        assert twr_calls == [], "a writer ran after this run's lease could have been re-taken"
+        assert result["ok"] is False
+        assert result["outcome"] == "lease_lost"
+        # Nobody re-took it, so the CAS release hands the bytes back.
+        assert claims.rows == {}
+
+    def test_an_expired_lease_skips_the_rehydrate(self, monkeypatch, claims, pages, tmp_path):
+        import journal_rehydrate
+
+        clock = [1000.0]
+        monkeypatch.setattr(ingest.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(ingest, "classify_flex_xml", lambda _x: ingest.TRADES)
+        monkeypatch.setattr(
+            ingest, "statement_metadata", lambda _x: {"period_from": None, "period_to": None}
+        )
+
+        def _slow_claim(digest, **kwargs):
+            won = FakeClaims.claim(claims, digest, **kwargs)
+            clock[0] += 10_000
+            return won
+
+        monkeypatch.setattr(ingest, "claim_flex_delivery", _slow_claim)
+        calls: list = []
+        monkeypatch.setattr(journal_rehydrate, "rehydrate", lambda **k: calls.append(k) or {"ok": True})
+        path = tmp_path / "trades.xml"
+        path.write_text("<FlexQueryResponse/>")
+        result = ingest.ingest_xml("<FlexQueryResponse/>", source_path=str(path))
+        assert calls == []
+        assert result["outcome"] == "lease_lost"
+
+
 class TestWriterReleasesTheRow:
     def test_release_flex_delivery_deletes_by_digest(self, monkeypatch):
         """The statement must be a DELETE keyed on the content hash."""
@@ -347,12 +458,14 @@ class TestWriterReleasesTheRow:
                 return None
 
         monkeypatch.setattr(writer, "get_db", lambda: _DB())
-        assert writer.release_flex_delivery("abc123") is True
+        assert writer.release_flex_delivery("abc123", claim_token="tok") is True
         assert len(executed) == 1
         sql, params = executed[0]
         assert "DELETE FROM flex_deliveries" in sql
         assert "content_sha256 = ?" in sql
-        assert params == ("abc123",)
+        assert "claim_token = ?" in sql
+        assert "status = 'in_progress'" in sql
+        assert params == ("abc123", "tok")
 
 
 class _RecordingDB:
@@ -402,6 +515,7 @@ class TestWriterStatementsPinTheClaimStatus:
             period_from="20260101",
             period_to="20260814",
             source_path="activity.xml",
+            claim_token="tok",
             now=NOW,
         ) is True
         assert len(db.executed) == 1 and db.commits == 1
@@ -419,15 +533,17 @@ class TestWriterStatementsPinTheClaimStatus:
             "activity.xml",
             "in_progress",
             NOW_ISO,
+            "tok",
             _cutoff_iso(),
         ), params
+        assert "claim_token = excluded.claim_token" in sql
 
     def test_claim_loses_when_no_row_was_inserted_or_updated(self, monkeypatch):
         from db import writer
 
         db = _RecordingDB(rowcount=0)
         monkeypatch.setattr(writer, "get_db", lambda: db)
-        assert writer.claim_flex_delivery("abc123", classified_as="activity") is False
+        assert writer.claim_flex_delivery("abc123", classified_as="activity", claim_token="tok") is False
 
     def test_the_stale_window_is_shorter_than_the_timer_gap(self):
         """07:30 and 08:30 are the closest two runs; a lease older than the
@@ -471,14 +587,15 @@ class TestWriterStatementsPinTheClaimStatus:
 
         db = _RecordingDB(rowcount=1)
         monkeypatch.setattr(writer, "get_db", lambda: db)
-        assert writer.mark_flex_delivery_applied("abc123") is True
+        assert writer.mark_flex_delivery_applied("abc123", claim_token="tok") is True
         assert db.commits == 1
         sql, params = db.executed[0]
         assert "UPDATE flex_deliveries" in sql
         assert "status = 'applied'" in sql
         assert "content_sha256 = ?" in sql
         assert "status = 'in_progress'" in sql
-        assert params == ("abc123",)
+        assert "claim_token = ?" in sql
+        assert params == ("abc123", "tok")
 
 
 class TestSftpRetryAfterAFailedIngest:

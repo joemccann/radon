@@ -11,6 +11,8 @@ import hashlib
 import json
 import sys
 import time
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -39,11 +41,11 @@ def claim_flex_delivery(content_sha256: str, **kwargs: Any) -> bool:
     return _claim(content_sha256, **kwargs)
 
 
-def release_flex_delivery(content_sha256: str) -> bool:
+def release_flex_delivery(content_sha256: str, *, claim_token: str) -> bool:
     """Indirection so the release is injectable in tests. See db.writer."""
     from db.writer import release_flex_delivery as _release  # noqa: PLC0415
 
-    return _release(content_sha256)
+    return _release(content_sha256, claim_token=claim_token)
 
 
 def flex_delivery_status(content_sha256: str) -> str | None:
@@ -53,11 +55,55 @@ def flex_delivery_status(content_sha256: str) -> str | None:
     return _status(content_sha256)
 
 
-def mark_flex_delivery_applied(content_sha256: str) -> bool:
+def mark_flex_delivery_applied(content_sha256: str, *, claim_token: str) -> bool:
     """Indirection so the mark is injectable in tests. See db.writer."""
     from db.writer import mark_flex_delivery_applied as _mark  # noqa: PLC0415
 
-    return _mark(content_sha256)
+    return _mark(content_sha256, claim_token=claim_token)
+
+
+# Stop starting writers this long before the lease can be re-taken, so a
+# writer that begins just inside the window still ends inside it.
+_LEASE_SAFETY_MARGIN_S = 60.0
+
+
+@dataclass(frozen=True)
+class _Lease:
+    """This run's claim on one delivery. `token` is what release/mark CAS on.
+
+    `expires_at` is a local monotonic deadline: once it passes, another run
+    may re-take the stale row, so no further writer may start (§1#16).
+    """
+
+    digest: str
+    token: str
+    expires_at: float
+
+
+def _new_lease(digest: str) -> _Lease:
+    from db.writer import FLEX_CLAIM_STALE_AFTER_S  # noqa: PLC0415
+
+    # Read BEFORE the claim writes claimed_at, so the deadline is conservative.
+    window = FLEX_CLAIM_STALE_AFTER_S - _LEASE_SAFETY_MARGIN_S
+    return _Lease(digest=digest, token=uuid.uuid4().hex, expires_at=time.monotonic() + window)
+
+
+def _lease_held(lease: _Lease) -> bool:
+    return time.monotonic() < lease.expires_at
+
+
+def _lease_lost(lease: _Lease, kind: str, source_path: str, stage: str) -> Dict[str, Any]:
+    message = f"flex claim lease lost {stage}; another run may own {lease.digest}"
+    print(f"[flex-ingest] {message}", file=sys.stderr)
+    _page_flex_pull(lease.digest, message)
+    return {
+        "ok": False,
+        "outcome": "lease_lost",
+        "classified_as": kind,
+        "content_sha256": lease.digest,
+        "error": message,
+        "source_path": source_path,
+    }
 
 
 # The catalogued key whose timer drives this ingest in production. A release
@@ -226,9 +272,11 @@ def ingest_xml(
     meta = statement_metadata(xml_text)
     # BEFORE any writer: re-applying a statement is not idempotent (R-329), so
     # the fingerprint has to gate the run rather than annotate it. R-326.
+    lease = _new_lease(digest)
     if not claim_flex_delivery(
         digest,
         classified_as=kind,
+        claim_token=lease.token,
         period_from=meta["period_from"],
         period_to=meta["period_to"],
         source_path=record_as or source_path or None,
@@ -309,15 +357,17 @@ def ingest_xml(
     # become permanently unretryable behind a green heartbeat while `cash_flows`
     # stays half-applied. R-379.
     try:
-        result = _apply_classified(kind, xml_text, digest, source_path)
+        result = _apply_classified(kind, xml_text, digest, source_path, lease)
     except BaseException:
-        _release_claim(digest)
+        _release_claim(lease)
         raise
     if not result.get("ok"):
-        _release_claim(digest)
+        _release_claim(lease)
         return result
-    # Only now has every writer committed. R-436.
-    mark_flex_delivery_applied(digest)
+    # Only now has every writer committed. R-436. A refused mark means another
+    # run re-took the lease while these writers ran: not a success. §1#16.
+    if not mark_flex_delivery_applied(digest, claim_token=lease.token):
+        return {**result, **_lease_lost(lease, kind, source_path, "before mark_applied")}
     return result
 
 
@@ -383,21 +433,23 @@ def _repair_unmirrored_activity_nav(xml_text: str) -> None:
         )
 
 
-def _release_claim(digest: str) -> None:
+def _release_claim(lease: _Lease) -> None:
     """Best-effort release. A failure here must not mask the ingest failure.
 
     It is not silent either: the lease it leaves behind blocks the same bytes
     until it goes stale, so the failure pages on the flex-pull row. R-436.
+    The release is CAS on this run's token, so a lease another run re-took
+    is left alone. §1#16.
     """
     try:
-        release_flex_delivery(digest)
+        release_flex_delivery(lease.digest, claim_token=lease.token)
     except Exception as exc:  # noqa: BLE001 — the caller is already failing
-        message = f"claim release failed for {digest}: {exc}"
+        message = f"claim release failed for {lease.digest}: {exc}"
         print(f"[flex-ingest] {message}", file=sys.stderr)
-        _page_release_failure(digest, message)
+        _page_flex_pull(lease.digest, message)
 
 
-def _page_release_failure(digest: str, message: str) -> None:
+def _page_flex_pull(digest: str, message: str) -> None:
     try:
         from db import writer  # noqa: PLC0415
 
@@ -442,7 +494,11 @@ def _heartbeat_cash_flow_sync(state: str, error: Dict[str, Any] | None = None) -
         print(f"[flex-ingest] cash-flow-sync heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
-def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -> Dict[str, Any]:
+def _apply_classified(
+    kind: str, xml_text: str, digest: str, source_path: str, lease: _Lease
+) -> Dict[str, Any]:
+    if not _lease_held(lease):
+        return _lease_lost(lease, kind, source_path, "before the first writer")
     if kind == ACTIVITY:
         import cash_flow_sync
         import perf_twr_builder
@@ -501,6 +557,8 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
         # radon-flex-pull (Result=exit-code) while radon-perf-twr published
         # ok three minutes later.
         _heartbeat_cash_flow_sync("ok")
+        if not _lease_held(lease):
+            return _lease_lost(lease, kind, source_path, "before the TWR persist")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
             "ok": True,

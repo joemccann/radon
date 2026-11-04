@@ -44,9 +44,9 @@ def _claim_always_wins(monkeypatch):
     """
     released: list[str] = []
     monkeypatch.setattr(ingest, "claim_flex_delivery", lambda _d, **_k: True)
-    monkeypatch.setattr(ingest, "release_flex_delivery", lambda d: released.append(d))
+    monkeypatch.setattr(ingest, "release_flex_delivery", lambda d, **_k: released.append(d))
     # R-436: the applied mark after the writers is the same seam; grant it.
-    monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True)
+    monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d, **_k: True)
     return released
 
 
@@ -117,7 +117,7 @@ class TestActivityShortCircuit:
 
         applied: list[str] = []
         monkeypatch.setattr(
-            ingest, "mark_flex_delivery_applied", lambda d: applied.append(d) or True
+            ingest, "mark_flex_delivery_applied", lambda d, **_k: applied.append(d) or True
         )
         monkeypatch.setattr(cash_flow_sync, "main", lambda _a: 0)
         monkeypatch.setattr(

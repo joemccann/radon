@@ -114,7 +114,7 @@ class TestServiceHealthRehydration:
 
     def test_a_lapse_clears_the_flex_web_service_row(self, monkeypatch):
         cleared: list[str] = []
-        monkeypatch.setattr(fe, "_heartbeat_ok", lambda: cleared.append("ok"))
+        monkeypatch.setattr(fe, "_heartbeat_ok", lambda _moment: cleared.append("ok"))
         fe.record_lockout("1025", now=T0)
         assert fe.is_blocked(now=T0 + timedelta(days=8)) is False
         assert cleared == ["ok"], (
