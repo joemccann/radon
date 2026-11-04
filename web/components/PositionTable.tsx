@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import InstrumentDetailModal from "./InstrumentDetailModal";
+import { useActiveInstrument } from "@/lib/activeInstrument";
 import { useSort } from "@/lib/useSort";
 import SortTh from "./SortTh";
 import { usePriceDirection } from "@/lib/usePriceDirection";
@@ -209,24 +210,7 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: n
   };
 }
 
-export type ActiveInstrumentIdentity = {
-  positionId: number;
-  conId: number | null;
-  legIndex: number;
-};
-
-export function resolveActiveInstrument(
-  positions: PortfolioPosition[],
-  identity: ActiveInstrumentIdentity | null,
-): { leg: PortfolioLeg; ticker: string; expiry: string } | null {
-  if (!identity) return null;
-  const position = positions.find((candidate) => candidate.id === identity.positionId);
-  if (!position) return null;
-  const leg = identity.conId != null
-    ? position.legs.find((candidate) => candidate.con_id === identity.conId)
-    : position.legs[identity.legIndex];
-  return leg ? { leg, ticker: position.ticker, expiry: position.expiry } : null;
-}
+export { resolveActiveInstrument, type ActiveInstrumentIdentity } from "@/lib/activeInstrument";
 
 /* ─── Leg row ──────────────────────────────────────────── */
 
@@ -719,27 +703,13 @@ export default function PositionTable({
 
   const [density, toggleDensity] = useDensity(tableId);
 
-  // Instrument detail modal state
-  const [activeInstrument, setActiveInstrument] = useState<ActiveInstrumentIdentity | null>(null);
-
-  const sourceFor = strategyGrouping?.sourceFor;
-  const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
-    const source = sourceFor?.(pos) ?? pos;
-    setActiveInstrument({
-      positionId: source.id,
-      conId: leg.con_id ?? null,
-      legIndex: source.legs.indexOf(leg),
-    });
-  }, [sourceFor]);
-
-  const resolvedInstrument = useMemo(
-    () => resolveActiveInstrument(strategyGrouping ? positions.map(position => strategyGrouping.sourceFor(position)) : positions, activeInstrument),
-    [activeInstrument, positions, strategyGrouping],
-  );
-
-  useEffect(() => {
-    if (activeInstrument && !resolvedInstrument) setActiveInstrument(null);
-  }, [activeInstrument, resolvedInstrument]);
+  // Instrument detail modal: identity in state, live leg re-resolved and
+  // kept stable across mark-only refreshes.
+  const {
+    instrument: resolvedInstrument,
+    open: handleLegClick,
+    close: closeInstrument,
+  } = useActiveInstrument(positions, strategyGrouping?.sourceFor);
 
   if (isMobile && hasMounted) {
     return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} portfolio={portfolio} strategyGrouping={strategyGrouping} />;
@@ -816,7 +786,7 @@ export default function PositionTable({
           expiry={resolvedInstrument.expiry}
           prices={prices}
           portfolio={portfolio}
-          onClose={() => setActiveInstrument(null)}
+          onClose={closeInstrument}
         />
       )}
     </>
