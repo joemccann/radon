@@ -409,6 +409,57 @@ class TestCheckUnits:
         assert outcomes == []
         assert json.loads(state_path.read_text())["units"]
 
+    def test_corrupt_state_file_is_logged(self, tmp_path, caplog):
+        state_path = tmp_path / "units_state.json"
+        state_path.write_text("{not json")
+        with caplog.at_level("WARNING", logger="watchdog.units"):
+            units.check_units(now=NOW, state_path=state_path, show_runner=lambda: STEADY)
+        assert "units state unreadable" in caplog.text
+
+    def test_failed_write_keeps_the_previous_snapshot(self, tmp_path, monkeypatch):
+        """A write that dies part-way (disk full) must not tear the
+        last-cycle snapshot: torn = empty = flap/delta memory lost."""
+        import io
+
+        state_path = tmp_path / "units_state.json"
+        flapping = _show_output(
+            _block("radon-nextjs.service", active="activating", sub="auto-restart",
+                   result="exit-code", nrestarts=10)
+        )
+        units.check_units(now=NOW, state_path=state_path, show_runner=lambda: flapping)
+        before = units._load_state(state_path)
+        assert before
+
+        real_open = io.open
+
+        class HalfWriter:
+            def __init__(self, fh):
+                self._fh = fh
+
+            def write(self, data):
+                self._fh.write(data[: len(data) // 2])
+                raise OSError(28, "No space left on device")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self._fh.close()
+                return False
+
+            def __getattr__(self, name):
+                return getattr(self._fh, name)
+
+        def faulty_open(file, mode="r", *args, **kwargs):
+            fh = real_open(file, mode, *args, **kwargs)
+            return HalfWriter(fh) if "w" in mode else fh
+
+        monkeypatch.setattr(io, "open", faulty_open)
+        units.check_units(now=NOW, state_path=state_path, show_runner=lambda: STEADY)
+        monkeypatch.setattr(io, "open", real_open)
+
+        assert units._load_state(state_path) == before
+
 
 # ── __main__ wiring: continuous bucket only, alert-only dispatch ────
 
