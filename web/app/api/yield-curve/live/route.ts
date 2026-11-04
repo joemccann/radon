@@ -81,12 +81,13 @@ async function buildLivePayload(): Promise<Record<string, unknown>> {
   };
 }
 
-async function refreshLivePayload(): Promise<Record<string, unknown>> {
+/** A fresh payload, or null when the provider could not produce one. */
+async function refreshLivePayload(): Promise<Record<string, unknown> | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = buildLivePayload().then((payload) => {
     if (payload.missing) {
       negativeUntil = Date.now() + NEGATIVE_TTL_MS;
-      return cached?.payload ?? MISSING_LIVE;
+      return null;
     }
     cached = { payload, at: Date.now() };
     negativeUntil = 0;
@@ -97,32 +98,46 @@ async function refreshLivePayload(): Promise<Record<string, unknown>> {
   return refreshInFlight;
 }
 
+/**
+ * Every read resolves to exactly one cache state:
+ *   fresh      snapshot inside CACHE_TTL_MS            → HIT
+ *   refreshed  provider answered on this read          → MISS
+ *   stale      snapshot past TTL; refresh failed or the
+ *              negative window suppressed it            → STALE + is_stale
+ *   missing    no snapshot and no provider answer       → MISS + missing
+ */
+type LiveRead =
+  | { state: "fresh" | "refreshed" | "stale"; payload: Record<string, unknown> }
+  | { state: "missing" };
+
+async function readLive(): Promise<LiveRead> {
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return { state: "fresh", payload: cached.payload };
+  }
+  const refreshed = Date.now() < negativeUntil ? null : await refreshLivePayload();
+  if (refreshed) return { state: "refreshed", payload: refreshed };
+  return cached ? { state: "stale", payload: cached.payload } : { state: "missing" };
+}
+
+const CACHE_STATE = { fresh: "HIT", refreshed: "MISS", stale: "STALE", missing: "MISS" } as const;
+
 export const radonCapability = "read";
 
 export async function GET() {
   const requestId = getRequestId();
-  if (!cached || Date.now() - cached.at >= CACHE_TTL_MS) {
-    const payload = Date.now() < negativeUntil
-      ? (cached?.payload ?? MISSING_LIVE)
-      : await refreshLivePayload();
-    if (payload.missing || !cached) {
-      const response = NextResponse.json(payload);
-      setCacheResponseHeaders(response, {
-        maxAgeSeconds: 30,
-        staleWhileRevalidateSeconds: 120,
-        requestId,
-        cacheState: "MISS",
-        tags: ["yield-curve"],
-      });
-      return response;
-    }
-  }
-  const response = NextResponse.json(cached.payload);
+  const read = await readLive();
+  const body =
+    read.state === "missing"
+      ? MISSING_LIVE
+      : read.state === "stale"
+        ? { ...read.payload, is_stale: true }
+        : read.payload;
+  const response = NextResponse.json(body);
   setCacheResponseHeaders(response, {
     maxAgeSeconds: 30,
     staleWhileRevalidateSeconds: 120,
     requestId,
-    cacheState: "HIT",
+    cacheState: CACHE_STATE[read.state],
     tags: ["yield-curve"],
   });
   return response;
