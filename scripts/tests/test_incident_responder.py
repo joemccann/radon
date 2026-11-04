@@ -83,7 +83,7 @@ class TestState:
     def test_state_roundtrip(self, tmp_path: Path):
         state_path = tmp_path / "state.json"
         state = load_state(state_path)
-        assert state == {"analyzed": {}, "attempts": {}}
+        assert state == {"analyzed": {}, "attempts": {}, "gave_up": {}}
         mark_analyzed(state_path, state, "20260804T020000Z-alpha", NOW)
         reloaded = load_state(state_path)
         assert reloaded["analyzed"]["20260804T020000Z-alpha"] == NOW.isoformat()
@@ -162,7 +162,11 @@ class TestCycleRetry:
                        side_effect=_fake_runner(1)):
                 run_cycle(tmp_path)
         state = load_state(mirror / ".responder-state.json")
-        assert "20260804T020000Z-alpha" in state["analyzed"]
+        # Giving up is its own terminal state, not a recorded diagnosis.
+        assert "20260804T020000Z-alpha" in state["gave_up"]
+        assert "20260804T020000Z-alpha" not in state["analyzed"]
+        assert state["attempts"] == {}
+        assert select_new_open_incidents(mirror, state, now=NOW) == []
 
     def test_diagnosis_filename_is_derived_from_a_validated_id(
             self, tmp_path: Path, monkeypatch):
