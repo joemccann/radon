@@ -12,7 +12,7 @@ import ErrorToast from "@/components/ErrorToast";
  */
 
 import { userErrorMessage } from "@/lib/userError";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
   fetchPreferences,
@@ -40,6 +40,55 @@ function isWidening(entry: PreferenceEntry, next: number | boolean): boolean {
   if (!entry.risk_gated) return false;
   if (typeof next !== "number" || typeof entry.value !== "number") return false;
   return next > entry.value;
+}
+
+type QueuedSave = { entry: PreferenceEntry; value: number | boolean };
+
+/**
+ * One save lock for the whole page. A row Save and a group "Save changes"
+ * both run a queue of drafts through it; a widening risk cap parks the queue
+ * in `awaitingWidenConfirm` with the rows still to save, and confirming
+ * resumes them instead of leaving them silently dirty. `error` carries the
+ * row that failed and unlocks the controls like `idle`.
+ */
+type PreferenceSaveState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "awaitingWidenConfirm"; pending: QueuedSave; remaining: QueuedSave[] }
+  | { kind: "error"; key: string };
+
+type PreferenceSaveEvent =
+  | { type: "start" }
+  | { type: "widen"; pending: QueuedSave; remaining: QueuedSave[] }
+  | { type: "confirm" }
+  | { type: "cancel" }
+  | { type: "failed"; key: string }
+  | { type: "done" };
+
+function preferenceSaveTransition(
+  state: PreferenceSaveState,
+  event: PreferenceSaveEvent,
+): PreferenceSaveState {
+  switch (event.type) {
+    case "start":
+      return state.kind === "idle" || state.kind === "error" ? { kind: "saving" } : state;
+    case "widen":
+      return state.kind === "saving"
+        ? { kind: "awaitingWidenConfirm", pending: event.pending, remaining: event.remaining }
+        : state;
+    case "confirm":
+      return state.kind === "awaitingWidenConfirm" ? { kind: "saving" } : state;
+    case "cancel":
+      return state.kind === "awaitingWidenConfirm" ? { kind: "idle" } : state;
+    case "failed":
+      return state.kind === "saving" ? { kind: "error", key: event.key } : state;
+    case "done":
+      return state.kind === "saving" ? { kind: "idle" } : state;
+  }
+}
+
+function isSaveLocked(state: PreferenceSaveState): boolean {
+  return state.kind === "saving" || state.kind === "awaitingWidenConfirm";
 }
 
 function errorMessage(error: unknown): string {
@@ -70,9 +119,15 @@ export default function PreferencesSection() {
   const [boolDrafts, setBoolDrafts] = useState<Record<string, boolean>>({});
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
   const [rowError, setRowError] = useState<Record<string, string>>({});
-  const [pendingWiden, setPendingWiden] = useState<
-    { entry: PreferenceEntry; value: number | boolean } | null
-  >(null);
+  const [saveState, setSaveState] = useState<PreferenceSaveState>({ kind: "idle" });
+  // Mirrors saveState synchronously so two clicks in one tick cannot both
+  // pass the lock before React re-renders.
+  const saveStateRef = useRef<PreferenceSaveState>({ kind: "idle" });
+  const sendSave = useCallback((event: PreferenceSaveEvent) => {
+    const next = preferenceSaveTransition(saveStateRef.current, event);
+    saveStateRef.current = next;
+    setSaveState(next);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -175,15 +230,44 @@ export default function PreferencesSection() {
     }
   }, [applyMutation, setBusy]);
 
-  const saveRow = useCallback(async (entry: PreferenceEntry): Promise<boolean> => {
-    const value = draftValueFor(entry);
-    if (value === null) return false;
-    if (isWidening(entry, value)) {
-      setPendingWiden({ entry, value });
-      return false;
+  const runQueue = useCallback(async (queue: QueuedSave[]) => {
+    for (let i = 0; i < queue.length; i += 1) {
+      const item = queue[i];
+      if (isWidening(item.entry, item.value)) {
+        sendSave({ type: "widen", pending: item, remaining: queue.slice(i + 1) });
+        return;
+      }
+      if (!(await commitSave(item.entry, item.value))) {
+        sendSave({ type: "failed", key: item.entry.key });
+        return;
+      }
     }
-    return commitSave(entry, value);
-  }, [commitSave, draftValueFor]);
+    sendSave({ type: "done" });
+  }, [commitSave, sendSave]);
+
+  const startSave = useCallback((entries: PreferenceEntry[]) => {
+    if (isSaveLocked(saveStateRef.current) || entries.length === 0) return;
+    const queue: QueuedSave[] = [];
+    for (const entry of entries) {
+      const value = draftValueFor(entry);
+      if (value === null) return;
+      queue.push({ entry, value });
+    }
+    sendSave({ type: "start" });
+    void runQueue(queue);
+  }, [draftValueFor, runQueue, sendSave]);
+
+  const confirmWiden = useCallback(async () => {
+    const current = saveStateRef.current;
+    if (current.kind !== "awaitingWidenConfirm") return;
+    const { pending, remaining } = current;
+    sendSave({ type: "confirm" });
+    if (!(await commitSave(pending.entry, pending.value))) {
+      sendSave({ type: "failed", key: pending.entry.key });
+      return;
+    }
+    await runQueue(remaining);
+  }, [commitSave, runQueue, sendSave]);
 
   const resetRow = useCallback(async (entry: PreferenceEntry) => {
     setBusy(entry.key, true);
@@ -202,13 +286,6 @@ export default function PreferencesSection() {
     }
   }, [applyMutation, setBusy]);
 
-  const saveGroup = useCallback(async (entries: PreferenceEntry[]) => {
-    for (const entry of entries.filter(isDirty)) {
-      const ok = await saveRow(entry);
-      if (!ok) return;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saveRow, drafts, boolDrafts, payload]);
 
   if (loading) {
     return (
@@ -227,6 +304,8 @@ export default function PreferencesSection() {
   }
 
   const storeUnavailable = payload.store.available === false;
+  const saveLocked = isSaveLocked(saveState);
+  const pendingWiden = saveState.kind === "awaitingWidenConfirm" ? saveState.pending : null;
   const groups = groupPreferences(payload.preferences, payload.groups);
 
   return (
@@ -248,8 +327,8 @@ export default function PreferencesSection() {
                     type="button"
                     className="admin-btn admin-btn-primary"
                     data-testid={`preference-group-save-${slug}`}
-                    disabled={storeUnavailable}
-                    onClick={() => { void saveGroup(entries); }}
+                    disabled={storeUnavailable || saveLocked}
+                    onClick={() => startSave(entries.filter(isDirty))}
                   >
                     Save changes
                   </button>
@@ -359,8 +438,8 @@ export default function PreferencesSection() {
                       type="button"
                       className="admin-btn admin-btn-primary"
                       data-testid={`preference-save-${entry.key}`}
-                      disabled={!dirty || busy || storeUnavailable || Boolean(inputError)}
-                      onClick={() => { void saveRow(entry); }}
+                      disabled={!dirty || busy || saveLocked || storeUnavailable || Boolean(inputError)}
+                      onClick={() => startSave([entry])}
                     >
                       {busy ? "Saving..." : "Save"}
                     </button>
@@ -401,12 +480,8 @@ export default function PreferencesSection() {
             }
             confirmLabel="Widen cap"
             requireTyped={pendingWiden.entry.key}
-            onConfirm={() => {
-              const { entry, value } = pendingWiden;
-              setPendingWiden(null);
-              void commitSave(entry, value);
-            }}
-            onCancel={() => setPendingWiden(null)}
+            onConfirm={() => { void confirmWiden(); }}
+            onCancel={() => sendSave({ type: "cancel" })}
           />
         </div>
       ) : null}
