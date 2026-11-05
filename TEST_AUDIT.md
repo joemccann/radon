@@ -12246,3 +12246,13 @@ Audited through: ad42fbeba4fb5cf5813f6e777c8614838965ba51 on 2026-11-05 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-584 | DONE | Pre-fix: 4/4 red (`called[1][1] is True`, serial 0.62s). Wall mutation `return fn()` failed the rewritten case the same way (1 failed / 0.14s, `requests == 1`). Restored `collectors.py`. Fake clock: elapsed `pytest.approx(0.30)`, vercel still inside the 0.4s deadline. Case 1 passed ×3 (0.16s/0.12s/0.12s). File 97 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-05
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest round 2 had one xdist load flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other (0 added / 0 removed). Cloud product tree unchanged vs `ad42fbeba`; FAILED composition matches the 2026-11-04 Darwin baseline.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | 20,312 passed / 12 skipped / 63 subtests (130.30s), EXIT 0 | 11,610 passed / 21 skipped / 1,184 files (45.05s) | 42 failed / 3,976 passed / 23 skipped (1017.17s) | — |
+| 2 | xdist 1 failed credentials clock, serial file 11 passed; 20,311 passed / 12 skipped / 63 subtests (206.55s) | 11,610 passed / 21 skipped / 1,184 files (93.65s) | 42 failed / 3,976 passed / 23 skipped (1187.79s) | 0 added / 0 removed |
+| 3 | 20,312 passed / 12 skipped / 63 subtests (167.03s), EXIT 0 | 11,610 passed / 21 skipped / 1,184 files (95.53s) | 42 failed / 3,976 passed / 23 skipped (996.48s) | 0 added / 0 removed |
