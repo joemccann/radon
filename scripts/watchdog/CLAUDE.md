@@ -71,4 +71,4 @@ When IB transitions from `awaiting_2fa` → `authenticated`, the handler clears 
 
 `error_text()` (`check.py`) renders a writer's error blob by taking the first non-empty of `message` > `summary` > `detail` > `reason` — writers disagree on the key (`drift_audit` writes `summary`, FastAPI paths write `detail`, reconcile writes `reason`). A writer supplying none of the four renders `in error state: unknown`.
 
-Event-odds ownership: `GET /event-odds/{ticker}` triggers refresh. No VPS timer owns it; keep its health category on-demand and exclude it from scheduled watchdog buckets.
+Event-odds ownership: `GET /event-odds/{ticker}` is request-driven. No VPS timer owns it; keep its health category on-demand and exclude it from scheduled watchdog buckets.

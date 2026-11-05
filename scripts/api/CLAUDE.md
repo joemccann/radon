@@ -79,6 +79,13 @@ Don't return 4xx for legitimate empty/pending states; use 200 + payload flag (e.
 interpreter on every 10-minute panel poll (PERF-023). Stale or unstamped
 cache still goes live; a failed live fetch still falls back to disk.
 
+`GET /event-odds/{ticker}` serves `data/event_odds/{TICKER}.json` when
+`scan_time` is inside the open-hours window in
+`web/lib/serviceHealthWindows.ts` and only then spawns
+`fetch_event_odds.py`. Polymarket midpoints do not justify a new
+interpreter on every panel poll (PERF-043). Stale or unstamped cache
+still goes live; a failed live fetch still falls back to disk.
+
 `GET /short-availability/{ticker}` overlaps the IB tick-46/89 probe and the
 UW `get_short_data` fee overlay (PERF-024). Merge after both complete;
 source priority stays IB then UW.
