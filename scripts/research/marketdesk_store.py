@@ -28,6 +28,9 @@ WORK_PREFIX = "marketdesk:"
 # Terminal for the listing; retired relevance decisions are replayed by a bounded policy migration.
 _DONE = "('published','failed','held','dropped')"
 _IN_CHUNK = 200
+# 6 params/row; 400 rows stay under SQLite's variable limit. Over Hrana,
+# one INSERT per article is one /v2/pipeline POST (PERF-044).
+_DISCOVER_CHUNK_ROWS = 400
 
 
 def _now() -> str:
@@ -62,13 +65,34 @@ def unseen(refs, *, lookback_hours: int, now: datetime | None = None) -> list:
 
 
 def discover(refs) -> None:
-    """Persist every discovered article before slow work; never acquire a processing lease here."""
+    """Persist every discovered article before slow work; never acquire a processing lease here.
+
+    Chunked multi-row INSERT OR IGNORE (PERF-044). One statement per ~400
+    articles, never one POST per listed item — the provider's latest-25
+    page used to cost 25 sequential Turso round-trips before any claim.
+    """
+    items = list(refs)
+    if not items:
+        return
     now = _now()
-    for ref in refs:
+    for start in range(0, len(items), _DISCOVER_CHUNK_ROWS):
+        chunk = items[start:start + _DISCOVER_CHUNK_ROWS]
+        placeholders = ", ".join("(?,?,?,?,?,?)" for _ in chunk)
+        params: list = []
+        for item in chunk:
+            params.extend((
+                item.article_id,
+                str(item.title or "")[:500],
+                item.url,
+                _utc(item.published_at).isoformat(),
+                now,
+                now,
+            ))
         hrana_execute(
             "INSERT INTO marketdesk_articles (article_id,title,article_url,published_at,first_seen_at,updated_at) "
-            "VALUES (?,?,?,?,?,?) ON CONFLICT(article_id) DO NOTHING",
-            (ref.article_id, str(ref.title or "")[:500], ref.url, _utc(ref.published_at).isoformat(), now, now))
+            f"VALUES {placeholders} ON CONFLICT(article_id) DO NOTHING",
+            params,
+        )
 
 
 def pending(limit: int = 100) -> list:
