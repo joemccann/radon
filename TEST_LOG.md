@@ -1392,3 +1392,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-583 | DONE | Existing ExecStart allowlist stayed 1 passed after dropping `CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}`. New interpolation assert failed that mutation (1 failed / 1 passed). Dropping the name from the three `MCP_ENV_KEYS` copies failed the writer-subset case. Restored product source. Focused cloud files 20 passed / 2 skipped. Product source unchanged. Closing rounds: root pytest xdist credentials clock flake then serial 11 passed; 20,296 passed / 12 skipped / 63 subtests each round. Vitest 11,610 passed / 21 skipped / 1,184 files each round. Cloud 42 failed / 3,976 passed / 23 skipped each round, 0 added / 0 removed against `ab4e6b45`. |
+
+## 2026-11-05
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-584 | DONE | Pre-fix NOAA walk case 4/4 red on leftover `called[1][1] is True` with `elapsed < 0.7` holding (serial 0.62s). Fake `collectors.time.monotonic` plus connect that advances that clock: wall mutation `return fn()` 1 failed; restored 1 passed ×3; file 97 passed ×3. Product source unchanged. |

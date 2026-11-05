@@ -12222,3 +12222,27 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (264.80s) | 11,610 passed / 21 skipped / 1,184 files (118.70s) | 42 failed / 3,976 passed / 23 skipped (1042.04s) | 0 added / 0 removed |
 
 Base cloud at `ab4e6b45` on this Mac (standing sweep before the test commit; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (952.28s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-05
+
+Range `ab4e6b45315f642423da6bb71a6be8a8e6010be4..ad42fbeba4fb5cf5813f6e777c8614838965ba51`: 20 commits / 31 paths. Newest trusted checkpoint on issue #83 is `audited-through: ab4e6b45315f642423da6bb71a6be8a8e6010be4` (collaborator, 2026-11-04). It carried no open verified finding. No open `testing/` pull request. Highest id T-583. Next id T-584. `#1426` is merged.
+
+`ci.yml` and coverage thresholds are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-583 remains DONE. T-581 and T-582 remain DONE.
+
+Delta Python tests 661 passed / 1 failed ×3 (`test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline`). Serial isolation of that case: 1 failed in 0.62s, `elapsed < 0.7` held, `called[1][1] is True` did not. Linux CI on `ad42fbeba` is green.
+
+Not filed: event-odds TTL, credit-vix 502, MarketDesk fallback slice, and MCP azp each shipped with behavioral tests. Unstamped event-odds still spawns via `test_workstation_flow_contracts.py` (payload has no `scan_time`). Credentials xdist clock bound is serial-green when it appears.
+
+### T-584 — P1 — NOAA address-walk proof sleeps on the host clock
+
+`scripts/tests/test_ai_cycle_collectors.py:1494` asserted leftover run budget with `called[1][1] is True` after `time.sleep` on each blackholed connect and a 0.4s `Transport.deadline`. Two 0.15s sleeps plus `collect.main` overhead expire that fixture before vercel is recorded, so a correct `_request_within_attempt_wall` (`scripts/ai_cycle/collectors.py:280`) is red here. `elapsed < 0.7` stayed true (0.62s serial), which is the wall working. Linux CI at `ad42fbeba` is green.
+
+Acceptance: connect time is `collectors.time.monotonic`, not a host sleep. Fake elapsed is `pytest.approx(0.15 * 2)` and vercel still sees the 0.4s deadline. `_request_within_attempt_wall` reduced to `return fn()` fails `called[1][1] is True`.
+
+Audited through: ad42fbeba4fb5cf5813f6e777c8614838965ba51 on 2026-11-05 — 1 new finding
+
+## Remediation 2026-11-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-584 | DONE | Pre-fix: 4/4 red (`called[1][1] is True`, serial 0.62s). Wall mutation `return fn()` failed the rewritten case the same way (1 failed / 0.14s, `requests == 1`). Restored `collectors.py`. Fake clock: elapsed `pytest.approx(0.30)`, vercel still inside the 0.4s deadline. Case 1 passed ×3 (0.16s/0.12s/0.12s). File 97 passed ×3. Product source unchanged. |
