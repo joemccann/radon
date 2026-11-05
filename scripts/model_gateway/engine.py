@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from clients import prepaid_denylist, provider_cooldown
-from .contracts import (MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, ModelLadderExhausted, ModelResponseError, LadderResult, VisionResult, parse_json_object, parse_json_rows, safe_error_message, accept_tags_payload, accept_distill_payload)
+from .contracts import (MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, MIN_FALLBACK_SLICE_S, ModelLadderExhausted, ModelResponseError, LadderResult, VisionResult, parse_json_object, parse_json_rows, safe_error_message, accept_tags_payload, accept_distill_payload)
 
 logger = logging.getLogger(__name__)
 
@@ -1483,6 +1483,8 @@ LAST_RESORT_PROVIDER = "cerebras"
 # except FALLBACK_RESERVE_S for each later live rung, and never less than an
 # even split. An even split gave the first of six rungs 20s of 120s, so slow
 # but healthy multimodal replies timed out while later rungs had time to spare.
+# A rejected draft does not keep this leftover: each later live rung gets
+# MIN_FALLBACK_SLICE_S, and the deadline grows by only the shortfall.
 _FALLBACK_RESERVE_S = 20.0
 # A rung whose models all failed for a reason that does not clear in seconds
 # (missing model, billing, refused key) is still attempted, but stops reserving
@@ -1497,6 +1499,31 @@ _dead_clock = time.monotonic
 def _rung_slice(remaining: float, live: int) -> float:
     live = max(1, live)
     return max(0.001, remaining / live, remaining - _FALLBACK_RESERVE_S * (live - 1))
+
+
+def _extend_fallback_deadline(state: AttemptState, live: int) -> float:
+    """Give each remaining rung MIN_FALLBACK_SLICE_S after a rejected draft.
+
+    The success path does not call this, so an accepted draft still finishes
+    inside the original read_timeout. The extension is only the shortfall.
+    """
+    live = max(1, live)
+    needed = MIN_FALLBACK_SLICE_S * live
+    remaining = state.deadline - state.clock()
+    if remaining < needed:
+        state.deadline = state.clock() + needed
+        remaining = needed
+    return remaining
+
+
+def _fallback_slice(remaining: float, live: int) -> float:
+    """Current rung's slice, leaving MIN_FALLBACK_SLICE_S for each later rung."""
+    live = max(1, live)
+    reserved = MIN_FALLBACK_SLICE_S * (live - 1)
+    current = remaining - reserved
+    if current < MIN_FALLBACK_SLICE_S:
+        current = remaining / live
+    return max(0.001, min(remaining, current))
 
 
 def _rung_dead(name: str) -> bool:
@@ -1574,6 +1601,9 @@ def _run_ladder(
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     state = _ATTEMPT_STATE.get()
     refresh_token = refresh_token or (state.refresh if state else None) or _refresh_subscription_token
+    # A continuation already recorded the rejected winner in seen. A fresh
+    # request starts empty and only reserves fallback time after a rejection.
+    rejected_draft = state is not None and bool(state.seen)
     attempted: list[str] = []
     skipped: list[str] = []
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
@@ -1620,12 +1650,16 @@ def _run_ladder(
                     skipped.append(f"{name}:already_attempted")
                     continue
                 state.attempt_deadline = None
-                scoped_timeout(300.0)
                 remaining = state.deadline - state.clock()
                 live = sum(1 for candidate in order[position + 1:]
                            if candidate in keyed and not _rung_dead(candidate))
-                state.slice_seconds = _rung_slice(remaining, live + 1)
+                if rejected_draft:
+                    remaining = _extend_fallback_deadline(state, live + 1)
+                    state.slice_seconds = _fallback_slice(remaining, live + 1)
+                else:
+                    state.slice_seconds = _rung_slice(remaining, live + 1)
                 state.attempt_deadline = state.clock() + state.slice_seconds
+                scoped_timeout(300.0)
                 state.seen.add((name, model))
             if limiter is not None and not acquire_model_slot(limiter, _nvidia_max_wait(env)):
                 attempted.append(f"{name}:rate_limited_local")
@@ -1723,6 +1757,7 @@ def _run_ladder(
 
             if not isinstance(payload, dict):
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )
@@ -1734,6 +1769,7 @@ def _run_ladder(
                 raise
             except (ValueError, TypeError, KeyError):
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )
@@ -1741,6 +1777,7 @@ def _run_ladder(
 
             if parsed is None:
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )

@@ -7,6 +7,44 @@ from pathlib import Path
 import pytest
 
 
+def test_accepted_draft_keeps_the_original_request_timeout(monkeypatch):
+    from clients import model_ladder
+    now = [1000.0]
+    monkeypatch.setattr(model_ladder.time, "monotonic", lambda: now[0])
+    timeouts = []
+
+    def request(operation, payload, **kwargs):
+        timeouts.append(kwargs["timeout_seconds"])
+        return {"data": {"ok": True}, "text": "{}", "provider": "anthropic", "model": "a",
+                "attempted": ["anthropic:ok"]}
+
+    monkeypatch.setattr(model_ladder, "gateway_request", request)
+    model_ladder.complete_text_json("test", read_timeout=120, accept=lambda data: data["ok"])
+    assert timeouts == [pytest.approx(130)]
+
+
+def test_rejected_draft_continuation_is_not_stuck_with_the_leftover_budget(monkeypatch):
+    from clients import model_ladder
+    from model_gateway.contracts import MIN_FALLBACK_SLICE_S, MODEL_LADDER_ORDER
+    now = [1000.0]
+    monkeypatch.setattr(model_ladder.time, "monotonic", lambda: now[0])
+    timeouts = []
+
+    def request(operation, payload, **kwargs):
+        timeouts.append(kwargs["timeout_seconds"])
+        now[0] += 110
+        if payload.get("continuation"):
+            return {"data": {"ok": True}, "text": "{}", "provider": "grok", "model": "g",
+                    "attempted": ["grok:ok"]}
+        return {"data": {"ok": False}, "text": "{}", "provider": "anthropic", "model": "a",
+                "attempted": ["anthropic:ok"], "continuation": "next"}
+
+    monkeypatch.setattr(model_ladder, "gateway_request", request)
+    model_ladder.complete_text_json("test", read_timeout=120, accept=lambda data: data["ok"])
+    assert timeouts[0] == pytest.approx(130)
+    assert timeouts[1] >= MIN_FALLBACK_SLICE_S * len(MODEL_LADDER_ORDER)
+
+
 def test_json_accept_rejection_continues_on_server(monkeypatch):
     from clients import model_ladder
     calls = []

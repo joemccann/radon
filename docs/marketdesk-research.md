@@ -246,7 +246,11 @@ length limits. The figures are attached to the request
 exhaustion leaves the article unpublished (see the attempt rules above). The
 ladder is `scripts/clients/model_ladder.py`. Image and text copy use that
 shared order, grok included. NVIDIA and Cerebras stay paused at the gateway.
-A reply the caller's `accept` rejects resumes the next rung. An incomplete
+A reply the caller's `accept` rejects resumes the next rung. Each later live
+rung then gets 60 seconds, so a rejected draft can run past the 120 second
+copy timeout. An accepted draft does not. The short `copy_problems` codes are
+stored on `marketdesk_articles.last_error` (truncated, no draft body) and are
+included in the `marketdesk-research` health error. An incomplete
 or invalid gateway reply raises `ModelResponseError` and stops the article
 (`CopyUnavailable`). Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
