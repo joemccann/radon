@@ -24,7 +24,7 @@ NVIDIA and Cerebras are paused in every environment by `engine.PAUSED_BY_DEFAULT
 
 ## Upgrades and rollback
 
-CLI packages and inference dependencies are built at reviewed pins in immutable release images. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
+CLI packages and inference dependencies are built at reviewed pins in immutable release images. The gateway target starts from `runtime-deps` and copies `scripts/` after the torch lock so a scripts-only push reuses those layers. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
 
 A release needs all required checks on its exact head and matching immutable application, archive and gateway images. The managed gateway status reports the SHA of its already-selected immutable gateway image. The runtime supplies a gateway-only `RADON_DEPLOY_SHA` after validating the fixed image repository and full lowercase SHA; caller environment, dotenv values and a later checkout lookup are not identity authorities. Host coding clients are promoted from verified release artifacts; automated consumers do not install or upgrade provider CLIs. The first gateway cutover records a root-owned, hash-verified previous control-plane bundle for bounded rollback to that exact serving release. The privileged control-plane floor remains monotonic.
 
