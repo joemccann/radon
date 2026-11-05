@@ -4685,9 +4685,12 @@ Canonical: [`grok-page-responder.md`](grok-page-responder.md).
 
 The same watchdog send that buzzes Pushover on the iPhone writes a
 `watchdog_pages` row (sanitized excerpt, one ticket per service/kind/UTC
-hour). VPS `radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
-dedicated clone `/home/radon/radon-page-responder`) claims the row and
-runs headless Grok with this playbook: diagnose, stand down when this
+hour). After [finalization](grok-page-responder.md#finalize-and-verify),
+VPS `radon-grok-responder.timer` claims the row as the isolated
+`radon-responder` account. Until then, and after a rollback, the legacy
+`radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
+dedicated clone `/home/radon/radon-page-responder`) claims it. The live
+unit runs headless Grok with this playbook: diagnose, stand down when this
 runbook says so, otherwise TDD and ship. A normal-priority `radon grok:`
 follow-up reports the disposition. After a `fix/**` push,
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges). Joe
@@ -5220,3 +5223,14 @@ The article path must not request a PDF. It persists every discovered reference 
 - **Mechanism:** the publication batch reused a socket closed by the peer during copy generation. It is not a full database outage, model-ladder exhaustion or PDF allowance refusal. A failed response leaves a write outcome uncertain; do not retry the transaction blindly.
 - **Remediation:** retire existing API-pool connections before every request not proven to contain only SELECT statements. Keep read pooling and its single safe retry. Send each write or atomic batch once on a fresh connection. This adds a handshake to mutations while retaining the health-poll read optimization.
 - **Verification:** regression coverage must reproduce connection-specific stale reuse, successful fresh atomic publication and a lost write acknowledgement with one side effect and no resend. Confirm an actual new publication with post/source identity, saved image bytes and the existing editorial certificate after the gated deployment. Preserve article policy, leases, retry deadlines, PDF pacing, provider grants and the broker.
+
+## credit-vix-persist-transport
+
+**`radon-credit-vix.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when one Turso history write gets HTTP 502.**
+
+- **Observed:** page `28fd447deac29fbff195ecb6ed898218` at 2026-11-02T22:30:00Z. The timer started 2026-11-02T22:26:32Z. IB returned 251 bars for SHY, HYG, and VIX. Rehydrate logged the same 502 as non-fatal. `upsert_credit_vix_rows` then raised `ValueError: Hrana: api error: status=502 Bad Gateway, body={"error":"connect to upstream failed"}`. The oneshot exited 1. `dispersion` had persisted at 22:22:40Z and `yield-curve` persisted at 22:33:56Z, so this was not a platform outage. The 2026-11-03 22:29 timer exited 0. `:8321/health/lite` stayed authenticated with `database=up`. This was not IB 2FA and not exit 75 lock contention (`SuccessExitStatus=75`).
+- **Mechanism:** `Type=oneshot` has no `Restart=`. libsql raises a bare `ValueError` for a gateway 502. `load_cached_series` already treats that as non-fatal and falls back to JSON. `persist_result` does not. `run` records `cycle_failed` and re-raises. `main` let the exception escape, so systemd recorded `Result=exit-code` / `NRestarts=0`. The unit watchdog pages that first `InactiveEnterTimestamp` as P1. The error row is the visibility signal. The next successful cycle clears it.
+- **Discriminating check:** the journal shows a successful three-leg fetch, `turso rehydrate non-fatal` with `status=502`, then the traceback in `upsert_credit_vix_rows`. Sibling writers in the surrounding minutes succeed. A SQLite statement error (`no such table`, `SQLite error`) still exits 1. Empty sources with no cache still exit 1. `Result=signal` or exit 143 inside a deploy window is deploy stop-clean. A Python Turso `SELECT 1` failure in the same minute, with siblings also failing, is a platform outage: stand down, do not restart-flap. Do not `reset-failed` as the fix. The unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Remediation (code):** a libsql `ValueError` whose text is HTTP 502, 503, or 504, or `connect to upstream failed` / `upstream forward failed`, still keeps the error row and the oneshot exits 0. Stderr prints `cycle transport non-fatal` and the exception type only. Do not retry the uncertain insert in the failed process. The next timer retries. Statement errors still exit 1.
+- **Regression:** `scripts/tests/test_credit_vix_persist_transport.py::test_hrana_502_on_history_upsert_exits_zero`, `test_sqlite_statement_error_on_upsert_still_fails`.
+- **Code:** `scripts/fetch_credit_vix.py` (`_is_persist_transport`, `main`).

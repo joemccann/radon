@@ -17,8 +17,8 @@ Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and 
 - Use 1h cooldown per `(service, severity)` in `watchdog_cooldowns`.
 - Manual mute: `python -m scripts.watchdog ack <service>` for 4h.
 - Missing Pushover env degrades gracefully; still write rows.
-- A delivered P1 writes `watchdog_pages` for laptop Grok auto-response
-  (`docs/grok-page-responder.md`). Enqueue is best-effort and must never
+- A delivered P1 writes `watchdog_pages` for the VPS Grok responder
+  (`docs/grok-page-responder.md`). Laptop launchd is off. Enqueue is best-effort and must never
   block or unmute the page. Follow-up and deploy-live pages are priority 0.
 
 ## State Semantics
