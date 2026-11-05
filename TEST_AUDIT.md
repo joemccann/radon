@@ -12186,3 +12186,39 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | 20,227 passed / 12 skipped / 63 subtests (165.79s) | 11,604 passed / 21 skipped / 1,182 files (98.29s) | 42 failed / 3,960 passed / 23 skipped (1067.63s) | 0 added / 0 removed |
 
 Base cloud at `157938f5` on this Mac (standing sweep before the test commit; cloud tree unchanged): 42 failed / 3,960 passed / 23 skipped (952.39s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-04
+
+Range `157938f596234f3f1fe3974ddcd89275b55900f2..ab4e6b45315f642423da6bb71a6be8a8e6010be4`: 107 commits / 392 paths. Newest trusted checkpoint on issue #83 is `audited-through: 157938f596234f3f1fe3974ddcd89275b55900f2` (collaborator). It carried no open verified finding. No open `testing/` pull request. Highest id T-582. Next id T-583. `#1405` and `#1415` are merged.
+
+`ci.yml` added a non-required `lint-typecheck` job and gated non-gating Playwright behind the `run-e2e` label (`scripts/tests/test_ci_gate_integrity.py:525`). Coverage thresholds unchanged. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-581 and T-582 remain DONE.
+
+Not filed: Playwright label gate (jobs were already outside `deploy.needs`). JSON compact budget tests write bytes. LEAP empty-ticker, MarketDesk enqueue-after-publish, Codex cooldown, and healthd-down Caddy floor each have behavioral tests. Credentials xdist clock bound is serial-green (11 passed).
+
+Standing sweeps on this Mac: root pytest 20,296 passed / 1 failed / 12 skipped / 63 subtests (115.75s); serial `test_model_gateway_credentials.py` 11 passed (10.86s). Vitest 11,610 passed / 21 skipped / 1,184 files (42.80s). cloud/tests 42 failed / 3,976 passed / 23 skipped (952.28s). Delta Python 872 passed ×3; Vitest 40 passed ×3; cloud delta 126 passed ×3.
+
+### T-583 — P1 — hosted MCP azp binding is unproven at the env -i seam
+
+`cloud/services/radon-mcp.service:38` now interpolates `CLERK_AUTHORIZED_PARTIES` into `env -i`. `cloud/tests/test_rel194_mcp_unit.py:34` still listed only `CLERK_JWKS_URL`, `CLERK_ISSUER`, and `ALLOWED_USER_IDS`. Dropping the new token from ExecStart left that test green (1 passed) while the process would see an empty azp list and skip the operator binding. `cloud/tests/test_mcp_env_ownership.py` `CANONICAL_ENV` also omitted the key, so dropping it from `MCP_ENV_KEYS` still matched across the three writers.
+
+Acceptance: ExecStart must contain `CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}`. The three `MCP_ENV_KEYS` copies must include the name, and the publisher fixture must copy it into `mcp.env`. Deleting the interpolation or the regex name fails those cases.
+
+Audited through: ab4e6b45315f642423da6bb71a6be8a8e6010be4 on 2026-11-04 — 1 new finding
+
+## Remediation 2026-11-04
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-583 | DONE | Existing allowlist case stayed 1 passed after deleting `CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}` from ExecStart. New interpolation assert failed that mutation (`AssertionError: CLERK_AUTHORIZED_PARTIES`, 1 failed / 1 passed). Dropping the name from all three `MCP_ENV_KEYS` failed `test_every_writer_derives_the_same_key_subset`. Restored product source. Focused `test_rel194_mcp_unit.py` + `test_mcp_env_ownership.py`: 20 passed / 2 skipped (GNU `mv -T` absent). Product source unchanged. |
+
+### Closing gates 2026-11-04
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had one xdist load flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially each time. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other and as origin/main `ab4e6b45` (0 added / 0 removed).
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `ab4e6b45` |
+|---|---|---|---|---|
+| 1 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (129.75s) | 11,610 passed / 21 skipped / 1,184 files (48.06s) | 42 failed / 3,976 passed / 23 skipped (980.70s) | 0 added / 0 removed |
+| 2 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (146.52s) | 11,610 passed / 21 skipped / 1,184 files (88.54s) | 42 failed / 3,976 passed / 23 skipped (1032.59s) | 0 added / 0 removed |
+| 3 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (264.80s) | 11,610 passed / 21 skipped / 1,184 files (118.70s) | 42 failed / 3,976 passed / 23 skipped (1042.04s) | 0 added / 0 removed |
+
+Base cloud at `ab4e6b45` on this Mac (standing sweep before the test commit; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (952.28s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.

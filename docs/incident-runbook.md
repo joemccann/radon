@@ -4739,9 +4739,12 @@ Canonical: [`grok-page-responder.md`](grok-page-responder.md).
 
 The same watchdog send that buzzes Pushover on the iPhone writes a
 `watchdog_pages` row (sanitized excerpt, one ticket per service/kind/UTC
-hour). VPS `radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
-dedicated clone `/home/radon/radon-page-responder`) claims the row and
-runs headless Grok with this playbook: diagnose, stand down when this
+hour). After [finalization](grok-page-responder.md#finalize-and-verify),
+VPS `radon-grok-responder.timer` claims the row as the isolated
+`radon-responder` account. Until then, and after a rollback, the legacy
+`radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
+dedicated clone `/home/radon/radon-page-responder`) claims it. The live
+unit runs headless Grok with this playbook: diagnose, stand down when this
 runbook says so, otherwise TDD and ship. A normal-priority `radon grok:`
 follow-up reports the disposition. After a `fix/**` push,
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges). Joe
