@@ -1631,6 +1631,60 @@ when the EIA read stalls once inside the 25s publisher timeout.** Peak:
 
 ---
 
+## ai-cycle-noaa-address-walk
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when a NOAA GET walks every resolved address at the full connect timeout.**
+Peak: 2026-11-04 07:34Z, page `857674e1ee976821f058b1b5a8157557`. Timer next ~24h.
+
+- **Mechanism:** Daily `--record` fetched OpenRouter through Vast, then NOAA.
+  `www.ncei.noaa.gov` resolves to 12 SOCK_STREAM addresses (6 IPv6, then 6
+  IPv4). `Transport._download` passed a 25s requests timeout. urllib3 applies
+  that timeout to each address inside one `session.request`, and the 500s run
+  deadline is checked only between attempts and between body chunks. A
+  blackholed route burned 12 * 25s = 300s for the first GET. The deadline
+  still had about 107s left, so the GET retry started a second 300s walk.
+  NOAA `checked_at` 07:17:41.675Z to the next source 07:27:42.202Z is 600.5s.
+  Status `error` / `Publisher transport failed`. Ramp then recorded
+  `Per-run time budget exhausted` and the loop stopped, so open-design-arena,
+  liquidcompute, and epoch kept the previous day's status.
+  `persist_api_snapshot` still ran (`generated_at`
+  2026-11-04T07:34:01.807457Z). `main` returned 1. `Type=oneshot` has no
+  `Restart=`. ExecMain 07:16:06Z to 07:34:03Z, `ExecMainStatus=1`, CPU
+  42.468s, under `TimeoutStartSec=1200`. The report counted 32 requests.
+  `:8321/health/lite` stayed authenticated with `database=up`. Edge
+  `/edge-health/status` was `ok`. A later keyless NOAA GET from this host
+  returned 4826 bytes in 1.18s, so the publisher was reachable again after
+  the page. Not IB. Not a Turso platform outage.
+- **Detection:** `systemctl show` is `exit-code` / `NRestarts=0`. Live
+  `/ai-cycle` `sources` has `noaa.status=error` and
+  `reason=Publisher transport failed`, with `checked_at` about 600s before
+  the next source in the same run. Journal is root-only (`User=root` via
+  `radon-app-runtime`); localhost `GET /admin/logs?unit=radon-ai-cycle.service`
+  shows the same report.
+- **Discriminating check:** the NOAA wall gap to the next source is about
+  600s (12 addresses times 25s times 2 attempts), not about 50s. Sibling
+  sources before NOAA are `available`. A source row of
+  `Observation persistence failed` is the insert case, not this one.
+  Canary fail on `SELECT 1` or `/ai-cycle` 503 means Turso, stand down.
+  `Result=signal` or exit 143 is deploy stop-clean. `/health/lite` down
+  means API, stand down. Do not `reset-failed` and start before this wall
+  is live: the same blackhole still exits 1, and it still spends the run
+  budget on the address walk.
+- **Remediation (code):** each publisher attempt shrinks every connect to
+  the time left in that attempt, so a multi-address blackhole cannot
+  outlive the 25s timeout. The GET retry still runs once when the run
+  deadline remains. A second stall still records `error` and exits 1.
+  After deploy, the next 07:15 UTC timer collects the missed window.
+  Inserts are append-only, and the snapshot from the failed run is already
+  stored.
+- **Regression:**
+  `scripts/tests/test_ai_cycle_collectors.py::test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline`.
+- **Code:** `scripts/ai_cycle/collectors.py`
+  (`Transport._request_within_attempt_wall`).
+
+---
+
 ## ai-cycle-observation-insert-http-503
 
 **`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
