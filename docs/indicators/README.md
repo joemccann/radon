@@ -18,7 +18,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
-| credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX; diagnostic I/O limits) |
+| credit-vix | `/regime/credit-vix` | `credit-vix` | [credit-vix.md](credit-vix.md) (SHY minus HYG vs VIX; diagnostic I/O limits; a Turso 502/503/504 history write keeps the error row and exits 0) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (timer 16:20 ET, close-anchored across DST) |

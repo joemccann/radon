@@ -409,6 +409,43 @@ def test_no_keyed_provider_is_transient() -> None:
     assert info.value.transient is True
 
 
+def test_rejected_draft_keeps_copy_problems_and_drops_the_body() -> None:
+    secret = "sk-" + "n" * 24
+    marker = "UNIQUE_DRAFT_BODY_" + secret
+
+    def fake(instruction, **kwargs):
+        bad = clean()
+        bad["content"] += "\n\nFlows hit $99bn. " + marker
+        assert kwargs["accept"](bad) is False
+        raise ModelLadderExhausted(
+            "Model ladder exhausted. tried=anthropic:unparseable grok:network:ReadTimeout "
+            "codex:http_429;"
+        )
+
+    with pytest.raises(mc.CopyOutage) as info:
+        _call(fake)
+    message = str(info.value)
+    assert info.value.transient is True
+    assert "unsupported_number" in message and "99" in message
+    assert secret not in message and "UNIQUE_DRAFT_BODY" not in message
+    assert len(message) <= 300
+
+
+def test_every_rung_rejected_still_records_the_reasons() -> None:
+    def fake(instruction, **kwargs):
+        bad = clean()
+        bad["content"] += "\n\nFlows hit $99bn."
+        assert kwargs["accept"](bad) is False
+        raise ModelLadderExhausted(
+            "Model ladder exhausted. tried=anthropic:unparseable grok:unparseable;"
+        )
+
+    with pytest.raises(mc.CopyUnavailable) as info:
+        _call(fake)
+    assert info.value.transient is False
+    assert "unsupported_number" in str(info.value)
+
+
 def test_every_rung_rejecting_the_copy_is_not_transient() -> None:
     def fake(instruction, **kwargs):
         raise ModelLadderExhausted("Model ladder exhausted after trying every keyed provider. "

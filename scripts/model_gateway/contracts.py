@@ -15,6 +15,13 @@ MODEL_LADDER_ORDER = (
     "cerebras",
 )
 
+# Minimum seconds for each rung after a draft is rejected. Twenty seconds is
+# enough to reserve a fallback, and not enough for a multimodal reply (the
+# reason the first rung is allowed a larger slice). A rejected draft may
+# extend the deadline by the shortfall; an accepted draft stays inside the
+# caller's read_timeout.
+MIN_FALLBACK_SLICE_S = 60.0
+
 MODEL_LADDER_TIERS = {
     "anthropic": "subscription",
     "grok": "subscription",
