@@ -151,7 +151,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 **Image host:** `https://media.radon.run` (Caddy on Hetzner; `radon-newsfeed` writes `/var/lib/radon/media/` directly). Posts use absolute URLs.
 
-**Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` with fallback to `data/blotter.json` for legacy rows lacking `realized_pnl`/`cost_basis`/`proceeds`. See `docs/cloud-services.md`.
+**Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()`. See `docs/cloud-services.md`.
 
 ## Commit Hygiene
 
@@ -175,10 +175,10 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 ## Critical Data Files
 
+Open positions, bankroll and exposure live in Turso `portfolio_snapshots`; trades in Turso `journal`. `portfolio.json`, `trade_log.json`, `orders.json`, `blotter.json` and `reconciliation.json` are retired: nothing may read them (`scripts/tests/test_legacy_json_source_truth.py`).
+
 | File | Purpose |
 |---|---|
-| `data/portfolio.json` | Open positions, bankroll, exposure |
-| `data/trade_log.json` | **Append-only** trade journal |
 | `data/watchlist.json` | Surveillance tickers |
 | `data/tag_taxonomy.json` | Auto-growing UPPERCASE tag list (gitignored, runtime-owned by newsfeed; canonical tags in Turso `tag_taxonomy`). Untracked 2026-07-15 — was force-tracked, but runtime mutation drifted it and tripped `deploy.sh`'s tracked-drift guard, blocking deploys. |
 | `data/{vcg,gex}.json` | Scan caches |

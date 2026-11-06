@@ -73,6 +73,20 @@ export function sumUnrealizedBreakdown(portfolio: PortfolioData): number {
 }
 
 /**
+ * The rows use Radon's marks and journal lot-matched basis; IB's account figure
+ * uses IB's marks and VWAP. Names the gap so the two never read as one number.
+ */
+export function describeAccountDifference(
+  rowSum: number,
+  accountPnl: number | null | undefined,
+): string | null {
+  if (accountPnl == null) return null;
+  const difference = accountPnl - rowSum;
+  if (Math.abs(difference) < 1) return null;
+  return `IB account: ${fmtSigned(accountPnl, 2)} · difference ${fmtSigned(difference, 2)} (IB marks and cost basis)`;
+}
+
+/**
  * Positions whose legs disagree about their basis (T-315): their measured leg
  * P&L is in the total, but their aggregate entry basis is unpublishable, so
  * the UNMEASURED BASIS caveat still names them.

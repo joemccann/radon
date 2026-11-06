@@ -9,7 +9,7 @@ import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
 import { computeDayMoveBreakdown } from "@/lib/dayMoveBreakdown";
-import { computeUnrealizedBreakdown, countUnmeasuredBasis, sumUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
+import { computeUnrealizedBreakdown, countUnmeasuredBasis, describeAccountDifference, sumUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
 import { resolveMarketValue } from "@/lib/positionUtils";
 import { getMarketPhaseFromDate } from "@/lib/serviceHealthWindows";
 import {
@@ -826,7 +826,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         col2Header="MKT VALUE"
         pctHeader="RETURN %"
         rows={unrealizedBreakdownRows}
-        total={acct?.unrealized_pnl ?? pnl}
+        total={pnl}
+        totalDetail={describeAccountDifference(pnl, acct?.unrealized_pnl)}
         onClose={() => setUnrealizedModalOpen(false)}
       />
 

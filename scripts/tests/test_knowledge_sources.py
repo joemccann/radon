@@ -1,7 +1,7 @@
 """Phase 1 connectors — fixture-driven tests.
 
 LOCAL libsql :memory: DB with miniature journal/posts/service_health tables
-(real column names), tmp_path fixture files for evals/docs/trade_log. No
+(real column names), tmp_path fixture files for evals/docs. No
 network, no get_db(). Window-relative dates only.
 """
 from __future__ import annotations
@@ -119,15 +119,8 @@ def _seed_journal(db):
     db.commit()
 
 
-@pytest.fixture
-def empty_trade_log(tmp_path, monkeypatch):
-    path = tmp_path / "trade_log.json"
-    path.write_text(json.dumps({"trades": [], "_checksum": "x"}))
-    monkeypatch.setattr(journal_source, "TRADE_LOG_PATH", path)
-    return path
 
-
-def test_journal_auto_import_row_renders_fill_line(db, empty_trade_log):
+def test_journal_auto_import_row_renders_fill_line(db):
     _seed_journal(db)
     docs = {d.doc_key: d for d in journal_source.fetch(db)}
     doc = docs["00019285.6a5a6b03.01.01"]
@@ -139,7 +132,7 @@ def test_journal_auto_import_row_renders_fill_line(db, empty_trade_log):
     assert doc.metadata["action"] == "BUY_TO_CLOSE"
 
 
-def test_journal_rich_row_includes_thesis(db, empty_trade_log):
+def test_journal_rich_row_includes_thesis(db):
     _seed_journal(db)
     docs = {d.doc_key: d for d in journal_source.fetch(db)}
     doc = docs["manual-alab-1"]
@@ -150,39 +143,13 @@ def test_journal_rich_row_includes_thesis(db, empty_trade_log):
     assert doc.metadata["ticker"] == "ALAB"
 
 
-def test_journal_last_activity_from_written_at(db, empty_trade_log):
+def test_journal_last_activity_from_written_at(db):
     _seed_journal(db)
     docs = {d.doc_key: d for d in journal_source.fetch(db)}
     assert docs["00019285.6a5a6b03.01.01"].last_activity_at == _days_ago(3)
 
 
-def test_journal_trade_log_thesis_entries_included_stubs_skipped(db, tmp_path, monkeypatch):
-    log = {
-        "trades": [
-            dict(_RICH_PAYLOAD),
-            {
-                "id": 2,
-                "date": _days_ago_date(10),
-                "ticker": "PLTR",
-                "decision": "IB_AUTO_IMPORT",
-                "action": "SELL_TO_CLOSE",
-            },
-        ],
-        "_checksum": "x",
-    }
-    path = tmp_path / "trade_log.json"
-    path.write_text(json.dumps(log))
-    monkeypatch.setattr(journal_source, "TRADE_LOG_PATH", path)
-    docs = list(journal_source.fetch(db))
-    keys = [d.doc_key for d in docs]
-    assert "trade_log:1" in keys
-    assert all("trade_log:2" != k for k in keys)
-    doc = next(d for d in docs if d.doc_key == "trade_log:1")
-    assert "LEAP options significantly underpriced" in doc.content
-    assert doc.last_activity_at == _days_ago_date(30) + "T00:00:00Z"
-
-
-def test_journal_raw_and_deterministic(db, empty_trade_log):
+def test_journal_raw_and_deterministic(db):
     _seed_journal(db)
     first = list(journal_source.fetch(db))
     second = list(journal_source.fetch(db))
@@ -191,7 +158,7 @@ def test_journal_raw_and_deterministic(db, empty_trade_log):
     assert all(d.source == "journal" for d in first)
 
 
-def test_journal_skips_unparseable_payload(db, empty_trade_log):
+def test_journal_skips_unparseable_payload(db):
     db.execute(
         "INSERT INTO journal (trade_id, payload, filled_at, written_at) VALUES (?, ?, ?, ?)",
         ("broken", "{not json", None, _days_ago(1)),
@@ -200,17 +167,8 @@ def test_journal_skips_unparseable_payload(db, empty_trade_log):
     assert list(journal_source.fetch(db)) == []
 
 
-def test_journal_prune_authority_never_covers_trade_log_keys(
-    tmp_path, monkeypatch, empty_trade_log
-):
-    # trade_log.json is host-local and DIVERGES between hosts (production
-    # appends on the VPS while the laptop holds a stale copy), so even a host
-    # WITH the file must not treat another host's entries as vanished.
-    # 2026-07-19: the VPS's present-but-partial reports/ pruned 177 laptop
-    # eval docs; same hazard here.
-    keys = ["manual-alab-1", "trade_log:1"]
-    assert journal_source.prunable_doc_keys(keys) == ["manual-alab-1"]
-    monkeypatch.setattr(journal_source, "TRADE_LOG_PATH", tmp_path / "absent.json")
+def test_journal_prune_authority_never_covers_trade_log_keys():
+    keys = ["trade_log:17", "manual-alab-1", "trade_log:18"]
     assert journal_source.prunable_doc_keys(keys) == ["manual-alab-1"]
 
 

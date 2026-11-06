@@ -178,6 +178,9 @@ Risk-capital return (`getPnlPct`, `resolveReturnCapital`) is `(MV − EC) / veri
 
 The Return column calls `getDisplayReturnPct`. It uses the verified basis when one exists. A multi-leg combo with no verified basis, no blended basis, and a positive signed net entry debit (`resolveLegPnlBasis`) shows return on that debit and labels it `Return on net entry debit`. A single leg, a nonpositive net debit, a missing leg entry, or a blended basis stays blank. That debit is measured opening value, not risk capital.
 
+### Unrealized P&L modal total
+The modal's header and TOTAL are `sumUnrealizedBreakdown`, the sum of its rows. The account card keeps IB's `unrealized_pnl`, and `describeAccountDifference` names that figure and the gap under the modal total, because rows use Radon marks and journal basis while IB uses its own marks and VWAP. On the sync side, an option with no two-sided book and an IB-reported volume of 0 takes IB's portfolio mark (`poll_contract_mark`), so a cached last cannot hold it at an old print (IWO 380C, 2026-11-06: 1.95 against IB's 0.8927, $31.7k). Tests: `unrealized-modal-reconciles-rows.test.tsx`, `test_option_untraded_broker_mark.py`.
+
 ### Price Resolution
 
 | Context | Source |

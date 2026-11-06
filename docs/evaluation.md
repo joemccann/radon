@@ -29,7 +29,7 @@ Pipeline for converting a ticker into a trade decision. Stop on failure at any g
    - Enforce 2.5% bankroll cap per position. Hard cap, not advisory. Fail closed without a structure.
 
 7. **Log**
-   - Executed → `data/trade_log.json` (append-only).
+   - Executed → Turso `journal` table.
    - NO_TRADE → `docs/status.md`.
 
 ---
