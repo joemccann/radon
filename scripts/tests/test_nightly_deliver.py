@@ -132,6 +132,9 @@ class TestClassifyChecks:
         assert "pytest (cloud edge)" in expected
         assert "Perimeter smoke (next start + curl)" in expected
         assert "Exact app images" not in expected
+        # Label-gated PR jobs skip as one row under the unexpanded matrix
+        # name, so their shard names never arrive on an unlabeled PR.
+        assert not [name for name in expected if "P0-financial smoke" in name]
         rows = [{"name": "PR body template", "bucket": "pass", "link": ""}]
         state, pending = nd.classify_checks(rows, expected=expected)
         assert state == "pending"

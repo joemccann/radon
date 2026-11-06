@@ -379,6 +379,36 @@ class TestMenthorQClientCTA:
                     client.get_cta("2026-03-06")
                 mock_ss.assert_called_once()
 
+    def test_card_image_download_fetches_https_src(self, client):
+        """An https card image src is downloaded without following redirects."""
+        page = MagicMock()
+        page.evaluate.return_value = "https://bucket.s3.amazonaws.com/cta.png"
+        resp = MagicMock(status_code=200, content=b"png")
+        with patch("httpx.get", return_value=resp) as mock_get:
+            images = client._download_card_images(page, {"main": "cta-main"})
+
+        assert images == {"main": b"png"}
+        mock_get.assert_called_once_with(
+            "https://bucket.s3.amazonaws.com/cta.png",
+            timeout=30.0,
+            follow_redirects=False,
+        )
+
+    @pytest.mark.parametrize("src", [
+        "http://bucket.s3.amazonaws.com/cta.png",
+        "file:///etc/hosts",
+        "data:image/png;base64,AAAA",
+    ])
+    def test_card_image_download_refuses_non_https_src(self, client, src):
+        """A non-https card image src is never fetched; caller falls back."""
+        page = MagicMock()
+        page.evaluate.return_value = src
+        with patch("httpx.get") as mock_get:
+            images = client._download_card_images(page, {"main": "cta-main"})
+
+        assert images == {}
+        mock_get.assert_not_called()
+
 
 # ══════════════════════════════════════════════════════════════════════
 # 5. SCREENER
