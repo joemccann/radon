@@ -164,8 +164,10 @@ def _validate_equibles(values: Dict[str, str]) -> ValidationResult:
 
 
 def _validate_artificial_analysis(values: Dict[str, str]) -> ValidationResult:
+    from scripts.ai_cycle.aa_catalog import LANGUAGE_MODELS_URL
+
     return _get(
-        "https://artificialanalysis.ai/api/v2/data/llms/models",
+        LANGUAGE_MODELS_URL,
         {"x-api-key": values["ARTIFICIAL_ANALYSIS_API_KEY"]},
         "Artificial Analysis",
     )

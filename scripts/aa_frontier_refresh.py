@@ -24,6 +24,7 @@ from typing import Any, Iterator, Protocol
 
 import requests
 
+from scripts.ai_cycle.aa_catalog import MAX_CATALOG_PAGES, CatalogPageError, next_catalog_page
 from scripts.ai_cycle.collectors import URLS
 from scripts.secret_store import SecretStore
 from scripts.utils.atomic_io import atomic_save, verified_load
@@ -285,19 +286,42 @@ def _selection_result(
 
 
 def fetch_catalog(api_key: str, *, session: Any = requests, timeout: int = FETCH_TIMEOUT_SECONDS) -> dict[str, Any]:
-    try:
-        response = session.get(URLS["artificial-analysis"], headers={"x-api-key": api_key}, timeout=timeout)
-    except requests.RequestException as exc:
-        raise CatalogError("Artificial Analysis catalog transport failed") from exc
-    if response.status_code != 200:
-        raise CatalogError(f"Artificial Analysis catalog returned HTTP {response.status_code}")
-    try:
-        payload = response.json()
-    except (TypeError, ValueError) as exc:
-        raise CatalogError("Artificial Analysis catalog returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise CatalogError("Artificial Analysis catalog schema is invalid")
-    return payload
+    """GET the free language-model list and combine every page.
+
+    The retired ``/api/v2/data/llms/models`` path returns HTTP 410. A
+    non-200 response is reported by status code only; the body can name
+    a migration URL and is not read. Pagination that does not end inside
+    the page bound raises instead of returning a short catalog.
+    """
+    rows: list[Any] = []
+    page = 1
+    while True:
+        if page > MAX_CATALOG_PAGES:
+            raise CatalogError("Artificial Analysis catalog pagination exceeded the page bound")
+        try:
+            response = session.get(
+                URLS["artificial-analysis"],
+                headers={"x-api-key": api_key},
+                params={"page": page},
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            raise CatalogError("Artificial Analysis catalog transport failed") from exc
+        if response.status_code != 200:
+            raise CatalogError(f"Artificial Analysis catalog returned HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as exc:
+            raise CatalogError("Artificial Analysis catalog returned invalid JSON") from exc
+        try:
+            nxt = next_catalog_page(payload, requested_page=page)
+        except CatalogPageError as exc:
+            raise CatalogError(str(exc)) from exc
+        rows.extend(payload["data"])
+        if nxt is None:
+            break
+        page = nxt
+    return {"status": 200, "data": rows}
 
 
 def load_state(state_path: Path) -> dict[str, Any] | None:

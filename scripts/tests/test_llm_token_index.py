@@ -248,7 +248,42 @@ class TestFetch:
             fetch_aa_models(api_key="secret-key")
 
         assert captured.get("header_x_api_key") == "secret-key"
-        assert "/data/llms/models" in str(captured.get("url"))
+        assert str(captured.get("url")) == (
+            "https://artificialanalysis.ai/api/v2/language/models/free?page=1"
+        )
+
+    def test_follows_free_catalog_pages(self):
+        from llm_token_index import fetch_aa_models
+
+        pages = {
+            1: {
+                "pagination": {"page": 1, "has_more": True, "page_size": 200, "total_pages": 2},
+                "data": [{"id": "page-1", "slug": "one", "pricing": {"price_1m_input_tokens": 1, "price_1m_output_tokens": 2}}],
+            },
+            2: {
+                "pagination": {"page": 2, "has_more": False, "page_size": 200, "total_pages": 2},
+                "data": [{"id": "page-2", "slug": "two", "pricing": {"price_1m_input_tokens": 3, "price_1m_output_tokens": 4}}],
+            },
+        }
+        urls = []
+
+        def open_page(req, timeout):
+            urls.append(req.get_full_url())
+            page = 2 if "page=2" in req.get_full_url() else 1
+            response = MagicMock()
+            response.read.return_value = json.dumps(pages[page]).encode("utf-8")
+            response.__enter__ = MagicMock(return_value=response)
+            response.__exit__ = MagicMock(return_value=None)
+            return response
+
+        with patch("llm_token_index.urlopen", side_effect=open_page):
+            payload = fetch_aa_models(api_key="secret-key")
+
+        assert urls == [
+            "https://artificialanalysis.ai/api/v2/language/models/free?page=1",
+            "https://artificialanalysis.ai/api/v2/language/models/free?page=2",
+        ]
+        assert [row["id"] for row in payload["data"]] == ["page-1", "page-2"]
 
 
 # ─── Persistence: idempotent on (date, ON CONFLICT REPLACE) ──────────
@@ -296,7 +331,7 @@ def _http_error(code: int, reason: str):
     import io
 
     err = HTTPError(
-        url="https://artificialanalysis.ai/api/v2/data/llms/models",
+        url="https://artificialanalysis.ai/api/v2/language/models/free",
         code=code,
         msg=reason,
         hdrs=None,  # type: ignore[arg-type]
