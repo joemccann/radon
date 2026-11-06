@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import socket
 import tempfile
 import time
 from email.utils import parsedate_to_datetime
@@ -17,11 +18,18 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
+from scripts.ai_cycle.aa_catalog import (
+    LANGUAGE_MODELS_URL,
+    MAX_CATALOG_PAGES,
+    CatalogPageError,
+    next_catalog_page,
+)
+
 URLS = {
     "openrouter": "https://openrouter.ai/api/v1/datasets/rankings-daily",
     "vercel": "https://vercel.com/api/ai/leaderboard-export",
     "gpu-rental": "https://gpurentalprices.com/api/latest.json",
-    "artificial-analysis": "https://artificialanalysis.ai/api/v2/data/llms/models",
+    "artificial-analysis": LANGUAGE_MODELS_URL,
     "eia": "https://api.eia.gov/v2/electricity/rto/region-sub-ba-data/data/",
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
@@ -240,15 +248,22 @@ class Transport:
                 raise SourceError("Per-run time budget exhausted")
             self.requests += 1
             response = None
+            attempt_timeout = min(self.timeout, max(1, self.deadline - time.monotonic()))
             try:
-                response = self.session.request(
-                    "POST" if body is not None else "GET",
-                    url,
-                    params=params,
-                    headers=headers,
-                    json=body,
-                    timeout=min(self.timeout, max(1, self.deadline - time.monotonic())),
-                    stream=True,
+                # requests' timeout is per socket. urllib3 applies it to every
+                # getaddrinfo result, so one NOAA GET walked 12 blackholed
+                # addresses for 300s and the retry walked them again (2026-11-04).
+                response = self._request_within_attempt_wall(
+                    attempt_timeout,
+                    lambda: self.session.request(
+                        "POST" if body is not None else "GET",
+                        url,
+                        params=params,
+                        headers=headers,
+                        json=body,
+                        timeout=attempt_timeout,
+                        stream=True,
+                    ),
                 )
                 if response.status_code != 200:
                     raise SourceError(f"Publisher returned HTTP {response.status_code}")
@@ -268,6 +283,32 @@ class Transport:
                 if response is not None:
                     response.close()
         raise SourceError("Publisher transport failed")
+
+    def _request_within_attempt_wall(self, timeout, fn):
+        """Run one publisher attempt inside a single wall-clock budget.
+
+        ``socket.create_connection`` applies the requests timeout to each
+        resolved address. A blackholed route therefore multiplies that
+        timeout by the address count, all inside one ``session.request``,
+        where the run deadline is not checked. Shrink every connect to the
+        time left in this attempt so the walk cannot outlive it.
+        """
+        deadline = time.monotonic() + timeout
+        original = socket.socket.connect
+
+        def connect(sock, address):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("publisher attempt wall exceeded")
+            current = sock.gettimeout()
+            sock.settimeout(remaining if current is None else min(current, remaining))
+            return original(sock, address)
+
+        socket.socket.connect = connect
+        try:
+            return fn()
+        finally:
+            socket.socket.connect = original
 
     def fetch(self, url, *, params=None, headers=None, body=None):
         raw, _headers = self._download(url, params=params, headers=headers, body=body)
@@ -1317,6 +1358,35 @@ def parse_vast(payload, digest, fetched):
     ]
 
 
+def _collect_aa_catalog(transport, key: str, basket):
+    """Follow free-list pages so a basket member past page 1 is not missing."""
+    headers = {"x-api-key": key}
+    rows = []
+    page = 1
+    fetched = None
+    while True:
+        if page > MAX_CATALOG_PAGES:
+            raise SourceError("Artificial Analysis catalog pagination exceeded the page bound")
+        payload, _page_digest, fetched = transport.fetch(
+            URLS["artificial-analysis"],
+            params={"page": page},
+            headers=headers,
+        )
+        try:
+            nxt = next_catalog_page(payload, requested_page=page)
+        except CatalogPageError as exc:
+            raise SourceError(str(exc)) from exc
+        rows.extend(payload["data"])
+        if nxt is None:
+            break
+        page = nxt
+    combined = {"status": 200, "data": rows}
+    raw = json.dumps(combined, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    archive = getattr(transport, "archive", None)
+    digest = archive_raw(Path(archive), raw) if archive is not None else hashlib.sha256(raw).hexdigest()
+    return parse_aa(combined, digest, fetched, basket)
+
+
 def collect_source(source, transport, start, end, *, env=None, basket=(), full_history=False):
     env = os.environ if env is None else env
     if source == "openrouter":
@@ -1364,7 +1434,7 @@ def collect_source(source, transport, start, end, *, env=None, basket=(), full_h
         key = env.get("ARTIFICIAL_ANALYSIS_API_KEY")
         if not key:
             raise SourceError("ARTIFICIAL_ANALYSIS_API_KEY is not configured")
-        return parse_aa(*transport.fetch(URLS[source], headers={"x-api-key": key}), basket)
+        return _collect_aa_catalog(transport, key, basket)
     if source == "vast":
         key = env.get("VAST_API_KEY")
         if not key:

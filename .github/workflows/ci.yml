@@ -14,6 +14,11 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # No cron. path_filter.py treats a non-push event with an empty BASE_SHA as
+  # an empty diff and fail-closes both gates, so a schedule on this workflow
+  # would start the full shard fan-out every night. workflow_dispatch is the
+  # manual stand-in. Deploy stays limited to a push to main.
+  workflow_dispatch:
 
 # Least privilege: this workflow only runs tests and deploys over SSH (the SSH
 # key is a secret, not the GITHUB_TOKEN). No job needs to write to the repo, so
@@ -793,6 +798,38 @@ jobs:
           assert_status /api/probe/freshness 200 "Bearer ${RADON_PROBE_FRESHNESS_TOKEN}"
           exit $fail
 
+  lint-typecheck:
+    name: Lint + typecheck
+    # Non-required: absent from deploy.needs and from
+    # .github/required-status-checks.json. A red run does not block a merge.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: ci-lint-typecheck-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      # Root install resolves @sinclair/typebox and @types/node for lib/tools.
+      # web/ install provides tsc, oxlint, and the Next types.
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile &
+          root=$!
+          bun install --frozen-lockfile --cwd web &
+          web=$!
+          wait "$root"
+          wait "$web"
+      - name: Oxlint
+        working-directory: web
+        run: bun run lint:oxlint
+      - name: tsc web
+        run: ./web/node_modules/typescript/bin/tsc -p web/tsconfig.json --noEmit --pretty false --incremental false
+      - name: tsc lib/tools
+        run: ./web/node_modules/typescript/bin/tsc -p lib/tsconfig.ci.json --noEmit --pretty false --incremental false
+
   e2e-financial-smoke:
     name: Playwright P0-financial smoke (non-gating, shard ${{ matrix.shard }}/2)
     # CIP-009: defer behind secret-scan (the app-images pattern) so the t=0
@@ -801,7 +838,21 @@ jobs:
     # exactly 40 across 2026-10-29..11-01), not the 20 first assumed here,
     # and every in-flight run shares it. Still non-gating for deploy.
     needs: [changes, secret-scan]
-    if: needs.changes.outputs.web == 'true'
+    # PRs run only with the run-e2e label, read on opened, synchronize, and
+    # reopened. labeled is not a workflow activity: it would restart every
+    # required job. Push to main and merge_group keep the web path filter.
+    # workflow_dispatch always runs these jobs. Same condition on
+    # e2e-setup-gate. scripts/tests/test_ci_gate_integrity.py.
+    if: >-
+      (
+        github.event_name == 'pull_request'
+        && contains(github.event.pull_request.labels.*.name, 'run-e2e')
+      )
+      || (
+        (github.event_name == 'push' || github.event_name == 'merge_group')
+        && needs.changes.outputs.web == 'true'
+      )
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # One serial `playwright test` (workers=1) ran ~263s and made this the
     # longest PR check. Three 1-worker shards paid ~65s of duplicated setup
@@ -1163,7 +1214,17 @@ jobs:
     # real Edge middleware setup gate is observable. Must never share web/.next,
     # port 3000 or the authless header with e2e-financial-smoke. Non-gating.
     needs: [changes, secret-scan]
-    if: needs.changes.outputs.web == 'true'
+    # Same run condition as e2e-financial-smoke.
+    if: >-
+      (
+        github.event_name == 'pull_request'
+        && contains(github.event.pull_request.labels.*.name, 'run-e2e')
+      )
+      || (
+        (github.event_name == 'push' || github.event_name == 'merge_group')
+        && needs.changes.outputs.web == 'true'
+      )
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy

@@ -33,6 +33,7 @@ SUDOERS = CLOUD_ROOT / "config" / "sudoers.d" / "radon-deploy"
 CANONICAL_ENV = (
     "CLERK_JWKS_URL=https://clerk.example.test/.well-known/jwks.json\n"
     "CLERK_ISSUER=https://clerk.example.test\n"
+    "CLERK_AUTHORIZED_PARTIES=https://app.example.test\n"
     "CLERK_SECRET_KEY=sk_live_secret\n"
     "ALLOWED_USER_IDS='user_a,user_b$NOT_EXPANDED'\n"
     "RADON_MCP_APP_BASE=http://127.0.0.1:3000\n"
@@ -41,6 +42,7 @@ CANONICAL_ENV = (
 EXPECTED = (
     "CLERK_JWKS_URL=https://clerk.example.test/.well-known/jwks.json\n"
     "CLERK_ISSUER=https://clerk.example.test\n"
+    "CLERK_AUTHORIZED_PARTIES=https://app.example.test\n"
     "ALLOWED_USER_IDS='user_a,user_b$NOT_EXPANDED'\n"
     "RADON_MCP_APP_BASE=http://127.0.0.1:3000\n"
 )
@@ -174,6 +176,7 @@ class TestContracts:
         deploy_text = DEPLOY.read_text(encoding="utf-8")
         keys = re.search(r"readonly MCP_ENV_KEYS=('[^']+')", deploy_text)
         assert keys
+        assert "CLERK_AUTHORIZED_PARTIES" in keys.group(1)
         assert keys.group(1) in SETUP.read_text(encoding="utf-8")
         assert keys.group(1) in ROOT_HELPER.read_text(encoding="utf-8")
 

@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from clients import prepaid_denylist, provider_cooldown
-from .contracts import (MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, ModelLadderExhausted, ModelResponseError, LadderResult, VisionResult, parse_json_object, parse_json_rows, safe_error_message, accept_tags_payload, accept_distill_payload)
+from .contracts import (MODEL_LADDER_ORDER, MODEL_LADDER_TIERS, MIN_FALLBACK_SLICE_S, ModelLadderExhausted, ModelResponseError, LadderResult, VisionResult, parse_json_object, parse_json_rows, safe_error_message, accept_tags_payload, accept_distill_payload)
 
 logger = logging.getLogger(__name__)
 
@@ -133,14 +133,22 @@ def acquire_model_slot(limiter, max_wait):
         raise
 
 
-def _invoke_provider(call, name, auth, model):
+# One in-flight call per provider. The first pass only probes the lock so the
+# ladder can fail over; a busy provider gets a second pass that waits for it,
+# because a busy subscription is still a working one.
+_PROVIDER_BUSY = "provider_busy"
+_BUSY_PROBE_SECONDS = 1.0
+_DEFERRED_LOCK_WAIT_SECONDS = 60.0
+
+
+def _invoke_provider(call, name, auth, model, *, lock_wait=_BUSY_PROBE_SECONDS):
     state = _ATTEMPT_STATE.get()
     lock = state.locks.get(name) if state else None
     if lock is None:
         scoped_timeout(120)
         return call(name, auth, model)
-    if not lock.acquire(timeout=scoped_timeout(1.0)):
-        raise RuntimeError("provider_busy")
+    if not lock.acquire(timeout=scoped_timeout(lock_wait)):
+        raise RuntimeError(_PROVIDER_BUSY)
     try:
         scoped_timeout(120)
         return call(name, auth, model)
@@ -1483,6 +1491,8 @@ LAST_RESORT_PROVIDER = "cerebras"
 # except FALLBACK_RESERVE_S for each later live rung, and never less than an
 # even split. An even split gave the first of six rungs 20s of 120s, so slow
 # but healthy multimodal replies timed out while later rungs had time to spare.
+# A rejected draft does not keep this leftover: each later live rung gets
+# MIN_FALLBACK_SLICE_S, and the deadline grows by only the shortfall.
 _FALLBACK_RESERVE_S = 20.0
 # A rung whose models all failed for a reason that does not clear in seconds
 # (missing model, billing, refused key) is still attempted, but stops reserving
@@ -1499,9 +1509,64 @@ def _rung_slice(remaining: float, live: int) -> float:
     return max(0.001, remaining / live, remaining - _FALLBACK_RESERVE_S * (live - 1))
 
 
+def _extend_fallback_deadline(state: AttemptState, live: int) -> float:
+    """Give each remaining rung MIN_FALLBACK_SLICE_S after a rejected draft.
+
+    The success path does not call this, so an accepted draft still finishes
+    inside the original read_timeout. The extension is only the shortfall.
+    """
+    live = max(1, live)
+    needed = MIN_FALLBACK_SLICE_S * live
+    remaining = state.deadline - state.clock()
+    if remaining < needed:
+        state.deadline = state.clock() + needed
+        remaining = needed
+    return remaining
+
+
+def _fallback_slice(remaining: float, live: int) -> float:
+    """Current rung's slice, leaving MIN_FALLBACK_SLICE_S for each later rung."""
+    live = max(1, live)
+    reserved = MIN_FALLBACK_SLICE_S * (live - 1)
+    current = remaining - reserved
+    if current < MIN_FALLBACK_SLICE_S:
+        current = remaining / live
+    return max(0.001, min(remaining, current))
+
+
+def _defer_busy_provider(queue, position, state, name, model, lock_wait) -> None:
+    """Retry a busy provider after the other rungs, waiting for its lock that time.
+
+    The retry still runs ahead of a pending last-resort rung.
+    """
+    if state is not None:
+        state.seen.discard((name, model))
+    if lock_wait != _BUSY_PROBE_SECONDS:
+        return
+    last_resort = next((index for index in range(position, len(queue))
+                        if queue[index][0] == LAST_RESORT_PROVIDER), len(queue))
+    queue.insert(last_resort, (name, _DEFERRED_LOCK_WAIT_SECONDS))
+
+
 def _rung_dead(name: str) -> bool:
     until = _dead_until.get(name)
     return until is not None and until > _dead_clock()
+
+
+def _note_provider_cooldown(name: str, status: int, body_text: str, env: Mapping[str, str]) -> bool:
+    """Record a cooldown for a spent quota or a reset-naming 429.
+
+    Returns True when the failure is an exhausted quota, so the rung's other
+    models (same account) are not tried. A bare 429 records nothing: the next
+    document or oneshot may try the rung again (scripts/tests/test_research_runtime.py).
+    """
+    seconds = provider_cooldown.reset_seconds(body_text, None)
+    if provider_cooldown.is_quota_exhausted(body_text):
+        provider_cooldown.note_quota(name, seconds, env)
+        return True
+    if status == 429 and seconds is not None:
+        provider_cooldown.note(name, seconds, env)
+    return False
 
 
 def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
@@ -1574,12 +1639,19 @@ def _run_ladder(
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     state = _ATTEMPT_STATE.get()
     refresh_token = refresh_token or (state.refresh if state else None) or _refresh_subscription_token
+    # A continuation already recorded the rejected winner in seen. A fresh
+    # request starts empty and only reserves fallback time after a rejection.
+    rejected_draft = state is not None and bool(state.seen)
     attempted: list[str] = []
     skipped: list[str] = []
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
     keyed = {name for name in order if name != "cursor" and _auth_for(name, env) is not None}
 
-    for position, name in enumerate(order):
+    queue = [(name, _BUSY_PROBE_SECONDS) for name in order]
+    position = 0
+    while position < len(queue):
+        name, lock_wait = queue[position]
+        position += 1
         if name == "cursor":
             skipped.append("cursor:unwired")
             logger.info("%s skip provider=cursor reason=unwired", log_prefix)
@@ -1620,12 +1692,17 @@ def _run_ladder(
                     skipped.append(f"{name}:already_attempted")
                     continue
                 state.attempt_deadline = None
-                scoped_timeout(300.0)
                 remaining = state.deadline - state.clock()
-                live = sum(1 for candidate in order[position + 1:]
-                           if candidate in keyed and not _rung_dead(candidate))
-                state.slice_seconds = _rung_slice(remaining, live + 1)
+                live = sum(1 for candidate, _wait in queue[position:]
+                           if candidate in keyed and not _rung_dead(candidate)
+                           and not provider_cooldown.rate_limited(candidate, env))
+                if rejected_draft:
+                    remaining = _extend_fallback_deadline(state, live + 1)
+                    state.slice_seconds = _fallback_slice(remaining, live + 1)
+                else:
+                    state.slice_seconds = _rung_slice(remaining, live + 1)
                 state.attempt_deadline = state.clock() + state.slice_seconds
+                scoped_timeout(300.0)
                 state.seen.add((name, model))
             if limiter is not None and not acquire_model_slot(limiter, _nvidia_max_wait(env)):
                 attempted.append(f"{name}:rate_limited_local")
@@ -1637,7 +1714,9 @@ def _run_ladder(
                 )
                 break
             try:
-                status, raw, payload = _invoke_provider(call_provider, name, auth, model)
+                status, raw, payload = _invoke_provider(
+                    call_provider, name, auth, model, lock_wait=lock_wait
+                )
             except ModelResponseError:
                 raise
             except RuntimeError as exc:
@@ -1646,6 +1725,9 @@ def _run_ladder(
                 logger.warning(
                     "%s provider=%s model=%s failed %s", log_prefix, name, model, code
                 )
+                if code == _PROVIDER_BUSY:
+                    _defer_busy_provider(queue, position, state, name, model, lock_wait)
+                    break
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
@@ -1707,9 +1789,8 @@ def _run_ladder(
                     _body_snippet(body_text),
                 )
             if payload is None or _is_hard_fail(status, payload):
-                code = _classify_http_failure(
-                    status, _error_envelope(payload) if status == 200 else body_text
-                )
+                failure_text = _error_envelope(payload) if status == 200 else body_text
+                code = _classify_http_failure(status, failure_text)
                 attempted.append(f"{name}:{code}")
                 logger.warning(
                     "%s provider=%s model=%s auth=%s failed %s status=%s body=%r",
@@ -1721,19 +1802,13 @@ def _run_ladder(
                     status,
                     _body_snippet(body_text) if status != 200 else "",
                 )
-                if status == 429:
-                    # Persist only when the body or headers name a reset.
-                    # A bare 429 still fails this request and this model list,
-                    # but the next document or oneshot may try the rung again
-                    # (scripts/tests/test_research_runtime.py).
-                    seconds = provider_cooldown.reset_seconds(body_text, None)
-                    if seconds is not None:
-                        provider_cooldown.note(name, seconds, env)
+                if _note_provider_cooldown(name, status, failure_text, env) or status == 429:
                     break
                 continue
 
             if not isinstance(payload, dict):
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )
@@ -1745,6 +1820,7 @@ def _run_ladder(
                 raise
             except (ValueError, TypeError, KeyError):
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )
@@ -1752,6 +1828,7 @@ def _run_ladder(
 
             if parsed is None:
                 attempted.append(f"{name}:unparseable")
+                rejected_draft = True
                 logger.warning(
                     "%s provider=%s model=%s unparseable", log_prefix, name, model
                 )

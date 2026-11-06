@@ -911,6 +911,23 @@ def _option_history_bars(client: IBClient, contract, budget: Optional[OptionHist
     return trade_bars, request("MIDPOINT")
 
 
+def _load_position_marks(positions: list) -> dict:
+    return load_session_marks(
+        option_mark_key(p.get("symbol"), p.get("expiry"), p.get("strike"), p.get("right"))
+        for p in positions
+        if str(p.get("secType") or "").upper() == "OPT"
+    )
+
+
+def _broker_marks(client: IBClient) -> dict:
+    """IB's own per-position marks by conId; empty leaves the normal mark chain."""
+    try:
+        return {item.contract.conId: item.marketPrice for item in client.ib.portfolio()}
+    except Exception as exc:
+        print(f"  Warning: IB portfolio marks unavailable: {exc}")
+        return {}
+
+
 def _stamp_position_price(
     pos: dict,
     ticker,
@@ -918,6 +935,7 @@ def _stamp_position_price(
     client: IBClient,
     today: str,
     history_budget: Optional[OptionHistoryBudget] = None,
+    broker_marks: Optional[dict] = None,
 ) -> bool:
     """Write marketPrice fields from the live ticker, session cache, or history."""
     sec_type = pos.get("secType")
@@ -944,6 +962,8 @@ def _stamp_position_price(
         session_mark=session_marks.get(key) if key else None,
         today=today,
         fetch_history=fetch if key and contract is not None else None,
+        volume=getattr(ticker, "volume", None),
+        broker_mark=(broker_marks or {}).get(getattr(contract, "conId", None)),
     )
     dirty = False
     if key and updated is not None:
@@ -1333,12 +1353,13 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
             f"position(s): {missing[:8]} — last trade or last bid/offer used if known"
         )
 
-    session_marks = load_session_marks()
+    session_marks = _load_position_marks(positions)
     today = _et_today()
     dirty = False
     history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
+    broker_marks = _broker_marks(client)
     for pos, ticker in zip(positions, tickers):
-        dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget) or dirty
+        dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget, broker_marks) or dirty
         client.cancel_market_data(pos['contract'])
         del pos['contract']  # Remove non-serializable contract object
     if dirty:
@@ -2299,12 +2320,13 @@ def main():
 
             # ── Phase 5: Read all results ──
             # Market prices
-            session_marks = load_session_marks()
+            session_marks = _load_position_marks(positions)
             today = _et_today()
             dirty = False
             history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
+            broker_marks = _broker_marks(client)
             for pos, ticker in zip(positions, tickers):
-                dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget) or dirty
+                dirty = _stamp_position_price(pos, ticker, session_marks, client, today, history_budget, broker_marks) or dirty
                 client.ib.cancelMktData(pos['contract'])
                 del pos['contract']
             if dirty:

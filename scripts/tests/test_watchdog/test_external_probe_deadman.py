@@ -535,9 +535,13 @@ def test_caddy_floor_with_healthd_down_outside_deploy_still_pages(
     assert outcome.severity == "P1"
 
 
-def test_caddy_floor_with_readable_down_aggregate_during_deploy_still_pages(
+def test_caddy_floor_with_readable_down_aggregate_during_fresh_journal_is_suppressed(
     tmp_path, monkeypatch
 ) -> None:
+    # 2026-11-03 23:30Z page e531039d6de89f132404215a5b4586d7. Deploy via SSH
+    # was in progress. The off-box probe recorded the Caddy floor, then
+    # restart-managed brought healthd back before the serving path was up.
+    # The watchdog saw a readable down aggregate and paged the stale floor.
     from scripts.watchdog import external_probe
 
     monkeypatch.setattr(
@@ -553,7 +557,73 @@ def test_caddy_floor_with_readable_down_aggregate_during_deploy_still_pages(
     response.status = 200
     response.read.return_value = (
         b'{"schema_version":3,"ok":false,"overall_state":"down",'
+        b'"generated_at":"2026-11-03T23:29:30Z"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is False
+    assert outcome.status == "healthy"
+    assert outcome.severity is None
+    assert "deploy window" in outcome.message
+
+
+def test_caddy_floor_with_readable_down_aggregate_outside_journal_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=1, detail="status_unreachable:caddy"
+        ),
+    )
+    _deploy_marker(tmp_path, monkeypatch)
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":3,"ok":false,"overall_state":"down",'
         b'"generated_at":"2026-11-01T03:36:00Z"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_caddy_floor_with_readable_down_aggregate_and_stranded_journal_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    import os
+
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=1, detail="status_unreachable:caddy"
+        ),
+    )
+    _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
+    journal = tmp_path / "deploy-transition.json"
+    stamp = (
+        NOW
+        - timedelta(seconds=external_probe.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS + 60)
+    ).timestamp()
+    os.utime(journal, (stamp, stamp))
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":3,"ok":false,"overall_state":"down",'
+        b'"generated_at":"2026-11-03T23:29:30Z"}'
     )
     with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = response

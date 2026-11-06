@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-10-29T20:08:39Z",
-  "node_count": 4233,
-  "edge_count": 8671,
+  "generated_at": "2026-11-03T17:16:23Z",
+  "node_count": 4343,
+  "edge_count": 8815,
   "areas": {
-    "web": 2388,
+    "web": 2398,
     "site": 159,
-    "scripts": 1512,
-    "cloud": 126,
+    "scripts": 1580,
+    "cloud": 158,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -25,7 +25,7 @@
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 244
+      "count": 246
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 463
+      "count": 462
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1130
+      "count": 1139
     },
     {
       "id": "site/app",
@@ -100,7 +100,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 193
+      "count": 195
     },
     {
       "id": "scripts/ai_cycle",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 148
+      "count": 150
     },
     {
       "id": "scripts/backtest",
@@ -125,12 +125,12 @@
     {
       "id": "scripts/ci",
       "area": "scripts",
-      "count": 8
+      "count": 11
     },
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 29
+      "count": 30
     },
     {
       "id": "scripts/control_service",
@@ -193,6 +193,11 @@
       "count": 19
     },
     {
+      "id": "scripts/model_gateway",
+      "area": "scripts",
+      "count": 23
+    },
+    {
       "id": "scripts/monitor_daemon",
       "area": "scripts",
       "count": 21
@@ -210,7 +215,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 47
+      "count": 48
     },
     {
       "id": "scripts/runner",
@@ -230,7 +235,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 798
+      "count": 834
     },
     {
       "id": "scripts/trade_blotter",
@@ -270,12 +275,12 @@
     {
       "id": "cloud/scripts",
       "area": "cloud",
-      "count": 15
+      "count": 22
     },
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 108
+      "count": 133
     },
     {
       "id": "lib/tools",
@@ -342,21 +347,21 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 107,
+      "in": 109,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 104,
+      "in": 106,
       "out": 1,
       "test": false
     },
     {
       "id": "scripts/db/writer.py",
       "area": "scripts",
-      "in": 100,
+      "in": 101,
       "out": 5,
       "test": false
     },
@@ -398,8 +403,15 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 65,
+      "in": 67,
       "out": 4,
+      "test": false
+    },
+    {
+      "id": "scripts/api/server.py",
+      "area": "scripts",
+      "in": 50,
+      "out": 18,
       "test": false
     },
     {
@@ -407,13 +419,6 @@
       "area": "web",
       "in": 65,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/api/server.py",
-      "area": "scripts",
-      "in": 50,
-      "out": 17,
       "test": false
     },
     {
@@ -454,7 +459,7 @@
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 51,
+      "in": 50,
       "out": 5,
       "test": false
     },
@@ -494,6 +499,13 @@
       "test": false
     },
     {
+      "id": "web/e2e/clear-fixtures.ts",
+      "area": "web",
+      "in": 38,
+      "out": 10,
+      "test": true
+    },
+    {
       "id": "web/lib/useViewport.ts",
       "area": "web",
       "in": 46,
@@ -501,17 +513,17 @@
       "test": false
     },
     {
-      "id": "web/e2e/clear-fixtures.ts",
-      "area": "web",
-      "in": 36,
-      "out": 10,
-      "test": true
-    },
-    {
       "id": "scripts/clients/ib_client.py",
       "area": "scripts",
       "in": 42,
       "out": 3,
+      "test": false
+    },
+    {
+      "id": "scripts/utils/__init__.py",
+      "area": "scripts",
+      "in": 44,
+      "out": 0,
       "test": false
     },
     {
@@ -522,16 +534,16 @@
       "test": false
     },
     {
-      "id": "scripts/utils/__init__.py",
+      "id": "scripts/api/auth.py",
       "area": "scripts",
       "in": 43,
       "out": 0,
       "test": false
     },
     {
-      "id": "scripts/api/auth.py",
+      "id": "scripts/research/__init__.py",
       "area": "scripts",
-      "in": 43,
+      "in": 42,
       "out": 0,
       "test": false
     },
@@ -575,13 +587,6 @@
       "area": "scripts",
       "in": 36,
       "out": 3,
-      "test": false
-    },
-    {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 38,
-      "out": 0,
       "test": false
     }
   ],

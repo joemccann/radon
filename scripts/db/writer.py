@@ -2989,7 +2989,7 @@ def upsert_ticker_lookup_cache(query: str, result: str, expires_at: str) -> None
 
 
 def upsert_reconciliation_log(snapshot_at: str, payload: dict[str, Any]) -> None:
-    """Phase 4 — replaces data/reconciliation.json."""
+    """Phase 4 reconciliation log."""
     db = get_db()
     db.execute(
         """

@@ -83,6 +83,32 @@ def _log(message: str) -> None:
     print(f"[{SERVICE}] {message}", file=sys.stderr)
 
 
+# libsql raises a bare ValueError. SQLite statement text also starts with
+# "Hrana", so the HTTP status or upstream-connect body is the wire signal.
+_PERSIST_TRANSPORT_STATUSES = ("status=502", "status=503", "status=504")
+_PERSIST_TRANSPORT_BODIES = (
+    "connect to upstream failed",
+    "upstream forward failed",
+)
+
+
+def _is_persist_transport(exc: BaseException) -> bool:
+    """True for a Turso gateway blip on a history or snapshot write.
+
+    A statement error stays fatal. Do not retry the uncertain insert in
+    this process; the next timer does.
+    """
+    if not isinstance(exc, ValueError):
+        return False
+    message = str(exc)
+    lowered = message.lower()
+    if "sqlite error" in lowered or "no such table" in lowered:
+        return False
+    if any(status in message for status in _PERSIST_TRANSPORT_STATUSES):
+        return True
+    return any(body in lowered for body in _PERSIST_TRANSPORT_BODIES)
+
+
 # ── math ──────────────────────────────────────────────────────────
 
 def pct_rank(value: float, low: float, high: float) -> float:
@@ -564,7 +590,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    payload = run(no_db=args.no_db)
+    try:
+        payload = run(no_db=args.no_db)
+    except ValueError as exc:
+        if not _is_persist_transport(exc):
+            raise
+        # Type only. The error row already holds the gateway text.
+        _log(f"cycle transport non-fatal: {type(exc).__name__}")
+        return 0
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

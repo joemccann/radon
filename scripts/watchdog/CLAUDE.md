@@ -29,7 +29,7 @@ Rides the continuous bucket only (`__main__._cmd_bucket`, NOT in `SCHEDULED_SERV
 
 Env: `PUSHOVER_USER`, `PUSHOVER_TOKEN` (absent → degrade gracefully, just write rows).
 
-A delivered P1 also inserts `watchdog_pages` (best-effort). VPS `radon-grok-page-responder` claims the row from the dedicated clone. Live deploys page `radon deploy live` at priority 0. Enqueue must never block or unmute the page. Spec: `docs/grok-page-responder.md`.
+A delivered P1 also inserts `watchdog_pages` (best-effort). After finalization the isolated VPS `radon-grok-responder` claims the row; until then the legacy `radon-grok-page-responder` claims it from the dedicated clone. Live deploys page `radon deploy live` at priority 0. Enqueue must never block or unmute the page. Spec: `docs/grok-page-responder.md`.
 
 ---
 
@@ -71,4 +71,4 @@ When IB transitions from `awaiting_2fa` → `authenticated`, the handler clears 
 
 `error_text()` (`check.py`) renders a writer's error blob by taking the first non-empty of `message` > `summary` > `detail` > `reason` — writers disagree on the key (`drift_audit` writes `summary`, FastAPI paths write `detail`, reconcile writes `reason`). A writer supplying none of the four renders `in error state: unknown`.
 
-Event-odds ownership: `GET /event-odds/{ticker}` triggers refresh. No VPS timer owns it; keep its health category on-demand and exclude it from scheduled watchdog buckets.
+Event-odds ownership: `GET /event-odds/{ticker}` is request-driven. No VPS timer owns it; keep its health category on-demand and exclude it from scheduled watchdog buckets.

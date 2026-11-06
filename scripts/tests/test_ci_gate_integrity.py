@@ -9,6 +9,7 @@ waits on (REL-070 / R-201).
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -464,6 +465,104 @@ def test_darwin_runner_exception_only_verifies_native_consumer_artifacts() -> No
         "/usr/bin/sandbox-exec",
     ):
         assert evidence in commands, f"native artifact exception lost its required proof: {evidence}"
+
+
+def _top_level(expr: str, op: str) -> list[str]:
+    parts, depth, quote, start, i = [], 0, False, 0, 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch == "'":
+            quote = not quote
+        elif not quote and ch == "(":
+            depth += 1
+        elif not quote and ch == ")":
+            depth -= 1
+        elif not quote and depth == 0 and expr.startswith(op, i):
+            parts.append(expr[start:i].strip())
+            i += len(op)
+            start = i
+            continue
+        i += 1
+    parts.append(expr[start:].strip())
+    return [part for part in parts if part]
+
+
+def _outer_parens(expr: str) -> bool:
+    if not (expr.startswith("(") and expr.endswith(")")):
+        return False
+    depth = 0
+    for index, ch in enumerate(expr):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return index == len(expr) - 1
+    return False
+
+
+def _eval_e2e(expr: str, env: dict) -> bool:
+    """Walk the Playwright job `if`. Unknown atoms fail the test."""
+    expr = " ".join(expr.split())
+    if expr.startswith("${{") and expr.endswith("}}"):
+        expr = expr[3:-2].strip()
+    if _outer_parens(expr):
+        return _eval_e2e(expr[1:-1], env)
+    disjuncts = _top_level(expr, "||")
+    if len(disjuncts) > 1:
+        return any(_eval_e2e(part, env) for part in disjuncts)
+    conjuncts = _top_level(expr, "&&")
+    if len(conjuncts) > 1:
+        return all(_eval_e2e(part, env) for part in conjuncts)
+    if expr.startswith("contains(") and expr.endswith(")"):
+        assert "'run-e2e'" in expr, expr
+        return "run-e2e" in env["labels"]
+    left, right = (side.strip() for side in expr.split(" == ", 1))
+    return env[left] == right.strip("'")
+
+
+def test_playwright_jobs_follow_the_label_and_do_not_use_a_schedule() -> None:
+    """PRs run the non-gating Playwright jobs only with the run-e2e label.
+
+    A schedule trigger is absent: path_filter.py fail-closes an empty BASE_SHA
+    to both gates, so cron on this workflow would start the shard fan-out.
+    workflow_dispatch is the manual stand-in. The jobs stay out of deploy.needs,
+    so a skip does not open the production host, and they are not required
+    status checks, so a skip does not block a merge.
+    """
+    workflow = _workflow()
+    assert "schedule" not in workflow["on"], workflow["on"]
+    assert "workflow_dispatch" in workflow["on"]
+    jobs = workflow["jobs"]
+    smoke = " ".join(jobs["e2e-financial-smoke"]["if"].split())
+    setup = " ".join(jobs["e2e-setup-gate"]["if"].split())
+    assert smoke == setup
+    declared = json.loads(
+        (WORKFLOW.parent.parent / "required-status-checks.json").read_text(encoding="utf-8")
+    )["contexts"]
+    for name in ("e2e-financial-smoke", "e2e-setup-gate"):
+        assert name not in jobs["deploy"]["needs"]
+        assert jobs[name]["name"] not in declared
+    cases = [
+        ("pull_request", "true", [], False),
+        ("pull_request", "false", [], False),
+        ("pull_request", "true", ["run-e2e"], True),
+        ("pull_request", "false", ["run-e2e"], True),
+        ("pull_request", "true", ["other"], False),
+        ("push", "true", [], True),
+        ("push", "false", ["run-e2e"], False),
+        ("merge_group", "true", [], True),
+        ("merge_group", "false", ["run-e2e"], False),
+        ("workflow_dispatch", "false", [], True),
+        ("schedule", "true", ["run-e2e"], False),
+    ]
+    for event, web, labels, expected in cases:
+        env = {
+            "github.event_name": event,
+            "needs.changes.outputs.web": web,
+            "labels": labels,
+        }
+        assert _eval_e2e(smoke, env) is expected, (event, web, labels)
 
 
 def test_native_runner_exception_never_accepts_other_jobs_or_floating_labels() -> None:

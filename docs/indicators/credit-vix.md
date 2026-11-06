@@ -140,6 +140,10 @@ Fetcher rehydrates from its own table (R-123).
 Register in `setup-vps.sh`, `test_systemd_services.py`, and
 `installed-units.sha256`.
 
+A libsql HTTP 502, 503, or 504 on the history or snapshot write keeps the
+error row and exits 0. The next timer retries. A SQLite statement error
+still exits 1. See `credit-vix-persist-transport` in the incident runbook.
+
 ### Unavailable aligned data
 
 REL-297 / R-716: every cycle requires at least one date shared by SHY, HYG

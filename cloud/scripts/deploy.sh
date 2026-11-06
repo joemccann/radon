@@ -147,7 +147,7 @@ readonly RELEASE_ARTIFACTS=(node_modules web/node_modules web/.next web/.env)
 # knobs) instead of the full secret set. It sits next to the canonical env
 # (/etc/radon/mcp.env in production, which is what the unit loads).
 readonly MCP_ENV_FILE="${RADON_MCP_ENV_FILE:-$(dirname "$ENV_FILE_DEFAULT")/mcp.env}"
-readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
+readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|CLERK_AUTHORIZED_PARTIES|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
 readonly ROLLBACK_ARTIFACTS=(node_modules web/node_modules web/.next web/.env .venv)
 readonly REUSE_LIVE_MARKER=".deploy-reuse-live"
 readonly PRESTAGE_FILE="${RADON_DEPLOY_PRESTAGE:-/home/radon/.radon-prestage}"

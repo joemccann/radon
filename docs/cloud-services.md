@@ -220,22 +220,14 @@ the `/journal` and `/orders` pages derive their view from the same rows:
 
 - `web/app/api/journal/route.ts` reads `journal` directly (one row per
   execution-grouped action) and returns it as `{ trades: [...] }`.
-- `web/app/api/blotter/route.ts` reads the same rows AND `data/blotter.json`,
-  then unions them through `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()`
-  into the historical-trades shape that
-  `WorkspaceSections.HistoricalTradesSection` consumes (closed/open arrays,
-  executions, cost basis, proceeds). The union prefers explicit P&L fields
-  on journal rows when present (post-`bbc776e` rehydrate), and falls back
-  to `data/blotter.json` for `realized_pnl` / `cost_basis` / `proceeds`
-  when the journal row is from before the lot-matched fields existed.
-  Trades present only in legacy are spliced into the output. As soon as
-  the next IB Flex re-rehydrate runs, journal rows take precedence and the
-  fallback retires per-row.
+- `web/app/api/blotter/route.ts` reads the same rows and passes them through
+  `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` into the
+  historical-trades shape that `WorkspaceSections.HistoricalTradesSection`
+  consumes (closed/open arrays, executions, cost basis, proceeds).
 - Writers: `scripts/journal_rehydrate.py` (Flex Query 1442520, working,
   ≤365d backfill) and `scripts/monitor_daemon/handlers/journal_sync.py`
-  (live IB session fills via `client.get_fills()`). Both dual-write to
-  `data/trade_log.json` and the `journal` table; both use `ib_exec_id`
-  for idempotent dedupe.
+  (live IB session fills via `client.get_fills()`). Both write the `journal`
+  table and use `ib_exec_id` for idempotent dedupe.
 - Gap sensors (alert-only, pure Turso): daily `journal-reconcile`
   (monitor daemon, 26h window) and continuous `journal-gap-sli` (every
   5m; `service_health.last_error` carries structured
@@ -244,14 +236,8 @@ the `/journal` and `/orders` pages derive their view from the same rows:
   `journal_sync` do not false-positive). Repair with
   `scripts/backfill_journal_from_executed_orders.py`.
 
-`data/blotter.json` (Flex Query 1422766, broken IB-side at 2026-03-26)
-and `data/trade_log.json` are **file mirrors / fallbacks** — the
-`/orders` route reads them alongside the journal so historical P&L is
-preserved while the journal table is being re-rehydrated. The
-standalone Flex Query 1422766 path lives on as the `POST /api/blotter`
-refresh hook for backwards compatibility but
-`scripts/trade_blotter/flex_query.py` and `blotter_service.py` are
-marked deprecated. Don't extend them.
+`blotter.json` and `trade_log.json` are retired. A post-deploy hook archived
+the production copies under `~/retired-json/`.
 
 ## Bootstrap & disaster recovery
 
@@ -382,9 +368,13 @@ journald on the VPS is on-box only (capped at 1G) and the only copy: `ForwardToS
 
 ### Grok P1 responder (dedicated VPS clone)
 
-`radon-grok-page-responder.timer` claims `watchdog_pages` from
+After [finalization](grok-page-responder.md#finalize-and-verify),
+`radon-grok-responder.timer` claims `watchdog_pages` as the isolated
+`radon-responder` account. Until then, and after a rollback, the legacy
+`radon-grok-page-responder.timer` claims them from
 `/home/radon/radon-page-responder` with a stripped env
-(`/home/radon/radon-page-responder.env`). It must not use
+(`/home/radon/radon-page-responder.env`). Nothing provisions that legacy pair
+(DS-2026-10-29-01); an existing host keeps its copy only as the rollback target. It must not use
 `/home/radon/radon` or `/home/radon/radon-cloud/.env`. Laptop launchd is
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
@@ -434,7 +424,10 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   with the caller's own token; allowlisted operator token (the same
   `ALLOWED_USER_IDS` FastAPI enforces, failing CLOSED when empty) →
   `operator_*` reads proxied to the local Next.js routes with the caller's
-  own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
+  own token. When `CLERK_AUTHORIZED_PARTIES` is set, the operator rung also
+  requires the token's `azp` to be listed (or absent), the same app binding
+  FastAPI and the Next.js middleware apply; demo-trial tokens are unaffected.
+  No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
   JWKS lookups are capped at `MAX_JWKS_INFLIGHT` (4) concurrent verifications;
   a caller past the cap gets a retryable `503 authentication unavailable`

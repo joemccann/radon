@@ -216,6 +216,12 @@ CROSS_TREE_CONTRACTS = (
         ),
     ),
     CrossTreeContract(
+        # The pre-push hook's Oxlint config is pinned to the ESLint perimeter
+        # file list. A web-only edit of either file has to run that pin.
+        patterns=("web/eslint.config.mjs", "web/oxlint.perimeter.json"),
+        tests=("scripts/tests/test_pre_push.py",),
+    ),
+    CrossTreeContract(
         patterns=("web/lib/serviceHealthWindows.ts",),
         tests=(
             "cloud/tests/test_nextjs_db_watchdog.py::TestHealthRowServiceIsInBothCatalogs::test_registered_in_the_typescript_catalog",
@@ -290,6 +296,10 @@ CROSS_TREE_CONTRACTS = (
     CrossTreeContract(
         patterns=("web/bun.lock",),
         tests=("scripts/tests/test_bun_lock_platforms.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/package.json", "web/.oxlintrc.json"),
+        tests=("scripts/tests/test_ci_lint_typecheck_job.py",),
     ),
 )
 

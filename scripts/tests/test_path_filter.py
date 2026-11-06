@@ -366,6 +366,13 @@ def test_every_tree_read_by_a_vitest_test_routes_to_the_web_gate() -> None:
 # --- T-157: the python gate must own everything pytest reads ---------------
 
 
+def test_perimeter_lint_files_run_the_pre_push_pin() -> None:
+    for path in ("web/eslint.config.mjs", "web/oxlint.perimeter.json"):
+        selection = select_gates([path])
+        assert selection.python is False
+        assert "scripts/tests/test_pre_push.py" in selection.contract_tests
+
+
 def test_python_contracts_fire_for_site_plates_and_web_lib() -> None:
     """The ⛔ PII guard and the account-figure guard live in pytest.
 

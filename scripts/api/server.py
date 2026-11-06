@@ -5275,6 +5275,10 @@ async def informed_flow_get(ticker: str):
 # ── Event odds (F5 — Polymarket overlay) ────────────────────────────
 
 _EVENT_ODDS_DIR = DATA_DIR / "event_odds"
+# Polymarket midpoints do not move intra-minute. Match the 7h open-hours
+# window in web/lib/serviceHealthWindows.ts so a panel poll does not spawn
+# fetch_event_odds.py (PERF-043).
+_EVENT_ODDS_CACHE_TTL_S = 7 * 60 * 60
 
 
 @app.get("/event-odds/{ticker}")
@@ -5286,11 +5290,18 @@ async def event_odds_get(ticker: str):
     persists the per-ticker cache, and returns the overlay payload. 200 +
     ``missing`` flag for a ticker with no mapped markets (never 4xx for a
     legitimate empty state); the on-disk cache stays the fallback when the live
-    fetch fails.
+    fetch fails. A cache whose ``scan_time`` is inside
+    ``_EVENT_ODDS_CACHE_TTL_S`` is served without a spawn (PERF-043).
     """
     upper = ticker.upper()
     if not _TICKER_RE.match(upper):
         raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    cached = _read_cache(_EVENT_ODDS_DIR / f"{upper}.json")
+    if isinstance(cached, dict):
+        age = _cache_age_seconds(cached)
+        if age is not None and age < _EVENT_ODDS_CACHE_TTL_S:
+            return cached
 
     result = await run_script("fetch_event_odds.py", [upper, "--json"], timeout=60)
     if result.ok and isinstance(result.data, dict) and not result.data.get("error"):

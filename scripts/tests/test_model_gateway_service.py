@@ -329,3 +329,294 @@ def test_rung_slice_never_starves_and_last_rung_gets_everything():
     assert engine._rung_slice(120, 4) == pytest.approx(60)
     assert engine._rung_slice(40, 4) == pytest.approx(10)  # even-split floor
     assert engine._rung_slice(0, 3) > 0
+
+
+def test_rejected_continuation_gives_each_later_rung_its_minimum(monkeypatch, fresh_rungs):
+    """A caller-rejected first draft must not leave the next rungs a few seconds."""
+    now = [0.0]
+    gateway = service(monkeypatch, clock=lambda: now[0])
+    from model_gateway import engine
+    from model_gateway.contracts import MIN_FALLBACK_SLICE_S
+    monkeypatch.setattr(engine.provider_cooldown, "rate_limited", lambda *_a, **_k: False)
+    slices = []
+
+    def call(name, *a, **kw):
+        slices.append((name, engine.scoped_timeout(300)))
+        if name == "antigravity":
+            now[0] += 79  # uses the generous first slice, then the caller rejects it
+            return answer(name, {"ok": True})
+        if name == "grok":
+            return 503, "busy", {"error": "busy"}
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    payload = {"instruction": "facts", "read_timeout": 120,
+               "providers": ["antigravity", "grok", "codex"]}
+    first = gateway.handle("json", payload)
+    assert slices[0] == ("antigravity", pytest.approx(80))  # success-path slice, unchanged
+    gateway.handle("json", {**payload, "continuation": first["continuation"]})
+    fallback = [(name, timeout) for name, timeout in slices if name != "antigravity"]
+    assert [name for name, _timeout in fallback] == ["grok", "codex"]
+    assert all(timeout >= MIN_FALLBACK_SLICE_S - 0.01 for _name, timeout in fallback)
+
+
+def test_in_engine_rejected_draft_does_not_starve_later_rungs(monkeypatch, fresh_rungs):
+    now = [0.0]
+    from model_gateway import engine
+    from model_gateway.contracts import MIN_FALLBACK_SLICE_S
+    monkeypatch.setattr(engine, "_auth_for", lambda name, env: engine.AuthMaterial("fixture", "subscription", "test"))
+    monkeypatch.setattr(engine, "_model_for", lambda name, env, **kw: name + "-model")
+    monkeypatch.setattr(engine.provider_cooldown, "rate_limited", lambda *_a, **_k: False)
+    slices = []
+
+    def call(name, *a, **kw):
+        slices.append((name, engine.scoped_timeout(300)))
+        if name == "anthropic":
+            now[0] += 70
+            return answer(name, {"ok": False})
+        if name == "grok":
+            return 503, "busy", {"error": "busy"}
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    with engine.attempt_scope(deadline=120, seen=set(), clock=lambda: now[0]):
+        result = engine.complete_multimodal_json(
+            "facts", providers=["anthropic", "grok", "codex"], read_timeout=120,
+            accept=lambda obj: obj.get("ok") is True,
+        )
+    assert slices[0] == ("anthropic", pytest.approx(80))  # success-path slice: 120s minus 20s for each later rung
+    assert result.provider == "codex"
+    assert all(timeout >= MIN_FALLBACK_SLICE_S - 0.01 for name, timeout in slices if name != "anthropic")
+
+
+# Live quota bodies from radon-model-gateway.service (2026-11-05), secrets-free.
+CODEX_USAGE_LIMIT_BODY = (
+    '{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached",'
+    '"plan_type":"pro","resets_at":1793994517}}'
+)
+AGY_QUOTA_BODY = (
+    "warning: --mode plan has no effect in print mode\n"
+    "error: Individual quota reached. Please upgrade your subscription to increase "
+    "your limits. Resets in 24h34m35s. AGY_ERR_QUOTA"
+)
+AGY_QUOTA_NO_RESET_BODY = "error: Individual quota reached. AGY_ERR_QUOTA"
+
+
+def quota_clock(monkeypatch, tmp_path, start):
+    from clients import provider_cooldown
+    now = [start]
+    monkeypatch.setenv("RADON_PROVIDER_COOLDOWN_STATE", str(tmp_path / "cooldown.json"))
+    monkeypatch.setattr(provider_cooldown, "_now", lambda: now[0])
+    return now
+
+
+def scripted(monkeypatch, failures):
+    """Each provider in `failures` answers its scripted error; others succeed."""
+    from model_gateway import engine
+    calls = []
+
+    def call(name, *a, **kw):
+        calls.append(name)
+        if name in failures:
+            return failures[name]
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    return calls
+
+
+def test_antigravity_quota_is_skipped_until_its_named_reset(monkeypatch, tmp_path):
+    now = quota_clock(monkeypatch, tmp_path, 1_793_900_000.0)
+    gateway = service(monkeypatch)
+    failures = {"antigravity": (502, AGY_QUOTA_BODY, None)}
+    calls = scripted(monkeypatch, failures)
+    request_body = {"instruction": "facts", "providers": ["antigravity", "anthropic"]}
+
+    assert gateway.handle("json", request_body)["provider"] == "anthropic"
+    assert calls == ["antigravity", "anthropic"]
+
+    calls.clear()
+    now[0] += 24 * 3600 + 34 * 60 + 30
+    reply = gateway.handle("json", request_body)
+    assert calls == ["anthropic"]
+    assert "antigravity:rate_limited_cooldown" in reply["attempted"]
+
+    calls.clear()
+    now[0] += 6
+    failures.clear()
+    assert gateway.handle("json", request_body)["provider"] == "antigravity"
+    assert calls == ["antigravity"]
+
+
+def test_codex_usage_limit_429_is_skipped_until_resets_at(monkeypatch, tmp_path):
+    now = quota_clock(monkeypatch, tmp_path, 1_793_990_000.0)
+    gateway = service(monkeypatch)
+    calls = scripted(monkeypatch, {"codex": (429, CODEX_USAGE_LIMIT_BODY, None)})
+    request_body = {"instruction": "facts", "providers": ["codex", "anthropic"]}
+
+    gateway.handle("json", request_body)
+    calls.clear()
+    now[0] = 1_793_994_516.0
+    gateway.handle("json", request_body)
+    assert calls == ["anthropic"]
+
+    calls.clear()
+    now[0] = 1_793_994_518.0
+    gateway.handle("json", request_body)
+    assert calls == ["codex", "anthropic"]
+
+
+def test_quota_without_a_reset_backs_off_exponentially_and_success_resets_it(monkeypatch, tmp_path):
+    from clients import provider_cooldown
+    now = quota_clock(monkeypatch, tmp_path, 1_700_000_000.0)
+    gateway = service(monkeypatch)
+    failures = {"antigravity": (502, AGY_QUOTA_NO_RESET_BODY, None)}
+    calls = scripted(monkeypatch, failures)
+    request_body = {"instruction": "facts", "providers": ["antigravity", "anthropic"]}
+    base = provider_cooldown.QUOTA_BACKOFF_BASE_S
+
+    def antigravity_called_after(seconds):
+        calls.clear()
+        now[0] += seconds
+        gateway.handle("json", request_body)
+        return "antigravity" in calls
+
+    gateway.handle("json", request_body)
+    assert not antigravity_called_after(base - 1)
+    assert antigravity_called_after(2)  # first backoff lapsed; fails again
+    assert not antigravity_called_after(2 * base - 1)
+    assert antigravity_called_after(2)  # second backoff was doubled
+    failures.clear()
+    assert antigravity_called_after(4 * base + 1)  # wins: streak cleared
+    failures["antigravity"] = (502, AGY_QUOTA_NO_RESET_BODY, None)
+    assert antigravity_called_after(1)
+    assert not antigravity_called_after(base - 2)
+    assert antigravity_called_after(2)  # back to the first step, not 8x
+
+
+def test_a_backed_off_later_rung_reserves_no_time(monkeypatch, tmp_path, fresh_rungs):
+    from clients import provider_cooldown
+    from model_gateway import engine
+    quota_clock(monkeypatch, tmp_path, 1_700_000_000.0)
+    monkeypatch.setattr(engine, "_auth_for", lambda name, env: engine.AuthMaterial("fixture", "subscription", "test"))
+    monkeypatch.setattr(engine, "_model_for", lambda name, env, **kw: name + "-model")
+    provider_cooldown.note_quota("codex", None, os.environ)
+    slices = []
+
+    def call(name, *a, **kw):
+        slices.append((name, engine.scoped_timeout(300)))
+        return answer(name, {"ok": True})
+
+    monkeypatch.setattr(engine, "_call_text_provider", call)
+    with engine.attempt_scope(deadline=120, seen=set(), clock=lambda: 0.0):
+        engine.complete_multimodal_json("facts", providers=["anthropic", "codex"], read_timeout=120)
+    assert slices == [("anthropic", pytest.approx(120))]
+
+
+def test_transient_overload_does_not_back_off(monkeypatch, tmp_path):
+    quota_clock(monkeypatch, tmp_path, 1_700_000_000.0)
+    gateway = service(monkeypatch)
+    calls = scripted(monkeypatch, {"antigravity": (529, '{"type":"overloaded_error"}', None)})
+    request_body = {"instruction": "facts", "providers": ["antigravity", "anthropic"]}
+    gateway.handle("json", request_body)
+    calls.clear()
+    gateway.handle("json", request_body)
+    assert calls == ["antigravity", "anthropic"]
+
+
+def test_every_rung_backed_off_reads_as_an_outage_not_a_content_rejection(monkeypatch, tmp_path):
+    from model_gateway import engine
+    from research import marketdesk_copy
+    quota_clock(monkeypatch, tmp_path, 1_793_900_000.0)
+    service(monkeypatch)
+    failures = {"antigravity": (502, AGY_QUOTA_BODY, None), "codex": (429, CODEX_USAGE_LIMIT_BODY, None)}
+    calls = scripted(monkeypatch, failures)
+    providers = ["antigravity", "codex"]
+    with pytest.raises(engine.ModelLadderExhausted):
+        engine.complete_text_json("facts", providers=providers)
+    calls.clear()
+    with pytest.raises(engine.ModelLadderExhausted) as error:
+        engine.complete_text_json("facts", providers=providers)
+    assert calls == []
+    message = str(error.value)
+    assert "antigravity:rate_limited_cooldown" in message and "codex:rate_limited_cooldown" in message
+    assert marketdesk_copy._every_rung_rejected(message) is False
+
+
+def _isolated_cooldown(tmp_path):
+    return {"RADON_PROVIDER_COOLDOWN_STATE": str(tmp_path / "cooldown.json")}
+
+
+class _BusyOnceLock:
+    """Held by another request on the first short probe, free once waited on."""
+
+    def __init__(self):
+        self.timeouts = []
+
+    def acquire(self, timeout=-1):
+        self.timeouts.append(timeout)
+        return len(self.timeouts) > 1
+
+    def release(self):
+        pass
+
+
+def test_busy_provider_is_retried_after_the_other_rungs_fail(monkeypatch, tmp_path):
+    from model_gateway import engine
+    service(monkeypatch)
+    busy = _BusyOnceLock()
+
+    def call(name, auth, model):
+        return (200, "", {"ok": True}) if name == "anthropic" else (429, "slow down", None)
+
+    # Freeze the attempt clock so scoped_timeout cannot cap the 60s retry wait
+    # against a 30s wall deadline (T-585). Literals: a 60→5 mutation must fail.
+    with engine.attempt_scope(deadline=1000.0, seen=set(), clock=lambda: 0.0,
+                              locks={"anthropic": busy, "grok": threading.RLock()}):
+        parsed, _text, provider, _model, attempted = engine._run_ladder(
+            env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test", call_provider=call,
+            parse_success=lambda name, payload: (payload, ""), providers=("anthropic", "grok"))
+
+    assert provider == "anthropic" and parsed == {"ok": True}
+    assert attempted[0] == "anthropic:provider_busy" and attempted[-1] == "anthropic:ok"
+    assert busy.timeouts == [1.0, 60.0]
+
+
+def test_provider_busy_on_every_pass_still_exhausts(monkeypatch, tmp_path):
+    import time
+    from model_gateway import engine
+    service(monkeypatch)
+
+    class AlwaysBusy(_BusyOnceLock):
+        def acquire(self, timeout=-1):
+            self.timeouts.append(timeout)
+            return False
+
+    busy = AlwaysBusy()
+    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(), locks={"anthropic": busy}):
+        with pytest.raises(engine.ModelLadderExhausted):
+            engine._run_ladder(
+                env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test",
+                call_provider=lambda *a: (200, "", {"ok": True}),
+                parse_success=lambda name, payload: (payload, ""), providers=("anthropic",))
+    assert len(busy.timeouts) == 2
+
+
+def test_busy_provider_retry_still_runs_before_the_last_resort(monkeypatch, tmp_path):
+    import time
+    from model_gateway import engine
+    service(monkeypatch)
+    busy = _BusyOnceLock()
+    calls = []
+
+    def call(name, auth, model):
+        calls.append(name)
+        return (200, "", {"ok": True}) if name == "anthropic" else (429, "busy", None)
+
+    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(), locks={"anthropic": busy}):
+        _parsed, _text, provider, _model, _attempted = engine._run_ladder(
+            env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test", call_provider=call,
+            parse_success=lambda name, payload: (payload, ""),
+            providers=("anthropic", "grok", engine.LAST_RESORT_PROVIDER))
+
+    assert provider == "anthropic" and calls == ["grok", "anthropic"]

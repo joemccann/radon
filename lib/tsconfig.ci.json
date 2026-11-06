@@ -1,0 +1,8 @@
+{
+  // CI project for `tsc --noEmit` on lib/tools. pi-tools.ts imports
+  // @mariozechner/pi-coding-agent, which is not installed, so the unmodified
+  // tsconfig.json exits 2 on that file. The exclude replaces the parent's
+  // exclude, so the test directory stays excluded too.
+  "extends": "./tsconfig.json",
+  "exclude": ["tools/__tests__/**", "tools/pi-tools.ts"]
+}
