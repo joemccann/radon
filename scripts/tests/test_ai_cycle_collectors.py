@@ -15,6 +15,7 @@ from scripts.ai_cycle.collectors import (
     Transport,
     archive_raw,
     collect_gpu_history,
+    collect_source,
     parse_aa,
     parse_disclosures,
     parse_eia,
@@ -167,6 +168,72 @@ def test_gpu_history_uses_dated_snapshots_and_deduplicates_latest():
     rows = collect_gpu_history(FakeTransport(), "2026-07-05", "2026-07-05")
     assert len(rows) == 1
     assert rows[0]["period_end"] == "2026-07-05"
+
+
+def test_aa_catalog_follows_pages_when_the_basket_member_is_not_on_page_one():
+    member = {
+        "id": "stable-expensive-id",
+        "slug": "expensive",
+        "name": "Expensive",
+        "model_creator": {"id": "creator-id"},
+        "pricing": {"price_1m_input_tokens": 2, "price_1m_output_tokens": 8},
+    }
+
+    class PagedTransport:
+        def __init__(self):
+            self.calls = []
+
+        def fetch(self, url, *, params=None, headers=None, body=None):
+            self.calls.append((url, (params or {}).get("page")))
+            page = (params or {}).get("page", 1)
+            if page == 1:
+                return (
+                    {
+                        "tier": "free",
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 200,
+                            "total_pages": 2,
+                            "has_more": True,
+                        },
+                        "data": [],
+                    },
+                    "d1",
+                    "2026-11-05T07:15:00+00:00",
+                )
+            if page == 2:
+                return (
+                    {
+                        "tier": "free",
+                        "pagination": {
+                            "page": 2,
+                            "page_size": 200,
+                            "total_pages": 2,
+                            "has_more": False,
+                        },
+                        "data": [member],
+                    },
+                    "d2",
+                    "2026-11-05T07:15:01+00:00",
+                )
+            raise SourceError("unexpected page")
+
+    transport = PagedTransport()
+    rows = collect_source(
+        "artificial-analysis",
+        transport,
+        "2026-11-05",
+        "2026-11-05",
+        env={"ARTIFICIAL_ANALYSIS_API_KEY": "secret"},
+        basket=("expensive",),
+    )
+
+    assert rows[0]["series_id"] == "stable-expensive-id"
+    assert rows[0]["value"] == 10
+    assert transport.calls == [
+        ("https://artificialanalysis.ai/api/v2/language/models/free", 1),
+        ("https://artificialanalysis.ai/api/v2/language/models/free", 2),
+    ]
 
 
 def test_aa_missing_expensive_member_suppresses_entire_basket():

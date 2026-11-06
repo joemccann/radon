@@ -165,7 +165,7 @@ def _validate_equibles(values: Dict[str, str]) -> ValidationResult:
 
 def _validate_artificial_analysis(values: Dict[str, str]) -> ValidationResult:
     return _get(
-        "https://artificialanalysis.ai/api/v2/data/llms/models",
+        "https://artificialanalysis.ai/api/v2/language/models/free",
         {"x-api-key": values["ARTIFICIAL_ANALYSIS_API_KEY"]},
         "Artificial Analysis",
     )

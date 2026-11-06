@@ -24,7 +24,7 @@ from typing import Any, Iterator, Protocol
 
 import requests
 
-from scripts.ai_cycle.collectors import URLS
+from scripts.ai_cycle.collectors import URLS, assemble_language_model_catalog
 from scripts.secret_store import SecretStore
 from scripts.utils.atomic_io import atomic_save, verified_load
 
@@ -285,19 +285,28 @@ def _selection_result(
 
 
 def fetch_catalog(api_key: str, *, session: Any = requests, timeout: int = FETCH_TIMEOUT_SECONDS) -> dict[str, Any]:
+    def fetch_page(page: int) -> dict[str, Any]:
+        try:
+            response = session.get(
+                URLS["artificial-analysis"],
+                headers={"x-api-key": api_key},
+                params={"page": page},
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            raise CatalogError("Artificial Analysis catalog transport failed") from exc
+        if response.status_code != 200:
+            raise CatalogError(f"Artificial Analysis catalog returned HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as exc:
+            raise CatalogError("Artificial Analysis catalog returned invalid JSON") from exc
+        return payload
+
     try:
-        response = session.get(URLS["artificial-analysis"], headers={"x-api-key": api_key}, timeout=timeout)
-    except requests.RequestException as exc:
-        raise CatalogError("Artificial Analysis catalog transport failed") from exc
-    if response.status_code != 200:
-        raise CatalogError(f"Artificial Analysis catalog returned HTTP {response.status_code}")
-    try:
-        payload = response.json()
-    except (TypeError, ValueError) as exc:
-        raise CatalogError("Artificial Analysis catalog returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise CatalogError("Artificial Analysis catalog schema is invalid")
-    return payload
+        return assemble_language_model_catalog(fetch_page)
+    except ValueError as exc:
+        raise CatalogError(str(exc)) from exc
 
 
 def load_state(state_path: Path) -> dict[str, Any] | None:

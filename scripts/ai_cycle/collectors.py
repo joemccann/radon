@@ -22,7 +22,10 @@ URLS = {
     "openrouter": "https://openrouter.ai/api/v1/datasets/rankings-daily",
     "vercel": "https://vercel.com/api/ai/leaderboard-export",
     "gpu-rental": "https://gpurentalprices.com/api/latest.json",
-    "artificial-analysis": "https://artificialanalysis.ai/api/v2/data/llms/models",
+    # /api/v2/data/* returned 410 Gone after 2026-11-04 23:59:59Z. The free
+    # language-model list accepts any valid key and includes the identity,
+    # price, and intelligence fields this basket uses. It is paginated.
+    "artificial-analysis": "https://artificialanalysis.ai/api/v2/language/models/free",
     "eia": "https://api.eia.gov/v2/electricity/rto/region-sub-ba-data/data/",
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
@@ -78,6 +81,50 @@ IFRS_FACT_TAGS = {
 
 class SourceError(ValueError):
     """Safe fixed-message collection failure; never exposes HTTP bodies or keys."""
+
+
+AA_CATALOG_PAGE_CAP = 50
+
+
+def assemble_language_model_catalog(fetch_page):
+    """Merge language-model pages into the selector envelope.
+
+    A payload with ``status`` 200 and no pagination is already complete.
+    That is the pre-retirement fixture shape. The replacement endpoint
+    returns ``tier``, ``pagination``, and ``data``, with no status field,
+    and one page is not the catalog. ``fetch_page(page)`` returns one
+    decoded object. HTTP errors stay with the caller.
+    """
+    rows = []
+    tier = None
+    for page in range(1, AA_CATALOG_PAGE_CAP + 1):
+        payload = fetch_page(page)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("Artificial Analysis catalog schema is invalid")
+        pagination = payload.get("pagination")
+        if pagination is None and payload.get("status") == 200:
+            if page != 1:
+                raise ValueError("Artificial Analysis catalog schema is invalid")
+            return payload
+        if not isinstance(pagination, dict) or pagination.get("page") != page:
+            raise ValueError("Artificial Analysis catalog page did not advance")
+        has_more = pagination.get("has_more")
+        total_pages = pagination.get("total_pages")
+        if not isinstance(has_more, bool) or isinstance(total_pages, bool) or not isinstance(total_pages, int):
+            raise ValueError("Artificial Analysis catalog schema is invalid")
+        if total_pages < page or total_pages > AA_CATALOG_PAGE_CAP:
+            raise ValueError("Artificial Analysis catalog pagination exceeded the page cap")
+        if has_more != (page < total_pages):
+            raise ValueError("Artificial Analysis catalog page did not advance")
+        rows.extend(payload["data"])
+        if payload.get("tier") is not None:
+            tier = payload.get("tier")
+        if not has_more:
+            merged = {"status": 200, "data": rows}
+            if tier is not None:
+                merged["tier"] = tier
+            return merged
+    raise ValueError("Artificial Analysis catalog pagination exceeded the page cap")
 
 
 def now_iso():
@@ -1398,7 +1445,30 @@ def collect_source(source, transport, start, end, *, env=None, basket=(), full_h
         key = env.get("ARTIFICIAL_ANALYSIS_API_KEY")
         if not key:
             raise SourceError("ARTIFICIAL_ANALYSIS_API_KEY is not configured")
-        return parse_aa(*transport.fetch(URLS[source], headers={"x-api-key": key}), basket)
+        fetched_at = None
+
+        def fetch_page(page, _key=key):
+            nonlocal fetched_at
+            payload, _digest, fetched = transport.fetch(
+                URLS[source],
+                params={"page": page},
+                headers={"x-api-key": _key},
+            )
+            fetched_at = fetched
+            return payload
+
+        try:
+            merged = assemble_language_model_catalog(fetch_page)
+        except ValueError as exc:
+            raise SourceError(str(exc)) from exc
+        raw = json.dumps(
+            {"status": 200, "data": merged["data"]},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        archive = getattr(transport, "archive", None)
+        digest = archive_raw(archive, raw) if archive is not None else hashlib.sha256(raw).hexdigest()
+        return parse_aa(merged, digest, fetched_at, basket)
     if source == "vast":
         key = env.get("VAST_API_KEY")
         if not key:

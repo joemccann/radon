@@ -418,6 +418,123 @@ def test_corrupt_state_refetches_without_overwriting_good_basket_on_bad_catalog(
     assert store.writes == []
 
 
+def test_retired_data_endpoint_410_follows_pages_to_the_only_scored_row(tmp_path):
+    """Page 271992331fbb5ad679a503dd21dca875 (2026-11-05 07:05Z).
+
+    Artificial Analysis retired /api/v2/data/* at 2026-11-04 23:59:59Z.
+    The oneshot still requested that path, received HTTP 410, wrote the
+    error health row, and exited 1. The replacement catalog has no status
+    field and is paginated. The only scored Mistral row is on page 2, so
+    a first-page read cannot select it.
+    """
+    payload = production_catalog()
+    rest = [
+        row
+        for row in payload["data"]
+        if (row.get("model_creator") or {}).get("id") != CREATOR_IDS["mistral"]
+    ]
+    leader = model(
+        "mistral",
+        "mistral-large-4",
+        score=38.4,
+        released="2026-10-06",
+        name="Mistral Large 4",
+        input_price=1.36,
+        output_price=4.18,
+    )
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            params = kwargs.get("params") or {}
+            self.calls.append((url, params.get("page")))
+            if "/api/v2/data/" in url:
+                return FakeResponse(
+                    {"error": "Gone", "message": "legacy endpoint retired"},
+                    status_code=410,
+                )
+            page = params.get("page", 1)
+            if page == 1:
+                return FakeResponse(
+                    {
+                        "tier": "free",
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 200,
+                            "total_pages": 2,
+                            "has_more": True,
+                        },
+                        "data": rest,
+                    }
+                )
+            if page == 2:
+                return FakeResponse(
+                    {
+                        "tier": "free",
+                        "pagination": {
+                            "page": 2,
+                            "page_size": 200,
+                            "total_pages": 2,
+                            "has_more": False,
+                        },
+                        "data": [leader],
+                    }
+                )
+            return FakeResponse({"error": "no such page"}, status_code=404)
+
+    session = Session()
+    store = FakeStore({"ARTIFICIAL_ANALYSIS_API_KEY": "secret"})
+    result = run_once(
+        store=store,
+        session=session,
+        state_path=tmp_path / "state.json",
+        today=date(2026, 11, 5),
+    )
+
+    assert "mistral-large-4" in result["basket"].split(",")
+    assert session.calls == [
+        ("https://artificialanalysis.ai/api/v2/language/models/free", 1),
+        ("https://artificialanalysis.ai/api/v2/language/models/free", 2),
+    ]
+    assert "legacy endpoint retired" not in json.dumps(result)
+
+
+def test_catalog_page_that_does_not_advance_preserves_last_known_good(tmp_path):
+    class Session:
+        def get(self, url, **kwargs):
+            return FakeResponse(
+                {
+                    "tier": "free",
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 200,
+                        "total_pages": 2,
+                        "has_more": True,
+                    },
+                    "data": production_catalog()["data"],
+                }
+            )
+
+    store = FakeStore(
+        {
+            "ARTIFICIAL_ANALYSIS_API_KEY": "secret",
+            BASKET_SECRET: "last-known-good",
+        }
+    )
+    with pytest.raises(CatalogError, match="did not advance"):
+        run_once(
+            store=store,
+            session=Session(),
+            state_path=tmp_path / "state.json",
+            today=date(2026, 11, 5),
+        )
+
+    assert store.values[BASKET_SECRET] == "last-known-good"
+    assert store.writes == []
+
+
 def test_http_auth_failure_is_sanitized_and_never_reads_response_body():
     class Session:
         def get(self, *_args, **_kwargs):

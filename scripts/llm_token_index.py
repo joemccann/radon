@@ -8,8 +8,8 @@ WHY:
     as a slow-moving macro context (one row per UTC day).
 
 WHAT:
-    Pulls https://artificialanalysis.ai/api/v2/data/llms/models — the
-    free Artificial Analysis API (1000 req/day quota). For a curated
+    Pulls https://artificialanalysis.ai/api/v2/language/models/free, the
+    free Artificial Analysis language-model list. For a curated
     basket of frontier models (Claude Opus/Sonnet, GPT-4o, Gemini 2.5
     Pro, DeepSeek V3, Llama 3.1 405B, Mistral Large), computes:
 
@@ -68,7 +68,7 @@ from urllib.request import Request, urlopen
 
 # ─── Constants ───────────────────────────────────────────────────────
 
-AA_BASE = "https://artificialanalysis.ai/api/v2/data/llms/models"
+AA_BASE = "https://artificialanalysis.ai/api/v2/language/models/free"
 AA_TIMEOUT_S = 10.0
 METHODOLOGY_VERSION = 1
 
@@ -117,11 +117,12 @@ class IndexResult:
 
 
 def fetch_aa_models(api_key: str, *, timeout: float = AA_TIMEOUT_S) -> dict[str, Any]:
-    """GET https://artificialanalysis.ai/api/v2/data/llms/models with x-api-key.
+    """GET the free language-model list with x-api-key.
 
     Raises ArtificialAnalysisError on any non-2xx, timeout, or malformed
     JSON. Distinguishes 401 (auth) from 5xx (transient) in the message
-    so operator-side debugging is fast.
+    so operator-side debugging is fast. Follows pagination. A payload
+    with status 200 and no pagination is already complete.
     """
     if not api_key:
         raise ArtificialAnalysisError(
@@ -130,28 +131,44 @@ def fetch_aa_models(api_key: str, *, timeout: float = AA_TIMEOUT_S) -> dict[str,
             "a key, then set ARTIFICIAL_ANALYSIS_API_KEY in .env."
         )
 
-    req = Request(AA_BASE, headers={"x-api-key": api_key, "Accept": "application/json"})
     try:
-        with urlopen(req, timeout=timeout) as response:
-            body = response.read()
-    except HTTPError as exc:
-        if exc.code == 401:
+        from scripts.ai_cycle.collectors import assemble_language_model_catalog
+    except ImportError:
+        from ai_cycle.collectors import assemble_language_model_catalog
+
+    def fetch_page(page: int) -> dict[str, Any]:
+        req = Request(
+            f"{AA_BASE}?page={page}",
+            headers={"x-api-key": api_key, "Accept": "application/json"},
+        )
+        try:
+            with urlopen(req, timeout=timeout) as response:
+                body = response.read()
+        except HTTPError as exc:
+            if exc.code == 401:
+                raise ArtificialAnalysisError(
+                    "Artificial Analysis API returned 401: missing or invalid API key. "
+                    "Check ARTIFICIAL_ANALYSIS_API_KEY in .env."
+                ) from exc
             raise ArtificialAnalysisError(
-                "Artificial Analysis API returned 401 — missing or invalid API key. "
-                "Check ARTIFICIAL_ANALYSIS_API_KEY in .env."
+                f"Artificial Analysis API returned HTTP {exc.code}: {exc.reason}"
             ) from exc
-        raise ArtificialAnalysisError(
-            f"Artificial Analysis API returned HTTP {exc.code}: {exc.reason}"
-        ) from exc
-    except (URLError, socket.timeout) as exc:
-        raise ArtificialAnalysisError(
-            f"Artificial Analysis API unreachable: {exc}"
-        ) from exc
+        except (URLError, socket.timeout) as exc:
+            raise ArtificialAnalysisError(
+                f"Artificial Analysis API unreachable: {exc}"
+            ) from exc
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ArtificialAnalysisError(f"AA response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ArtificialAnalysisError("AA response was not a JSON object")
+        return payload
 
     try:
-        return json.loads(body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ArtificialAnalysisError(f"AA response was not valid JSON: {exc}") from exc
+        return assemble_language_model_catalog(fetch_page)
+    except ValueError as exc:
+        raise ArtificialAnalysisError(str(exc)) from exc
 
 
 # ─── Math ───────────────────────────────────────────────────────────

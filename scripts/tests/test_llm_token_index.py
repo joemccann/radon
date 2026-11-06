@@ -248,7 +248,7 @@ class TestFetch:
             fetch_aa_models(api_key="secret-key")
 
         assert captured.get("header_x_api_key") == "secret-key"
-        assert "/data/llms/models" in str(captured.get("url"))
+        assert "/api/v2/language/models/free" in str(captured.get("url"))
 
 
 # ─── Persistence: idempotent on (date, ON CONFLICT REPLACE) ──────────

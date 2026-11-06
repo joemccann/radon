@@ -4952,6 +4952,61 @@ already contained the 2026-10-28 display-name fix.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_PREVIEW_SLUG`,
   `_candidate`, `select_frontier_models`).
 
+## aa-frontier-catalog-410
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer after Artificial
+Analysis retires `/api/v2/data/*`.** Peak: 2026-11-05 07:05Z, page
+`271992331fbb5ad679a503dd21dca875`. Timer last trigger 07:04:41Z. The
+07:15 ai-cycle `Wants=` start failed again at 07:15:13Z to 07:15:15Z.
+Health row `aa-frontier-basket` stored
+`Artificial Analysis catalog returned HTTP 410`. State file was not
+rewritten. Edge and `/health/lite` stayed up (`database: up`). Not IB.
+
+- **Mechanism:** The publisher retired `/api/v2/data/*` at 2026-11-04
+  23:59:59Z. An unauthenticated GET of
+  `https://artificialanalysis.ai/api/v2/data/llms/models` returns HTTP 410
+  with a JSON message naming the migration guide
+  `https://artificialanalysis.ai/data-api/migrate-v2-data`. The oneshot
+  still requested that path, mapped the status to `CatalogError`, wrote
+  the error health row, and exited 1. The run was about 90ms, so this was
+  not the 30s transport timeout. The replacement free list is
+  `GET /api/v2/language/models/free` with the same `x-api-key`. It accepts
+  any valid key and returns `tier`, `pagination`, and `data`, with no
+  top-level `status`. The documented example is page size 200 with
+  `has_more` true. A first page is not a complete catalog. The pro list
+  `/api/v2/language/models` returns 403 for a free key, so the oneshot
+  uses the free list. OpenAPI fields used here (id, slug, name,
+  release_date, model_creator.id, input and output prices, intelligence
+  index) are on the free shape.
+- **Detection:** `service_health` detail
+  `Artificial Analysis catalog returned HTTP 410`. Journal stdout
+  `{"status": "error", "reason": "Artificial Analysis catalog returned HTTP 410"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  State `checked_at` stays on the previous success.
+- **Discriminating check:** an unauthenticated GET of the legacy path
+  returns 410 and the migration URL. The same key on
+  `/api/v2/language/models/free` is 401 without a key and 200 with one.
+  A `CatalogError` for a missing provider, incomplete catalog, or
+  read-back mismatch still exits 1. `Result=signal` or exit 143 inside a
+  deploy window is `deploy-stop-clean-oneshot-signal`. Python Turso
+  `SELECT 1` failing in the same minute is a platform outage: stand down.
+- **Remediation (code):** request the free language-model list, follow
+  pages until `has_more` is false, and hand the selector the merged
+  `{status: 200, data}` envelope. A page that does not advance fails
+  closed and does not replace the basket. Do not `reset-failed` as the
+  fix. The next timer is 07:00 UTC. A manual start after the deploy
+  rewrites the state file. `radon-llm-index` uses the same free list.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_retired_data_endpoint_410_follows_pages_to_the_only_scored_row`,
+  `test_catalog_page_that_does_not_advance_preserves_last_known_good`,
+  `scripts/tests/test_ai_cycle_collectors.py::test_aa_catalog_follows_pages_when_the_basket_member_is_not_on_page_one`.
+- **Code:** `scripts/ai_cycle/collectors.py` (`URLS`,
+  `assemble_language_model_catalog`, `collect_source`),
+  `scripts/aa_frontier_refresh.py` (`fetch_catalog`),
+  `scripts/credential_validators.py` (key probe URL),
+  `scripts/llm_token_index.py` (`AA_BASE`, `fetch_aa_models`).
+
 ## pnl-story-stock-entry-timing
 
 **A realized stock P&L story shows entry price and exit timestamp but omits entry timestamp and hold duration.**
