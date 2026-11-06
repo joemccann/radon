@@ -12248,3 +12248,15 @@ Audited through: 62f08ffcdbac96c1f6120004de5dd02b47bc12de on 2026-11-06 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-585 | DONE | Pre-fix assertion under 60→5: 3 passed. New literals under 60→5: `assert [1.0, 5.0] == [1.0, 60.0]` (1 failed). Restored 60.0: 1 passed. Product source unchanged. Focused file cluster 85 passed ×3. |
+
+### Closing gates 2026-11-06
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially (round 3: one serial miss at 1.002s, then 2 passed isolated and 11 passed on the file). Round 1 also failed the NOAA walk case (T-584, already on #1433); rounds 2 and 3 did not. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other and as origin/main `62f08ffc` (0 added / 0 removed). Cloud product tree is unchanged from that SHA, so the standing cloud run is the base.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `62f08ffc` |
+|---|---|---|---|---|
+| 1 | NOAA T-584 + credentials xdist flake, serial credentials 11 passed, serial NOAA 1 failed; 20,328 passed / 12 skipped / 63 subtests (155.17s) | 11,610 passed / 21 skipped / 1,184 files (174.31s) | 42 failed / 3,976 passed / 23 skipped (1182.87s) | 0 added / 0 removed |
+| 2 | credentials xdist flake, serial file 11 passed; 20,329 passed / 12 skipped / 63 subtests (159.03s) | 11,610 passed / 21 skipped / 1,184 files (92.77s) | 42 failed / 3,976 passed / 23 skipped (1040.04s) | 0 added / 0 removed |
+| 3 | credentials xdist flake, serial miss then isolated 2 passed and file 11 passed; 20,329 passed / 12 skipped / 63 subtests (165.71s) | 11,610 passed / 21 skipped / 1,184 files (94.68s) | 42 failed / 3,976 passed / 23 skipped (1042.33s) | 0 added / 0 removed |
+
+Base cloud at `62f08ffc` on this Mac (standing sweep; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (1130.42s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
