@@ -1481,11 +1481,16 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     500s deadline is checked only between attempts. NOAA ended at 600s with
     Publisher transport failed, then ramp and the later publishers saw
     Per-run time budget exhausted and the oneshot exited 1.
+
+    Connect time is collectors.time.monotonic, not a host sleep. A 0.4s
+    leftover-deadline assert against real sleeps was red on a correct wall
+    (T-584): two 0.15s sleeps plus collect.main overhead exhausted the
+    fixture before vercel was recorded.
     """
     import socket
-    import time
 
     from scripts.ai_cycle import collect as collect_mod
+    from scripts.ai_cycle import collectors as col
     from scripts.ai_cycle.collectors import Transport
 
     addresses = [
@@ -1493,6 +1498,8 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
         for i in range(1, 9)
     ]
     original_connect = socket.socket.connect
+    now = [1_000.0]
+    monkeypatch.setattr(col.time, "monotonic", lambda: now[0])
 
     def getaddrinfo(host, port, *args, **kwargs):
         if host == "www.ncei.noaa.gov":
@@ -1502,8 +1509,7 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     def connect(self, address):
         if isinstance(address, tuple) and str(address[0]).startswith("192.0.2."):
             timeout = self.gettimeout()
-            if timeout:
-                time.sleep(timeout)
+            now[0] += float(timeout or 0)
             raise TimeoutError("timed out")
         return original_connect(self, address)
 
@@ -1515,7 +1521,7 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     def init(self, archive, **kwargs):
         kwargs.setdefault("timeout", 0.15)
         real_init(self, archive, **kwargs)
-        self.deadline = time.monotonic() + 0.4
+        self.deadline = col.time.monotonic() + 0.4
 
     monkeypatch.setattr(Transport, "__init__", init)
 
@@ -1523,13 +1529,13 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     real_collect = collect_mod.collect_source
 
     def wrapped(source, transport, *args, **kwargs):
-        called.append((source, time.monotonic() < transport.deadline))
+        called.append((source, col.time.monotonic() < transport.deadline))
         if source == "noaa":
             return real_collect(source, transport, *args, **kwargs)
         return []
 
     monkeypatch.setattr(collect_mod, "collect_source", wrapped)
-    started = time.monotonic()
+    started = now[0]
     code = collect_mod.main(
         [
             "--verify",
@@ -1543,13 +1549,14 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
             str(tmp_path / "raw"),
         ]
     )
-    elapsed = time.monotonic() - started
+    elapsed = now[0] - started
     assert code == 1
     assert [item[0] for item in called] == ["noaa", "vercel"]
     # Eight blackholed addresses at 0.15s is 1.2s for one walk, 2.4s for two.
-    # The attempt wall is 0.15s, so both attempts and the next publisher fit
-    # inside the 0.4s run deadline.
-    assert elapsed < 0.7, elapsed
+    # The attempt wall spends one connect timeout per attempt (0.30s) so the
+    # next publisher still sees the 0.4s run deadline. An uncapped walk is 1.2s
+    # on the first GET and leaves vercel with no budget.
+    assert elapsed == pytest.approx(0.15 * 2), elapsed
     assert called[1][1] is True
 
 
