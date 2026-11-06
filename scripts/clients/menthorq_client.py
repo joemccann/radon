@@ -1436,8 +1436,11 @@ class MenthorQClient:
                 if not img_src:
                     logger.warning(f"No img src found for card slug: {slug}")
                     return {}
+                if not img_src.startswith("https://"):
+                    logger.warning(f"Non-https img src for card slug: {slug}")
+                    return {}
 
-                resp = httpx.get(img_src, timeout=30.0)
+                resp = httpx.get(img_src, timeout=30.0, follow_redirects=False)
                 if resp.status_code != 200:
                     logger.warning(
                         f"S3 download failed for {slug}: HTTP {resp.status_code}"
