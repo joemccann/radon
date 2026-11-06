@@ -911,6 +911,14 @@ def _option_history_bars(client: IBClient, contract, budget: Optional[OptionHist
     return trade_bars, request("MIDPOINT")
 
 
+def _load_position_marks(positions: list) -> dict:
+    return load_session_marks(
+        option_mark_key(p.get("symbol"), p.get("expiry"), p.get("strike"), p.get("right"))
+        for p in positions
+        if str(p.get("secType") or "").upper() == "OPT"
+    )
+
+
 def _broker_marks(client: IBClient) -> dict:
     """IB's own per-position marks by conId; empty leaves the normal mark chain."""
     try:
@@ -1345,7 +1353,7 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
             f"position(s): {missing[:8]} — last trade or last bid/offer used if known"
         )
 
-    session_marks = load_session_marks()
+    session_marks = _load_position_marks(positions)
     today = _et_today()
     dirty = False
     history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
@@ -2224,7 +2232,7 @@ def main():
 
             # ── Phase 5: Read all results ──
             # Market prices
-            session_marks = load_session_marks()
+            session_marks = _load_position_marks(positions)
             today = _et_today()
             dirty = False
             history_budget = OptionHistoryBudget(OPTION_HISTORY_BUDGET_S)
