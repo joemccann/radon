@@ -3319,3 +3319,35 @@ class TestDocumentation20261104:
         agents = (_ROOT / "scripts/watchdog/AGENTS.md").read_text()
         assert "laptop Grok auto-response" not in agents
         assert "VPS Grok responder" in agents
+
+
+class TestDocumentation20261105:
+    """DOC-255: GET /event-odds serves a fresh cache without a spawn."""
+
+    def test_api_subprocess_owner_names_event_odds_cache_hit(self):
+        claude = (_ROOT / "scripts/api/CLAUDE.md").read_text()
+        section = claude.split("## Subprocess Pattern (`run_script`)", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert "GET /event-odds/{ticker}" in section
+        assert "fetch_event_odds.py" in section
+        assert "PERF-043" in section
+        assert "serviceHealthWindows.ts" in section
+        assert "triggers refresh" not in section
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        assert "_EVENT_ODDS_CACHE_TTL_S = 7 * 60 * 60" in server
+        assert "event_odds_get" in server
+
+    def test_watchdog_owner_does_not_say_every_get_refreshes(self):
+        claude = (_ROOT / "scripts/watchdog/CLAUDE.md").read_text()
+        line = next(
+            row
+            for row in claude.splitlines()
+            if "event-odds" in row.lower() or "Event-odds" in row
+        )
+        assert "triggers refresh" not in line
+        assert "GET /event-odds/{ticker}" in line
+        assert "No VPS timer owns it" in line
+        agents = (_ROOT / "scripts/watchdog/AGENTS.md").read_text()
+        assert "event-odds" in agents
+        assert "request-driven" in agents
+        assert "triggers refresh" not in agents
