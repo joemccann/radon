@@ -18,6 +18,7 @@ SECRETS_FILE="${RADON_RUNNER_ENV:-$HOME/.radon-runner.env}"
 # Resolvers and hooks run under an isolated interpreter (no cwd, no user site).
 RUNNER_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 TIMED_OUT=124
+EMPTY_OUTPUT=65
 HOOK_SECS="${RADON_RUNNER_HOOK_SECS:-900}"
 AGENT_PID=""
 HOOK_PID=""
@@ -503,8 +504,9 @@ reap_leftovers() {
 # GNU timeout leads its own process group, so one group kill afterwards also
 # reaps anything the agent left running (dev servers, watchers).
 run_agent() {
-  local agent="${1%%:*}" provider=""
+  local agent="${1%%:*}" provider="" output_start
   [[ "$1" == *:* ]] && provider="${1#*:}"
+  output_start="$(wc -c < "$LOG")"
   ( cd "$WORK" || exit 70
     # The security prompts' native audit workflows resolve the clone from it.
     export PROMPT_FILE RADON_REPO_ROOT="$WORK"
@@ -517,6 +519,13 @@ run_agent() {
   AGENT_RC=$?
   kill -KILL -- "-$AGENT_PID" 2>/dev/null || true
   AGENT_PID=""
+  # Grok with no usable model catalog ends its turn at once and still exits 0.
+  # Read this before reap_leftovers, which writes to the same log.
+  if [[ "$AGENT_RC" == 0 && "$agent" == grok ]] \
+    && ! LC_ALL=C grep -aq '[^[:space:]]' < <(tail -c "+$((output_start + 1))" "$LOG"); then
+    log "grok exited 0 with no output"
+    AGENT_RC=$EMPTY_OUTPUT
+  fi
   reap_leftovers
   return "$AGENT_RC"
 }

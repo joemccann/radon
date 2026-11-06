@@ -5,7 +5,7 @@ One loop run is what the operator would do by hand: open an agent CLI in a fresh
 1. Take the loop's lock (a live run makes the new fire page `skipped` and exit 0; a proven dead or reused pid is reclaimed by one contender). Missing identity metadata or an unreadable process fingerprint refuses with exit 75 and preserves the clone (REL-291 / R-710).
 2. Delete the previous clone and `git clone` `main` again, so nothing an agent left behind (files, `.git` hooks, config) survives to the next night.
 3. Prepend a header (date, branch `<BRANCH_PREFIX>/<date>`, time budget) to `.claude/runner-prompts/<loop>.md` from that clone.
-4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero; a timeout ends the night. Anything the agent left running is killed with its process group.
+4. Run the first agent in `AGENTS` under `timeout`. The next agent runs only if one exits non-zero or grok exits 0 with no output (recorded as 65); a timeout ends the night. Anything the agent left running is killed with its process group.
 5. Look up the PR for the branch and send one Pushover message with the agent's `RESULT:` line and the PR link.
 
 The agent does the whole job in one session: audit, fix, push the branch, open a draft PR, watch CI. Every PR body follows `.github/pull_request_template.md`; the gh guard (`nightly_pr_guard.py`), `nightly_publish.py publish` and the `PR body template` CI check refuse any other shape (`scripts/ci/check_pr_body.py`, installed beside the guard by `install.sh`). The prompt owns what the loop does; the runner owns nothing else.
