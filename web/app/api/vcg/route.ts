@@ -1,8 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { isVcgDataStale } from "@/lib/vcgStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
@@ -12,14 +10,13 @@ import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { buildDemoVcgFixture } from "@/lib/demo/fixtures/regime";
 import { getMarketStateFromDate, isUsTradingDay } from "@/lib/serviceHealthWindows";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "vcg.json");
 
 const EMPTY_VCG = {
   scan_time: "",
@@ -74,24 +71,15 @@ async function readVcgFromDb(): Promise<TimestampedRead<Record<string, unknown>>
   };
 }
 
-async function readVcgFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const jsonStart = raw.indexOf("{");
-  if (jsonStart === -1) return null;
-  const data = JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 // Coalesces every client tab's ~60s poll into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 5_000;
 
-/** Fresher of the Turso row and data/vcg.json — a frozen writer on either side never wins. */
+/** Latest Turso row, or the last good read held in memory when Turso fails. */
 async function readCachedVcg(): Promise<Record<string, unknown> | null> {
   const result = await cachedRead("vcg:snapshot", READ_CACHE_TTL_MS, () =>
     dbFirstRead({
       fromDb: readVcgFromDb,
-      fromDisk: readVcgFromDisk,
       maxAgeMs: VCG_MAX_AGE_MS,
       label: "vcg",
     }),
@@ -138,7 +126,7 @@ export async function GET(): Promise<Response> {
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
   if (!cached) {
-    // Both the Turso row and data/vcg.json were unreadable. EMPTY_VCG's
+    // No Turso row and no remembered read. EMPTY_VCG's
     // defaults are an affirmative reading — regime "DIVERGENCE",
     // interpretation "NORMAL", ro/edr 0 which suppress the RISK-OFF and EDR
     // pills — so a dead feed rendered as "no risk-off signal". R-228.
@@ -157,9 +145,8 @@ export async function GET(): Promise<Response> {
     });
   }
 
-  // Stale-while-revalidate. `cached` is the FRESHER of DB row and disk
-  // JSON, so a stale verdict here means BOTH sources are stale — a frozen
-  // DB mirror alone can no longer loop the background rescan.
+  // Stale-while-revalidate. `cached` keeps its own scan_time when it came from
+  // memory, so an outage reads stale here and still kicks the background rescan.
   const stale = isVcgDataStale(
     cached as { scan_time?: string; market_open?: boolean },
     expectedVcgSessionDate(),

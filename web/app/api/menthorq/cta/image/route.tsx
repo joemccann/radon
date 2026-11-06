@@ -2,17 +2,15 @@ import { computeCtaImageHeight, truncateCtaTables } from "@/lib/ctaImageLayout";
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { ImageResponse } from "next/og";
-import { readdir, readFile } from "fs/promises";
-import { join } from "path";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG, posColor, pctileBg, zColor, zOpacity, fmt } from "@/lib/og-theme";
 import { reconcileCtaTables } from "@/lib/ctaPercentiles";
+import { dbExecute } from "@/lib/dbExecute";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 
 export const runtime = "nodejs";
 // A satori render holding the whole bitmap must not be able to run unbounded.
 export const maxDuration = 30;
-
-const CACHE_DIR = join(process.cwd(), "..", "data", "menthorq_cache");
 
 type CtaRow = {
   underlying: string;
@@ -82,37 +80,46 @@ function deduplicateTables(
   return result;
 }
 
+/** The image is cosmetic: fresh only labels the read, and the date is drawn on it. */
+const CTA_IMAGE_MAX_AGE_MS = 96 * 60 * 60_000;
+
+async function readLatestCtaFromDb(): Promise<TimestampedRead<CtaCache> | null> {
+  const result = await dbExecute({
+    sql: `SELECT date, payload, fetched_at FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
+    args: [],
+  }, { label: "menthorq-cta-image" });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { date: string; payload: string; fetched_at: string };
+  return {
+    data: { date: row.date, ...(JSON.parse(row.payload) as Partial<CtaCache>) } as CtaCache,
+    timestampMs: contentTimestampMs(row.fetched_at),
+  };
+}
+
 async function loadLatestCta(
   section?: string
 ): Promise<CtaCache | null> {
-  try {
-    const files = await readdir(CACHE_DIR);
-    const ctaFiles = files
-      .filter((f) => f.startsWith("cta_") && f.endsWith(".json"))
-      .sort();
-    if (ctaFiles.length === 0) return null;
-    const raw = await readFile(
-      join(CACHE_DIR, ctaFiles[ctaFiles.length - 1]),
-      "utf-8"
-    );
-    const data = JSON.parse(raw) as CtaCache;
-    if (!data.tables) return data;
+  const result = await dbFirstRead({
+    fromDb: readLatestCtaFromDb,
+    maxAgeMs: CTA_IMAGE_MAX_AGE_MS,
+    label: "menthorq-cta-image",
+  });
+  if (!result.ok) return null;
+  const data = result.data;
+  if (!data.tables) return data;
 
-    // Same reconciliation the CTA route applies: rounded-away percentiles are
-    // repaired from the duplicate row before dedupe drops it.
-    data.tables = deduplicateTables(reconcileCtaTables(data.tables));
+  // Same reconciliation the CTA route applies: rounded-away percentiles are
+  // repaired from the duplicate row before dedupe drops it.
+  const tables = deduplicateTables(reconcileCtaTables(data.tables));
 
-    if (section) {
-      // REL-108 / R-315: an unknown section is absent data, not a blank 200 image.
-      if (!Object.hasOwn(data.tables, section)) return null;
-      const filtered: Record<string, CtaRow[]> = {};
-      if (data.tables[section]) filtered[section] = data.tables[section];
-      return { ...data, tables: filtered };
-    }
-    return data;
-  } catch {
-    return null;
+  if (section) {
+    // REL-108 / R-315: an unknown section is absent data, not a blank 200 image.
+    if (!Object.hasOwn(tables, section)) return null;
+    const filtered: Record<string, CtaRow[]> = {};
+    if (tables[section]) filtered[section] = tables[section];
+    return { ...data, tables: filtered };
   }
+  return { ...data, tables };
 }
 
 function SectionHeader({ label, count }: { label: string; count: number }) {

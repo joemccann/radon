@@ -27,15 +27,6 @@ vi.mock("@/lib/db", () => ({
   getDb: mockGetDb,
 }));
 
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
-
 type Payload = Record<string, unknown>;
 
 const SERIES_TICKERS = 200;
@@ -87,7 +78,6 @@ async function insertSnapshot(payload: Payload): Promise<void> {
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function getJson(): Promise<{ text: string; json: Payload }> {
   const { GET } = await import("../app/api/equibles-ats-venue-share/route");
@@ -105,8 +95,6 @@ beforeEach(async () => {
   await db.execute(`CREATE TABLE scan_snapshots (
     service TEXT NOT NULL, scan_time TEXT NOT NULL, payload TEXT NOT NULL,
     PRIMARY KEY (service, scan_time))`);
-  mockReadFile.mockReset();
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
@@ -151,13 +139,6 @@ describe("GET /api/equibles-ats-venue-share payload", () => {
     expect((json.current as Payload[]).map((r) => r.ticker)).toEqual(["AAPL", "NVDA"]);
     expect(json).toMatchObject({ count: 2, tickers: ["AAPL", "NVDA"], week_start_date: "2026-08-03" });
     expect(json.thresholds).toMatchObject({ z_window_weeks: 52 });
-  });
-
-  it("strips the series map from the disk fallback too", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
-    const { json } = await getJson();
-    expect(json).not.toHaveProperty("series");
-    expect(json.count).toBe(2);
   });
 
   it("keeps the missing:true contract with HTTP 200 when nothing exists", async () => {
@@ -214,16 +195,6 @@ describe("GET /api/equibles-ats-venue-share read cache", () => {
     await insertSnapshot(buildPayload());
     const json = (await (await GET()).json()) as Payload;
     expect(json.count).toBe(2);
-  });
-
-  it("parses the disk fallback once per TTL", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
-    const { GET } = await import("../app/api/equibles-ats-venue-share/route");
-    await GET();
-    await GET();
-    const snapshotReads = mockReadFile.mock.calls
-      .filter(([path]) => String(path).endsWith("equibles_ats_venue_share.json"));
-    expect(snapshotReads).toHaveLength(1);
   });
 
   it("declares force-dynamic per the disk-backed route cache contract", async () => {

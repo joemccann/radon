@@ -690,10 +690,10 @@ loadCloseCache();
 
 /* ─── Option session last / last bid-offer ────────────────────────────────
  * After hours IB drops last/bid/ask and keeps CLOSE on the previous session.
- * Persist the last trade (and last two-sided book) so a restart still has
- * a mark that is not that close. File: data/option_session_mark_cache.json
+ * Keep the last trade (and last two-sided book) in memory. ib_sync persists
+ * held contracts to Turso option_session_marks, so a restart still has a mark
+ * for them that is not that close.
  */
-const SESSION_CACHE_PATH = path.resolve(process.cwd(), "data", "option_session_mark_cache.json");
 const optionSessionCache = new Map();
 
 function etDateString(date = new Date()) {
@@ -711,57 +711,32 @@ function positiveSessionPrice(value) {
     : null;
 }
 
-function loadSessionCache() {
+async function loadSessionCache() {
   try {
-    if (!fs.existsSync(SESSION_CACHE_PATH)) return;
-    const raw = JSON.parse(fs.readFileSync(SESSION_CACHE_PATH, "utf8"));
-    for (const [key, val] of Object.entries(raw || {})) {
-      if (!val || typeof val !== "object") continue;
+    const { readOptionSessionMarks } = await import("./db/writer.js");
+    const rows = await readOptionSessionMarks();
+    for (const row of rows) {
       const entry = {};
-      const last = positiveSessionPrice(val.last);
-      const bid = positiveSessionPrice(val.bid);
-      const ask = positiveSessionPrice(val.ask);
-      const mid = positiveSessionPrice(val.mid);
+      const last = positiveSessionPrice(row.last);
+      const bid = positiveSessionPrice(row.bid);
+      const ask = positiveSessionPrice(row.ask);
+      const mid = positiveSessionPrice(row.mid);
       if (last) entry.last = last;
       if (bid) entry.bid = bid;
       if (ask) entry.ask = ask;
       if (mid) entry.mid = mid;
-      if (typeof val.checked_on === "string" && val.checked_on) entry.checked_on = val.checked_on;
-      if (entry.last || (entry.bid && entry.ask) || entry.mid || entry.checked_on) {
-        optionSessionCache.set(key, entry);
+      if (row.checked_on) entry.checked_on = row.checked_on;
+      // A tick that arrived during this read is newer than the stored row.
+      if (Object.keys(entry).length && !optionSessionCache.has(row.mark_key)) {
+        optionSessionCache.set(row.mark_key, entry);
       }
     }
     if (optionSessionCache.size) {
       console.log(`Loaded ${optionSessionCache.size} cached option session marks`);
     }
   } catch (err) {
-    console.warn("Failed to load option session mark cache:", err.message);
+    console.warn("Failed to load option session marks:", err.message);
   }
-}
-
-let sessionCacheDirty = false;
-let sessionCacheTimer = null;
-
-function persistSessionCache() {
-  if (!sessionCacheDirty) return;
-  sessionCacheDirty = false;
-  try {
-    const dir = path.dirname(SESSION_CACHE_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const obj = Object.fromEntries(optionSessionCache);
-    fs.writeFileSync(SESSION_CACHE_PATH, JSON.stringify(obj), "utf8");
-  } catch (err) {
-    console.warn("Failed to persist option session mark cache:", err.message);
-  }
-}
-
-function scheduleSessionCachePersist() {
-  sessionCacheDirty = true;
-  if (sessionCacheTimer) return;
-  sessionCacheTimer = setTimeout(() => {
-    sessionCacheTimer = null;
-    persistSessionCache();
-  }, 5000);
 }
 
 function updateOptionSessionCache(data) {
@@ -791,10 +766,9 @@ function updateOptionSessionCache(data) {
   if (!changed) return;
   next.checked_on = etDateString();
   optionSessionCache.set(data.symbol, next);
-  scheduleSessionCachePersist();
 }
 
-loadSessionCache();
+void loadSessionCache();
 
 /* ─── Keep-Alive State ──────────────────────────────────────────────────── */
 const clientLastPong = new Map(); // client → timestamp (ms)

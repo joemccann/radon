@@ -1,53 +1,23 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { statSync } from "fs";
-import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
+import { snapshotCacheMeta } from "@/lib/snapshotCacheMeta";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, scrubSecrets, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "scanner.json");
 const STALE_THRESHOLD_SECONDS = 3600;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 10_000;
-
-interface CacheMeta {
-  last_refresh: string | null;
-  age_seconds: number | null;
-  is_stale: boolean;
-  stale_threshold_seconds: number;
-}
-
-function buildCacheMeta(filePath: string): CacheMeta {
-  try {
-    const s = statSync(filePath);
-    const ageSeconds = (Date.now() - s.mtime.getTime()) / 1000;
-    return {
-      last_refresh: s.mtime.toISOString(),
-      age_seconds: Math.round(ageSeconds),
-      is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  } catch {
-    return {
-      last_refresh: null,
-      age_seconds: null,
-      is_stale: true,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  }
-}
 
 /** Phase 2 — latest Turso snapshot, timestamped by the scan_time row key. */
 async function readScannerFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
@@ -64,10 +34,14 @@ async function readScannerFromDb(): Promise<TimestampedRead<Record<string, unkno
   };
 }
 
-async function readScannerFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+function readScannerSnapshot() {
+  return cachedRead("scanner:snapshot", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readScannerFromDb,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "scanner",
+    }),
+  );
 }
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
@@ -76,17 +50,8 @@ export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  // Fresher of DB row and disk JSON. The cache_meta still reflects file
-  // mtime — useful for "how stale is the disk fallback" diagnostics.
-  const result = await cachedRead("scanner:snapshot", READ_CACHE_TTL_MS, () =>
-    dbFirstRead({
-      fromDb: readScannerFromDb,
-      fromDisk: readScannerFromDisk,
-      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-      label: "scanner",
-    }),
-  );
-  const cache_meta = buildCacheMeta(CACHE_PATH);
+  const result = await readScannerSnapshot();
+  const cache_meta = snapshotCacheMeta(result.ok ? result.timestampMs : null, STALE_THRESHOLD_SECONDS);
   if (result.ok) {
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...result.data, cache_meta }),
@@ -110,29 +75,27 @@ export async function POST(): Promise<Response> {
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
-    const data = await radonFetch("/scan", { method: "POST", timeout: 130_000 });
+    const data = await radonFetch<Record<string, unknown>>("/scan", { method: "POST", timeout: 130_000 });
     invalidateCache("scanner:snapshot");
-    const cache_meta = buildCacheMeta(CACHE_PATH);
+    const cache_meta = snapshotCacheMeta(contentTimestampMs(data.scan_time), STALE_THRESHOLD_SECONDS);
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...data, cache_meta }),
       requestId,
     );
   } catch (error) {
-    // Serve cached data on failure
-    try {
-      const raw = await readFile(CACHE_PATH, "utf-8");
-      const cached = JSON.parse(raw);
-      const cache_meta = buildCacheMeta(CACHE_PATH);
-      const res = NextResponse.json({ ...cached, cache_meta, is_stale: true });
+    // Serve the Turso or last-in-memory snapshot on failure
+    const cached = await readScannerSnapshot();
+    if (cached.ok) {
+      const cache_meta = snapshotCacheMeta(cached.timestampMs, STALE_THRESHOLD_SECONDS);
+      const res = NextResponse.json({ ...cached.data, cache_meta, is_stale: true });
       res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
       return setNoStoreResponseHeaders(res, requestId);
-    } catch {
-      // RC-B9: upstream error text can carry a LibsqlError's URL + token.
-      const message = scrubSecrets(error instanceof Error ? error.message : "Scanner failed");
-      return setNoStoreResponseHeaders(
-        NextResponse.json({ error: message }, { status: 502 }),
-        requestId,
-      );
     }
+    // RC-B9: upstream error text can carry a LibsqlError's URL + token.
+    const message = scrubSecrets(error instanceof Error ? error.message : "Scanner failed");
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ error: message }, { status: 502 }),
+      requestId,
+    );
   }
 }

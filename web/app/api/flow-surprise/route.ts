@@ -1,50 +1,20 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { statSync } from "fs";
-import { join } from "path";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
+import { snapshotCacheMeta } from "@/lib/snapshotCacheMeta";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/flow_surprise.json). Without this, the framework freezes the first
-// response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const FLOW_SURPRISE_CACHE_PATH = join(process.cwd(), "..", "data", "flow_surprise.json");
 const STALE_THRESHOLD_SECONDS = 600;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 10_000;
-
-interface CacheMeta {
-  last_refresh: string | null;
-  age_seconds: number | null;
-  is_stale: boolean;
-  stale_threshold_seconds: number;
-}
-
-function buildCacheMeta(filePath: string): CacheMeta {
-  try {
-    const s = statSync(filePath);
-    const ageSeconds = (Date.now() - s.mtime.getTime()) / 1000;
-    return {
-      last_refresh: s.mtime.toISOString(),
-      age_seconds: Math.round(ageSeconds),
-      is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  } catch {
-    return {
-      last_refresh: null,
-      age_seconds: null,
-      is_stale: true,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  }
-}
 
 interface FlowSurpriseFile {
   scan_time?: string;
@@ -68,25 +38,18 @@ async function readFlowSurpriseFromDb(): Promise<TimestampedRead<FlowSurpriseFil
   };
 }
 
-async function readFlowSurpriseFromDisk(): Promise<TimestampedRead<FlowSurpriseFile> | null> {
-  const raw = await readFile(FLOW_SURPRISE_CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as FlowSurpriseFile;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const cache_meta = buildCacheMeta(FLOW_SURPRISE_CACHE_PATH);
   const result = await cachedRead("flow-surprise:snapshot", READ_CACHE_TTL_MS, () =>
     dbFirstRead({
       fromDb: readFlowSurpriseFromDb,
-      fromDisk: readFlowSurpriseFromDisk,
       maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
       label: "flow-surprise",
     }),
   );
+  const cache_meta = snapshotCacheMeta(result.ok ? result.timestampMs : null, STALE_THRESHOLD_SECONDS);
   if (result.ok) {
     const data = result.data;
     return setNoStoreResponseHeaders(
@@ -101,7 +64,7 @@ export async function GET(): Promise<Response> {
       requestId,
     );
   }
-  // Missing/unreadable on both sources is a legitimate empty state, not an error.
+  // No row and no remembered read is a legitimate empty state, not an error.
   return setNoStoreResponseHeaders(
     NextResponse.json({
       results: [],

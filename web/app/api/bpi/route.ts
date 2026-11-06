@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { BPI_INDEX_SYMBOLS, type BpiIndexEntry, type BpiIndexSymbol } from "@/lib/bpi";
@@ -9,13 +7,11 @@ import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbF
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { buildDemoBpiFixture } from "@/lib/demo/fixtures/regime";
 
-// Disable Next.js static caching: this handler reads live disk state
-// (data/bpi.json) as the Turso fallback.
+// Disable Next.js static caching: this handler reads live Turso state.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "bpi.json");
 
 // The scan timer runs Mon-Fri 21:30 UTC; four days survives long weekends.
 const BPI_MAX_AGE_MS = 4 * 24 * 3_600_000;
@@ -45,12 +41,6 @@ async function readBpiFromDb(): Promise<TimestampedRead<BpiDoc> | null> {
     data: { generated_at: newestTakenAt, indices },
     timestampMs: contentTimestampMs(newestTakenAt),
   };
-}
-
-async function readBpiFromDisk(): Promise<TimestampedRead<BpiDoc> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as BpiDoc;
-  return { data, timestampMs: contentTimestampMs(data.generated_at) };
 }
 
 function missingIndex(symbol: BpiIndexSymbol): BpiIndexEntry {
@@ -83,7 +73,6 @@ export async function GET(): Promise<Response> {
   }
   const result = await dbFirstRead({
     fromDb: readBpiFromDb,
-    fromDisk: readBpiFromDisk,
     maxAgeMs: BPI_MAX_AGE_MS,
     label: "bpi",
   });

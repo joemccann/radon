@@ -2,10 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 
-const mocks = vi.hoisted(() => ({ getDb: vi.fn(), readFile: vi.fn(), access: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getDb: vi.fn(), access: vi.fn() }));
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.access }));
 vi.mock("@/lib/db", () => ({ getDb: mocks.getDb, resetDb: vi.fn() }));
-vi.mock("fs/promises", async (original) => ({ ...await original<typeof import("fs/promises")>(), readFile: mocks.readFile }));
 let db: Client;
 const absent = { missing: true, degraded: false, scan_time: null, source_last_modified: null,
   data_date: null, expected_session_date: null, count: 0, weekly_count: 0, current: null,
@@ -28,7 +27,6 @@ beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); db = createClient({ url: ":memory:" });
   await db.execute("CREATE TABLE scan_snapshots(service TEXT,scan_time TEXT,payload TEXT,PRIMARY KEY(service,scan_time))");
   mocks.getDb.mockReturnValue(db);
-  mocks.readFile.mockRejectedValue(new Error("absent"));
   mocks.access.mockResolvedValue({ ok: true, principal: { kind: "operator", userId: "operator" } });
 });
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
@@ -42,7 +40,7 @@ describe("private common-stock high-low GET", () => {
     expect(route.dynamic).toBe("force-dynamic"); expect(route.runtime).toBe("nodejs"); expect(route.radonCapability).toBe("read");
     expect(route).not.toHaveProperty("POST");
     expect((await route.GET(new Request("http://localhost/api/high-low-line"))).status).toBe(403);
-    expect(mocks.getDb).not.toHaveBeenCalled(); expect(mocks.readFile).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
     expect(mocks.access).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ operatorOnly: true }));
   });
   it("returns the exact authenticated missing contract at HTTP200", async () => {
@@ -52,7 +50,7 @@ describe("private common-stock high-low GET", () => {
   });
   it("executes service-scoped SQL with fresh content timestamps", async () => {
     const good = payload(); await seed(good); await seed(payload(new Date(Date.now()+1000).toISOString()), "other-service");
-    mocks.readFile.mockResolvedValue(JSON.stringify(payload(new Date(Date.now()-3600000).toISOString())));
+    await seed(payload(new Date(Date.now()-3600000).toISOString()));
     const { GET } = await import("../app/api/high-low-line/route");
     const response = await GET(new Request("http://localhost/api/high-low-line"));
     expect(await response.json()).toEqual(good); expect(response.headers.get("X-Request-Id")).toBeTruthy();
@@ -64,23 +62,17 @@ describe("private common-stock high-low GET", () => {
     const { GET } = await import("../app/api/high-low-line/route");
     expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual({ ...absent, stale: true, scan_time: old.scan_time });
   });
-  it("uses the valid disk fallback when Turso is unavailable", async () => {
-    mocks.getDb.mockImplementation(() => { throw new Error("offline"); }); const good = payload();
-    mocks.readFile.mockResolvedValue(JSON.stringify(good));
+  it("serves the last good read from memory when Turso is unavailable", async () => {
+    const good = payload(); await seed(good);
     const { GET } = await import("../app/api/high-low-line/route");
+    await GET(new Request("http://localhost/api/high-low-line"));
+    mocks.getDb.mockImplementation(() => { throw new Error("offline"); });
     expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual(good);
   });
   it("rejects invalid nonfinite-equivalent or wrong-universe payloads", async () => {
     const bad = payload(); bad.series[0].stoch_rsi14 = 20; await seed(bad);
     const { GET } = await import("../app/api/high-low-line/route");
     expect((await (await GET(new Request("http://localhost/api/high-low-line"))).json()).missing).toBe(true);
-  });
-  it("uses the newer disk content clock even when the SQL envelope is newer", async () => {
-    const old = payload(new Date(Date.now()-3_600_000).toISOString());
-    await db.execute({ sql: "INSERT INTO scan_snapshots VALUES (?,?,?)", args: ["high-low-line", new Date().toISOString(), JSON.stringify(old)] });
-    const good = payload(); mocks.readFile.mockResolvedValue(JSON.stringify(good));
-    const { GET } = await import("../app/api/high-low-line/route");
-    expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual(good);
   });
   it("preserves degraded source lag and published fractional values", async () => {
     const good = payload(); good.degraded = true;
@@ -114,11 +106,11 @@ describe("private common-stock high-low GET", () => {
     const { GET } = await import("../app/api/high-low-line/route");
     expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual(absent);
   });
-  it("keeps a valid older disk sample when newer DB content is malformed", async () => {
-    await seed(payload());
-    await db.execute("UPDATE scan_snapshots SET payload='not JSON'");
-    const good = payload(new Date(Date.now()-60_000).toISOString()); mocks.readFile.mockResolvedValue(JSON.stringify(good));
+  it("keeps the last good read when newer DB content is malformed", async () => {
+    const good = payload(new Date(Date.now()-60_000).toISOString()); await seed(good);
     const { GET } = await import("../app/api/high-low-line/route");
+    await GET(new Request("http://localhost/api/high-low-line"));
+    await db.execute("UPDATE scan_snapshots SET payload='not JSON'");
     expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual(good);
   });
 
@@ -136,20 +128,21 @@ describe("private common-stock high-low GET", () => {
     const response = await GET(new Request("http://localhost/api/high-low-line"));
     expect(response.status).toBe(status);
     expect(response.headers.get("Cache-Control")).toContain("no-store");
-    expect(mocks.getDb).not.toHaveBeenCalled(); expect(mocks.readFile).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
-  it("bounds a hung DB request, serves disk, and retries DB on the next GET", async () => {
+  it("bounds a hung DB request, serves memory, and retries DB on the next GET", async () => {
+    const good = payload(); await seed(good);
+    const { GET } = await import("../app/api/high-low-line/route");
+    await GET(new Request("http://localhost/api/high-low-line"));
+    mocks.getDb.mockClear();
     vi.useFakeTimers();
     try {
       mocks.getDb.mockReturnValueOnce({ execute: () => new Promise(() => {}) });
-      const good = payload(); mocks.readFile.mockResolvedValue(JSON.stringify(good));
-      const { GET } = await import("../app/api/high-low-line/route");
       const pending = GET(new Request("http://localhost/api/high-low-line"));
       await vi.advanceTimersByTimeAsync(3_001);
       expect(await (await pending).json()).toEqual(good);
       expect(mocks.getDb).toHaveBeenCalledTimes(1);
-      await seed(good); mocks.readFile.mockRejectedValue(new Error("absent"));
       expect(await (await GET(new Request("http://localhost/api/high-low-line"))).json()).toEqual(good);
       expect(mocks.getDb).toHaveBeenCalledTimes(2);
     } finally { vi.useRealTimers(); }

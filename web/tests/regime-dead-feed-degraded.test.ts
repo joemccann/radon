@@ -11,19 +11,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockReadFile = vi.fn();
-const mockReaddir = vi.fn();
 const mockWriteFile = vi.fn();
-const mockStat = vi.fn();
 const mockMkdir = vi.fn();
 const mockSpawn = vi.fn();
 const mockGetDb = vi.fn();
 
 vi.mock("fs/promises", () => ({
-  readFile: mockReadFile,
-  readdir: mockReaddir,
   writeFile: mockWriteFile,
-  stat: mockStat,
   mkdir: mockMkdir,
 }));
 
@@ -47,7 +41,7 @@ vi.mock("@/lib/db", () => ({
 describe("/api/regime with every source dead", () => {
   beforeEach(() => {
     vi.resetModules();
-    for (const m of [mockReadFile, mockReaddir, mockWriteFile, mockStat, mockMkdir, mockSpawn, mockGetDb]) {
+    for (const m of [mockWriteFile, mockMkdir, mockSpawn, mockGetDb]) {
       m.mockReset();
     }
     mockWriteFile.mockResolvedValue(undefined);
@@ -56,10 +50,6 @@ describe("/api/regime with every source dead", () => {
     mockGetDb.mockImplementation(() => {
       throw new Error("turso unreachable");
     });
-    // No scheduled files and no legacy cache on disk.
-    mockReaddir.mockResolvedValue([]);
-    mockStat.mockRejectedValue(new Error("ENOENT"));
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
   });
 
   async function deadFeedBody() {

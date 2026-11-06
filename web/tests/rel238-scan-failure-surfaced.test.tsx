@@ -11,14 +11,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-const mockReadFile = vi.fn();
-const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() });
-const mockReaddir = vi.fn().mockResolvedValue([]);
 vi.mock("fs/promises", () => {
   const mocked = {
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-    stat: (...args: unknown[]) => mockStat(...args),
-    readdir: (...args: unknown[]) => mockReaddir(...args),
     writeFile: vi.fn().mockResolvedValue(undefined),
     mkdir: vi.fn().mockResolvedValue(undefined),
   };
@@ -40,13 +34,14 @@ vi.mock("@/lib/radonApi", () => ({
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
 vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }), resetDb: () => {} }));
 
+function seedRow(snapshot: Record<string, unknown>) {
+  mockExecute.mockResolvedValue({
+    rows: [{ scan_time: snapshot.scan_time, taken_at: snapshot.scan_time, payload: JSON.stringify(snapshot) }],
+  });
+}
+
 beforeEach(() => {
   vi.resetModules();
-  mockReadFile.mockReset();
-  // T-478: re-stamp the stat default per test — the module-load-time value
-  // both freezes (ages as the file runs) and leaks any per-test stub.
-  mockStat.mockReset();
-  mockStat.mockResolvedValue({ mtimeMs: Date.now() });
   mockRadonFetch.mockReset();
   mockExecute.mockReset();
   mockExecute.mockResolvedValue({ rows: [] });
@@ -63,12 +58,12 @@ afterEach(() => {
 describe("POST /api/gex upstream failure (R-643)", () => {
   it("serves the cached fallback as 200 with body-level failure markers", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       ticker: "SPX",
       net_gex: 321,
       history: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/gex/route");
     const res = await POST();
@@ -97,14 +92,14 @@ describe("POST /api/gex upstream failure (R-643)", () => {
 describe("POST /api/regime upstream failure (R-643)", () => {
   it("serves the cached fallback as 200 with body-level failure markers", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       date: "2026-09-05",
       market_open: true,
       cri: { score: 18, level: "LOW", components: { vix: 4, vvix: 4, correlation: 5, momentum: 5 } },
       history: [],
       spy_closes: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/regime/route");
     const res = await POST();
@@ -119,12 +114,12 @@ describe("POST /api/regime upstream failure (R-643)", () => {
 describe("POST /api/gamma-rotation upstream failure (R-643)", () => {
   it("serves the cached fallback with a non-2xx status and body-level markers", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       signal: { grg_z: 1.23 },
       assets: { SPY: { ticker: "SPY" }, TLT: { ticker: "TLT" } },
       history: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/gamma-rotation/route");
     const res = await POST();
@@ -195,13 +190,13 @@ describe("useSyncHook body-level failure (R-643)", () => {
 describe("GET /api/gex does not wait on the background scan", () => {
   it("returns the snapshot while the scan is still in flight", async () => {
     mockRadonFetch.mockImplementation(() => new Promise(() => {}));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-01-02T15:00:00Z",
       market_open: true,
       ticker: "SPX",
       net_gex: 111,
       history: [],
-    }));
+    });
     const { GET } = await import("../app/api/gex/route");
     // The scan promise never settles: the test timeout catches an awaited scan.
     // A 50ms wall-clock race instead leaks the losing GET into the next test
@@ -224,12 +219,12 @@ describe("POST /api/gex aborts when the client disconnects", () => {
         opts?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
       });
     });
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       ticker: "SPX",
       net_gex: 321,
       history: [],
-    }));
+    });
     const { POST } = await import("../app/api/gex/route");
     const request = new Request("https://app.radon.run/api/gex", {
       method: "POST",
@@ -248,13 +243,13 @@ describe("POST /api/gex aborts when the client disconnects", () => {
 describe("GET /api/gex staleness (R-660)", () => {
   it("marks a stale snapshot STALE in X-Cache-State and stamps is_stale in the body", async () => {
     mockRadonFetch.mockResolvedValue({}); // background rescan trigger
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-01-02T15:00:00Z", // months old
       market_open: true,
       ticker: "SPX",
       net_gex: 111,
       history: [],
-    }));
+    });
 
     const { GET } = await import("../app/api/gex/route");
     const res = await GET();
@@ -273,14 +268,14 @@ describe("GET /api/gex staleness (R-660)", () => {
     try {
       mockRadonFetch.mockResolvedValue({});
       const { mostRecentSessionDate } = await import("../lib/marketSession");
-      mockReadFile.mockResolvedValue(JSON.stringify({
+      seedRow({
         // Friday 15:59 ET, the last scan of the most recent session.
         scan_time: `${mostRecentSessionDate()}T20:59:00Z`,
         market_open: false,
         ticker: "SPX",
         net_gex: 222,
         history: [],
-      }));
+      });
 
       const { GET } = await import("../app/api/gex/route");
       const res = await GET();
@@ -302,12 +297,12 @@ describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
   it("gex: RadonApiError 429 yields exactly 429 with no cached body", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       ticker: "SPX",
       net_gex: 321,
       history: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/gex/route");
     const res = await POST();
@@ -322,14 +317,14 @@ describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
   it("regime: RadonApiError 429 yields exactly 429 with no cached body", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       date: "2026-09-05",
       market_open: true,
       cri: { score: 18, level: "LOW", components: { vix: 4, vvix: 4, correlation: 5, momentum: 5 } },
       history: [],
       spy_closes: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/regime/route");
     const res = await POST();
@@ -343,12 +338,12 @@ describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
   it("gamma-rotation: RadonApiError 429 yields exactly 429 with no cached body", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    seedRow({
       scan_time: "2026-09-05T13:00:00Z",
       signal: { grg_z: 1.23 },
       assets: { SPY: { ticker: "SPY" }, TLT: { ticker: "TLT" } },
       history: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/gamma-rotation/route");
     const res = await POST();
@@ -357,22 +352,5 @@ describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
     expect(body.scan_succeeded).toBe(false);
     expect(body.signal).toBeUndefined();
     expect(body.is_stale).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// T-478: the module-load-time mockStat default must be restored per test —
-// a test that stubs stat stale must not leak into the next test in file order.
-// ---------------------------------------------------------------------------
-
-describe("mockStat default restored between tests (T-478)", () => {
-  it("a test may stub stat stale for its own scenario", async () => {
-    mockStat.mockResolvedValue({ mtimeMs: 0 });
-    expect((await mockStat()).mtimeMs).toBe(0);
-  });
-
-  it("the next test observes a fresh window-relative mtime, not the leak", async () => {
-    const { mtimeMs } = await mockStat();
-    expect(Date.now() - mtimeMs).toBeLessThan(60_000);
   });
 });

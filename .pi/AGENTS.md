@@ -99,7 +99,7 @@ The unattended release coordinator requires strict up-to-date checks, all existi
 - Evaluations must call `python3.13 scripts/evaluate.py [TICKER]`; do not manually call milestone scripts during evaluation.
 - Every evaluation milestone must fetch fresh data, include today's data, and print a Data Freshness line.
 - M3B OI changes are required; large OI can reveal institutional trades missed by UW flow alerts.
-- Portfolio source of truth is Interactive Brokers via `python3.13 scripts/ib_sync.py`. `docs/status.md` and `data/portfolio.json` are stale-prone caches/logs.
+- Portfolio source of truth is Interactive Brokers via `python3.13 scripts/ib_sync.py`. `docs/status.md` is a stale-prone log; the latest synced state is Turso `portfolio_snapshots`.
 
 ## Brand Rules
 
@@ -141,3 +141,9 @@ Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set a
 - Trades canonical store is the Turso `journal` table. `/journal` and `/orders` derive from it, with JSON fallback only for legacy rows.
 - Push to `main` runs CI then automatically starts the Production-environment deploy job after every required test gate passes; no manual approval is configured. Verify with `gh run list --workflow=ci.yml --limit 1`. Monorepo cutover state and env contract: `docs/monorepo-cloud-migration.md`. Live reliability lessons: `tasks/lessons.md` (2026-07-11).
 - Local HTML reports that embed images must inline images as base64 `data:` URIs; Chrome blocks `file://` image loading.
+
+## Skills
+
+Agent skills live in `.agents/skills/` (open Agent Skills `SKILL.md` format). `.claude/skills/` resolves to the same files for Claude Code.
+
+- **untangle-codebase** (`.agents/skills/untangle-codebase/SKILL.md`): whole-codebase structural refactor. Run only when explicitly asked (e.g. "untangle the codebase"); read the file and follow it end to end.

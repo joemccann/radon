@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead } from "@/lib/dbFirstRead";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
 const SERVICE = "equibles-ats-venue-share";
-const CACHE_PATH = join(process.cwd(), "..", "data", "equibles_ats_venue_share.json");
 
 // Contract: absent venue-share data is HTTP 200 with missing:true, never a 4xx.
 const MISSING_ATS_VENUE_SHARE = {
@@ -41,12 +38,7 @@ type VenueShareRead = TimestampedRead<Record<string, unknown>>;
 
 // The writer no longer stores the per-ticker `series` map in scan_snapshots (it
 // lives in equibles_ats_venue_share). Older rows still carry it (53.65 MB of a
-// 54.2 MB row) and no view reads it, so json_remove drops it inside Turso; the
-// disk copy keeps it for carry-forward, so dropSeries covers that.
-function dropSeries(payload: Record<string, unknown>): Record<string, unknown> {
-  const { series: _series, ...rest } = payload;
-  return rest;
-}
+// 54.2 MB row) and no view reads it, so json_remove drops it inside Turso.
 
 function isCacheableRead(read: VenueShareRead | null): boolean {
   if (!read || isMissingPayload(read.data)) return false;
@@ -64,15 +56,9 @@ async function readVenueShareFromDb(): Promise<VenueShareRead | null> {
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   return {
-    data: dropSeries(JSON.parse(row.payload) as Record<string, unknown>),
+    data: JSON.parse(row.payload) as Record<string, unknown>,
     timestampMs: contentTimestampMs(row.scan_time),
   };
-}
-
-async function readVenueShareFromDisk(): Promise<VenueShareRead | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = dropSeries(JSON.parse(raw) as Record<string, unknown>);
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
 function cachedSource(source: string, read: () => Promise<VenueShareRead | null>) {
@@ -82,7 +68,6 @@ function cachedSource(source: string, read: () => Promise<VenueShareRead | null>
 }
 
 const readCachedVenueShareFromDb = cachedSource("db", readVenueShareFromDb);
-const readCachedVenueShareFromDisk = cachedSource("disk", readVenueShareFromDisk);
 
 export const radonCapability = "read";
 
@@ -90,7 +75,6 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readCachedVenueShareFromDb,
-    fromDisk: readCachedVenueShareFromDisk,
     maxAgeMs: ATS_VENUE_SHARE_MAX_AGE_MS,
     label: SERVICE,
   });

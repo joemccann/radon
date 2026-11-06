@@ -213,14 +213,7 @@ Scripts that need longer timeouts pass them explicitly:
 
 ## Cached Data Fallback
 
-When sync fails, API routes serve cached data instead of returning 502:
-
-| Route | Fallback File | Signal |
-|-------|--------------|--------|
-| `POST /api/portfolio` | `data/portfolio.json` | `X-Sync-Warning` header |
-| `POST /api/orders` | `data/orders.json` | `X-Sync-Warning` header |
-
-**502 only occurs when both sync AND cache file are missing/empty.** This is by design -- the UI should always render something if data has ever been synced.
+When sync fails, API routes serve the latest Turso snapshot with an `X-Sync-Warning` header instead of returning 502. The UI should always render.
 
 ---
 

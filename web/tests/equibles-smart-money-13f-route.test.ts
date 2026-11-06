@@ -5,14 +5,12 @@
  *
  * GET-only: 13F is quarterly, so the refresh job writes and this route only
  * reads. Turso-first through the dbFirstRead chokepoint (newest vintage in
- * equibles_13f_snapshots) with a data/equibles_13f/{TICKER}.json fallback.
+ * equibles_13f_snapshots) with a per-ticker last-in-memory fallback.
  * Absent data is the contract's `missing: true` shape at HTTP 200; only a
  * malformed/absent ticker is a real client error and 400s.
  *
- * Split from the jsdom panel suite deliberately: under the jsdom environment
- * the fs/promises mock does not reach a dynamically re-imported route module,
- * so the disk-fallback branch silently reads the real filesystem. Same split
- * as margin-debt-api.test.ts vs margin-debt-panel.test.tsx.
+ * Split from the jsdom panel suite deliberately: same split as
+ * margin-debt-api.test.ts vs margin-debt-panel.test.tsx.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
@@ -23,14 +21,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: mockGetDb,
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
-
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 type Payload = Record<string, unknown>;
 
@@ -99,8 +89,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockReset();
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -133,12 +121,15 @@ describe("GET /api/equibles-smart-money-13f", () => {
     expect(json.ticker).toBe("AAPL");
   });
 
-  it("falls back to the per-ticker disk cache when Turso has no row", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ holder_count: 99 })));
+  it("serves the ticker's last good read from memory when Turso has no row", async () => {
+    await insertSnapshot("AAPL", "2026-06-30", buildPayload({ holder_count: 99 }));
 
     const { GET } = await import("../app/api/equibles-smart-money-13f/route");
+    await GET(request("?ticker=AAPL"));
+    await db.execute("DELETE FROM equibles_13f_snapshots");
     const json = await jsonOf(await GET(request("?ticker=AAPL")));
     expect(json.holder_count).toBe(99);
+    expect((await jsonOf(await GET(request("?ticker=MSFT")))).missing).toBe(true);
   });
 
   it("returns 200 with missing:true when no data exists yet, never a 4xx", async () => {
@@ -175,7 +166,7 @@ describe("GET /api/equibles-smart-money-13f", () => {
     expect(json.report_date).toBe("2026-06-30");
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/equibles-smart-money-13f/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

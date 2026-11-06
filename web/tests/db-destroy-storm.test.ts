@@ -134,14 +134,13 @@ describe("isolated failures do not tear down the pool", () => {
         await dbExecute("SELECT 1", { label: "nested" });
         return null;
       },
-      fromDisk: async () => ({ data: { source: "disk" }, timestampMs: Date.now() }),
       maxAgeMs: 60_000,
       label: "nested",
     });
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(totalDestroys()).toBe(0);
   });
 

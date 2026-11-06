@@ -1,25 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readFile: vi.fn(),
-  statSync: vi.fn(),
   radonFetch: vi.fn(),
   getDb: vi.fn(),
 }));
 
-vi.mock("fs/promises", () => ({
-  readFile: mocks.readFile,
-}));
-
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
-  return {
-    ...actual,
-    statSync: mocks.statSync,
-  };
-});
-
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mocks.getDb() }));
+
+function dbRow(snapshot: { scan_time: string }) {
+  return dbReturning([{ scan_time: snapshot.scan_time, payload: JSON.stringify(snapshot) }]);
+}
 
 function dbReturning(rows: Array<{ scan_time: string; payload: string }>) {
   return { execute: async () => ({ rows }) };
@@ -67,13 +57,9 @@ function noStoreHeader(res: Response): string {
 
 beforeEach(() => {
   vi.resetModules();
-  mocks.readFile.mockReset();
-  mocks.statSync.mockReset();
   mocks.radonFetch.mockReset();
   mocks.getDb.mockReset();
-  mocks.statSync.mockReturnValue({ mtime: new Date("2026-09-16T15:01:00Z") });
-  mocks.readFile.mockResolvedValue(JSON.stringify(payload));
-  mocks.getDb.mockReturnValue(dbReturning([]));
+  mocks.getDb.mockReturnValue(dbRow(payload));
 });
 
 afterEach(() => {
@@ -91,14 +77,11 @@ describe("GET /api/scanner/vol-skew-mr", () => {
     expect(noStoreHeader(res)).toContain("no-store");
     expect(body.results[0].ticker).toBe("AAPL");
     expect(body.actionable_count).toBe(1);
-    expect(body.cache_meta.last_refresh).toBe("2026-09-16T15:01:00.000Z");
+    expect(body.cache_meta.last_refresh).toBe("2026-09-16T15:00:00.000Z");
   });
 
   it("returns the empty envelope when no cache exists", async () => {
-    mocks.readFile.mockRejectedValueOnce(new Error("ENOENT"));
-    mocks.statSync.mockImplementationOnce(() => {
-      throw new Error("ENOENT");
-    });
+    mocks.getDb.mockReturnValue(dbReturning([]));
     const { GET } = await import("../app/api/scanner/vol-skew-mr/route");
 
     const res = await GET();

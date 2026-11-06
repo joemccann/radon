@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
@@ -9,7 +7,6 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "rsi_oversold.json");
 
 const MISSING_RSI_OVERSOLD = Object.freeze({
   missing: true,
@@ -40,19 +37,12 @@ async function readRsiOversoldFromDb(): Promise<TimestampedRead<Record<string, u
   };
 }
 
-async function readRsiOversoldFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readRsiOversoldFromDb,
-    fromDisk: readRsiOversoldFromDisk,
     maxAgeMs: await snapshotMaxAgeMs(RSI_OVERSOLD_MAX_AGE_MS),
     label: "rsi-oversold",
   });

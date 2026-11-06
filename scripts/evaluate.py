@@ -574,12 +574,16 @@ def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict
         return {t: {"error": f"price history fetch failed: {exc}"} for t in tickers}
 
 
-def _open_max_losses_from_portfolio() -> list:
-    path = Path(__file__).resolve().parent.parent / "data" / "portfolio.json"
+def _open_max_losses_from_portfolio() -> Optional[list]:
+    """Open max losses from the latest Turso snapshot. None means unreadable, which
+    must not size a trade as if the book were empty."""
     try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return []
+        from bankroll_guard import _load_latest_snapshot
+    except ImportError:
+        from scripts.bankroll_guard import _load_latest_snapshot
+    payload = _load_latest_snapshot()
+    if payload is None:
+        return None
     losses = []
     for pos in payload.get("positions") or []:
         raw = pos.get("max_risk")
@@ -862,6 +866,16 @@ def run_evaluation(
 
     if open_max_losses is None:
         open_max_losses = _open_max_losses_from_portfolio()
+    if open_max_losses is None:
+        eval_result.milestones["M6"] = MilestoneResult(
+            name="kelly_sizing",
+            passed=False,
+            data={"bankroll": bankroll},
+            error="RISK: open positions unreadable from Turso; cannot size against the book",
+        )
+        eval_result.decision = "NO_TRADE"
+        eval_result.failing_gate = "RISK"
+        return eval_result
     ticket = kelly_ticket(
         prob_win=float(structure.get("prob_win") or 0),
         max_gain=float(structure.get("max_gain") or 0),

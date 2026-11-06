@@ -1,10 +1,7 @@
-"""Journal connector — one doc per Turso `journal` row (fill/trade rendering)
-plus one doc per rationale-bearing entry in data/trade_log.json (the entries
-with a thesis; IB_AUTO_IMPORT stubs there duplicate journal rows)."""
+"""Journal connector: one doc per Turso `journal` row (fill/trade rendering)."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Iterator
 
 from ..schema import KnowledgeDoc
@@ -12,8 +9,6 @@ from ..schema import KnowledgeDoc
 SOURCE = "journal"
 SCOPE = "trading"
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-TRADE_LOG_PATH = _REPO_ROOT / "data" / "trade_log.json"
 TRADE_LOG_KEY_PREFIX = "trade_log:"
 
 _BATCH_ROWS = 200
@@ -25,15 +20,12 @@ _ROWS_SQL = (
 
 def fetch(db) -> Iterator[KnowledgeDoc]:
     yield from _journal_rows(db)
-    yield from _trade_log_entries()
 
 
 def prunable_doc_keys(doc_keys: Iterator[str] | list[str]) -> list[str]:
-    """Vanished-key authority: Turso-backed journal rows only. trade_log:*
-    docs come from the gitignored data/trade_log.json, which DIVERGES between
-    hosts (production appends on the VPS, the laptop holds a stale copy), so
-    even a host with the file must not treat another host's entries as
-    vanished. Same hazard class as the 2026-07-19 evals pruning incident."""
+    """Vanished-key authority: Turso-backed journal rows only. trade_log:* docs
+    were ingested from the retired trade log and are the only remaining copy of
+    those theses in Turso, so nothing here may prune them."""
     return [key for key in doc_keys if not key.startswith(TRADE_LOG_KEY_PREFIX)]
 
 
@@ -58,33 +50,6 @@ def _journal_rows(db) -> Iterator[KnowledgeDoc]:
                 last_activity_at=written_at or _date_to_iso(filled_at),
             )
         cursor = rows[-1][0]
-
-
-def _trade_log_entries() -> Iterator[KnowledgeDoc]:
-    trades = _read_trade_log()
-    for entry in trades:
-        if not entry.get("thesis"):
-            continue
-        yield KnowledgeDoc(
-            source=SOURCE,
-            scope=SCOPE,
-            doc_key=f"{TRADE_LOG_KEY_PREFIX}{entry.get('id')}",
-            content=_render_rationale(entry),
-            title=_title(entry),
-            metadata=_metadata(entry),
-            last_activity_at=_date_to_iso(entry.get("date")),
-        )
-
-
-def _read_trade_log() -> list[dict]:
-    if not TRADE_LOG_PATH.exists():
-        return []
-    try:
-        data = json.loads(TRADE_LOG_PATH.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return []
-    trades = data.get("trades", []) if isinstance(data, dict) else []
-    return [t for t in trades if isinstance(t, dict)]
 
 
 def _parse_payload(payload_json: str) -> dict | None:

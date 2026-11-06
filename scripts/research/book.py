@@ -1,16 +1,12 @@
 """Watchlist and portfolio underlyings for legacy triage and strict admission.
 
-`current_tickers()` requires complete, fresh canonical DB evidence and never
-uses JSON fallbacks. The legacy `tickers()` helper tries Turso then data/*.json
-and returns None only when neither source is readable; it is not sufficient
-evidence for the hard equity-research admission gate.
+`current_tickers()` requires complete, fresh canonical DB evidence. The legacy
+`tickers()` helper reads Turso and returns None only when neither source is
+readable; it is not sufficient evidence for the hard equity-research admission
+gate.
 """
 from __future__ import annotations
-import json
 import re
-from pathlib import Path
-
-DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
 
 # Flex rehydrate stores OCC symbols ("SPY   260918P00740000"); live rows store the root.
 _OCC_TICKER = re.compile(r'^([A-Z.]{1,6})\s+\d{6}[CP]\d{8}$')
@@ -38,13 +34,7 @@ def _watchlist():
         from db.readers import read_watchlist_tickers
         return _clean(read_watchlist_tickers())
     except Exception:
-        pass
-    try:
-        stored = json.loads((DATA_DIR / 'watchlist.json').read_text())
-    except (OSError, ValueError):
         return None
-    items = stored.get('tickers') if isinstance(stored, dict) else None
-    return _clean(item.get('ticker') if isinstance(item, dict) else item for item in items or [])
 
 
 def _portfolio():
@@ -52,12 +42,7 @@ def _portfolio():
         from db.readers import read_portfolio_positions
         return _positions_tickers(read_portfolio_positions())
     except Exception:
-        pass
-    try:
-        payload = json.loads((DATA_DIR / 'portfolio.json').read_text())
-    except (OSError, ValueError):
         return None
-    return _positions_tickers(payload.get('positions') if isinstance(payload, dict) else None)
 
 
 def tickers():

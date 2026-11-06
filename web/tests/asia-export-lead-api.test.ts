@@ -2,12 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 
-const mocks = vi.hoisted(() => ({ getDb: vi.fn(), readFile: vi.fn(), requireRouteAccess: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getDb: vi.fn(), requireRouteAccess: vi.fn() }));
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
 vi.mock("@/lib/db", () => ({ getDb: mocks.getDb, resetDb: vi.fn() }));
-vi.mock("fs/promises", async (original) => ({
-  ...await original<typeof import("fs/promises")>(), readFile: mocks.readFile,
-}));
 
 let db: Client;
 const comparison = { available: false, label: "MSCI US forward 12-month EPS", reason: "Licensed EPS series not connected" };
@@ -27,7 +24,6 @@ beforeEach(async () => {
   await db.execute("CREATE TABLE scan_snapshots(service TEXT,scan_time TEXT,payload TEXT,PRIMARY KEY(service,scan_time))");
   mocks.getDb.mockReturnValue(db);
   mocks.requireRouteAccess.mockResolvedValue({ ok: true, principal: { kind: "operator", userId: "operator" } });
-  mocks.readFile.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
 });
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
@@ -39,10 +35,10 @@ describe("official export lead GET", () => {
     expect(route.radonCapability).toBe("read");
     expect(route).not.toHaveProperty("POST");
   });
-  it("executes service-scoped SQL and serves Turso over older disk", async () => {
+  it("executes service-scoped SQL and serves the newest row over an older one", async () => {
     await seed(payload());
     await seed(payload(new Date(Date.now()+1000).toISOString(), 999), "other-service");
-    mocks.readFile.mockResolvedValue(JSON.stringify(payload(new Date(Date.now()-3600000).toISOString(), -30)));
+    await seed(payload(new Date(Date.now()-3600000).toISOString(), -30));
     const { GET } = await import("../app/api/asia-export-lead/route");
     const response = await GET();
     expect(response.status).toBe(200);
@@ -51,22 +47,17 @@ describe("official export lead GET", () => {
     expect(response.headers.get("Cache-Control")).toContain("max-age=300");
     expect(response.headers.get("Cache-Control")).toContain("stale-while-revalidate=3600");
   });
-  it("uses the newer content timestamp rather than blindly preferring database", async () => {
-    await seed(payload(new Date(Date.now()-3600000).toISOString(), -30));
-    mocks.readFile.mockResolvedValue(JSON.stringify(payload(new Date().toISOString(), 40)));
-    const { GET } = await import("../app/api/asia-export-lead/route");
-    expect((await (await GET()).json()).current.mean_yoy_pct).toBe(40);
-  });
   it("returns the exact missing measurement contract at HTTP200", async () => {
     const { GET } = await import("../app/api/asia-export-lead/route");
     const response = await GET();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(missing);
   });
-  it("falls back to a valid disk snapshot when the database is unavailable", async () => {
-    mocks.getDb.mockImplementation(() => { throw new Error("offline"); });
-    mocks.readFile.mockResolvedValue(JSON.stringify(payload()));
+  it("serves the last good read from memory when the database is unavailable", async () => {
+    await seed(payload());
     const { GET } = await import("../app/api/asia-export-lead/route");
+    await GET();
+    mocks.getDb.mockImplementation(() => { throw new Error("offline"); });
     expect((await (await GET()).json()).missing).toBe(false);
   });
   it("collapses stale writer snapshots while retaining their diagnostic timestamp", async () => {
@@ -93,22 +84,21 @@ describe("export snapshot provenance and invalid sources", () => {
     expect(await (await GET()).json()).toEqual(missing);
   });
 
-  it("compares payload sample clocks rather than a fresher SQL envelope", async () => {
+  it("judges the payload sample clock rather than a fresher SQL envelope", async () => {
     const old = payload(new Date(Date.now() - 27 * 3600000).toISOString(), -10);
     await db.execute({ sql: "INSERT INTO scan_snapshots VALUES (?, ?, ?)",
       args: ["asia-export-lead", new Date().toISOString(), JSON.stringify(old)] });
-    const disk = payload(new Date(Date.now() - 3600000).toISOString(), 40);
-    mocks.readFile.mockResolvedValue(JSON.stringify(disk));
     const { GET } = await import("../app/api/asia-export-lead/route");
-    expect(await (await GET()).json()).toEqual(disk);
+    expect(await (await GET()).json()).toEqual({ ...missing, stale: true, scan_time: old.scan_time });
   });
 
-  it.each(["db", "disk"])("rejects a future %s sample without displacing the healthy source", async (source) => {
+  it("rejects a future sample without displacing the last good read", async () => {
     const fresh = payload(new Date(Date.now() - 3600000).toISOString(), 25);
     const future = payload(new Date(Date.now() + 3600000).toISOString(), 999);
-    await seed(source === "db" ? future : fresh);
-    mocks.readFile.mockResolvedValue(JSON.stringify(source === "disk" ? future : fresh));
+    await seed(fresh);
     const { GET } = await import("../app/api/asia-export-lead/route");
+    await GET();
+    await seed(future);
     expect(await (await GET()).json()).toEqual(fresh);
   });
 
@@ -131,28 +121,22 @@ describe("export snapshot provenance and invalid sources", () => {
     expect(stored.rows[0].payload).toBe(serialized);
   });
 
-  it.each([null, [], 5, "not-json"])("uses the healthy DB when disk is malformed: %s", async (value) => {
-    const data = payload();
+  it("serves the last good read after a malformed database payload", async () => {
+    const data = payload(new Date(Date.now() - 3600000).toISOString());
     await seed(data);
-    mocks.readFile.mockResolvedValue(value === "not-json" ? value : JSON.stringify(value));
     const { GET } = await import("../app/api/asia-export-lead/route");
-    expect(await (await GET()).json()).toEqual(data);
-  });
-
-  it("falls back after a malformed database payload", async () => {
+    await GET();
     await db.execute({ sql: "INSERT INTO scan_snapshots VALUES (?, ?, ?)", args: ["asia-export-lead", new Date().toISOString(), "not-json"] });
-    const data = payload();
-    mocks.readFile.mockResolvedValue(JSON.stringify(data));
-    const { GET } = await import("../app/api/asia-export-lead/route");
     expect(await (await GET()).json()).toEqual(data);
   });
 
   it("does not let a newer missing marker replace valid observations", async () => {
+    const data = payload(new Date(Date.now() - 3600000).toISOString());
+    await seed(data);
+    const { GET } = await import("../app/api/asia-export-lead/route");
+    await GET();
     await db.execute({ sql: "INSERT INTO scan_snapshots VALUES (?, ?, ?)",
       args: ["asia-export-lead", new Date().toISOString(), JSON.stringify({ ...missing, scan_time: new Date().toISOString() })] });
-    const data = payload(new Date(Date.now() - 3600000).toISOString());
-    mocks.readFile.mockResolvedValue(JSON.stringify(data));
-    const { GET } = await import("../app/api/asia-export-lead/route");
     expect(await (await GET()).json()).toEqual(data);
   });
 

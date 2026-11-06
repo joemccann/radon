@@ -1,10 +1,11 @@
 /** REL-108 / R-315: unknown image sections refuse before expensive rendering. */
 import {beforeEach, describe, expect, it, vi} from "vitest";
 const mocks = vi.hoisted(() => ({fonts: vi.fn(), render: vi.fn()}));
-vi.mock("fs/promises", () => ({
-  readdir: vi.fn(async () => ["cta_mock.json"]),
-  readFile: vi.fn(async () => JSON.stringify({date: "mock", tables: {main: []}})),
-}));
+vi.mock("@/lib/db", () => ({resetDb: () => {}, getDb: () => ({execute: async () => ({rows: [{
+  date: "mock",
+  fetched_at: "2026-05-08T20:00:00Z",
+  payload: JSON.stringify({date: "mock", tables: {main: []}}),
+}]})})}));
 vi.mock("@/lib/routeAccess", () => ({requireRouteAccess: vi.fn(async () => ({ok: true}))}));
 vi.mock("@/lib/og-fonts", () => ({loadFonts: mocks.fonts}));
 vi.mock("next/og", () => ({ImageResponse: class extends Response {

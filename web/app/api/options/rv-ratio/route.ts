@@ -1,7 +1,5 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
-import { readFile } from "fs/promises";
-import { join } from "path";
 
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -56,15 +54,6 @@ async function readRvRatioFromDb(
   };
 }
 
-async function readRvRatioFromDisk(
-  symbol: string,
-): Promise<TimestampedRead<SnapshotPayload> | null> {
-  const cachePath = join(process.cwd(), "..", "data", "rv_ratio", `${symbol}.json`);
-  const raw = await readFile(cachePath, "utf-8");
-  const data = JSON.parse(raw) as SnapshotPayload;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 function snapshotLastDate(payload: SnapshotPayload): string | null {
   const coverage = payload.coverage;
   if (!coverage || typeof coverage !== "object") return null;
@@ -87,9 +76,9 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await dbFirstRead({
     fromDb: () => readRvRatioFromDb(symbol),
-    fromDisk: () => readRvRatioFromDisk(symbol),
     maxAgeMs: RV_RATIO_MAX_AGE_MS,
-    label: "rv-ratio",
+    // One memory entry per symbol: a bare route label would serve SPY's as QQQ's.
+    label: `rv-ratio:${symbol}`,
   });
   if (!result.ok) return optionsJson({ schema_version: 1, symbol, missing: true });
   return optionsJson(withSessionStaleness(result.data));

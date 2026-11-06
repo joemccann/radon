@@ -1,35 +1,33 @@
 /**
- * Freshness-aware DB-vs-disk read — the single chokepoint for every
- * snapshot-backed Next.js route (scanner, vcg, discover, flow-analysis,
- * performance).
+ * Turso-first read with a last-in-memory fallback: the single chokepoint for
+ * every snapshot-backed Next.js route.
  *
- * Both sources are read; whichever carries the NEWER content timestamp
- * is served. This protects the UI from a stalled writer on EITHER side:
- *   - Turso mirror frozen (e.g. the 2026-06-11 dual-write gate) → disk wins.
- *   - Disk fallback stale (laptop-thin mode) → DB wins.
+ * Sources of truth are Turso and IB. Routes never read `data/*.json`. A valid,
+ * non-degraded DB row is served and remembered per label; when Turso fails, times
+ * out, has no row, returns a future-dated row or returns a degraded row, the last
+ * good read for that label is served instead, with source "memory".
  *
- * Timestamps are the snapshot's own content time (scan_time / taken_at /
- * last_sync), never file mtime — a stalled writer re-writing old content
- * must still read as stale. Missing/unparseable timestamps are infinitely
- * stale: a timestamped source always beats an untimestamped one, and the
- * DB wins ties (legacy DB-first order).
+ * `fresh` reports whether the SERVED read is within the route's max-age budget,
+ * computed from that read's own content timestamp (scan_time / taken_at /
+ * last_sync). A memory entry therefore ages like the row it came from: it can keep
+ * a panel rendering through an outage, but dead data can never look current, and
+ * the routes' stale gating and background rescans keep firing. Missing or
+ * unparseable timestamps are infinitely stale.
  *
- * `fresh` reports whether the served snapshot is within the route's
- * max-age budget. Routes gate background rescans on it: the served
- * snapshot is the fresher of the two, so "served snapshot is stale"
- * means BOTH sources are stale.
+ * Memory is process-local and starts empty: a restart during an outage serves the
+ * route's missing state, never a disk copy. Entries are shared by reference with
+ * every caller, the same contract as `cachedRead`, so a route must never mutate
+ * `result.data`.
  *
- * Freshness alone doesn't catch a source that's structurally present but
- * content-degraded — a writer that ran, found/produced nothing, and still
- * wrote a timestamped row (`missing: true`, an empty result set). Without
- * a validity check, that row can beat an older, genuinely populated
- * snapshot on timestamp alone. Callers may opt in with `isDegraded`: a
- * fresher degraded source then loses to a non-degraded older one, and two
- * degraded sources keep the existing freshness order. NOT on by default —
- * several routes have a LEGITIMATE empty/degraded-shaped fresh state
- * (discover's "0 candidates today", performance's insufficient_data
- * writing series:[] on purpose so the UI shows empty rather than a stale
- * curve), so there is no universal heuristic; each call site wires its own.
+ * Freshness alone doesn't catch a row that's structurally present but
+ * content-degraded: a writer that ran, found/produced nothing, and still wrote a
+ * timestamped row (`missing: true`, an empty result set). Callers may opt in with
+ * `isDegraded`: a degraded row loses to healthy memory and is never remembered;
+ * with no memory it is still served. NOT on by default: several routes have a
+ * LEGITIMATE empty/degraded-shaped fresh state (discover's "0 candidates today",
+ * performance's insufficient_data writing series:[] on purpose so the UI shows
+ * empty rather than a stale curve), so there is no universal heuristic; each call
+ * site wires its own.
  */
 
 import { parseScanTime } from "./parseScanTime";
@@ -41,6 +39,7 @@ import {
   type DbOperationIdentity,
 } from "./dbOperation";
 import { describeDbError } from "./dbExecute";
+import { demoDbScope } from "./demo/demoDbIsolation";
 
 export type TimestampedRead<T> = {
   data: T;
@@ -51,7 +50,7 @@ export type TimestampedRead<T> = {
 export type DbFirstResult<T> =
   | {
       ok: true;
-      source: "db" | "disk";
+      source: "db" | "memory";
       data: T;
       timestampMs: number | null;
       fresh: boolean;
@@ -85,35 +84,58 @@ export function staleCollapse<M extends { scan_time?: string | null }, T>(
 export type DbFirstReadOptions<T> = {
   /** Latest Turso snapshot, or null when no row exists. Throwing is treated as absent. */
   fromDb: () => Promise<TimestampedRead<T> | null>;
-  /** On-disk JSON fallback, or null when the file is missing/empty. Throwing is treated as absent. */
-  fromDisk: () => Promise<TimestampedRead<T> | null>;
   /** Per-route freshness budget; the served snapshot reports fresh=false beyond it. */
   maxAgeMs: number;
   /**
-   * Optional label used in console.warn when the disk fallback fires.
-   * Helps identify which route is drifting in production logs.
+   * Keys the last-good memory entry and labels the warnings, so it must identify
+   * the snapshot and not just the route: a per-ticker read carries the ticker.
    */
-  label?: string;
+  label: string;
   /** Injectable clock for tests. */
   now?: () => number;
-  /** Per-source read deadline. Prevents a hung DB read from blocking disk fallback. */
+  /** DB read deadline. Prevents a hung read from blocking the memory fallback. */
   sourceTimeoutMs?: number;
   /**
-   * Optional per-route validity gate. A source whose `data` this predicate
-   * flags degraded loses to a non-degraded source even when it's fresher —
-   * a stalled-but-newer writer must never regress the UI from real data to
-   * an empty/error shape. Two degraded sources (or two healthy ones) fall
-   * through to the normal freshness order, unchanged. Omitted by default:
-   * see the module docstring for why there's no safe universal default.
-   * `isMissingPayload` below covers the common `missing: true` / absent
-   * case; routes with their own degraded shape (e.g. an empty results
-   * array that's never legitimately empty) can compose their own.
+   * Optional per-route validity gate. A DB row this predicate flags degraded
+   * loses to a remembered healthy read even when it's fresher: a
+   * stalled-but-newer writer must never regress the UI from real data to an
+   * empty/error shape. Omitted by default: see the module docstring for why
+   * there's no safe universal default. `isMissingPayload` below covers the common
+   * `missing: true` / absent case; routes with their own degraded shape (e.g. an
+   * empty results array that's never legitimately empty) can compose their own.
    */
   isDegraded?: (data: T) => boolean;
 };
 
 const DEFAULT_SOURCE_TIMEOUT_MS = 3_000;
 const MAX_FUTURE_SKEW_MS = 60_000;
+/** Static labels plus the per-ticker ones; only an idle ticker is ever evicted. */
+const MAX_MEMORY_ENTRIES = 256;
+
+const lastGoodReads = new Map<string, TimestampedRead<unknown>>();
+
+/**
+ * One process serves operator and demo principals, and a demo-scoped assistant
+ * tool call makes getDb() throw DemoDbIsolationError against the prod DB. That
+ * failure must not fall through to rows remembered for the operator, so the scope
+ * and the database are part of the key.
+ */
+function memoryKey(label: string): string {
+  return `${demoDbScope()}|${process.env.TURSO_DB_URL ?? ""}|${label}`;
+}
+
+function rememberRead(key: string, read: TimestampedRead<unknown>): void {
+  lastGoodReads.delete(key);
+  lastGoodReads.set(key, read);
+  if (lastGoodReads.size > MAX_MEMORY_ENTRIES) {
+    lastGoodReads.delete(lastGoodReads.keys().next().value as string);
+  }
+}
+
+/** Test seam: module-level memory otherwise persists across tests in a file. */
+export function __resetDbFirstReadMemoryForTests(): void {
+  lastGoodReads.clear();
+}
 
 /** Epoch ms from a snapshot's content timestamp field (scan_time / taken_at / last_sync). */
 export function contentTimestampMs(value: unknown): number | null {
@@ -147,27 +169,35 @@ export async function dbFirstRead<T>(
     sourceTimeoutMs = DEFAULT_SOURCE_TIMEOUT_MS,
     isDegraded,
   } = options;
+  const key = memoryKey(label);
 
-  const [db, disk] = await Promise.all([
-    readSource(options.fromDb, "DB", label, sourceTimeoutMs),
-    readSource(options.fromDisk, "disk", label, sourceTimeoutMs),
-  ]);
+  const db = await readDb(options.fromDb, label, sourceTimeoutMs);
   const nowMs = now();
-  const validDb = rejectFutureTimestamp(db, nowMs);
-  const validDisk = rejectFutureTimestamp(disk, nowMs);
-  if (!validDb && !validDisk) return { ok: false };
+  const valid = rejectFutureTimestamp(db, nowMs);
+  const degraded = valid !== null && isDegraded?.(valid.data) === true;
 
-  const source = pickFresherSource(validDb, validDisk, isDegraded);
-  const chosen = (source === "db" ? validDb : validDisk) as TimestampedRead<T>;
-  if (source === "disk") warnDiskServed(label, validDb !== null);
-
-  return {
+  const served = (source: "db" | "memory", read: TimestampedRead<T>): DbFirstResult<T> => ({
     ok: true,
     source,
-    data: chosen.data,
-    timestampMs: chosen.timestampMs,
-    fresh: isWithinMaxAge(chosen.timestampMs, maxAgeMs, nowMs),
-  };
+    data: read.data,
+    timestampMs: read.timestampMs,
+    fresh: isWithinMaxAge(read.timestampMs, maxAgeMs, nowMs),
+  });
+
+  if (valid && !degraded) {
+    rememberRead(key, valid);
+    return served("db", valid);
+  }
+
+  const memory = lastGoodReads.get(key) as TimestampedRead<T> | undefined;
+  if (memory) {
+    warnWithLabel(
+      label,
+      `${degraded ? "DB row is degraded" : "DB failed, empty or future-dated"}; serving last-good memory snapshot.`,
+    );
+    return served("memory", memory);
+  }
+  return valid ? served("db", valid) : { ok: false };
 }
 
 function rejectFutureTimestamp<T>(
@@ -176,28 +206,6 @@ function rejectFutureTimestamp<T>(
 ): TimestampedRead<T> | null {
   if (source?.timestampMs != null && source.timestampMs - nowMs > MAX_FUTURE_SKEW_MS) return null;
   return source;
-}
-
-function pickFresherSource<T>(
-  db: TimestampedRead<T> | null,
-  disk: TimestampedRead<T> | null,
-  isDegraded?: (data: T) => boolean,
-): "db" | "disk" {
-  if (!db) return "disk";
-  if (!disk) return "db";
-
-  if (isDegraded) {
-    const dbDegraded = isDegraded(db.data);
-    const diskDegraded = isDegraded(disk.data);
-    // Exactly one side is degraded: the healthy one wins outright, even if
-    // the degraded side is the fresher of the two. Both degraded (or both
-    // healthy) falls through to the ordinary freshness comparison below.
-    if (dbDegraded !== diskDegraded) return dbDegraded ? "disk" : "db";
-  }
-
-  const dbTs = db.timestampMs ?? Number.NEGATIVE_INFINITY;
-  const diskTs = disk.timestampMs ?? Number.NEGATIVE_INFINITY;
-  return diskTs > dbTs ? "disk" : "db";
 }
 
 function isWithinMaxAge(
@@ -210,44 +218,31 @@ function isWithinMaxAge(
     && nowMs - timestampMs <= maxAgeMs;
 }
 
-async function readSource<T>(
+async function readDb<T>(
   read: () => Promise<TimestampedRead<T> | null>,
-  sourceName: "DB" | "disk",
-  label: string | undefined,
+  label: string,
   timeoutMs: number,
 ): Promise<TimestampedRead<T> | null> {
-  const identity: DbOperationIdentity | undefined =
-    sourceName === "DB" ? createDbOperationIdentity() : undefined;
+  const identity: DbOperationIdentity = createDbOperationIdentity();
   // Stamp the caller's label so a teardown triggered here is attributable
   // in journald (2026-08-06: `trigger=unlabelled` was undiagnosable).
-  if (identity) identity.label = label ? `dbFirstRead:${label}` : "dbFirstRead";
+  identity.label = `dbFirstRead:${label}`;
   try {
-    const pending = identity ? runWithDbOperation(identity, read) : read();
     return (await withTimeout(
-      pending,
+      runWithDbOperation(identity, read),
       timeoutMs,
-      `${sourceName} read timed out after ${timeoutMs}ms`,
+      `DB read timed out after ${timeoutMs}ms`,
     )) ?? null;
   } catch (err) {
-    // A DB-source timeout is the stale-pool wedge: drop the cached client so
-    // the NEXT request rebuilds a fresh pool instead of waiting for the 12s
-    // stall ceiling. The disk read still serves this request. Never reset on a
-    // disk-source error — that has nothing to do with the libsql client.
-    if (identity) resetDb(identity);
-    warnWithLabel(label, `${sourceName} read failed: ${describeDbError(err)}`);
+    // A DB timeout is the stale-pool wedge: drop the cached client so the NEXT
+    // request rebuilds a fresh pool instead of waiting for the 12s stall ceiling.
+    // Memory still serves this request.
+    resetDb(identity);
+    warnWithLabel(label, `DB read failed: ${describeDbError(err)}`);
     return null;
   }
 }
 
-function warnDiskServed(label: string | undefined, dbWasPresent: boolean): void {
-  warnWithLabel(
-    label,
-    dbWasPresent
-      ? "DB snapshot is staler than disk; serving disk (DB writer drift)."
-      : "DB empty or failed; serving disk fallback.",
-  );
-}
-
-function warnWithLabel(label: string | undefined, message: string): void {
-  console.warn(`[dbFirstRead${label ? `:${label}` : ""}] ${message}`);
+function warnWithLabel(label: string, message: string): void {
+  console.warn(`[dbFirstRead:${label}] ${message}`);
 }

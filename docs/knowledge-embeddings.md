@@ -195,3 +195,5 @@ Writer: `scripts/knowledge/store.py` (dual-write logic, HTTP and local paths).
 Query resolution: `scripts/knowledge/embed.py:resolve_query_vector`.
 Backfill script: `scripts/knowledge/backfill_v2.py`.
 Contract test: `scripts/tests/test_knowledge_embed_v2.py`.
+
+The journal connector indexes Turso `journal` rows only. Existing `trade_log:*` docs came from the retired trade log; they stay in Turso and are never pruned.

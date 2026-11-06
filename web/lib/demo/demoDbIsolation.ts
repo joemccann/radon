@@ -51,11 +51,16 @@ export class DemoDbIsolationError extends Error {
   readonly code = "DEMO_DB_ISOLATION";
 }
 
+/** Which side of the demo/operator DB boundary the current execution is on. */
+export function demoDbScope(env: EnvLike = process.env): "demo" | "primary" {
+  return demoPrincipalScope.getStore() === true || env.NEXT_PUBLIC_RADON_DEMO === "1"
+    ? "demo"
+    : "primary";
+}
+
 /** Throws when a demo-scoped caller would execute against a prod-marked DB. */
 export function assertDemoDbIsolation(env: EnvLike = process.env): void {
-  const demoScoped =
-    demoPrincipalScope.getStore() === true || env.NEXT_PUBLIC_RADON_DEMO === "1";
-  if (!demoScoped) return;
+  if (demoDbScope(env) !== "demo") return;
   const violation = demoDbIsolationViolation(env);
   if (violation) throw new DemoDbIsolationError(violation);
 }

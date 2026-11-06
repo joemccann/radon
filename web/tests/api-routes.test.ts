@@ -70,6 +70,16 @@ vi.mock("@/lib/orders/readOrdersFromDb", () => ({
   readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
 }));
 
+function dbRow(snapshot: Record<string, unknown>) {
+  return {
+    rows: [{
+      payload: JSON.stringify(snapshot),
+      scan_time: snapshot.scan_time ?? snapshot.discovery_time ?? snapshot.analysis_time,
+      taken_at: snapshot.scan_time,
+    }],
+  };
+}
+
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
 const mockBatch = vi.fn(async (statements: Array<{ sql: string; args?: unknown[] }>) => {
   const results = [];
@@ -783,7 +793,7 @@ describe("GET /api/gex", () => {
   });
 
   it("returns cached GEX payload when file exists", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       scan_time: "2026-04-22T14:00:00Z",
       ticker: "SPX",
       net_gex: 123,
@@ -825,7 +835,7 @@ describe("POST /api/gex", () => {
 
   it("falls back to cached data when the fresh scan fails", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       scan_time: "2026-04-22T14:00:00Z",
       ticker: "SPX",
       net_gex: 321,
@@ -865,14 +875,14 @@ describe("GET /api/regime", () => {
     // Window-relative date: a hardcoded past date goes stale and re-arms
     // triggerBackgroundScan() (T-477).
     const sessionDate = mostRecentSessionDate();
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce({ rows: [{ ...dbRow({
       scan_time: `${sessionDate}T14:00:00Z`,
       date: sessionDate,
       market_open: true,
       cri: { score: 24, level: "ELEVATED", components: { vix: 6, vvix: 6, correlation: 6, momentum: 6 } },
       history: [],
       spy_closes: [],
-    }));
+    }).rows[0], taken_at: new Date().toISOString() }] });
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -913,7 +923,7 @@ describe("POST /api/regime", () => {
 
   it("falls back to cached regime data when the fresh scan fails", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       scan_time: "2026-04-22T14:00:00Z",
       date: "2026-04-22",
       market_open: true,

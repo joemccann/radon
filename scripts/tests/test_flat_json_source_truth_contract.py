@@ -102,5 +102,9 @@ def test_trade_portfolio_scripts_do_not_use_flat_json_source_truth() -> None:
         "scripts/ib_reconcile.py",
         "scripts/db/bootstrap_journal.py",
         "scripts/utils/incremental_sync.py",
+        "scripts/kelly_guard.py",
+        "scripts/option_session_mark.py",
+        "scripts/research/book.py",
+        "scripts/knowledge/sources/journal.py",
     ]:
         _assert_no_legacy_data_files(PROJECT_ROOT / rel)

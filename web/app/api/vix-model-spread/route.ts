@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -11,7 +9,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const radonCapability = "read";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "vix-model-spread.json");
 const MISSING_VIX_MODEL_SPREAD = {
   missing: true, status: "missing", scan_time: null, as_of: null,
   data_date: null, count: 0, current: null, series: [],
@@ -57,18 +54,12 @@ async function readFromDb(): Promise<TimestampedRead<Payload> | null> {
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
-async function readFromDisk(): Promise<TimestampedRead<Payload> | null> {
-  const data = parsePayload(await readFile(CACHE_PATH, "utf-8"));
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export async function GET(request: Request): Promise<Response> {
   // The source is approved for the operator's personal, non-commercial use.
   const access = await requireRouteAccess(request, { operatorOnly: true });
   if (!access.ok) return access.response;
   const result = await dbFirstRead({
     fromDb: readFromDb,
-    fromDisk: readFromDisk,
     maxAgeMs: getFreshnessWindowMs("vix-model-spread", "closed"),
     label: "vix-model-spread",
     isDegraded: isMissingPayload,

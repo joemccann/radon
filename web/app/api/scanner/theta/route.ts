@@ -1,8 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { statSync } from "fs";
 import { join } from "path";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
@@ -16,7 +14,6 @@ import { buildDemoThetaHarvester } from "@/lib/demo/fixtures/thetaHarvester";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "theta_harvester.json");
 const STALE_THRESHOLD_SECONDS = 6 * 60 * 60;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
@@ -41,26 +38,6 @@ function buildResultCacheMeta(timestampMs: number | null, fresh: boolean): Cache
   };
 }
 
-function buildCacheMeta(filePath: string): CacheMeta {
-  try {
-    const s = statSync(filePath);
-    const ageSeconds = (Date.now() - s.mtime.getTime()) / 1000;
-    return {
-      last_refresh: s.mtime.toISOString(),
-      age_seconds: Math.round(ageSeconds),
-      is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  } catch {
-    return {
-      last_refresh: null,
-      age_seconds: null,
-      is_stale: true,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  }
-}
-
 export function emptyThetaHarvesterPayload() {
   return {
     scan_time: "",
@@ -76,14 +53,9 @@ export function emptyThetaHarvesterPayload() {
 
 export const radonCapability = "read";
 
-export async function readThetaHarvesterCache(): Promise<Record<string, unknown> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
 /** Latest Turso snapshot — shared across hosts, so the scan that
  *  radon-signals-refresh.timer runs on the FastAPI host is visible to the
- *  Next.js host (the disk file is host-local). */
+ *  Next.js host. */
 async function readThetaFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
@@ -100,12 +72,6 @@ async function readThetaFromDb(): Promise<TimestampedRead<Record<string, unknown
   };
 }
 
-async function readThetaFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const data = await readThetaHarvesterCache();
-  if (data == null) return null;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 async function fetchEarningsBatch(tickers: string[]): Promise<{
   results?: Array<Record<string, unknown>>;
 } | null> {
@@ -113,6 +79,23 @@ async function fetchEarningsBatch(tickers: string[]): Promise<{
   return radonFetch<{ results?: Array<Record<string, unknown>> }>(path, {
     timeout: EARNINGS_BACKFILL_TIMEOUT_MS,
   });
+}
+
+function readThetaHarvesterSnapshot() {
+  return cachedRead("scanner:theta", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readThetaFromDb,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "theta-harvester",
+      isDegraded: (data) => isCoverageFailedScan(data),
+    }),
+  );
+}
+
+/** Turso or last-in-memory snapshot, for the scan route's failure path. */
+export async function readThetaHarvesterCache(): Promise<Record<string, unknown> | null> {
+  const result = await readThetaHarvesterSnapshot();
+  return result.ok ? result.data : null;
 }
 
 export async function GET(): Promise<Response> {
@@ -134,21 +117,9 @@ export async function GET(): Promise<Response> {
       requestId,
     );
   }
-  const diskCacheMeta = buildCacheMeta(CACHE_PATH);
-  // Fresher of the shared Turso snapshot and the host-local disk JSON.
-  const result = await cachedRead("scanner:theta", READ_CACHE_TTL_MS, () =>
-    dbFirstRead({
-      fromDb: readThetaFromDb,
-      fromDisk: readThetaFromDisk,
-      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-      label: "theta-harvester",
-      isDegraded: (data) => isCoverageFailedScan(data),
-    }),
-  );
+  const result = await readThetaHarvesterSnapshot();
   if (result.ok) {
-    const cache_meta = result.source === "disk"
-      ? diskCacheMeta
-      : buildResultCacheMeta(result.timestampMs, result.fresh);
+    const cache_meta = buildResultCacheMeta(result.timestampMs, result.fresh);
     // Pre-feature snapshots lack the `earnings` key. Backfill from the
     // standalone earnings service so the column is not blank until the next
     // full NDX rescan. Fail-open: backfill errors leave the payload unchanged.
@@ -162,7 +133,7 @@ export async function GET(): Promise<Response> {
     );
   }
   return setNoStoreResponseHeaders(
-    NextResponse.json({ ...emptyThetaHarvesterPayload(), cache_meta: diskCacheMeta }),
+    NextResponse.json({ ...emptyThetaHarvesterPayload(), cache_meta: buildResultCacheMeta(null, false) }),
     requestId,
   );
 }
