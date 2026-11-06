@@ -1398,3 +1398,8 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-584 | DONE | Pre-fix NOAA walk case 4/4 red on leftover `called[1][1] is True` with `elapsed < 0.7` holding (serial 0.62s). Fake `collectors.time.monotonic` plus connect that advances that clock: wall mutation `return fn()` 1 failed; restored 1 passed ×3; file 97 passed ×3. Product source unchanged. Closing rounds: root pytest r1/r3 20,312 passed / 12 skipped / 63 subtests; r2 xdist credentials clock flake then serial 11 passed. Vitest 11,610 passed / 21 skipped / 1,184 files each round. Cloud 42 failed / 3,976 passed / 23 skipped each round, 0 added / 0 removed. |
+## 2026-11-06
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-585 | DONE | Pre-fix `<= 1.0 < timeouts[1]` under 60→5 stayed 3 passed. Frozen clock `deadline=1000.0` then failed `assert [1.0, 5.0] == [1.0, 60.0]`. Restored 60.0: 1 passed. `scripts/tests/test_model_gateway_service.py` + cooldown + probe files 85 passed ×3. Product source unchanged. Closing rounds: root pytest credentials xdist flake then serial 11 passed (r1 also NOAA T-584, already on #1433); 20,328/20,329/20,329 passed / 12 skipped / 63 subtests. Vitest 11,610 passed / 21 skipped / 1,184 files each round. Cloud 42 failed / 3,976 passed / 23 skipped each round, 0 added / 0 removed against `62f08ffc`. |
