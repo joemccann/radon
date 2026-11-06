@@ -4952,6 +4952,49 @@ already contained the 2026-10-28 display-name fix.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_PREVIEW_SLUG`,
   `_candidate`, `select_frontier_models`).
 
+## aa-frontier-catalog-410
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer, and the
+07:16 ai-cycle start repeats it, when the catalog URL returns HTTP 410.**
+Peak: 2026-11-06 07:16Z, page `9734adb77f1e50445f2c0ec402aaba14`. Health
+row `aa-frontier-basket` stored
+`Artificial Analysis catalog returned HTTP 410`. The same minute
+`ai-cycle` stored `Enabled publisher collection failed; inspect source statuses`.
+
+- **Mechanism:** Daily 07:00 UTC timer, then `radon-ai-cycle.service`
+  `Wants=` the same oneshot at 07:16. Both callers GET
+  `https://artificialanalysis.ai/api/v2/data/llms/models`. That path
+  returned HTTP 410 with `The legacy /api/v2/data/* endpoints were
+  retired on Wed, 04 Nov 2026 23:59:59 GMT`. The run was under a second
+  of container time, so this was not the 30s transport timeout. The
+  error row was written. `/health/lite` stayed `database: up`. Not IB.
+  Not the 2026-10-08 ok-heartbeat case and not a missing-provider
+  `CatalogError`: the detail is the HTTP status sentence.
+- **Detection:** journal stdout
+  `{"status": "error", "reason": "Artificial Analysis catalog returned HTTP 410"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  An unauthenticated GET of the legacy path returns the same 410 JSON
+  and names `https://artificialanalysis.ai/data-api/migrate-v2-data`.
+- **Discriminating check:** the legacy path is HTTP 410 even with a
+  dummy key. `GET /api/v2/language/models/free` is 401 without a key
+  and 401 for a dummy key, not 410. Python Turso `SELECT 1` failing in
+  the same minute is a platform outage: stand down. `Result=signal` or
+  exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** call the free language-model list, which
+  accepts any valid key and still has slug, creator id, release date,
+  input and output prices, and the intelligence index. Follow `page`
+  until `has_more` is false. A page loop past 25 pages fails closed.
+  Do not `reset-failed` as the fix. The next timer is 07:00 UTC. A
+  manual start after the deploy rewrites the state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_retired_data_endpoint_410_follows_paginated_free_catalog`,
+  `test_catalog_pagination_bound_fails_closed_without_a_partial_basket`,
+  `scripts/tests/test_ai_cycle_collectors.py::test_aa_collection_follows_paginated_free_catalog_after_data_endpoint_410`.
+- **Code:** `scripts/ai_cycle/aa_catalog.py`, `scripts/aa_frontier_refresh.py`
+  (`fetch_catalog`), `scripts/ai_cycle/collectors.py` (`_collect_aa_catalog`),
+  `scripts/credential_validators.py`, `scripts/llm_token_index.py`.
+
 ## pnl-story-stock-entry-timing
 
 **A realized stock P&L story shows entry price and exit timestamp but omits entry timestamp and hold duration.**

@@ -18,11 +18,18 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
+from scripts.ai_cycle.aa_catalog import (
+    LANGUAGE_MODELS_URL,
+    MAX_CATALOG_PAGES,
+    CatalogPageError,
+    next_catalog_page,
+)
+
 URLS = {
     "openrouter": "https://openrouter.ai/api/v1/datasets/rankings-daily",
     "vercel": "https://vercel.com/api/ai/leaderboard-export",
     "gpu-rental": "https://gpurentalprices.com/api/latest.json",
-    "artificial-analysis": "https://artificialanalysis.ai/api/v2/data/llms/models",
+    "artificial-analysis": LANGUAGE_MODELS_URL,
     "eia": "https://api.eia.gov/v2/electricity/rto/region-sub-ba-data/data/",
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
@@ -1351,6 +1358,35 @@ def parse_vast(payload, digest, fetched):
     ]
 
 
+def _collect_aa_catalog(transport, key: str, basket):
+    """Follow free-list pages so a basket member past page 1 is not missing."""
+    headers = {"x-api-key": key}
+    rows = []
+    page = 1
+    fetched = None
+    while True:
+        if page > MAX_CATALOG_PAGES:
+            raise SourceError("Artificial Analysis catalog pagination exceeded the page bound")
+        payload, _page_digest, fetched = transport.fetch(
+            URLS["artificial-analysis"],
+            params={"page": page},
+            headers=headers,
+        )
+        try:
+            nxt = next_catalog_page(payload, requested_page=page)
+        except CatalogPageError as exc:
+            raise SourceError(str(exc)) from exc
+        rows.extend(payload["data"])
+        if nxt is None:
+            break
+        page = nxt
+    combined = {"status": 200, "data": rows}
+    raw = json.dumps(combined, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    archive = getattr(transport, "archive", None)
+    digest = archive_raw(Path(archive), raw) if archive is not None else hashlib.sha256(raw).hexdigest()
+    return parse_aa(combined, digest, fetched, basket)
+
+
 def collect_source(source, transport, start, end, *, env=None, basket=(), full_history=False):
     env = os.environ if env is None else env
     if source == "openrouter":
@@ -1398,7 +1434,7 @@ def collect_source(source, transport, start, end, *, env=None, basket=(), full_h
         key = env.get("ARTIFICIAL_ANALYSIS_API_KEY")
         if not key:
             raise SourceError("ARTIFICIAL_ANALYSIS_API_KEY is not configured")
-        return parse_aa(*transport.fetch(URLS[source], headers={"x-api-key": key}), basket)
+        return _collect_aa_catalog(transport, key, basket)
     if source == "vast":
         key = env.get("VAST_API_KEY")
         if not key:
