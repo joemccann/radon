@@ -127,7 +127,10 @@ root-owned `radon-app-runtime`. Its systemd unit loads the encrypted master
 key for protected staging, never for host checkout or virtualenv execution.
 Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
 model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
-over `/etc/radon/env` on the collector's next run.
+over `/etc/radon/env` on the collector's next run. The Artificial Analysis key
+check in `scripts/credential_validators.py` calls the same free language-model
+list as the collector, `/api/v2/language/models/free`, because the legacy
+`/api/v2/data/*` paths return HTTP 410.
 
 The subscription-token vault reuses this same store rather than adding a second
 crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth

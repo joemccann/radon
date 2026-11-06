@@ -157,6 +157,10 @@ CAPACITY_SHED_MARKER="subprocess capacity exhausted"
 # 429) after its one wait. The oneshot must not page. A provider-outage
 # 400 keeps the hard error string and still exits 1.
 ADMISSION_SHED_MARKER="discover rate limit shed"
+# discover.py sets this when the market-wide walk cannot finish inside the
+# curl budget. Same oneshot policy as a short rate limit: exit 75, no retry,
+# no direct discover.py. A provider-outage 400 keeps the hard error.
+BUDGET_SHED_MARKER="discover budget shed"
 
 _is_capacity_shed() {
     # $1 = curl exit, $2 = http code, $3 = response body
@@ -173,6 +177,13 @@ _is_admission_shed() {
     [ "$1" -eq 0 ] || return 1
     [ "$2" = "400" ] || return 1
     printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$ADMISSION_SHED_MARKER"
+}
+
+_is_budget_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    [ "$2" = "400" ] || return 1
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$BUDGET_SHED_MARKER"
 }
 
 _retryable_flow_shed() {
@@ -250,6 +261,11 @@ refresh_scan() {
     # A second copy would hit the same stampede. The next timer retries.
     if _is_admission_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         echo "$(date): ${label} shed for a short UW rate limit (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$SHED_EXIT"
+    fi
+
+    if _is_budget_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        echo "$(date): ${label} shed for the post budget (http=${HTTP_CODE}); the next slot retries" >&2
         return "$SHED_EXIT"
     fi
 

@@ -429,6 +429,77 @@ def test_http_auth_failure_is_sanitized_and_never_reads_response_body():
     assert "must not leak" not in str(exc.value)
 
 
+def test_retired_data_endpoint_410_follows_paginated_free_catalog():
+    """Page 9734adb77f1e50445f2c0ec402aaba14 (2026-11-06 07:16Z).
+
+    The legacy ``/api/v2/data/llms/models`` path returns HTTP 410. The
+    replacement list is paginated, and a provider that exists only on a
+    later page must still be selected. The 410 body must not leak.
+    """
+    free = "https://artificialanalysis.ai/api/v2/language/models/free"
+    page_one = catalog()
+    page_one["data"] = [row for row in page_one["data"] if row["model_creator"]["id"] != CREATOR_IDS["mistral"]]
+    page_one["pagination"] = {"page": 1, "page_size": 200, "total_pages": 2, "has_more": True}
+    mistral = model("mistral", "mistral-large-3", score=40, released="2026-10-01")
+    page_two = {
+        "tier": "free",
+        "pagination": {"page": 2, "page_size": 200, "total_pages": 2, "has_more": False},
+        "data": [mistral],
+    }
+
+    class Session:
+        def __init__(self):
+            self.calls: list[tuple[str, dict | None]] = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs.get("params")))
+            if "/api/v2/data/" in url:
+                return FakeResponse(
+                    {"error": "Gone", "message": "migrate-v2-data secret-must-not-leak"},
+                    status_code=410,
+                )
+            page = (kwargs.get("params") or {}).get("page")
+            if url == free and page == 1:
+                return FakeResponse(page_one)
+            if url == free and page == 2:
+                return FakeResponse(page_two)
+            return FakeResponse({"error": "unexpected"}, status_code=404)
+
+    session = Session()
+    payload = fetch_catalog("secret", session=session)
+    selected = select_frontier_basket(payload, today=date(2026, 11, 6), minimum_rows=1)
+
+    assert session.calls == [(free, {"page": 1}), (free, {"page": 2})]
+    assert selected[DEFAULT_PROVIDERS.index("mistral")] == "mistral-large-3"
+    assert "secret-must-not-leak" not in json.dumps(payload)
+
+
+def test_catalog_pagination_bound_fails_closed_without_a_partial_basket():
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            page = (kwargs.get("params") or {}).get("page", self.calls)
+            return FakeResponse(
+                {
+                    "pagination": {
+                        "page": page,
+                        "page_size": 200,
+                        "total_pages": 99,
+                        "has_more": True,
+                    },
+                    "data": [model("openai", f"openai-page-{self.calls}")],
+                }
+            )
+
+    session = Session()
+    with pytest.raises(CatalogError, match="pagination"):
+        fetch_catalog("secret", session=session)
+    assert 1 < session.calls <= 25
+
+
 def test_same_date_score_revision_does_not_flip_frontier_incumbent():
     incumbent = model("anthropic", "anthropic-incumbent", score=46, released="2026-09-01")
     challenger = model("anthropic", "anthropic-challenger", score=50, released="2026-09-01")
