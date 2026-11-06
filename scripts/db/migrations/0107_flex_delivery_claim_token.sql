@@ -1,4 +1,4 @@
--- 0106_flex_delivery_claim_token.sql — the Flex delivery lease names its owner.
+-- 0107_flex_delivery_claim_token.sql — the Flex delivery lease names its owner.
 --
 -- `release_flex_delivery` (DELETE) and `mark_flex_delivery_applied` (UPDATE)
 -- matched on content_sha256 alone. A run that outlived
@@ -15,4 +15,4 @@
 ALTER TABLE flex_deliveries ADD COLUMN claim_token TEXT;
 
 INSERT OR IGNORE INTO schema_migrations (version, applied_at)
-  VALUES (106, datetime('now'));
+  VALUES (107, datetime('now'));

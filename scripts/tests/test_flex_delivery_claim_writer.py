@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 MIGRATIONS = (
     SCRIPTS / "db" / "migrations" / "0059_flex_deliveries.sql",
     SCRIPTS / "db" / "migrations" / "0063_flex_delivery_claim_status.sql",
-    SCRIPTS / "db" / "migrations" / "0106_flex_delivery_claim_token.sql",
+    SCRIPTS / "db" / "migrations" / "0107_flex_delivery_claim_token.sql",
 )
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ACTIVITY_XML = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
