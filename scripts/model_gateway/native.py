@@ -27,6 +27,21 @@ _CLAUDE_NATIVE_BETAS = (
     "context-management-2025-06-27", "per-turn-control-2026-07-01", "mid-conversation-tool-changes-2026-07-01",
     "thinking-token-count-2026-05-13", "advanced-tool-use-2025-11-20", "effort-2025-11-24",
 )
+# The bridge forwards only the body, so betas that gate auto-mode body fields
+# are derived from those fields (captured from the same pinned client with
+# `--permission-mode auto --verbose`). Plain sessions never send them.
+_CLAUDE_DISPLAY_UPDATES_BETAS = ("thinking-display-updates-2026-08-18", "afk-mode-2026-01-31")
+_CLAUDE_SAFEGUARDS_BETAS = ("dangerous-tool-use-2026-09-03", "afk-mode-2026-01-31")
+
+
+def _claude_field_betas(body: dict) -> list[str]:
+    betas: list[str] = []
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("display") == "updates":
+        betas += _CLAUDE_DISPLAY_UPDATES_BETAS
+    if "safeguards" in body:
+        betas += _CLAUDE_SAFEGUARDS_BETAS
+    return betas
 _PROTOCOLS = {"responses", "messages", "chat_completions"}
 _URLS = {
     ("responses", "codex"): engine._CHATGPT_CODEX_RESPONSES_URL,
@@ -199,7 +214,7 @@ def complete(payload: dict, *, post: Callable | None = None, env: Mapping[str, s
         body["model"] = model
         if name == "anthropic":
             headers = engine._anthropic_headers(auth.token, subscription=auth.kind == "subscription")
-            headers["anthropic-beta"] = ",".join(dict.fromkeys([*headers.get("anthropic-beta", "").split(","), *_CLAUDE_NATIVE_BETAS]))
+            headers["anthropic-beta"] = ",".join(dict.fromkeys([*headers.get("anthropic-beta", "").split(","), *_CLAUDE_NATIVE_BETAS, *_claude_field_betas(body)]))
             headers["x-app"] = "cli"
             headers["user-agent"] = "claude-cli/2.1.311 (external, sdk-cli)"
             system = body.get("system")

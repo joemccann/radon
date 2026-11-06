@@ -8,7 +8,7 @@ Python app callers use `clients.model_ladder` for text/vision JSON and its local
 
 Fixed operations cover normalized chat with tools/images, JSON, vision extraction, explicit 384/2048-dimensional embedding spaces, OCR, X search, Chronos forecasting, and Clairic dates. Inputs cannot supply upstream URLs, headers, credentials, paths, or arbitrary commands. Existing publication, Humanizer, portfolio, source, trading and provider pacing rules remain in their owning pipelines.
 
-The default text/JSON order starts with Antigravity. Requests needing images or native tools use compatible providers. Native Messages, Responses and Chat Completions preserve their original schemas, including custom tool grammars, and use only providers supporting that protocol. A response must reach a verified terminal state before delivery. Unsupported capability is an error; schemas and images are never silently discarded.
+The default text/JSON order starts with Antigravity. Requests needing images or native tools use compatible providers. Native Messages, Responses and Chat Completions preserve their original schemas, including custom tool grammars, and use only providers supporting that protocol. A response must reach a verified terminal state before delivery. Unsupported capability is an error; schemas and images are never silently discarded. The loopback bridge forwards only the request body, so native Claude requests get the pinned client's beta list from the gateway. Auto-mode body fields add their own betas: `thinking.display: "updates"` and `safeguards` (`native._claude_field_betas`). Without those betas, Claude Security sessions with `--permission-mode auto --verbose` get a 400.
 
 ## Authentication and renewal
 
