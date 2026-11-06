@@ -133,14 +133,22 @@ def acquire_model_slot(limiter, max_wait):
         raise
 
 
-def _invoke_provider(call, name, auth, model):
+# One in-flight call per provider. The first pass only probes the lock so the
+# ladder can fail over; a busy provider gets a second pass that waits for it,
+# because a busy subscription is still a working one.
+_PROVIDER_BUSY = "provider_busy"
+_BUSY_PROBE_SECONDS = 1.0
+_DEFERRED_LOCK_WAIT_SECONDS = 60.0
+
+
+def _invoke_provider(call, name, auth, model, *, lock_wait=_BUSY_PROBE_SECONDS):
     state = _ATTEMPT_STATE.get()
     lock = state.locks.get(name) if state else None
     if lock is None:
         scoped_timeout(120)
         return call(name, auth, model)
-    if not lock.acquire(timeout=scoped_timeout(1.0)):
-        raise RuntimeError("provider_busy")
+    if not lock.acquire(timeout=scoped_timeout(lock_wait)):
+        raise RuntimeError(_PROVIDER_BUSY)
     try:
         scoped_timeout(120)
         return call(name, auth, model)
@@ -1526,6 +1534,20 @@ def _fallback_slice(remaining: float, live: int) -> float:
     return max(0.001, min(remaining, current))
 
 
+def _defer_busy_provider(queue, position, state, name, model, lock_wait) -> None:
+    """Retry a busy provider after the other rungs, waiting for its lock that time.
+
+    The retry still runs ahead of a pending last-resort rung.
+    """
+    if state is not None:
+        state.seen.discard((name, model))
+    if lock_wait != _BUSY_PROBE_SECONDS:
+        return
+    last_resort = next((index for index in range(position, len(queue))
+                        if queue[index][0] == LAST_RESORT_PROVIDER), len(queue))
+    queue.insert(last_resort, (name, _DEFERRED_LOCK_WAIT_SECONDS))
+
+
 def _rung_dead(name: str) -> bool:
     until = _dead_until.get(name)
     return until is not None and until > _dead_clock()
@@ -1625,7 +1647,11 @@ def _run_ladder(
     order = _last_resort_last(providers or MODEL_LADDER_ORDER)
     keyed = {name for name in order if name != "cursor" and _auth_for(name, env) is not None}
 
-    for position, name in enumerate(order):
+    queue = [(name, _BUSY_PROBE_SECONDS) for name in order]
+    position = 0
+    while position < len(queue):
+        name, lock_wait = queue[position]
+        position += 1
         if name == "cursor":
             skipped.append("cursor:unwired")
             logger.info("%s skip provider=cursor reason=unwired", log_prefix)
@@ -1667,7 +1693,7 @@ def _run_ladder(
                     continue
                 state.attempt_deadline = None
                 remaining = state.deadline - state.clock()
-                live = sum(1 for candidate in order[position + 1:]
+                live = sum(1 for candidate, _wait in queue[position:]
                            if candidate in keyed and not _rung_dead(candidate)
                            and not provider_cooldown.rate_limited(candidate, env))
                 if rejected_draft:
@@ -1688,7 +1714,9 @@ def _run_ladder(
                 )
                 break
             try:
-                status, raw, payload = _invoke_provider(call_provider, name, auth, model)
+                status, raw, payload = _invoke_provider(
+                    call_provider, name, auth, model, lock_wait=lock_wait
+                )
             except ModelResponseError:
                 raise
             except RuntimeError as exc:
@@ -1697,6 +1725,9 @@ def _run_ladder(
                 logger.warning(
                     "%s provider=%s model=%s failed %s", log_prefix, name, model, code
                 )
+                if code == _PROVIDER_BUSY:
+                    _defer_busy_provider(queue, position, state, name, model, lock_wait)
+                    break
                 continue
 
             body_text = raw if isinstance(raw, str) else ""
