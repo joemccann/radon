@@ -1531,6 +1531,22 @@ def _rung_dead(name: str) -> bool:
     return until is not None and until > _dead_clock()
 
 
+def _note_provider_cooldown(name: str, status: int, body_text: str, env: Mapping[str, str]) -> bool:
+    """Record a cooldown for a spent quota or a reset-naming 429.
+
+    Returns True when the failure is an exhausted quota, so the rung's other
+    models (same account) are not tried. A bare 429 records nothing: the next
+    document or oneshot may try the rung again (scripts/tests/test_research_runtime.py).
+    """
+    seconds = provider_cooldown.reset_seconds(body_text, None)
+    if provider_cooldown.is_quota_exhausted(body_text):
+        provider_cooldown.note_quota(name, seconds, env)
+        return True
+    if status == 429 and seconds is not None:
+        provider_cooldown.note(name, seconds, env)
+    return False
+
+
 def _last_resort_last(order: Sequence[str]) -> tuple[str, ...]:
     """Cerebras is the last resort: nothing runs after it, whatever the caller passed."""
     rest = tuple(name for name in order if name != LAST_RESORT_PROVIDER)
@@ -1652,7 +1668,8 @@ def _run_ladder(
                 state.attempt_deadline = None
                 remaining = state.deadline - state.clock()
                 live = sum(1 for candidate in order[position + 1:]
-                           if candidate in keyed and not _rung_dead(candidate))
+                           if candidate in keyed and not _rung_dead(candidate)
+                           and not provider_cooldown.rate_limited(candidate, env))
                 if rejected_draft:
                     remaining = _extend_fallback_deadline(state, live + 1)
                     state.slice_seconds = _fallback_slice(remaining, live + 1)
@@ -1730,9 +1747,8 @@ def _run_ladder(
                     _body_snippet(body_text),
                 )
             if payload is None or _is_hard_fail(status, payload):
-                code = _classify_http_failure(
-                    status, _error_envelope(payload) if status == 200 else body_text
-                )
+                failure_text = _error_envelope(payload) if status == 200 else body_text
+                code = _classify_http_failure(status, failure_text)
                 attempted.append(f"{name}:{code}")
                 logger.warning(
                     "%s provider=%s model=%s auth=%s failed %s status=%s body=%r",
@@ -1744,14 +1760,7 @@ def _run_ladder(
                     status,
                     _body_snippet(body_text) if status != 200 else "",
                 )
-                if status == 429:
-                    # Persist only when the body or headers name a reset.
-                    # A bare 429 still fails this request and this model list,
-                    # but the next document or oneshot may try the rung again
-                    # (scripts/tests/test_research_runtime.py).
-                    seconds = provider_cooldown.reset_seconds(body_text, None)
-                    if seconds is not None:
-                        provider_cooldown.note(name, seconds, env)
+                if _note_provider_cooldown(name, status, failure_text, env) or status == 429:
                     break
                 continue
 
@@ -1792,6 +1801,7 @@ def _run_ladder(
         rung_codes = [entry.split(":", 1)[1] for entry in attempted[rung_start:]]
         if provider_won:
             _dead_until.pop(name, None)
+            provider_cooldown.clear(name, env)
         elif rung_codes and all(code in _DEAD_RUNG_CODES for code in rung_codes):
             _dead_until[name] = _dead_clock() + _DEAD_RUNG_TTL_S
         if provider_won:
