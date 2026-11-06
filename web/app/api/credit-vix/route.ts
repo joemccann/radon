@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
@@ -11,7 +9,6 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "credit_vix.json");
 
 // Daily 22:25 UTC timer plus weekend slack; older means the writer is down.
 const CREDIT_VIX_MAX_AGE_MS = 48 * 60 * 60_000;
@@ -31,19 +28,12 @@ async function readCreditVixFromDb(): Promise<TimestampedRead<Record<string, unk
   };
 }
 
-async function readCreditVixFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readCreditVixFromDb,
-    fromDisk: readCreditVixFromDisk,
     maxAgeMs: await snapshotMaxAgeMs(CREDIT_VIX_MAX_AGE_MS),
     label: "credit-vix",
     isDegraded: isMissingPayload,

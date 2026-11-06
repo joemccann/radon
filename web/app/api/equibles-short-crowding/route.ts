@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 
-// Disable Next.js static caching: this handler reads live disk state
-// (data/equibles_short_crowding.json). Without this, the framework freezes the
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "equibles_short_crowding.json");
 
 const SERVICE = "equibles-short-crowding";
 
@@ -46,12 +43,6 @@ async function readShortCrowdingFromDb(): Promise<TimestampedRead<Record<string,
   };
 }
 
-async function readShortCrowdingFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 // An entry-less payload is a degraded writer cycle, not a real scoreboard:
 // it must never beat an older populated snapshot on timestamp alone.
 function isDegraded(data: Record<string, unknown>): boolean {
@@ -64,7 +55,6 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readShortCrowdingFromDb,
-    fromDisk: readShortCrowdingFromDisk,
     maxAgeMs: SHORT_CROWDING_MAX_AGE_MS,
     label: SERVICE,
     isDegraded,

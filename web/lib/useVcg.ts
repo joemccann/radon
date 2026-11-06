@@ -52,7 +52,7 @@ export type VcgData = {
   scan_time: string;
   market_open: boolean;
   credit_proxy: string;
-  /** True when both the Turso row and data/vcg.json were unreadable; `signal`
+  /** True when no Turso row was readable and nothing was held in memory; `signal`
    *  is null alongside it. The route used to fabricate EMPTY_VCG, whose
    *  defaults read as an affirmative "no risk-off signal". R-228. */
   missing?: boolean;

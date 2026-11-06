@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
@@ -12,7 +10,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const radonCapability = "read";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "asia_export_lead.json");
 const MISSING_ASIA_EXPORT_LEAD: AsiaExportLeadData = {
   missing: true,
   scan_time: null,
@@ -46,15 +43,10 @@ async function readFromDb(): Promise<TimestampedRead<AsiaExportLeadData> | null>
   return snapshot(String(result.rows[0].payload));
 }
 
-async function readFromDisk(): Promise<TimestampedRead<AsiaExportLeadData> | null> {
-  return snapshot(await readFile(CACHE_PATH, "utf-8"));
-}
-
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readFromDb,
-    fromDisk: readFromDisk,
     // Daily sampling plus two hours of writer slack, shared with health checks.
     maxAgeMs: await snapshotMaxAgeMs(getFreshnessWindowMs("asia-export-lead", "closed")),
     label: "asia-export-lead",

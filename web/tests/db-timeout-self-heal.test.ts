@@ -9,7 +9,7 @@
  *
  * Pins the reset on the three read paths:
  *   - dbExecute (the shared execute-with-timeout-and-reset chokepoint)
- *   - dbFirstRead (DB source timeout → reset; disk failure → NO reset)
+ *   - dbFirstRead (DB source timeout → reset; a healthy read → NO reset)
  *   - readOrdersFromDb (routes through dbExecute)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -80,27 +80,33 @@ describe("dbFirstRead self-heal", () => {
     warn.mockRestore();
   });
 
-  it("calls resetDb when the DB source times out (disk still serves)", async () => {
+  it("calls resetDb when the DB source times out (memory still serves)", async () => {
     const { resetDb } = mockDb({});
     const { dbFirstRead } = await import("../lib/dbFirstRead");
-    const result = await dbFirstRead({
-      fromDb: () => hanging(),
-      fromDisk: async () => ({ data: { ok: 1 }, timestampMs: Date.now() }),
+    await dbFirstRead({
+      fromDb: async () => ({ data: { ok: 1 }, timestampMs: Date.now() }),
       maxAgeMs: 60_000,
       sourceTimeoutMs: 20,
+      label: "self-heal",
     });
-    expect(result).toMatchObject({ ok: true, source: "disk" });
+    const result = await dbFirstRead({
+      fromDb: () => hanging(),
+      maxAgeMs: 60_000,
+      sourceTimeoutMs: 20,
+      label: "self-heal",
+    });
+    expect(result).toMatchObject({ ok: true, source: "memory" });
     expect(resetDb).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT reset when only the disk source fails", async () => {
+  it("does NOT reset on a healthy read", async () => {
     const { resetDb } = mockDb({});
     const { dbFirstRead } = await import("../lib/dbFirstRead");
     const result = await dbFirstRead({
       fromDb: async () => ({ data: { ok: 1 }, timestampMs: Date.now() }),
-      fromDisk: () => Promise.reject(new Error("ENOENT")),
       maxAgeMs: 60_000,
       sourceTimeoutMs: 20,
+      label: "self-heal",
     });
     expect(result).toMatchObject({ ok: true, source: "db" });
     expect(resetDb).not.toHaveBeenCalled();

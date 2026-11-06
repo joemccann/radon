@@ -3,11 +3,9 @@
  *
  * GET /api/equibles-filing-forensics — the pre-trade filing-forensics read route.
  *
- * Turso-first through dbFirstRead with a per-ticker disk fallback. Absent data
- * is HTTP 200 + missing:true; only a malformed ticker is a 4xx. Split from
- * equibles-filing-forensics.test.tsx (jsdom, the surface) because the disk
- * fallback needs a node environment: under jsdom the route's `fs/promises`
- * import is not interceptable by vi.mock, so the fallback silently never fires.
+ * Turso-first through dbFirstRead with a per-ticker last-in-memory fallback.
+ * Absent data is HTTP 200 + missing:true; only a malformed ticker is a 4xx. Split
+ * from equibles-filing-forensics.test.tsx (jsdom, the surface).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -19,14 +17,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: () => ({ execute: dbExecute }),
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
-
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 function check(overrides: Row = {}): Row {
   return {
@@ -71,7 +61,6 @@ beforeEach(() => {
   vi.resetModules();
   dbRows.value = [];
   dbExecute.mockClear();
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
@@ -93,12 +82,27 @@ describe("GET /api/equibles-filing-forensics", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the on-disk dossier when Turso has no row", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(dossier({ flag_count: 3 })));
+  it("serves the ticker's last good dossier from memory when Turso has no row", async () => {
+    const payload = dossier({ flag_count: 3 });
+    dbRows.value = [{ as_of: payload.as_of, payload: JSON.stringify(payload) }];
 
     const { GET } = await loadRoute();
+    await GET(request("?ticker=AAPL"));
+    dbRows.value = [];
     const json = await jsonOf(await GET(request("?ticker=AAPL")));
     expect(json.flag_count).toBe(3);
+  });
+
+  it("never serves one ticker's remembered dossier for another ticker", async () => {
+    const payload = dossier({ flag_count: 3 });
+    dbRows.value = [{ as_of: payload.as_of, payload: JSON.stringify(payload) }];
+
+    const { GET } = await loadRoute();
+    await GET(request("?ticker=AAPL"));
+    dbRows.value = [];
+    const json = await jsonOf(await GET(request("?ticker=MSFT")));
+    expect(json.missing).toBe(true);
+    expect(json.ticker).toBe("MSFT");
   });
 
   it("returns 200 with missing:true when no dossier exists anywhere", async () => {
@@ -163,7 +167,7 @@ describe("GET /api/equibles-filing-forensics", () => {
     expect((await jsonOf(res)).missing).toBe(true);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     expect((await loadRoute()).dynamic).toBe("force-dynamic");
   });
 });

@@ -6,12 +6,6 @@ let db: Client;
 const mockGetDb = vi.fn(() => db);
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
-
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
     service TEXT NOT NULL, scan_time TEXT NOT NULL, payload TEXT NOT NULL,
@@ -33,7 +27,7 @@ function buildPayload(overrides: Payload = {}): Payload {
     current: seriesPoint(DATA_DATE, -4.8), series: [seriesPoint(DISK_DATA_DATE, -4.2), seriesPoint(DATA_DATE, -4.8)], ...overrides };
 }
 
-function diskPayload(scanTime?: string): Payload {
+function olderPayload(scanTime?: string): Payload {
   return buildPayload({
     ...(scanTime ? { scan_time: scanTime } : {}),
     data_date: DISK_DATA_DATE,
@@ -48,7 +42,6 @@ async function insertSnapshot(payload: Payload, service = "record-high-breadth")
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 const jsonOf = async (res: Response) => (await res.json()) as Record<string, unknown>;
 
 beforeEach(async () => {
@@ -56,7 +49,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -67,10 +59,10 @@ afterEach(() => {
 });
 
 describe("GET /api/record-high-breadth", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload(staleTime)));
+    await insertSnapshot(olderPayload(staleTime));
     const { GET } = await import("../app/api/record-high-breadth/route");
     const res = await GET();
     expect(res.status).toBe(200);
@@ -82,9 +74,11 @@ describe("GET /api/record-high-breadth", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload()));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(olderPayload());
     const { GET } = await import("../app/api/record-high-breadth/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const json = await jsonOf(await GET());
     expect(json.data_date).toBe(DISK_DATA_DATE);
     expect((json.series as Payload[]).length).toBe(1);
@@ -110,7 +104,7 @@ describe("GET /api/record-high-breadth", () => {
     expect((await jsonOf(await GET())).missing).toBe(true);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/record-high-breadth/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

@@ -19,6 +19,19 @@ vi.mock("fs/promises", () => ({
   writeFile: (...args: unknown[]) => mockWriteFile(...args),
 }));
 
+function dbRow(snapshot: Record<string, unknown>) {
+  return {
+    rows: [{
+      payload: JSON.stringify(snapshot),
+      scan_time: snapshot.scan_time ?? snapshot.discovery_time ?? snapshot.analysis_time,
+      taken_at: snapshot.scan_time,
+    }],
+  };
+}
+
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
+
 const mockSpawn = vi.fn();
 vi.mock("child_process", () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
@@ -43,7 +56,7 @@ describe("Flow Analysis API GET", () => {
       watch: [],
       neutral: [],
     };
-    mockReadFile.mockResolvedValueOnce(JSON.stringify(cached));
+    mockExecute.mockResolvedValueOnce(dbRow(cached));
 
     const { GET } = await import("../app/api/flow-analysis/route");
     const res = await GET();
@@ -87,7 +100,7 @@ describe("Scanner API GET", () => {
       signals_found: 5,
       top_signals: [{ ticker: "NVDA", score: 75, signal: "STRONG" }],
     };
-    mockReadFile.mockResolvedValueOnce(JSON.stringify(cached));
+    mockExecute.mockResolvedValueOnce(dbRow(cached));
 
     const { GET } = await import("../app/api/scanner/route");
     const res = await GET();

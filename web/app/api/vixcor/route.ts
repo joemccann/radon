@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "vixcor.json");
 
 // Contract: absent vixcor data is HTTP 200 with missing:true, never a 4xx.
 // The job's own degradation states ("holding", "stale_parent") are real
@@ -51,19 +48,12 @@ async function readVixcorFromDb(): Promise<TimestampedRead<Record<string, unknow
   };
 }
 
-async function readVixcorFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readVixcorFromDb,
-    fromDisk: readVixcorFromDisk,
     maxAgeMs: await snapshotMaxAgeMs(VIXCOR_MAX_AGE_MS),
     label: "vixcor",
     // A fresher row that only carries the missing:true heartbeat must not

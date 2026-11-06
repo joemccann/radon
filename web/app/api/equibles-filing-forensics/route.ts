@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -10,8 +8,8 @@ import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
  * GET /api/equibles-filing-forensics?ticker=AAPL  -> one pre-trade dossier
  * GET /api/equibles-filing-forensics              -> flagged tickers, worst first
  *
- * Turso-first through dbFirstRead (equibles_filing_forensics row), disk
- * fallback data/equibles_filing_forensics/<TICKER>.json. Absent data is HTTP
+ * Turso through dbFirstRead (equibles_filing_forensics row), with the last good
+ * read per ticker held in memory when Turso fails. Absent data is HTTP
  * 200 with `missing: true` — a ticker with nothing on file is a legitimate
  * empty state, not a client error. Only a malformed ticker param is a 4xx.
  *
@@ -21,7 +19,6 @@ import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CACHE_DIR = join(process.cwd(), "..", "data", "equibles_filing_forensics");
 const TICKER_RE = /^[A-Z][A-Z.]{0,9}$/;
 const FLAGGED_LIST_LIMIT = 50;
 
@@ -63,12 +60,6 @@ async function readDossierFromDb(ticker: string): Promise<TimestampedRead<Dossie
   };
 }
 
-async function readDossierFromDisk(ticker: string): Promise<TimestampedRead<Dossier> | null> {
-  const raw = await readFile(join(CACHE_DIR, `${ticker}.json`), "utf-8");
-  const data = JSON.parse(raw) as Dossier;
-  return { data, timestampMs: contentTimestampMs(data.as_of) };
-}
-
 async function readFlaggedList(): Promise<Dossier> {
   const db = getDb();
   const result = await db.execute({
@@ -101,9 +92,9 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await dbFirstRead<Dossier>({
     fromDb: () => readDossierFromDb(ticker),
-    fromDisk: () => readDossierFromDisk(ticker),
     maxAgeMs: await snapshotMaxAgeMs(FILING_FORENSICS_MAX_AGE_MS),
-    label: "equibles-filing-forensics",
+    // One memory entry per dossier: a bare route label would serve AAPL's as MSFT's.
+    label: `equibles-filing-forensics:${ticker}`,
   });
   if (!result.ok) return respond(missingDossier(ticker), requestId);
   return respond({ ...result.data, stale: !result.fresh }, requestId);

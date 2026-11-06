@@ -6,7 +6,7 @@
  * GET-only: the series updates daily (radon-credit-spread timer runs
  * fetch_credit_spread.py directly), so there is no manual-scan POST. Reads
  * through the dbFirstRead chokepoint — Turso scan_snapshots row
- * (service='credit-spread') first, disk data/credit_spread.json fallback —
+ * (service='credit-spread') first, last-in-memory fallback —
  * and ALWAYS returns 200; absent data is the contract's `missing: true`
  * shape, never a 4xx.
  */
@@ -19,15 +19,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: mockGetDb,
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -68,7 +59,6 @@ async function insertSnapshot(payload: Payload, scanTime?: string): Promise<void
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function jsonOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
@@ -79,7 +69,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -90,12 +79,10 @@ afterEach(() => {
 });
 
 describe("GET /api/credit-spread", () => {
-  it("serves the latest Turso snapshot (Turso-first over an older disk cache)", async () => {
+  it("serves the latest Turso snapshot (newest row wins)", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(buildPayload({ scan_time: staleTime, count: 1 })),
-    );
+    await insertSnapshot(buildPayload({ scan_time: staleTime, count: 1 }));
 
     const { GET } = await import("../app/api/credit-spread/route");
     const res = await GET();
@@ -106,10 +93,12 @@ describe("GET /api/credit-spread", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ count: 657 })));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload({ count: 657 }));
 
     const { GET } = await import("../app/api/credit-spread/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const json = await jsonOf(res);
@@ -142,7 +131,7 @@ describe("GET /api/credit-spread", () => {
     expect(json.missing).toBe(true);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/credit-spread/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

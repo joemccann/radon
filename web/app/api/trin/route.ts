@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { MISSING_TRIN } from "@/lib/trin";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { buildDemoTrinFixture } from "@/lib/demo/fixtures/regime";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "trin.json");
 
 // radon-trin.timer samples IB every 5 minutes during RTH; 30 minutes
 // tolerates a few missed cycles before the snapshot is treated as dead.
@@ -36,12 +33,6 @@ async function readTrinFromDb(): Promise<TimestampedRead<Record<string, unknown>
   };
 }
 
-async function readTrinFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
@@ -53,7 +44,6 @@ export async function GET(): Promise<Response> {
   }
   const result = await dbFirstRead({
     fromDb: readTrinFromDb,
-    fromDisk: readTrinFromDisk,
     maxAgeMs: TRIN_MAX_AGE_MS,
     label: "trin",
     // R-193: a writer that ran, produced nothing and still stamped a

@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import {
   getRequestId,
   setCacheResponseHeaders,
@@ -17,21 +15,20 @@ import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbF
  * Complements the thin UW institutional summary on /api/informed-flow.
  *
  * Reads through the dbFirstRead chokepoint: the newest Turso vintage for the
- * ticker (equibles_13f_snapshots), disk data/equibles_13f/{TICKER}.json
- * fallback. Absent data is the contract's `missing: true` shape at HTTP 200 —
+ * ticker (equibles_13f_snapshots), or the last good read per ticker held in
+ * memory when Turso fails. Absent data is the contract's `missing: true` shape at HTTP 200 —
  * a ticker no institution has filed on is a legitimate empty state, not an
  * error. A malformed or absent ticker IS a real client error and 400s.
  */
-// Disable Next.js static caching: this handler reads live disk state.
+// Disable Next.js static caching: this handler reads live Turso state.
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const TICKER_RE = /^[A-Z]{1,5}$/;
-const CACHE_DIR = join(process.cwd(), "..", "data", "equibles_13f");
 
 // 13F is quarterly, so the refresh job runs weekly against a source that only
 // moves four times a year. Beyond two refresh cycles the writer is down, not
-// the source. Freshness only ranks db-vs-disk here; both are served either way.
+// the source. It only sets the read's `fresh` flag here; the row is served either way.
 const SNAPSHOT_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
 
 function missingSurface(ticker: string): Record<string, unknown> {
@@ -75,14 +72,6 @@ async function readFromDb(
   };
 }
 
-async function readFromDisk(
-  ticker: string,
-): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(join(CACHE_DIR, `${ticker}.json`), "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time as string) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(request: Request): Promise<Response> {
@@ -97,7 +86,6 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await dbFirstRead({
     fromDb: () => readFromDb(ticker),
-    fromDisk: () => readFromDisk(ticker),
     maxAgeMs: SNAPSHOT_MAX_AGE_MS,
     label: `equibles-smart-money-13f:${ticker}`,
   });

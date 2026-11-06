@@ -1,7 +1,5 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -9,14 +7,13 @@ import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { buildDemoPerformance } from "@/lib/demo/fixtures/performance";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const PERFORMANCE_PATH = join(process.cwd(), "..", "data", "performance.json");
 
 // §4.4 — TTL is market-state aware: 5 min when OPEN, 60 min otherwise.
 // CLOSED covers extended + overnight + weekends (getMarketStateFromDate
@@ -27,15 +24,6 @@ const CACHE_TTL_CLOSED_MS = 60 * 60_000;
 function getCacheTtlMs(now: Date = new Date()): number {
   const state = getMarketStateFromDate(now);
   return state === "open" ? CACHE_TTL_OPEN_MS : CACHE_TTL_CLOSED_MS;
-}
-
-async function readJsonFile(path: string): Promise<Record<string, unknown> | null> {
-  try {
-    const raw = await readFile(path, "utf-8");
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 function extractTimestampValue(data: Record<string, unknown> | null, key: string): string | null {
@@ -129,7 +117,7 @@ function navUnavailablePayload(): Record<string, unknown> {
       {
         code: "NAV_UNAVAILABLE",
         severity: "error",
-        message: "No NAV series available (Flex, disk and Turso all empty).",
+        message: "No NAV series available (Flex and Turso both empty).",
         context: {},
       },
     ],
@@ -151,12 +139,6 @@ async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
   }
 }
 
-async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const data = await readJsonFile(PERFORMANCE_PATH);
-  if (!data) return null;
-  return { data, timestampMs: payloadTimestampMs(data, "") };
-}
-
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
@@ -171,12 +153,11 @@ export async function GET(): Promise<Response> {
   }
   const cacheTtlMs = getCacheTtlMs();
   const [perfRead, portfolioSnapshot] = await Promise.all([
-    // Fresher of DB row and disk JSON — a frozen writer on either side
-    // never wins. The downstream freshness logic uses whichever was served.
+    // Turso, or the last good read held in memory when Turso fails. The
+    // downstream freshness logic judges whichever was served by its own time.
     // TTL is market-state aware (§4.4): 5 min OPEN, 60 min CLOSED.
     dbFirstRead({
       fromDb: readPerformanceFromDb,
-      fromDisk: readPerformanceFromDisk,
       maxAgeMs: cacheTtlMs,
       label: "performance",
     }),

@@ -5,20 +5,8 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
-  return { ...actual, statSync: vi.fn() };
-});
-
-vi.mock("fs/promises", () => ({
-  readFile: vi.fn(),
-}));
-
-vi.mock("@/lib/db", () => ({ resetDb: () => {},
-  getDb: () => ({
-    execute: vi.fn().mockResolvedValue({ rows: [] }),
-  }),
-}));
+const mockExecute = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: vi.fn().mockResolvedValue({
@@ -29,8 +17,6 @@ vi.mock("@/lib/radonApi", () => ({
   }),
 }));
 
-import * as fs from "fs";
-import { readFile } from "fs/promises";
 
 const validCachePayload = JSON.stringify({
   scan_time: "2026-05-09T02:04:09.999Z",
@@ -47,25 +33,23 @@ function expectNoStore(res: Response): void {
 describe("/api/scanner — Cache-Control: no-store", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.mocked(readFile).mockResolvedValue(validCachePayload as unknown as string);
-    vi.mocked(fs.statSync).mockReturnValue({ mtime: new Date() } as unknown as fs.Stats);
+    mockExecute.mockResolvedValue({
+      rows: [{ scan_time: new Date().toISOString(), payload: validCachePayload }],
+    });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("GET sets no-store when serving the disk-fallback cache file", async () => {
+  it("GET sets no-store when serving a Turso snapshot", async () => {
     const { GET } = await import("../app/api/scanner/route");
     const res = await GET();
     expectNoStore(res);
   });
 
-  it("GET sets no-store on the empty-fallback envelope when both DB and disk are empty", async () => {
-    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
-    vi.mocked(fs.statSync).mockImplementation(() => {
-      throw new Error("ENOENT");
-    });
+  it("GET sets no-store on the empty-fallback envelope when Turso is empty and nothing is remembered", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
 
     const { GET } = await import("../app/api/scanner/route");
     const res = await GET();
