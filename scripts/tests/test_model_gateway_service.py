@@ -541,3 +541,81 @@ def test_every_rung_backed_off_reads_as_an_outage_not_a_content_rejection(monkey
     message = str(error.value)
     assert "antigravity:rate_limited_cooldown" in message and "codex:rate_limited_cooldown" in message
     assert marketdesk_copy._every_rung_rejected(message) is False
+
+
+def _isolated_cooldown(tmp_path):
+    return {"RADON_PROVIDER_COOLDOWN_STATE": str(tmp_path / "cooldown.json")}
+
+
+class _BusyOnceLock:
+    """Held by another request on the first short probe, free once waited on."""
+
+    def __init__(self):
+        self.timeouts = []
+
+    def acquire(self, timeout=-1):
+        self.timeouts.append(timeout)
+        return len(self.timeouts) > 1
+
+    def release(self):
+        pass
+
+
+def test_busy_provider_is_retried_after_the_other_rungs_fail(monkeypatch, tmp_path):
+    import time
+    from model_gateway import engine
+    service(monkeypatch)
+    busy = _BusyOnceLock()
+
+    def call(name, auth, model):
+        return (200, "", {"ok": True}) if name == "anthropic" else (429, "slow down", None)
+
+    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(),
+                              locks={"anthropic": busy, "grok": threading.RLock()}):
+        parsed, _text, provider, _model, attempted = engine._run_ladder(
+            env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test", call_provider=call,
+            parse_success=lambda name, payload: (payload, ""), providers=("anthropic", "grok"))
+
+    assert provider == "anthropic" and parsed == {"ok": True}
+    assert attempted[0] == "anthropic:provider_busy" and attempted[-1] == "anthropic:ok"
+    assert busy.timeouts[0] <= 1.0 < busy.timeouts[1]
+
+
+def test_provider_busy_on_every_pass_still_exhausts(monkeypatch, tmp_path):
+    import time
+    from model_gateway import engine
+    service(monkeypatch)
+
+    class AlwaysBusy(_BusyOnceLock):
+        def acquire(self, timeout=-1):
+            self.timeouts.append(timeout)
+            return False
+
+    busy = AlwaysBusy()
+    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(), locks={"anthropic": busy}):
+        with pytest.raises(engine.ModelLadderExhausted):
+            engine._run_ladder(
+                env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test",
+                call_provider=lambda *a: (200, "", {"ok": True}),
+                parse_success=lambda name, payload: (payload, ""), providers=("anthropic",))
+    assert len(busy.timeouts) == 2
+
+
+def test_busy_provider_retry_still_runs_before_the_last_resort(monkeypatch, tmp_path):
+    import time
+    from model_gateway import engine
+    service(monkeypatch)
+    busy = _BusyOnceLock()
+    calls = []
+
+    def call(name, auth, model):
+        calls.append(name)
+        return (200, "", {"ok": True}) if name == "anthropic" else (429, "busy", None)
+
+    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(), locks={"anthropic": busy}):
+        _parsed, _text, provider, _model, _attempted = engine._run_ladder(
+            env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test", call_provider=call,
+            parse_success=lambda name, payload: (payload, ""),
+            providers=("anthropic", "grok", engine.LAST_RESORT_PROVIDER))
+
+    assert provider == "anthropic" and calls == ["grok", "anthropic"]
