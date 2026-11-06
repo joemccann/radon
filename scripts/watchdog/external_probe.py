@@ -87,20 +87,41 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     )
 
 
+def _fresh_transition_journal(now: datetime) -> bool:
+    """True when a deploy owns the app tier and the journal is not stranded."""
+    journal_age = _transition_journal_age_seconds(now)
+    return (
+        journal_age is not None
+        and journal_age <= TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
+    )
+
+
 def _caddy_floor_while_healthd_stopped(down_reason: str, now: datetime) -> bool:
     """True when the Caddy floor is the deploy's own healthd stop.
 
     stop-clean stops radon-health, so :8330 cannot confirm the serving path.
     A fresh transition journal is the deploy's evidence that this unread
-    aggregate is that stop. A readable aggregate that says the serving path
-    is down still pages. A stranded journal does not count.
+    aggregate is that stop. A stranded journal does not count.
     """
     if down_reason != "status_unreachable:caddy":
         return False
-    journal_age = _transition_journal_age_seconds(now)
-    if journal_age is None or journal_age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS:
+    if not _fresh_transition_journal(now):
         return False
     return _read_local_aggregate() is None
+
+
+def _caddy_floor_during_fresh_transition(down_reason: str, now: datetime) -> bool:
+    """True when a fresh journal explains a stale Caddy floor sample.
+
+    restart-managed brings radon-health back before the serving path is up.
+    The floor row is still the latest off-box sample for that whole window, so
+    a readable aggregate that is not yet serving-path-ok is the restart, not a
+    second outage. A raw 5xx is a different reason and still pages. A stranded
+    journal does not count.
+    """
+    if down_reason != "status_unreachable:caddy":
+        return False
+    return _fresh_transition_journal(now)
 
 
 def _local_aggregate_serving_path_ok(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
@@ -378,9 +399,12 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     # counts: requiring overall_state=up re-paged d98c3364 on every weekend
     # deploy. 2026-11-01 03:36Z: stop-clean stops radon-health, so the
     # serving-path read cannot succeed during the exact floor it exists to
-    # cover. A fresh journal plus an unread :8330 is that stop. A readable
-    # aggregate that says the serving path is down still pages. The next
-    # off-box cycle still independently proves perimeter recovery.
+    # cover. A fresh journal plus an unread :8330 is that stop.
+    # 2026-11-03 23:30Z: restart-managed had already brought healthd back, so
+    # the aggregate was readable and down while the latest off-box row was
+    # still the floor. That restart is the same stop. A raw 5xx still pages.
+    # Outside the journal, healthd-down still pages. The next off-box cycle
+    # still independently proves perimeter recovery.
     if state == reader.VERDICT_DOWN:
         down_reason = str(verdict.get("reason") or "")
         age = verdict.get("age_seconds")
@@ -389,14 +413,19 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         healthd_stopped = (not serving_ok) and _caddy_floor_while_healthd_stopped(
             down_reason, checked_at
         )
+        floor_during_transition = _caddy_floor_during_fresh_transition(
+            down_reason, checked_at
+        )
         if (
             _DEPLOY_COLLATERAL_REASON.fullmatch(down_reason)
             and sample_time is not None
             and _sampled_during_deploy_window(sample_time, checked_at)
-            and (serving_ok or healthd_stopped)
+            and (serving_ok or healthd_stopped or floor_during_transition)
         ):
             if healthd_stopped:
                 detail = "healthd stopped with the transition"
+            elif floor_during_transition and not serving_ok:
+                detail = "healthd back during transition"
             else:
                 detail = "local aggregate healthy"
             return CheckOutcome(

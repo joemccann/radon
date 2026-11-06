@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import socket
 import tempfile
 import time
 from email.utils import parsedate_to_datetime
@@ -240,15 +241,22 @@ class Transport:
                 raise SourceError("Per-run time budget exhausted")
             self.requests += 1
             response = None
+            attempt_timeout = min(self.timeout, max(1, self.deadline - time.monotonic()))
             try:
-                response = self.session.request(
-                    "POST" if body is not None else "GET",
-                    url,
-                    params=params,
-                    headers=headers,
-                    json=body,
-                    timeout=min(self.timeout, max(1, self.deadline - time.monotonic())),
-                    stream=True,
+                # requests' timeout is per socket. urllib3 applies it to every
+                # getaddrinfo result, so one NOAA GET walked 12 blackholed
+                # addresses for 300s and the retry walked them again (2026-11-04).
+                response = self._request_within_attempt_wall(
+                    attempt_timeout,
+                    lambda: self.session.request(
+                        "POST" if body is not None else "GET",
+                        url,
+                        params=params,
+                        headers=headers,
+                        json=body,
+                        timeout=attempt_timeout,
+                        stream=True,
+                    ),
                 )
                 if response.status_code != 200:
                     raise SourceError(f"Publisher returned HTTP {response.status_code}")
@@ -268,6 +276,32 @@ class Transport:
                 if response is not None:
                     response.close()
         raise SourceError("Publisher transport failed")
+
+    def _request_within_attempt_wall(self, timeout, fn):
+        """Run one publisher attempt inside a single wall-clock budget.
+
+        ``socket.create_connection`` applies the requests timeout to each
+        resolved address. A blackholed route therefore multiplies that
+        timeout by the address count, all inside one ``session.request``,
+        where the run deadline is not checked. Shrink every connect to the
+        time left in this attempt so the walk cannot outlive it.
+        """
+        deadline = time.monotonic() + timeout
+        original = socket.socket.connect
+
+        def connect(sock, address):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("publisher attempt wall exceeded")
+            current = sock.gettimeout()
+            sock.settimeout(remaining if current is None else min(current, remaining))
+            return original(sock, address)
+
+        socket.socket.connect = connect
+        try:
+            return fn()
+        finally:
+            socket.socket.connect = original
 
     def fetch(self, url, *, params=None, headers=None, body=None):
         raw, _headers = self._download(url, params=params, headers=headers, body=body)

@@ -1415,6 +1415,85 @@ def test_publisher_http_error_is_not_retried(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_path, monkeypatch):
+    """2026-11-04 07:17Z radon-ai-cycle: www.ncei.noaa.gov resolved to 12
+    stream addresses. urllib3 applies the 25s connect timeout to each one,
+    so one GET burned 300s. The retry started a second walk because the
+    500s deadline is checked only between attempts. NOAA ended at 600s with
+    Publisher transport failed, then ramp and the later publishers saw
+    Per-run time budget exhausted and the oneshot exited 1.
+    """
+    import socket
+    import time
+
+    from scripts.ai_cycle import collect as collect_mod
+    from scripts.ai_cycle.collectors import Transport
+
+    addresses = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (f"192.0.2.{i}", 443))
+        for i in range(1, 9)
+    ]
+    original_connect = socket.socket.connect
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        if host == "www.ncei.noaa.gov":
+            return list(addresses)
+        raise AssertionError(f"unexpected DNS lookup for {host}")
+
+    def connect(self, address):
+        if isinstance(address, tuple) and str(address[0]).startswith("192.0.2."):
+            timeout = self.gettimeout()
+            if timeout:
+                time.sleep(timeout)
+            raise TimeoutError("timed out")
+        return original_connect(self, address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+
+    real_init = Transport.__init__
+
+    def init(self, archive, **kwargs):
+        kwargs.setdefault("timeout", 0.15)
+        real_init(self, archive, **kwargs)
+        self.deadline = time.monotonic() + 0.4
+
+    monkeypatch.setattr(Transport, "__init__", init)
+
+    called = []
+    real_collect = collect_mod.collect_source
+
+    def wrapped(source, transport, *args, **kwargs):
+        called.append((source, time.monotonic() < transport.deadline))
+        if source == "noaa":
+            return real_collect(source, transport, *args, **kwargs)
+        return []
+
+    monkeypatch.setattr(collect_mod, "collect_source", wrapped)
+    started = time.monotonic()
+    code = collect_mod.main(
+        [
+            "--verify",
+            "--sources",
+            "noaa,vercel",
+            "--start",
+            "2026-10-28",
+            "--end",
+            "2026-11-03",
+            "--archive",
+            str(tmp_path / "raw"),
+        ]
+    )
+    elapsed = time.monotonic() - started
+    assert code == 1
+    assert [item[0] for item in called] == ["noaa", "vercel"]
+    # Eight blackholed addresses at 0.15s is 1.2s for one walk, 2.4s for two.
+    # The attempt wall is 0.15s, so both attempts and the next publisher fit
+    # inside the 0.4s run deadline.
+    assert elapsed < 0.7, elapsed
+    assert called[1][1] is True
+
+
 def test_publisher_retry_obeys_remaining_request_budget(tmp_path):
     import requests
 

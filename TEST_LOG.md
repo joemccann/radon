@@ -1386,3 +1386,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-582 | DONE | Deleting the two `retrievedRead` assignments in `web/lib/assistant/tools.ts` left the `call_api` case green and failed the new `fetch_backend` and `get_quote` cases (2 failed / 17 passed, watchlist POST `ok` true). Restored the assignments. File 19 passed on three runs. Product source unchanged. Closing rounds: root pytest r1/r2 xdist credentials clock flake then serial 11 passed; r3 20,227 passed / 12 skipped / 63 subtests. Vitest 11,604 passed / 21 skipped / 1,182 files each round. Cloud 42 failed / 3,960 passed / 23 skipped each round, 0 added / 0 removed against `157938f5`. |
+
+## 2026-11-04
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-583 | DONE | Existing ExecStart allowlist stayed 1 passed after dropping `CLERK_AUTHORIZED_PARTIES=${CLERK_AUTHORIZED_PARTIES}`. New interpolation assert failed that mutation (1 failed / 1 passed). Dropping the name from the three `MCP_ENV_KEYS` copies failed the writer-subset case. Restored product source. Focused cloud files 20 passed / 2 skipped. Product source unchanged. Closing rounds: root pytest xdist credentials clock flake then serial 11 passed; 20,296 passed / 12 skipped / 63 subtests each round. Vitest 11,610 passed / 21 skipped / 1,184 files each round. Cloud 42 failed / 3,976 passed / 23 skipped each round, 0 added / 0 removed against `ab4e6b45`. |

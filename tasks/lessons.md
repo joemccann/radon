@@ -1,3 +1,7 @@
+# 2026-11-03: Caddy floor after healthd returns mid-deploy
+
+- A fresh transition journal plus an unread `:8330` is only the first half of stop-clean. restart-managed brings radon-health back before the serving path is up, and the latest off-box row can still be `status_unreachable:caddy`. That readable down aggregate is the same restart. Suppress only that reason. A raw 5xx, a stranded journal, and the floor outside the journal still page.
+
 # 2026-10-31: model deployment resource admission
 
 - Use the canonical pytest temporary root for full gates. On macOS an explicit /tmp base can inherit group wheel instead of the process group and invalidate permission fixtures; reproduce with the canonical root before changing production guards or assertions.

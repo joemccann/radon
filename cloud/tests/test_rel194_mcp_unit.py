@@ -31,8 +31,13 @@ class TestUnitEnvironmentIsAllowlisted:
         assert "env -i" in exec_line, (
             "ExecStart does not scrub the inherited environment"
         )
-        for needed in ("CLERK_JWKS_URL", "CLERK_ISSUER", "ALLOWED_USER_IDS"):
-            assert needed in exec_line
+        for needed in (
+            "CLERK_JWKS_URL",
+            "CLERK_ISSUER",
+            "CLERK_AUTHORIZED_PARTIES",
+            "ALLOWED_USER_IDS",
+        ):
+            assert f"{needed}=${{{needed}}}" in exec_line, needed
         for secret in ("UW_TOKEN", "IB_FLEX_TOKEN", "TURSO", "CLERK_SECRET_KEY"):
             assert secret not in exec_line
 
