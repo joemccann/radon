@@ -89,11 +89,19 @@ def get_existing_tickers() -> set:
     return {t for t in tickers if t}
 
 
-def fetch_options_flow(min_premium: int = 500000, limit: int = 200, _client: UWClient = None) -> list:
+def fetch_options_flow(
+    min_premium: int = 500000,
+    limit: int = 200,
+    _client: UWClient = None,
+    *,
+    deadline: float | None = None,
+    retry_transient: bool = True,
+) -> list:
     """Fetch market-wide options flow alerts (full multi-page walk).
 
     Delegates to ``fetch_flow.fetch_flow_alerts`` so market-wide discovery
-    is not stuck at a single UW page (max 200).
+    is not stuck at a single UW page (max 200). ``deadline`` stops later
+    pages so the hourly POST can return before the wrapper curl budget.
     """
     from fetch_flow import fetch_flow_alerts
 
@@ -102,6 +110,8 @@ def fetch_options_flow(min_premium: int = 500000, limit: int = 200, _client: UWC
         min_premium=min_premium,
         _client=_client,
         limit=limit,
+        deadline=deadline,
+        retry_transient=retry_transient,
     )
 
 
@@ -155,6 +165,8 @@ def fetch_darkpool_multi(
     _client: UWClient = None,
     *,
     max_pages: int = DISCOVER_DARKPOOL_MAX_PAGES,
+    deadline: float | None = None,
+    retry_transient: bool = True,
 ) -> dict:
     """Fetch multiple days of dark pool data for sustained direction analysis.
 
@@ -179,7 +191,12 @@ def fetch_darkpool_multi(
         trades = get_cached_darkpool(ticker, date, require_complete=False)
         if trades is None:
             walk = walk_darkpool(
-                ticker, date=date, _client=client, max_pages=max_pages
+                ticker,
+                date=date,
+                _client=client,
+                max_pages=max_pages,
+                deadline=deadline,
+                retry_transient=retry_transient,
             )
             trades = walk.trades
             if isinstance(trades, list):
@@ -555,11 +572,27 @@ def discover_targeted(tickers: list, dp_days: int = 3,
 # governor default when the header is missing, and still leaves the
 # dark-pool walk room to finish. A longer embargo is the daily reset.
 OPTIONS_FLOW_ADMISSION_WAIT_S = 70.0
+# The wrapper curl deadline and the FastAPI script timeout are both 180s
+# and start together. A walk still running at that instant is curl 28 with
+# 0 bytes, and the oneshot exits 1 (2026-11-04 21:03Z). Stop starting new
+# UW work early enough that one in-flight page (admission plus one HTTP
+# timeout, no client retry) and the JSON response land before curl fires.
+DISCOVER_CURL_BUDGET_S = 180
+DISCOVER_PAGE_TIMEOUT_S = 30
+DISCOVER_PAGE_ADMISSION_S = 5
+DISCOVER_RESPONSE_MARGIN_S = 8
+DISCOVER_INFLIGHT_PAGE_S = DISCOVER_PAGE_ADMISSION_S + DISCOVER_PAGE_TIMEOUT_S
+DISCOVER_POST_BUDGET_S = (
+    DISCOVER_CURL_BUDGET_S - DISCOVER_INFLIGHT_PAGE_S - DISCOVER_RESPONSE_MARGIN_S
+)
 _OPTIONS_FLOW_ADMISSION_POLL_S = 8.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
 # The wrapper sheds HTTP 400 only when the body carries this exact phrase.
 # Quota exhaustion and a multi-hour embargo keep the hard provider error.
 DISCOVER_ADMISSION_SHED = "discover rate limit shed"
+# The wrapper sheds this HTTP 400 the same way as a short rate limit.
+# A provider outage keeps the hard error and still fails the oneshot.
+DISCOVER_BUDGET_SHED = "discover budget shed"
 _QUOTA_MARKERS = (
     "daily request limit",
     "quota is exhausted",
@@ -638,7 +671,13 @@ def _admission_retry_delay(exc: BaseException) -> float | None:
     return remaining
 
 
-def _fetch_options_flow_after_admission(client, *, min_premium: int) -> list:
+def _fetch_options_flow_after_admission(
+    client,
+    *,
+    min_premium: int,
+    deadline: float | None = None,
+    retry_transient: bool = True,
+) -> list:
     """Fetch market-wide alerts, waiting once for a short admission embargo.
 
     fetch_flow already retries a 429 once after 2s. That retry still fails
@@ -650,7 +689,11 @@ def _fetch_options_flow_after_admission(client, *, min_premium: int) -> list:
     while True:
         try:
             return fetch_options_flow(
-                min_premium=min_premium, limit=200, _client=client
+                min_premium=min_premium,
+                limit=200,
+                _client=client,
+                deadline=deadline,
+                retry_transient=retry_transient,
             )
         except UWRateLimitError as exc:
             if waited:
@@ -658,13 +701,18 @@ def _fetch_options_flow_after_admission(client, *, min_premium: int) -> list:
             delay = _admission_retry_delay(exc)
             if delay is None:
                 raise
+            # The post budget is absolute. A short embargo that starts after
+            # it is already gone must not add another sleep on top of curl.
+            if deadline is not None:
+                delay = min(delay, deadline - time.monotonic())
+            if delay <= 0:
+                raise
             waited = True
-            if delay > 0:
-                print(
-                    f"Options flow admission busy; retrying in {delay:.0f}s",
-                    file=sys.stderr,
-                )
-                time.sleep(delay)
+            print(
+                f"Options flow admission busy; retrying in {delay:.0f}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
 
 
 def discover(min_premium: int = 500000, min_alerts: int = 1,
@@ -688,12 +736,22 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         )
 
     # --- Market-wide mode (original behavior) ---
+    # Bound the hourly book. The wrapper and the API both kill this POST at
+    # 180s, so a walk that uses the full script budget never writes a body.
+    deadline = time.monotonic() + DISCOVER_POST_BUDGET_S
     print("Fetching market-wide options flow...", file=sys.stderr)
 
-    with UWClient() as client:
+    with UWClient(
+        timeout=DISCOVER_PAGE_TIMEOUT_S,
+        max_retries=0,
+        admission_timeout=DISCOVER_PAGE_ADMISSION_S,
+    ) as client:
         try:
             alerts = _fetch_options_flow_after_admission(
-                client, min_premium=min_premium
+                client,
+                min_premium=min_premium,
+                deadline=deadline,
+                retry_transient=False,
             )
         except UWAPIError as exc:
             return {
@@ -742,8 +800,18 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
+            # Submit is instant, so the pool would otherwise start every
+            # ticker. A worker that wakes after the budget returns nothing
+            # instead of opening another UW walk.
+            if time.monotonic() >= deadline:
+                return None
             dp = fetch_darkpool_multi(
-                ticker, days=dp_days, _client=client, max_pages=dp_pages
+                ticker,
+                days=dp_days,
+                _client=client,
+                max_pages=dp_pages,
+                deadline=deadline,
+                retry_transient=False,
             )
             return _build_candidate(ticker, all_flow[ticker], dp)
 
@@ -762,6 +830,8 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
                         and not _rate_limit_is_a_hard_outage(exc)
                     )
                     print(f"    [{done}/{total}] {ticker}... SKIP (provider unavailable)", file=sys.stderr)
+                    continue
+                if candidate is None:
                     continue
                 print(f"    [{done}/{total}] {ticker}... Score: {candidate['score']}", file=sys.stderr)
                 candidates.append(candidate)
@@ -782,6 +852,15 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         provider_failures,
         shed_admission=bool(provider_failures) and all(admission_sheds),
     )
+    # A tape that did not finish, with nothing scored, must not cache as an
+    # empty success. The wrapper sheds this body and the next slot retries.
+    if (
+        time.monotonic() >= deadline
+        and not result.get("candidates")
+        and not result.get("error")
+    ):
+        result["degraded"] = True
+        result["error"] = DISCOVER_BUDGET_SHED
     return result
 
 

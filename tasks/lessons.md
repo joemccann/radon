@@ -41,6 +41,11 @@ When asked to replace previews with downloads, trace the actual authenticated Do
 - Successful oneshot starts count toward systemd StartLimit too. Bound an accelerated replay, stop on start-limit-hit and retain the normal service limit; do not spin on refused starts or loosen the timer's crash-loop protection.
 - Managed cancellation is control flow. Provider error handling must not convert it into a fallback request. Verify actual SIGTERM during request setup and streaming, exit 143, cleanup and the error heartbeat.
 
+# Discover curl 28 is the market-wide walk, not the flow-analysis wait (2026-11-04)
+
+- `curl: (28)` / `http=000` / 0 bytes at 180s is not always `flow-refresh-analysis-admission-wait`. Read which POST timed out. Scanner OK, flow-analysis OK, then discover held for the full curl budget is `flow-refresh-discover-budget-timeout`.
+- The wrapper curl deadline and the `/discover` script timeout are the same 180s. A walk that uses the full budget cannot write a body, so the oneshot sees indeterminate and exits 1. Bound the market-wide tape (`DISCOVER_POST_BUDGET_S`, fail-fast client) and shed `discover budget shed`. Do not start a short admission sleep after that budget is gone. Do not raise `SCAN_TIMEOUT` to hide the walk. A later hour can already be `success`. Read the journal at `paged_at`.
+
 # The portfolio flow book must not inherit the report admission wait (2026-10-27)
 
 - `FLOW_ADMISSION_WAIT_S` (120s) is the single-ticker `flow_report.py` path. Its subprocess budget is 300s. `flow_analysis.py` is the hourly book inside `radon-flow-refresh.service`, and the wrapper curl deadline is 180s. `fetch_flow` defaults `retry_transient=True`, so the book used to open `UWClient(admission_timeout=120)` per name. One saturated top-of-hour wait holds `POST /flow-analysis` until `curl: (28)` / `http=000` / 0 bytes, and the oneshot exits 1.

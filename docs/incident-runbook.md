@@ -2992,7 +2992,9 @@ after one curl-7 retry. Discover then shed a short UW rate limit.
   `curl: (7)` then fallback is `flow-refresh-connect-refused`.
   Discover HTTP 400 `discover rate limit shed` is
   `flow-refresh-discover-rate-limit-shed` and is not this page when
-  flow-analysis already returned OK. `Result=signal` is deploy
+  flow-analysis already returned OK. Discover `curl=28` / `http=000`
+  at the 180s deadline, after flow-analysis OK, is
+  `flow-refresh-discover-budget-timeout`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
   in the same minute, stand down.
 - **Remediation (code):** the portfolio scan passes
@@ -3214,6 +3216,69 @@ retries, then completed.
 - **Code:** `scripts/discover.py` (`_provider_error_key`,
   `_apply_provider_failures`), `scripts/run_flow_refresh.sh`
   (`_is_admission_shed`).
+
+---
+
+## flow-refresh-discover-budget-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the market-wide discover walk is admitted and
+outlives the wrapper curl deadline.** Peak: 2026-11-04 21:03:52Z,
+page `9b494e21badd31a9ff5cbef6a2532940`. Scanner and flow-analysis in
+the same fire exited OK. Earlier hours that session shed discover on
+a short UW rate limit in a few seconds.
+
+- **Mechanism:** the wrapper `SCAN_TIMEOUT` and `POST /discover`
+  `run_script` timeout are both 180s and start together. A walk that
+  is still running at that instant never writes an HTTP body. The
+  journal is `curl: (28) Operation timed out after 180002 milliseconds
+  with 0 bytes received`, then
+  `discover FastAPI outcome indeterminate (curl=28, http=000)`. The
+  wrapper does not launch a direct `discover.py` (BUG-013) and exits 1.
+  `fetch_options_flow` walked up to `FLOW_ALERTS_MAX_PAGES` (25) with
+  no deadline, and darkpool scoring submitted every candidate at once.
+  The UW client retry ladder (3 extra 30s attempts) can add another
+  full curl budget onto one page. Hours that hit a short embargo
+  return HTTP 400 in seconds and do not page. The close fire was the
+  one that got a lane and ran the tape. `/health/lite` stayed
+  authenticated. Database stayed up.
+- **Detection:** unit journal scanner OK, flow-analysis OK, then one
+  discover POST, then `curl: (28)` at 180s with 0 bytes and
+  `http=000`, then `Flow refresh finished with 1 failed scan(s)`.
+  `systemctl show` is `exit-code` / `ExecMainStatus=1` /
+  `NRestarts=0`. Duration from the discover POST is the curl budget,
+  not ~2s and not ~30-70s.
+- **Discriminating check:** `curl=28` and `http=000` with 0 bytes on
+  the discover POST, after flow-analysis already returned OK. A
+  flow-analysis `curl=28` is `flow-refresh-analysis-admission-wait`.
+  Instant `Subprocess capacity exhausted` is
+  `flow-refresh-capacity-502`. HTTP 400 `discover rate limit shed`
+  is `flow-refresh-discover-rate-limit-shed`. HTTP 400
+  `required provider data unavailable` after a scored walk is
+  `flow-refresh-discover-partial-400`. `curl: (7)` then fallback is
+  `flow-refresh-connect-refused`. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
+  in the same minute, stand down.
+- **Remediation (code):** the market-wide scan uses a fail-fast client
+  (`max_retries=0`, 30s page timeout, 5s admission) and stops new UW
+  work `DISCOVER_POST_BUDGET_S` before the curl deadline, leaving one
+  in-flight page plus the JSON response. A short admission wait that
+  would start after that budget is already gone is not started. A tape that does not finish,
+  with nothing scored, sets `error` to `discover budget shed`. The
+  wrapper returns exit 75 and the oneshot exits 0 with a warn health
+  row. It does not retry the POST and does not launch a direct
+  `discover.py`. Scored names still return 200. Quota exhaustion and
+  any non-rate-limit provider error still set the hard error and the
+  oneshot still exits 1. Do not `reset-failed`. The next timer after
+  deploy is enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_market_wide_walk_returns_before_the_wrapper_curl_budget`,
+  `test_late_admission_busy_does_not_sleep_past_the_curl_budget`,
+  `scripts/tests/test_run_flow_refresh_wrapper.py::test_discover_budget_400_sheds_without_retry_or_fallback`,
+  `test_discover_provider_outage_400_still_fails_the_unit`.
+- **Code:** `scripts/discover.py` (`discover`, `fetch_options_flow`,
+  `fetch_darkpool_multi`), `scripts/run_flow_refresh.sh`
+  (`_is_budget_shed`).
 
 ---
 
