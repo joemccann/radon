@@ -124,6 +124,7 @@ class TestImageWorkflowTokenScope:
         values = {
             "${{ steps.pyimage.outputs.tag }}": "ghcr.io/joemccann/radon-python:ihash-" + "a" * 64,
             "${{ steps.pyimage.outputs.hash }}": "a" * 64,
+            "${{ steps.pyimage.outputs.payload }}": "a" * 64,
             "${{ github.sha }}": "c" * 40,
         }
         docker = tmp_path / "bin" / "docker"
@@ -166,7 +167,11 @@ class TestImageWorkflowTokenScope:
                 assert completed.returncode == 0, f"{step['name']}: {completed.stderr}"
                 exercised.append(step["name"])
         calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-        assert {"Reuse identical python image", "Reuse identical model gateway image"} <= set(exercised)
+        assert {
+            "Reuse identical python image",
+            "Reuse identical model gateway image",
+            "Reuse verified client disk bounds",
+        } <= set(exercised)
         assert calls, "no PR-reachable registry lookup ran"
         assert all(call.startswith("buildx imagetools inspect ") for call in calls), calls
         assert not any("--raw" in call or "buildcache" in call for call in calls), calls
