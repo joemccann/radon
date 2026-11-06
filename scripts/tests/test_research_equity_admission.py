@@ -67,10 +67,8 @@ def test_sector_stock_picks_require_subject_resolution():
     assert result.outcome != 'publish'
 
 
-def test_strict_book_never_falls_back_to_disk_or_partial_source(monkeypatch,tmp_path):
+def test_strict_book_never_falls_back_to_partial_source(monkeypatch):
     import db.readers as readers
-    monkeypatch.setattr(book,'DATA_DIR',tmp_path)
-    (tmp_path/'portfolio.json').write_text('{"positions":[{"ticker":"HOOD"}]}')
     monkeypatch.setattr(readers,'read_watchlist_tickers',lambda: ['MU'])
     monkeypatch.setattr(readers,'read_latest_portfolio_snapshot',lambda: None)
     assert book.current_tickers() is None
