@@ -1,4 +1,4 @@
-"""Semver fold pinned at 0.7.0 / eb5e5206."""
+"""Semver fold pinned at 0.7.0 / 6f31eec6."""
 
 from __future__ import annotations
 
@@ -15,8 +15,16 @@ BASE = (0, 7, 0)
 
 
 def test_base_pin_is_the_0_7_0_commit() -> None:
-    assert rv.BASE_SHA == "eb5e52066462374b3426c0ec874c6c9024bb5b8b"
+    assert rv.BASE_SHA == "6f31eec6fec275e20cbde30aaf93f200a93b5c41"
     assert rv.BASE_VERSION == BASE
+
+
+def test_base_pin_is_reachable_from_this_checkout() -> None:
+    """A history rewrite orphaned the old pin and froze production at 0.13.9."""
+    root = Path(__file__).resolve().parents[2]
+    if _git(root, "rev-parse", "--is-shallow-repository") == "true":
+        pytest.skip("shallow clone cannot prove ancestry")
+    _git(root, "merge-base", "--is-ancestor", rv.BASE_SHA, "HEAD")
 
 
 @pytest.mark.parametrize(
@@ -109,7 +117,7 @@ def test_json_falls_back_to_package_json_without_the_base(tmp_path: Path, monkey
 
 
 @pytest.mark.parametrize('history', ['missing', 'unrelated'])
-def test_ci_version_keeps_package_identity_when_original_history_is_unavailable(tmp_path, monkeypatch, history):
+def test_ci_version_refuses_to_ship_a_package_label_without_the_base(tmp_path, monkeypatch, history):
     repo, _ = _repo(tmp_path)
     _commit(repo, 'feat(web): synthetic runtime', {'web/example.ts': 'export {}\n'})
     if history == 'unrelated':
@@ -121,8 +129,9 @@ def test_ci_version_keeps_package_identity_when_original_history_is_unavailable(
         unavailable = 'a' * 40
     monkeypatch.setenv('RADON_RELEASE_BASE_SHA', unavailable)
     sha = _git(repo, 'rev-parse', 'HEAD')
-    assert rv.ci_version(repo, sha) == '0.7.0'
     assert rv.build_identity(repo, 'production')['source'] == 'package'
+    with pytest.raises(ValueError, match='not an ancestor'):
+        rv.ci_version(repo, sha)
 
 
 @pytest.mark.parametrize('version', ['', 'v0.7.0', '0.7', '01.7.0', '0.7.0-extra', '0.7.0\ninjected'])
@@ -148,8 +157,8 @@ def test_ci_version_refuses_another_commit_even_with_a_valid_label(tmp_path):
 
 
 def test_ci_cli_emits_only_the_validated_build_label(tmp_path, monkeypatch, capsys):
-    repo, _ = _repo(tmp_path)
-    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', 'a' * 40)
+    repo, base = _repo(tmp_path)
+    monkeypatch.setenv('RADON_RELEASE_BASE_SHA', base)
     sha = _git(repo, 'rev-parse', 'HEAD')
     assert rv.main(['--repo', str(repo), '--ci-version', '--expected-sha', sha]) == 0
     assert capsys.readouterr().out == '0.7.0\n'

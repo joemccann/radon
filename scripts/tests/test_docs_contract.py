@@ -2209,7 +2209,7 @@ class TestDocumentation20261012:
         deploy = _section((_ROOT / "docs/operations.md").read_text(), "Deployment")
         assert "scripts/release_version.py" in deploy
         assert "package.json" in deploy
-        assert "can lag" in deploy
+        assert "Repin `BASE_SHA`" in deploy
         assert "release-tag" in deploy
         ci = (_ROOT / ".github/workflows/ci.yml").read_text()
         start = ci.index("  release-tag:")
