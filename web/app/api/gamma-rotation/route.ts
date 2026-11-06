@@ -1,9 +1,8 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
@@ -13,8 +12,6 @@ import { buildDemoGammaRotationFixture } from "@/lib/demo/fixtures/regime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const CACHE_PATH = join(process.cwd(), "..", "data", "gamma_rotation_gap.json");
 
 const EMPTY_ASSET = {
   ticker: "",
@@ -84,29 +81,15 @@ function isMarketOpenNow(): boolean {
 // (closed-guard precedes the date-roll check) so off-hours GETs stop firing a
 // background scan on every weekend/overnight tab open.
 
-async function readCachedGammaRotationFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const result = await dbExecute({
-      sql: `SELECT payload FROM gamma_rotation_snapshots ORDER BY scan_time DESC LIMIT 1`,
-      args: [],
-    }, { label: "gamma-rotation" });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { payload: string };
-    return JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-async function readCachedGammaRotationFromDisk(): Promise<Record<string, unknown> | null> {
-  try {
-    const raw = await readFile(CACHE_PATH, "utf-8");
-    const jsonStart = raw.indexOf("{");
-    if (jsonStart === -1) return null;
-    return JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+async function readCachedGammaRotationFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const result = await dbExecute({
+    sql: `SELECT payload FROM gamma_rotation_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    args: [],
+  }, { label: "gamma-rotation" });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { payload: string };
+  const data = JSON.parse(row.payload) as Record<string, unknown>;
+  return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
 // Coalesces every client tab's ~60s poll into one source read per window
@@ -114,9 +97,15 @@ async function readCachedGammaRotationFromDisk(): Promise<Record<string, unknown
 const READ_CACHE_TTL_MS = 5_000;
 
 async function readCachedGammaRotation(): Promise<Record<string, unknown> | null> {
-  return cachedRead("gamma-rotation:snapshot", READ_CACHE_TTL_MS, async () =>
-    (await readCachedGammaRotationFromDb()) ?? (await readCachedGammaRotationFromDisk()),
-  );
+  return cachedRead("gamma-rotation:snapshot", READ_CACHE_TTL_MS, async () => {
+    const result = await dbFirstRead({
+      fromDb: readCachedGammaRotationFromDb,
+      // Unused: isGammaRotationStale judges the served payload's own scan_time.
+      maxAgeMs: READ_CACHE_TTL_MS,
+      label: "gamma-rotation",
+    });
+    return result.ok ? result.data : null;
+  });
 }
 
 function normalizeAsset(raw: unknown, ticker: "SPY" | "TLT"): Record<string, unknown> {

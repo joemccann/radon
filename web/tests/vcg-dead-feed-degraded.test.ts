@@ -13,10 +13,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockReadFile = vi.fn();
 const mockGetDb = vi.fn();
 
-vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mockGetDb() }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: vi.fn(async () => ({})) }));
 // T-485 class: the real trigger logs from async continuations after the test
@@ -28,12 +26,10 @@ vi.mock("@/lib/backgroundScan", () => ({
 describe("/api/vcg with every source dead", () => {
   beforeEach(() => {
     vi.resetModules();
-    mockReadFile.mockReset();
     mockGetDb.mockReset();
     mockGetDb.mockImplementation(() => {
       throw new Error("turso unreachable");
     });
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
   });
 
   async function deadFeedBody() {

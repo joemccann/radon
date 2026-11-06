@@ -1,18 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockReadFile = vi.fn();
-const mockStat = vi.fn();
-
-vi.mock("fs/promises", () => ({
-  readFile: mockReadFile,
-  stat: mockStat,
-}));
-
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 const mockGetDb = vi.fn();
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
+
+let performanceRow: Record<string, unknown> | null = null;
 
 function mockDbSnapshots({
   performance = null,
@@ -24,12 +18,13 @@ function mockDbSnapshots({
   mockGetDb.mockReturnValue({
     execute: vi.fn(async ({ sql }: { sql: string }) => {
       if (/FROM\s+performance_snapshots/i.test(sql)) {
+        const row = performance ?? performanceRow;
         return {
-          rows: performance
+          rows: row
             ? [
                 {
-                  taken_at: String(performance.last_sync ?? performance.as_of ?? "2026-03-13T12:00:00Z"),
-                  payload: JSON.stringify(performance),
+                  taken_at: String(row.last_sync ?? row.as_of ?? "2026-03-13T12:00:00Z"),
+                  payload: JSON.stringify(row),
                 },
               ]
             : [],
@@ -51,8 +46,7 @@ describe("/api/performance route", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-13T16:10:00Z"));
     vi.clearAllMocks();
-    mockReadFile.mockReset();
-    mockStat.mockReset();
+    performanceRow = null;
     mockRadonFetch.mockReset();
     mockGetDb.mockReset();
     mockDbSnapshots();
@@ -69,19 +63,13 @@ describe("/api/performance route", () => {
         account_summary: { net_liquidation: 1_313_112.03 },
       },
     });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-13",
-          // Inside the 5-min market-open TTL of the fake clock (16:10Z).
-          last_sync: "2026-03-13T16:08:00Z",
-          summary: { sharpe_ratio: 1.2 },
-          series: [],
-        });
-      }
-      throw new Error(`unexpected read: ${path}`);
-    });
+    performanceRow = {
+      as_of: "2026-03-13",
+      // Inside the 5-min market-open TTL of the fake clock (16:10Z).
+      last_sync: "2026-03-13T16:08:00Z",
+      summary: { sharpe_ratio: 1.2 },
+      series: [],
+    };
 
     const { GET } = await import("../app/api/performance/route");
     const res = await GET();
@@ -100,18 +88,12 @@ describe("/api/performance route", () => {
         account_summary: { net_liquidation: 1_313_112.03 },
       },
     });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-10",
-          last_sync: "2026-03-10T18:55:00Z",
-          summary: { ending_equity: 1_063_031.86 },
-          series: [],
-        });
-      }
-      throw new Error(`unexpected read: ${path}`);
-    });
+    performanceRow = {
+      as_of: "2026-03-10",
+      last_sync: "2026-03-10T18:55:00Z",
+      summary: { ending_equity: 1_063_031.86 },
+      series: [],
+    };
     mockRadonFetch.mockResolvedValueOnce({ status: "accepted" });
 
     const { GET } = await import("../app/api/performance/route");
@@ -133,18 +115,12 @@ describe("/api/performance route", () => {
         account_summary: { net_liquidation: 1_218_410.03 },
       },
     });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-12",
-          last_sync: "2026-03-12T13:23:21Z",
-          summary: { ending_equity: 1_218_410.03 },
-          series: [],
-        });
-      }
-      throw new Error(`unexpected read: ${path}`);
-    });
+    performanceRow = {
+      as_of: "2026-03-12",
+      last_sync: "2026-03-12T13:23:21Z",
+      summary: { ending_equity: 1_218_410.03 },
+      series: [],
+    };
     mockRadonFetch.mockResolvedValueOnce({ status: "accepted" });
 
     const { GET } = await import("../app/api/performance/route");
@@ -166,18 +142,12 @@ describe("/api/performance route", () => {
         account_summary: { net_liquidation: 1_218_410.03 },
       },
     });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-12",
-          last_sync: "2026-03-12T13:23:21Z",
-          summary: { ending_equity: 1_218_410.03 },
-          series: [],
-        });
-      }
-      throw new Error(`unexpected read: ${path}`);
-    });
+    performanceRow = {
+      as_of: "2026-03-12",
+      last_sync: "2026-03-12T13:23:21Z",
+      summary: { ending_equity: 1_218_410.03 },
+      series: [],
+    };
     mockRadonFetch.mockRejectedValue(new Error("IB unavailable"));
 
     const { GET } = await import("../app/api/performance/route");
@@ -211,18 +181,12 @@ describe("/api/performance route", () => {
   it("GET SWR: returns stale cache immediately and triggers background rebuild", async () => {
     mockDbSnapshots({ portfolio: { last_sync: "2026-03-13T12:00:00Z" } });
     // Stale: mtime is 20 minutes ago
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 20 * 60_000 });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-13",
-          last_sync: "2026-03-13T12:00:00Z",
-          summary: { sharpe_ratio: 1.2 },
-          series: [],
-        });
-      }
-      throw new Error(`unexpected read: ${path}`);
-    });
+    performanceRow = {
+      as_of: "2026-03-13",
+      last_sync: "2026-03-13T12:00:00Z",
+      summary: { sharpe_ratio: 1.2 },
+      series: [],
+    };
     // Background trigger should fire-and-forget
     mockRadonFetch.mockResolvedValue({ status: "accepted" });
 
@@ -237,8 +201,6 @@ describe("/api/performance route", () => {
   });
 
   it("GET cold start: blocks on rebuild when no cache exists", async () => {
-    mockStat.mockRejectedValue(new Error("ENOENT"));
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
     mockRadonFetch.mockResolvedValue({
       as_of: "2026-03-13",
       last_sync: "2026-03-13T16:00:00Z",
@@ -259,8 +221,6 @@ describe("/api/performance route", () => {
     // §C.6: missing data is a status, never a 4xx or 5xx. The UI branches on
     // `status` rather than guessing at an error envelope. The upstream error
     // text must still never reach the client.
-    mockStat.mockRejectedValue(new Error("ENOENT"));
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
     mockRadonFetch.mockRejectedValue(new Error("FastAPI down"));
 
     const { GET } = await import("../app/api/performance/route");
@@ -275,18 +235,12 @@ describe("/api/performance route", () => {
 
   it("GET SWR: background trigger failure is swallowed — stale cache still returned", async () => {
     mockDbSnapshots({ portfolio: { last_sync: "2026-03-13T12:00:00Z" } });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 20 * 60_000 });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path.includes("performance.json")) {
-        return JSON.stringify({
-          as_of: "2026-03-13",
-          last_sync: "2026-03-13T12:00:00Z",
-          summary: { ending_equity: 100_000 },
-          series: [],
-        });
-      }
-      throw new Error("not found");
-    });
+    performanceRow = {
+      as_of: "2026-03-13",
+      last_sync: "2026-03-13T12:00:00Z",
+      summary: { ending_equity: 100_000 },
+      series: [],
+    };
     mockRadonFetch.mockRejectedValue(new Error("timeout"));
 
     const { GET } = await import("../app/api/performance/route");
@@ -315,8 +269,6 @@ describe("/api/performance staleness is served", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-16T22:00:00Z")); // Monday, market closed
     vi.clearAllMocks();
-    mockReadFile.mockReset();
-    mockStat.mockReset();
     mockRadonFetch.mockReset();
     mockGetDb.mockReset();
   });

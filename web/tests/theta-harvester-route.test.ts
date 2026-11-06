@@ -1,25 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readFile: vi.fn(),
-  statSync: vi.fn(),
   radonFetch: vi.fn(),
   getDb: vi.fn(),
 }));
 
-vi.mock("fs/promises", () => ({
-  readFile: mocks.readFile,
-}));
-
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
-  return {
-    ...actual,
-    statSync: mocks.statSync,
-  };
-});
-
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mocks.getDb() }));
+
+function dbRow(snapshot: { scan_time: string }) {
+  return dbReturning([{ scan_time: snapshot.scan_time, payload: JSON.stringify(snapshot) }]);
+}
 
 /** A stub libsql client whose theta snapshot query returns `rows`. */
 function dbReturning(rows: Array<{ scan_time: string; payload: string }>) {
@@ -78,14 +68,10 @@ function noStoreHeader(res: Response): string {
 
 beforeEach(() => {
   vi.resetModules();
-  mocks.readFile.mockReset();
-  mocks.statSync.mockReset();
   mocks.radonFetch.mockReset();
   mocks.getDb.mockReset();
-  mocks.statSync.mockReturnValue({ mtime: new Date("2026-06-24T15:01:00Z") });
-  mocks.readFile.mockResolvedValue(JSON.stringify(thetaPayload));
-  // Default: no Turso row → GET falls back to the disk cache.
-  mocks.getDb.mockReturnValue(dbReturning([]));
+  // Default: the latest Turso row is the fixture snapshot.
+  mocks.getDb.mockReturnValue(dbRow(thetaPayload));
 });
 
 afterEach(() => {
@@ -102,14 +88,11 @@ describe("GET /api/scanner/theta", () => {
     expect(res.status).toBe(200);
     expect(noStoreHeader(res)).toContain("no-store");
     expect(body.results[0].ticker).toBe("AAPL");
-    expect(body.cache_meta.last_refresh).toBe("2026-06-24T15:01:00.000Z");
+    expect(body.cache_meta.last_refresh).toBe("2026-06-24T15:00:00.000Z");
   });
 
   it("returns the empty envelope when no cache exists", async () => {
-    mocks.readFile.mockRejectedValueOnce(new Error("ENOENT"));
-    mocks.statSync.mockImplementationOnce(() => {
-      throw new Error("ENOENT");
-    });
+    mocks.getDb.mockReturnValue(dbReturning([]));
     const { GET } = await import("../app/api/scanner/theta/route");
 
     const res = await GET();
@@ -122,16 +105,14 @@ describe("GET /api/scanner/theta", () => {
   });
 
   it("serves the last populated Turso snapshot when a later quota scan wrote zero rows", async () => {
-    mocks.readFile.mockResolvedValue(
-      JSON.stringify({
+    mocks.getDb.mockReturnValue(dbRow({
         ...thetaPayload,
         scan_time: "2026-08-14T17:15:18.159060+00:00",
         candidates_found: 0,
         theta_harvest_count: 0,
         tickers_scanned: 102,
         results: [],
-      }),
-    );
+      }));
     mocks.getDb.mockReturnValue(
       dbReturning([
         {
@@ -169,10 +150,8 @@ describe("GET /api/scanner/theta", () => {
     expect(body.scan_time).toBe("2026-08-14T15:30:09.987292+00:00");
   });
 
-  it("prefers the fresher Turso snapshot over a staler host-local disk cache", async () => {
-    // Disk has the old NDX scan (AAPL @ 2026-06-24); Turso carries a newer
-    // single-ticker scan (NVDA @ 2026-06-25). This is the prod split-brain:
-    // the scan ran on another host and is only visible via the shared DB.
+  it("serves the newest Turso snapshot, shared across hosts", async () => {
+    // The scan ran on another host and is only visible via the shared DB.
     mocks.getDb.mockReturnValue(
       dbReturning([
         {
@@ -199,8 +178,7 @@ describe("GET /api/scanner/theta", () => {
 
   it("backfills earnings on pre-feature snapshots that omit the earnings key", async () => {
     // Snapshot shape before earnings annotation shipped — no `earnings` key.
-    mocks.readFile.mockResolvedValueOnce(
-      JSON.stringify({
+    mocks.getDb.mockReturnValue(dbRow({
         ...thetaPayload,
         results: [
           {
@@ -217,8 +195,7 @@ describe("GET /api/scanner/theta", () => {
             },
           },
         ],
-      }),
-    );
+      }));
     mocks.radonFetch.mockResolvedValueOnce({
       results: [
         {
@@ -253,12 +230,10 @@ describe("GET /api/scanner/theta", () => {
   });
 
   it("does not call earnings when the snapshot already has the earnings key", async () => {
-    mocks.readFile.mockResolvedValueOnce(
-      JSON.stringify({
+    mocks.getDb.mockReturnValue(dbRow({
         ...thetaPayload,
         results: [{ ...thetaPayload.results[0], earnings: null }],
-      }),
-    );
+      }));
     const { GET } = await import("../app/api/scanner/theta/route");
     const res = await GET();
     const body = await res.json();
@@ -363,7 +338,7 @@ describe("POST /api/scanner/theta/scan", () => {
 
   it("returns a 502 empty envelope when both FastAPI and cache fail", async () => {
     mocks.radonFetch.mockRejectedValueOnce(new Error("upstream down"));
-    mocks.readFile.mockRejectedValueOnce(new Error("ENOENT"));
+    mocks.getDb.mockReturnValue(dbReturning([]));
     const { POST } = await import("../app/api/scanner/theta/scan/route");
     const req = new Request("http://localhost/api/scanner/theta/scan", {
       method: "POST",

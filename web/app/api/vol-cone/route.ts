@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "vol_cone.json");
 
 // Contract: absent vol-cone data is HTTP 200 with missing:true, never a 4xx.
 const MISSING_VOL_CONE = {
@@ -76,14 +73,7 @@ async function readVolConeFromDb(): Promise<TimestampedRead<Record<string, unkno
   };
 }
 
-async function readVolConeFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 const readCachedVolConeFromDb = cachedSource("db", readVolConeFromDb);
-const readCachedVolConeFromDisk = cachedSource("disk", readVolConeFromDisk);
 
 export const radonCapability = "read";
 
@@ -91,7 +81,6 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readCachedVolConeFromDb,
-    fromDisk: readCachedVolConeFromDisk,
     maxAgeMs: await snapshotMaxAgeMs(maxAgeMs()),
     label: "vol-cone",
     // R-193: a writer that ran, produced nothing and still stamped a

@@ -4,8 +4,7 @@
  * /api/skew2d — two-session change in SPX 1M put/call skew (regime tab).
  *
  * GET-only: radon-skew2d.timer runs fetch_skew2d.py daily at 21:50 UTC.
- * Reads through dbFirstRead (Turso scan_snapshots service='skew2d', disk
- * data/skew2d.json). Always HTTP 200; absent data is missing:true.
+ * Reads through dbFirstRead (Turso scan_snapshots service='skew2d', last-in-memory). Always HTTP 200; absent data is missing:true.
  * Spec: docs/indicators/skew2d.md.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -17,15 +16,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: mockGetDb,
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -77,18 +67,16 @@ async function insertSnapshot(
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function jsonOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
 beforeEach(async () => {
+  (await import("@/lib/dbFirstRead")).__resetDbFirstReadMemoryForTests();
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockReset();
-  mockReadFile.mockRejectedValue(ENOENT);
 });
 
 afterEach(() => {
@@ -118,20 +106,22 @@ describe("/api/skew2d", () => {
     );
   });
 
-  it("falls back to disk when Turso has no row", async () => {
+  it("serves the last good read from memory when Turso has no rows", async () => {
     const payload = buildPayload({ scan_time: new Date(Date.now() - 120_000).toISOString(), count: 700 });
-    mockReadFile.mockResolvedValue(JSON.stringify(payload));
+    await insertSnapshot("skew2d", payload);
     const { GET } = await import("@/app/api/skew2d/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.count).toBe(700);
   });
 
-  it("prefers fresher Turso over older disk", async () => {
+  it("prefers the newest Turso row over an older one", async () => {
     const older = buildPayload({ scan_time: new Date(Date.now() - 120_000).toISOString(), count: 700 });
     const newer = buildPayload({ scan_time: new Date(Date.now() - 60_000).toISOString(), count: 733 });
-    mockReadFile.mockResolvedValue(JSON.stringify(older));
+    await insertSnapshot("skew2d", older);
     await insertSnapshot("skew2d", newer);
     const { GET } = await import("@/app/api/skew2d/route");
     const body = await jsonOf(await GET());

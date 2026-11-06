@@ -28,10 +28,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { goldenOkPayload, type PerformancePayloadV2 } from "./fixtures/performanceScenarios";
 
-const mockReadFile = vi.fn();
-const mockStat = vi.fn();
-vi.mock("fs/promises", () => ({ readFile: mockReadFile, stat: mockStat }));
-
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
@@ -100,13 +96,8 @@ describe("GET /api/performance rebuild loop (R5)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     vi.clearAllMocks();
-    mockReadFile.mockReset();
-    mockStat.mockReset();
     mockRadonFetch.mockReset();
     mockGetDb.mockReset();
-    // No disk fallback: the DB row is the only cache.
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
-    mockStat.mockRejectedValue(new Error("ENOENT"));
     mockRadonFetch.mockResolvedValue({ status: "accepted" });
   });
 

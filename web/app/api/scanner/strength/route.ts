@@ -1,9 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { statSync } from "fs";
-import { join } from "path";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -13,7 +10,6 @@ import { isCoverageFailedScan, pickUsableScanSnapshot } from "@/lib/scanCoverage
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "strength_confirmation.json");
 const STALE_THRESHOLD_SECONDS = 6 * 60 * 60;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
@@ -25,26 +21,6 @@ type CacheMeta = {
   is_stale: boolean;
   stale_threshold_seconds: number;
 };
-
-function buildCacheMeta(filePath: string): CacheMeta {
-  try {
-    const s = statSync(filePath);
-    const ageSeconds = (Date.now() - s.mtime.getTime()) / 1000;
-    return {
-      last_refresh: s.mtime.toISOString(),
-      age_seconds: Math.round(ageSeconds),
-      is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  } catch {
-    return {
-      last_refresh: null,
-      age_seconds: null,
-      is_stale: true,
-      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
-    };
-  }
-}
 
 function buildResultCacheMeta(timestampMs: number | null, fresh: boolean): CacheMeta {
   const ageSeconds = timestampMs == null ? null : Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
@@ -71,14 +47,9 @@ export function emptyStrengthConfirmationPayload() {
 
 export const radonCapability = "read";
 
-export async function readStrengthConfirmationCache(): Promise<Record<string, unknown> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
 /** Latest Turso snapshot — shared across hosts, so a scan that ran on the
- *  FastAPI host is visible to the Next.js host (the disk file is host-local
- *  and there is no strength auto-scan timer). */
+ *  FastAPI host is visible to the Next.js host (there is no strength auto-scan
+ *  timer). */
 async function readStrengthFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
@@ -95,38 +66,37 @@ async function readStrengthFromDb(): Promise<TimestampedRead<Record<string, unkn
   };
 }
 
-async function readStrengthFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const data = await readStrengthConfirmationCache();
-  if (data == null) return null;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+function readStrengthConfirmationSnapshot() {
+  return cachedRead("scanner:strength", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readStrengthFromDb,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "strength-confirmation",
+      isDegraded: (data) => isCoverageFailedScan(data),
+    }),
+  );
+}
+
+/** Turso or last-in-memory snapshot, for the scan route's failure path. */
+export async function readStrengthConfirmationCache(): Promise<Record<string, unknown> | null> {
+  const result = await readStrengthConfirmationSnapshot();
+  return result.ok ? result.data : null;
 }
 
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const diskCacheMeta = buildCacheMeta(CACHE_PATH);
-  // Fresher of the shared Turso snapshot and the host-local disk JSON.
-  const result = await cachedRead("scanner:strength", READ_CACHE_TTL_MS, () =>
-    dbFirstRead({
-      fromDb: readStrengthFromDb,
-      fromDisk: readStrengthFromDisk,
-      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-      label: "strength-confirmation",
-      isDegraded: (data) => isCoverageFailedScan(data),
-    }),
-  );
+  const result = await readStrengthConfirmationSnapshot();
   if (result.ok) {
-    const cache_meta = result.source === "disk"
-      ? diskCacheMeta
-      : buildResultCacheMeta(result.timestampMs, result.fresh);
+    const cache_meta = buildResultCacheMeta(result.timestampMs, result.fresh);
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...result.data, cache_meta }),
       requestId,
     );
   }
   return setNoStoreResponseHeaders(
-    NextResponse.json({ ...emptyStrengthConfirmationPayload(), cache_meta: diskCacheMeta }),
+    NextResponse.json({ ...emptyStrengthConfirmationPayload(), cache_meta: buildResultCacheMeta(null, false) }),
     requestId,
   );
 }

@@ -2,13 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 
-const mocks = vi.hoisted(() => ({ access: vi.fn(), disk: vi.fn(), getDb: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), getDb: vi.fn() }));
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.access }));
 vi.mock("@/lib/db", () => ({ getDb: mocks.getDb, resetDb: vi.fn() }));
-vi.mock("fs/promises", async (original) => ({
-  ...await original<typeof import("fs/promises")>(), readFile: mocks.disk,
-}));
 import { GET, dynamic, runtime, radonCapability } from "@/app/api/vix-model-spread/route";
+import { __resetDbFirstReadMemoryForTests } from "@/lib/dbFirstRead";
 
 let db: Client;
 const request = () => new Request("http://localhost/api/vix-model-spread");
@@ -38,17 +36,17 @@ async function body() { const response = await GET(request()); expect(response.s
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  __resetDbFirstReadMemoryForTests();
   db = createClient({ url: ":memory:" });
   await db.execute("CREATE TABLE scan_snapshots(service TEXT NOT NULL,scan_time TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(service,scan_time))");
   mocks.getDb.mockReturnValue(db);
-  mocks.disk.mockRejectedValue(new Error("ENOENT"));
   mocks.access.mockResolvedValue({ ok: true, principal: { kind: "operator", userId: "owner" } });
 });
 afterEach(() => { db.close(); });
 
 describe("personal VIX model source selection", () => {
-  it("serves the latest service snapshot over older disk", async () => {
-    const data = payload(); await insert(data); mocks.disk.mockResolvedValue(JSON.stringify(payload({scan_time: hoursAgo(2)})));
+  it("serves the latest service snapshot over an older row", async () => {
+    const data = payload(); await insert(data); await insert(payload({scan_time: hoursAgo(2)}));
     expect(await body()).toEqual(data);
   });
   it("omits writer-only raw source history in the SQL read", async () => {
@@ -57,22 +55,16 @@ describe("personal VIX model source selection", () => {
     expect(await body()).toEqual(data);
     expect(execute.mock.calls.some(([statement])=>typeof statement === "object" && statement.sql.includes("json_remove(payload, '$.source_series')"))).toBe(true);
   });
-  it("omits writer-only raw source history from the disk fallback", async () => {
-    const data=payload();mocks.disk.mockResolvedValue(JSON.stringify({...data,source_series:{VIX:[{date:entry.date,value:20}]}}));
-    expect(await body()).toEqual(data);
-  });
-  it("serves fresher disk over an older DB snapshot", async () => {
-    await insert(payload({scan_time: hoursAgo(2)})); const data = payload(); mocks.disk.mockResolvedValue(JSON.stringify(data));
-    expect(await body()).toEqual(data);
-  });
-  it("falls back to disk when storage throws", async () => {
+  it("serves the last good read from memory when storage throws", async () => {
+    const data = payload(); await insert(data); await body();
     mocks.getDb.mockImplementationOnce(() => { throw new Error("DB unavailable"); });
-    const data = payload(); mocks.disk.mockResolvedValue(JSON.stringify(data)); expect(await body()).toEqual(data);
+    expect(await body()).toEqual(data);
   });
   it("only reads this service's snapshots", async () => { await insert(payload(), "vixcor"); expect(await body()).toEqual(missing); });
   it("keeps real older data over a newer missing heartbeat", async () => {
+    const data = payload({ scan_time: hoursAgo(1) }); await insert(data); await body();
     await insert({ ...missing, scan_time: hoursAgo(0) });
-    const data = payload({ scan_time: hoursAgo(1) }); mocks.disk.mockResolvedValue(JSON.stringify(data)); expect(await body()).toEqual(data);
+    expect(await body()).toEqual(data);
   });
   it("keeps a source-lag status and both precomputed windows intact", async () => {
     const data = payload({ status: "stale_source", expected_session: "2026-10-19" }); await insert(data); expect(await body()).toEqual(data);
@@ -80,7 +72,7 @@ describe("personal VIX model source selection", () => {
 });
 
 describe("VIX model missing and timestamp contract", () => {
-  it("returns missing HTTP 200 when neither source exists", async () => { expect(await body()).toEqual(missing); });
+  it("returns missing HTTP 200 when nothing exists", async () => { expect(await body()).toEqual(missing); });
   it("collapses snapshots over the shared 48h budget and preserves scan provenance", async () => {
     const old = hoursAgo(49); await insert(payload({scan_time: old})); expect(await body()).toEqual({...missing, stale:true, scan_time:old});
   });
@@ -92,9 +84,10 @@ describe("VIX model missing and timestamp contract", () => {
     expect(await body()).toEqual({...missing,stale:true,scan_time:old});
   });
   it("rejects a future-dated snapshot", async () => { await insert(payload({scan_time:hoursAgo(-2)})); expect(await body()).toEqual(missing); });
-  it.each(["null", "[]", "{}", "{broken", '"unexpected"'])("ignores malformed DB JSON %s and retains good disk", async (raw) => {
+  it.each(["null", "[]", "{}", "{broken", '"unexpected"'])("ignores malformed DB JSON %s and retains the last good read", async (raw) => {
+    const data=payload({scan_time:hoursAgo(1)}); await insert(data); await body();
     await db.execute({sql:"INSERT INTO scan_snapshots VALUES(?,?,?)",args:["vix-model-spread",hoursAgo(0),raw]});
-    const data=payload(); mocks.disk.mockResolvedValue(JSON.stringify(data)); expect(await body()).toEqual(data);
+    expect(await body()).toEqual(data);
   });
   it.each([
     { series: [null] }, { current: [] }, { source: "unexpected" }, { count: 99 },
@@ -102,7 +95,6 @@ describe("VIX model missing and timestamp contract", () => {
   ])("rejects invalid typed snapshot fields %j", async (invalid) => {
     await insert(payload(invalid)); expect(await body()).toEqual(missing);
   });
-  it("does not serve a fresh malformed disk record", async () => { mocks.disk.mockResolvedValue(JSON.stringify({scan_time:hoursAgo(0)})); expect(await body()).toEqual(missing); });
   it("collapses a fresh missing heartbeat to the stable missing shape", async () => {
     const stamp=hoursAgo(0);await insert({...missing,scan_time:stamp});expect(await body()).toEqual({...missing,stale:true,scan_time:stamp});
   });
@@ -113,9 +105,9 @@ describe("personal-use access and HTTP contract", () => {
     expect(dynamic).toBe("force-dynamic"); expect(runtime).toBe("nodejs"); expect(radonCapability).toBe("read");
     expect(await import("@/app/api/vix-model-spread/route")).not.toHaveProperty("POST");
   });
-  it.each([401,403])("returns denied %s before DB or disk read", async (status) => {
+  it.each([401,403])("returns denied %s before any DB read", async (status) => {
     mocks.access.mockResolvedValue({ok:false,response:new Response("Forbidden",{status})});
-    expect((await GET(request())).status).toBe(status); expect(mocks.getDb).not.toHaveBeenCalled(); expect(mocks.disk).not.toHaveBeenCalled();
+    expect((await GET(request())).status).toBe(status); expect(mocks.getDb).not.toHaveBeenCalled();
     expect(mocks.access).toHaveBeenCalledWith(expect.any(Request),{operatorOnly:true});
   });
   it("rejects a real active demo principal before storage", async () => {
@@ -127,7 +119,7 @@ describe("personal-use access and HTTP contract", () => {
       } } }),
     }));
     expect((await GET(request())).status).toBe(403);
-    expect(mocks.getDb).not.toHaveBeenCalled(); expect(mocks.disk).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
   it("sets private cache metadata and the service cache tag", async () => {
     const response=await GET(request());expect(response.headers.get("Cache-Control")).toBe("private, max-age=300, stale-while-revalidate=3600");

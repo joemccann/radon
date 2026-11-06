@@ -2,27 +2,24 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
-import { readdir, readFile, stat } from "fs/promises";
 import { join } from "path";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { isUsTradingDay } from "@/lib/serviceHealthWindows";
 import { reconcileCtaTables } from "@/lib/ctaPercentiles";
 
 export const runtime = "nodejs";
-// Disable Next.js's default static caching for route handlers. The route reads
-// from disk via readdir/readFile/stat — Next.js can't see those as dynamic
-// data sources, so without this the first response is frozen and subsequent
-// requests serve stale CTA cache state until the dev server restarts. See
-// commit history: prior incidents fixed Apr 30 (post-startup hook), but the
-// underlying response-caching window remained.
+// Disable Next.js's default static caching for route handlers. Without this the
+// first response is frozen and subsequent requests serve stale CTA state until
+// the dev server restarts. See commit history: prior incidents fixed Apr 30
+// (post-startup hook), but the underlying response-caching window remained.
 export const dynamic = "force-dynamic";
 
 const PROJECT_ROOT = join(/* turbopackIgnore: true */ process.cwd(), "..");
-const CACHE_DIR = join(PROJECT_ROOT, "data", "menthorq_cache");
-const STATUS_PATH = join(CACHE_DIR, "health", "cta-sync-latest.json");
-const SERVICE_STATUS_PATH = join(PROJECT_ROOT, "data", "service_health", "cta-sync.json");
-const LEGACY_STATUS_PATH = join(CACHE_DIR, "cta_sync_status.json");
+// A successful sync lands one row per closed trading day, and the expected-date
+// comparison in buildCacheMeta is what gates staleness; this only labels `fresh`.
+const CTA_MAX_AGE_MS = 96 * 60 * 60_000;
 
 type CtaTables = {
   main: Array<Record<string, unknown>>;
@@ -115,184 +112,96 @@ function emptySyncHealth(targetDate: string): CtaSyncHealth {
   };
 }
 
-function normalizeSyncHealth(raw: Record<string, unknown> | null, targetDate: string): CtaSyncHealth {
-  if (!raw) return emptySyncHealth(targetDate);
+// service_health.state vocabulary -> the sync-health vocabulary CtaPage reads.
+const SERVICE_STATE_TO_SYNC_STATE: Record<string, string> = {
+  ok: "healthy",
+  error: "degraded",
+};
 
-  const derivedState = typeof raw.state === "string"
-    ? raw.state
-    : raw.status === "success"
-      ? "healthy"
-      : raw.status === "error"
-        ? "degraded"
-        : typeof raw.status === "string"
-          ? raw.status
-          : "unknown";
+function parseLastError(raw: unknown): CtaSyncHealth["last_error"] {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw) as { type?: unknown; message?: unknown };
+    return {
+      type: typeof parsed.type === "string" ? parsed.type : "error",
+      message: typeof parsed.message === "string" ? parsed.message : raw,
+    };
+  } catch {
+    return { type: "error", message: raw };
+  }
+}
 
-  const lastError = raw.last_error && typeof raw.last_error === "object"
-    ? raw.last_error as { type?: unknown; message?: unknown }
-    : (raw.error_type || raw.error_excerpt)
-      ? { type: raw.error_type, message: raw.error_excerpt }
-      : null;
-
+/** The cta-sync row in service_health; the detail files stay with the writer. */
+async function readSyncHealthFromDb(targetDate: string): Promise<TimestampedRead<CtaSyncHealth> | null> {
+  const result = await dbExecute({
+    sql: `SELECT state, last_attempt_started_at, last_attempt_finished_at, last_error, updated_at
+          FROM service_health WHERE service = 'cta-sync'`,
+    args: [],
+  }, { label: "cta-sync-health" });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as {
+    state: string;
+    last_attempt_started_at: string | null;
+    last_attempt_finished_at: string | null;
+    last_error: string | null;
+    updated_at: string | null;
+  };
   return {
-    service: typeof raw.service === "string" ? raw.service : "cta-sync",
-    state: derivedState,
-    target_date: typeof raw.target_date === "string" ? raw.target_date : targetDate,
-    latest_available_date:
-      typeof raw.latest_available_date === "string" ? raw.latest_available_date : null,
-    last_attempt_started_at:
-      typeof raw.last_attempt_started_at === "string"
-        ? raw.last_attempt_started_at
-        : typeof raw.started_at === "string"
-          ? raw.started_at
-          : null,
-    last_attempt_finished_at:
-      typeof raw.last_attempt_finished_at === "string"
-        ? raw.last_attempt_finished_at
-        : typeof raw.finished_at === "string"
-          ? raw.finished_at
-          : null,
-    last_successful_date:
-      typeof raw.last_successful_date === "string" ? raw.last_successful_date : null,
-    last_successful_at:
-      typeof raw.last_successful_at === "string" ? raw.last_successful_at : null,
-    last_cache_path:
-      typeof raw.last_cache_path === "string"
-        ? raw.last_cache_path
-        : typeof raw.cache_path === "string"
-          ? raw.cache_path
-          : null,
-    attempt_count:
-      typeof raw.attempt_count === "number" && Number.isFinite(raw.attempt_count)
-        ? raw.attempt_count
-        : 0,
-    last_error: lastError && typeof lastError.type === "string"
-      ? {
-          type: lastError.type,
-          message: typeof lastError.message === "string" ? lastError.message : "",
-        }
-      : null,
-    last_run_source:
-      typeof raw.last_run_source === "string"
-        ? raw.last_run_source
-        : typeof raw.trigger === "string"
-          ? raw.trigger
-          : null,
-    artifacts: raw.artifacts && typeof raw.artifacts === "object"
-      ? raw.artifacts as Record<string, string>
-      : {},
-    message: typeof raw.message === "string" ? raw.message : null,
+    data: {
+      ...emptySyncHealth(targetDate),
+      state: SERVICE_STATE_TO_SYNC_STATE[row.state] ?? row.state,
+      last_attempt_started_at: row.last_attempt_started_at,
+      last_attempt_finished_at: row.last_attempt_finished_at,
+      last_error: parseLastError(row.last_error),
+    },
+    timestampMs: contentTimestampMs(row.updated_at),
   };
 }
 
 async function readSyncHealth(targetDate: string): Promise<CtaSyncHealth | null> {
-  for (const path of [STATUS_PATH, SERVICE_STATUS_PATH, LEGACY_STATUS_PATH]) {
-    try {
-      const raw = JSON.parse(
-        await readFile(/* turbopackIgnore: true */ path, "utf-8"),
-      ) as Record<string, unknown>;
-      const looksLikeSyncHealth = typeof raw.service === "string"
-        || typeof raw.state === "string"
-        || typeof raw.status === "string";
-      if (!looksLikeSyncHealth) {
-        continue;
-      }
-      return normalizeSyncHealth(raw, targetDate);
-    } catch {
-      // try next path
-    }
-  }
-  return null;
+  const result = await dbFirstRead({
+    fromDb: () => readSyncHealthFromDb(targetDate),
+    maxAgeMs: CTA_MAX_AGE_MS,
+    label: "cta-sync-health",
+  });
+  return result.ok ? result.data : null;
 }
 
-async function readLatestCtaFromDb(): Promise<{
-  data: { date: string | null; fetched_at: string | null; tables: CtaTables };
-  latestFile: string | null;
-  mtimeMs: number | null;
-} | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT date, payload, fetched_at FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { date: string; payload: string; fetched_at: string };
-    const raw = JSON.parse(row.payload) as Record<string, unknown>;
-    const mtimeMs = Date.parse(row.fetched_at);
-    return {
-      data: {
-        date: typeof raw.date === "string" ? raw.date : row.date,
-        fetched_at:
-          typeof raw.fetched_at === "string" ? raw.fetched_at : row.fetched_at,
-        tables: reconcileCtaTables((raw.tables as CtaTables) ?? null),
-      },
-      latestFile: `db:menthorq_cta/${row.date}`,
-      mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
-    };
-  } catch {
-    return null;
-  }
+type LatestCta = {
+  date: string | null;
+  fetched_at: string | null;
+  tables: CtaTables;
+};
+
+async function readLatestCtaFromDb(): Promise<TimestampedRead<LatestCta> | null> {
+  const result = await dbExecute({
+    sql: `SELECT date, payload, fetched_at FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
+    args: [],
+  }, { label: "menthorq-cta" });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { date: string; payload: string; fetched_at: string };
+  const raw = JSON.parse(row.payload) as Record<string, unknown>;
+  return {
+    data: {
+      date: typeof raw.date === "string" ? raw.date : row.date,
+      fetched_at:
+        typeof raw.fetched_at === "string" ? raw.fetched_at : row.fetched_at,
+      tables: reconcileCtaTables((raw.tables as CtaTables) ?? null),
+    },
+    timestampMs: contentTimestampMs(row.fetched_at),
+  };
 }
 
-async function readLatestCtaFromDisk(): Promise<{
-  data: { date: string | null; fetched_at: string | null; tables: CtaTables };
-  latestFile: string | null;
-  mtimeMs: number | null;
-}> {
-  try {
-    const files = await readdir(/* turbopackIgnore: true */ CACHE_DIR);
-    const ctaFiles = files
-      .filter((file) => /^cta_\d{4}-\d{2}-\d{2}\.json$/.test(file))
-      .sort();
-
-    if (ctaFiles.length === 0) {
-      return {
-        data: { date: null, fetched_at: null, tables: null },
-        latestFile: null,
-        mtimeMs: null,
-      };
-    }
-
-    const latestFile = ctaFiles[ctaFiles.length - 1];
-    const raw = JSON.parse(
-      await readFile(
-        /* turbopackIgnore: true */ join(CACHE_DIR, latestFile),
-        "utf-8",
-      ),
-    ) as Record<string, unknown>;
-    const fileStat = await stat(
-      /* turbopackIgnore: true */ join(CACHE_DIR, latestFile),
-    );
-
-    return {
-      data: {
-        date: typeof raw.date === "string" ? raw.date : null,
-        fetched_at: typeof raw.fetched_at === "string" ? raw.fetched_at : null,
-        tables: reconcileCtaTables((raw.tables as CtaTables) ?? null),
-      },
-      latestFile,
-      mtimeMs: fileStat.mtimeMs,
-    };
-  } catch {
-    return {
-      data: { date: null, fetched_at: null, tables: null },
-      latestFile: null,
-      mtimeMs: null,
-    };
-  }
-}
-
-async function readLatestCta(): Promise<{
-  data: { date: string | null; fetched_at: string | null; tables: CtaTables };
-  latestFile: string | null;
-  mtimeMs: number | null;
-}> {
-  // Phase 2: prefer DB; fall back to disk for resilience while the
-  // dual-write path is still warming.
-  const fromDb = await readLatestCtaFromDb();
-  if (fromDb && fromDb.data.tables) return fromDb;
-  return readLatestCtaFromDisk();
+async function readLatestCta(): Promise<TimestampedRead<LatestCta> | null> {
+  const result = await dbFirstRead({
+    fromDb: readLatestCtaFromDb,
+    maxAgeMs: CTA_MAX_AGE_MS,
+    label: "menthorq-cta",
+    isDegraded: (data) => !data.tables,
+  });
+  return result.ok && result.data.tables
+    ? { data: result.data, timestampMs: result.timestampMs }
+    : null;
 }
 
 function buildCacheMeta(
@@ -375,10 +284,8 @@ export async function GET(): Promise<Response> {
   const expectedDate = latestClosedTradingDay();
   const latest = await readLatestCta();
   const syncHealth = await readSyncHealth(expectedDate);
-  const latestAvailableDate = latest.data.date
-    ?? latest.latestFile?.replace(/^cta_/, "").replace(/\.json$/, "")
-    ?? null;
-  const cache_meta = buildCacheMeta(expectedDate, latestAvailableDate, latest.mtimeMs);
+  const latestAvailableDate = latest?.data.date ?? null;
+  const cache_meta = buildCacheMeta(expectedDate, latestAvailableDate, latest?.timestampMs ?? null);
 
   // Allow re-trigger if the "syncing" state is stale (> 5 min since last attempt).
   // A dead-process lock can leave the service permanently in "syncing" otherwise.
@@ -423,11 +330,11 @@ export async function GET(): Promise<Response> {
         artifact_log_path: syncHealth.artifacts.context ?? null,
       }
     : null;
-  const status = latest.latestFile ? 200 : 503;
+  const status = latest ? 200 : 503;
 
   return setNoStoreResponseHeaders(
     NextResponse.json({
-      ...latest.data,
+      ...(latest?.data ?? { date: null, fetched_at: null, tables: null }),
       cache_meta,
       sync_health: syncHealthPayload,
       sync_status: syncStatusPayload,

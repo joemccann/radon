@@ -3,7 +3,7 @@
  *
  * The demo Turso never gets a `catalysts` table (only scripts/fetch_catalysts.py
  * creates it), so demo principals are completed at request time; operators keep
- * the Turso / disk read and its missing state unchanged.
+ * the Turso read and its missing state unchanged.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,6 @@ import { buildDemoCatalysts } from "@/lib/demo/fixtures/catalysts";
 const mocks = vi.hoisted(() => ({
   requireRouteAccess: vi.fn(),
   dbExecute: vi.fn(),
-  readFile: vi.fn(),
 }));
 
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
@@ -20,7 +19,6 @@ vi.mock("@/lib/dbExecute", () => ({
   dbExecute: mocks.dbExecute,
   describeDbError: (error: unknown) => String(error),
 }));
-vi.mock("fs/promises", () => ({ readFile: mocks.readFile }));
 
 const NOW = new Date("2026-10-14T15:00:00.000Z");
 
@@ -33,7 +31,6 @@ beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
   as("demo");
   mocks.dbExecute.mockRejectedValue(new Error("database must not be reached"));
-  mocks.readFile.mockRejectedValue(new Error("disk must not be reached"));
 });
 
 describe("demo catalysts fixture", () => {
@@ -58,13 +55,11 @@ describe("GET /api/catalysts", () => {
     expect(body.missing).toBeUndefined();
     expect(body.count).toBeGreaterThan(0);
     expect(mocks.dbExecute).not.toHaveBeenCalled();
-    expect(mocks.readFile).not.toHaveBeenCalled();
   });
 
   it("keeps the operator Turso read and its missing state", async () => {
     as("operator");
     mocks.dbExecute.mockRejectedValue(new Error("no such table: catalysts"));
-    mocks.readFile.mockRejectedValue(new Error("ENOENT"));
     const { GET } = await import("../app/api/catalysts/route");
     const body = await (await GET()).json();
     expect(body.missing).toBe(true);

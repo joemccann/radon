@@ -1,21 +1,18 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { buildDemoBreadthFixture } from "@/lib/demo/fixtures/regime";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "breadth.json");
 
 // Contract: absent breadth data is HTTP 200 with missing:true, never a 4xx.
 const MISSING_BREADTH = {
@@ -43,19 +40,10 @@ async function readBreadthFromDb(): Promise<TimestampedRead<Record<string, unkno
   };
 }
 
-async function readBreadthFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const jsonStart = raw.indexOf("{");
-  if (jsonStart === -1) return null;
-  const data = JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
-/** Fresher of the Turso row and data/breadth.json — a frozen writer on either side never wins. */
+/** Latest Turso row, or the last good read held in memory when Turso fails. */
 async function readCachedBreadth(): Promise<Record<string, unknown> | null> {
   const result = await dbFirstRead({
     fromDb: readBreadthFromDb,
-    fromDisk: readBreadthFromDisk,
     maxAgeMs: BREADTH_MAX_AGE_MS,
     label: "breadth",
   });

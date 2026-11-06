@@ -1,8 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -11,17 +9,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const radonCapability = "read";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "bounce_setup.json");
 // Weekday timer after the close.
 const STALE_THRESHOLD_SECONDS = 26 * 60 * 60;
 
 export function missingBouncePayload() {
   return { missing: true, scan_time: null, results: [], bounce_count: 0 };
-}
-
-export async function readBounceCache(): Promise<Record<string, unknown> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 async function readBounceFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
@@ -41,22 +33,25 @@ async function readBounceFromDb(): Promise<TimestampedRead<Record<string, unknow
   };
 }
 
-async function readBounceFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const data = await readBounceCache();
-  if (data == null) return null;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+function readBounceSnapshot() {
+  return dbFirstRead({
+    fromDb: readBounceFromDb,
+    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+    label: "bounce-setup",
+  });
+}
+
+/** Turso or last-in-memory snapshot, for the scan route's failure path. */
+export async function readBounceCache(): Promise<Record<string, unknown> | null> {
+  const result = await readBounceSnapshot();
+  return result.ok ? result.data : null;
 }
 
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const result = await dbFirstRead({
-    fromDb: readBounceFromDb,
-    fromDisk: readBounceFromDisk,
-    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-    label: "bounce-setup",
-  });
+  const result = await readBounceSnapshot();
   if (result.ok) {
     const ts = result.timestampMs;
     const cache_meta = {

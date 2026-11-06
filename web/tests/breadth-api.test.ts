@@ -4,7 +4,7 @@
  * /api/breadth — NYSE advance/decline breadth snapshot route.
  *
  * GET reads through the dbFirstRead chokepoint (Turso breadth_snapshots
- * first, disk data/breadth.json fallback) and ALWAYS returns 200 — absent
+ * first, last-in-memory fallback) and ALWAYS returns 200 — absent
  * data is the contract's `missing: true` shape, never a 4xx. POST forwards
  * to FastAPI POST /breadth/scan via radonFetch, falling back to the cached
  * snapshot (with an X-Sync-Warning header) when the scan fails.
@@ -27,15 +27,6 @@ const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: (...args: unknown[]) => mockRadonFetch(...args),
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE breadth_snapshots (
@@ -80,7 +71,6 @@ async function insertSnapshot(payload: Payload, takenAt?: string): Promise<void>
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function jsonOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
@@ -91,7 +81,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   mockRadonFetch.mockReset();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -103,14 +92,12 @@ afterEach(() => {
 });
 
 describe("GET /api/breadth", () => {
-  it("serves the latest Turso snapshot (Turso-first over an older disk cache)", async () => {
+  it("serves the latest Turso snapshot (newest row wins)", async () => {
     const dbPayload = buildPayload();
     await insertSnapshot(dbPayload);
-    // Older disk snapshot must NOT win.
+    // An older row must NOT win.
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(buildPayload({ scan_time: staleTime, source: "cache" })),
-    );
+    await insertSnapshot(buildPayload({ scan_time: staleTime, source: "cache" }));
 
     const { GET } = await import("../app/api/breadth/route");
     const res = await GET();
@@ -121,12 +108,14 @@ describe("GET /api/breadth", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    const diskPayload = buildPayload({ source: "cache" });
-    ((diskPayload.latest as Payload).net_ad as unknown) = 111;
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    const olderPayload = buildPayload({ source: "cache" });
+    ((olderPayload.latest as Payload).net_ad as unknown) = 111;
+    await insertSnapshot(olderPayload);
 
     const { GET } = await import("../app/api/breadth/route");
+    await GET();
+    await db.execute("DELETE FROM breadth_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const json = await jsonOf(res);
@@ -148,7 +137,7 @@ describe("GET /api/breadth", () => {
     });
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/breadth/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

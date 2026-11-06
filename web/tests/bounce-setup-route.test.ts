@@ -7,12 +7,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readFile: vi.fn(),
   radonFetch: vi.fn(),
   getDb: vi.fn(),
 }));
 
-vi.mock("fs/promises", () => ({ readFile: mocks.readFile }));
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mocks.getDb() }));
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mocks.radonFetch,
@@ -56,12 +54,10 @@ const payload = {
   ],
 };
 
-const ENOENT = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 const noStore = (res: Response) => (res.headers.get("Cache-Control") ?? "").toLowerCase();
 
 beforeEach(() => {
   vi.resetModules();
-  mocks.readFile.mockReset().mockRejectedValue(ENOENT);
   mocks.radonFetch.mockReset();
   mocks.getDb.mockReset().mockReturnValue(dbReturning([]));
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -83,12 +79,13 @@ describe("GET /api/scanner/bounce", () => {
     expect(body.bounce_count).toBe(1);
   });
 
-  it("falls back to data/bounce_setup.json", async () => {
-    mocks.readFile.mockResolvedValue(JSON.stringify(payload));
+  it("serves the last good read from memory when Turso has no row", async () => {
+    mocks.getDb.mockReturnValue(dbReturning([{ scan_time: payload.scan_time, payload: JSON.stringify(payload) }]));
     const { GET } = await import("../app/api/scanner/bounce/route");
+    await GET();
+    mocks.getDb.mockReturnValue(dbReturning([]));
     const body = await (await GET()).json();
     expect(body.results[0].verdict).toBe("BOUNCE_SETUP");
-    expect(String(mocks.readFile.mock.calls[0][0])).toMatch(/data[\\/]bounce_setup\.json$/);
   });
 
   it("returns the missing contract at HTTP 200 with no-store", async () => {
@@ -147,7 +144,7 @@ describe("POST /api/scanner/bounce/scan", () => {
   it("falls back to cached bounce payload on >=500 API errors when cache matches request", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mocks.radonFetch.mockRejectedValueOnce(new RadonApiError(504, "Gateway Timeout"));
-    mocks.readFile.mockResolvedValueOnce(JSON.stringify(payload));
+    mocks.getDb.mockReturnValue(dbReturning([{ scan_time: payload.scan_time, payload: JSON.stringify(payload) }]));
     const { POST } = await import("../app/api/scanner/bounce/scan/route");
     const res = await POST(new Request("http://localhost/api/scanner/bounce/scan", { method: "POST" }));
     expect(res.status).toBe(504);
@@ -163,7 +160,6 @@ describe("POST /api/scanner/bounce/scan", () => {
   it("returns missing payload with error when upstream fails and no matching cache exists", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mocks.radonFetch.mockRejectedValueOnce(new RadonApiError(502, "Bad Gateway"));
-    mocks.readFile.mockRejectedValueOnce(ENOENT);
     const { POST } = await import("../app/api/scanner/bounce/scan/route");
     const res = await POST(new Request("http://localhost/api/scanner/bounce/scan", { method: "POST" }));
     expect(res.status).toBe(502);

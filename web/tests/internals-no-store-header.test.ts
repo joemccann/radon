@@ -6,18 +6,17 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("fs/promises", () => ({
-  readFile: vi.fn(),
-  readdir: vi.fn().mockResolvedValue([]),
   writeFile: vi.fn().mockResolvedValue(undefined),
-  stat: vi.fn(),
   mkdir: vi.fn().mockResolvedValue(undefined),
 }));
+
+const mockExecute = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: vi.fn().mockResolvedValue({}),
 }));
 
-import { readFile, stat } from "fs/promises";
 
 function expectNoStore(res: Response): void {
   const cc = res.headers.get("Cache-Control") ?? "";
@@ -39,8 +38,11 @@ const validCriPayload = JSON.stringify({
 describe("/api/internals — Cache-Control: no-store", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.mocked(readFile).mockResolvedValue(validCriPayload as unknown as string);
-    vi.mocked(stat).mockResolvedValue({ mtimeMs: Date.now() } as never);
+    mockExecute.mockImplementation(async ({ sql }: { sql: string }) => ({
+      rows: sql.includes("cri_snapshots")
+        ? [{ taken_at: new Date().toISOString(), payload: validCriPayload }]
+        : [],
+    }));
   });
 
   afterEach(() => {
