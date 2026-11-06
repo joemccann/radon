@@ -2581,3 +2581,45 @@ red (hasher and LABEL missing) then green (5 passed).
 that were red then green; image-id miss without a label still exports.
 Related scripts (39) and cloud gateway/reuse (26) stayed green. Full
 suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+
+## CIP-025 - keep torch cached across scripts-only python rebuilds (2026-11-05) - VALIDATING
+
+`FROM runtime AS model-gateway` inherited `COPY scripts ./scripts`, so every
+scripts-only python-image miss rebuilt Chronos/torch and re-exported the
+gateway. Mixed rebuild
+[41949521130](https://github.com/joemccann/radon/actions/runs/41949521130)
+(job 126990250055) is the comparable before sample: clock 788s, python image
+408s, gateway step 232s (`pip` 38.7s at +118s, export 79.4s). Sibling
+rebuilds 41946994935 (790s/415s), 41944557269 (707s/358s), 41924285373
+(819s/411s), 41911098537 (783s/388s). Ten percent of the 788s clock is 79s.
+Caching torch on a scripts-free `runtime-deps` parent is expected to drop
+the gateway step by about 120s when vendor-clis are unchanged, which clears
+15s and 10%. A vendor-clis or Dockerfile.python change still rebuilds torch.
+Ihash retags are a different class. Runner minutes do not increase.
+
+**Change.** `runtime-deps` holds python, browsers, charts, and the logs
+directory. `runtime` and `model-gateway` copy `scripts/` after that base.
+The gateway copies scripts after the torch lock. Exact SHA tags, smokes,
+bounds check, payload LABEL, Darwin-before-python, and fail-closed reuse
+are unchanged. No `needs` edge, test inventory, coverage, health check,
+stability window, rollback, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Revert if a scripts-only main rebuild still
+runs `pip install ... requirements-model-gateway.txt` instead of CACHED, if
+the gateway image ships without `scripts/`, or if the python image CMD/user
+smokes disappear.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 408s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 41949521130 (job 126990250055).
+Acceptance remains five comparable mixed python-rebuild deploys before and
+five after: same-class p50 at least 10% and 15s faster; p95 no worse than
+5% or 15s; cold p50 no worse than 10%; runner minutes no more than 20%
+higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_model_gateway_image.py::test_gateway_torch_layer_does_not_follow_copy_scripts`
+was red (`FROM runtime-deps` missing) then green. Cloud image contracts 145
+passed / 2 skipped; scripts payload/hash tests 60 passed. YAML unchanged.
+Full suites, Vitest, Docker builds, and workflow lint are left to PR CI.

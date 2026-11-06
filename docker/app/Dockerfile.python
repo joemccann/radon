@@ -26,7 +26,7 @@ WORKDIR /opt/radon-charts
 COPY docker/app/chart-runtime/package.json docker/app/chart-runtime/package-lock.json ./
 RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund
 
-FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
+FROM python:3.13.16-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime-deps
 
 COPY --from=chart-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=chart-runtime /opt/radon-charts /opt/radon-charts
@@ -73,11 +73,15 @@ RUN python -m playwright install --with-deps --only-shell chromium \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /var/lib/apt/lists/*
 
-COPY scripts ./scripts
 RUN chmod -R a-w /opt/radon-charts
 
 # Monitor logging needs a writable directory; the app and import tree stay root-owned.
 RUN install -d -o radon -g radon -m 0755 /home/radon/radon/logs
+
+# CIP-025: application source is a later sibling of this deps stage so a
+# scripts-only push does not rebuild torch or the CLI payload.
+FROM runtime-deps AS runtime
+COPY scripts ./scripts
 
 USER radon
 
@@ -126,8 +130,10 @@ PY
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1", "--timeout-keep-alive", "75"]
 
 # Optional local AI runtimes belong only to the private gateway, never to API,
-# monitor or archive images. Both targets share the exact same trusted base.
-FROM runtime AS model-gateway
+# monitor or archive images. Both targets share the exact same trusted base
+# (`runtime-deps`). Application source is copied after the torch lock so a
+# scripts-only push reuses those layers (CIP-025).
+FROM runtime-deps AS model-gateway
 USER root
 COPY --from=vendor-clis /opt/radon-clis /opt/radon-clis
 COPY docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/install-antigravity.py /opt/radon-clis/
@@ -143,6 +149,7 @@ COPY docker/app/requirements-model-gateway.txt ./requirements-model-gateway.txt
 RUN python -m pip install --no-cache-dir --require-hashes --no-deps --only-binary=:all: \
     --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple \
     -r requirements-model-gateway.txt
+COPY scripts ./scripts
 USER radon
 # Run by GitHub's image build: verify real native payloads and root ownership.
 RUN python - <<'PY'

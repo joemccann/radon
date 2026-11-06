@@ -81,8 +81,8 @@ rotation and sealing execute inside the managed gateway image. Individual
 revoked logins still require the existing provider consent process.
 
 The `model-gateway` Docker target adds the production Chronos 2.3.0 and CPU
-Torch 2.12.1 packages to the identical Python base; the default Python image
-remains lean. The existing image check builds both targets on pull requests,
+Torch 2.12.1 packages to the identical `runtime-deps` base, then copies
+`scripts/` after that lock; the default Python image remains lean. The existing image check builds both targets on pull requests,
 smokes optional package capability without fetching weights, and publishes a
 third exact-SHA `radon-model-gateway` image on main. Admission, concurrent
 prepull and protected rollback pruning cover all three image repositories.
