@@ -11,17 +11,16 @@
 
 | Question | Source of Truth | NOT a Source of Truth |
 |----------|----------------|---------------------|
-| What positions do I hold? | `python3.13 scripts/ib_sync.py` (IB live) | `docs/status.md`, `data/portfolio.json` (cache) |
+| What positions do I hold? | `python3.13 scripts/ib_sync.py` (IB live) | `docs/status.md` |
 | Is a position still open? | `python3.13 scripts/ib_sync.py` (IB live) | `docs/status.md` "Rule Violations" table |
 | Current P&L? | `python3.13 scripts/ib_sync.py` (IB live) | `docs/status.md` "Portfolio State" section |
-| What trades happened? | `data/trade_log.json` (append-only) | `docs/status.md` "Trade Log Summary" |
+| What trades happened? | Turso `journal` table | `docs/status.md` "Trade Log Summary" |
 
 **Rules:**
-1. **NEVER claim a position exists or doesn't exist based on `docs/status.md` or `data/portfolio.json`.** These are caches that go stale.
+1. **NEVER claim a position exists or doesn't exist based on `docs/status.md`.** It goes stale.
 2. **ALWAYS verify against IB** before making any statement about current holdings, open positions, or portfolio state.
 3. `docs/status.md` is a **decision log and audit trail** — it records what happened and why. It is NOT a live portfolio dashboard.
-4. `data/portfolio.json` is a **cache** updated by `ib_sync.py --sync`. It may be hours or days old.
-5. When IB is unavailable (Gateway down), say so explicitly: *"Cannot verify — IB unavailable."* Do NOT fall back to status.md.
+4. When IB is unavailable (Gateway down), say so explicitly: *"Cannot verify — IB unavailable."* Do NOT fall back to status.md.
 
 ## ⚠️ Evaluate Command → ALWAYS `evaluate.py`
 **Any evaluation request routes to `python3.13 scripts/evaluate.py [TICKER]`. No exceptions.**
@@ -71,13 +70,11 @@ All IB and UW access goes through centralized clients in `scripts/clients/`:
 - State the failing gate clearly and move on
 
 ### 4. Diffs Stay Scoped
-- When updating portfolio.json, only modify relevant fields
-- When appending to trade_log.json, append only (never overwrite history)
 - Keep watchlist.json updates minimal and targeted
 
 ### 5. Continuous Documentation
 - Update `docs/status.md` after each evaluation
-- Log EXECUTED trades only to trade_log.json (with full details)
+- Executed trades land in the Turso `journal` table through the fill handlers
 - Log NO_TRADE decisions to docs/status.md (Recent Evaluations section)
 - Include timestamp, ticker, decision, and rationale
 
@@ -95,8 +92,6 @@ All IB and UW access goes through centralized clients in `scripts/clients/`:
 After any trade decision:
 ```bash
 # Validate JSON integrity
-python3.13 -m json.tool data/portfolio.json
-python3.13 -m json.tool data/trade_log.json
 python3.13 -m json.tool data/watchlist.json
 ```
 
@@ -272,7 +267,7 @@ python3.13 scripts/scenario_report.py
 **⚠️ ALWAYS use `ib_execute.py` for all orders. It automatically:**
 - Places the order
 - Monitors for fills (real-time updates)
-- Logs filled trades to `trade_log.json`
+- Logs filled trades to the Turso `journal` table
 
 ### Single-Leg Orders
 
@@ -426,49 +421,14 @@ The startup extension automatically runs `ib_reconcile.py` when Pi starts:
 
 - **Async**: Does not block Pi startup
 - **Detects**: New trades, new positions, closed positions
-- **Output**: `data/reconciliation.json`
+- **Output**: Turso
 - **Notification**: Shows if action needed
-- **⚠️ Auto-Log**: If new trades detected, IMMEDIATELY log them
-
-### Auto-Log Workflow (MANDATORY)
-
-When startup shows `⚠️ IB: N new trades`, **immediately** run this workflow:
-
-```bash
-# 1. Check reconciliation data
-cat data/reconciliation.json | python3.13 -m json.tool
-
-# 2. For each trade in new_trades, add to trade_log.json:
-#    - id: next sequential ID
-#    - date, time from reconciliation
-#    - ticker, action, realized_pnl, commission
-#    - validation_method: "ib_reconciliation"
-#    - notes: "Detected via IB reconciliation"
-
-# 3. Update docs/status.md:
-#    - Trade Log Summary table
-#    - Today's Trades section
-#    - Portfolio State metrics (positions, deployed %, etc.)
-
-# 4. Clear reconciliation flag
-# Write to reconciliation.json:
-#    needs_attention: false
-#    processed_trades: [list of processed trade IDs]
-
-# 5. Validate JSON
-python3.13 -m json.tool data/trade_log.json
-```
-
-**Do NOT prompt user** — this auto-log runs automatically whenever `needs_attention: true`.
+- **Trades**: Fill handlers write the Turso `journal` table; there is nothing to log by hand
 
 ### Manual Reconciliation
 
 ```bash
-# Trigger reconciliation manually
 python3.13 scripts/ib_reconcile.py
-
-# Check results
-cat data/reconciliation.json | python3.13 -m json.tool
 ```
 
 ---
@@ -477,9 +437,9 @@ cat data/reconciliation.json | python3.13 -m json.tool
 
 | File | Purpose |
 |------|---------|
-| `data/trade_log.json` | Executed trades (append-only) |
-| `data/portfolio.json` | Current positions from IB |
-| `data/reconciliation.json` | IB sync discrepancies |
+| Turso `journal` | Executed trades |
+| Turso `portfolio_snapshots` | Current positions from IB |
+| Turso reconciliation log | IB sync discrepancies |
 | `data/watchlist.json` | Tickers under surveillance |
 | `data/ticker_cache.json` | Ticker → company name cache |
 | `data/analyst_ratings_cache.json` | Cached analyst data |

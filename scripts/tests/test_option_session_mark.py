@@ -6,19 +6,14 @@ IB snapshot: last=None, bid=ask=-1, close=26.70. 1-minute TRADES last print
 forward-fill 6.95 at volume 0 and must not beat the print.
 """
 
-from pathlib import Path
-
 import pytest
 
 from option_session_mark import (
     last_midpoint_bar_price,
     last_traded_bar_price,
-    load_session_marks,
     option_mark_key,
     poll_contract_mark,
     resolve_polled_mark,
-    save_session_marks,
-    session_is_fresh,
 )
 
 TODAY = "2026-09-21"
@@ -343,24 +338,6 @@ class TestPollContractMark:
         assert calc is True
         assert updated["bid"] == 8.0
         assert updated["ask"] == 8.3
-
-
-class TestCacheRoundtrip:
-    def test_roundtrip_and_corrupt_file(self, tmp_path: Path):
-        path = tmp_path / "option_session_mark_cache.json"
-        marks = {META_KEY: {"last": PRINT, "bid": 8.0, "ask": 8.3, "checked_on": TODAY}}
-        save_session_marks(marks, path)
-        loaded = load_session_marks(path)
-        assert loaded[META_KEY]["last"] == PRINT
-        assert session_is_fresh(loaded[META_KEY], TODAY) is True
-        path.write_text("{not json")
-        assert load_session_marks(path) == {}
-        assert load_session_marks(tmp_path / "missing.json") == {}
-
-    def test_does_not_persist_close_as_last(self, tmp_path: Path):
-        path = tmp_path / "cache.json"
-        save_session_marks({META_KEY: {"last": 0, "close": CLOSE}}, path)
-        assert load_session_marks(path) == {}
 
 
 class TestOptionHistoryBudget:

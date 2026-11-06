@@ -7,18 +7,14 @@ module does not re-enable Gate 4.
 """
 from __future__ import annotations
 
-import json
 import logging
 import math
-from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT, kelly_config
 from order_limits import effective_order_price
 
 _LOG = logging.getLogger(__name__)
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_PORTFOLIO = _REPO_ROOT / "data" / "portfolio.json"
 
 
 def _is_verified_close(params: dict) -> bool:
@@ -43,8 +39,11 @@ def _is_verified_close(params: dict) -> bool:
 
 def _portfolio_bankroll() -> Optional[float]:
     try:
-        payload = json.loads(_PORTFOLIO.read_text())
-    except (OSError, json.JSONDecodeError):
+        from bankroll_guard import _load_latest_snapshot
+    except ImportError:
+        from scripts.bankroll_guard import _load_latest_snapshot
+    payload = _load_latest_snapshot()
+    if payload is None:
         return None
     acct = payload.get("account_summary") or {}
     for key in ("net_liquidation", "NetLiquidation"):

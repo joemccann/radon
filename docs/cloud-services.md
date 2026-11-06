@@ -220,22 +220,14 @@ the `/journal` and `/orders` pages derive their view from the same rows:
 
 - `web/app/api/journal/route.ts` reads `journal` directly (one row per
   execution-grouped action) and returns it as `{ trades: [...] }`.
-- `web/app/api/blotter/route.ts` reads the same rows AND `data/blotter.json`,
-  then unions them through `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()`
-  into the historical-trades shape that
-  `WorkspaceSections.HistoricalTradesSection` consumes (closed/open arrays,
-  executions, cost basis, proceeds). The union prefers explicit P&L fields
-  on journal rows when present (post-`bbc776e` rehydrate), and falls back
-  to `data/blotter.json` for `realized_pnl` / `cost_basis` / `proceeds`
-  when the journal row is from before the lot-matched fields existed.
-  Trades present only in legacy are spliced into the output. As soon as
-  the next IB Flex re-rehydrate runs, journal rows take precedence and the
-  fallback retires per-row.
+- `web/app/api/blotter/route.ts` reads the same rows and passes them through
+  `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` into the
+  historical-trades shape that `WorkspaceSections.HistoricalTradesSection`
+  consumes (closed/open arrays, executions, cost basis, proceeds).
 - Writers: `scripts/journal_rehydrate.py` (Flex Query 1442520, working,
   ≤365d backfill) and `scripts/monitor_daemon/handlers/journal_sync.py`
-  (live IB session fills via `client.get_fills()`). Both dual-write to
-  `data/trade_log.json` and the `journal` table; both use `ib_exec_id`
-  for idempotent dedupe.
+  (live IB session fills via `client.get_fills()`). Both write the `journal`
+  table and use `ib_exec_id` for idempotent dedupe.
 - Gap sensors (alert-only, pure Turso): daily `journal-reconcile`
   (monitor daemon, 26h window) and continuous `journal-gap-sli` (every
   5m; `service_health.last_error` carries structured
@@ -244,14 +236,8 @@ the `/journal` and `/orders` pages derive their view from the same rows:
   `journal_sync` do not false-positive). Repair with
   `scripts/backfill_journal_from_executed_orders.py`.
 
-`data/blotter.json` (Flex Query 1422766, broken IB-side at 2026-03-26)
-and `data/trade_log.json` are **file mirrors / fallbacks** — the
-`/orders` route reads them alongside the journal so historical P&L is
-preserved while the journal table is being re-rehydrated. The
-standalone Flex Query 1422766 path lives on as the `POST /api/blotter`
-refresh hook for backwards compatibility but
-`scripts/trade_blotter/flex_query.py` and `blotter_service.py` are
-marked deprecated. Don't extend them.
+`blotter.json` and `trade_log.json` are retired. A post-deploy hook archived
+the production copies under `~/retired-json/`.
 
 ## Bootstrap & disaster recovery
 

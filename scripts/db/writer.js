@@ -298,6 +298,14 @@ export async function appendTaxonomy(tags) {
   return added;
 }
 
+export async function readOptionSessionMarks() {
+  const db = getDb();
+  const result = await withDbBounds("readOptionSessionMarks", () => db.execute(
+    "SELECT mark_key, last, bid, ask, mid, checked_on FROM option_session_marks",
+  ));
+  return result.rows;
+}
+
 export async function recordServiceHealth(service, state, extra = {}) {
   const db = getDb();
   const now = new Date().toISOString();

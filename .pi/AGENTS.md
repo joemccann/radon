@@ -99,7 +99,7 @@ The unattended release coordinator requires strict up-to-date checks, all existi
 - Evaluations must call `python3.13 scripts/evaluate.py [TICKER]`; do not manually call milestone scripts during evaluation.
 - Every evaluation milestone must fetch fresh data, include today's data, and print a Data Freshness line.
 - M3B OI changes are required; large OI can reveal institutional trades missed by UW flow alerts.
-- Portfolio source of truth is Interactive Brokers via `python3.13 scripts/ib_sync.py`. `docs/status.md` and `data/portfolio.json` are stale-prone caches/logs.
+- Portfolio source of truth is Interactive Brokers via `python3.13 scripts/ib_sync.py`. `docs/status.md` is a stale-prone log; the latest synced state is Turso `portfolio_snapshots`.
 
 ## Brand Rules
 
