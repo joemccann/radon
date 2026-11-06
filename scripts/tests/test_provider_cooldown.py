@@ -49,7 +49,7 @@ def test_a_write_failure_still_skips_this_process(tmp_path, monkeypatch):
 
 
 def test_docs_match_the_engine_cooldown_contract():
-    """The engine persists only a body-named reset; no env fallback is read."""
+    """Named-reset 429 and spent quota persist; no env fallback is read."""
     root = Path(__file__).resolve().parents[2]
     engine = (root / "scripts/model_gateway/engine.py").read_text()
     assert "provider_cooldown.reset_seconds(body_text, None)" in engine
@@ -57,8 +57,10 @@ def test_docs_match_the_engine_cooldown_contract():
     research = (root / "docs/dropbox-research.md").read_text()
     assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in research
     assert "A bare 429 persists nothing" in research
+    assert "spent quota" in research
     gateway = (root / "docs/model-gateway.md").read_text()
     assert "A 429 whose body names a reset records `clients.provider_cooldown`" in gateway
+    assert "A spent quota, at any status, also records that cooldown" in gateway
     example = (root / "cloud/.env.example").read_text()
     assert "RADON_PROVIDER_RATE_LIMIT_COOLDOWN_S" not in example
     assert "RADON_PROVIDER_COOLDOWN_STATE=" in example

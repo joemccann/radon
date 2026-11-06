@@ -3351,3 +3351,22 @@ class TestDocumentation20261105:
         assert "event-odds" in agents
         assert "request-driven" in agents
         assert "triggers refresh" not in agents
+class TestDocumentation20261106:
+    """DOC-256: spent quota at any status persists a cooldown, not 429-only."""
+
+    def test_research_cooldown_owner_names_spent_quota_and_defers_to_gateway(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        auth = research.split("#### Auth matrix", 1)[1].split(
+            "**Expired subscription token.**", 1
+        )[0]
+        assert "A rung's HTTP 429 whose body names a reset" not in auth
+        assert "spent quota" in auth
+        assert "model-gateway.md" in auth
+        assert "A bare 429 persists nothing" in auth
+        assert "RADON_PROVIDER_COOLDOWN_STATE" in auth
+
+        gateway = (_ROOT / "docs/model-gateway.md").read_text()
+        assert "A spent quota, at any status, also records that cooldown" in gateway
+        engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
+        assert "def _note_provider_cooldown" in engine
+        assert "is_quota_exhausted" in engine
