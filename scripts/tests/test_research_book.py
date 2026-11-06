@@ -1,6 +1,4 @@
-"""Operator book for triage: Turso-first watchlist + portfolio tickers, data/*.json fallback."""
-import json
-
+"""Operator book for triage: watchlist + portfolio tickers from Turso only."""
 import pytest
 
 import db.readers as readers
@@ -18,27 +16,15 @@ def test_turso_union_normalizes_occ_symbols_and_case(monkeypatch):
     assert book.tickers() == frozenset({"NVDA", "ASPI", "SPY", "TSLA", "GLD"})
 
 
-def test_disk_fallback_reads_watchlist_and_portfolio_json(monkeypatch, tmp_path):
-    monkeypatch.setattr(readers, "read_watchlist_tickers", _fail)
-    monkeypatch.setattr(readers, "read_portfolio_positions", _fail)
-    monkeypatch.setattr(book, "DATA_DIR", tmp_path)
-    (tmp_path / "watchlist.json").write_text(json.dumps({"tickers": [{"ticker": "nvda"}, "MSTR"]}))
-    (tmp_path / "portfolio.json").write_text(json.dumps({"positions": [{"ticker": "IBIT"}]}))
-    assert book.tickers() == frozenset({"NVDA", "MSTR", "IBIT"})
-
-
-def test_one_source_down_still_merges_the_other(monkeypatch, tmp_path):
+def test_one_source_down_still_returns_the_other(monkeypatch):
     monkeypatch.setattr(readers, "read_watchlist_tickers", lambda db=None: ["NVDA"])
     monkeypatch.setattr(readers, "read_portfolio_positions", _fail)
-    monkeypatch.setattr(book, "DATA_DIR", tmp_path)
-    (tmp_path / "portfolio.json").write_text(json.dumps({"positions": [{"ticker": "IBIT"}]}))
-    assert book.tickers() == frozenset({"NVDA", "IBIT"})
+    assert book.tickers() == frozenset({"NVDA"})
 
 
-def test_no_readable_source_returns_none(monkeypatch, tmp_path):
+def test_no_readable_source_returns_none(monkeypatch):
     monkeypatch.setattr(readers, "read_watchlist_tickers", _fail)
     monkeypatch.setattr(readers, "read_portfolio_positions", _fail)
-    monkeypatch.setattr(book, "DATA_DIR", tmp_path)
     assert book.tickers() is None
 
 

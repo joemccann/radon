@@ -916,3 +916,20 @@ def test_rel269_exactly_two_to_one_retains_trade(
     assert result.decision == "TRADE"
     assert result.milestones["M5"].passed is True
     assert result.milestones["M6"].passed is True
+
+
+def test_unreadable_book_fails_m6_closed_instead_of_sizing_an_empty_book(
+    ticker_data, flow_data_accumulation, options_data_bullish, oi_data_massive, price_history,
+):
+    raw = {"M1": ticker_data, "M1B": {}, "M1C": {}, "M1D": {},
+           "M2": flow_data_accumulation, "M3": options_data_bullish,
+           "M3B": oi_data_massive, "PRICE": price_history}
+    with patch("evaluate._run_parallel_milestones", return_value=raw), \
+         patch("evaluate._open_max_losses_from_portfolio", return_value=None), \
+         patch("evaluate.kelly_ticket") as sizing:
+        result = evaluate_ticker("AAPL", bankroll=100_000,
+                                structure={"max_gain": 200, "max_loss": 100, "prob_win": .4})
+    assert result.decision == "NO_TRADE"
+    assert result.failing_gate == "RISK"
+    assert result.milestones["M6"].passed is False
+    sizing.assert_not_called()
