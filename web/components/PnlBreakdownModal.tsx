@@ -30,6 +30,7 @@ type Props = {
   pctHeader?: string;
   rows: PnlBreakdownRow[];
   total: number;
+  totalDetail?: string | null;
   totalLabel?: string;
   onClose: () => void;
   className?: string;
@@ -47,7 +48,7 @@ function pnlCell(row: PnlBreakdownRow) {
 }
 
 export default function PnlBreakdownModal({
-  open, title, formula, col1Header, col2Header, pctHeader = "%", rows, total, totalLabel = "TOTAL", onClose, className = "",
+  open, title, formula, col1Header, col2Header, pctHeader = "%", rows, total, totalDetail, totalLabel = "TOTAL", onClose, className = "",
 }: Props) {
   const columns: MetricBreakdownColumn[] = [
     { header: "TICKER" },
@@ -80,6 +81,7 @@ export default function PnlBreakdownModal({
       className={`pnl-breakdown-modal ${className}`}
       value={fmtSigned(total, 2)}
       valueTone={total >= 0 ? "positive" : "negative"}
+      valueDetail={totalDetail}
       formula={formula}
       columns={columns}
       rows={breakdownRows}

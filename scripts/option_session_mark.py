@@ -220,6 +220,8 @@ def poll_contract_mark(
     session_mark: Optional[dict],
     today: str,
     fetch_history: Optional[Callable[[], tuple[Any, Any]]] = None,
+    volume: Optional[float] = None,
+    broker_mark: Optional[float] = None,
 ) -> tuple[Optional[float], bool, Optional[dict]]:
     live_price = _positive_price(market_price)
     live_bid = _positive_price(bid)
@@ -228,6 +230,11 @@ def poll_contract_mark(
     live = live_price is not None or live_book
     fresh = session_is_fresh(session_mark, today)
     is_opt = str(sec_type or "").upper() == "OPT"
+    # IB reports no trade today and no two-sided book: any last in hand is an
+    # older print, so IB's own position mark is the only current value.
+    broker = _positive_price(broker_mark)
+    if is_opt and broker is not None and not live_book and _nonneg_number(volume) == 0:
+        return broker, True, None
     need_history = is_opt and not live and not fresh
     trade_bars = midpoint_bars = None
     if need_history and fetch_history is not None:
