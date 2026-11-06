@@ -89,11 +89,17 @@ def test_app_images_enforces_bounds_on_the_exact_built_gateway_image():
     steps = workflow["jobs"]["python-image"]["steps"]
     names = [step.get("name", "") for step in steps]
     build = names.index("Build and publish model gateway image")
+    reuse_bounds = names.index("Reuse verified client disk bounds")
     check = names.index("Enforce pinned model client disk bounds")
-    assert build < check
+    assert build < reuse_bounds < check
     step = steps[check]
-    # The reuse path re-tags an image that already passed this check.
-    assert step["if"] == steps[build]["if"] == "steps.reuse-gateway.outputs.hit != 'true'"
+    # Gateway reuse re-tags an image that already passed this check.
+    # CIP-026 also skips when a pbounds-<payload> receipt exists.
+    assert steps[build]["if"] == "steps.reuse-gateway.outputs.hit != 'true'"
+    assert step["if"] == (
+        "steps.reuse-gateway.outputs.hit != 'true'"
+        " && steps.reuse-bounds.outputs.hit != 'true'"
+    )
     assert steps[build]["with"]["load"] == "true"
     assert "scripts/ci/check_model_client_bounds.py" in step["run"]
     assert '--image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"' in step["run"]

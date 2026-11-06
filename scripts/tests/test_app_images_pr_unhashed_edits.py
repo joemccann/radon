@@ -210,9 +210,16 @@ def test_bounds_pin_edit_rebuilds_and_rechecks_the_gateway(tmp_path: Path) -> No
     assert unhashed == {"python": "unchanged"}
     assert _reuse_hit(tmp_path, PYTHON_REUSE, unhashed=unhashed) == "true"
     assert _reuse_hit(tmp_path, GATEWAY_REUSE, unhashed=unhashed) != "true"
-    for name in ("Build and publish model gateway image", "Smoke model gateway runtime",
-                 "Enforce pinned model client disk bounds"):
+    for name in ("Build and publish model gateway image", "Smoke model gateway runtime"):
         assert _step(name)["if"] == "steps.reuse-gateway.outputs.hit != 'true'"
+    assert _step("Reuse verified client disk bounds")["if"] == (
+        "steps.reuse-gateway.outputs.hit != 'true'"
+        " && (github.event_name != 'pull_request' || steps.unhashed.outputs.gateway == 'unchanged')"
+    )
+    assert _step("Enforce pinned model client disk bounds")["if"] == (
+        "steps.reuse-gateway.outputs.hit != 'true'"
+        " && steps.reuse-bounds.outputs.hit != 'true'"
+    )
 
 
 def test_workflow_edit_rebuilds_both_images(tmp_path: Path) -> None:

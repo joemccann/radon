@@ -2581,3 +2581,65 @@ red (hasher and LABEL missing) then green (5 passed).
 that were red then green; image-id miss without a label still exports.
 Related scripts (39) and cloud gateway/reuse (26) stayed green. Full
 suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+
+## CIP-026 - skip client disk bounds when the payload already passed (2026-11-06) - VALIDATING
+
+Scripts-only python/gateway rebuilds still run the production client export
+inside `Enforce pinned model client disk bounds` even though
+`export_from_image` only reads vendor-clis, Darwin, `node`, and the four
+`model_gateway` helpers — the same files `model_client_payload_inputs.py`
+hashes. CIP-025 (open #1432) caches torch layers; it does not skip this
+export.
+
+Evidence, attempt-1 mixed rebuild python-image steps (`gh run view --json
+jobs` plus job logs):
+
+| Run | Clock | Python image | Gateway build | Bounds | Deploy |
+|---|---|---|---|---|---|
+| [42142783710](https://github.com/joemccann/radon/actions/runs/42142783710) | 741s | 368s (job 127647258925) | 202s | 77s | 235s |
+| [42141085036](https://github.com/joemccann/radon/actions/runs/42141085036) | 828s | 417s | 240s | 77s | 281s |
+| [42065978857](https://github.com/joemccann/radon/actions/runs/42065978857) | 788s | 393s | 223s | 79s | 234s |
+| [41949521130](https://github.com/joemccann/radon/actions/runs/41949521130) | 788s | 408s | 232s | 80s | 233s |
+| [41946994935](https://github.com/joemccann/radon/actions/runs/41946994935) | 790s | 415s | 237s | 79s | 239s |
+
+Newest mixed-rebuild p50 clock is 789s (n=10). Bounds p50 is 79s on those
+rebuilds (linux 1621822708 bytes + darwin 700866560 in 77s on
+42142783710). Ten percent of 789s is 79s. Queue is 2–3s and is not part of
+the gain. Ihash runs already skip the step (`reuse-gateway` hit). A payload
+that has never been checked still measures; the first rebuild after merge
+writes `pbounds-<64 hex>` and later identical payloads skip. Runner minutes
+fall with the skipped export.
+
+**Change.** After gateway smoke, inspect
+`ghcr.io/joemccann/radon-model-gateway:pbounds-<payload>`. A hit skips the
+export. A missing tag, empty payload, or malformed hash measures. Main
+records the tag with `imagetools create` from the exact SHA after a passing
+check. Pull requests that edit `GATEWAY_UNHASHED` (workflow or
+`model_clients.py` pins) do not consult the receipt. `:latest` and
+`ihash-` are not donors. `pbounds-` is not a deploy tag. Smoke, Darwin
+before python, exact SHA publish, health, recovery, rollback, and the
+40-second stability window stay.
+
+**Safety and revert trigger.** Fail closed to measure. Revert if a
+scripts-only main rebuild with an unchanged payload hash still runs
+`check_model_client_bounds.py`, if a pin-edit PR skips the check, if a
+`pbounds-` tag is used as a deploy image, or if the python image CMD/user
+smokes disappear.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 368s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 42142783710 (job 127647258925),
+the newest attempt-1 mixed rebuild that paid the 77s export. Acceptance
+remains five comparable mixed python-rebuilds whose payload hash already
+has a `pbounds-` receipt, before and after: same-class p50 at least 10% and
+15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner
+minutes no more than 20% higher. The first after-run still measures.
+Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip026_payload_bounds_reuse.py` was
+red (10 failed: missing reuse/record steps) then green (11 passed).
+Related scripts (51) and cloud bounds/images (61) stayed green. YAML
+parses. Full suites, Vitest, Docker builds, and workflow lint are left to
+PR CI.
