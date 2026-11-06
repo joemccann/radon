@@ -12222,3 +12222,29 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (264.80s) | 11,610 passed / 21 skipped / 1,184 files (118.70s) | 42 failed / 3,976 passed / 23 skipped (1042.04s) | 0 added / 0 removed |
 
 Base cloud at `ab4e6b45` on this Mac (standing sweep before the test commit; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (952.28s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-06
+
+Range `ad42fbeba4fb5cf5813f6e777c8614838965ba51..62f08ffcdbac96c1f6120004de5dd02b47bc12de`: 7 commits / 9 paths (PRs #1430 Caddy floor mid-deploy, #1438 quota backoff, #1439 busy-provider retry). Newest trusted checkpoint on issue #83 is `audited-through: ad42fbeba4fb5cf5813f6e777c8614838965ba51` (collaborator, 2026-11-05). It carried no open verified finding. Open `testing/` PR #1433 carries T-584 and is not repeated. Highest id across ledgers and that PR is T-584. Next id T-585.
+
+Codemap (`tools/codemap/codemap.json`, generated 2026-11-03) lists `scripts/tests/test_model_gateway_service.py` as an importer of `scripts/model_gateway/engine.py` and `scripts/tests/test_watchdog/test_external_probe_deadman.py` as an importer of `scripts/watchdog/external_probe.py`. It does not yet list `scripts/tests/test_provider_cooldown.py` as an importer of `scripts/clients/provider_cooldown.py` (only `scripts/tests/conftest.py`). `rg` confirmed the cooldown tests and the three new engine cases.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-581, T-582, T-583 remain DONE. T-492 / T-493 / T-495 stay DONE from later 2026-09-27+ evidence.
+
+Not filed: T-584 NOAA walk clock (open #1433; standing pytest 1 failed, serial 1 failed at `test_ai_cycle_collectors.py:1494`). Quota backoff cases drive `provider_cooldown._now`. Caddy-floor cases assert fired plus the no-journal and stranded-journal pages. Credentials xdist clock bound is serial-green.
+
+Standing sweeps on this Mac: root pytest 20,329 passed / 1 failed / 12 skipped / 63 subtests (154.14s); serial NOAA case 1 failed (0.68s) — T-584, already on #1433. Vitest 11,610 passed / 21 skipped / 1,184 files (47.63s). cloud/tests 42 failed / 3,976 passed / 23 skipped (1130.42s). Delta Python 85 passed ×3.
+
+### T-585 — P1 — busy-provider retry wait is capped by the test deadline, so 60s is unpinned
+
+`scripts/model_gateway/engine.py:141` `_DEFERRED_LOCK_WAIT_SECONDS = 60.0`, inserted at `_defer_busy_provider` `:1548`. `scripts/tests/test_model_gateway_service.py:581` asserted `busy.timeouts[0] <= 1.0 < busy.timeouts[1]` under `deadline=time.monotonic() + 30` (`:573`). `scoped_timeout` at `engine.py:105` returns `min(timeout, slice_seconds, remaining)`, so the second acquire was ~30s, never 60. Mutating `_DEFERRED_LOCK_WAIT_SECONDS` 60.0 → 5.0 left the three busy cases **3 passed**. The 1s first-pass probe is the defect #1439 fixed; a 5s second pass would drop a still-working Anthropic lock the same way.
+
+Acceptance: freeze `clock=lambda: 0.0` with `deadline=1000.0` and assert `busy.timeouts == [1.0, 60.0]` as literals. Mutating 60.0 → 5.0 fails `assert [1.0, 5.0] == [1.0, 60.0]`. Product source unchanged.
+
+Audited through: 62f08ffcdbac96c1f6120004de5dd02b47bc12de on 2026-11-06 — 1 new finding
+
+## Remediation 2026-11-06
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-585 | DONE | Pre-fix assertion under 60→5: 3 passed. New literals under 60→5: `assert [1.0, 5.0] == [1.0, 60.0]` (1 failed). Restored 60.0: 1 passed. Product source unchanged. Focused file cluster 85 passed ×3. |

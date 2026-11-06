@@ -562,7 +562,6 @@ class _BusyOnceLock:
 
 
 def test_busy_provider_is_retried_after_the_other_rungs_fail(monkeypatch, tmp_path):
-    import time
     from model_gateway import engine
     service(monkeypatch)
     busy = _BusyOnceLock()
@@ -570,7 +569,9 @@ def test_busy_provider_is_retried_after_the_other_rungs_fail(monkeypatch, tmp_pa
     def call(name, auth, model):
         return (200, "", {"ok": True}) if name == "anthropic" else (429, "slow down", None)
 
-    with engine.attempt_scope(deadline=time.monotonic() + 30, seen=set(),
+    # Freeze the attempt clock so scoped_timeout cannot cap the 60s retry wait
+    # against a 30s wall deadline (T-585). Literals: a 60→5 mutation must fail.
+    with engine.attempt_scope(deadline=1000.0, seen=set(), clock=lambda: 0.0,
                               locks={"anthropic": busy, "grok": threading.RLock()}):
         parsed, _text, provider, _model, attempted = engine._run_ladder(
             env=_isolated_cooldown(tmp_path), post=None, kind="text", log_prefix="test", call_provider=call,
@@ -578,7 +579,7 @@ def test_busy_provider_is_retried_after_the_other_rungs_fail(monkeypatch, tmp_pa
 
     assert provider == "anthropic" and parsed == {"ok": True}
     assert attempted[0] == "anthropic:provider_busy" and attempted[-1] == "anthropic:ok"
-    assert busy.timeouts[0] <= 1.0 < busy.timeouts[1]
+    assert busy.timeouts == [1.0, 60.0]
 
 
 def test_provider_busy_on_every_pass_still_exhausts(monkeypatch, tmp_path):
