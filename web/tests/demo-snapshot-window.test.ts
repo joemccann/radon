@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireRouteAccess: vi.fn(),
   execute: vi.fn(),
-  readFile: vi.fn(),
 }));
 
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
@@ -21,7 +20,6 @@ vi.mock("@/lib/db", () => ({
   getDb: () => ({ execute: mocks.execute }),
   resetDb: vi.fn(),
 }));
-vi.mock("fs/promises", () => ({ readFile: mocks.readFile }));
 
 const HOUR = 60 * 60_000;
 // Wednesday 15:00 UTC (11:00 ET, RTH): market-aware windows resolve to "open".
@@ -39,7 +37,6 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   Object.values(mocks).forEach((mock) => mock.mockReset());
-  mocks.readFile.mockRejectedValue(new Error("no disk snapshot"));
 });
 
 afterEach(() => {

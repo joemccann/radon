@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "credit_spread.json");
 
 // Contract: absent credit-spread data is HTTP 200 with missing:true, never a 4xx.
 const MISSING_CREDIT_SPREAD = {
@@ -43,19 +40,12 @@ async function readCreditSpreadFromDb(): Promise<TimestampedRead<Record<string, 
   };
 }
 
-async function readCreditSpreadFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const raw = await readFile(CACHE_PATH, "utf-8");
-  const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
     fromDb: readCreditSpreadFromDb,
-    fromDisk: readCreditSpreadFromDisk,
     maxAgeMs: await snapshotMaxAgeMs(CREDIT_SPREAD_MAX_AGE_MS),
     label: "credit-spread",
     // R-193: a writer that ran, produced nothing and still stamped a

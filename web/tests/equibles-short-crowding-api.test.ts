@@ -5,12 +5,11 @@
  *
  * GET-only: the refresh job owns the Equibles pull, so there is no manual-scan
  * POST. Reads through the dbFirstRead chokepoint (Turso scan_snapshots row
- * service='equibles-short-crowding' first, data/equibles_short_crowding.json
- * fallback) and ALWAYS returns 200; absent data is the contract's
+ * service='equibles-short-crowding' first, last-in-memory fallback) and ALWAYS returns 200; absent data is the contract's
  * `missing: true` shape, never a 4xx.
  *
  * Split from equibles-short-crowding.test.tsx because the panel needs jsdom and
- * jsdom cannot intercept the `fs/promises` mock the disk fallback depends on.
+ * this route test runs under node.
  *
  * Mechanics mirror margin-debt-api.test.ts.
  */
@@ -23,15 +22,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: () => mockGetDb(),
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 type Payload = Record<string, unknown>;
 
@@ -66,7 +56,6 @@ async function insertSnapshot(payload: Payload, scanTime?: string): Promise<void
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function callRoute(): Promise<Payload> {
   const { GET } = await import("../app/api/equibles-short-crowding/route");
@@ -84,7 +73,6 @@ beforeEach(async () => {
     payload TEXT NOT NULL,
     PRIMARY KEY (service, scan_time))`);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -95,13 +83,9 @@ afterEach(() => {
 });
 
 describe("GET /api/equibles-short-crowding", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(
-        buildPayload({ scan_time: new Date(Date.now() - 3_600_000).toISOString(), count: 1 }),
-      ),
-    );
+    await insertSnapshot(buildPayload({ scan_time: new Date(Date.now() - 3_600_000).toISOString(), count: 1 }),);
 
     const json = await callRoute();
     expect(json.count).toBe(2);
@@ -109,8 +93,8 @@ describe("GET /api/equibles-short-crowding", () => {
     expect(json.latest_settlement_date).toBe(SETTLEMENT);
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ count: 9 })));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload({ count: 9 }));
     const json = await callRoute();
     expect(json.count).toBe(9);
   });
@@ -130,9 +114,8 @@ describe("GET /api/equibles-short-crowding", () => {
   it("never lets a fresher entry-less snapshot mask an older populated one", async () => {
     const older = new Date(Date.now() - 3_600_000).toISOString();
     await insertSnapshot(buildPayload({ scan_time: older }), older);
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(buildPayload({ scan_time: new Date().toISOString(), count: 0, entries: [] })),
-    );
+    await callRoute();
+    await insertSnapshot(buildPayload({ scan_time: new Date().toISOString(), count: 0, entries: [] }));
 
     const json = await callRoute();
     expect(json.count).toBe(2);
@@ -161,7 +144,7 @@ describe("GET /api/equibles-short-crowding", () => {
     expect(json.missing).toBe(true);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/equibles-short-crowding/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

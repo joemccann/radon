@@ -6,7 +6,7 @@
  *
  * GET-only (radon-ma-ratio timer runs the sweep once daily at 16:20 ET).
  * Reads through dbFirstRead — Turso scan_snapshots (service='ma-ratio')
- * first, disk data/ma_ratio.json fallback — and ALWAYS returns 200; absent
+ * first, last-in-memory fallback — and ALWAYS returns 200; absent
  * data is the contract's `missing: true` shape, never a 4xx.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -15,12 +15,6 @@ import { createClient, type Client } from "@libsql/client";
 let db: Client;
 const mockGetDb = vi.fn(() => db);
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -66,10 +60,10 @@ function buildPayload(overrides: Payload = {}): Payload {
   };
 }
 
-function diskPayload(scanTime?: string): Payload {
+function olderPayload(scanTime?: string): Payload {
   return buildPayload({
     ...(scanTime ? { scan_time: scanTime } : {}),
-    source: { constituents: "disk-cache", constituents_count: 503, member_close_fetches: null },
+    source: { constituents: "older-cache", constituents_count: 503, member_close_fetches: null },
   });
 }
 
@@ -80,7 +74,6 @@ async function insertSnapshot(payload: Payload, service = "ma-ratio"): Promise<v
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 const jsonOf = async (res: Response) => (await res.json()) as Record<string, unknown>;
 
 beforeEach(async () => {
@@ -88,7 +81,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -99,10 +91,10 @@ afterEach(() => {
 });
 
 describe("GET /api/ma-ratio", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload(staleTime)));
+    await insertSnapshot(olderPayload(staleTime));
     const { GET } = await import("../app/api/ma-ratio/route");
     const res = await GET();
     expect(res.status).toBe(200);
@@ -114,11 +106,13 @@ describe("GET /api/ma-ratio", () => {
     expect(json.missing).toBe(false);
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload()));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(olderPayload());
     const { GET } = await import("../app/api/ma-ratio/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const json = await jsonOf(await GET());
-    expect((json.source as Payload).constituents).toBe("disk-cache");
+    expect((json.source as Payload).constituents).toBe("older-cache");
     expect(json.data_date).toBe(DATA_DATE);
   });
 
@@ -171,7 +165,7 @@ describe("GET /api/ma-ratio", () => {
     expect(json.series).toEqual([]);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/ma-ratio/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

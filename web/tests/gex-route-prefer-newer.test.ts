@@ -1,18 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * GET /api/gex must serve whichever store (Turso DB vs disk) has the NEWER
- * scan_time. Reading the DB unconditionally first hid fresh disk data behind a
- * stale Turso row — GEX showed a week-old 2026-06-16 snapshot while the VPS
- * data/gex.json was already current (2026-06-23). Bug fixed 2026-06-23.
+ * GET /api/gex reads Turso and nothing else. When Turso has no row or fails, the
+ * last good read serves from memory, carrying its own scan_time so the route's
+ * stale verdict still fires.
  */
 const mockGetDb = vi.fn();
-const mockReadFile = vi.fn();
 const mockRadonFetch = vi.fn();
 
-vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mockGetDb() }));
-vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
+vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch, RadonApiError: class extends Error {} }));
 
 function dbReturning(payload: Record<string, unknown> | null) {
   return {
@@ -23,38 +20,43 @@ function dbReturning(payload: Record<string, unknown> | null) {
 beforeEach(() => {
   vi.resetModules();
   mockGetDb.mockReset();
-  mockReadFile.mockReset();
   mockRadonFetch.mockReset().mockResolvedValue({});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-describe("GET /api/gex prefers the freshest store", () => {
-  it("serves the disk snapshot when it is newer than the DB row", async () => {
-    mockGetDb.mockReturnValue(dbReturning({ ticker: "SPX", scan_time: "2026-06-16T23:39:09Z", spot: 7500 }));
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ ticker: "SPX", scan_time: "2026-06-23T13:00:00Z", spot: 7600, data_date: "2026-06-23" }),
-    );
+describe("GET /api/gex reads Turso, then memory", () => {
+  const SNAPSHOT = { ticker: "SPX", scan_time: "2026-06-23T14:00:00Z", spot: 7700 };
+
+  it("serves the DB row", async () => {
+    mockGetDb.mockReturnValue(dbReturning(SNAPSHOT));
     const { GET } = await import("../app/api/gex/route");
     const body = await (await GET()).json();
-    expect(body.scan_time).toBe("2026-06-23T13:00:00Z");
+    expect(body.scan_time).toBe(SNAPSHOT.scan_time);
   });
 
-  it("keeps the DB row when it is newer than disk", async () => {
-    mockGetDb.mockReturnValue(dbReturning({ ticker: "SPX", scan_time: "2026-06-23T14:00:00Z", spot: 7700 }));
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ ticker: "SPX", scan_time: "2026-06-23T13:00:00Z", spot: 7600 }),
-    );
-    const { GET } = await import("../app/api/gex/route");
-    const body = await (await GET()).json();
-    expect(body.scan_time).toBe("2026-06-23T14:00:00Z");
+  it("serves the last good read and reports it stale when Turso later has no row", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-23T14:30:00Z"));
+    try {
+      mockGetDb.mockReturnValue(dbReturning(SNAPSHOT));
+      const { POST } = await import("../app/api/gex/route");
+      // POST's failure path bypasses the 5s GET coalescing window.
+      mockRadonFetch.mockRejectedValue(new Error("upstream down"));
+      await POST();
+      mockGetDb.mockReturnValue(dbReturning(null));
+      const body = await (await POST()).json();
+      expect(body.spot).toBe(7700);
+      expect(body.is_stale).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("falls back to disk when the DB has no row", async () => {
+  it("is empty when Turso has never had a row", async () => {
     mockGetDb.mockReturnValue(dbReturning(null));
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ ticker: "SPX", scan_time: "2026-06-23T13:00:00Z", spot: 7600 }),
-    );
     const { GET } = await import("../app/api/gex/route");
     const body = await (await GET()).json();
-    expect(body.scan_time).toBe("2026-06-23T13:00:00Z");
+    expect(body.scan_time).toBe("");
+    expect(body.is_stale).toBe(true);
   });
 });

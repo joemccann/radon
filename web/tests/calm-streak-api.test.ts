@@ -3,7 +3,7 @@
  *
  * /api/calm-streak: consecutive SPX sessions without a >1% intraday band
  * (regime tab CALM STREAK). GET-only; dbFirstRead over scan_snapshots
- * (service='calm-streak') with data/calm_streak.json fallback. Always 200.
+ * (service='calm-streak') with a last-in-memory fallback. Always 200.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
@@ -11,12 +11,6 @@ import { createClient, type Client } from "@libsql/client";
 let db: Client;
 const mockGetDb = vi.fn(() => db);
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
 
 type Payload = Record<string, unknown>;
 
@@ -50,7 +44,6 @@ async function insertSnapshot(payload: Payload, service = "calm-streak"): Promis
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 const jsonOf = async (res: Response) => (await res.json()) as Payload;
 
 beforeEach(async () => {
@@ -60,7 +53,6 @@ beforeEach(async () => {
     service TEXT NOT NULL, scan_time TEXT NOT NULL, payload TEXT NOT NULL,
     PRIMARY KEY (service, scan_time))`);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -71,12 +63,10 @@ afterEach(() => {
 });
 
 describe("GET /api/calm-streak", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
     const older = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(buildPayload({ scan_time: older, current: { date: DATA_DATE, streak: 1, band_pct: 2, close: 1 } })),
-    );
+    await insertSnapshot(buildPayload({ scan_time: older, current: { date: DATA_DATE, streak: 1, band_pct: 2, close: 1 } }));
     const { GET } = await import("../app/api/calm-streak/route");
     const res = await GET();
     expect(res.status).toBe(200);
@@ -86,12 +76,13 @@ describe("GET /api/calm-streak", () => {
     expect(json.missing).toBe(false);
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload());
     const { GET } = await import("../app/api/calm-streak/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const json = await jsonOf(await GET());
     expect(json.data_date).toBe(DATA_DATE);
-    expect(mockReadFile.mock.calls[0][0]).toMatch(/data[\\/]calm_streak\.json$/);
   });
 
   it("returns the exact missing:true shape with HTTP 200 when nothing exists", async () => {

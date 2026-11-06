@@ -3,9 +3,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: (...args: unknown[]) => mockRadonFetch(...args) }));
 
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
-
 const mockGetDb = vi.fn();
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
@@ -20,11 +17,10 @@ describe("/api/gamma-rotation", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockRadonFetch.mockImplementation(() => new Promise(() => {}));
-    mockReadFile.mockReset();
     mockGetDb.mockReset();
   });
 
-  it("GET returns the latest Turso snapshot before disk fallback", async () => {
+  it("GET returns the latest Turso snapshot", async () => {
     mockGetDb.mockReturnValue(dbStub([
       {
         payload: JSON.stringify({
@@ -35,7 +31,6 @@ describe("/api/gamma-rotation", () => {
         }),
       },
     ]));
-    mockReadFile.mockRejectedValue(new Error("should not read disk"));
 
     const { GET } = await import("../app/api/gamma-rotation/route");
     const res = await GET();
@@ -43,7 +38,24 @@ describe("/api/gamma-rotation", () => {
 
     expect(res.status).toBe(200);
     expect(body.signal.grg_z).toBe(1.23);
-    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it("GET serves the last good read from memory when Turso later has no row", async () => {
+    const snapshot = {
+      scan_time: new Date().toISOString(),
+      signal: { grg_z: 1.23 },
+      assets: { SPY: { ticker: "SPY" }, TLT: { ticker: "TLT" } },
+      history: [],
+    };
+    mockGetDb.mockReturnValue(dbStub([{ payload: JSON.stringify(snapshot) }]));
+    const { GET } = await import("../app/api/gamma-rotation/route");
+    const { invalidateCache } = await import("@/lib/dbCache");
+    await GET();
+    invalidateCache("gamma-rotation:snapshot");
+    mockGetDb.mockReturnValue(dbStub([]));
+    const body = await (await GET()).json();
+    expect(body.signal.grg_z).toBe(1.23);
+    expect(body.scan_time).toBe(snapshot.scan_time);
   });
 
   it("POST returns fresh FastAPI scan data", async () => {

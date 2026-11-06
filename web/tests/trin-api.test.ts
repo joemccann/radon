@@ -4,8 +4,7 @@
  * /api/trin — NYSE Arms Index, 60-minute bars + MA(10) (regime tab).
  *
  * GET-only (radon-trin timer samples IB every 5 minutes during RTH). Reads
- * through dbFirstRead — Turso scan_snapshots (service='trin') first, disk
- * data/trin.json fallback — and ALWAYS returns 200; absent data is the
+ * through dbFirstRead — Turso scan_snapshots (service='trin') first, last-in-memory fallback — and ALWAYS returns 200; absent data is the
  * contract's `missing: true` shape, never a 4xx.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -14,12 +13,6 @@ import { createClient, type Client } from "@libsql/client";
 let db: Client;
 const mockGetDb = vi.fn(() => db);
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -56,7 +49,6 @@ async function insertSnapshot(payload: Payload, scanTime?: string): Promise<void
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 const jsonOf = async (res: Response) => (await res.json()) as Record<string, unknown>;
 
 beforeEach(async () => {
@@ -64,7 +56,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -75,10 +66,10 @@ afterEach(() => {
 });
 
 describe("GET /api/trin", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ scan_time: staleTime, source: "disk" })));
+    await insertSnapshot(buildPayload({ scan_time: staleTime, source: "older" }));
     const { GET } = await import("../app/api/trin/route");
     const res = await GET();
     expect(res.status).toBe(200);
@@ -88,10 +79,12 @@ describe("GET /api/trin", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ source: "disk" })));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload({ source: "older" }));
     const { GET } = await import("../app/api/trin/route");
-    expect((await jsonOf(await GET())).source).toBe("disk");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
+    expect((await jsonOf(await GET())).source).toBe("older");
   });
 
   it("returns the contract's missing:true shape with HTTP 200 when nothing exists", async () => {
@@ -112,7 +105,7 @@ describe("GET /api/trin", () => {
     expect((await jsonOf(await GET())).missing).toBe(true);
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/trin/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

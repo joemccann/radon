@@ -31,18 +31,24 @@ describe("R-193: the four delta routes carry the isDegraded guard", () => {
     expect(call).toContain("isDegraded");
   });
 
-  it("pickFresherSource still prefers the healthy side", async () => {
+  it("a degraded row still loses to the last healthy read", async () => {
     const { dbFirstRead, isMissingPayload } = await import("../lib/dbFirstRead");
-    const result = await dbFirstRead({
-      fromDb: async () => ({ data: { missing: true, scan_time: "2026-08-23" }, timestampMs: 2_000 }),
-      fromDisk: async () => ({ data: { missing: false, scan_time: "2026-08-22" }, timestampMs: 1_000 }),
+    const options = {
       maxAgeMs: 10_000_000_000_000,
-      label: "test",
+      label: "serving-honesty",
       isDegraded: isMissingPayload,
       now: () => 2_500,
+    };
+    await dbFirstRead({
+      ...options,
+      fromDb: async () => ({ data: { missing: false, scan_time: "2026-08-22" }, timestampMs: 1_000 }),
+    });
+    const result = await dbFirstRead({
+      ...options,
+      fromDb: async () => ({ data: { missing: true, scan_time: "2026-08-23" }, timestampMs: 2_000 }),
     });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.source).toBe("disk");
+    if (result.ok) expect(result.source).toBe("memory");
   });
 });
 

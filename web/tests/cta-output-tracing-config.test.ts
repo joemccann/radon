@@ -10,7 +10,7 @@ describe("host-data output tracing", () => {
     }
   });
 
-  it("excludes the host-mounted data tree from disk-fallback API routes", async () => {
+  it("excludes the host-mounted data tree from API routes that run from the repo root", async () => {
     const { default: config } = await import("../next.config.mjs");
 
     expect(config.outputFileTracingExcludes["/api/menthorq/cta"]).toEqual([
@@ -40,18 +40,6 @@ describe("host-data output tracing", () => {
 
     expect(route).toContain(
       'join(/* turbopackIgnore: true */ process.cwd(), "..")',
-    );
-    expect(route).toContain(
-      'readFile(/* turbopackIgnore: true */ path, "utf-8")',
-    );
-    expect(route).toContain(
-      "readdir(/* turbopackIgnore: true */ CACHE_DIR)",
-    );
-    expect(route).toMatch(
-      /readFile\(\s*\/\* turbopackIgnore: true \*\/ join\(CACHE_DIR, latestFile\)/,
-    );
-    expect(route).toMatch(
-      /stat\(\s*\/\* turbopackIgnore: true \*\/ join\(CACHE_DIR, latestFile\)/,
     );
   });
 

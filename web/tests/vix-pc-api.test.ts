@@ -18,15 +18,6 @@ vi.mock("@/lib/db", () => ({
   getDb: mockGetDb,
 }));
 
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
-
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
     service TEXT NOT NULL,
@@ -117,8 +108,6 @@ beforeEach(async () => {
   vi.resetModules();
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
-  mockReadFile.mockReset();
-  mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 });
 
 afterEach(() => {
@@ -126,14 +115,14 @@ afterEach(() => {
 });
 
 describe("GET /api/vix-pc — source selection", () => {
-  it("serves the latest Turso snapshot (Turso-first over an older disk cache)", async () => {
+  it("serves the latest Turso snapshot (newest row wins)", async () => {
     const fresh = buildPayload();
     await insertSnapshot(fresh);
     const stale = buildPayload({
       scan_time: new Date(Date.now() - 6 * 3_600_000).toISOString(),
       source: "uw",
     });
-    mockReadFile.mockResolvedValue(JSON.stringify(stale));
+    await insertSnapshot(stale);
 
     const { GET } = await import("../app/api/vix-pc/route");
     const res = await GET();
@@ -144,11 +133,13 @@ describe("GET /api/vix-pc — source selection", () => {
     expect(body.current.cum5_ratio).toBeCloseTo(0.3188487844029556, 6);
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    const diskPayload = buildPayload();
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    const olderPayload = buildPayload();
+    await insertSnapshot(olderPayload);
 
     const { GET } = await import("../app/api/vix-pc/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -156,13 +147,14 @@ describe("GET /api/vix-pc — source selection", () => {
     expect(body.missing).toBeUndefined();
   });
 
-  it("serves disk with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+  it("serves the last good read from memory with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+    await insertSnapshot(buildPayload());
+    const { GET } = await import("../app/api/vix-pc/route");
+    await GET();
+
     mockGetDb.mockImplementationOnce(() => {
       throw new Error("hrana stream not found");
     });
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
-
-    const { GET } = await import("../app/api/vix-pc/route");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -234,7 +226,7 @@ describe("GET /api/vix-pc — degradation statuses pass through untransformed", 
 });
 
 describe("GET /api/vix-pc — route contract", () => {
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/vix-pc/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

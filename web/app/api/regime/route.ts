@@ -1,30 +1,32 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { readFile, readdir, writeFile, stat, mkdir } from "fs/promises";
+import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { isCriDataStale } from "@/lib/criStaleness";
-import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
+import { hasCompleteRvolHistory } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { buildDemoCriFixture } from "@/lib/demo/fixtures/regime";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
 const PROJECT_ROOT = join(/* turbopackIgnore: true */ process.cwd(), "..");
-const CACHE_PATH = join(PROJECT_ROOT, "data", "cri.json");
+// Write-only archive consumed by scripts/strength_confirmation_scanner.py and
+// scripts/generate_regime_share.py. This route never reads it back.
 const SCHEDULED_DIR = join(PROJECT_ROOT, "data", "cri_scheduled");
-// Upper bound on the Turso/libsql snapshot read before we fall back to disk.
+// Upper bound on the Turso/libsql snapshot read before memory serves instead.
 // The libsql client can hang for minutes on a reachable endpoint; this keeps
-// the route responsive (disk fallback) instead of pinning the loader.
+// the route responsive instead of pinning the loader.
 const DB_READ_TIMEOUT_MS = 2500;
 
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
@@ -185,93 +187,47 @@ function normalizeCriPayload(raw: Record<string, unknown>): Record<string, unkno
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 5_000;
 
-/** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
- *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
-async function readLatestCri(): Promise<{ data: object; path: string } | null> {
+type LatestCri = { data: Record<string, unknown>; takenAtMs: number | null };
+
+/** Latest CRI snapshot from Turso, or the last good read held in memory. */
+async function readLatestCri(): Promise<LatestCri | null> {
   return cachedRead("regime:cri", READ_CACHE_TTL_MS, readLatestCriUncached);
 }
 
-async function readLatestCriUncached(): Promise<{ data: object; path: string } | null> {
-  async function readCriCandidate(filePath: string): Promise<CriCacheCandidate | null> {
-    try {
-      const raw = await readFile(filePath, "utf-8");
-      const jsonStart = raw.indexOf("{");
-      if (jsonStart === -1) return null;
-      const fileStat = await stat(filePath);
-      return {
-        path: filePath,
-        mtimeMs: fileStat.mtimeMs,
-        data: JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async function readLatestScheduledCri(): Promise<CriCacheCandidate | null> {
-    try {
-      const files = await readdir(SCHEDULED_DIR);
-      const jsonFiles = files.filter((f) => f.startsWith("cri-") && f.endsWith(".json")).sort();
-      for (let index = jsonFiles.length - 1; index >= 0; index -= 1) {
-        const candidate = await readCriCandidate(join(SCHEDULED_DIR, jsonFiles[index]));
-        if (candidate) return candidate;
-      }
-    } catch {
-      // dir may not exist yet
-    }
-
-    return null;
-  }
-
-  async function readLatestDbCri(): Promise<CriCacheCandidate | null> {
-    try {
-      // Bound the libsql read: a stale cached HTTP client can stall for MINUTES
-      // even when the Turso endpoint is reachable (raw HTTPS 200 in ~190ms while
-      // a `SELECT 1` hangs past 40s — the stale-undici-pool wedge). The route
-      // awaits this FIRST, and a hang is not a rejection, so without a bound the
-      // disk fallback (data/cri.json) is never reached and /regime/cri spins
-      // forever. dbExecute caps the read AND drops the wedged client so the next
-      // request heals (replaces the old hand-rolled Promise.race band-aid).
-      const result = await dbExecute({
-        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
-        args: [],
-      }, { label: "regime-cri", timeoutMs: DB_READ_TIMEOUT_MS });
-      if (result.rows.length === 0) return null;
-      const row = result.rows[0] as unknown as { taken_at: string; payload: string };
-      const mtimeMs = Date.parse(row.taken_at);
-      return {
-        path: `db:cri_snapshots/${row.taken_at}`,
-        mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : Date.now(),
-        data: JSON.parse(row.payload) as Record<string, unknown>,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  const dbCandidate = await readLatestDbCri();
-  const selected = selectPreferredCriCandidate(
-    dbCandidate ?? (await readLatestScheduledCri()),
-    await readCriCandidate(CACHE_PATH),
-  );
-
-  return selected ? { data: selected.data, path: selected.path } : null;
+async function readLatestCriFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  // Bound the libsql read: a stale cached HTTP client can stall for MINUTES
+  // even when the Turso endpoint is reachable (raw HTTPS 200 in ~190ms while
+  // a `SELECT 1` hangs past 40s — the stale-undici-pool wedge). dbExecute caps
+  // the read AND drops the wedged client so the next request heals.
+  const result = await dbExecute({
+    sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
+    args: [],
+  }, { label: "regime-cri", timeoutMs: DB_READ_TIMEOUT_MS });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { taken_at: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    timestampMs: contentTimestampMs(row.taken_at),
+  };
 }
 
-/** Check if the latest cached data is stale (market-hours aware). */
-async function isCacheStale(filePath: string, data: Record<string, unknown>): Promise<boolean> {
-  try {
-    if (filePath.startsWith("db:cri_snapshots/")) {
-      const takenAtIso = filePath.slice("db:cri_snapshots/".length);
-      const mtimeMs = Date.parse(takenAtIso);
-      if (!Number.isFinite(mtimeMs)) return true;
-      return isCriDataStale(data, mtimeMs, todayET(), isMarketOpenNow());
-    }
-    const s = await stat(filePath);
-    return isCriDataStale(data, s.mtimeMs, todayET(), isMarketOpenNow());
-  } catch {
-    return true;
-  }
+async function readLatestCriUncached(): Promise<LatestCri | null> {
+  const result = await dbFirstRead({
+    fromDb: readLatestCriFromDb,
+    // Unused: isCriDataStale judges the served read's own date and taken_at.
+    maxAgeMs: READ_CACHE_TTL_MS,
+    label: "regime-cri",
+    sourceTimeoutMs: DB_READ_TIMEOUT_MS,
+    // A row with a truncated RVOL history loses to the last complete read.
+    isDegraded: (data) => !hasCompleteRvolHistory(data),
+  });
+  return result.ok ? { data: result.data, takenAtMs: result.timestampMs } : null;
+}
+
+/** Check if the latest snapshot is stale (market-hours aware). */
+function isCacheStale(takenAtMs: number | null, data: Record<string, unknown>): boolean {
+  if (takenAtMs === null) return true;
+  return isCriDataStale(data, takenAtMs, todayET(), isMarketOpenNow());
 }
 
 /** Fire-and-forget: run CRI scan via FastAPI and save results */
@@ -297,14 +253,14 @@ export async function GET(): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(buildDemoCriFixture()), requestId);
   }
   const result = await readLatestCri();
-  const data = normalizeCriPayload((result?.data ?? EMPTY_CRI) as Record<string, unknown>);
+  const data = normalizeCriPayload(result?.data ?? EMPTY_CRI);
   const currentMarketOpen = isMarketOpenNow();
 
   // Keep market_open aligned with the current session state for every request.
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
   if (!result) {
-    // Every source is dead: Turso unreachable AND no readable cache on disk.
+    // Every source is dead: no Turso row AND nothing held in memory.
     // EMPTY_CRI's defaults are not neutral — score 0 / level "LOW" /
     // triggered false / exposure 200 is the CALMEST reading the panel can
     // draw, and it is a legal real reading, so nothing downstream could tell
@@ -329,7 +285,7 @@ export async function GET(): Promise<Response> {
 
   // Stale-while-revalidate: return cached data immediately,
   // kick off a background scan if today's data is stale or from stale date.
-  if (await isCacheStale(result.path, data)) {
+  if (isCacheStale(result.takenAtMs, data)) {
     triggerBackgroundScan();
   }
 
@@ -369,7 +325,7 @@ export async function POST(request?: Request): Promise<Response> {
       const cached = await readLatestCri();
       if (cached?.data) {
         const response = NextResponse.json(
-          { ...normalizeCriPayload(cached.data as Record<string, unknown>), is_stale: true, scan_succeeded: false },
+          { ...normalizeCriPayload(cached.data), is_stale: true, scan_succeeded: false },
         );
         response.headers.set("X-Sync-Warning", "CRI sync failed - serving cached data");
         return response;

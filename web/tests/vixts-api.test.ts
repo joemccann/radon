@@ -4,8 +4,7 @@
  * /api/vixts — VIX / VIX3M term-structure ratio (regime tab VIX TS).
  *
  * GET-only (radon-vixts.timer runs the daily Cboe pull at 02:45 UTC). Reads
- * through dbFirstRead — Turso scan_snapshots (service='vixts') first, disk
- * data/vixts.json fallback — and ALWAYS returns 200; absent data is the
+ * through dbFirstRead — Turso scan_snapshots (service='vixts') first, last-in-memory fallback — and ALWAYS returns 200; absent data is the
  * contract's `missing: true` shape, never a 4xx.
  *
  * Spec: docs/indicators/vixts.md.
@@ -16,12 +15,6 @@ import { createClient, type Client } from "@libsql/client";
 let db: Client;
 const mockGetDb = vi.fn(() => db);
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return { ...actual, readFile: (...args: unknown[]) => mockReadFile(...args) };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -77,7 +70,7 @@ function buildPayload(overrides: Payload = {}): Payload {
   };
 }
 
-function diskPayload(scanTime?: string): Payload {
+function olderPayload(scanTime?: string): Payload {
   return buildPayload({
     ...(scanTime ? { scan_time: scanTime } : {}),
     data_date: DISK_DATA_DATE,
@@ -101,7 +94,6 @@ async function insertSnapshot(payload: Payload, service = "vixts"): Promise<void
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 const jsonOf = async (res: Response) => (await res.json()) as Record<string, unknown>;
 
 beforeEach(async () => {
@@ -109,7 +101,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -120,10 +111,10 @@ afterEach(() => {
 });
 
 describe("GET /api/vixts", () => {
-  it("serves the latest Turso snapshot over an older disk cache", async () => {
+  it("serves the latest Turso snapshot over an older row", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload(staleTime)));
+    await insertSnapshot(olderPayload(staleTime));
     const { GET } = await import("../app/api/vixts/route");
     const res = await GET();
     expect(res.status).toBe(200);
@@ -136,9 +127,11 @@ describe("GET /api/vixts", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload()));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(olderPayload());
     const { GET } = await import("../app/api/vixts/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const json = await jsonOf(await GET());
     expect(json.data_date).toBe(DISK_DATA_DATE);
     expect((json.series as Payload[]).length).toBe(1);
@@ -178,7 +171,7 @@ describe("GET /api/vixts", () => {
     });
   });
 
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/vixts/route");
     expect(route.dynamic).toBe("force-dynamic");
   });
@@ -226,10 +219,9 @@ describe("GET /api/vixts freshness budget", () => {
     const older = new Date(Date.now() - 6 * 60 * 60_000).toISOString();
     const newer = new Date(Date.now() - 60_000).toISOString();
     await insertSnapshot(buildPayload({ scan_time: older }));
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ missing: true, scan_time: newer, series: [], current: null }),
-    );
     const { GET } = await import("../app/api/vixts/route");
+    await GET();
+    await insertSnapshot({ missing: true, scan_time: newer, series: [], current: null });
     const json = await jsonOf(await GET());
 
     expect(json.missing).toBeUndefined();

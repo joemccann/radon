@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = join(__dirname, "..");
 
-// Disk-backed GET routes that read live JSON state from the data/ tree.
+// GET routes that read live snapshot state.
 // All of these MUST opt out of Next.js's static-route cache, otherwise the
 // first GET response gets frozen for the lifetime of the dev server and
-// subsequent calls serve stale data even after the underlying file changes.
+// subsequent calls serve stale data even after the underlying row changes.
 // The CTA route was the canary; commit 0575bc1 fixed it. This contract test
 // keeps the rest of the family in line.
 const DYNAMIC_ROUTES = [
@@ -49,7 +49,7 @@ const DYNAMIC_ROUTES = [
   "app/api/skew/route.ts",
 ];
 
-// Client-side fetch sites that hit a disk-backed dynamic route. Each fetch
+// Client-side fetch sites that hit a snapshot-backed dynamic route. Each fetch
 // MUST request a fresh response with `cache: "no-store"` so the browser/
 // Next-data layers never serve a stale snapshot. Defense in depth alongside
 // the route-level dynamic export.
@@ -128,7 +128,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/gamma-rotation/route.ts", dbHelperPattern: /readCachedGammaRotationFromDb\s*\(/ },
   { path: "app/api/discover/route.ts", dbHelperPattern: /readDiscoverFromDb\s*\(/ },
   { path: "app/api/menthorq/cta/route.ts", dbHelperPattern: /readLatestCtaFromDb\s*\(/ },
-  { path: "app/api/regime/route.ts", dbHelperPattern: /readLatestDbCri\s*\(/ },
+  { path: "app/api/regime/route.ts", dbHelperPattern: /readLatestCriFromDb\b/ },
   { path: "app/api/scanner/route.ts", dbHelperPattern: /readScannerFromDb\s*\(/ },
   { path: "app/api/flow-analysis/route.ts", dbHelperPattern: /readFlowAnalysisFromDb\s*\(/ },
   { path: "app/api/performance/route.ts", dbHelperPattern: /readPerformanceFromDb\s*\(/ },
@@ -139,12 +139,12 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/service-health/route.ts", dbHelperPattern: /\bdbExecute\s*\(/ },
   // Formerly disk-only routes (2026-07-02 SOT sweep): producers mirror to
   // Turso (catalysts table / generic scan_snapshots / cri_snapshots +
-  // menthorq_cta), routes read DB-first with the data/ JSON as fallback.
+  // menthorq_cta), routes read Turso with a last-in-memory fallback.
   { path: "app/api/catalysts/route.ts", dbHelperPattern: /readCatalystsFromDb\s*\(/ },
   { path: "app/api/leap/route.ts", dbHelperPattern: /readLeapFromDb\s*\(/ },
   { path: "app/api/garch-convergence/route.ts", dbHelperPattern: /readGarchFromDb\s*\(/ },
   { path: "app/api/flow-surprise/route.ts", dbHelperPattern: /readFlowSurpriseFromDb\s*\(/ },
-  { path: "app/api/internals/route.ts", dbHelperPattern: /readLatestDbCri\s*\(/ },
+  { path: "app/api/internals/route.ts", dbHelperPattern: /readLatestCriFromDb\b/ },
   { path: "app/api/options/rv-ratio/route.ts", dbHelperPattern: /readRvRatioFromDb\s*\(/ },
   { path: "app/api/bpi/route.ts", dbHelperPattern: /readBpiFromDb\b/ },
 ];

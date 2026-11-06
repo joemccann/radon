@@ -5,8 +5,8 @@
  *
  * GET-only: the scan runs on the Mon-Fri 21:30 UTC radon-bpi timer, so
  * there is no client-side scan POST. Reads through the dbFirstRead
- * chokepoint — the three Turso bpi_snapshots payload rows first, disk
- * data/bpi.json fallback — and ALWAYS returns 200 with all three index
+ * chokepoint — the three Turso bpi_snapshots payload rows first, last-in-memory
+ * fallback — and ALWAYS returns 200 with all three index
  * keys; an absent index is its `{missing: true, index_symbol}` shape,
  * never a 4xx.
  *
@@ -26,17 +26,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: () => mockGetDb(),
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
-
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 type Json = Record<string, unknown>;
 
@@ -63,7 +52,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -74,7 +62,7 @@ afterEach(() => {
 });
 
 describe("GET /api/bpi", () => {
-  it("returns 200 with all three indices missing:true (never a 4xx) when both sources are absent", async () => {
+  it("returns 200 with all three indices missing:true (never a 4xx) when nothing exists", async () => {
     const { GET } = await import("../app/api/bpi/route");
     const res = await GET();
 
@@ -126,52 +114,19 @@ describe("GET /api/bpi", () => {
     expect(indices.RUT).toEqual({ missing: true, index_symbol: "RUT" });
   });
 
-  it("falls back to disk data/bpi.json when Turso has no rows", async () => {
+  it("serves the last good read from memory when Turso has no rows", async () => {
     const ndx = buildBpiPayloadFixture({ symbol: "NDX" });
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ generated_at: ndx.taken_at, indices: { NDX: ndx } }),
-    );
+    await insertSnapshot(ndx);
 
     const { GET } = await import("../app/api/bpi/route");
+    await GET();
+    await db.execute("DELETE FROM bpi_snapshots");
     const json = await jsonOf(await GET());
 
     expect(json.generated_at).toBe(ndx.taken_at);
     const indices = json.indices as Record<string, Json>;
     expect(indices.NDX.bpi).toBe(ndx.bpi);
     expect(indices.SPX).toEqual({ missing: true, index_symbol: "SPX" });
-    expect(mockReadFile).toHaveBeenCalledWith(
-      expect.stringContaining("data"),
-      "utf-8",
-    );
-    expect(String(mockReadFile.mock.calls[0][0])).toContain("bpi.json");
-  });
-
-  it("serves the newer DB snapshot over an older disk cache", async () => {
-    const fresh = buildBpiPayloadFixture({ symbol: "NDX" });
-    await insertSnapshot(fresh);
-    const stale = buildBpiPayloadFixture({ symbol: "NDX", endSessionsAgo: 5 });
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ generated_at: stale.taken_at, indices: { NDX: stale } }),
-    );
-
-    const { GET } = await import("../app/api/bpi/route");
-    const json = await jsonOf(await GET());
-
-    expect((json.indices as Record<string, Json>).NDX.as_of_session).toBe(fresh.as_of_session);
-  });
-
-  it("serves the disk snapshot when it is newer than the DB rows", async () => {
-    const stale = buildBpiPayloadFixture({ symbol: "NDX", endSessionsAgo: 5 });
-    await insertSnapshot(stale);
-    const fresh = buildBpiPayloadFixture({ symbol: "NDX" });
-    mockReadFile.mockResolvedValue(
-      JSON.stringify({ generated_at: fresh.taken_at, indices: { NDX: fresh } }),
-    );
-
-    const { GET } = await import("../app/api/bpi/route");
-    const json = await jsonOf(await GET());
-
-    expect((json.indices as Record<string, Json>).NDX.as_of_session).toBe(fresh.as_of_session);
   });
 });
 

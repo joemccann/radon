@@ -65,6 +65,16 @@ vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
 }));
 
+function dbRow(snapshot: Record<string, unknown>) {
+  return {
+    rows: [{
+      payload: JSON.stringify(snapshot),
+      scan_time: snapshot.scan_time ?? snapshot.discovery_time ?? snapshot.analysis_time,
+      taken_at: snapshot.scan_time,
+    }],
+  };
+}
+
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
 vi.mock("@/lib/db", () => ({
   resetDb: () => {},
@@ -1741,7 +1751,7 @@ describe("GET /api/discover — extended", () => {
       candidates_found: 3,
       candidates: [{ ticker: "NET", score: 78 }],
     };
-    mockReadFile.mockResolvedValue(JSON.stringify(discoverData));
+    mockExecute.mockResolvedValueOnce(dbRow(discoverData));
 
     const { GET } = await import("../app/api/discover/route");
     const res = await GET();
