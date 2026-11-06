@@ -677,3 +677,122 @@ def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
     scoring = dpc.get_cached_darkpool("SNDK", session_prior, require_complete=False)
     assert scoring is not None
     assert len(scoring) == 2 * DARKPOOL_PAGE_LIMIT
+
+
+def test_market_wide_walk_returns_before_the_wrapper_curl_budget():
+    """The hourly discover POST must return before the wrapper curl deadline.
+
+    2026-11-04 21:03:52Z, page 9b494e21badd31a9ff5cbef6a2532940: scanner and
+    flow-analysis were OK. POST /discover then held the socket until
+    ``curl: (28)`` at 180002 ms with 0 bytes (http=000). The wrapper treats
+    that as indeterminate and the oneshot exits 1. The market-wide walk is
+    FLOW_ALERTS_MAX_PAGES with no deadline, so a close tape that is actually
+    admitted (the earlier hours that day shed on a short rate limit) outlives
+    the curl budget and never produces an HTTP body.
+    """
+    from discover import discover
+    from fetch_flow import FLOW_ALERTS_MAX_PAGES, FLOW_ALERTS_PAGE_LIMIT
+
+    curl_budget_s = 180
+    per_page_s = (curl_budget_s // FLOW_ALERTS_MAX_PAGES) + 1
+    assert FLOW_ALERTS_MAX_PAGES * per_page_s > curl_budget_s
+
+    clock = {"t": 0.0}
+    pages = {"n": 0}
+    darkpool_calls = {"n": 0}
+
+    def monotonic():
+        return clock["t"]
+
+    def get_flow_alerts(**_kwargs):
+        n = pages["n"]
+        pages["n"] += 1
+        clock["t"] += per_page_s
+        start = 10_000_000 - n * 1_000
+        return {
+            "data": [
+                {
+                    "ticker": "DEMO",
+                    "option_chain": f"DEMO-{n}-{i}",
+                    "created_at": f"{start - i:010d}",
+                    "total_premium": 600_000,
+                    "type": "CALL",
+                    "volume_oi_ratio": 2.5,
+                    "has_sweep": True,
+                    "sector": "Technology",
+                    "marketcap": 1_000_000_000,
+                    "underlying_price": 100,
+                    "issue_type": "Common Stock",
+                }
+                for i in range(FLOW_ALERTS_PAGE_LIMIT)
+            ]
+        }
+
+    def track_darkpool(*_args, **_kwargs):
+        darkpool_calls["n"] += 1
+        return _dp_ok()
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_flow_alerts.side_effect = get_flow_alerts
+    ctor = MagicMock(return_value=client)
+
+    with patch("discover.UWClient", ctor), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", side_effect=track_darkpool), \
+         patch("discover.time.monotonic", monotonic), \
+         patch("fetch_flow._monotonic", monotonic):
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert clock["t"] < curl_budget_s, (
+        f"walk ran {clock['t']}s across {pages['n']} pages; "
+        f"the {curl_budget_s}s curl deadline would already have fired"
+    )
+    assert pages["n"] < FLOW_ALERTS_MAX_PAGES
+    assert darkpool_calls["n"] == 0
+    assert result["candidates"] == []
+    assert result["error"] == "discover budget shed"
+    assert ctor.call_args.kwargs.get("max_retries") == 0
+
+
+def test_late_admission_busy_does_not_sleep_past_the_curl_budget():
+    """A 429 near the post budget must not add another admission sleep.
+
+    The hourly POST and the wrapper curl deadline are the same 180s. One
+    short embargo wait is fine early in the scan. The same wait, started
+    after the post budget is already gone, holds the socket until curl 28
+    and the oneshot exits 1. Do not start that sleep when no time remains.
+    """
+    from discover import DISCOVER_CURL_BUDGET_S, discover
+
+    clock = {"t": 0.0}
+    sleeps = []
+    frozen = 1_800_000_000.0
+
+    def monotonic():
+        return clock["t"]
+
+    def flow(*_args, **_kwargs):
+        clock["t"] = DISCOVER_CURL_BUDGET_S - 1
+        raise _admission_busy()
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=client), \
+         patch("discover.fetch_options_flow", side_effect=flow), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.time.monotonic", monotonic), \
+         patch("discover.time.time", return_value=frozen), \
+         patch("discover.time.sleep", side_effect=sleep), \
+         patch("utils.uw_governor.snapshot", return_value={"embargo_until": frozen + 30}):
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert sleeps == []
+    assert clock["t"] < DISCOVER_CURL_BUDGET_S
+    assert result["error"] == "discover rate limit shed"

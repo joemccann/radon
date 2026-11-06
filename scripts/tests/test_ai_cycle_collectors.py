@@ -15,6 +15,7 @@ from scripts.ai_cycle.collectors import (
     Transport,
     archive_raw,
     collect_gpu_history,
+    collect_source,
     parse_aa,
     parse_disclosures,
     parse_eia,
@@ -167,6 +168,64 @@ def test_gpu_history_uses_dated_snapshots_and_deduplicates_latest():
     rows = collect_gpu_history(FakeTransport(), "2026-07-05", "2026-07-05")
     assert len(rows) == 1
     assert rows[0]["period_end"] == "2026-07-05"
+
+
+def test_aa_collection_follows_paginated_free_catalog_after_data_endpoint_410(tmp_path):
+    """The 2026-11-06 frontier refresh and ai-cycle oneshots both died on
+    HTTP 410 from the retired data catalog. The basket member on page 2
+    must be collected from the free language-model list."""
+    free = "https://artificialanalysis.ai/api/v2/language/models/free"
+    calls = []
+
+    class RecordingTransport:
+        archive = tmp_path
+
+        def fetch(self, url, params=None, headers=None, body=None):
+            calls.append((url, params, headers))
+            if "/api/v2/data/" in url:
+                raise SourceError("Publisher returned HTTP 410")
+            page = (params or {}).get("page")
+            if page == 1:
+                payload = {
+                    "pagination": {"page": 1, "has_more": True, "page_size": 200, "total_pages": 2},
+                    "data": [
+                        {
+                            "id": "stable-cheap-id",
+                            "slug": "cheap",
+                            "name": "Cheap frontier",
+                            "model_creator": {"id": "creator-id"},
+                            "pricing": {"price_1m_input_tokens": 1, "price_1m_output_tokens": 2},
+                        }
+                    ],
+                }
+            else:
+                payload = {
+                    "pagination": {"page": 2, "has_more": False, "page_size": 200, "total_pages": 2},
+                    "data": [
+                        {
+                            "id": "stable-expensive-id",
+                            "slug": "expensive",
+                            "name": "Expensive frontier",
+                            "model_creator": {"id": "creator-id"},
+                            "pricing": {"price_1m_input_tokens": 3, "price_1m_output_tokens": 4},
+                        }
+                    ],
+                }
+            return payload, HASH, FETCHED
+
+    rows = collect_source(
+        "artificial-analysis",
+        RecordingTransport(),
+        "2026-11-06",
+        "2026-11-06",
+        env={"ARTIFICIAL_ANALYSIS_API_KEY": "secret"},
+        basket=["cheap", "expensive"],
+    )
+
+    assert [call[0] for call in calls] == [free, free]
+    assert [call[1] for call in calls] == [{"page": 1}, {"page": 2}]
+    assert [call[2]["x-api-key"] for call in calls] == ["secret", "secret"]
+    assert [row["series_id"] for row in rows] == ["stable-cheap-id", "stable-expensive-id"]
 
 
 def test_aa_missing_expensive_member_suppresses_entire_basket():

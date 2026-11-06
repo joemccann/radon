@@ -130,3 +130,54 @@ def test_claude_per_turn_output_config_on_system_message_carries_its_beta(monkey
                      "thinking-token-count-2026-05-13", "advanced-tool-use-2025-11-20", "effort-2025-11-24"]
     assert set(pinned_client) <= set(beta)
     assert len(beta) == len(set(beta))
+
+
+def _claude_stream():
+    return event({"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 0}}}) + event({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}) + event({"type": "message_stop"})
+
+
+def _claude_auto_request(**extra):
+    # Shape captured 2026-11-05 from the pinned Claude Code 2.1.311 bundle
+    # against a local fake upstream with `--permission-mode auto
+    # --output-format stream-json --verbose` (the Claude Security scan flags).
+    request = {"model": "claude-opus-5-5", "stream": True, "max_tokens": 64000,
+        "system": [{"type": "text", "text": engine._CLAUDE_CODE_SYSTEM_PREFIX}],
+        "messages": [{"role": "user", "content": "scan"}],
+        "thinking": {"type": "adaptive", "display": "updates"}, "output_config": {"effort": "medium"},
+        "context_management": {"edits": []}, "metadata": {"user_id": "u"}, "tools": []}
+    request.update(extra)
+    return request
+
+
+def test_claude_auto_mode_thinking_updates_carry_their_betas(monkeypatch):
+    # Without thinking-display-updates the API rejects the scan session:
+    # "thinking.adaptive.display: Input should be 'summarized', 'omitted'".
+    native = module(monkeypatch, {"anthropic"})
+    request = _claude_auto_request(safeguards={"mode": "auto"})
+    seen = []
+    native.complete({"protocol": "messages", "request": request, "stream": True}, post=lambda url, **kw: seen.append(kw) or Response(_claude_stream()), env={})
+    assert seen[0]["json"] == request
+    beta = seen[0]["headers"]["anthropic-beta"].split(",")
+    assert {"thinking-display-updates-2026-08-18", "afk-mode-2026-01-31", "dangerous-tool-use-2026-09-03"} <= set(beta)
+    assert len(beta) == len(set(beta))
+
+
+def test_claude_display_updates_without_safeguards_gets_only_display_betas(monkeypatch):
+    native = module(monkeypatch, {"anthropic"})
+    seen = []
+    native.complete({"protocol": "messages", "request": _claude_auto_request(), "stream": True}, post=lambda url, **kw: seen.append(kw) or Response(_claude_stream()), env={})
+    beta = set(seen[0]["headers"]["anthropic-beta"].split(","))
+    assert {"thinking-display-updates-2026-08-18", "afk-mode-2026-01-31"} <= beta
+    assert "dangerous-tool-use-2026-09-03" not in beta
+
+
+@pytest.mark.parametrize("thinking", [{"type": "adaptive", "display": "omitted"}, {"type": "adaptive"}, None])
+def test_claude_plain_sessions_never_send_auto_mode_betas(monkeypatch, thinking):
+    native = module(monkeypatch, {"anthropic"})
+    request = _claude_auto_request(thinking=thinking)
+    if thinking is None:
+        del request["thinking"]
+    seen = []
+    native.complete({"protocol": "messages", "request": request, "stream": True}, post=lambda url, **kw: seen.append(kw) or Response(_claude_stream()), env={})
+    beta = set(seen[0]["headers"]["anthropic-beta"].split(","))
+    assert not beta & {"thinking-display-updates-2026-08-18", "afk-mode-2026-01-31", "dangerous-tool-use-2026-09-03"}
