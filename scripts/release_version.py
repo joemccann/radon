@@ -24,7 +24,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-BASE_SHA = "eb5e52066462374b3426c0ec874c6c9024bb5b8b"
+BASE_SHA = "6f31eec6fec275e20cbde30aaf93f200a93b5c41"
 BASE_VERSION = (0, 7, 0)
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -166,7 +166,8 @@ def build_identity(repo: Path, channel: str) -> dict[str, str]:
 
 
 def ci_version(repo: Path, expected_sha: str) -> str:
-    """The exact build/tag label, including the existing no-history fallback."""
+    """The exact build/tag label. A base missing from history fails the build: the
+    package fallback froze production at 0.13.9 after a history rewrite."""
     if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
         raise ValueError("release identity requires a full lowercase SHA")
     head = _git(repo, "rev-parse", "HEAD")
@@ -178,6 +179,8 @@ def ci_version(repo: Path, expected_sha: str) -> str:
         raise ValueError("release identity requires canonical semver")
     if identity["sha"] != expected_sha[:12]:
         raise ValueError("build identity does not match the checked-out SHA")
+    if identity["source"] != "history":
+        raise ValueError(f"release base {base_sha()[:12]} is not an ancestor of HEAD; repin BASE_SHA")
     return version
 
 

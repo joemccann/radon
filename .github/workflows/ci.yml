@@ -1706,8 +1706,7 @@ jobs:
           set -euo pipefail
           version="$(python3 scripts/release_version.py --ci-version --expected-sha "$GITHUB_SHA")"
           tag="v${version}"
-          # An unchanged build label (including the no-history package fallback)
-          # keeps its existing tag; never retag an already published version.
+          # An unchanged build label keeps its existing tag; never retag an already published version.
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already tagged at $(git rev-list -n 1 "${tag}")"
             exit 0

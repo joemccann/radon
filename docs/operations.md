@@ -1335,11 +1335,11 @@ canonical semver and the exact checkout SHA; selector failure stops the step
 before output or tagging. The tag job runs after deployment succeeds, including
 when earlier test jobs were skipped, and never moves an existing tag.
 
-The original 0.7.0 history baseline remains unchanged. When that history is
-missing or disconnected after a history rewrite, the existing web `package.json`
-fallback labels both the built app and its tag. Package fields can lag earlier
-tags; this fallback does not reconstruct monotonic semver or restore purged
-objects. The exact SHA remains the deployment identity. For the exact privileged bootstrap,
+The 0.7.0 history baseline is pinned to `6f31eec6`, that commit's SHA on current
+main. When the baseline is missing or disconnected after a history rewrite,
+`--ci-version` fails, which stops the image build and the tag. Repin `BASE_SHA`
+to the rewritten commit. Only local builds fall back to the web `package.json`.
+The exact SHA remains the deployment identity. For the exact privileged bootstrap,
 recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.
