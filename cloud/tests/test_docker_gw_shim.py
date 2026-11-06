@@ -305,6 +305,34 @@ def test_a_cleared_hold_lets_compose_up_through(box) -> None:
     assert box.log.read_text(encoding="utf-8").strip().endswith("up -d")
 
 
+def test_flags_the_python_writer_produces_read_the_same_in_the_shim(box, monkeypatch) -> None:
+    """Parity: every flag ib_operator_hold writes, through set, compare-and-
+    clear and a refused clear, decides compose-up exactly as is_held does."""
+    monkeypatch.syspath_prepend(str(CLOUD.parent / "scripts"))
+    from utils import ib_operator_hold as hold
+
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_PATH", str(box.hold))
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_AUDIT", str(box.tmp / "audit.jsonl"))
+    monkeypatch.setenv("RADON_IB_OPERATOR_HOLD_OWNER_UID", str(os.getuid()))
+
+    def agree() -> None:
+        expected = 73 if hold.is_held() else 0
+        assert box.run("compose-up").returncode == expected
+
+    older = hold.set_hold("operator release", "ssh:test")
+    agree()
+    newer = hold.set_hold("IBKR session taken", "auto:ib-watchdog")
+    with pytest.raises(hold.HoldChanged):
+        hold.clear_hold("app:u", expected_id=older["id"])
+    agree()
+    hold.clear_hold("app:u", expected_id=newer["id"])
+    assert hold.is_held() is False
+    agree()
+    hold.set_hold("again", "ssh:test")
+    hold.clear_hold("ssh:test", expected_id=hold.ANY_HOLD)
+    agree()
+
+
 def test_release_verbs_stay_open_while_held(box) -> None:
     box.hold.write_text('{"held": true}\n', encoding="utf-8")
     assert box.run("compose-down").returncode == 0

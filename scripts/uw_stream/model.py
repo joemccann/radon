@@ -10,6 +10,25 @@ from typing import Any
 MAX_STATE_KEYS = 2048
 MAX_TRADE_TAIL = 100
 MAX_PERISCOPE_ROWS = 20_000
+# A gap inside the current connection keeps the stream degraded until this
+# long has passed with every channel acknowledged and frames still applying.
+GAP_RECOVERY_SECS = 60.0
+
+
+def settled_status(*, connected: bool, all_acknowledged: bool, gap_age: float | None) -> str:
+    """Stream status once the join handshake is over.
+
+    disconnected without a socket; degraded while any channel is unacknowledged
+    or a gap inside this connection is younger than GAP_RECOVERY_SECS; else live.
+    ``gap_age`` is None when no gap happened since connect.
+    """
+    if not connected:
+        return "disconnected"
+    if not all_acknowledged:
+        return "degraded"
+    if gap_age is not None and gap_age < GAP_RECOVERY_SECS:
+        return "degraded"
+    return "live"
 
 
 def iso(timestamp: float) -> str:
@@ -94,13 +113,32 @@ class Materializer:
             meta["gap_count"] += 1
             meta["complete"] = False
 
-    def _gap_since_connect(self) -> bool:
+    def _gap_age(self, now: float) -> float | None:
+        """Seconds since the last gap inside this connection, else None.
+
+        ``gaps`` is cumulative across restarts; only a gap at or after
+        connected_at counts. Per-channel gap_count/complete still disclose
+        the historical holes.
+        """
         gap_at = (self.state.get("last_gap") or {}).get("at")
+        if not gap_at:
+            return None
+        parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
         connected_at = self.state["connection"].get("connected_at")
-        if not gap_at or not connected_at:
-            return bool(gap_at)
-        parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parse(gap_at) >= parse(connected_at)
+        if connected_at and parse(gap_at) < parse(connected_at):
+            return None
+        return max(0.0, now - parse(gap_at))
+
+    def _settle(self, now: float) -> None:
+        """connecting | degraded -> settled_status(). Never moves a stream
+        out of disconnected or disabled (those belong to the collector)."""
+        if self.state["status"] not in {"connecting", "degraded", "live"}:
+            return
+        self.state["status"] = settled_status(
+            connected=self.state["connection"]["connected"],
+            all_acknowledged=all(m["acknowledged"] for m in self.state["channels"].values()),
+            gap_age=self._gap_age(now),
+        )
 
     def apply(self, channel: str, payload: dict, now: float, ingest_id: int) -> bool:
         if channel not in self.channels or not isinstance(payload, dict):
@@ -120,10 +158,7 @@ class Materializer:
             if not meta["acknowledged"]:
                 self.state["status"] = "degraded"
             elif self.state["connection"]["connected"] and all(m["acknowledged"] for m in self.state["channels"].values()):
-                # `gaps` is cumulative across restarts; only a gap inside this
-                # connection keeps it degraded. Per-channel gap_count/complete
-                # still disclose the historical holes.
-                self.state["status"] = "degraded" if self._gap_since_connect() else "live"
+                self._settle(now)
             return True
         if not meta["acknowledged"]:
             self.state["metrics"]["invalid"] += 1
@@ -213,6 +248,9 @@ class Materializer:
         while len(latest) > limit:
             del latest[next(iter(latest))]
             meta["retained_history_limited"] = True
+        if self.state["status"] == "degraded":
+            # Sustained healthy flow after a mid-connection gap recovers.
+            self._settle(now)
         return True
 
     def _periscope(self, channel: str, ticker: str, payload: dict, record: dict, now: float) -> bool:

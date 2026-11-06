@@ -507,8 +507,10 @@ class TestResponder:
             "SELECT status, attempts FROM watchdog_pages WHERE page_id=?", (pid,)
         ).fetchone() == ("pending", 1)
 
-        record_attempt_failure(pid, now=NOW, error="x")
-        status = record_attempt_failure(pid, now=NOW, error="x")
+        assert claim_page(pid, now=NOW, claim_token="tok-2")
+        record_attempt_failure(pid, now=NOW, error="x", claim_token="tok-2")
+        assert claim_page(pid, now=NOW, claim_token="tok-3")
+        status = record_attempt_failure(pid, now=NOW, error="x", claim_token="tok-3")
         assert status == "skipped"
         assert db_conn.execute(
             "SELECT status, attempts FROM watchdog_pages WHERE page_id=?", (pid,)

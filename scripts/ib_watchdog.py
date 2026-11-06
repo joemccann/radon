@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import signal
 import socket
@@ -595,6 +596,11 @@ class WatchdogState:
     # flag without one). Set once the HELD page is out; cleared, with one
     # "hold cleared" page, when the hold lifts.
     operator_hold_announced: str = ""
+    # Acquisition token (``acquired_at``) of the 2FA lease this watchdog took
+    # for its last Gateway restart; 0.0 when it holds none. Release binds to it
+    # so a late release cannot delete a newer lease taken after an orphan
+    # revoke (audit 2026-11-03 §1 #19).
+    lease_acquired_at: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -613,43 +619,145 @@ class WatchdogState:
             "pending_pool_reconnect": self.pending_pool_reconnect,
             "authenticated_recovery_count": self.authenticated_recovery_count,
             "quiet_degraded_since": self.quiet_degraded_since,
+            "lease_acquired_at": self.lease_acquired_at,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "WatchdogState":
+    def from_dict(cls, data: object, now: Optional[float] = None) -> "WatchdogState":
+        """Parse persisted state field by field; never raises.
+
+        The restart-storm caps fail toward "cap reached", never toward a reset:
+        a missing-but-unreadable or mistyped cap field saturates it (the
+        stuck-2FA rolling hour fills with ``now``, which ages out after one
+        window; the api-hang count sits at its cap until authenticated
+        recovery resets it, exactly as after three real restarts). Every other
+        bad field takes its default. Cross-field invariants are then enforced
+        by ``_enforce_invariants``.
+        """
+        now = time.time() if now is None else now
+        if not isinstance(data, dict):
+            return cls.unreadable(now)
+        state = cls()
+        state.degraded_count = _count_field(data, "degraded_count", 0)
+        state.last_restart_at = _float_field(data, "last_restart_at", 0.0)
+        state.last_outcome = _str_field(data, "last_outcome", "init")
+        state.stuck_2fa_count = _count_field(data, "stuck_2fa_count", 0)
         history = data.get("stuck_2fa_restart_history", [])
+        if isinstance(history, list) and all(_is_finite_number(t) for t in history):
+            state.stuck_2fa_restart_history = [float(t) for t in history]
+        else:
+            LOG.warning("state field stuck_2fa_restart_history unreadable; cap reached")
+            state.stuck_2fa_restart_history = _saturated_stuck_2fa_history(now)
+        cap = _count_field(data, "api_hang_restart_count", None)
+        if cap is None:
+            LOG.warning("state field api_hang_restart_count unreadable; cap reached")
+            cap = API_HANG_MAX_CONSECUTIVE_RESTARTS
+        state.api_hang_restart_count = cap
+        state.awaiting_2fa_alerted = _bool_field(data, "awaiting_2fa_alerted", False)
+        state.pending_pool_reconnect = _bool_field(data, "pending_pool_reconnect", False)
+        state.authenticated_recovery_count = _count_field(data, "authenticated_recovery_count", 0)
+        state.quiet_degraded_since = _float_field(data, "quiet_degraded_since", 0.0)
+        since = data.get("login_throttle_since", 0.0)
+        if since is None or _is_finite_number(since):
+            state.login_throttle_since = max(0.0, float(since or 0.0))
+        else:
+            # An episode was recorded but its start is unreadable: restart the
+            # quiet period now rather than allow a login into a live throttle.
+            LOG.warning("state field login_throttle_since unreadable; quiet period restarts")
+            state.login_throttle_since = now
+        state.login_throttle_line = _str_field(data, "login_throttle_line", "")
+        state.login_throttle_retries = _count_field(data, "login_throttle_retries", 0)
+        state.login_throttle_alerted = _bool_field(data, "login_throttle_alerted", False)
+        state.operator_hold_announced = _str_field(data, "operator_hold_announced", "")
+        state.lease_acquired_at = _float_field(data, "lease_acquired_at", 0.0)
+        state._enforce_invariants()
+        return state
+
+    @classmethod
+    def unreadable(cls, now: float) -> "WatchdogState":
+        """State for a file that exists but cannot be parsed: every counter at
+        its default except the restart-storm caps, which read as reached."""
         return cls(
-            degraded_count=int(data.get("degraded_count", 0)),
-            last_restart_at=float(data.get("last_restart_at", 0.0)),
-            last_outcome=str(data.get("last_outcome", "init")),
-            stuck_2fa_count=int(data.get("stuck_2fa_count", 0)),
-            stuck_2fa_restart_history=[float(t) for t in history]
-            if isinstance(history, list)
-            else [],
-            api_hang_restart_count=int(data.get("api_hang_restart_count", 0)),
-            awaiting_2fa_alerted=bool(data.get("awaiting_2fa_alerted", False)),
-            pending_pool_reconnect=bool(data.get("pending_pool_reconnect", False)),
-            authenticated_recovery_count=int(
-                data.get("authenticated_recovery_count", 0)
-            ),
-            quiet_degraded_since=float(data.get("quiet_degraded_since", 0.0)),
-            login_throttle_since=float(data.get("login_throttle_since", 0.0)),
-            login_throttle_line=str(data.get("login_throttle_line", "")),
-            login_throttle_retries=int(data.get("login_throttle_retries", 0)),
-            login_throttle_alerted=bool(data.get("login_throttle_alerted", False)),
-            operator_hold_announced=str(data.get("operator_hold_announced", "")),
+            last_outcome="state_unreadable",
+            last_restart_at=now,
+            stuck_2fa_restart_history=_saturated_stuck_2fa_history(now),
+            api_hang_restart_count=API_HANG_MAX_CONSECUTIVE_RESTARTS,
         )
 
+    def _enforce_invariants(self) -> None:
+        """Cross-episode invariants. A field that only means something inside
+        an episode is cleared when that episode is not open."""
+        if not self.pending_pool_reconnect:
+            # Confirmation samples only count toward a pending reconnect.
+            self.authenticated_recovery_count = 0
+        if self.login_throttle_since <= 0:
+            # No login-throttle episode: none of its bookkeeping survives.
+            self.login_throttle_since = 0.0
+            self.login_throttle_line = ""
+            self.login_throttle_retries = 0
+            self.login_throttle_alerted = False
+        self.quiet_degraded_since = max(0.0, self.quiet_degraded_since)
+        self.lease_acquired_at = max(0.0, self.lease_acquired_at)
 
-def load_state(path: Path) -> WatchdogState:
-    if not path.exists():
-        return WatchdogState()
+
+def _is_finite_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _count_field(data: dict, key: str, default):
+    """A non-negative int count, or ``default`` when absent or unreadable."""
+    if key not in data:
+        return 0 if default is None else default
+    value = data[key]
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    if _is_finite_number(value) and float(value).is_integer() and value >= 0:
+        return int(value)
+    if default is not None:
+        LOG.warning("state field %s unreadable (%r); using %r", key, value, default)
+    return default
+
+
+def _float_field(data: dict, key: str, default: float) -> float:
+    value = data.get(key, default)
+    if _is_finite_number(value):
+        return float(value)
+    LOG.warning("state field %s unreadable (%r); using %r", key, value, default)
+    return default
+
+
+def _str_field(data: dict, key: str, default: str) -> str:
+    value = data.get(key, default)
+    return value if isinstance(value, str) else default
+
+
+def _bool_field(data: dict, key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    return value if isinstance(value, bool) else default
+
+
+def _saturated_stuck_2fa_history(now: float) -> list:
+    return [now] * STUCK_2FA_MAX_RESTARTS_PER_HOUR
+
+
+def load_state(path: Path, now: Optional[float] = None) -> WatchdogState:
+    """Load the persisted state. A missing file is a clean slate; a file that
+    exists but cannot be read or parsed keeps the restart-storm caps reached
+    (``WatchdogState.unreadable``) instead of resetting them."""
+    now = time.time() if now is None else now
     try:
         with path.open() as fh:
-            return WatchdogState.from_dict(json.load(fh))
-    except (json.JSONDecodeError, OSError) as exc:
-        LOG.warning("state load failed (%s); resetting", exc)
+            raw = json.load(fh)
+    except FileNotFoundError:
         return WatchdogState()
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError, ValueError) as exc:
+        LOG.warning("state load failed (%s); restart caps held at reached", exc)
+        return WatchdogState.unreadable(now)
+    return WatchdogState.from_dict(raw, now)
 
 
 def save_state(path: Path, state: WatchdogState) -> None:
@@ -663,7 +771,9 @@ def save_state(path: Path, state: WatchdogState) -> None:
 # --- Restart action ---------------------------------------------------------
 
 
-def trigger_restart(unit: str, dry_run: bool = False) -> bool:
+def trigger_restart(
+    unit: str, dry_run: bool = False, *, lease_acquired_at: Optional[float] = None
+) -> bool:
     """Run Gateway recovery or restart one non-Gateway unit.
 
     The fixed preheld adapter owns the Gateway cycle. Wait for the oneshot so
@@ -671,6 +781,9 @@ def trigger_restart(unit: str, dry_run: bool = False) -> bool:
     otherwise failed helpers consume the bounded restart budget while the
     broker remains down. Other unit restarts route through the locked,
     root-owned operator instead of broad systemctl privilege.
+
+    ``lease_acquired_at`` is the token of the lease this restart was taken
+    under; a failed handoff rolls back that lease and no other.
     """
     is_preheld_gateway = unit == DEFAULT_RESTART_UNIT
     if is_preheld_gateway:
@@ -688,29 +801,61 @@ def trigger_restart(unit: str, dry_run: bool = False) -> bool:
     except subprocess.CalledProcessError as exc:
         LOG.error("restart handoff failed: rc=%s stderr=%s", exc.returncode, exc.stderr)
         if is_preheld_gateway:
-            _release_preheld_lease()
+            _release_preheld_lease(lease_acquired_at)
         return False
     except subprocess.TimeoutExpired:
         LOG.error("restart handoff timed out after %ss", timeout)
         if is_preheld_gateway:
-            _release_preheld_lease()
+            _release_preheld_lease(lease_acquired_at)
         return False
 
 
-def _release_preheld_lease() -> None:
+def _release_preheld_lease(lease_acquired_at: Optional[float] = None) -> None:
     """Roll the preheld Gateway lease back after a failed handoff, bounded.
 
     The exclusive guard spans ``_write_lock_file``'s two fsyncs, so an
     unbounded release here wedges the oneshot on a stalled disk. The lease
     still auto-expires at its TTL if the guard is unavailable. T-200.
+    Bound to ``lease_acquired_at`` when known, so a newer lease taken after an
+    orphan revoke survives (audit 2026-11-03 §1 #19).
     """
     try:
         ib_2fa_lock.release_2fa_push_lock(
             expected_holder=WATCHDOG_LOCK_HOLDER,
+            expected_acquired_at=lease_acquired_at,
             guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
         )
     except ib_2fa_lock.GuardLockTimeout as exc:
         LOG.warning("preheld lease rollback deferred: %s", exc)
+
+
+def _restart_under_lease(
+    state: "WatchdogState", unit: str, dry_run: bool, lease: ib_2fa_lock.PushLock
+) -> bool:
+    """Restart the Gateway under ``lease`` and remember its token for release.
+    A failed handoff already rolled the lease back, so no token is kept."""
+    ok = trigger_restart(unit, dry_run=dry_run, lease_acquired_at=lease.acquired_at)
+    state.lease_acquired_at = lease.acquired_at if ok else 0.0
+    return ok
+
+
+def _release_watchdog_lease(state: "WatchdogState") -> None:
+    """Release the lease this watchdog took for its last restart, bound to its
+    token. Without a token there is nothing of ours to release: a holder-name
+    match alone could delete a newer lease. A lease taken before tokens were
+    recorded simply ages out at its TTL."""
+    if state.lease_acquired_at <= 0:
+        return
+    try:
+        ib_2fa_lock.release_2fa_push_lock(
+            expected_holder=WATCHDOG_LOCK_HOLDER,
+            expected_acquired_at=state.lease_acquired_at,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        LOG.warning("watchdog lease release deferred: %s", exc)
+        return
+    state.lease_acquired_at = 0.0
 
 
 # --- service_health write ---------------------------------------------------
@@ -1002,7 +1147,7 @@ def _handle_stuck_awaiting_2fa(
         state.stuck_2fa_count,
         restart_unit,
     )
-    ok = trigger_restart(restart_unit, dry_run=dry_run)
+    ok = _restart_under_lease(state, restart_unit, dry_run, lock_now)
     restart_at = clock()
     state.last_restart_at = restart_at
     # Record this restart in the rolling-hour history (only on a real attempt)
@@ -1328,7 +1473,7 @@ def _handle_login_throttled(
         restart_unit,
     )
     with _timed("restart"):
-        ok = trigger_restart(restart_unit, dry_run=dry_run)
+        ok = _restart_under_lease(state, restart_unit, dry_run, lock_now)
     state.login_throttle_retries += 1
     state.login_throttle_since = now
     state.last_restart_at = now
@@ -1545,7 +1690,7 @@ def _advance_api_hang(
         restart_unit,
     )
     with _timed("restart"):
-        ok = trigger_restart(restart_unit, dry_run=dry_run)
+        ok = _restart_under_lease(state, restart_unit, dry_run, lock_now)
     state.last_restart_at = clock()
     # Count the attempt toward the consecutive cap/backoff regardless of
     # outcome; only recovery to `authenticated` re-arms the ladder.
@@ -1811,7 +1956,7 @@ def _run_cycle_steps(
     clock: callable,
     utcnow: Optional[Callable[[], datetime]],
 ) -> WatchdogState:
-    state = load_state(state_path)
+    state = load_state(state_path, now=clock())
     hold = ib_operator_hold.hold_state()
     if hold["held"]:
         return _stand_down_for_operator_hold(state, state_path, hold)
@@ -2030,13 +2175,7 @@ def _run_cycle_steps(
                 )
                 return state
             state.api_hang_restart_count = 0
-            try:
-                ib_2fa_lock.release_2fa_push_lock(
-                    expected_holder=WATCHDOG_LOCK_HOLDER,
-                    guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
-                )
-            except ib_2fa_lock.GuardLockTimeout as exc:
-                LOG.warning("watchdog lease release deferred: %s", exc)
+            _release_watchdog_lease(state)
             return _reconnect_pool_after_recovery(
                 state=state,
                 state_path=state_path,
@@ -2048,13 +2187,7 @@ def _run_cycle_steps(
         if health.auth_state == "authenticated":
             state.api_hang_restart_count = 0
             state.authenticated_recovery_count = 0
-            try:
-                ib_2fa_lock.release_2fa_push_lock(
-                    expected_holder=WATCHDOG_LOCK_HOLDER,
-                    guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
-                )
-            except ib_2fa_lock.GuardLockTimeout as exc:
-                LOG.warning("watchdog lease release deferred: %s", exc)
+            _release_watchdog_lease(state)
 
         state.last_outcome = f"healthy:{health.service_state}/{health.auth_state}"
         save_state(state_path, state)

@@ -53,19 +53,6 @@ function isCacheBehindPortfolio(
 }
 
 /**
- * Hard floor between background rebuilds, deliberately independent of WHY one
- * was judged necessary. A rebuild runs a full Flex SendRequest plus polls
- * against a single query id, and IBKR answers a request storm with a 24h to
- * 168h throttle embargo — this repo has already taken one. FastAPI's own
- * `_running_build` guard only dedupes CONCURRENT builds, so sequential GETs
- * need the floor on the caller side, where a freshness bug can no longer
- * reopen the loop.
- */
-const MIN_REBUILD_INTERVAL_MS = 5 * 60_000;
-
-let lastBackgroundRebuildAtMs = 0;
-
-/**
  * Freshness comes from the payload's own full-ISO `generated_at` (payload v2),
  * falling back to the legacy `last_sync` and only then to the row key. Two
  * writers wrote `taken_at` in two shapes; a date-only key reads as ~midnight

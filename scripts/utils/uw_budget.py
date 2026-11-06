@@ -53,6 +53,25 @@ def quota_date(now: Optional[datetime] = None) -> str:
     return local.date().isoformat()
 
 
+def next_reset(now: Optional[datetime] = None) -> datetime:
+    """The 20:00 ET quota reset strictly after ``now``.
+
+    The one copy of the reset rule: the governor's embargo, the writers'
+    sidecar deadline and the budget's quota day all derive from it.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local = now.astimezone(ET)
+    reset = local.replace(hour=RESET_HOUR_ET, minute=0, second=0, microsecond=0)
+    if reset <= local:
+        reset = (local + timedelta(days=1)).replace(
+            hour=RESET_HOUR_ET, minute=0, second=0, microsecond=0
+        )
+    return reset
+
+
 def _path(path: Optional[Path | str] = None) -> Path:
     return Path(path) if path is not None else BUDGET_PATH
 
@@ -269,11 +288,32 @@ def _configured_limit() -> int | None:
         return 0
 
 
+def _admission_used() -> int:
+    """The governor's reserved-or-observed count (admission's own counter)."""
+    from utils.uw_governor import snapshot
+    state = snapshot()
+    if not state.get("available"):
+        return DAILY_LIMIT  # Admission cannot account for spend: fail closed.
+    try:
+        return max(0, int(state.get("reserved_or_observed") or 0))
+    except (TypeError, ValueError):
+        return DAILY_LIMIT
+
+
+def spent(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int:
+    """One counter for the scan brake and admission: max(budget file, governor).
+
+    The file sees every wire hit (Next.js mirrors included); the governor sees
+    every reservation, before the wire. Neither alone is the account's spend.
+    """
+    return max(used(path=path, now=now), _admission_used())
+
+
 def remaining(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int | float:
     if _read_unlocked(_path(path)).get("_unreadable"):
         return 0
     cap = _configured_limit()
-    return math.inf if cap is None else max(0, cap - used(path=path, now=now))
+    return math.inf if cap is None else max(0, cap - spent(path=path, now=now))
 
 
 def should_block_universe_scan(
@@ -282,7 +322,7 @@ def should_block_universe_scan(
     if _read_unlocked(_path(path)).get("_unreadable"):
         return True
     cap = _configured_limit()
-    return cap is not None and used(path=path, now=now) >= int(cap * 0.5)
+    return cap is not None and spent(path=path, now=now) >= int(cap * 0.5)
 
 
 def usage_snapshot(
@@ -298,7 +338,7 @@ def usage_snapshot(
         "state_unreadable": unreadable,
         "used": hits,
         "limit": cap,
-        "remaining": None if cap is None and not unreadable else (0 if unreadable else max(0, cap - hits)),
+        "remaining": None if cap is None and not unreadable else (0 if unreadable else max(0, cap - spent(path=path, now=now))),
         "reset_et": f"{RESET_HOUR_ET:02d}:00",
         "quota_day": quota_date(now),
         "universe_scans_blocked": should_block_universe_scan(path=path, now=now),

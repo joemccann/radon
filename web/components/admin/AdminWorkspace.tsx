@@ -2,7 +2,7 @@
 
 import RequestError from "@/components/RequestError";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdminHealthPayload,
   EdgeHealthStatus,
@@ -55,6 +55,41 @@ const SERVICES_POLL_MS = 5_000;
 const SERVICES_TRANSITIONAL_POLL_MS = 2_000;
 // How long to keep the success-flash class on the row that was just acted on.
 const FLASH_DURATION_MS = 2_000;
+const GATEWAY_UNIT = "radon-ib-gateway.service";
+const COMMAND_REFUSED_DETAIL = "Not sent. Another command is in progress.";
+
+/** Names a command for the action log when the shared lock refuses it. */
+type CommandLabel = Pick<RestartLogEntry, "action" | "target">;
+
+/**
+ * Single-flight runner for one polled source: idle | running | rerunQueued.
+ * A scheduled poll is skipped while a fetch is in flight. An explicit refresh
+ * (after an action, or Refresh status) queues exactly one rerun, so the panel
+ * is never left showing a response that started before the action.
+ */
+type FlightState = "idle" | "running" | "rerunQueued";
+
+function useSingleFlight(load: () => Promise<void>): { poll: () => void; refresh: () => void } {
+  const state = useRef<FlightState>("idle");
+  const run = useCallback(async (mode: "poll" | "refresh") => {
+    if (state.current !== "idle") {
+      if (mode === "refresh") state.current = "rerunQueued";
+      return;
+    }
+    state.current = "running";
+    try {
+      for (;;) {
+        await load();
+        // A refresh may have queued a rerun while load() was awaiting.
+        if ((state.current as FlightState) !== "rerunQueued") break;
+        state.current = "running";
+      }
+    } finally {
+      state.current = "idle";
+    }
+  }, [load]);
+  return useMemo(() => ({ poll: () => { void run("poll"); }, refresh: () => { void run("refresh"); } }), [run]);
+}
 
 /**
  * Shell for the /admin route. Owns:
@@ -71,12 +106,6 @@ const FLASH_DURATION_MS = 2_000;
 export default function AdminWorkspace() {
   const commandLock = useRef(false);
   const [commandPending, setCommandPending] = useState(false);
-  const runCommand = async <T,>(command: () => Promise<T>): Promise<T | false> => {
-    if (commandLock.current) return false;
-    commandLock.current = true;
-    setCommandPending(true);
-    try { return await command(); } finally { commandLock.current = false; setCommandPending(false); }
-  };
   const [controlsOpen, setControlsOpen] = useState<"gateway" | "services" | null>(null);
   const [health, setHealth] = useState<AdminHealthPayload | null>(null);
   const [telemetryErrors, setTelemetryErrors] = useState<Record<string, unknown>>({});
@@ -112,19 +141,10 @@ export default function AdminWorkspace() {
   // on the matching ServiceRow.
   const [flashTarget, setFlashTarget] = useState<FlashTarget | null>(null);
 
-  // Lock against concurrent polls; the panel hits localhost FastAPI so we
-  // don't want overlapping fetches when a card re-renders.
-  const healthInflightRef = useRef(false);
-  const servicesInflightRef = useRef(false);
-  const edgeInflightRef = useRef(false);
-  const reliabilityInflightRef = useRef(false);
-  const hostMetricsInflightRef = useRef(false);
-  const sloInflightRef = useRef(false);
   const flashTimerRef = useRef<number | null>(null);
 
-  const fetchHealth = useCallback(async () => {
-    if (healthInflightRef.current) return;
-    healthInflightRef.current = true;
+  // Each source runs single-flight (useSingleFlight) so polls never overlap.
+  const loadHealth = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/health", { cache: "no-store" });
       if (!res.ok) {
@@ -142,13 +162,10 @@ export default function AdminWorkspace() {
       setHealthError(err instanceof Error ? err.message : "health probe failed");
     } finally {
       setHealthLoading(false);
-      healthInflightRef.current = false;
     }
   }, []);
 
-  const fetchServices = useCallback(async () => {
-    if (servicesInflightRef.current) return;
-    servicesInflightRef.current = true;
+  const loadServices = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/services", { cache: "no-store" });
       if (!res.ok) {
@@ -164,16 +181,13 @@ export default function AdminWorkspace() {
       setServicesError(err instanceof Error ? err.message : "service list failed");
     } finally {
       setServicesLoading(false);
-      servicesInflightRef.current = false;
     }
   }, []);
 
   // Edge health (the isolated daemon's aggregate, via the always-200 proxy):
   // service_health rows + the off-box probe. Always returns 200 with a
   // `reachable` flag, so a daemon/edge outage is data, not an exception.
-  const fetchEdge = useCallback(async () => {
-    if (edgeInflightRef.current) return;
-    edgeInflightRef.current = true;
+  const loadEdge = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/edge-health", { cache: "no-store" });
       if (!res.ok) throw new Error("Edge observation unavailable");
@@ -187,16 +201,13 @@ export default function AdminWorkspace() {
       setEdgeReachable(false);
     } finally {
       setEdgeLoaded(true);
-      edgeInflightRef.current = false;
     }
   }, []);
 
   // The 7-day service_health_events history behind the uptime / MTTR /
   // transitions / deploy tiles. The route is always-200 (missing table or
   // unreachable DB is data — `missing: true` — not an exception).
-  const fetchReliability = useCallback(async () => {
-    if (reliabilityInflightRef.current) return;
-    reliabilityInflightRef.current = true;
+  const loadReliability = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/reliability", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -208,8 +219,6 @@ export default function AdminWorkspace() {
       setTelemetryErrors(previous => ({ ...previous, "reliability": error }));
       // Keep the last good payload; the tiles degrade to "--" only when
       // nothing has ever loaded.
-    } finally {
-      reliabilityInflightRef.current = false;
     }
   }, []);
 
@@ -217,9 +226,7 @@ export default function AdminWorkspace() {
   // (DUR-12). Always-200 route: a missing table or unreachable DB is data
   // (`missing: true`), not an exception. Minutely samples + a 60s poll keep
   // the strip one sample behind at worst.
-  const fetchHostMetrics = useCallback(async () => {
-    if (hostMetricsInflightRef.current) return;
-    hostMetricsInflightRef.current = true;
+  const loadHostMetrics = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/host-metrics", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -230,17 +237,13 @@ export default function AdminWorkspace() {
     } catch (error) {
       setTelemetryErrors(previous => ({ ...previous, "host-metrics": error }));
       // Keep the last good payload; the tiles flag staleness themselves.
-    } finally {
-      hostMetricsInflightRef.current = false;
     }
   }, []);
 
   // The 7-day external_probe_runs history behind the SLO attainment tiles
   // (DUR-16). Always-200 route: a missing table or unreachable DB is data
   // (`missing: true`), not an exception.
-  const fetchSlo = useCallback(async () => {
-    if (sloInflightRef.current) return;
-    sloInflightRef.current = true;
+  const loadSlo = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/slo", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -252,40 +255,49 @@ export default function AdminWorkspace() {
       setTelemetryErrors(previous => ({ ...previous, "slo": error }));
       // Keep the last good payload; the tiles degrade to "--" only when
       // nothing has ever loaded.
-    } finally {
-      sloInflightRef.current = false;
     }
   }, []);
+
+  const healthFlight = useSingleFlight(loadHealth);
+  const servicesFlight = useSingleFlight(loadServices);
+  const edgeFlight = useSingleFlight(loadEdge);
+  const reliabilityFlight = useSingleFlight(loadReliability);
+  const hostMetricsFlight = useSingleFlight(loadHostMetrics);
+  const sloFlight = useSingleFlight(loadSlo);
+  // Explicit refreshes (post-action, Refresh status) queue behind an
+  // in-flight poll instead of being dropped.
+  const fetchHealth = healthFlight.refresh;
+  const fetchServices = servicesFlight.refresh;
+  const fetchEdge = edgeFlight.refresh;
 
   // True while any visible unit is in a transitional state — drives a faster
   // poll cadence so the operator sees activating -> active without waiting.
   const hasTransitionalUnit = hasTransitionalRow(services);
 
   useEffect(() => {
-    void fetchHealth();
-    void fetchServices();
-    void fetchEdge();
-    void fetchReliability();
-    void fetchHostMetrics();
-    void fetchSlo();
-    const healthId = window.setInterval(fetchHealth, HEALTH_POLL_MS);
-    const servicesInterval = hasTransitionalUnit
-      ? SERVICES_TRANSITIONAL_POLL_MS
-      : SERVICES_POLL_MS;
-    const servicesId = window.setInterval(fetchServices, servicesInterval);
-    const edgeId = window.setInterval(fetchEdge, EDGE_POLL_MS);
-    const reliabilityId = window.setInterval(fetchReliability, RELIABILITY_POLL_MS);
-    const hostMetricsId = window.setInterval(fetchHostMetrics, RELIABILITY_POLL_MS);
-    const sloId = window.setInterval(fetchSlo, RELIABILITY_POLL_MS);
+    const flights = [healthFlight, servicesFlight, edgeFlight, reliabilityFlight, hostMetricsFlight, sloFlight];
+    for (const flight of flights) flight.poll();
+    const intervals = [
+      window.setInterval(healthFlight.poll, HEALTH_POLL_MS),
+      window.setInterval(edgeFlight.poll, EDGE_POLL_MS),
+      window.setInterval(reliabilityFlight.poll, RELIABILITY_POLL_MS),
+      window.setInterval(hostMetricsFlight.poll, RELIABILITY_POLL_MS),
+      window.setInterval(sloFlight.poll, RELIABILITY_POLL_MS),
+    ];
     return () => {
-      window.clearInterval(healthId);
-      window.clearInterval(servicesId);
-      window.clearInterval(edgeId);
-      window.clearInterval(reliabilityId);
-      window.clearInterval(hostMetricsId);
-      window.clearInterval(sloId);
+      for (const id of intervals) window.clearInterval(id);
     };
-  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, fetchHostMetrics, fetchSlo, hasTransitionalUnit]);
+  }, [healthFlight, servicesFlight, edgeFlight, reliabilityFlight, hostMetricsFlight, sloFlight]);
+
+  // Only the services cadence follows the transitional flag; retuning it
+  // neither refetches nor reschedules the other sources.
+  useEffect(() => {
+    const servicesId = window.setInterval(
+      servicesFlight.poll,
+      hasTransitionalUnit ? SERVICES_TRANSITIONAL_POLL_MS : SERVICES_POLL_MS,
+    );
+    return () => window.clearInterval(servicesId);
+  }, [servicesFlight, hasTransitionalUnit]);
 
   // 1s ticker so the "updated Ns ago" indicator counts up between polls.
   useEffect(() => {
@@ -309,6 +321,19 @@ export default function AdminWorkspace() {
     setActionError(entry.ok ? null : entry);
     setLog((prev) => [entry, ...prev].slice(0, 25));
   }, []);
+
+  // One command at a time across gateway, service and trading controls. A
+  // refused command resolves `false`; a labelled one is also logged so the
+  // operator never sees a confirmation close with nothing recorded.
+  const runCommand = async <T,>(command: () => Promise<T>, label?: CommandLabel): Promise<T | false> => {
+    if (commandLock.current) {
+      if (label) appendLog({ at: new Date().toISOString(), ...label, ok: false, detail: COMMAND_REFUSED_DETAIL });
+      return false;
+    }
+    commandLock.current = true;
+    setCommandPending(true);
+    try { return await command(); } finally { commandLock.current = false; setCommandPending(false); }
+  };
 
   const forcePush = useCallback(async () => {
     const at = new Date().toISOString();
@@ -580,15 +605,15 @@ export default function AdminWorkspace() {
         <AdminControlDialog open={controlsOpen === "gateway"} onClose={() => setControlsOpen(null)} title="Gateway controls" id="gateway-controls">
               <Ib2faControls
                 health={health}
-                onForcePush={async () => { await runCommand(forcePush); }}
-                onResetBackoff={async () => { await runCommand(resetBackoff); }}
-                onRestartStack={() => runCommand(restartStack)}
+                onForcePush={async () => { await runCommand(forcePush, { action: "force-2fa", target: "ib-gateway" }); }}
+                onResetBackoff={async () => { await runCommand(resetBackoff, { action: "reset-backoff", target: "ib-gateway" }); }}
+                onRestartStack={() => runCommand(restartStack, { action: "stack-restart", target: "all radon-*" })}
                 gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
                 servicesSupported={services?.supported ?? false}
                 hostRole={services?.host_role ?? health?.host_role}
-                onStopGateway={() => runCommand(stopGateway)}
-                onStartGateway={() => runCommand(startGateway)}
-                onRestartGateway={() => runCommand(() => runServiceAction("radon-ib-gateway.service", "restart"))}
+                onStopGateway={() => runCommand(stopGateway, { action: "service-action", target: `${GATEWAY_UNIT} stop` })}
+                onStartGateway={() => runCommand(startGateway, { action: "service-action", target: `${GATEWAY_UNIT} start` })}
+                onRestartGateway={() => runCommand(() => runServiceAction(GATEWAY_UNIT, "restart"), { action: "service-action", target: `${GATEWAY_UNIT} restart` })}
                 externalPending={commandPending}
                 apiUnreachable={servicesError != null && healthError != null}
                 stackActionContainer={stackActionContainer}
@@ -605,7 +630,7 @@ export default function AdminWorkspace() {
         <AdminControlDialog open={controlsOpen === "services"} onClose={() => setControlsOpen(null)} title="Service controls" id="service-controls">
           <p className={styles.controlDescription}>Start, restart, or stop an individual service. Gateway lifecycle controls are available separately.</p>
           <div className={styles.stackActions} ref={setStackActionContainer} />
-          <ServiceControlPanel services={services} loading={servicesLoading} error={servicesError} observationCurrent={isAdminObservationCurrent(sources.services, nowTick)} externalPending={commandPending} onAction={async (unit, action) => { await runCommand(() => runServiceAction(unit, action)); }} flashTarget={flashTarget} />
+          <ServiceControlPanel services={services} loading={servicesLoading} error={servicesError} observationCurrent={isAdminObservationCurrent(sources.services, nowTick)} externalPending={commandPending} onAction={async (unit, action) => { await runCommand(() => runServiceAction(unit, action), { action: "service-action", target: `${unit} ${action}` }); }} flashTarget={flashTarget} />
         </AdminControlDialog>
 
         <div className={styles.secondaryGrid}>

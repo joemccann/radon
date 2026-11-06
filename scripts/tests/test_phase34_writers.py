@@ -263,6 +263,15 @@ class _AutocommitFlakyDb:
             )
             """
         )
+        self.conn.execute(  # replace_open_orders_for_session claims its snapshot slot (C3)
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+              key         TEXT PRIMARY KEY,
+              value       TEXT NOT NULL,
+              updated_at  TEXT NOT NULL
+            )
+            """
+        )
         self.fail_on_execute = fail_on_execute
         self.calls = 0
 
@@ -298,7 +307,7 @@ class TestReplaceOpenOrdersAtomicity:
         return writer_mod
 
     def test_failure_on_first_write_statement_keeps_prior_snapshot(self, monkeypatch):
-        db = _AutocommitFlakyDb(fail_on_execute=1)
+        db = _AutocommitFlakyDb(fail_on_execute=3)  # 1-2: snapshot claim; 3: upsert
         self._seed(db)
         writer_mod = self._patched_writer(monkeypatch, db)
 
@@ -311,7 +320,7 @@ class TestReplaceOpenOrdersAtomicity:
         )
 
     def test_failure_mid_replace_never_leaves_the_table_empty(self, monkeypatch):
-        db = _AutocommitFlakyDb(fail_on_execute=2)
+        db = _AutocommitFlakyDb(fail_on_execute=4)  # 4: the delete, after the upsert
         self._seed(db)
         writer_mod = self._patched_writer(monkeypatch, db)
 

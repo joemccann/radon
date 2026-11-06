@@ -2,7 +2,7 @@
 
 import ErrorToast from "@/components/ErrorToast";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import type { OrdersData, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -36,6 +36,7 @@ import {
 import OrderTypeToggle from "@/components/OrderTypeToggle";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { buildQuoteTelemetryModel, comboQuotePriceData, oldestQuoteTimestamp } from "@/lib/quoteTelemetry";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 
 function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): NakedShortPortfolio {
   if (!portfolio) return { positions: [] };
@@ -156,12 +157,13 @@ export default function PositionTradeTicket({
   const [orderType, setOrderType] = useState<IbOrderType>("LMT");
   const [stopPrice, setStopPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // `loading` is state and invisible to a second call in the same tick; the
+  // ref is what actually stops a double-send (R-281).
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
 
-  const reset = () => { setConfirmStep(false); setRiskState(null); };
 
   const { bid, ask, mid, asOf, priceData: legPriceData } = useTargetQuote(position, prices, target);
 
@@ -198,6 +200,20 @@ export default function PositionTradeTicket({
     [isValid, position, target, action, parsedQty, riskExecutionPrice, tif, bid, ask, underlyingSpot],
   );
 
+  // The exact request transmit sends. BAG legs and ratios derive from the
+  // live `position`, so the confirm step arms for this body: a polled change
+  // to the held legs disarms instead of transmitting unreviewed ratios.
+  const requestBody = useMemo(() => {
+    if (!built) return null;
+    const extra = !isComboTarget ? ibPlaceFields(orderType, parsedPrice, parsedStop) : {};
+    const body: Record<string, unknown> = { ...built.payload, ...extra };
+    if (orderType === "STP") delete body.limitPrice;
+    return body;
+  }, [built, isComboTarget, orderType, parsedPrice, parsedStop]);
+  const payloadKey = requestBody ? canonicalPayloadKey({ url: "/api/orders/place", body: requestBody }) : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+  const reset = () => { disarm(); setRiskState(null); };
+
   const nakedShortWarning = useMemo(() => {
     if (!built) return null;
     const res = checkNakedShortRisk(built.payload as OrderPayload, toNakedShortPortfolio(portfolio));
@@ -223,28 +239,26 @@ export default function PositionTradeTicket({
 
   const handlePlace = useCallback(async () => {
     if (!isValid) return;
-    if (!confirmStep) { setConfirmStep(true); return; }
-    if (!built) return;
+    if (!confirmStep) { arm(); return; }
+    if (!built || !requestBody) return;
     if (!okToSubmit) return;
     // Re-evaluate age on the click: a ticket can sit idle after review.
     const currentQuoteGate = quoteSubmitGate({ quoteTimestamp: asOf, feedConnected });
     if (!currentQuoteGate.open) { setError(currentQuoteGate.reason); return; }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
       const guard = checkNakedShortRisk(built.payload as OrderPayload, toNakedShortPortfolio(portfolio));
       if (!guard.allowed) {
         setError(guard.reason ?? "Order blocked: naked short exposure");
-        setLoading(false);
         return;
       }
-      const extra = !isComboTarget ? ibPlaceFields(orderType, parsedPrice, parsedStop) : {};
-      const payload = { ...built.payload, ...extra };
-      if (orderType === "STP") delete payload.limitPrice;
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestBody),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -255,16 +269,17 @@ export default function PositionTradeTicket({
           `${action} ${parsedQty}x ${position.ticker} ${subjectLabel} @ ${fmtSignedPrice(riskExecutionPrice)}`,
         );
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
         onOrderPlaced?.();
         onClose();
       }
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  }, [isValid, confirmStep, built, okToSubmit, asOf, feedConnected, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, isComboTarget, orderType, parsedPrice, parsedStop]);
+  }, [isValid, confirmStep, arm, disarm, built, requestBody, okToSubmit, asOf, feedConnected, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose]);
 
   const closingHint =
     built?.isClosing === false

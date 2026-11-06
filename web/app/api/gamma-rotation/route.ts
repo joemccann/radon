@@ -5,6 +5,7 @@ import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
 import { buildDemoGammaRotationFixture } from "@/lib/demo/fixtures/regime";
@@ -139,17 +140,10 @@ function normalizeGammaRotationPayload(raw: Record<string, unknown>): Record<str
   };
 }
 
-let bgScanInFlight = false;
-
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-  console.log("[GRG] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 })
-    .then(() => { console.log("[GRG] Background scan complete"); })
-    .catch((err) => { console.error("[GRG] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
-}
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "GRG",
+  run: () => radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 }),
+});
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 

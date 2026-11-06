@@ -520,7 +520,7 @@ describe("POST /api/orders/place (via radonFetch)", () => {
     expect(body.error).toContain("rejected");
   });
 
-  it("detects IB silent rejection (Unknown status)", async () => {
+  it("does not call an acknowledged order (permId, status Unknown) a rejection", async () => {
     mockRadonFetch.mockResolvedValueOnce({
       status: "ok",
       orderId: 42,
@@ -535,9 +535,10 @@ describe("POST /api/orders/place (via radonFetch)", () => {
       body: JSON.stringify({ type: "stock", symbol: "AAPL", action: "BUY", quantity: 10, limitPrice: 150 }),
     });
     const res = await POST(req);
-    expect(res.status).toBe(502);
+    // A nonzero permId is IB's acknowledgement (audit 2026-11-03 §1 #4).
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("no acknowledgement");
+    expect(body.permId).toBe(9999);
   });
 
   it("succeeds with valid stock order", async () => {

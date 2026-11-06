@@ -301,6 +301,11 @@ CROSS_TREE_CONTRACTS = (
         patterns=("web/package.json", "web/.oxlintrc.json"),
         tests=("scripts/tests/test_ci_lint_typecheck_job.py",),
     ),
+    CrossTreeContract(
+        # The TS order-status vocabulary must stay a mirror of the Python one.
+        patterns=("web/lib/orders/ibOrderStatus.ts",),
+        tests=("scripts/tests/test_ib_order_status_parity.py",),
+    ),
 )
 
 

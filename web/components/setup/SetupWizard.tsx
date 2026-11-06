@@ -14,7 +14,7 @@ import ErrorToast from "@/components/ErrorToast";
  */
 
 import { userErrorMessage } from "@/lib/userError";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { CredentialServiceEntry, CredentialsPayload } from "@/lib/credentials";
 import {
   groupCredentialServices,
@@ -33,6 +33,18 @@ type StatusResponse = {
 };
 
 type Verdict = { status: string; message: string };
+
+/**
+ * The collect step does one thing at a time: idle, one vendor check, or the
+ * final store. A check and the store can never overlap, so the store never
+ * runs on values whose verdict is still being decided.
+ */
+type Activity =
+  | { kind: "idle" }
+  | { kind: "validating"; service: string }
+  | { kind: "completing" };
+
+const IDLE: Activity = { kind: "idle" };
 
 type CompleteResponse = {
   ok: boolean;
@@ -71,8 +83,15 @@ export default function SetupWizard() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
   const [attempts, setAttempts] = useState<Record<string, number>>({});
-  const [busyService, setBusyService] = useState<string | null>(null);
-  const [completing, setCompleting] = useState(false);
+  const [activity, setActivityState] = useState<Activity>(IDLE);
+  // Synchronous mirror so two clicks in one tick cannot both leave idle.
+  const activityRef = useRef<Activity>(IDLE);
+  const setActivity = useCallback((next: Activity) => {
+    activityRef.current = next;
+    setActivityState(next);
+  }, []);
+  const busyService = activity.kind === "validating" ? activity.service : null;
+  const completing = activity.kind === "completing";
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [result, setResult] = useState<CompleteResponse | null>(null);
 
@@ -106,8 +125,8 @@ export default function SetupWizard() {
   const validateService = useCallback(
     async (service: CredentialServiceEntry) => {
       const values = valuesFor(service);
-      if (Object.keys(values).length === 0 || busyService) return;
-      setBusyService(service.id);
+      if (Object.keys(values).length === 0 || activityRef.current.kind !== "idle") return;
+      setActivity({ kind: "validating", service: service.id });
       setVerdicts((current) => ({
         ...current,
         [service.id]: {
@@ -139,14 +158,14 @@ export default function SetupWizard() {
           },
         }));
       } finally {
-        setBusyService(null);
+        setActivity(IDLE);
       }
     },
-    [attempts, busyService, token, valuesFor],
+    [attempts, setActivity, token, valuesFor],
   );
 
   const complete = useCallback(async () => {
-    if (!registry || completing) return;
+    if (!registry || activityRef.current.kind !== "idle") return;
     const services: Record<string, Record<string, string>> = {};
     for (const service of registry.services) {
       const values = valuesFor(service);
@@ -156,7 +175,7 @@ export default function SetupWizard() {
       setCompleteError("Nothing to save yet. Paste at least the Clerk and Turso credentials.");
       return;
     }
-    setCompleting(true);
+    setActivity({ kind: "completing" });
     setCompleteError(null);
     try {
       const data = await postJson<CompleteResponse>("/api/setup/complete", {
@@ -168,9 +187,20 @@ export default function SetupWizard() {
     } catch (error) {
       setCompleteError(userErrorMessage(error, "setup failed"));
     } finally {
-      setCompleting(false);
+      setActivity(IDLE);
     }
-  }, [completing, registry, token, valuesFor]);
+  }, [registry, setActivity, token, valuesFor]);
+
+  // A verdict describes the values it checked; an edit retires it.
+  const editDraft = useCallback((serviceId: string, field: string, value: string) => {
+    setDrafts((current) => ({ ...current, [field]: value }));
+    setVerdicts((current) => {
+      if (!(serviceId in current)) return current;
+      const next = { ...current };
+      delete next[serviceId];
+      return next;
+    });
+  }, []);
 
   const grouped = useMemo(() => {
     if (!registry) return [];
@@ -314,9 +344,7 @@ export default function SetupWizard() {
                             placeholder={field.placeholder || "Paste value"}
                             value={drafts[field.name] ?? ""}
                             disabled={busy || completing}
-                            onChange={(e) =>
-                              setDrafts((current) => ({ ...current, [field.name]: e.target.value }))
-                            }
+                            onChange={(e) => editDraft(service.id, field.name, e.target.value)}
                           />
                         </div>
                       </div>
@@ -359,7 +387,7 @@ export default function SetupWizard() {
             type="button"
             className="admin-btn admin-btn-primary"
             data-testid="setup-complete"
-            disabled={completing}
+            disabled={activity.kind !== "idle"}
             onClick={() => {
               void complete();
             }}

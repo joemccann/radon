@@ -16,7 +16,9 @@ which never clears — only the owner consumes its own sidecar.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,9 +27,11 @@ from zoneinfo import ZoneInfo
 
 from clients.uw_client import UWRateLimitError
 
+from utils.uw_budget import RESET_HOUR_ET, next_reset
+
 _ET = ZoneInfo("America/New_York")
 DAILY_LIMIT_MARKER = "daily request limit"
-DAILY_RESET_HOUR_ET = 20
+DAILY_RESET_HOUR_ET = RESET_HOUR_ET
 BURST_RETRY = timedelta(minutes=5)
 
 PathSource = Callable[[], Path]
@@ -37,20 +41,30 @@ def _utc_iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse(raw: Any) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def is_daily_quota(exc: BaseException) -> bool:
-    """True only for the 24h cap — a burst 429 clears in minutes, not a day."""
-    return isinstance(exc, UWRateLimitError) and DAILY_LIMIT_MARKER in str(exc).lower()
+    """True only for the 24h cap — a burst 429 clears in minutes, not a day.
+
+    Reads the typed ``reason``, so a governor refusal that holds until the
+    reset is recognised even though its text never says "daily request limit".
+    """
+    return isinstance(exc, UWRateLimitError) and getattr(exc, "reason", None) == "daily_quota"
 
 
 def retry_at(exc: BaseException, now: datetime) -> str:
     """When this writer may call UW again. Daily cap → next 20:00 ET reset."""
     if not is_daily_quota(exc):
         return _utc_iso(now + BURST_RETRY)
-    local = now.astimezone(_ET)
-    reset = local.replace(hour=DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
-    if local >= reset:
-        reset += timedelta(days=1)
-    return _utc_iso(reset)
+    return _utc_iso(next_reset(now))
 
 
 def _load_writer() -> Any:
@@ -96,9 +110,29 @@ class UwEmbargo:
         return _utc_iso(stored)
 
     def arm(self, next_attempt_at: str) -> None:
+        """Extend-only, atomic: a shorter deadline never replaces a longer one.
+
+        A burst 429 landing after the daily cap armed must not shorten the
+        embargo to five minutes; a torn write must not erase a live one.
+        """
         path = self.path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+        with open(path.with_name(path.name + ".lock"), "a+") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                wanted = _parse(next_attempt_at)
+                stored = self._read()
+                if stored is not None and (wanted is None or stored >= wanted):
+                    return
+                tmp = path.with_name(path.name + ".tmp")
+                try:
+                    tmp.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+                    os.replace(tmp, path)
+                except BaseException:
+                    tmp.unlink(missing_ok=True)
+                    raise
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def clear(self) -> None:
         self.path().unlink(missing_ok=True)
@@ -108,13 +142,8 @@ class UwEmbargo:
             raw = json.loads(self.path().read_text()).get("next_attempt_at")
         except (OSError, ValueError, TypeError, AttributeError):
             return None
-        if not raw:
-            return None
-        try:
-            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return _parse(raw)
+
 
     # ── telemetry ─────────────────────────────────────────────────
 

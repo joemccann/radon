@@ -196,6 +196,7 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
 
   return (
     <ListedContractOrderForm
+      contractKey={selectedContract ? String(selectedContract.conId) : null}
       eyebrow={
         <>
           {symbol} Futures · {data.exchange}

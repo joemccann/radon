@@ -80,8 +80,12 @@ describe("selected position legs", () => {
     const orders = { open_orders: [{ status: "Submitted", action: "BUY", remaining: 50, totalQuantity: 50,
       contract: { symbol: "CRWD", secType: "OPT", expiry: "20261030", strike: 230, right: "P" } }] } as unknown as OrdersData;
     view.rerender(<PositionTab position={position} prices={prices} portfolio={portfolio} orders={orders} />);
-    expect((screen.getByRole("button", { name: "Confirm Order" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Order" }));
+    // The reserved contracts leave no valid request, so the armed ticket
+    // drops back to compose and cannot re-arm.
+    expect(screen.queryByRole("button", { name: "Confirm Order" })).toBeNull();
+    const review = screen.getByRole("button", { name: "Review Order" }) as HTMLButtonElement;
+    expect(review.disabled).toBe(true);
+    fireEvent.click(review);
     expect(fetchSpy.mock.calls.filter(([url]) => url === "/api/orders/place")).toHaveLength(0);
   });
   it("invalidates a selected ticket when the broker changes held quantities", () => {

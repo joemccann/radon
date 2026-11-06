@@ -51,6 +51,7 @@ text. ``_redact`` strips every known secret defensively from error strings.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -61,7 +62,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional
 
 import requests
 
@@ -100,6 +101,16 @@ FAILURE_TOKEN_ENDPOINT = "token_endpoint"
 BREAKER_COOLDOWN_S = 300.0
 # robinhood_configured() re-reads the token file at most this often (R-484).
 CONFIGURED_MEMO_S = 60.0
+# A structural auth failure (rejected grant, rejected fresh token) is written
+# to <token file>.disabled so the NEXT oneshot does not re-spend the same
+# grant. It binds to a fingerprint of the credentials it condemned (a
+# re-provisioned token reopens the rung at once) and lapses after this long.
+DISABLED_MARKER_TTL_S = 6 * 3600.0
+
+# The rung, as every ladder must read it. ``unconfigured``: no credentials,
+# skip silently. ``closed``: configured but the breaker or a structural auth
+# failure has the rung shut, which a ladder reports as a degradation.
+RungState = Literal["unconfigured", "closed", "open"]
 
 # Access tokens live ~3 days; refresh this far ahead of the recorded expiry.
 REFRESH_SAFETY_WINDOW_S = 3600
@@ -219,13 +230,38 @@ _configured_memo: Optional[tuple[float, tuple, bool]] = None
 _warned_paths: set = set()
 
 
-def _disable_for_process(reason: str, failure_class: str = FAILURE_AUTH) -> None:
-    """Structural failure: no retry in this process can help."""
+def _disable_for_process(
+    reason: str,
+    failure_class: str = FAILURE_AUTH,
+    *,
+    store: Optional["RobinhoodTokenStore"] = None,
+) -> None:
+    """Structural failure: no retry in this process can help.
+
+    With ``store`` the disable is also persisted for the next process, bound
+    to the credentials that failed (see DISABLED_MARKER_TTL_S).
+    """
     global _refresh_disabled, _failure
     with _process_lock:
         _refresh_disabled = True
         _failure = {"class": failure_class, "reason": reason, "at": time.time()}
     print(f"  Robinhood disabled for this process: {reason}", file=sys.stderr)
+    if store is not None:
+        store.persist_disable(reason, failure_class)
+
+
+def _adopt_disable(marker: Dict[str, Any]) -> None:
+    """Load a persisted disable into this process without re-persisting it."""
+    global _refresh_disabled, _failure
+    with _process_lock:
+        if _refresh_disabled:
+            return
+        _refresh_disabled = True
+        _failure = {
+            "class": str(marker.get("class") or FAILURE_AUTH),
+            "reason": str(marker.get("reason") or "disabled by an earlier run"),
+            "at": float(marker.get("at") or time.time()),
+        }
 
 
 def _open_breaker(reason: str, failure_class: str) -> None:
@@ -279,6 +315,13 @@ def robinhood_degradation(
     }
 
 
+def _written_at(state: Dict[str, Any]) -> float:
+    try:
+        return float(state.get("written_at") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _reset_process_state() -> None:
     """Test hook: forget the breaker, the failure, the shared client, the memo."""
     global _refresh_disabled, _failure, _breaker_until, _shared_client, _configured_memo
@@ -330,21 +373,92 @@ class RobinhoodTokenStore:
                 )
         except OSError:
             pass
+        file_present = True
         try:
             loaded = json.loads(self._path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 state = loaded
+        except FileNotFoundError:
+            file_present = False
         except (OSError, ValueError):
             state = {}
+        # A rotation the store could not commit (REL-205) is newer than the
+        # spent token on disk: read it back instead of re-spending.
+        rotated = self._read_fallback()
+        if rotated is not None and _written_at(rotated) > _written_at(state):
+            state = rotated
+        # Env values only BOOTSTRAP a store that does not exist yet. Over an
+        # existing (even unreadable) file they are the original, long since
+        # rotated grant: resurrecting them spends a dead refresh token.
+        bootstrap = not file_present and rotated is None
         for key, env in (
             ("access_token", "ROBINHOOD_MCP_TOKEN"),
             ("refresh_token", "ROBINHOOD_MCP_REFRESH_TOKEN"),
             ("client_id", "ROBINHOOD_MCP_CLIENT_ID"),
         ):
+            if key != "client_id" and not bootstrap:
+                continue
             if not state.get(key) and os.environ.get(env):
                 state[key] = os.environ[env]
         state.setdefault("token_type", "Bearer")
         return state
+
+    # -- rotation fallback + persisted disable (both survive the process) --
+
+    def _fallback_path(self) -> Path:
+        digest = hashlib.sha256(str(self._path.resolve()).encode()).hexdigest()[:16]
+        return Path(ROTATED_TOKEN_FALLBACK_DIR) / f"rh-mcp-rotated-{digest}.json"
+
+    def _read_fallback(self) -> Optional[Dict[str, Any]]:
+        """The saved rotation, only if it is ours: regular, our uid, 0600."""
+        try:
+            fd = os.open(self._fallback_path(), os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
+            return None
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_mode & 0o077 or info.st_size > 65536):
+                return None
+            loaded = json.loads(os.read(fd, 65537).decode("utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            return None
+        finally:
+            os.close(fd)
+        return loaded if isinstance(loaded, dict) and loaded.get("refresh_token") else None
+
+    def _marker_path(self) -> Path:
+        return self._path.with_name(self._path.name + ".disabled")
+
+    def _credential_fingerprint(self) -> str:
+        material = (self.access_token + chr(0) + self.refresh_token).encode()
+        return hashlib.sha256(material).hexdigest()[:16]
+
+    def persist_disable(self, reason: str, failure_class: str) -> None:
+        """Best effort: a failed write leaves the disable in-process only."""
+        marker = {"fingerprint": self._credential_fingerprint(), "class": failure_class,
+                  "reason": _scrub(reason, self.secrets())[:300], "at": time.time()}
+        target = self._marker_path()
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(marker, handle)
+            os.replace(tmp, target)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+
+    def persisted_disable(self, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """The live marker for THESE credentials, or None."""
+        try:
+            marker = json.loads(self._marker_path().read_text(encoding="utf-8"))
+            age = (time.time() if now is None else now) - float(marker["at"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return None
+        if not isinstance(marker, dict) or marker.get("fingerprint") != self._credential_fingerprint():
+            return None
+        return marker if 0 <= age < DISABLED_MARKER_TTL_S else None
 
     # ── introspection (never network) ────────────────────────────
 
@@ -446,6 +560,11 @@ class RobinhoodTokenStore:
             tmp.unlink(missing_ok=True)
             raise
         os.chmod(self._path, 0o600)
+        # The rotation is on disk now; the fallback copy has done its job.
+        try:
+            self._fallback_path().unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def persist(self) -> None:
         """Atomic 0600 write: temp file in the same directory, then rename."""
@@ -456,12 +575,19 @@ class RobinhoodTokenStore:
         could not be committed: write the state somewhere writable, 0600."""
         ROTATED_TOKEN_FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(
-            prefix="rh-mcp-rotated-", suffix=".json", dir=str(ROTATED_TOKEN_FALLBACK_DIR)
+            prefix="rh-mcp-rotated-", suffix=".tmp", dir=str(ROTATED_TOKEN_FALLBACK_DIR)
         )
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(self._state, handle, indent=2)
-        os.chmod(name, 0o600)
-        return Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(self._state, handle, indent=2)
+            os.chmod(name, 0o600)
+            # A fixed name per store, so the next process reads it back.
+            target = self._fallback_path()
+            os.replace(name, target)
+        except BaseException:
+            Path(name).unlink(missing_ok=True)
+            raise
+        return target
 
     def bootstrap_file_if_missing(self) -> None:
         """First configured run: materialize the env tokens into the file."""
@@ -506,6 +632,10 @@ class RobinhoodTokenStore:
         """
         if _refresh_disabled:
             raise RobinhoodNotConfiguredError("Robinhood refresh disabled for this process")
+        marker = self.persisted_disable()
+        if marker is not None:
+            _adopt_disable(marker)
+            raise RobinhoodNotConfiguredError("Robinhood refresh disabled by an earlier run")
         if not self.can_refresh():
             raise RobinhoodNotConfiguredError(
                 "no ROBINHOOD_MCP_REFRESH_TOKEN / ROBINHOOD_MCP_CLIENT_ID to refresh with"
@@ -573,7 +703,8 @@ class RobinhoodTokenStore:
                 # invalid_grant / invalid_client: retrying cannot help.
                 _disable_for_process(
                     f"token refresh rejected (HTTP {resp.status_code}); "
-                    "treating Robinhood as unconfigured"
+                    "treating Robinhood as unconfigured",
+                    store=self,
                 )
                 raise RobinhoodAuthError(
                     f"Robinhood token refresh rejected (HTTP {resp.status_code}): {detail}"
@@ -645,15 +776,9 @@ class RobinhoodTokenStore:
         ) from None
 
 
-def robinhood_configured() -> bool:
-    """True when an access token OR refresh credentials are available.
-
-    Never touches the network, and False for the rest of the process after
-    a rejected refresh grant.
-    """
+def _credentials_snapshot() -> tuple[bool, Optional[Dict[str, Any]]]:
+    """(configured, live persisted-disable marker), memoized (R-484)."""
     global _configured_memo
-    if not robinhood_available():
-        return False
     # Keyed on the env the store reads, so a credential change (operator
     # exports a token, a test swaps the file path) is never served stale.
     key = tuple(
@@ -670,9 +795,34 @@ def robinhood_configured() -> bool:
         now = time.monotonic()
         if memo is not None and memo[1] == key and now - memo[0] < CONFIGURED_MEMO_S:
             return memo[2]
-        configured = RobinhoodTokenStore().is_configured()
-        _configured_memo = (now, key, configured)
-        return configured
+        store = RobinhoodTokenStore()
+        snapshot = (store.is_configured(), store.persisted_disable())
+        _configured_memo = (now, key, snapshot)
+        return snapshot
+
+
+def robinhood_rung_state() -> RungState:
+    """``unconfigured`` | ``closed`` | ``open``. Never touches the network.
+
+    ``closed`` covers the breaker cooldown, a process disable and a disable
+    an earlier run persisted for these same credentials.
+    """
+    configured, marker = _credentials_snapshot()
+    if not configured:
+        return "unconfigured"
+    if marker is not None:
+        _adopt_disable(marker)
+        return "closed"
+    return "open" if robinhood_available() else "closed"
+
+
+def robinhood_configured() -> bool:
+    """True only when the rung is OPEN (credentials present and not closed).
+
+    Kept as a bool for the ladders' early return. A caller that must tell an
+    unconfigured host from a closed rung reads ``robinhood_rung_state()``.
+    """
+    return robinhood_rung_state() == "open"
 
 
 class RobinhoodClient:
@@ -797,7 +947,8 @@ class RobinhoodClient:
                     # mint cannot help, and retrying per symbol would hammer
                     # the token endpoint across a whole scan.
                     _disable_for_process(
-                        f"MCP rejected a freshly refreshed token (HTTP {resp.status_code})"
+                        f"MCP rejected a freshly refreshed token (HTTP {resp.status_code})",
+                        store=self._store,
                     )
                     raise RobinhoodAuthError(
                         f"Robinhood MCP rejected the token (HTTP {resp.status_code})"
@@ -810,7 +961,8 @@ class RobinhoodClient:
             # degrade the process to the unconfigured skip.
             _disable_for_process(
                 f"MCP rejected the access token (HTTP {resp.status_code}) and "
-                + ("a fresh refresh cannot help" if not _retry_auth else "no refresh credentials exist")
+                + ("a fresh refresh cannot help" if not _retry_auth else "no refresh credentials exist"),
+                store=self._store,
             )
             raise RobinhoodAuthError(f"Robinhood MCP rejected the token (HTTP {resp.status_code})")
         if resp.status_code == 429:

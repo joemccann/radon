@@ -8,9 +8,17 @@ docs/indicators/dispersion.md.
 
 Source ladder: IB daily TRADES bars for the S&P 500 seed + sector SPDRs +
 VIX (asyncio sweep, IB_CONCURRENCY slots), then Yahoo for whatever IB left
-empty. UW is skipped on purpose (515 per-symbol calls would spend the shared
-daily cap). Only raw per-session rows are stored; the 60-session means and
+empty. Only raw per-session rows are stored; the 60-session means and
 since-2017 z-scores are rebuilt from every stored row each run.
+
+Why there is no Robinhood or UW rung yet (the order is IB > RH > UW > Yahoo):
+both clients can serve the incremental window (RH get_equity_historicals
+span "year", UW stock OHLC 1d), but neither serves the 10 Y backfill, both
+are per-symbol (515 serialized calls), and the payload's source vocabulary
+(web/lib/dispersion.ts DispersionSourceKind, "mixed" rendered as
+"IB + YAHOO") cannot name them, so adding a rung here would publish false
+provenance. The rungs follow once that vocabulary and a per-rung budget
+inside the unit's 900 s TimeoutStartSec (IB 420 s + Yahoo 180 s today) exist.
 
 Usage:
     python3 scripts/fetch_dispersion.py              # human summary (stderr)

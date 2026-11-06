@@ -65,6 +65,7 @@ except ImportError:
 
 from utils.exec_ids import exec_id_root, flex_ib_exec_id  # noqa: E402 — needs the sys.path above
 from clients.journal_basis import _bucket_key, _signed_qty  # noqa: E402
+from utils.journal_action import FillLabel, classify_net, structure_side  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -92,15 +93,8 @@ def _structure_label(action: str, sec_type: str, strike: Optional[float], right:
         "OPT": "Option",
         "BAG": "Spread",
     }.get(sec_type, sec_type)
-    # A sold-to-open call is a SHORT position, not a Closed one. Only a
-    # close-long sell (SELL_OPTION) or a round-trip (CLOSED) reads "Closed".
-    a = (action or "").upper()
-    if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
-        side_label = "Long"
-    elif a == "SELL_TO_OPEN":
-        side_label = "Short"
-    else:
-        side_label = "Closed"
+    # Shared prefix (utils.journal_action): opens Long/Short, else Closed.
+    side_label = structure_side(action)
 
     if sec_type in ("OPT", "BAG") and strike and right:
         right_label = "Call" if right == "C" else "Put" if right == "P" else right
@@ -204,39 +198,16 @@ def _group_executions(executions: List[Any]) -> Dict[str, Dict[str, Any]]:
     return grouped
 
 
-def _resolve_action(bucket: Dict[str, Any], prior_qty: float = 0.0) -> Optional[str]:
-    """Map (prior_qty, bucket_net, sec_type) → action label.
+def _resolve_label(bucket: Dict[str, Any], prior_qty: Optional[float] = 0.0) -> Optional[FillLabel]:
+    """Label a bucket from its gross buy/sell totals and the prior position.
 
-    Before 2026-05-22 this picked the label from `bucket_net` alone, which
-    mislabeled SELLs that closed a prior long as ``SELL_TO_OPEN`` (the
-    "open short" label). Consumers of the journal (``fromJournal.ts``
-    treats ``SELL_TO_OPEN`` as opening and ``SELL_OPTION`` as closing) saw
-    closed longs as new short positions. ``prior_qty`` is the running
-    signed position for this contract before this bucket's fills are
-    applied, derived from already-imported journal rows.
+    ``prior_qty`` is the contract's running signed position before this
+    bucket's fills, derived from already-imported journal rows. The shared
+    classifier (``utils.journal_action.classify_net``) separates a close from
+    an open (stock included), marks a net-zero bucket ``CLOSED`` and a
+    bucket that crosses zero as a flip.
     """
-    sec_type = bucket["sec_type"]
-    net = bucket["buy_qty"] - bucket["sell_qty"]
-
-    if net > 0:
-        # Net buy. Covering a prior short (prior_qty < 0) is BUY_TO_CLOSE so
-        # fromJournal.ts marks the row closed; otherwise open long BUY_OPTION.
-        if sec_type == "STK":
-            return "BUY"
-        return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
-    if net < 0:
-        # Net sell. If the position was long beforehand, this is a close
-        # (SELL_OPTION). Otherwise it's opening / extending a short
-        # (SELL_TO_OPEN). prior_qty > 0 → was long.
-        if prior_qty > 0:
-            return "SELL" if sec_type == "STK" else "SELL_OPTION"
-        return "SELL" if sec_type == "STK" else "SELL_TO_OPEN"
-    # Net flat — buy and sell sides match. Treat as a closed round-trip;
-    # _compute_pnl_summary() does the lot matching that gives us the
-    # realized P&L.
-    if bucket["buy_qty"] > 0:
-        return "CLOSED"
-    return None
+    return classify_net(bucket["sec_type"], prior_qty, bucket["buy_qty"], bucket["sell_qty"])
 
 
 def _contract_key_from_trade(trade: Dict[str, Any]) -> Optional[str]:
@@ -258,29 +229,22 @@ def _contract_key_from_trade(trade: Dict[str, Any]) -> Optional[str]:
 def _prior_state_index(trades: List[Dict[str, Any]]) -> Dict[str, float]:
     """Build per-contract signed position from existing journal rows.
 
-    Sums ±contracts/shares using the action label's sign (BUY → +, SELL/
-    SHORT/CLOSED → -). The sign convention matches journal_basis.py's
-    ``_signed_qty`` — both fall back to net-qty sign rather than trusting
-    the OPEN/CLOSE semantic of the label itself, so this works even when
-    older rows are mislabeled.
+    Sums ±contracts/shares using the shared label sign (BUY → +, SELL/
+    SHORT → -, CLOSED round trip → 0): journal_basis.py's ``_signed_qty``.
     """
     state: Dict[str, float] = {}
     for trade in sorted(trades, key=lambda t: str(t.get("date") or "")):
         key = _contract_key_from_trade(trade)
         if not key:
             continue
-        action = str(trade.get("action") or "").upper()
         qty_raw = trade.get("contracts") or trade.get("shares") or 0
         try:
             qty = abs(float(qty_raw))
         except (TypeError, ValueError):
             continue
-        if qty <= 0:
-            continue
-        if action.startswith("BUY"):
-            state[key] = state.get(key, 0.0) + qty
-        elif action.startswith("SELL") or action.startswith("SHORT") or action == "CLOSED":
-            state[key] = state.get(key, 0.0) - qty
+        signed = _signed_qty(trade.get("action"), qty)
+        if signed:
+            state[key] = state.get(key, 0.0) + signed
     return state
 
 
@@ -414,7 +378,7 @@ def _bucket_to_entry(
     """Build the journal payload for one grouped contract.
 
     ``prior_qty`` is the contract's signed position before this bucket's
-    fills — used by ``_resolve_action`` to distinguish closing-long from
+    fills — used by ``_resolve_label`` to distinguish closing-long from
     opening-short sells.
     """
     sec_type = bucket["sec_type"]
@@ -432,9 +396,10 @@ def _bucket_to_entry(
     total_cost = abs_qty * avg_price * multiplier + _decimal_to_float(bucket["total_commission"])
     expiry_iso = _expiry_to_iso(bucket["expiry"])
 
-    action = _resolve_action(bucket, prior_qty=prior_qty)
-    if action is None:
+    label = _resolve_label(bucket, prior_qty=prior_qty)
+    if label is None:
         return {}
+    action = label.action.value
 
     structure = _structure_label(action, sec_type, bucket["strike"], bucket["right"], expiry_iso)
 
@@ -479,6 +444,7 @@ def _bucket_to_entry(
             entry["expiry"] = bucket["expiry"]
     else:
         entry["shares"] = abs_qty
+    entry.update(label.payload_fields())
 
     # Retain the legacy net summary alongside gross per-direction coverage.
     per_day: Dict[str, Decimal] = {}

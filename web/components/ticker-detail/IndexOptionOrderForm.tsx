@@ -233,6 +233,7 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
 
   return (
     <ListedContractOrderForm
+      contractKey={selectedContract ? String(selectedContract.conId) : null}
       eyebrow={
         <>
           {symbol} Options

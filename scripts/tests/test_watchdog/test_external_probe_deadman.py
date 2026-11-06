@@ -344,8 +344,8 @@ def test_continuous_bucket_cancels_external_probe_emergency_on_recovery() -> Non
         ),
         patch("scripts.watchdog.notify.log_startup_warning"),
         patch(
-            "scripts.watchdog.cooldown.active_emergency_services",
-            return_value=["external-health-probe"],
+            "scripts.watchdog.cooldown.active_emergencies",
+            return_value=[("external-health-probe", "deadman")],
         ),
         patch("scripts.watchdog.notify.cancel_emergency") as cancel,
         patch("scripts.watchdog.cooldown.mark_emergency_resolved") as resolved,

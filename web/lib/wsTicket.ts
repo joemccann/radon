@@ -35,6 +35,37 @@ export class TicketBackoffError extends Error {
   }
 }
 
+/** Why a ticket request failed. Only `transport`, `server` and `throttled`
+ *  say the ticket service is struggling, so only they raise the block shared
+ *  by both sockets. `auth` (this tab's Clerk token; the next attempt fetches a
+ *  fresh one), `client` and `aborted` (the caller gave up) are the caller's
+ *  own problem and its own reconnect strategy paces it. */
+export type TicketFailureKind = "transport" | "server" | "throttled" | "auth" | "client" | "aborted";
+
+export function classifyTicketFailure(
+  failure: { status: number } | { error: unknown; callerAborted: boolean },
+): TicketFailureKind {
+  if ("status" in failure) {
+    if (failure.status === 401 || failure.status === 403) return "auth";
+    if (failure.status === 429) return "throttled";
+    if (failure.status >= 500) return "server";
+    return "client";
+  }
+  if (failure.callerAborted) return "aborted";
+  // Network errors and our own request timeout (TimeoutError).
+  return "transport";
+}
+
+function backsOffSharedTicket(kind: TicketFailureKind): boolean {
+  return kind === "transport" || kind === "server" || kind === "throttled";
+}
+
+class TicketHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Failed to obtain WS ticket: ${status}`);
+  }
+}
+
 function noteTicketFailure(now = Date.now()): void {
   const delay = Math.min(FAILURE_BASE_MS * 2 ** failureAttempt, FAILURE_MAX_MS);
   failureAttempt = Math.min(failureAttempt + 1, 10);
@@ -72,19 +103,16 @@ export async function getWsTicket(clerkToken: string, signal?: AbortSignal): Pro
       signal: combined,
     });
 
-    if (!res.ok) {
-      noteTicketFailure();
-      throw new Error(`Failed to obtain WS ticket: ${res.status}`);
-    }
+    if (!res.ok) throw new TicketHttpError(res.status);
 
     const data = await res.json();
     noteTicketSuccess();
     return data.ticket;
   } catch (err) {
-    if (err instanceof TicketBackoffError) throw err;
-    if (!(err instanceof Error) || !err.message.startsWith("Failed to obtain WS ticket:")) {
-      noteTicketFailure();
-    }
+    const kind = err instanceof TicketHttpError
+      ? classifyTicketFailure({ status: err.status })
+      : classifyTicketFailure({ error: err, callerAborted: signal?.aborted === true });
+    if (backsOffSharedTicket(kind)) noteTicketFailure();
     throw err;
   }
 }

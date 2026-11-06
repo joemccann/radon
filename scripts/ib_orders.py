@@ -16,7 +16,9 @@ Usage:
 import argparse
 import math
 import sys
-from datetime import datetime
+from contextlib import nullcontext
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional
 
@@ -243,10 +245,20 @@ def fetch_executed_orders(client: IBClient) -> list:
     return executed
 
 
-def build_orders_data(open_orders: list, executed_orders: list) -> dict:
-    """Build the orders snapshot payload."""
+def snapshot_time() -> str:
+    """UTC ISO read time of an IB order snapshot (orders open_orders writers)."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def build_orders_data(open_orders: list, executed_orders: list, snapshot_at: Optional[str] = None) -> dict:
+    """Build the orders snapshot payload.
+
+    ``snapshot_at`` is when IB was read (capture it BEFORE the fetch); it
+    orders this snapshot against the other open_orders writer.
+    """
     return {
         "last_sync": datetime.now().isoformat(),
+        "snapshot_at": snapshot_at or snapshot_time(),
         "open_orders": open_orders,
         "executed_orders": executed_orders,
         "open_count": len(open_orders),
@@ -254,9 +266,14 @@ def build_orders_data(open_orders: list, executed_orders: list) -> dict:
     }
 
 
-def save_orders(data: dict):
-    """Save orders to the canonical Turso order tables."""
-    _dual_write_orders_to_db(data)
+def save_orders(data: dict, heartbeat: bool = True):
+    """Save orders to the canonical Turso order tables.
+
+    ``heartbeat=False`` writes without recording the orders-sync service
+    row: only the orders-sync cycle owns that row (fill_monitor's mirror
+    heartbeating it hid an orders-sync outage).
+    """
+    _dual_write_orders_to_db(data, heartbeat=heartbeat)
     print("Saved orders to Turso open_orders/executed_orders")
 
 
@@ -298,7 +315,7 @@ def _write_execution_facts(executions: list[dict], upsert_facts) -> None:
             print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
 
 
-def _dual_write_orders_to_db(data: dict) -> None:
+def _dual_write_orders_to_db(data: dict, heartbeat: bool = True) -> None:
     """Persist an IB order snapshot into open_orders + executed_orders."""
     try:
         from db.service_cycle import service_cycle
@@ -320,7 +337,12 @@ def _dual_write_orders_to_db(data: dict) -> None:
         # service_cycle (DUR-14): ok heartbeat on clean exit, error row
         # (+ retry embargo) on failure, re-raised into the non-fatal
         # except below — the disk JSON stays the failure-safe path.
-        with service_cycle("orders-sync", market_hours_class="intraday") as cycle:
+        cycle_scope = (
+            service_cycle("orders-sync", market_hours_class="intraday")
+            if heartbeat
+            else nullcontext(SimpleNamespace(finished_at=None))
+        )
+        with cycle_scope as cycle:
             cycle.finished_at = data.get("last_sync")
             open_rows: list[tuple[int, dict]] = []
             for o in data.get("open_orders", []):
@@ -328,7 +350,9 @@ def _dual_write_orders_to_db(data: dict) -> None:
                 if not isinstance(perm_id, int):
                     continue
                 open_rows.append((perm_id, o))
-            replace_open_orders_for_session(open_rows)
+            if not replace_open_orders_for_session(open_rows, snapshot_at=data.get("snapshot_at")):
+                print("  open_orders: a newer snapshot is already applied; this one skipped",
+                      file=sys.stderr)
 
             # IB's commission-report realizedPNL drifts with IB's avgCost after a
             # partial close; persist the journal average-cost figure instead so
@@ -394,6 +418,7 @@ def main():
 
     try:
         print("Fetching open orders...")
+        snapshot_at = snapshot_time()
         open_orders = fetch_open_orders(client)
 
         print("Fetching executed fills...")
@@ -402,7 +427,7 @@ def main():
         display_orders(open_orders, executed_orders)
 
         if args.sync:
-            data = build_orders_data(open_orders, executed_orders)
+            data = build_orders_data(open_orders, executed_orders, snapshot_at=snapshot_at)
             save_orders(data)
         else:
             print("\nRun with --sync to save to Turso")

@@ -190,7 +190,7 @@ class TestFillMonitorMirrorBody:
             lambda client: executed, raising=False)
         monkeypatch.setattr(
             fill_monitor_module, "build_orders_data_for_mirror",
-            lambda o, e: {"open_orders": o, "executed_orders": e}, raising=False)
+            lambda o, e, **kw: {"open_orders": o, "executed_orders": e}, raising=False)
         monkeypatch.setattr(
             fill_monitor_module, "save_orders_snapshot", save, raising=False)
         monkeypatch.setattr(
@@ -215,7 +215,7 @@ class TestFillMonitorMirrorBody:
         handler = FillMonitorHandler(send_notifications=False)
         _ORIG_MIRROR(handler, MagicMock())
         save.assert_called_once_with(
-            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]})
+            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]}, heartbeat=False)
 
     def test_nonempty_book_fetches_builds_and_saves(self, monkeypatch):
         """Happy path: mirror body runs fetch → build → save."""
@@ -225,7 +225,7 @@ class TestFillMonitorMirrorBody:
         handler = FillMonitorHandler(send_notifications=False)
         _ORIG_MIRROR(handler, MagicMock())
         save.assert_called_once_with(
-            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]})
+            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]}, heartbeat=False)
 
     def test_partial_book_never_drops_tracked_working_orders(self, monkeypatch):
         """RED for R-610 (P1): the same 0.5s openOrderEnd cap that produces an
@@ -416,13 +416,21 @@ class TestFillMonitorJournalPersistence:
     Mirror inline via db.writer.upsert_journal_entry.
     """
 
+    @pytest.fixture(autouse=True)
+    def _flat_prior_journal(self):
+        """Prior-qty lookup reads a flat journal (a failed lookup refuses
+        the label, §1 #11)."""
+        with patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
+            yield
+
     def _make_partial_fill_trade(self):
         mock_trade = MagicMock()
         mock_trade.order.orderId = 5
-        # Realistic identity fields: permId 0 = not yet assigned by IB (the
-        # key then falls back to orderId); bare MagicMocks coerce via
-        # __int__ to 1 and shadow the orderId in the T-013 trade_id.
-        mock_trade.order.permId = 0
+        # Realistic identity fields: bare MagicMocks coerce via __int__ to 1
+        # and shadow the permId in the T-013 trade_id. A permId of 0 (not
+        # yet assigned) writes no mirror at all (C2); see
+        # test_fill_monitor_order_identity.py.
+        mock_trade.order.permId = 1234567
         mock_trade.order.action = "BUY"
         mock_trade.order.totalQuantity = 25
         mock_trade.order.lmtPrice = 1.00
@@ -527,6 +535,13 @@ class TestFillMonitorTradeIdUniqueness:
     is ON CONFLICT(trade_id) DO UPDATE, so the second fill destructively
     overwrote the first order's journal row."""
 
+    @pytest.fixture(autouse=True)
+    def _flat_prior_journal(self):
+        """Prior-qty lookup reads a flat journal (a failed lookup refuses
+        the label, §1 #11)."""
+        with patch.object(FillMonitorHandler, "_lookup_prior_qty", return_value=0.0):
+            yield
+
     @staticmethod
     def _trade(symbol, con_id, perm_id, strike=90.0):
         t = MagicMock()
@@ -614,8 +629,8 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
              patch.object(fm, "count_open_orders_for_mirror", lambda: 1), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
         assert saved == [], (
             "an empty open-orders read whole-replaced Turso while a working "
@@ -631,8 +646,8 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
              patch.object(fm, "count_open_orders_for_mirror", lambda: 0), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             handler._mirror_ib_orders_snapshot(MagicMock())
         assert len(saved) == 1
 
@@ -642,7 +657,7 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         saved = []
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: [{"orderId": 7}]), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
-             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
-             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e, **kw: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data, **kw: saved.append(data)):
             self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
         assert len(saved) == 1

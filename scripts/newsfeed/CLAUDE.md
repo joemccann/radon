@@ -2,7 +2,7 @@
 
 Headless Playwright scraper for themarketear.com → dashboard newsfeed. Loaded when cwd is under `scripts/newsfeed/`.
 
-Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `tagger`, `vision_tagger`, `taxonomy`, `scheduler`, `index`. Output shape locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`).
+Module split: `paths`, `browser`, `auth`, `authGate` (renewal window + failure backoff), `cdp`, `extract`, `media`, `store`, `tagger`, `vision_tagger`, `taxonomy`, `scheduler`, `index`. Output shape locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`).
 
 ---
 

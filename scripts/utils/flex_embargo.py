@@ -15,12 +15,19 @@ dual-write (R-130) — a deploy that wipes `data/` must not drop a live lockout.
 The row is also the token-wide record across hosts: the laptop and Hetzner
 share IB_FLEX_TOKEN and one Turso DB but have separate `data/` trees (T-100).
 A DB outage on the read side fails open with a log line.
+
+Row ownership (§1#22): this module writes only the `flex-web-service` row.
+`cash-flow-sync` belongs to the Flex ingest and is read here as evidence,
+never written. A LOCAL sidecar lapse is not evidence that the SHARED lockout
+lapsed: the shared row is flipped to `ok` only when its own deadline has
+passed, and only by compare-and-set on the `last_error` that was read.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -196,11 +203,19 @@ def _rehydrate_from_health() -> Optional[datetime]:
     R-130: the dual-write used to be write-only, so removing the gitignored
     sidecar silently dropped a live 7-day lockout. Fail closed on 1025
     evidence in either writer's row, else fail open.
+
+    `clear()` resets only the row this module owns, so `cash-flow-sync`
+    evidence stamped at or before the last manual clear is spent. §1#22.
     """
+    cleared_at = _cleared_at()
     for service in (SERVICE, CASH_FLOW_SERVICE):
         rows = _health_rows(service)
         if not rows:
             continue
+        if service == CASH_FLOW_SERVICE and cleared_at is not None:
+            evidence_at = _parse_iso(rows[0][1] if len(rows[0]) > 1 else None)
+            if evidence_at is not None and evidence_at <= cleared_at:
+                continue
         deadline = _deadline_from_health_row(rows[0])
         if deadline is not None:
             return deadline
@@ -253,8 +268,22 @@ def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
     if moment >= stored:
         # Natural lapse, not a manual escape: unlink WITHOUT the suppression
         # marker, so a genuinely new lockout after this point still arms.
+        # The lapse is LOCAL: the shared rows may carry another host's later
+        # lockout, so re-read them before reporting the token clear. §1#22.
         _unlink_sidecar()
-        _heartbeat_ok()
+        try:
+            shared = _rehydrate_from_health()
+        except FlexEmbargoStoreUnavailable:
+            log.warning(
+                "flex_embargo: sidecar lapsed but the shared record is unreadable "
+                "— blocking for %.0fh",
+                UNKNOWN_STATE_BLOCK_HOURS,
+            )
+            return _utc_iso(moment + timedelta(hours=UNKNOWN_STATE_BLOCK_HOURS))
+        if shared is not None and moment < shared:
+            _arm_sidecar(_utc_iso(shared))
+            return _utc_iso(shared)
+        _heartbeat_ok(moment)
         return None
     return _utc_iso(stored)
 
@@ -305,6 +334,14 @@ def _cleared_path() -> Path:
     return SIDECAR.with_name(SIDECAR.name + ".cleared")
 
 
+def _cleared_at() -> Optional[datetime]:
+    try:
+        raw = _cleared_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return _parse_iso(raw)
+
+
 def _cleared_marker_covers(moment: datetime) -> bool:
     """True while a manual clear() still suppresses health-row rehydration.
 
@@ -313,53 +350,88 @@ def _cleared_marker_covers(moment: datetime) -> bool:
     row and RE-ARMED. The marker lapses on its own so a genuinely new lockout
     is not suppressed forever. R-213.
     """
-    try:
-        raw = _cleared_path().read_text(encoding="utf-8").strip()
-    except OSError:
-        return False
-    cleared_at = _parse_iso(raw)
+    cleared_at = _cleared_at()
     if cleared_at is None:
         return False
     return moment < cleared_at + timedelta(hours=CLEAR_SUPPRESSION_HOURS)
 
 
+def _write_text_atomic(path: Path, text: str) -> None:
+    """temp + os.replace: a concurrent reader sees the old marker or the new one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def clear(*, now: Optional[datetime] = None) -> None:
     """Drop a live embargo and stop the health rows re-arming it.
 
-    Also resets the two writers' rows, so the banner does not stay red and
-    `_rehydrate_from_health` has nothing to mint from once the marker lapses.
+    Resets the `flex-web-service` row (this module's own), so the banner does
+    not stay red. `cash-flow-sync` is not ours to write: its pre-clear
+    evidence is skipped by `_rehydrate_from_health` instead. §1#22.
     """
     moment = now or datetime.now(timezone.utc)
     _unlink_sidecar()
     try:
-        _cleared_path().parent.mkdir(parents=True, exist_ok=True)
-        _cleared_path().write_text(_utc_iso(moment), encoding="utf-8")
+        _write_text_atomic(_cleared_path(), _utc_iso(moment))
     except OSError as exc:
         log.warning("flex_embargo: clear marker not written: %s", exc)
-    _heartbeat_ok()
+    try:
+        from db.writer import record_service_health
+    except Exception:
+        return
+    try:
+        record_service_health(SERVICE, "ok")
+    except Exception as exc:
+        log.warning("flex_embargo: clear could not reset %s: %s", SERVICE, exc)
 
 
 def is_lockout_code(code: Optional[str]) -> bool:
     return str(code or "").strip() in LOCKOUT_CODES
 
 
-def _heartbeat_ok() -> None:
-    """Clear the flex-web-service row once a lockout lapses (R-130).
+_CLEAR_LAPSED_ROW_SQL = (
+    "UPDATE service_health SET state = 'ok', last_error = NULL, updated_at = ? "
+    "WHERE service = ? AND state = 'error' AND last_error IS ?"
+)
+
+
+def _heartbeat_ok(moment: datetime) -> None:
+    """Clear the flex-web-service row once ITS OWN lockout lapsed (R-130).
 
     `clear()` only unlinked the sidecar, so the banner stayed red for ~24h
     inside the row's 8-day window, quoting a `next_attempt_at` in the past.
+
+    §1#22: the row is shared across hosts, so a local lapse proves nothing
+    about it. Flip it only when the deadline it carries has passed, and only
+    if `last_error` still holds what was read (CAS), so a lockout recorded in
+    between survives. `cash-flow-sync` is never written here.
     """
     try:
-        from db.writer import record_service_health
-    except Exception:
+        rows = _query_health_rows(SERVICE)
+    except Exception as exc:
+        log.warning("flex_embargo: lapse could not read %s: %s", SERVICE, exc)
         return
-    # Both writers, not just flex-web-service: `_rehydrate_from_health` also
-    # consults cash-flow-sync, and nothing ever reset that row. R-213.
-    for service in (SERVICE, CASH_FLOW_SERVICE):
-        try:
-            record_service_health(service, "ok")
-        except Exception:
-            continue
+    if not rows or rows[0][0] != "error":
+        return
+    deadline = _deadline_from_health_row(rows[0])
+    if deadline is not None and moment < deadline:
+        return
+    try:
+        from db.hrana_http import hrana_execute
+
+        hrana_execute(_CLEAR_LAPSED_ROW_SQL, (_utc_iso(datetime.now(timezone.utc)), SERVICE, rows[0][2]))
+    except Exception as exc:
+        log.warning("flex_embargo: lapsed %s row not cleared: %s", SERVICE, exc)
 
 
 def _heartbeat(until: str, code: str) -> bool:

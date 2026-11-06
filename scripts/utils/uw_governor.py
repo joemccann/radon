@@ -13,11 +13,13 @@ import os
 import sqlite3
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Mapping
+from typing import Literal, Mapping, get_args
 from zoneinfo import ZoneInfo
+
+from utils import uw_budget
 
 DEFAULT_RPM = 120
 DEFAULT_DAILY_LIMIT = 40_000
@@ -29,11 +31,25 @@ MAX_WAIT_SECONDS = 120.0  # Explicit scanner waits can cross a 60s window; defau
 # released them together into the next one: leap ran 57 bursts/hour at
 # ~14 req/min (2026-10-28..30) instead of finishing.
 MISSING_RETRY_AFTER_SECONDS = 2.0
+# A credential UW rejected (401/403) is not re-sent for this long; one probe
+# per window lets a transient rejection heal without a key rotation.
+AUTH_PROBE_SECONDS = 300.0
 ET = ZoneInfo("America/New_York")
+
+# Why admission refused. Writers branch on this, never on message text:
+# daily_quota waits for the 20:00 ET reset; the rest retry within minutes.
+RefusalReason = Literal["daily_quota", "burst", "busy", "auth"]
+REFUSAL_REASONS: frozenset = frozenset(get_args(RefusalReason))
 
 
 class AdmissionError(RuntimeError):
     """Admission refused; messages are safe to return without provider data."""
+
+    def __init__(self, message: str, *, reason: RefusalReason = "busy") -> None:
+        if reason not in REFUSAL_REASONS:
+            raise ValueError(f"unknown UW refusal reason: {reason!r}")
+        super().__init__(message)
+        self.reason: RefusalReason = reason
 
 
 def _database_path() -> Path:
@@ -44,18 +60,15 @@ def _database_path() -> Path:
 
 
 def _day(now: float) -> str:
-    dt = datetime.fromtimestamp(now, timezone.utc).astimezone(ET)
-    if dt.hour < 20:
-        dt -= timedelta(days=1)
-    return dt.date().isoformat()
+    return uw_budget.quota_date(datetime.fromtimestamp(now, timezone.utc))
 
 
 def _next_reset(now: float) -> float:
-    dt = datetime.fromtimestamp(now, timezone.utc).astimezone(ET)
-    reset = dt.replace(hour=20, minute=0, second=0, microsecond=0)
-    if reset.timestamp() <= now:
-        reset += timedelta(days=1)
-    return reset.timestamp()
+    return uw_budget.next_reset(datetime.fromtimestamp(now, timezone.utc)).timestamp()
+
+
+def _fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
 def _integer(value, *, minimum: int = 0, maximum: int = 2_000_000_000):
@@ -112,8 +125,9 @@ def _db():
         conn.execute("CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, quota_day TEXT NOT NULL, priority TEXT NOT NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS requests_at ON requests(at)")
         conn.execute("CREATE INDEX IF NOT EXISTS requests_day ON requests(quota_day)")
-        conn.execute("CREATE TABLE IF NOT EXISTS policy (id INTEGER PRIMARY KEY CHECK(id=1), embargo REAL NOT NULL DEFAULT 0, observed_at REAL, provider_count INTEGER, provider_cap INTEGER, provider_unlimited INTEGER NOT NULL DEFAULT 0, observed_day TEXT, cutoff INTEGER NOT NULL DEFAULT 0, auth_status INTEGER, token_fingerprint TEXT, reserved_total INTEGER NOT NULL DEFAULT 0, bootstrap_count INTEGER NOT NULL DEFAULT 0, bootstrap_day TEXT)")
-        from utils import uw_budget
+        conn.execute("CREATE TABLE IF NOT EXISTS policy (id INTEGER PRIMARY KEY CHECK(id=1), embargo REAL NOT NULL DEFAULT 0, observed_at REAL, provider_count INTEGER, provider_cap INTEGER, provider_unlimited INTEGER NOT NULL DEFAULT 0, observed_day TEXT, cutoff INTEGER NOT NULL DEFAULT 0, auth_status INTEGER, token_fingerprint TEXT, reserved_total INTEGER NOT NULL DEFAULT 0, bootstrap_count INTEGER NOT NULL DEFAULT 0, bootstrap_day TEXT, auth_failed_at REAL)")
+        if "auth_failed_at" not in {row[1] for row in conn.execute("PRAGMA table_info(policy)")}:
+            conn.execute("ALTER TABLE policy ADD COLUMN auth_failed_at REAL")
         seed = uw_budget.used()
         conn.execute("INSERT OR IGNORE INTO policy(id,bootstrap_count,bootstrap_day) VALUES(1,?,?)", (seed, _day(time.time())))
         conn.commit()
@@ -133,11 +147,27 @@ def _db():
             conn.close()
 
 
+def _budget_floor(day: str) -> int:
+    """Wire hits the budget file saw today (Next.js mirrors included).
+
+    The governor seeds from the file once; later mirrored hits only reach the
+    file. An unreadable file is no floor here: admission has its own fail-
+    closed store, and a torn file must not lock admission until it is rewritten.
+    """
+    state = uw_budget._read_unlocked(uw_budget.BUDGET_PATH)
+    if state.get("_unreadable") or state.get("date") != day:
+        return 0
+    try:
+        return max(0, int(state.get("count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _local_usage(conn, state, day: str) -> int:
     local = conn.execute("SELECT count(*) FROM requests WHERE quota_day=?", (day,)).fetchone()[0]
     if state["bootstrap_day"] == day:
         local += state["bootstrap_count"]
-    return local
+    return max(local, _budget_floor(day))
 
 
 def _usage(conn, state, day: str, policy: dict) -> int:
@@ -164,7 +194,7 @@ def reserve(token: str, *, priority: str = "standard", timeout: float = 5.0) -> 
     leaving interactive reads room. Waiting releases the database lock.
     """
     if not isinstance(token, str) or not token.strip():
-        raise AdmissionError("UW credential is unavailable")
+        raise AdmissionError("UW credential is unavailable", reason="auth")
     if priority not in {"interactive", "standard", "background"}:
         raise AdmissionError("UW admission priority is invalid")
     if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
@@ -176,6 +206,10 @@ def reserve(token: str, *, priority: str = "standard", timeout: float = 5.0) -> 
         day = _day(now)
         with _db() as conn:
             state = conn.execute("SELECT * FROM policy WHERE id=1").fetchone()
+            if (state["auth_status"] in (401, 403)
+                    and state["token_fingerprint"] == _fingerprint(token)
+                    and now - (state["auth_failed_at"] or 0) < AUTH_PROBE_SECONDS):
+                raise AdmissionError("UW credential was rejected; retry after the probe window", reason="auth")
             used = _usage(conn, state, day, policy)
             # Cap observations can be monthly; a spent provider cap stays
             # closed across ET midnight until a newer provider receipt.
@@ -186,13 +220,13 @@ def reserve(token: str, *, priority: str = "standard", timeout: float = 5.0) -> 
             rollover_probe = (policy["quota_period"] == "unknown"
                               and state["observed_day"] != day and local_used == 0)
             if state["provider_cap"] is not None and used >= state["provider_cap"] and not rollover_probe:
-                raise AdmissionError("UW provider quota is exhausted")
+                raise AdmissionError("UW provider quota is exhausted", reason="daily_quota")
             factor = 1.0 if priority == "interactive" else 1.0 - RESERVE_FRACTION
             daily_used = max(local_used, used) if policy["quota_period"] == "daily" else local_used
             if policy["daily_limit"] is not None and daily_used >= max(1, int(policy["daily_limit"] * factor)):
-                raise AdmissionError("UW request budget is reserved or exhausted")
+                raise AdmissionError("UW request budget is reserved or exhausted", reason="daily_quota")
             if state["provider_cap"] is not None and used >= max(1, int(state["provider_cap"] * factor)) and not rollover_probe:
-                raise AdmissionError("UW provider budget is reserved or exhausted")
+                raise AdmissionError("UW provider budget is reserved or exhausted", reason="daily_quota")
             minute_limit = max(1, int(policy["requests_per_minute"] * factor))
             minute = conn.execute("SELECT count(*), min(at) FROM requests WHERE at>?", (now - 60,)).fetchone()
             if state["embargo"] <= now and minute[0] < minute_limit:
@@ -203,10 +237,18 @@ def reserve(token: str, *, priority: str = "standard", timeout: float = 5.0) -> 
                 conn.execute("DELETE FROM requests WHERE at<?", (now - 3 * 86400,))
                 return request.lastrowid
             wait = max(0.01, state["embargo"] - now, (minute[1] + 60 - now) if minute[0] >= minute_limit else 0)
+            reason = _wait_reason(state["embargo"], now)
         remaining = deadline - time.monotonic()
         if remaining <= 0 or wait > remaining:
-            raise AdmissionError("UW admission is busy; retry after the current window")
+            raise AdmissionError("UW admission is busy; retry after the current window", reason=reason)
         time.sleep(min(wait, remaining))
+
+
+def _wait_reason(embargo: float, now: float) -> RefusalReason:
+    """Name a timed refusal: a reset-length embargo is the daily cap."""
+    if embargo > now:
+        return "daily_quota" if embargo >= _next_reset(now) else "burst"
+    return "busy"
 
 
 def _retry_after(headers: Mapping, now: float) -> float:
@@ -234,13 +276,15 @@ def observe(token: str, status: int, headers: Mapping, *, reservation: int | Non
     cap = _integer(cap_raw, minimum=1)
     unlimited = cap_raw in {"unlimited", "-1"}
     count = _integer(allowed.get("x-uw-daily-req-count"))
-    fingerprint = hashlib.sha256(token.encode()).hexdigest()[:16]
+    fingerprint = _fingerprint(token)
     with _db() as conn:
         state = conn.execute("SELECT * FROM policy WHERE id=1").fetchone()
         if status == 429:
             embargo = _next_reset(now) if daily_exhausted else now + _retry_after(allowed, now)
             conn.execute("UPDATE policy SET embargo=max(embargo,?) WHERE id=1", (embargo,))
         conn.execute("UPDATE policy SET auth_status=?,token_fingerprint=? WHERE id=1", (status if status in (200,401,403) else state["auth_status"], fingerprint))
+        if status in (401, 403):
+            conn.execute("UPDATE policy SET auth_failed_at=? WHERE id=1", (now,))
         if count is not None and (cap is not None or unlimited):
             # Out-of-order responses must not decrease the observed counter
             # within one quota day. A newer low count after rollover can.
@@ -265,6 +309,6 @@ def snapshot(token: str | None = None) -> dict:
                     "provider_unlimited_observed": bool(state["provider_unlimited"]),
                     "provider_observed_at": state["observed_at"],
                     "embargo_until": state["embargo"], "auth_status": state["auth_status"],
-                    "credential_matches": bool(token) and state["token_fingerprint"] == hashlib.sha256(token.encode()).hexdigest()[:16]}
+                    "credential_matches": bool(token) and state["token_fingerprint"] == _fingerprint(token)}
     except AdmissionError:
         return {"available": False, "state_unreadable": True, "scope": "account"}

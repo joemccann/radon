@@ -54,8 +54,7 @@ def _run(db, *, mid=5.00, open_orders=()):
     """Same wiring as the guard-durability drill, with a settable mid so a
     target at 7.00 and a stop at 3.00 both sit exactly on the 40% edge."""
     with patch("monitor_daemon.handlers.exit_orders.IBClient") as mock_cls, \
-         patch("monitor_daemon.handlers.exit_orders.Option"), \
-         patch("monitor_daemon.handlers.exit_orders.LimitOrder") as mock_limit:
+         patch("monitor_daemon.handlers.exit_orders.Option"):
         client = MagicMock()
         mock_cls.return_value = client
         contract = MagicMock()
@@ -70,11 +69,15 @@ def _run(db, *, mid=5.00, open_orders=()):
         client.get_open_orders.return_value = list(open_orders)
         client.place_order.side_effect = lambda *_a, **_k: _confirmed_trade()
         result = ExitOrdersHandler(db=db).execute()
-        return result, client, mock_limit
+        return result, client, client.place_order
 
 
-def _oca_kwargs(mock_limit):
-    return [call.kwargs for call in mock_limit.call_args_list]
+def _oca_kwargs(place_order):
+    """OCA fields of each order on the wire (target LMT and stop STP)."""
+    return [
+        {"ocaGroup": call.args[1].ocaGroup, "ocaType": call.args[1].ocaType}
+        for call in place_order.call_args_list
+    ]
 
 
 class TestOcaGroup:

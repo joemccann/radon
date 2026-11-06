@@ -586,9 +586,14 @@ def test_failed_gate_rollback_reverts_units_after_restoring_the_previous_release
     previous = "1" * 40
     subprocess.run(
         [sys.executable, str(JOURNAL_HELPER), "write", str(journal), requested,
-         previous, str(stage), str(backup), "target_unverified"],
+         previous, str(stage), str(backup), "prepared"],
         check=True,
     )
+    for step in ("backup_started", "backup_complete", "promoting", "target_unverified"):
+        subprocess.run(
+            [sys.executable, str(JOURNAL_HELPER), "phase", str(journal), step],
+            check=True,
+        )
     calls = tmp_path / "calls"
     shell = f"""
 set -euo pipefail

@@ -120,6 +120,20 @@ def _env_number(env: Mapping[str, str], name: str, default: float) -> float:
     return value if value > 0 else default
 
 
+# Deadlines every reader merges with max() (see cloud/scripts/model_pacing.py
+# READER and model_gateway/cache_migrate.migrate_pacing).
+_CLOCK_KEYS = ("next_at", "cooldown_until", "tripped_until", "last_429_at")
+
+
+def _sidecar_trip(path: Path) -> float:
+    """The ``.tripped`` epoch, or 0. Shell callers and other hosts write it."""
+    try:
+        value = float(path.with_name(path.name + ".tripped").read_text().strip())
+    except (OSError, ValueError):
+        return 0.0
+    return value if value >= 0 and value == value and value != float("inf") else 0.0
+
+
 class RateLimitStateBusy(RuntimeError):
     """REL-300 / R-719: shared pacing state was not available within its budget."""
 
@@ -193,13 +207,28 @@ class RateLimiter:
                         if remaining <= 0:
                             raise RateLimitStateBusy("NVIDIA rate state lock unavailable") from None
                         time.sleep(min(0.01, remaining))
+                corrupt = False
                 try:
                     state = json.loads(self.path.read_text())
                     if not isinstance(state, dict):
-                        state = {}
-                except (OSError, ValueError):
+                        state, corrupt = {}, True
+                except FileNotFoundError:
                     state = {}
+                except (OSError, ValueError):
+                    state, corrupt = {}, True
                 before = dict(state)
+                # One effective state: the file, the shell-visible sidecar and
+                # anything a failed write left only in this process.
+                trip = _sidecar_trip(self.path)
+                if trip > float(state.get("tripped_until", 0)):
+                    state["tripped_until"] = trip
+                for key in _CLOCK_KEYS:
+                    if self._memory.get(key, 0) > float(state.get(key, 0)):
+                        state[key] = self._memory[key]
+                if corrupt:
+                    # Unreadable state may have held a trip: fail toward
+                    # tripped, bounded, and rewrite a parseable file.
+                    self._trip(state, self.clock() + self.trip_secs)
                 yield state
                 if state != before:
                     tmp = self.path.with_name(self.path.name + ".new")
@@ -207,6 +236,7 @@ class RateLimiter:
                         tmp.write_text(json.dumps(state))
                         os.chmod(tmp, 0o600)
                         os.replace(tmp, self.path)
+                        self._memory.clear()
                     except OSError:
                         self._memory.update(state)
         finally:
@@ -253,6 +283,9 @@ class RateLimiter:
             state["last_429_at"] = now
             if state["consecutive_429"] >= self.trip_after:
                 self._trip(state, now + self.trip_secs)
+                # The trip consumes the streak: after it lapses, a fresh
+                # streak of trip_after 429s is needed, not a single one.
+                state["consecutive_429"] = 0
 
     def note_auth_failure(self, status: int) -> None:
         with self._state() as state:

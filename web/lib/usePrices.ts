@@ -95,7 +95,97 @@ export type UsePricesReturn = {
   getSnapshot: (symbols: string[]) => Promise<Record<string, PriceData>>;
 };
 
-type ConnState = "idle" | "connecting" | "open" | "closed";
+/** What the relay last said about the broker on THIS socket. A fresh socket
+ *  starts `unknown`: the previous socket's report says nothing about the new
+ *  relay session (audit §1 #15). */
+export type BrokerReport =
+  | { kind: "unknown" }
+  | {
+      kind: "reported";
+      ibConnected: boolean;
+      marketDataDegraded: boolean;
+      ibIssue: string | null;
+      ibStatusMessage: string | null;
+    };
+
+/** Price-socket connection machine. Broker state only exists while open, so a
+ *  closed socket cannot carry a stale `ibConnected` into the next session. */
+export type PriceFeedState =
+  | { phase: "idle" }
+  | { phase: "connecting" }
+  | { phase: "open"; broker: BrokerReport }
+  | { phase: "closed" };
+
+export type PriceFeedEvent =
+  /** A connect attempt starts (auth + socket construction). */
+  | { type: "connect" }
+  /** The socket reached OPEN. */
+  | { type: "open" }
+  /** Relay status frame. */
+  | {
+      type: "status";
+      ibConnected: boolean;
+      marketDataDegraded: boolean;
+      ibIssue: string | null;
+      ibStatusMessage: string | null;
+    }
+  /** Socket dropped, errored, or auth failed: reconnect is eligible. */
+  | { type: "closed" }
+  /** Teardown or an abandoned attempt: back to idle. */
+  | { type: "reset" };
+
+export function priceFeedTransition(state: PriceFeedState, event: PriceFeedEvent): PriceFeedState {
+  switch (event.type) {
+    case "connect":
+      return { phase: "connecting" };
+    case "open":
+      return state.phase === "connecting" ? { phase: "open", broker: { kind: "unknown" } } : state;
+    case "status":
+      if (state.phase !== "open") return state;
+      return {
+        phase: "open",
+        broker: {
+          kind: "reported",
+          ibConnected: event.ibConnected,
+          marketDataDegraded: event.marketDataDegraded,
+          ibIssue: event.ibIssue,
+          ibStatusMessage: event.ibStatusMessage,
+        },
+      };
+    case "closed":
+      return state.phase === "closed" ? state : { phase: "closed" };
+    case "reset":
+      return state.phase === "idle" ? state : { phase: "idle" };
+  }
+}
+
+export type PriceFeedView = {
+  connected: boolean;
+  ibConnected: boolean;
+  marketDataDegraded: boolean;
+  ibIssue: string | null;
+  ibStatusMessage: string | null;
+};
+
+/** Flat view the hook returns. An unknown broker reads as NOT connected, so
+ *  `connected && ibConnected && !marketDataDegraded` stays closed until the
+ *  current socket's relay reports. */
+export function derivePriceFeedView(state: PriceFeedState): PriceFeedView {
+  if (state.phase !== "open") {
+    return { connected: false, ibConnected: false, marketDataDegraded: false, ibIssue: null, ibStatusMessage: null };
+  }
+  const { broker } = state;
+  if (broker.kind === "unknown") {
+    return { connected: true, ibConnected: false, marketDataDegraded: false, ibIssue: null, ibStatusMessage: null };
+  }
+  return {
+    connected: true,
+    ibConnected: broker.ibConnected,
+    marketDataDegraded: broker.marketDataDegraded,
+    ibIssue: broker.ibIssue,
+    ibStatusMessage: broker.ibStatusMessage,
+  };
+}
 
 const WS_DEBUG = process.env.NODE_ENV === "development";
 function wsLog(...args: unknown[]) {
@@ -134,11 +224,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const [fundamentals, setFundamentals] = useState<Record<string, FundamentalsData>>({});
   const [depths, setDepths] = useState<Record<string, DepthBook>>({});
   const [tape, setTape] = useState<Record<string, Trade[]>>({});
-  const [connected, setConnected] = useState(false);
-  const [ibConnected, setIbConnected] = useState(false);
-  const [marketDataDegraded, setMarketDataDegraded] = useState(false);
-  const [ibIssue, setIbIssue] = useState<string | null>(null);
-  const [ibStatusMessage, setIbStatusMessage] = useState<string | null>(null);
+  const [feed, setFeed] = useState<PriceFeedState>({ phase: "idle" });
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -149,8 +235,15 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const mountedRef = useRef(true);
   const enabledRef = useRef(enabled);
 
-  // Connection state machine (ref — not rendered)
-  const connStateRef = useRef<ConnState>("idle");
+  // Connection state machine. The ref is the synchronous source of truth for
+  // the guards below; `feed` mirrors it for rendering.
+  const feedRef = useRef<PriceFeedState>({ phase: "idle" });
+  const dispatchFeed = useCallback((event: PriceFeedEvent) => {
+    const next = priceFeedTransition(feedRef.current, event);
+    if (next === feedRef.current) return;
+    feedRef.current = next;
+    setFeed(next);
+  }, []);
   const socketGenRef = useRef(0);
 
   // Reconnect strategy (shared utility)
@@ -472,17 +565,17 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
     // Idempotent: no-op if already connecting or open
     if (
-      connStateRef.current === "connecting" ||
-      connStateRef.current === "open"
+      feedRef.current.phase === "connecting" ||
+      feedRef.current.phase === "open"
     ) {
-      wsLog("connect-noop", connStateRef.current);
+      wsLog("connect-noop", feedRef.current.phase);
       return;
     }
 
     clearReconnectTimer();
 
     const gen = ++socketGenRef.current;
-    connStateRef.current = "connecting";
+    dispatchFeed({ type: "connect" });
     wsLog("connect", { gen });
 
     if (wsRef.current) {
@@ -496,20 +589,19 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         url = await buildAuthenticatedWebSocketUrl(socketUrl, getTokenRef.current);
       } catch (err) {
         if (gen !== socketGenRef.current || !mountedRef.current) return;
-        connStateRef.current = "closed";
-        setConnected(false);
+        dispatchFeed({ type: "closed" });
         const message = err instanceof Error ? err.message : "Realtime auth failed";
         setError(message);
         wsLog("Failed to authenticate realtime socket:", message);
         scheduleReconnectRef.current();
         return;
       }
-      if (
-        gen !== socketGenRef.current ||
-        !mountedRef.current ||
-        !enabledRef.current ||
-        !hasSubscriptionsRef.current
-      ) return;
+      if (gen !== socketGenRef.current || !mountedRef.current) return;
+      if (!enabledRef.current || !hasSubscriptionsRef.current) {
+        // Abandoned attempt: leave "connecting" so a later connect() is not a no-op.
+        dispatchFeed({ type: "reset" });
+        return;
+      }
 
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -528,10 +620,9 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     ws.onopen = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
       clearOpenTimer();
-      connStateRef.current = "open";
+      dispatchFeed({ type: "open" });
       reconnectStrategyRef.current.reset(); // Reset backoff on success
       lastMessageRef.current = Date.now();
-      setConnected(true);
       setError(null);
       onConnectionChangeRef.current?.(true);
       // Force full send on new connection
@@ -648,10 +739,13 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
             break;
           }
           case "status":
-            setIbConnected(message.ib_connected);
-            setMarketDataDegraded(message.market_data_degraded === true);
-            setIbIssue(message.ib_issue ?? null);
-            setIbStatusMessage(message.ib_status_message ?? null);
+            dispatchFeed({
+              type: "status",
+              ibConnected: message.ib_connected === true,
+              marketDataDegraded: message.market_data_degraded === true,
+              ibIssue: message.ib_issue ?? null,
+              ibStatusMessage: message.ib_status_message ?? null,
+            });
             break;
           case "error":
             setError(message.message);
@@ -676,11 +770,8 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     ws.onclose = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
       clearOpenTimer();
-      connStateRef.current = "closed";
+      dispatchFeed({ type: "closed" });
       clearStalenessTimer();
-      setConnected(false);
-      setIbIssue(null);
-      setIbStatusMessage(null);
       onConnectionChangeRef.current?.(false);
       lastSentHashRef.current = ""; // Next connect must full-sync
       lastSentDepthKeysRef.current = []; // Depth re-subscribes on reconnect
@@ -690,15 +781,14 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
     ws.onerror = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
-      connStateRef.current = "closed";
-      setConnected(false);
+      dispatchFeed({ type: "closed" });
       setError("Connection lost");
       onConnectionChangeRef.current?.(false);
       wsLog("error", { gen });
       ws.close();
     };
     })();
-  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, syncSubscriptions, syncDepth]);
+  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, syncSubscriptions, syncDepth, dispatchFeed]);
 
   // Wire scheduleReconnect via ref to avoid circular dep
   const scheduleReconnect = useCallback(() => {
@@ -724,21 +814,21 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     clearReconnectTimer();
     reconnectTimeoutRef.current = setTimeout(() => {
       if (mountedRef.current && enabled) {
-        connStateRef.current = "idle"; // Allow connect()
+        dispatchFeed({ type: "reset" }); // Allow connect()
         connect();
       }
     }, delay);
-  }, [enabled, clearReconnectTimer, connect]);
+  }, [enabled, clearReconnectTimer, connect, dispatchFeed]);
 
   // Keep the ref in sync
   scheduleReconnectRef.current = scheduleReconnect;
 
   const reconnect = useCallback(() => {
     // Force re-entry into idle so connect() isn't a no-op
-    connStateRef.current = "idle";
+    dispatchFeed({ type: "reset" });
     reconnectStrategyRef.current.reset();
     connect();
-  }, [connect]);
+  }, [connect, dispatchFeed]);
 
   // REL-197 (R-529): recover a closed/exhausted socket on the signals a
   // long-lived tab actually gets — returning to the foreground, the network
@@ -746,7 +836,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   // state with no backoff timer pending, so normal backoff is untouched.
   const recoverIfClosed = useCallback(() => {
     if (!enabled || !mountedRef.current) return;
-    if (connStateRef.current !== "closed") return;
+    if (feedRef.current.phase !== "closed") return;
     if (reconnectTimeoutRef.current !== null) return;
     const { symbols: syms, contracts: cts, indexes: idxs } = desiredRef.current;
     if (syms.length === 0 && cts.length === 0 && idxs.length === 0) return;
@@ -761,7 +851,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     if (typeof document === "undefined" || typeof window === "undefined") return;
     const onVisible = () => {
       const ws = wsRef.current;
-      if (ws && connStateRef.current === "open") syncDepthRef.current(ws);
+      if (ws && feedRef.current.phase === "open") syncDepthRef.current(ws);
       if (document.visibilityState === "visible") recoverIfClosedRef.current();
     };
     const onOnline = () => recoverIfClosedRef.current();
@@ -878,10 +968,9 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         }
         wsRef.current = null;
       }
-      connStateRef.current = "idle";
+      dispatchFeed({ type: "reset" });
       lastSentHashRef.current = "";
       lastSentDepthKeysRef.current = [];
-      setConnected(false);
       onConnectionChangeRef.current?.(false);
     }
 
@@ -897,20 +986,20 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         }
         wsRef.current = null;
       }
-      connStateRef.current = "idle";
+      dispatchFeed({ type: "reset" });
       lastSentHashRef.current = "";
       lastSentDepthKeysRef.current = [];
     };
-  }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
+  }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, dispatchFeed]);
 
   // ---------------------------------------------------------------------------
   // Subscription sync effect — sends diffs over open connection
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const ws = wsRef.current;
-    if (ws && connStateRef.current === "open") {
+    if (ws && feedRef.current.phase === "open") {
       syncSubscriptions(ws);
-    } else if (connStateRef.current === "closed") {
+    } else if (feedRef.current.phase === "closed") {
       // REL-197 (R-529): a page publishing a changed desired set while the
       // socket sits exhausted is a recovery signal, not a no-op.
       recoverIfClosedRef.current();
@@ -925,22 +1014,20 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const ws = wsRef.current;
-    if (ws && connStateRef.current === "open") {
+    if (ws && feedRef.current.phase === "open") {
       syncDepth(ws);
     }
     // If still connecting, onopen will flush via syncDepth
   }, [depthSymbolsHash, normalizedDepthSymbol, normalizedDepthExpiry, syncDepth]);
+
+  const feedView = useMemo(() => derivePriceFeedView(feed), [feed]);
 
   return {
     prices,
     fundamentals,
     depths,
     tape,
-    connected,
-    ibConnected,
-    marketDataDegraded,
-    ibIssue,
-    ibStatusMessage,
+    ...feedView,
     error,
     reconnect,
     getSnapshot,

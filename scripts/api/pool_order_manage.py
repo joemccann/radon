@@ -11,6 +11,8 @@ import asyncio
 import logging
 from typing import Optional
 
+from ib_order_manage import cancel_result, resolve_cancel_outcome
+from utils.ib_order_status import TERMINAL, CancelOutcome
 from utils.working_orders import working_order_missing_message
 
 logger = logging.getLogger("radon.pool_order_manage")
@@ -66,32 +68,31 @@ async def pool_cancel_order(
         return ownership_error
 
     status = trade.orderStatus.status
-    if status in ("Filled", "Cancelled", "ApiCancelled"):
+    if status in TERMINAL:
         return {"status": "error", "message": f"Order already {status} — cannot cancel"}
 
     await asyncio.to_thread(client.cancel_order, trade.order)
 
-    # Poll for confirmation (order disappears or status → Cancelled)
+    # Poll until the order leaves the working set; absence alone is not a
+    # cancel (a Filled order leaves too), so the outcome is named from the
+    # order's executions by the same transition the subprocess uses.
     elapsed = 0.0
     while elapsed < max_wait:
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
 
         refreshed = await asyncio.to_thread(_find_trade, client, order_id, perm_id)
-        if refreshed is None:
-            return {
-                "status": "ok",
-                "message": f"Order cancelled (orderId={trade.order.orderId})",
-                "orderId": trade.order.orderId,
-                "finalStatus": "Cancelled",
-            }
-        if refreshed.orderStatus.status in ("Cancelled", "ApiCancelled"):
-            return {
-                "status": "ok",
-                "message": f"Order cancelled (orderId={trade.order.orderId})",
-                "orderId": trade.order.orderId,
-                "finalStatus": refreshed.orderStatus.status,
-            }
+        current = trade if refreshed is None else refreshed
+        broker_status = current.orderStatus.status
+        outcome, filled, read_error = await asyncio.to_thread(
+            resolve_cancel_outcome, client, current, broker_status, gone=refreshed is None,
+        )
+        if outcome is CancelOutcome.STILL_WORKING:
+            continue
+        status_text, message, extra = cancel_result(
+            current, outcome, broker_status, filled, read_error,
+        )
+        return {"status": status_text, "message": message, **extra}
 
     final_status = trade.orderStatus.status
     return {
@@ -99,6 +100,7 @@ async def pool_cancel_order(
         "message": f"Cancel not confirmed after {max_wait}s — order still {final_status}",
         "orderId": trade.order.orderId,
         "finalStatus": final_status,
+        "cancelOutcome": CancelOutcome.STILL_WORKING.value,
     }
 
 
@@ -130,7 +132,7 @@ async def pool_modify_order(
         return ownership_error
 
     status = trade.orderStatus.status
-    if status in ("Filled", "Cancelled", "ApiCancelled"):
+    if status in TERMINAL:
         return {"status": "error", "message": f"Order already {status} — cannot modify"}
 
     order_type = trade.order.orderType

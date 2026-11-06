@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   claimAutoSyncFire,
@@ -44,7 +44,11 @@ function readState(target: string): TargetState | null {
   }
   if (!memory) return stored;
   if (!stored) return memory;
-  return stored.lastFiredAt > memory.lastFiredAt ? stored : memory;
+  // Storage is the cross-tab record; memory only covers a write that failed
+  // here. On an EQUAL lastFiredAt storage wins: another tab's reset clears
+  // `consecutive` without moving lastFiredAt (R-215), and memory would keep
+  // this tab on the escalated backoff.
+  return stored.lastFiredAt >= memory.lastFiredAt ? stored : memory;
 }
 
 function writeState(target: string, state: TargetState): void {
@@ -97,6 +101,12 @@ export function useAutoSyncOnStale(
   enabled: boolean,
   tick = 0,
 ): void {
+  // A Web-Lock claim resolves after the effect run that started it; fire the
+  // hook's CURRENT sync for that target, not the closure captured at claim
+  // time.
+  const latestRef = useRef({ target, syncNow });
+  latestRef.current = { target, syncNow };
+
   useEffect(() => {
     if (!enabled) return;
     if (!stale) {
@@ -119,7 +129,9 @@ export function useAutoSyncOnStale(
     // effect re-ran meanwhile (StrictMode double-invoke, a 30 s tick); the
     // sync hooks guard their own state updates against unmount.
     void claimed.then((ok) => {
-      if (ok) syncNow();
+      if (!ok) return;
+      const latest = latestRef.current;
+      (latest.target === target ? latest.syncNow : syncNow)();
     });
   }, [stale, enabled, target, syncNow, tick]);
 }

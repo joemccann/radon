@@ -53,7 +53,11 @@ export default function ApprovalGate({
   onConfirm,
   onDismiss,
 }: ApprovalGateProps) {
-  const [selected, setSelected] = useState(defaultOptionId ?? options[0]?.id ?? "");
+  const fallbackId = defaultOptionId ?? options[0]?.id ?? "";
+  const [picked, setSelected] = useState(fallbackId);
+  // A pick only counts while it names one of the current options; a gate
+  // re-rendered for another proposal falls back to that proposal's default.
+  const selected = options.some((opt) => opt.id === picked) ? picked : fallbackId;
   return (
     <section className="approval-gate" role="group" aria-label={title}>
       <div className="approval-gate__head">

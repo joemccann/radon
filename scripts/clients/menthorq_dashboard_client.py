@@ -330,6 +330,47 @@ class MenthorQDashboardClient:
             self._username, self._password, self._configured_token,
         ]).encode()).hexdigest()
 
+    # The embargo is also written beside the jar so a restarted oneshot does
+    # not pay chromium + bootstrap again on a jar that cannot mint. The
+    # persisted key omits the password and token (no offline guess oracle):
+    # path, jar revision and username. It lasts at most the embargo window.
+    def _embargo_path(self) -> Path:
+        return self._storage_state_path.with_name(
+            self._storage_state_path.name + ".auth-embargo.json"
+        )
+
+    def _persisted_signature(self) -> str:
+        try:
+            info = self._storage_state_path.stat()
+            revision = (info.st_ino, info.st_mtime_ns, info.st_size)
+        except OSError:
+            revision = None
+        return hashlib.sha256(json.dumps([
+            str(self._storage_state_path.resolve()), revision, self._username,
+        ]).encode()).hexdigest()
+
+    def _trip_auth_embargo(self) -> None:
+        _trip_auth_embargo(self._auth_signature())
+        target = self._embargo_path()
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"until": time.time() + _AUTH_FAILURE_EMBARGO_SECONDS,
+                           "signature": self._persisted_signature()}, handle)
+            os.replace(tmp, target)
+        except OSError:
+            tmp.unlink(missing_ok=True)  # the in-process embargo still holds
+
+    def _persisted_embargo_active(self) -> bool:
+        try:
+            row = json.loads(self._embargo_path().read_text(encoding="utf-8"))
+            until = float(row["until"])
+        except (OSError, ValueError, TypeError, KeyError):
+            return False
+        return (row.get("signature") == self._persisted_signature()
+                and time.time() < until <= time.time() + _AUTH_FAILURE_EMBARGO_SECONDS)
+
     def _remaining_ms(self, deadline: float, cap_seconds: float) -> int:
         """Milliseconds left before ``deadline``, clamped to ``cap_seconds``.
 
@@ -373,7 +414,7 @@ class MenthorQDashboardClient:
                     if self._token_is_explicit:
                         raise
                     if attempt:
-                        _trip_auth_embargo(self._auth_signature())
+                        self._trip_auth_embargo()
                         raise
                     # A revoked/opaque override cannot be detected by JWT exp.
                     # Never replay the rejected token, even if session says OK.
@@ -404,14 +445,14 @@ class MenthorQDashboardClient:
                     time.monotonic() < _auth_embargo_until
                     and _auth_failure_signature in {None, signature}
                 )
-            if embargoed:
+            if embargoed or self._persisted_embargo_active():
                 raise MenthorQDashboardAuthEmbargoed(
                     "dashboard authentication embargoed after a recent failure"
                 )
             try:
                 return self._resolve_access_token_uncached()
             except MenthorQDashboardAuthError:
-                _trip_auth_embargo(self._auth_signature())
+                self._trip_auth_embargo()
                 raise
         finally:
             self._auth_deadline = previous_deadline

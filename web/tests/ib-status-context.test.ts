@@ -148,7 +148,8 @@ describe("IBStatusProvider", () => {
     const { result } = renderHook(() => useIBStatusContext(), { wrapper });
     await flushSocketOpen();
     act(() => latestWs().simulateOpen());
-    // Default ibConnected is true (assume connected until told otherwise)
+    // ibConnected is false until the open socket's first status frame
+    expect(result.current.ibConnected).toBe(false);
     act(() => latestWs().simulateMessage({ type: "status", ib_connected: false }));
     expect(result.current.ibConnected).toBe(false);
     act(() => latestWs().simulateMessage({ type: "status", ib_connected: true }));
@@ -178,7 +179,10 @@ describe("IBStatusProvider", () => {
     expect(result.current.connectionState).toBe("relay_offline");
 
     act(() => latestWs().simulateOpen());
-    // WS open + ibConnected default true = connected
+    // WS open, broker not yet reported: fail closed (audit 2026-11-03 §3.5)
+    expect(result.current.connectionState).toBe("ib_offline");
+
+    act(() => latestWs().simulateMessage({ type: "status", ib_connected: true }));
     expect(result.current.connectionState).toBe("connected");
 
     act(() => latestWs().simulateMessage({ type: "status", ib_connected: false }));

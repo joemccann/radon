@@ -282,13 +282,13 @@ def test_theta_route_blocked_scan_does_not_consume_cooldown(app_client, monkeypa
         return _script_result(dict(THETA_BLOCKED_PAYLOAD))
 
     monkeypatch.setattr(server, "run_script", _fake_run_script)
-    monkeypatch.setattr(server, "_theta_last_scan", COOLDOWN_EXPIRED)
+    monkeypatch.setattr(server, "_THETA_GATE", server._preset_scan_gate("theta", server.THETA_COOLDOWN_S))
 
     resp = client.post("/theta-harvester/scan")
 
     assert resp.status_code == 200
     assert resp.json()["scan_status"] == "uw-budget-blocked"
-    assert server._theta_last_scan == COOLDOWN_EXPIRED
+    assert not server._THETA_GATE.in_cooldown()
 
 
 def test_theta_route_clean_scan_still_consumes_cooldown(app_client, monkeypatch) -> None:
@@ -298,12 +298,12 @@ def test_theta_route_clean_scan_still_consumes_cooldown(app_client, monkeypatch)
         return _script_result({"universe": "preset:ndx100", "candidates_found": 0, "results": []})
 
     monkeypatch.setattr(server, "run_script", _fake_run_script)
-    monkeypatch.setattr(server, "_theta_last_scan", COOLDOWN_EXPIRED)
+    monkeypatch.setattr(server, "_THETA_GATE", server._preset_scan_gate("theta", server.THETA_COOLDOWN_S))
 
     resp = client.post("/theta-harvester/scan")
 
     assert resp.status_code == 200
-    assert server._theta_last_scan > COOLDOWN_EXPIRED
+    assert server._THETA_GATE.in_cooldown()
 
 
 def test_strength_route_blocked_scan_does_not_consume_cooldown(app_client, monkeypatch) -> None:
@@ -320,13 +320,13 @@ def test_strength_route_blocked_scan_does_not_consume_cooldown(app_client, monke
         )
 
     monkeypatch.setattr(server, "run_script", _fake_run_script)
-    monkeypatch.setattr(server, "_strength_last_scan", COOLDOWN_EXPIRED)
+    monkeypatch.setattr(server, "_STRENGTH_GATE", server._preset_scan_gate("strength", server.STRENGTH_COOLDOWN_S))
 
     resp = client.post("/strength-confirmation/scan")
 
     assert resp.status_code == 200
     assert resp.json()["scan_status"] == "uw-budget-blocked"
-    assert server._strength_last_scan == COOLDOWN_EXPIRED
+    assert not server._STRENGTH_GATE.in_cooldown()
 
 
 # ── GARCH / LEAP preset scans (T-109) ─────────────────────────────

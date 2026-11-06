@@ -27,20 +27,30 @@ The prefix rule, not a JSON parse, decides: the root docker shim enforces the
 same rule in bash, and the two readers must never disagree. Writes are atomic
 and always canonical, so a flag this module writes reads the same in both.
 
+Clearing is compare-and-clear: ``clear_hold`` takes the ``id`` of the hold it
+means to lift and refuses (``HoldChanged``) when a different hold, or none,
+is on disk, so an unhold aimed at one hold can never delete a newer one. A
+caller that legitimately lifts whatever is held passes ``ANY_HOLD`` and says
+so. Set and clear serialize on an advisory ``flock`` beside the flag; a set
+that cannot take it writes anyway (fail-safe = HELD), a clear refuses.
+
 Stdlib only: the broker runs it under /usr/bin/python3.13, like ib_2fa_lock.
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import stat
 import sys
 import tempfile
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Final, Literal
 
 DEFAULT_HOLD_PATH = "/var/lib/radon/ib-operator-hold.json"
 DEFAULT_AUDIT_PATH = "/var/log/radon/ib-operator-hold.jsonl"
@@ -49,8 +59,54 @@ HELD_RC = 73
 FLAG_MODE = 0o644
 
 
+ANY_HOLD: Final = "*any*"
+"""``clear_hold`` target that lifts whatever hold is set. Say it explicitly."""
+
+
+class HoldChanged(RuntimeError):
+    """The hold on disk is not the one the caller asked to clear."""
+
+    def __init__(self, expected_id: str, current: dict) -> None:
+        self.expected_id = expected_id
+        self.current = current
+        found = current.get("id") or ("no hold" if not current.get("held") else "a hold without an id")
+        super().__init__(f"hold changed: expected {expected_id}, found {found}")
+
+
 def _hold_path() -> Path:
     return Path(os.environ.get("RADON_IB_OPERATOR_HOLD_PATH", DEFAULT_HOLD_PATH))
+
+
+def _guard_path() -> Path:
+    path = _hold_path()
+    return path.with_name(path.name + ".lock")
+
+
+@contextmanager
+def _transaction(*, required: bool):
+    """Serialize set/clear across processes (root CLI, broker daemon, watchdog).
+
+    Read-only open with O_NOFOLLOW: either uid can flock the other's file, and
+    root never follows a planted symlink. ``required=False`` (set) proceeds
+    unguarded when the lock cannot be opened, because a hold must always be
+    writable; ``required=True`` (clear) raises the OSError instead.
+    """
+    try:
+        fd = os.open(
+            _guard_path(),
+            os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            FLAG_MODE,
+        )
+    except OSError:
+        if required:
+            raise
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _audit_path() -> Path:
@@ -172,18 +228,36 @@ def set_hold(reason: str, actor: str, expires_at: str | None = None) -> dict:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         state["expires_at"] = parsed.astimezone(timezone.utc).isoformat()
-    _write_flag(state)
+    with _transaction(required=False):
+        _write_flag(state)
     _audit("hold", state)
     return state
 
 
-def clear_hold(actor: str) -> dict:
-    state = {"held": False, "actor": actor, "cleared_at": _now()}
-    if os.geteuid() == _owner_uid():
-        _write_flag(state)
-    else:
-        # Only the owner (root) can write a not-held flag that reads as one.
-        _hold_path().unlink(missing_ok=True)
+def clear_hold(actor: str, *, expected_id: str | Literal["*any*"]) -> dict:
+    """Lift the hold whose ``id`` is ``expected_id`` (or any, with ANY_HOLD).
+
+    Raises ``HoldChanged`` when the hold on disk is a different one or none:
+    the compare and the clear run in one transaction with ``set_hold``.
+    """
+    if not expected_id:
+        raise ValueError("expected_id is required (a hold id or ANY_HOLD)")
+    with _transaction(required=True):
+        current = hold_state()
+        if expected_id != ANY_HOLD and not (
+            current["held"] and current.get("id") == expected_id
+        ):
+            _audit("clear-refused", {"actor": actor, "expected_id": expected_id,
+                                     "found_id": current.get("id")})
+            raise HoldChanged(expected_id, current)
+        state = {"held": False, "actor": actor, "cleared_at": _now()}
+        if current.get("id"):
+            state["cleared_id"] = current["id"]
+        if os.geteuid() == _owner_uid():
+            _write_flag(state)
+        else:
+            # Only the owner (root) can write a not-held flag that reads as one.
+            _hold_path().unlink(missing_ok=True)
     _audit("clear", state)
     return state
 
@@ -197,8 +271,18 @@ def main(argv: list[str] | None = None) -> int:
     hold.add_argument("--actor", required=True)
     hold.add_argument("--expires-at", default=None,
                       help="ISO time; a reminder only, the hold never lifts itself")
-    clear = verbs.add_parser("clear")
+    clear = verbs.add_parser(
+        "clear",
+        help=f"lift the hold; exit {HELD_RC} when --expected-id names another hold",
+    )
     clear.add_argument("--actor", required=True)
+    target = clear.add_mutually_exclusive_group()
+    target.add_argument("--expected-id", default=None,
+                        help="clear only this hold id (compare-and-clear)")
+    # `radon ib resume` is the operator's explicit "lift whatever is held";
+    # with neither flag the CLI keeps that meaning for existing callers.
+    target.add_argument("--any", action="store_true",
+                        help="clear whatever hold is set (the default)")
     args = parser.parse_args(argv)
 
     if args.verb == "hold":
@@ -210,7 +294,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(state))
         return 0
     if args.verb == "clear":
-        print(json.dumps(clear_hold(args.actor)))
+        try:
+            state = clear_hold(args.actor, expected_id=args.expected_id or ANY_HOLD)
+        except HoldChanged as exc:
+            print(f"ib_operator_hold: {exc}", file=sys.stderr)
+            return HELD_RC
+        print(json.dumps(state))
         return 0
     state = hold_state()
     print(json.dumps(state))

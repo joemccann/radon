@@ -12,10 +12,18 @@ import {
 import ConfirmDialog from "./ConfirmDialog";
 
 const GATEWAY_UNIT = "radon-ib-gateway.service";
-// After a confirmed Stop/Start the unit-state poll lags by a beat, so we flip
-// the button optimistically. This is the safety ceiling: the override always
-// clears after this window even if the poll never settles, so it can't stick.
+// After a confirmed Stop/Start the unit-state poll lags by a beat, so the
+// acknowledged intent shows as in-transition until the poll confirms it. This
+// is the safety ceiling, measured from when the intent was recorded: the
+// intent always clears after this window even if the poll never settles.
 const OPTIMISTIC_POWER_MAX_MS = 120_000;
+
+/**
+ * An acknowledged power command the poll has not confirmed yet. While set,
+ * the gateway renders as transitional so neither Start nor Stop is armed on
+ * an unconfirmed state; the target only picks the label.
+ */
+type PowerIntent = { target: "stopped" | "running" } | null;
 
 type Ib2faControlsProps = {
   health: AdminHealthPayload | null;
@@ -83,11 +91,10 @@ export default function Ib2faControls({
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingRestart, setPendingRestart] = useState(false);
   const [pendingPower, setPendingPower] = useState(false);
-  // Optimistic power target set on a confirmed Stop/Start so the button flips
-  // immediately rather than waiting for the next /admin/services poll. Cleared
-  // once the poll settles to the expected terminal state (or after the safety
-  // window) so it never sticks stale.
-  const [optimisticPower, setOptimisticPower] = useState<GatewayPowerState | null>(null);
+  // Set on an acknowledged Stop/Start/Restart so the control leaves its armed
+  // state at once rather than waiting for the next /admin/services poll.
+  // Cleared once the poll reaches the target (or after the safety window).
+  const [powerIntent, setPowerIntent] = useState<PowerIntent>(null);
 
   const anyPending = externalPending || pendingForce || pendingReset || pendingRestart || pendingPower;
   const pushLock = health?.ib_gateway?.restart_backoff?.push_lock ?? null;
@@ -102,24 +109,24 @@ export default function Ib2faControls({
         unit: gatewayUnit,
         portListening: health?.ib_gateway?.port_listening,
       });
-  const powerState = polledPowerState === "unknown" ? "unknown" : optimisticPower ?? polledPowerState;
+  const powerState: GatewayPowerState = polledPowerState === "unknown"
+    ? "unknown"
+    : powerIntent !== null && polledPowerState !== powerIntent.target
+      ? "transitional"
+      : polledPowerState;
 
-  // Reconcile the optimistic override with the authoritative poll: clear it
-  // once the poll confirms the expected terminal state, or after the safety
-  // window so a missed/failed action can never leave the button wrong forever.
+  // Reconcile the intent with the authoritative poll: clear it once the poll
+  // reaches the target.
   useEffect(() => {
-    if (optimisticPower === null) return undefined;
-    const settled =
-      (optimisticPower === "stopped" && polledPowerState === "stopped") ||
-      ((optimisticPower === "running" || optimisticPower === "transitional") &&
-        polledPowerState === "running");
-    if (settled) {
-      setOptimisticPower(null);
-      return undefined;
-    }
-    const timer = setTimeout(() => setOptimisticPower(null), OPTIMISTIC_POWER_MAX_MS);
+    if (powerIntent !== null && polledPowerState === powerIntent.target) setPowerIntent(null);
+  }, [powerIntent, polledPowerState]);
+
+  // Safety ceiling keyed on the intent alone, so poll changes never re-arm it.
+  useEffect(() => {
+    if (powerIntent === null) return undefined;
+    const timer = setTimeout(() => setPowerIntent(null), OPTIMISTIC_POWER_MAX_MS);
     return () => clearTimeout(timer);
-  }, [optimisticPower, polledPowerState]);
+  }, [powerIntent]);
 
   const remoteGateway = hostRole === "app" && gatewayUnit?.can_control === true;
   const ownsGatewayLifecycle = hostRole !== "app" || remoteGateway;
@@ -205,8 +212,8 @@ export default function Ib2faControls({
     try {
       const succeeded = onStopGateway ? await onStopGateway() : false;
       if (succeeded) {
-        // Flip only after the control plane explicitly acknowledges success.
-        setOptimisticPower("stopped");
+        // Record the intent only after the control plane acknowledges it.
+        setPowerIntent({ target: "stopped" });
       }
     } finally {
       setPendingPower(false);
@@ -221,9 +228,9 @@ export default function Ib2faControls({
     try {
       const succeeded = onStartGateway ? await onStartGateway() : false;
       if (succeeded) {
-        // Start is a full-stack restart (~60-90s); show it as in-transition
-        // until the poll confirms the gateway is back up.
-        setOptimisticPower("transitional");
+        // Start takes ~60-90s; show it as in-transition until the poll
+        // confirms the gateway is back up.
+        setPowerIntent({ target: "running" });
       }
     } finally {
       setPendingPower(false);
@@ -236,7 +243,7 @@ export default function Ib2faControls({
     if (anyPending || restartGatewayDisabledReason || !onRestartGateway) return;
     setPendingPower(true);
     try {
-      if (await onRestartGateway()) setOptimisticPower("transitional");
+      if (await onRestartGateway()) setPowerIntent({ target: "running" });
     } finally {
       setPendingPower(false);
       setShowGatewayRestartConfirm(false);
@@ -261,7 +268,7 @@ export default function Ib2faControls({
   const powerButtonLabel = pendingPower
     ? "Working..."
     : powerState === "transitional"
-      ? gatewayUnit?.active_state === "deactivating"
+      ? (powerIntent?.target ?? (gatewayUnit?.active_state === "deactivating" ? "stopped" : "running")) === "stopped"
         ? "Stopping..."
         : "Starting..."
       : powerState === "running"

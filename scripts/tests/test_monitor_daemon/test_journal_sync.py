@@ -50,6 +50,14 @@ def _mock_fill(*, exec_id: str, symbol: str, side: str, shares: int, price: floa
 
 
 @pytest.fixture
+def empty_prior_journal():
+    """The prior-qty lookup reads a flat journal. Without it the lookup has
+    no DB and fails, and a failed lookup refuses the label (§1 #11)."""
+    with patch.object(JournalSyncHandler, "_lookup_prior_qty", return_value=0.0):
+        yield
+
+
+@pytest.fixture
 def trade_log_path(tmp_path: Path) -> Path:
     path = tmp_path / "trade_log.json"
     atomic_save(str(path), {"trades": []})
@@ -99,6 +107,7 @@ class TestJournalSyncHandlerExecute:
             assert result["fills_seen"] == 0
             assert not spy.called
 
+    @pytest.mark.usefixtures("empty_prior_journal")
     def test_appends_new_fills_with_exec_id(self, trade_log_path):
         fill = _mock_fill(
             exec_id="0001.6541ABCD.01",
@@ -164,6 +173,7 @@ class TestJournalSyncHandlerExecute:
         assert result["skipped"] == 1
         assert not spy.called
 
+    @pytest.mark.usefixtures("empty_prior_journal")
     def test_handles_option_fills(self, trade_log_path):
         fill = _mock_fill(
             exec_id="OPT-FILL-1",
@@ -525,7 +535,9 @@ class TestProductionNoMirrorConfig:
 
         def execute(sql, args=()):
             result = MagicMock(spec=["fetchall"])
-            if "trade_id, payload, filled_at, written_at" in sql:
+            if "rowid AS journal_rowid" in sql and "UPPER(" in sql:
+                result.fetchall.return_value = []  # prior-qty scan: flat
+            elif "trade_id, payload, filled_at, written_at" in sql:
                 result.fetchall.return_value = rows
             else:
                 result.fetchall.return_value = []
@@ -1316,12 +1328,21 @@ class TestCorrectionSuffixSupersede:
             for r in rows
         ]
         coverage = [(r["ib_exec_id"],) for r in rows]
-        prior = [(json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:00Z") for r in rows]
+        # Driver-faithful paged prior-qty rows: (trade_id, payload,
+        # filled_at, written_at, rowid). A non-advancing page is a FAILED
+        # lookup, which now refuses the label instead of reading as flat.
+        prior = [
+            (r["ib_exec_id"], json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:00Z", index)
+            for index, r in enumerate(rows, start=1)
+        ]
 
         def execute(sql, *args, **kwargs):
             result = MagicMock(spec=["fetchall"])
             statement = " ".join(str(sql).split())
-            if "trade_id, payload, filled_at, written_at" in statement:
+            if "rowid AS journal_rowid FROM journal WHERE rowid > ? AND UPPER" in statement:
+                cursor = int(args[0][0])
+                result.fetchall.return_value = [row for row in prior if row[-1] > cursor]
+            elif "trade_id, payload, filled_at, written_at" in statement:
                 result.fetchall.return_value = recovery
             elif "SELECT trade_id, rowid AS journal_rowid FROM journal" in statement:
                 result.fetchall.return_value = coverage

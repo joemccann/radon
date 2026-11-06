@@ -213,8 +213,10 @@ def _read(path: Path) -> dict:
 
 
 def _persist(provider: str, until: float, env: Mapping[str, str]) -> None:
+    """Extend-only: a shorter reset never replaces a longer persisted one."""
+
     def record(data: dict[str, float]) -> None:
-        data[provider] = until
+        data[provider] = max(data.get(provider, 0.0), until)
 
     _rewrite(env, record)
 

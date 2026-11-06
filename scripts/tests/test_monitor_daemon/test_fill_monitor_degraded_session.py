@@ -40,6 +40,7 @@ def _fill_for(order_id):
     fill = MagicMock()
     fill.execution.orderId = order_id
     fill.execution.permId = 700000 + order_id
+    fill.execution.shares = 5  # the whole tracked quantity
     return fill
 
 

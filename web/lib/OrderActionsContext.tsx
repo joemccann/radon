@@ -1,8 +1,21 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OpenOrder, OrdersData } from "@/lib/types";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
+import {
+  INITIAL_ORDER_ACTION_STATE,
+  POLL_INTERVAL_MS,
+  hasPending,
+  isCancelPending,
+  nextRequest,
+  resolutionNotice,
+  transition,
+  type OrderActionEvent,
+  type OrderActionState,
+  type Resolution,
+} from "@/lib/orders/orderActionMachine";
+import { orderIdentityKey } from "@/lib/orders/orderDialogMachine";
 
 /** Snapshot of a cancelled order for the executed table */
 export type CancelledOrder = {
@@ -43,9 +56,6 @@ type OrderActionsContextValue = {
 
 const OrderActionsContext = createContext<OrderActionsContextValue | null>(null);
 
-const POLL_INTERVAL_MS = 5_000;
-const POLL_MAX_COUNT = 24; // ~2 min
-
 /** Caddy's empty 504. The broker call may already have landed. */
 const MODIFY_STATUS_UNKNOWN =
   "Modify status unknown. The change may already be at IB. Check the order before sending it again.";
@@ -55,21 +65,39 @@ function isOpaqueEdgeTimeout(res: Response): boolean {
   return !isJson && (res.status === 502 || res.status === 504);
 }
 
+function retryAfterMs(res: Response): number | undefined {
+  const seconds = Number(res.headers.get("Retry-After"));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : undefined;
+}
+
 export function OrderActionsProvider({ children }: { children: ReactNode }) {
-  const [pendingCancels, setPendingCancels] = useState<Map<number, OpenOrder>>(new Map());
-  const [pendingModifies, setPendingModifies] = useState<Map<number, PendingModify>>(new Map());
+  // One explicit machine (lib/orders/orderActionMachine.ts) holds every
+  // pending cancel / modify. The ref is the source of truth for the poller;
+  // the state copy only drives renders.
+  const machineRef = useRef<OrderActionState>(INITIAL_ORDER_ACTION_STATE);
+  const [machine, setMachine] = useState<OrderActionState>(INITIAL_ORDER_ACTION_STATE);
   const [cancelledOrders, setCancelledOrders] = useState<CancelledOrder[]>([]);
 
-  const pollTimersRef = useRef<Map<number, ReturnType<typeof setInterval>>>(new Map());
-  const pollCountsRef = useRef<Map<number, number>>(new Map());
+  /** The single shared poll timer, and whether a poll request is in flight. */
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollInFlightRef = useRef(false);
+  const unmountedRef = useRef(false);
+  /** Order identity keys whose cancel POST is on the wire (double-click guard). */
+  const cancelRequestsInFlightRef = useRef<Set<string>>(new Set());
   const notificationsRef = useRef<Notification[]>([]);
   const ordersUpdaterRef = useRef<((data: OrdersData) => void) | null>(null);
-  const pendingModifiesRef = useRef<Map<number, PendingModify>>(new Map());
 
-  // Keep ref in sync with state for use inside interval callbacks
-  useEffect(() => {
-    pendingModifiesRef.current = pendingModifies;
-  }, [pendingModifies]);
+  const pendingCancels = useMemo(
+    () => new Map([...machine.cancels.values()].map((entry) => [entry.order.permId, entry.order])),
+    [machine.cancels],
+  );
+  const pendingModifies = useMemo(
+    () => new Map<number, PendingModify>([...machine.modifies.values()].map((entry) => [
+      entry.order.permId,
+      { order: entry.order, newPrice: entry.newPrice, newQuantity: entry.newQuantity },
+    ])),
+    [machine.modifies],
+  );
 
   const pushNotification = useCallback((n: Notification) => {
     notificationsRef.current.push(n);
@@ -77,7 +105,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
 
   /** Apply optimistic modify prices before pushing data to the UI */
   const pushOrdersData = useCallback((data: OrdersData) => {
-    const currentModifies = pendingModifiesRef.current;
+    const currentModifies = machineRef.current.modifies;
     if (currentModifies.size === 0) {
       ordersUpdaterRef.current?.(data);
       return;
@@ -85,7 +113,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     const patched: OrdersData = {
       ...data,
       open_orders: data.open_orders.map((o) => {
-        const pm = currentModifies.get(o.permId);
+        const pm = currentModifies.get(orderIdentityKey(o));
         if (!pm) return o;
         return {
           ...o,
@@ -97,189 +125,131 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     ordersUpdaterRef.current?.(patched);
   }, []);
 
-  /* ── Cancel polling ─────────────────────────────────── */
+  /* ── Confirmation machine + shared poller ───────────── */
 
-  const startCancelPoll = useCallback((order: OpenOrder) => {
-    const permId = order.permId;
-    pollCountsRef.current.set(permId, 0);
+  const dispatch = useCallback((event: OrderActionEvent): Resolution[] => {
+    const { state, resolutions } = transition(machineRef.current, event);
+    machineRef.current = state;
+    setMachine(state);
+    return resolutions;
+  }, []);
 
-    const tick = async () => {
-      const count = (pollCountsRef.current.get(permId) ?? 0) + 1;
-      pollCountsRef.current.set(permId, count);
+  const applyResolutions = useCallback((resolutions: Resolution[]) => {
+    const rows: CancelledOrder[] = [];
+    for (const resolution of resolutions) {
+      const notice = resolutionNotice(resolution);
+      if (notice) pushNotification(notice);
+      if (resolution.kind !== "cancel") continue;
+      const unfilled =
+        resolution.outcome === "confirmedCancelled"
+          ? resolution.pending.order.totalQuantity
+          : resolution.outcome === "partiallyFilledThenCancelled"
+            ? resolution.pending.order.totalQuantity - resolution.filledQuantity
+            : 0;
+      if (unfilled <= 0) continue;
+      const o = resolution.pending.order;
+      rows.push({
+        permId: o.permId,
+        symbol: o.symbol,
+        action: o.action,
+        orderType: o.orderType,
+        totalQuantity: unfilled,
+        limitPrice: o.limitPrice,
+        cancelledAt: new Date().toISOString(),
+      });
+    }
+    if (rows.length > 0) setCancelledOrders((prev) => [...rows, ...prev]);
+  }, [pushNotification]);
 
-      try {
-        const res = await fetch("/api/orders", { method: "POST" });
-        if (!res.ok) {
-          scheduleNext();
-          return;
-        }
-        const data = (await res.json()) as OrdersData;
+  const pollTickRef = useRef<() => Promise<void>>(async () => {});
 
-        const stillOpen = data.open_orders.some(
-          (o) => o.permId === permId || (o.orderId === order.orderId && order.orderId !== 0),
-        );
+  /** Arm the single poll timer when something is pending and none is armed. */
+  const ensurePolling = useCallback(() => {
+    if (unmountedRef.current || pollTimerRef.current || pollInFlightRef.current) return;
+    if (!hasPending(machineRef.current)) return;
+    pollTimerRef.current = setTimeout(() => {
+      pollTimerRef.current = null;
+      void pollTickRef.current();
+    }, POLL_INTERVAL_MS);
+  }, []);
 
-        if (!stillOpen) {
-          pollTimersRef.current.delete(permId);
-          pollCountsRef.current.delete(permId);
-
-          setPendingCancels((prev) => {
-            const next = new Map(prev);
-            next.delete(permId);
-            return next;
-          });
-          setCancelledOrders((prev) => [
-            {
-              permId,
-              symbol: order.symbol,
-              action: order.action,
-              orderType: order.orderType,
-              totalQuantity: order.totalQuantity,
-              limitPrice: order.limitPrice,
-              cancelledAt: new Date().toISOString(),
-            },
-            ...prev,
-          ]);
-
-          pushOrdersData(data);
-          pushNotification({ type: "success", message: `${order.symbol} order cancelled` });
-        } else if (count >= POLL_MAX_COUNT) {
-          pollTimersRef.current.delete(permId);
-          pollCountsRef.current.delete(permId);
-          setPendingCancels((prev) => {
-            const next = new Map(prev);
-            next.delete(permId);
-            return next;
-          });
-          pushOrdersData(data);
-          pushNotification({
-            type: "error",
-            message: `${order.symbol} cancellation failed. Order still open. Try cancelling again.`,
-            duration: 0,
-          });
-        } else {
-          pushOrdersData(data);
-          scheduleNext();
-        }
-      } catch {
-        scheduleNext();
+  const pollTick = useCallback(async () => {
+    const request = nextRequest(machineRef.current, Date.now());
+    if (!request) return;
+    pollInFlightRef.current = true;
+    try {
+      const res = await fetch(
+        "/api/orders",
+        request === "refresh" ? { method: "POST", cache: "no-store" } : { cache: "no-store" },
+      );
+      if (unmountedRef.current) return;
+      if (res.status === 429) {
+        dispatch({ type: "rateLimited", now: Date.now(), retryAfterMs: retryAfterMs(res) });
+        return;
       }
-    };
-
-    const scheduleNext = () => {
-      const timer = setTimeout(tick, POLL_INTERVAL_MS);
-      pollTimersRef.current.set(permId, timer);
-    };
-
-    scheduleNext();
-  }, [pushNotification, pushOrdersData]);
+      if (!res.ok) {
+        applyResolutions(dispatch({ type: "pollFailed" }));
+        return;
+      }
+      const data = (await res.json()) as OrdersData;
+      if (unmountedRef.current) return;
+      const resolutions = dispatch({
+        type: "snapshot",
+        data,
+        now: Date.now(),
+        refreshed: request === "refresh",
+      });
+      // Overlay only the modifies still pending; a resolved one shows IB's row.
+      pushOrdersData(data);
+      applyResolutions(resolutions);
+    } catch {
+      if (!unmountedRef.current) applyResolutions(dispatch({ type: "pollFailed" }));
+    } finally {
+      pollInFlightRef.current = false;
+      ensurePolling();
+    }
+  }, [applyResolutions, dispatch, ensurePolling, pushOrdersData]);
+  pollTickRef.current = pollTick;
 
   const requestCancel = useCallback(async (order: OpenOrder) => {
+    const permId = order.permId;
+    // One cancel per order (permId, else orderId while IB has not assigned
+    // one): a second click while one is on the wire or awaiting
+    // confirmation sends nothing.
+    const key = orderIdentityKey(order);
+    if (isCancelPending(machineRef.current, order) || cancelRequestsInFlightRef.current.has(key)) return;
+    cancelRequestsInFlightRef.current.add(key);
     try {
       const res = await fetch("/api/orders/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: order.orderId, permId: order.permId }),
+        body: JSON.stringify({ orderId: order.orderId, permId }),
       });
       const json = await res.json();
       if (!res.ok) {
         pushNotification({ type: "error", message: json.error || "Cancel failed" });
         if (json.orders) pushOrdersData(json.orders);
       } else {
-        setPendingCancels((prev) => new Map(prev).set(order.permId, order));
-        startCancelPoll(order);
+        dispatch({ type: "cancelRequested", order });
+        ensurePolling();
         if (json.orders) pushOrdersData(json.orders);
       }
     } catch {
       pushNotification({ type: "error", message: "Cancel request failed" });
+    } finally {
+      cancelRequestsInFlightRef.current.delete(key);
     }
-  }, [pushNotification, startCancelPoll, pushOrdersData]);
-
-  /* ── Modify polling ─────────────────────────────────── */
+  }, [dispatch, ensurePolling, pushNotification, pushOrdersData]);
 
   const startModifyPoll = useCallback((order: OpenOrder, request: ModifyRequestWithOutsideRth) => {
-    const permId = order.permId;
-    pollCountsRef.current.set(permId, 0);
-
-    const tick = async () => {
-      const count = (pollCountsRef.current.get(permId) ?? 0) + 1;
-      pollCountsRef.current.set(permId, count);
-
-      try {
-        const res = await fetch("/api/orders", { method: "POST" });
-        if (!res.ok) {
-          scheduleNext();
-          return;
-        }
-        const data = (await res.json()) as OrdersData;
-
-        const ibOrder = data.open_orders.find((o) => o.permId === permId);
-
-        const priceConfirmed = request.newPrice == null
-          || (ibOrder?.limitPrice != null && Math.abs(ibOrder.limitPrice - request.newPrice) < 0.001);
-        const quantityConfirmed = request.newQuantity == null
-          || ibOrder?.totalQuantity === request.newQuantity;
-        const confirmed = Boolean(ibOrder && priceConfirmed && quantityConfirmed);
-
-        if (confirmed) {
-          pollTimersRef.current.delete(permId);
-          pollCountsRef.current.delete(permId);
-
-          setPendingModifies((prev) => {
-            const next = new Map(prev);
-            next.delete(permId);
-            return next;
-          });
-
-          // Push the real data (no overlay needed — IB already shows new price)
-          ordersUpdaterRef.current?.(data);
-          const messageParts: string[] = [];
-          if (request.newPrice != null) {
-            messageParts.push(`price $${request.newPrice.toFixed(2)}`);
-          }
-          if (request.newQuantity != null) {
-            messageParts.push(`qty ${request.newQuantity}`);
-          }
-          pushNotification({
-            type: "success",
-            message: messageParts.length > 0
-              ? `${order.symbol} order confirmed (${messageParts.join(", ")})`
-              : `${order.symbol} order confirmed`,
-          });
-        } else if (count >= POLL_MAX_COUNT) {
-          pollTimersRef.current.delete(permId);
-          pollCountsRef.current.delete(permId);
-
-          setPendingModifies((prev) => {
-            const next = new Map(prev);
-            next.delete(permId);
-            return next;
-          });
-
-          // Push fresh IB data without overlay — reverts to the real (old) price
-          ordersUpdaterRef.current?.(data);
-          pushNotification({
-            type: "error",
-            message: `${order.symbol} modify not confirmed by IB`,
-            duration: 0,
-          });
-        } else {
-          // Still pending — push data with optimistic overlay
-          pushOrdersData(data);
-          scheduleNext();
-        }
-      } catch {
-        scheduleNext();
-      }
-    };
-
-    const scheduleNext = () => {
-      const timer = setTimeout(tick, POLL_INTERVAL_MS);
-      pollTimersRef.current.set(permId, timer);
-    };
-
-    scheduleNext();
-  }, [pushNotification, pushOrdersData]);
+    dispatch({
+      type: "modifyRequested",
+      order,
+      newPrice: request.newPrice,
+      newQuantity: request.newQuantity,
+    });
+    ensurePolling();
+  }, [dispatch, ensurePolling]);
 
   const requestModify = useCallback(async (order: OpenOrder, request: ModifyRequestWithOutsideRth) => {
     try {
@@ -292,11 +262,6 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
       if (isOpaqueEdgeTimeout(res)) {
         pushNotification({ type: "warning", message: MODIFY_STATUS_UNKNOWN, duration: 0 });
         if (!request.replaceOrder && (request.newPrice != null || request.newQuantity != null)) {
-          setPendingModifies((prev) => new Map(prev).set(order.permId, {
-            order,
-            newPrice: request.newPrice,
-            newQuantity: request.newQuantity,
-          }));
           startModifyPoll(order, request);
         }
         return;
@@ -306,14 +271,9 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
         pushNotification({ type: "error", message: json.error || "Modify failed" });
         if (json.orders) pushOrdersData(json.orders);
       } else {
-        if (request.newPrice != null || request.newQuantity != null) {
-          const pm: PendingModify = {
-            order,
-            newPrice: request.newPrice,
-            newQuantity: request.newQuantity,
-          };
-          setPendingModifies((prev) => new Map(prev).set(order.permId, pm));
-        }
+        const confirmable = !request.replaceOrder && (request.newPrice != null || request.newQuantity != null);
+        // Register first so the pushed snapshot carries the optimistic overlay.
+        if (confirmable) startModifyPoll(order, request);
 
         if (json.orders) {
           if (request.replaceOrder) {
@@ -328,9 +288,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (request.newPrice != null || request.newQuantity != null) {
-          startModifyPoll(order, request);
-        } else {
+        if (!confirmable) {
           pushNotification({ type: "success", message: `${order.symbol} order modified` });
         }
       }
@@ -352,15 +310,17 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     ordersUpdaterRef.current = fn;
   }, []);
 
-  // Cleanup all poll timers on unmount (read map at teardown so late pollers are cleared)
+  // One timer to clear. An in-flight poll sees `unmountedRef` and stops.
+  // Remount (StrictMode) resumes polling anything still pending.
   useEffect(() => {
+    unmountedRef.current = false;
+    ensurePolling();
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional ref read at unmount
-      for (const timer of pollTimersRef.current.values()) {
-        clearTimeout(timer);
-      }
+      unmountedRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
     };
-  }, []);
+  }, [ensurePolling]);
 
   return (
     <OrderActionsContext.Provider

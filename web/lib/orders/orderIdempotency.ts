@@ -26,7 +26,9 @@
  * restart. Expired entries are pruned on load and on every write. A corrupt or
  * missing file starts empty — the durable layer must never fail an order route.
  * Deterministic failures are never persisted (their key is cleared; a genuine
- * retry must re-attempt).
+ * retry must re-attempt). An IN-FLIGHT placement is persisted too, before it
+ * runs: a restart mid-placement rehydrates it as an indeterminate tombstone,
+ * because the dead process may already have reached IB (audit 2026-11-03 #12).
  *
  * Failure is NOT one class:
  *
@@ -62,16 +64,27 @@ export const CLIENT_KEY_TTL_MS = 300_000;
  * passes a fresh `idempotencyKey` rather than waiting this out.
  */
 export const INDETERMINATE_RETENTION_MS = 60_000;
+/**
+ * Upper bound on one placement: the route's 30s radonFetch budget plus slack.
+ * An in-flight record older than this belongs to a process that died
+ * mid-placement; it is treated as settled indeterminate at this point.
+ */
+export const IN_FLIGHT_MAX_MS = 35_000;
 const MAX_ENTRIES = 1_000;
+
+/**
+ * One key's lifecycle. A deterministic failure has no state: its key is
+ * deleted. Only `succeeded` entries are eligible for MAX_ENTRIES eviction.
+ */
+type EntryState =
+  | { kind: "inFlight"; startedAt: number }
+  | { kind: "succeeded"; settledAt: number; value: unknown }
+  | { kind: "indeterminate"; settledAt: number; error: unknown };
 
 interface Entry {
   promise: Promise<unknown>;
   ttlMs: number;
-  settledAt: number | null;
-  /** Set when placement failed indeterminately — the key is then retained. */
-  indeterminate: { error: unknown } | null;
-  /** Set on success; carried so the outcome can be mirrored to disk. */
-  resolvedValue: { value: unknown } | null;
+  state: EntryState;
 }
 
 const registry = new Map<string, Entry>();
@@ -79,12 +92,10 @@ let hydratedFromDisk = false;
 
 // ── Durable layer (L2) ────────────────────────────────────────────────
 
-interface PersistedEntry {
-  ttlMs: number;
-  settledAt: number;
-  value?: unknown;
-  indeterminate?: { name: string; message: string };
-}
+type PersistedEntry =
+  | { ttlMs: number; settledAt: number; value?: unknown; indeterminate?: undefined; inFlightSince?: undefined }
+  | { ttlMs: number; settledAt: number; indeterminate: { name: string; message: string }; inFlightSince?: undefined }
+  | { ttlMs: number; inFlightSince: number };
 
 interface PersistedStore {
   v: 1;
@@ -134,12 +145,31 @@ function isLiveAt(entry: { settledAt: number; ttlMs: number }, now: number): boo
   return now - entry.settledAt <= entry.ttlMs;
 }
 
+/** Retention of an indeterminate outcome: never below the floor. */
+function indeterminateTtl(ttlMs: number): number {
+  return Math.max(ttlMs, INDETERMINATE_RETENTION_MS);
+}
+
+/**
+ * When a persisted record stops guarding its key. An in-flight record from a
+ * dead process counts as settled indeterminate once IN_FLIGHT_MAX_MS passed.
+ */
+function persistedWindow(persisted: PersistedEntry): { settledAt: number; ttlMs: number } {
+  if (persisted.inFlightSince !== undefined) {
+    return {
+      settledAt: persisted.inFlightSince + IN_FLIGHT_MAX_MS,
+      ttlMs: indeterminateTtl(persisted.ttlMs),
+    };
+  }
+  return persisted;
+}
+
 function ensureHydrated(): void {
   if (hydratedFromDisk) return;
   hydratedFromDisk = true;
   const now = Date.now();
   for (const [key, persisted] of Object.entries(readStore().entries)) {
-    if (registry.has(key) || !isLiveAt(persisted, now)) continue;
+    if (registry.has(key) || !isLiveAt(persistedWindow(persisted), now)) continue;
     registry.set(key, rehydrateEntry(persisted));
   }
 }
@@ -159,27 +189,36 @@ function readStore(): PersistedStore {
   return { v: 1, entries: {} };
 }
 
+function indeterminateEntry(cause: Error, window: { settledAt: number; ttlMs: number }): Entry {
+  const promise = Promise.reject(cause);
+  promise.catch(() => {}); // pre-handled: rehydrated keys may never be re-hit
+  return {
+    promise,
+    ttlMs: window.ttlMs,
+    state: { kind: "indeterminate", settledAt: window.settledAt, error: cause },
+  };
+}
+
 function rehydrateEntry(persisted: PersistedEntry): Entry {
+  if (persisted.inFlightSince !== undefined) {
+    // The process that ran this placement died before it settled. IB may hold
+    // the order, so the key becomes an indeterminate tombstone.
+    const cause = Object.assign(
+      new Error("Placement was in flight when the server restarted; its outcome at IB is unknown."),
+      { name: "RestartedInFlight" },
+    );
+    return indeterminateEntry(cause, persistedWindow(persisted));
+  }
   if (persisted.indeterminate) {
     const cause = Object.assign(new Error(persisted.indeterminate.message), {
       name: persisted.indeterminate.name,
     });
-    const promise = Promise.reject(cause);
-    promise.catch(() => {}); // pre-handled: rehydrated keys may never be re-hit
-    return {
-      promise,
-      ttlMs: persisted.ttlMs,
-      settledAt: persisted.settledAt,
-      indeterminate: { error: cause },
-      resolvedValue: null,
-    };
+    return indeterminateEntry(cause, persisted);
   }
   return {
     promise: Promise.resolve(persisted.value),
     ttlMs: persisted.ttlMs,
-    settledAt: persisted.settledAt,
-    indeterminate: null,
-    resolvedValue: { value: persisted.value },
+    state: { kind: "succeeded", settledAt: persisted.settledAt, value: persisted.value },
   };
 }
 
@@ -208,42 +247,49 @@ function persistStore(): void {
 }
 
 function serializeEntry(entry: Entry, now: number): PersistedEntry | null {
-  if (entry.settledAt === null || !isLiveAt({ settledAt: entry.settledAt, ttlMs: entry.ttlMs }, now)) {
-    return null;
+  const state = entry.state;
+  switch (state.kind) {
+    case "inFlight":
+      return { ttlMs: entry.ttlMs, inFlightSince: state.startedAt };
+    case "indeterminate": {
+      if (!isLiveAt({ settledAt: state.settledAt, ttlMs: entry.ttlMs }, now)) return null;
+      const error = state.error as { name?: unknown; message?: unknown };
+      return {
+        ttlMs: entry.ttlMs,
+        settledAt: state.settledAt,
+        indeterminate: {
+          name: typeof error?.name === "string" ? error.name : "Error",
+          message: typeof error?.message === "string" ? error.message : "",
+        },
+      };
+    }
+    case "succeeded": {
+      if (!isLiveAt({ settledAt: state.settledAt, ttlMs: entry.ttlMs }, now)) return null;
+      try {
+        JSON.stringify(state.value);
+      } catch {
+        return null; // non-serializable result stays L1-only
+      }
+      return { ttlMs: entry.ttlMs, settledAt: state.settledAt, value: state.value };
+    }
   }
-  if (entry.indeterminate) {
-    const error = entry.indeterminate.error as { name?: unknown; message?: unknown };
-    return {
-      ttlMs: entry.ttlMs,
-      settledAt: entry.settledAt,
-      indeterminate: {
-        name: typeof error?.name === "string" ? error.name : "Error",
-        message: typeof error?.message === "string" ? error.message : "",
-      },
-    };
-  }
-  if (!entry.resolvedValue) return null; // deterministic failure — never persisted
-  try {
-    JSON.stringify(entry.resolvedValue.value);
-  } catch {
-    return null; // non-serializable result stays L1-only
-  }
-  return {
-    ttlMs: entry.ttlMs,
-    settledAt: entry.settledAt,
-    value: entry.resolvedValue.value,
-  };
+}
+
+function isExpired(entry: Entry, now: number): boolean {
+  const state = entry.state;
+  if (state.kind === "inFlight") return false;
+  return !isLiveAt({ settledAt: state.settledAt, ttlMs: entry.ttlMs }, now);
 }
 
 function evict(now: number): void {
   for (const [key, entry] of registry) {
-    if (entry.settledAt !== null && now - entry.settledAt > entry.ttlMs) {
-      registry.delete(key);
-    }
+    if (isExpired(entry, now)) registry.delete(key);
   }
-  if (registry.size > MAX_ENTRIES) {
-    const oldest = registry.keys().next().value;
-    if (oldest !== undefined) registry.delete(oldest);
+  // The cap only ever drops settled successes, oldest first: an in-flight or
+  // indeterminate key is the guard against a second live order.
+  for (const [key, entry] of registry) {
+    if (registry.size <= MAX_ENTRIES) break;
+    if (entry.state.kind === "succeeded") registry.delete(key);
   }
 }
 
@@ -330,8 +376,8 @@ export async function runIdempotentOrder<T>(
     );
     // Read the outcome only after the settle: the entry records an indeterminate
     // placement before its rejection propagates.
-    const held = existing.indeterminate;
-    if (held) throw new IndeterminatePlacementError(held.error, true);
+    const held = existing.state;
+    if (held.kind === "indeterminate") throw new IndeterminatePlacementError(held.error, true);
     if (!settled.ok) throw settled.error;
     return { value: settled.value as T, deduplicated: true };
   }
@@ -339,38 +385,39 @@ export async function runIdempotentOrder<T>(
   const entry: Entry = {
     promise: Promise.resolve(),
     ttlMs,
-    settledAt: null,
-    indeterminate: null,
-    resolvedValue: null,
+    state: { kind: "inFlight", startedAt: Date.now() },
   };
+  // Registered and persisted BEFORE placement runs, so a restart mid-placement
+  // still guards the key.
+  registry.set(key, entry);
+  persistStore();
   entry.promise = (async () => {
     try {
       const value = await placement();
-      entry.settledAt = Date.now();
-      entry.resolvedValue = { value };
+      entry.state = { kind: "succeeded", settledAt: Date.now(), value };
       persistStore();
       return value;
     } catch (err) {
-      entry.settledAt = Date.now();
       if (isIndeterminatePlacementFailure(err)) {
-        entry.indeterminate = { error: err };
-        entry.ttlMs = Math.max(ttlMs, INDETERMINATE_RETENTION_MS);
-        persistStore();
+        entry.state = { kind: "indeterminate", settledAt: Date.now(), error: err };
+        entry.ttlMs = indeterminateTtl(ttlMs);
+      } else if (registry.get(key) === entry) {
+        // Deterministic failure: a genuine retry must re-attempt.
+        registry.delete(key);
       }
+      persistStore();
       throw err;
     }
   })();
-  registry.set(key, entry);
 
   try {
     const value = (await entry.promise) as T;
     return { value, deduplicated: false };
   } catch (err) {
-    if (entry.indeterminate) {
+    if (entry.state.kind === "indeterminate") {
       // Key RETAINED: the order may be live at IB, so no retry may re-place it.
       throw new IndeterminatePlacementError(err, false);
     }
-    registry.delete(key); // deterministic failure → a genuine retry must re-attempt
     throw err;
   }
 }

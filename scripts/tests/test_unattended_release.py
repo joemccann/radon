@@ -808,6 +808,7 @@ def test_file_outbox_persists_ambiguous_attempt_across_restart(tmp_path):
     event_id = "42:" + HEAD
     with state.locked():
         assert state.claim(42, HEAD)
+        state.record(event_id, "merged", merge_sha=MERGE)
         state.record(event_id, "green", merge_sha=MERGE)
     notifier = FakeNotifier(fail_after_accept=True)
 
@@ -1113,6 +1114,7 @@ def test_bridge_pr_green_outbox_survives_restart_and_keeps_release_page_separate
         restarted.enqueue_pr_green(42, HEAD)
         assert restarted.pending_notifications() == []
         assert restarted.claim(42, HEAD)
+        restarted.record(f'42:{HEAD}', 'merged', merge_sha=MERGE)
         restarted.record(f'42:{HEAD}', 'green', merge_sha=MERGE)
         ur._drain_notifications(restarted, notifier)
     assert [event for event, _ in notifier.calls] == [f'pr-green:42:{HEAD}', f'42:{HEAD}']
@@ -1187,6 +1189,7 @@ def test_main_drains_bridge_green_outbox_even_when_bridge_waits_or_review_fails(
     def release(**kwargs):
         state=kwargs['state']
         assert state.claim(42,HEAD)
+        state.record(f'42:{HEAD}','merged',merge_sha=MERGE)
         state.record(f'42:{HEAD}','green',merge_sha=MERGE,sync_receipt=ur.SyncReceipt(MERGE,{'app':True,'broker':True}))
         if bridge_status=='release-error': raise RuntimeError('release unavailable')
         return ur.RunResult('green',42)
@@ -1619,3 +1622,50 @@ def test_candidate_that_changes_its_own_ci_definition_needs_a_human_merge(monkey
     monkeypatch.setattr(ur,'_command',lambda *a,**kw:pytest.fail('no reviewer may run'))
     assert reviews.review(pr,diff)==[]
     assert 'human merge' in reviews.failure_reason and 'no approval' in reviews.failure_reason
+
+
+class TestReleaseTransitions:
+    """claimed -> merged | rejected; merged -> merged (resume) | green.
+    green and rejected are terminal; anything else is refused unwritten."""
+
+    def _store(self, tmp_path):
+        state = ur.FileStateStore(tmp_path / "release-state", owner_uid=tmp_path.stat().st_uid)
+        key = f"42:{HEAD}"
+        return state, key
+
+    def test_happy_path(self, tmp_path):
+        state, key = self._store(tmp_path)
+        with state.locked():
+            assert state.claim(42, HEAD)
+            state.record(key, "merged", merge_sha=MERGE)
+            state.record(key, "merged", merge_sha=MERGE)
+            state.record(key, "green", merge_sha=MERGE)
+        assert state.data["releases"][key]["status"] == "green"
+
+    @pytest.mark.parametrize("path, illegal", [
+        (["merged", "green"], "merged"),
+        (["merged", "green"], "rejected"),
+        (["merged", "green"], "claimed"),
+        (["merged"], "rejected"),
+        (["merged"], "claimed"),
+        (["rejected"], "merged"),
+        ([], "green"),
+        ([], "done"),
+    ])
+    def test_regressions_and_skips_are_refused(self, tmp_path, path, illegal):
+        state, key = self._store(tmp_path)
+        with state.locked():
+            assert state.claim(42, HEAD)
+            for status in path:
+                state.record(key, status, merge_sha=MERGE)
+            before = json.loads(json.dumps(state.data))
+            with pytest.raises(ValueError):
+                state.record(key, illegal, merge_sha=MERGE)
+        assert state.data == before
+        assert ur.FileStateStore(state.path, owner_uid=tmp_path.stat().st_uid).data == before
+
+    def test_unclaimed_key_is_refused(self, tmp_path):
+        state, key = self._store(tmp_path)
+        with state.locked(), pytest.raises(ValueError):
+            state.record(key, "merged", merge_sha=MERGE)
+        assert state.data["releases"] == {}

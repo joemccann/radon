@@ -108,8 +108,13 @@ class TestFindNewTradesWithContracts:
             _make_execution("EWY", "OPT", "SLD", 25, 2.20, strike=141, expiry="20260313", right="C"),
         ]
         trade_log = {"trades": []}
+        # The broker book after the fills: both legs newly opened.
+        positions = [
+            {"symbol": "EWY", "sec_type": "OPT", "quantity": 25, "strike": 130, "expiry": "20260313", "right": "P"},
+            {"symbol": "EWY", "sec_type": "OPT", "quantity": -25, "strike": 141, "expiry": "20260313", "right": "C"},
+        ]
 
-        new_trades = find_new_trades(executions, trade_log)
+        new_trades = find_new_trades(executions, trade_log, positions)
 
         ewy_trades = [t for t in new_trades if t["symbol"] == "EWY"]
         assert len(ewy_trades) == 2, (
@@ -122,8 +127,11 @@ class TestFindNewTradesWithContracts:
             _make_execution("EWY", "OPT", "BOT", 25, 2.00, strike=130, expiry="20260313", right="P"),
         ]
         trade_log = {"trades": []}
+        positions = [
+            {"symbol": "EWY", "sec_type": "OPT", "quantity": 25, "strike": 130, "expiry": "20260313", "right": "P"},
+        ]
 
-        new_trades = find_new_trades(executions, trade_log)
+        new_trades = find_new_trades(executions, trade_log, positions)
 
         assert len(new_trades) == 1
         t = new_trades[0]

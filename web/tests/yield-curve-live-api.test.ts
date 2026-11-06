@@ -130,6 +130,39 @@ describe("GET /api/yield-curve/live", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 
+  it("labels an expired snapshot STALE when the refresh fails, including inside the negative window", async () => {
+    let up = true;
+    const good = mockYahoo({ "^TNX": { price: 4.686 }, "^IRX": { price: 3.7 } });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      up ? good(input) : new Response("upstream down", { status: 502 })));
+    let now = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    const { GET } = await import("../app/api/yield-curve/live/route");
+    const fresh = await GET();
+    expect(fresh.headers.get("X-Cache-State")).toBe("MISS");
+    expect((await fresh.json()).is_stale).toBeUndefined();
+
+    up = false;
+    now += 61_000;
+    const failedRefresh = await GET();
+    expect(failedRefresh.headers.get("X-Cache-State")).toBe("STALE");
+    const body = await failedRefresh.json();
+    expect(body.is_stale).toBe(true);
+    expect(body.spread_10y_3m).toBeCloseTo(0.986, 6);
+
+    now += 1_000; // inside the 5 s negative window: no refetch, still STALE
+    const negative = await GET();
+    expect(negative.headers.get("X-Cache-State")).toBe("STALE");
+    expect((await negative.json()).is_stale).toBe(true);
+
+    up = true;
+    now += 10_000;
+    const recovered = await GET();
+    expect(recovered.headers.get("X-Cache-State")).toBe("MISS");
+    expect((await recovered.json()).is_stale).toBeUndefined();
+  });
+
   it("coalesces concurrent cache misses into one two-leg refresh", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

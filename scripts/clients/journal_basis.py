@@ -9,6 +9,11 @@ import re
 from datetime import date
 from typing import Any, Iterable, Optional
 
+try:
+    from utils.journal_action import signed_qty as _shared_signed_qty
+except ImportError:  # imported as scripts.clients.journal_basis
+    from ..utils.journal_action import signed_qty as _shared_signed_qty  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,14 +120,12 @@ def con_id_of(source: dict[str, Any]) -> Optional[str]:
 
 
 def _signed_qty(action: Any, qty: float) -> float:
-    label = str(action or "").strip().upper()
-    if qty <= 0:
-        return 0.0
-    if label.startswith("BUY"):
-        return qty
-    if label.startswith("SELL") or label.startswith("SHORT") or label == "CLOSED":
-        return -qty
-    return 0.0
+    """Shared journal sign convention: BUY* +, SELL*/SHORT* -, CLOSED 0.
+
+    A CLOSED row is a round trip whose buys and sells net to zero; it used
+    to count -qty here while expiry_sweep counted 0.
+    """
+    return _shared_signed_qty(action, qty)
 
 
 def _bucket_key(payload: dict[str, Any]) -> Optional[str]:
@@ -158,9 +161,8 @@ def contract_fill_fingerprint(payload: dict[str, Any]) -> Optional[tuple]:
     except (TypeError, ValueError):
         return None
     signed = _signed_qty(payload.get("action"), qty)
-    # `_signed_qty` maps CLOSED to a negative, but a CLOSED row is a round
-    # trip, not one directional fill — it must not fingerprint-match a fill.
-    if signed == 0 or str(payload.get("action") or "").strip().upper() == "CLOSED":
+    # A CLOSED round trip signs to 0: it must not fingerprint-match a fill.
+    if signed == 0:
         return None
 
     contract = _bucket_key(payload) or f"{ticker}|STK"
@@ -567,7 +569,7 @@ def prior_net_qty_for_contract(
 
     Used by the real-time fill writer to decide whether a SELL closes a long
     (label ``SELL_OPTION``) or opens a short (``SELL_TO_OPEN``). Sums signed
-    qty across all matching rows: BUY → +, SELL/SHORT/CLOSED → −. Uses the
+    qty across all matching rows: BUY → +, SELL/SHORT → −, CLOSED → 0. Uses the
     same key normalisation as ``_bucket_key`` so the lookup lines up with
     the open-basis bucket math.
 

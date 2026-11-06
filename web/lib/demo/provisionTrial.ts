@@ -15,7 +15,7 @@
 //      deployment treats every non-operator user.created as a trial.
 
 import { getDemoUser, upsertDemoUser, type DemoDbClient } from "./demoUsers";
-import type { DemoPublicMetadata } from "./demoRole";
+import { trialStateFromRow, type DemoPublicMetadata } from "./demoContext";
 import type { TrialExpiry } from "./trialExpiry";
 
 export type ClerkUserCreatedData = {
@@ -111,13 +111,26 @@ export async function provisionDemoTrial(
     now,
   });
 
+  // The committed row is the source of truth: mirror IT into Clerk, not the
+  // local computation. A concurrent delivery may have committed its window
+  // first, and an operator may have revoked while this ran.
+  const committed = trialStateFromRow(await getDemoUser(deps.db, userId), now.getTime());
+  if (committed?.kind === "revoked" || committed?.kind === "invalid") {
+    // Clerk stays "pending" (denied); never stamp access over a dead row.
+    return { provisioned: false, reason: `row is ${committed.kind} — Clerk left pending` };
+  }
+  const window =
+    committed?.kind === "active" || committed?.kind === "lapsed"
+      ? { startedAt: committed.startedAt ?? expiry.startedAt, expiresAt: committed.expiresAt }
+      : { startedAt: expiry.startedAt, expiresAt: expiry.expiresAt };
+
   await deps.setClerkMetadata(userId, {
     demoRole: "trial",
-    demoTrialStartedAt: expiry.startedAt,
-    demoTrialExpiresAt: expiry.expiresAt,
+    demoTrialStartedAt: window.startedAt,
+    demoTrialExpiresAt: window.expiresAt,
   });
 
-  return { provisioned: true, expiresAt: expiry.expiresAt };
+  return { provisioned: true, expiresAt: window.expiresAt };
 }
 
 /** Parse the comma-separated ALLOWED_USER_IDS env into a set. */

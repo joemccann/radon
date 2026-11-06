@@ -18,8 +18,10 @@ import {
 import {
   claimDemoWebhookEvent,
   releaseDemoWebhookEvent,
+  getDemoUser,
   type DemoDbClient,
 } from "@/lib/demo/demoUsers";
+import { trialStateFromRow } from "@/lib/demo/demoContext";
 import { claimWebhookEventOrDegrade } from "@/lib/demo/webhookLedger";
 import { notifyDemoProvisioningFailure } from "@/lib/notify/pushover";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
@@ -90,7 +92,14 @@ export async function POST(request: Request): Promise<Response> {
     });
     replayGuarded = claim.replayGuarded;
     if (!claim.proceed) {
-      return ok({ duplicate: true, requestId });
+      // A claimed ledger row is only a duplicate once provisioning committed.
+      // A claim whose release failed after a provisioning error would
+      // otherwise ack every Clerk retry and strand the user pending forever;
+      // provisioning is idempotent, so an uncommitted user is retried.
+      const committed = trialStateFromRow(await getDemoUser(db, event.data.id));
+      if (committed !== null && committed.kind !== "pending") {
+        return ok({ duplicate: true, requestId });
+      }
     }
     const result = await provisionDemoTrial(event.data, {
       db,
@@ -105,7 +114,10 @@ export async function POST(request: Request): Promise<Response> {
     return ok({ ...result, requestId });
   } catch (error) {
     if (replayGuarded) {
-      await releaseDemoWebhookEvent(db, eventId).catch(() => undefined);
+      await releaseDemoWebhookEvent(db, eventId).catch((releaseError: unknown) => {
+        const why = releaseError instanceof Error ? releaseError.message : "unknown error";
+        void notifyDemoProvisioningFailure(`webhook ledger release failed: ${why}`);
+      });
     }
     const detail = error instanceof Error ? error.message : "provisioning failed";
     void notifyDemoProvisioningFailure(detail);

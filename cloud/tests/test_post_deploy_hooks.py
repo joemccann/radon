@@ -216,16 +216,73 @@ def test_failed_hook_stops_later_hooks_is_paged_and_retried_next_deploy(tree):
     assert len(tree.pages) == 2
 
 
-def test_hook_interrupted_mid_run_is_retried(tree):
-    tree.log_hook("0001-interrupted")
+def _seed_running(tree, hook_id: str) -> None:
+    """A runner killed mid-hook leaves `running`; the next runner holds the
+    lock, so that record can only belong to a dead run."""
     tree.state.parent.mkdir(parents=True)
     tree.state.write_text(json.dumps({
         "version": 1,
-        "hooks": {"0001-interrupted": {"status": "running", "attempts": 1, "sha256": "x"}},
+        "hooks": {hook_id: {
+            "status": "running", "attempts": 1, "sha256": "x",
+            "started_at": "2026-11-03T00:00:00Z",
+        }},
     }))
+
+
+def test_interrupted_idempotent_hook_is_rerun(tree):
+    tree.add_hook(
+        "0001-interrupted",
+        '#!/bin/bash\nprintf "%s\\n" 0001-interrupted >> "$RADON_DIR/order.log"\n',
+        idempotent=True,
+    )
+    _seed_running(tree, "0001-interrupted")
     assert tree.run_hooks() == 0
     assert tree.order() == ["0001-interrupted"]
-    assert tree.read_state()["hooks"]["0001-interrupted"]["attempts"] == 2
+    record = tree.read_state()["hooks"]["0001-interrupted"]
+    assert record["status"] == "done"
+    assert record["attempts"] == 2
+
+
+def test_interrupted_hook_without_idempotent_flag_is_paged_not_rerun(tree):
+    tree.log_hook("0001-interrupted")
+    tree.log_hook("0002-later")
+    _seed_running(tree, "0001-interrupted")
+
+    assert tree.run_hooks() == 1
+    assert tree.order() == [], "neither the interrupted hook nor a later one may run"
+    record = tree.read_state()["hooks"]["0001-interrupted"]
+    assert record["status"] == "interrupted"
+    assert record["attempts"] == 1
+    assert record["started_at"] == "2026-11-03T00:00:00Z"
+    assert len(tree.pages) == 1
+    assert "0001-interrupted" in tree.pages[0][1]
+    assert "idempotent" in tree.pages[0][1]
+
+    # Still blocked and still paged on the next deploy: nothing reruns it
+    # until a reviewed manifest change declares it idempotent or retires it.
+    assert tree.run_hooks(deploy_sha="b" * 40) == 1
+    assert tree.order() == []
+    assert len(tree.pages) == 2
+
+
+def test_interrupted_hook_reruns_once_manifest_declares_it_idempotent(tree):
+    tree.log_hook("0001-interrupted")
+    _seed_running(tree, "0001-interrupted")
+    assert tree.run_hooks() == 1
+    tree.hooks[0]["idempotent"] = True
+    tree.write_manifest()
+    assert tree.run_hooks() == 0
+    assert tree.order() == ["0001-interrupted"]
+    assert tree.read_state()["hooks"]["0001-interrupted"]["status"] == "done"
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def test_idempotent_flag_must_be_a_boolean(tree, value):
+    tree.log_hook("0001-any")
+    tree.hooks[0]["idempotent"] = value
+    tree.write_manifest()
+    with pytest.raises(pd.Refusal, match="idempotent"):
+        pd.load_manifest(tree.root)
 
 
 def test_hook_timeout_kills_process_group_and_records_failure(tree):

@@ -21,23 +21,38 @@ phase_status_exit() {
   if [[ -n "${PHASE_REFUSED:-}" || "$rc" == 2 ]]; then printf '2'; return 0; fi
   if [[ "$rc" == 124 ]]; then printf '124'; return 0; fi
   if [[ "$rc" == 70 ]]; then printf '70'; return 0; fi
+  status="${status#"${status%%[![:space:]]*}"}"
   if [[ "${PHASE_HOOK_REQUIRED:-}" == 1 && -z "$status" && -z "${PHASE_REFUSED:-}" ]]; then
     printf '1'
     return 0
   fi
-  case "$status" in
-    INCOMPLETE*|TRUNCATED*) printf '75' ;;
-    TIMEOUT*) printf '124' ;;
-    REFUSED*) printf '2' ;;
-    *GROUND\ TRUTH*) printf '70' ;;
-    FAILED*|KILLED*|CRASHED*) printf '1' ;;
-    OK*) printf '0' ;;
-    *)
-      if [[ "$rc" == 0 ]]; then printf '0'
-      elif [[ "$rc" == 75 ]]; then printf '75'
-      else printf '1'
-      fi
-      ;;
+  phase_status_keyword_exit "$(phase_status_keyword "$status")" && return 0
+  if [[ "$rc" == 0 ]]; then printf '0'
+  elif [[ "$rc" == 75 ]]; then printf '75'
+  else printf '1'
+  fi
+}
+
+# The verdict keyword that opens a status: everything before the first space,
+# colon or parenthesis. "GROUND TRUTH" is the one two-word keyword. Words
+# later in the status never change the verdict.
+phase_status_keyword() {
+  local status="$1"
+  if [[ "$status" == "GROUND TRUTH"* ]]; then printf 'GROUND TRUTH'; return 0; fi
+  printf '%s' "${status%%[ :(]*}"
+}
+
+# Explicit keyword -> public exit table. Returns 1 for an unknown keyword so
+# the caller falls back to the process exit.
+phase_status_keyword_exit() {
+  case "$1" in
+    OK) printf '0' ;;
+    FAILED|KILLED|CRASHED) printf '1' ;;
+    REFUSED) printf '2' ;;
+    "GROUND TRUTH") printf '70' ;;
+    INCOMPLETE|TRUNCATED) printf '75' ;;
+    TIMEOUT) printf '124' ;;
+    *) return 1 ;;
   esac
 }
 

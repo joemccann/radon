@@ -241,7 +241,12 @@ async function runCriScanAndArchive(): Promise<void> {
   console.log(`[CRI] Background scan archived → ${outPath}`);
 }
 
-const triggerBackgroundScan = createBackgroundScanTrigger({ label: "CRI", run: runCriScanAndArchive });
+// Shared with /api/internals (sharedKey "cri"): one CRI scan machine per process.
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "CRI",
+  run: runCriScanAndArchive,
+  sharedKey: "cri",
+});
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 

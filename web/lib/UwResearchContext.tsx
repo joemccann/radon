@@ -9,6 +9,9 @@ export function UwResearchProvider({children}:{children:ReactNode}) {
   const [data,setData]=useState<ResearchSnapshot|null>(null);
   const [connected,setConnected]=useState(false);
   const generation=useRef(getReturnCacheGeneration());
+  // Latest selected ticker: a refresh that resolves after the operator moved on must not replace the new ticker's snapshot.
+  const tickerRef=useRef<string|null>(null);
+  useEffect(()=>{tickerRef.current=ticker},[ticker]);
   const select=useCallback((symbol:string)=>{if(/^[A-Z][A-Z0-9.\-]{0,9}$/.test(symbol))setTicker(symbol)},[]);
   useEffect(()=>{
     if(!ticker || process.env.NEXT_PUBLIC_RADON_DEMO==="1")return;
@@ -31,7 +34,7 @@ export function UwResearchProvider({children}:{children:ReactNode}) {
     const current=getReturnCacheGeneration();
     const res=await fetch("/api/uw/research",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticker,...(sections?{sections}:{})}),signal:AbortSignal.timeout(130_000)});
     if(!res.ok)throw new Error("Research refresh could not complete. Previous observations remain available.");
-    const value:unknown=await res.json();if(getReturnCacheGeneration()===current&&isResearchSnapshot(value,ticker))setData(value);
+    const value:unknown=await res.json();if(tickerRef.current===ticker&&getReturnCacheGeneration()===current&&isResearchSnapshot(value,ticker))setData(value);
   },[ticker]);
   return <Context.Provider value={{data,connected,select,refresh}}>{children}</Context.Provider>;
 }

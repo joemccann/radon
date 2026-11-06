@@ -1326,7 +1326,7 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
     expect(body.error).toMatch(/ApiCancelled/i);
   });
 
-  it("returns 502 when IB returns Unknown (no ack before disconnect)", async () => {
+  it("returns 504 indeterminate when IB returns Unknown (no ack before disconnect)", async () => {
     mockRadonFetch.mockResolvedValueOnce({
       status: "ok",
       orderId: 0,
@@ -1342,9 +1342,10 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
         body: JSON.stringify(SPXU_COMBO_BODY),
       }),
     );
-    expect(res.status).toBe(502);
+    // No acknowledgement is not a rejection: IB may hold the order.
+    expect(res.status).toBe(504);
     const body = await res.json();
-    expect(body.error).toMatch(/Unknown|no acknowledgement/i);
+    expect(body.code).toBe("UPSTREAM_TIMEOUT_ORDER_INDETERMINATE");
   });
 
   it("returns 502 when IB returns Inactive", async () => {

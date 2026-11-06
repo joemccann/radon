@@ -14,6 +14,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from kelly import KELLY_MAX_PCT
+from utils import ib_order_status
 from order_limits import (
     _finite,
     _ib_order_type,
@@ -101,13 +103,9 @@ def _held_quantities(snapshot: dict) -> dict[tuple, float]:
     return held
 
 
-_RESTING_STATUSES = {
-    "PENDINGSUBMIT",
-    "PRESUBMITTED",
-    "SUBMITTED",
-    "APIPENDING",
-    "PENDINGCANCEL",
-}
+# Upper-cased, space-free form of the shared vocabulary: callers normalize
+# the stored status the same way before the membership test.
+_RESTING_STATUSES = frozenset(status.upper() for status in ib_order_status.WORKING)
 
 
 def _load_working_orders() -> Optional[list[dict]]:
@@ -190,21 +188,26 @@ def _resting_changes(orders: Any) -> Optional[dict[tuple, tuple[float, float]]]:
     return resting
 
 
-# DS-2026-10-24-02: the placement funnel's broker-confirmed book. While set,
-# is_close_out measures holdings and resting orders from the broker instead of
-# the store, whose snapshot can still show a holding a filled close removed.
-_BROKER_BOOK: Any = ...
+# Both values below are per thread. One order's admission runs on one
+# thread; a threaded caller (radon-api's pool, daemon handler threads) must
+# not see another order's broker book or take another order's proven close.
+_ORDER_SCOPE = threading.local()
 
-# DS-2026-10-25-01: set when a store-measured close is proven, so the funnel
-# re-admits at the broker an order its admission exempted even after the
-# store stops showing the close.
-_STORE_CLOSE_PROVEN = False
+
+def _broker_book_in_scope() -> Any:
+    """DS-2026-10-24-02: the placement funnel's broker-confirmed book. While
+    set, is_close_out measures holdings and resting orders from the broker
+    instead of the store, whose snapshot can still show a holding a filled
+    close removed. ``...`` means unset; None means no close is provable."""
+    return getattr(_ORDER_SCOPE, "broker_book", ...)
 
 
 def take_store_close_proven() -> bool:
-    """Whether a store-measured close was proven since the last call."""
-    global _STORE_CLOSE_PROVEN
-    proven, _STORE_CLOSE_PROVEN = _STORE_CLOSE_PROVEN, False
+    """Whether a store-measured close was proven on this thread since the
+    last call (DS-2026-10-25-01: the funnel re-admits at the broker an order
+    its admission exempted even after the store stops showing the close)."""
+    proven = getattr(_ORDER_SCOPE, "store_close_proven", False)
+    _ORDER_SCOPE.store_close_proven = False
     return proven
 
 
@@ -284,13 +287,14 @@ CLOSE_ADMISSION_BUSY = {
 
 @contextmanager
 def broker_book(book: Optional[tuple[dict, dict]]):
-    """Measure close-outs against ``book`` (None: no close is provable)."""
-    global _BROKER_BOOK
-    previous, _BROKER_BOOK = _BROKER_BOOK, book
+    """Measure close-outs on this thread against ``book`` (None: no close is
+    provable)."""
+    previous = _broker_book_in_scope()
+    _ORDER_SCOPE.broker_book = book
     try:
         yield
     finally:
-        _BROKER_BOOK = previous
+        _ORDER_SCOPE.broker_book = previous
 
 
 def _contract_key(contract: Any) -> Optional[tuple]:
@@ -507,10 +511,11 @@ def is_close_out(
     legs = _order_legs(params)
     if not legs:
         return False
-    if _BROKER_BOOK is not ...:
-        if _BROKER_BOOK is None:
+    book = _broker_book_in_scope()
+    if book is not ...:
+        if book is None:
             return False
-        held, resting = _BROKER_BOOK
+        held, resting = book
     else:
         if working_orders is ...:
             working_orders = _load_working_orders()
@@ -531,9 +536,8 @@ def is_close_out(
             return False
         if abs(change) > abs(position) + 1e-9:
             return False
-    if _BROKER_BOOK is ...:
-        global _STORE_CLOSE_PROVEN
-        _STORE_CLOSE_PROVEN = True
+    if book is ...:
+        _ORDER_SCOPE.store_close_proven = True
     return True
 
 
