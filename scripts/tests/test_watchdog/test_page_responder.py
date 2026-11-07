@@ -883,6 +883,45 @@ class TestSignalKilledOneshotRerun:
         assert rc == 0
         assert log == []
 
+    def test_unreadable_deploy_journal_does_not_fail_the_oneshot(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """ProtectHome hides /home/radon. exists() then raises PermissionError.
+
+        That stat must not escape run_cycle. The oneshot still exits 0 and
+        falls through to grok without starting the unit.
+        """
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        # The unit points LKG at a readable path. The default host path is
+        # not searchable here and would die before the journal stat.
+        monkeypatch.setenv("RADON_GROK_LKG_PATH", str(tmp_path / "no-lkg.json"))
+        monkeypatch.setenv(
+            "RADON_GROK_RUNTIME_LOCK", str(tmp_path / "grok-runtime.lock")
+        )
+        blocked = tmp_path / "unsearchable-home"
+        blocked.mkdir()
+        journal = blocked / ".radon-deploy-transition.json"
+        blocked.chmod(0o000)
+        monkeypatch.setattr(
+            "grok_page_responder.DEPLOY_TRANSITION_JOURNAL", journal
+        )
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, log=log)
+        try:
+            with pytest.raises(PermissionError):
+                journal.exists()
+            rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+        finally:
+            blocked.chmod(0o700)
+
+        assert rc == 0
+        assert log == []
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert "stand_down" in row[1]
+
     def test_systemd_state_is_verified_not_trusted_from_excerpt(
         self, db_conn, tmp_path, monkeypatch
     ):

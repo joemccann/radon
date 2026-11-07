@@ -699,7 +699,10 @@ until a human ran reset-failed + start. Before launching grok on a
 - `GROK_PAGE_AUTOSHIP=1` — the restart is an auto-fix action, so it takes the
   same explicit opt-in as shipping a code fix. Unset stands down.
 - no deploy transition journal (`/home/radon/.radon-deploy-transition.json`):
-  never restart units mid-deploy.
+  never restart units mid-deploy. An unreadable journal is the same skip.
+  The isolated responder has `ProtectHome=yes`, so `Path.exists()` raises
+  `PermissionError` instead of reporting the file missing. That stat must
+  not fail the oneshot; the cycle falls through to grok.
 - systemd itself reports `ActiveState=failed` (the page excerpt is
   untrusted text and never triggers the action on its own) with either
   `Result=signal`, or `Result=exit-code`/`Result=timeout` AND the green
