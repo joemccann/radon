@@ -12319,3 +12319,13 @@ Audited through: 751a9d0d8818bcda1c4f2cd40b77d00d847eff1d on 2026-11-07 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-586 | DONE | Idempotent assert: `None is True` (1 failed / 1 passed). Delete-without-archive mutation: `archive.is_file()` False (1 failed). Restored hook SHA `3cc0432456`. Manifest `"idempotent": true`. Green: 2 passed; file 83 passed ×3. Hook body unchanged. |
+
+### Closing gates 2026-11-07
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially after isolated retries (round 3). Round 1 also had `test_health_dependency_faults.py` stall TimeoutError (serial 40 passed with credentials). Round 2 also had `test_cta_share_llm_copy.py` copy drift (serial 44 passed with credentials). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as each other and as the standing HEAD run (0 added / 0 removed). Versus the 2026-11-06 Darwin 42-list the extra 16 are new bash 3.2 cases in `test_operator_topology_lifecycle.py` (5) and `test_ib_gateway_control.py` (11). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | credentials + health-stall xdist flakes then serial 40 passed; 21,000 passed / 12 skipped / 63 subtests (275.08s) | 11,853 passed / 21 skipped / 1,226 files (101.56s) | 58 failed / 4,004 passed / 23 skipped (1144.13s) | — |
+| 2 | credentials + cta-copy xdist flakes then serial 44 passed; 21,000 passed / 12 skipped / 63 subtests (168.83s) | 11,853 passed / 21 skipped / 1,226 files (109.72s) | 58 failed / 4,004 passed / 23 skipped (1053.41s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then isolated misses and file 11 passed; 21,001 passed / 12 skipped / 63 subtests (185.10s) | 11,853 passed / 21 skipped / 1,226 files (117.49s) | 58 failed / 4,004 passed / 23 skipped (1273.47s) | 0 added / 0 removed |

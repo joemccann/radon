@@ -1408,4 +1408,4 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 
 | ID | Status | Evidence |
 |---|---|---|
-| T-586 | DONE | Idempotent assert `None is True` (1 failed). Delete-without-archive mutation: `archive.is_file()` False. Restored hook; manifest `"idempotent": true`. Green 2 passed; `test_post_deploy_hooks.py` 83 passed ×3. Hook body unchanged. |
+| T-586 | DONE | Idempotent assert `None is True` (1 failed). Delete-without-archive mutation: `archive.is_file()` False. Restored hook; manifest `"idempotent": true`. Green 2 passed; `test_post_deploy_hooks.py` 83 passed ×3. Hook body unchanged. Closing rounds: root pytest credentials xdist flake then serial file 11 passed (r1 also health-stall, r2 also cta-copy); 21,000/21,000/21,001 passed / 12 skipped / 63 subtests. Vitest 11,853 passed / 21 skipped / 1,226 files each round. Cloud 58 failed / 4,004 passed / 23 skipped each round, 0 added / 0 removed against r1. |
