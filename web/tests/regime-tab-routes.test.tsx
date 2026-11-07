@@ -64,6 +64,7 @@ describe.each([
   ["high-low", "app/regime/high-low/page.tsx"],
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
+  ["quant", "app/regime/quant/page.tsx"],
   ["exports", "app/regime/exports/page.tsx"],
   ["straddle", "app/regime/straddle/page.tsx"],
   ["cor", "app/regime/cor/page.tsx"],
@@ -141,6 +142,9 @@ vi.mock("../components/AsiaExportLeadPanel", () => ({
 }));
 vi.mock("../components/MarginDebtPanel", () => ({
   default: () => <div data-testid="margin-panel-stub" />,
+}));
+vi.mock("../components/QuantPanel", () => ({
+  default: () => <div data-testid="quant-panel-stub" />,
 }));
 vi.mock("../components/StraddlePanel", () => ({
   default: () => <div data-testid="straddle-panel-stub" />,
@@ -338,6 +342,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^MARGIN$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/margin");
+  });
+
+  it("renders the Quant panel when pathname is /regime/quant", () => {
+    mockedPathname = "/regime/quant";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("quant-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
+  });
+
+  it("clicking QUANT tab pushes /regime/quant", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^QUANT$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/quant");
   });
 
   it("renders the Straddle panel when pathname is /regime/straddle", () => {

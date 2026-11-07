@@ -1001,6 +1001,9 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       // radon-iv-spread.timer pulls NDX + SPX 30d IV daily bars from IB only
       // (no UW/Yahoo rung serves index 30d IV).
       "iv-spread",
+      // radon-quant-execute.timer places the quant sleeve's stock orders through
+      // scripts/quant_execute.py -> ib_place_order.py (IBClient.place_order).
+      "quant-execute",
     ]);
     expect(ibTrue).toEqual(expected);
   });
@@ -1139,5 +1142,25 @@ describe("High-Low Line daily sampling health", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["high-low-line"]).toBeDefined();
     expect(getServiceCategory("high-low-line")).toBe("scheduled");
     expect(requiresIb("high-low-line")).toBe(false);
+  });
+});
+
+describe("quant sleeve freshness windows", () => {
+  const HOUR = 60 * 60_000;
+
+  it("quant-targets is a scheduled weekday timer window matching scripts/watchdog/services.py", () => {
+    expect(getServiceCategory("quant-targets")).toBe("scheduled");
+    expect(getFreshnessWindowMs("quant-targets", "open")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("quant-targets", "extended")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("quant-targets", "closed")).toBe(74 * HOUR);
+    expect(requiresIb("quant-targets")).toBe(false);
+  });
+
+  it("quant-execute places IB stock orders, so it is IB-dependent on the same weekday window", () => {
+    expect(getServiceCategory("quant-execute")).toBe("scheduled");
+    expect(getFreshnessWindowMs("quant-execute", "open")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("quant-execute", "extended")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("quant-execute", "closed")).toBe(74 * HOUR);
+    expect(requiresIb("quant-execute")).toBe(true);
   });
 });
