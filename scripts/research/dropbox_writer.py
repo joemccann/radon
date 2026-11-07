@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import http.client
+import io
 import json
 import os
 from pathlib import Path
 import re
+import ssl
 import time
 import unicodedata
 import urllib.error
@@ -32,6 +35,11 @@ MAX_UPLOAD = 100 * 1024 * 1024
 RPC_ALLOWLIST = frozenset({'users/get_current_account', 'files/get_metadata'})
 TIMEOUT = 45
 UPLOAD_TIMEOUT = 120
+# One HTTP/1.1 socket per origin. urllib.request.urlopen used to open a
+# fresh TCP/TLS handshake on every token refresh, identity RPC and upload
+# (PERF-047). Same idle bound as the read client (PERF-019).
+_KEEPALIVE_IDLE_S = 5.0
+_STDLIB_URLOPEN = urllib.request.urlopen
 NEW_YORK = ZoneInfo('America/New_York')
 ARTICLE_ID_RE = re.compile(r'^[A-Za-z0-9]{8,16}$')
 SLUG_MAX = 60
@@ -76,6 +84,7 @@ class DropboxWriter:
         self.token = None
         self.expires_at = 0.0
         self.verified = False
+        self._conns = {}
 
     @classmethod
     def from_env(cls, env=os.environ):
@@ -97,18 +106,99 @@ class DropboxWriter:
 
     # transport -------------------------------------------------------------
 
+    def close(self):
+        for key in list(self._conns):
+            self._close_conn(key)
+
+    def _close_conn(self, key):
+        entry = self._conns.pop(key, None)
+        if entry is None:
+            return
+        try:
+            entry[0].close()
+        except OSError:
+            pass
+
+    def _connect(self, parts, key):
+        port = parts.port or (443 if parts.scheme == 'https' else 80)
+        if parts.scheme == 'https':
+            conn = http.client.HTTPSConnection(
+                parts.hostname, port, timeout=TIMEOUT, context=ssl.create_default_context(),
+            )
+        else:
+            conn = http.client.HTTPConnection(parts.hostname, port, timeout=TIMEOUT)
+        self._conns[key] = (conn, None)
+        return conn
+
+    def _pooled_post(self, url, body, headers, limit, timeout):
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme not in ('http', 'https') or not parts.hostname:
+            raise DropboxError('Dropbox transport unavailable or timed out')
+        port = parts.port or (443 if parts.scheme == 'https' else 80)
+        key = (parts.scheme, parts.hostname, port)
+        path = parts.path or '/'
+        if parts.query:
+            path = f'{path}?{parts.query}'
+        wire_headers = {name: value for name, value in headers.items()}
+        wire_headers.setdefault('Connection', 'keep-alive')
+        payload = body or b''
+
+        last_success = self._conns[key][1] if key in self._conns else None
+        if key in self._conns and (
+            last_success is None or time.monotonic() - last_success >= _KEEPALIVE_IDLE_S
+        ):
+            self._close_conn(key)
+        reused = key in self._conns
+        conn = self._conns[key][0] if reused else self._connect(parts, key)
+        conn.timeout = timeout
+
+        def send():
+            conn.request('POST', path, payload, wire_headers)
+            return conn.getresponse()
+
+        try:
+            try:
+                resp = send()
+            except (OSError, http.client.HTTPException):
+                self._close_conn(key)
+                # A reused idle socket can die before the POST is committed.
+                # Token refresh is not replayed: oauth2/token can rotate.
+                if not reused or '/oauth2/token' in path:
+                    raise
+                conn = self._connect(parts, key)
+                conn.timeout = timeout
+                resp = send()
+            data = resp.read(limit + 1)
+            over = len(data) > limit or not resp.isclosed()
+            if over or resp.status != 200:
+                self._close_conn(key)
+                if resp.status != 200:
+                    err = urllib.error.HTTPError(
+                        url, resp.status, 'err', resp.headers, io.BytesIO(data))
+                    raise self._http_error(err) from None
+                raise DropboxError('Dropbox response exceeds byte limit')
+            self._conns[key] = (conn, time.monotonic())
+            return data
+        except DropboxError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
+            self._close_conn(key)
+            raise DropboxError('Dropbox transport unavailable or timed out') from None
+
     def _post(self, url, body, headers, *, limit=16 * 1024 * 1024, timeout=TIMEOUT):
         request = urllib.request.Request(url, data=body, headers=headers, method='POST')
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                data = response.read(limit + 1)
-        except urllib.error.HTTPError as exc:
-            raise self._http_error(exc) from None
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise DropboxError('Dropbox transport unavailable or timed out') from None
-        if len(data) > limit:
-            raise DropboxError('Dropbox response exceeds byte limit')
-        return data
+        if urllib.request.urlopen is not _STDLIB_URLOPEN:
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    data = response.read(limit + 1)
+            except urllib.error.HTTPError as exc:
+                raise self._http_error(exc) from None
+            except (urllib.error.URLError, TimeoutError, OSError):
+                raise DropboxError('Dropbox transport unavailable or timed out') from None
+            if len(data) > limit:
+                raise DropboxError('Dropbox response exceeds byte limit')
+            return data
+        return self._pooled_post(url, body, headers, limit, timeout)
 
     @staticmethod
     def _http_error(exc):
