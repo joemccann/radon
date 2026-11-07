@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 38 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(38);
-    expect(new Set(REGIME_TABS).size).toBe(38);
+  it("flattens to all 39 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(39);
+    expect(new Set(REGIME_TABS).size).toBe(39);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "high-low", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports"].sort(),
     );
   });
 
@@ -83,6 +83,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf["ma-ratio"]).toBe("Breadth & sentiment");
     expect(groupOf["rsi-oversold"]).toBe("Breadth & sentiment");
     expect(groupOf["record-high-breadth"]).toBe("Breadth & sentiment");
+    expect(groupOf.imbalance).toBe("Breadth & sentiment");
     expect(groupOf.hyad).toBe("Breadth & sentiment");
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
@@ -109,6 +110,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL["iei-hyg"]).toBe("TSY/HY");
     expect(REGIME_TAB_LABEL["credit-vix"]).toBe("CREDIT/VIX");
     expect(REGIME_TAB_LABEL["record-high-breadth"]).toBe("SPX BREADTH");
+    expect(REGIME_TAB_LABEL.imbalance).toBe("IMBALANCE");
     expect(REGIME_TAB_LABEL.exports).toBe("EXPORT LEAD");
     expect(REGIME_TAB_LABEL.hyad).toBe("HY AD");
     expect(REGIME_TAB_LABEL.hhlev).toBe("HH LEV");
@@ -183,12 +185,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 38 items", () => {
+  it("renders all five group headers and 39 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(38);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(39);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

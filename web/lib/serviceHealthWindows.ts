@@ -245,6 +245,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "hy-ad": { open: 120 * HOUR, extended: 120 * HOUR, closed: 120 * HOUR, category: "scheduled", requires_ib: false },
   // TradingView provider-coherent breadth comparison, daily 18:15 New York.
   "record-high-breadth": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  "imbalance": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``hhlev``: radon-hhlev.timer fires daily 13:20 UTC every calendar day,
   // a cheap conditional check of the quarterly Fed Z.1 household leverage
