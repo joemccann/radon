@@ -5,7 +5,7 @@ import {
   parseAllowedUserIds,
   type ClerkUserCreatedData,
 } from "@/lib/demo/provisionTrial";
-import { getDemoUser } from "@/lib/demo/demoUsers";
+import { getDemoUser, revokeDemoUser } from "@/lib/demo/demoUsers";
 import { makeFakeDemoDb } from "./helpers/fakeDemoDb";
 
 const EXPIRY = {
@@ -150,6 +150,29 @@ describe("provisionDemoTrial", () => {
     const row = await getDemoUser(d.db, "user_demo");
     expect(row?.started_at).toBe("2026-06-20T09:30:00-04:00");
     expect(row?.expires_at).toBe("2026-06-24T16:00:00-04:00");
+  });
+
+  it("a revoke landing after the committed-row read is not overwritten in Clerk", async () => {
+    // demoContext resolves access from Clerk metadata, so the final stamp is
+    // the gate. revokeTrial commits the row and then mirrors Clerk; a revoke
+    // that interleaves after provisioning re-read the row used to be erased by
+    // this stamp and left demo access live.
+    const d = deps();
+    let interleaved = false;
+    const stamp = vi.fn(async (_userId: string, meta: { demoRole: string }) => {
+      if (meta.demoRole === "trial" && !interleaved) {
+        interleaved = true;
+        await revokeDemoUser({ db: d.db, userId: "user_demo", now: d.now });
+      }
+    });
+    d.setClerkMetadata = stamp;
+
+    const result = await provisionDemoTrial(demoUser(), d);
+
+    expect(interleaved).toBe(true);
+    expect(result.provisioned).toBe(false);
+    expect(stamp.mock.calls.at(-1)?.[1]).toEqual({ demoRole: "pending" });
+    expect((await getDemoUser(d.db, "user_demo"))?.status).toBe("revoked");
   });
 
   it("leaves a failed provisioning attempt explicitly pending in Clerk", async () => {

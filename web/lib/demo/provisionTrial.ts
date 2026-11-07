@@ -130,6 +130,17 @@ export async function provisionDemoTrial(
     demoTrialExpiresAt: window.expiresAt,
   });
 
+  // The row read above is not the last word: an operator revoke commits the
+  // row and only then mirrors Clerk, so one that interleaved after that read
+  // would be erased by the stamp just written and leave demo access live. The
+  // row is re-read after the write and wins; Clerk returns to "pending"
+  // (denied) when it no longer grants a trial.
+  const settled = trialStateFromRow(await getDemoUser(deps.db, userId), now.getTime());
+  if (settled?.kind === "revoked" || settled?.kind === "invalid") {
+    await deps.setClerkMetadata(userId, { demoRole: "pending" });
+    return { provisioned: false, reason: `row is ${settled.kind} — Clerk returned to pending` };
+  }
+
   return { provisioned: true, expiresAt: window.expiresAt };
 }
 
