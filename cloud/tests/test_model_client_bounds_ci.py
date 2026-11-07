@@ -86,7 +86,7 @@ def test_cli_succeeds_on_a_bundle_within_bounds(tmp_path):
 
 def test_app_images_enforces_bounds_on_the_exact_built_gateway_image():
     workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
-    steps = workflow["jobs"]["python-image"]["steps"]
+    steps = workflow["jobs"]["gateway-image"]["steps"]
     names = [step.get("name", "") for step in steps]
     build = names.index("Build and publish model gateway image")
     reuse_bounds = names.index("Reuse verified client disk bounds")
