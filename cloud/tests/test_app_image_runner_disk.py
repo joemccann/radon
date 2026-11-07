@@ -55,7 +55,7 @@ def test_pr_caller_builds_only_through_the_reusable_workflow() -> None:
 
 def test_each_image_job_frees_disk_immediately_before_buildx() -> None:
     scripts = []
-    for job_name in ("python-image", "node-image"):
+    for job_name in ("python-image", "gateway-image", "node-image"):
         step = _disk_step(job_name)
         script = step["run"]
         scripts.append(script)
@@ -68,7 +68,8 @@ def test_each_image_job_frees_disk_immediately_before_buildx() -> None:
         assert "docker system prune -af || true" in script
         assert "rm -rf /opt/hostedtoolcache ||" not in script
         assert "rm -rf /opt/hostedtoolcache\n" not in script
-    assert scripts[0] == scripts[1]
+    assert len(scripts) == 3
+    assert scripts[0] == scripts[1] == scripts[2]
 
 
 def test_cleanup_is_fail_open_and_idempotent(tmp_path: Path) -> None:

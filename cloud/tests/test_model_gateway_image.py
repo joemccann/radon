@@ -68,7 +68,7 @@ def test_gateway_image_preserves_forecasting_outside_the_ordinary_python_image()
 
 def test_both_pr_and_release_build_and_smoke_the_gateway_image():
     wf = yaml.safe_load((ROOT / ".github/workflows/app-images.yml").read_text())
-    job = wf['jobs']['python-image']
+    job = wf['jobs']['gateway-image']
     build = next(s for s in job['steps'] if s.get('with', {}).get('target') == 'model-gateway')
     assert build['with']['file'] == 'docker/app/Dockerfile.python'
     assert f"{GATEWAY_REPO}:${{{{ github.sha }}}}" in build['with']['tags']
@@ -141,7 +141,7 @@ GATEWAY_SHA = "c" * 40
 
 def _gateway_steps():
     wf = yaml.safe_load((ROOT / ".github/workflows/app-images.yml").read_text())
-    return wf["jobs"]["python-image"]["steps"]
+    return wf["jobs"]["gateway-image"]["steps"]
 
 
 def _run_gateway_reuse(tmp_path, *, event, ref, inspect_status, digest=GATEWAY_HASH):

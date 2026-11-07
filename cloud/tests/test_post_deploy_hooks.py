@@ -19,6 +19,7 @@ import pwd
 import shlex
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 
@@ -29,6 +30,15 @@ CLOUD_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUNNER = CLOUD_ROOT / "scripts" / "post_deploy.py"
 DEPLOY = CLOUD_ROOT / "scripts" / "deploy.sh"
 REPO_POST_DEPLOY = CLOUD_ROOT / "post_deploy"
+ARCHIVE_HOOK = REPO_POST_DEPLOY / "hooks" / "0001-archive-retired-json.sh"
+RETIRED_JSON = (
+    "portfolio.json",
+    "trade_log.json",
+    "orders.json",
+    "blotter.json",
+    "reconciliation.json",
+    "option_session_mark_cache.json",
+)
 SHA = "a" * 40
 
 
@@ -829,6 +839,66 @@ def test_repo_manifest_pins_every_checked_in_hook():
     hooks = pd.validate_tree(REPO_POST_DEPLOY, manifest, euid=os.geteuid(), check_owner=False)
     pd.validate_checks(manifest["verify"])
     assert [h.id for h in hooks] == sorted(h["id"] for h in manifest["hooks"])
+
+
+def test_repo_archive_hook_is_declared_idempotent():
+    """An interrupted run is not retried unless the manifest says so.
+
+    The hook is a no-op when the retired files are already gone, so a
+    mid-run crash must retry instead of paging forever with JSON still on
+    disk (or a half-written archive).
+    """
+    manifest = pd.load_manifest(REPO_POST_DEPLOY)
+    entry = next(h for h in manifest["hooks"] if h["id"] == "0001-archive-retired-json")
+    assert entry.get("idempotent") is True
+
+
+def test_archive_retired_json_hook_archives_then_removes_and_is_rerunnable(tmp_path):
+    radon_dir = tmp_path / "radon"
+    data = radon_dir / "data"
+    data.mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    keep = data / "watchlist.json"
+    keep.write_text('{"keep": true}\n')
+    for name in RETIRED_JSON:
+        (data / name).write_text(f'{{"name": "{name}"}}\n')
+    sha = "b" * 40
+    env = {
+        **os.environ,
+        "RADON_DIR": str(radon_dir),
+        "RADON_DEPLOY_SHA": sha,
+        "HOME": str(home),
+        # macOS tar otherwise writes AppleDouble `._*` members; production is Linux.
+        "COPYFILE_DISABLE": "1",
+    }
+    result = subprocess.run(
+        [str(ARCHIVE_HOOK)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive = home / "retired-json" / f"retired-json-{sha}.tar.gz"
+    assert archive.is_file()
+    assert oct(archive.stat().st_mode & 0o777) == "0o600"
+    with tarfile.open(archive, "r:gz") as tar:
+        names = set(tar.getnames())
+    assert names == set(RETIRED_JSON)
+    for name in RETIRED_JSON:
+        assert not (data / name).exists(), name
+    assert keep.read_text() == '{"keep": true}\n'
+    result = subprocess.run(
+        [str(ARCHIVE_HOOK)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert archive.is_file()
+    assert keep.exists()
 
 
 # -- deploy.sh wiring ---------------------------------------------------------
