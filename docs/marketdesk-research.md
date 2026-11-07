@@ -125,9 +125,13 @@ fetched with a cookie-less opener that never follows redirects.
 | `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
 | `scripts/research/marketdesk_copy.py` | System prompt (voice doc plus humanize rules), em-dash scrub, `copy_problems` validator, model ladder call. |
 | `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, admission decision, bounded policy replay, re-queue, upload outbox) and `marketdesk_feedback_handled`. |
-| `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. |
+| `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. Reuses one HTTP/1.1 socket per origin (PERF-047). |
 | `scripts/research/publish.py` | `kind: "marketdesk"` provenance branch beside the unchanged `dropbox` branch. |
 | `scripts/db/migrations/0102_marketdesk_articles.sql` | Ledger table; deletes the retired `dropbox-research` health row. |
+
+## Dropbox write HTTP keep-alive (PERF-047)
+
+`research.dropbox_writer.DropboxWriter` reuses one HTTP/1.1 socket per origin (`api.dropboxapi.com` for token refresh and RPC, `content.dropboxapi.com` for `files/upload`). Idle sockets retire after five seconds, measured from a complete successful response. Failed, oversized, or non-200 responses close the socket. A reused socket that dies before a status line is retried once on a fresh connection, except `oauth2/token`, which is never replayed. Tests that replace `urllib.request.urlopen` still take that seam. Budget: `scripts/tests/test_research_dropbox_writer_keepalive.py`.
 
 ## One cycle
 

@@ -37,7 +37,7 @@ PBOUNDS = f"ghcr.io/joemccann/radon-model-gateway:pbounds-{PAYLOAD}"
 
 
 def _python_job() -> dict:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["python-image"]
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["gateway-image"]
 
 
 def _step(name: str) -> dict:

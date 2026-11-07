@@ -12293,3 +12293,39 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | credentials xdist flake, serial miss then isolated 2 passed and file 11 passed; 20,329 passed / 12 skipped / 63 subtests (165.71s) | 11,610 passed / 21 skipped / 1,184 files (94.68s) | 42 failed / 3,976 passed / 23 skipped (1042.33s) | 0 added / 0 removed |
 
 Base cloud at `62f08ffc` on this Mac (standing sweep; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (1130.42s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-07
+
+Range `62f08ffcdbac96c1f6120004de5dd02b47bc12de..751a9d0d8818bcda1c4f2cd40b77d00d847eff1d`: 185 commits / 551 paths. Newest trusted checkpoint on issue #83 is `audited-through: 62f08ffcdbac96c1f6120004de5dd02b47bc12de` (collaborator, 2026-11-06). It carried no open verified finding. No open `testing/` pull request. Highest id T-585. Next id T-586. `#1443` is merged.
+
+Codemap (`tools/codemap/codemap.json`) is stale for files added after 2026-11-03. `rg` confirmed importers for the 38 codemap gaps: `aa_catalog.py` via `test_aa_frontier_refresh.py`, `authGate.js` via `newsfeed-delivery-health.test.ts`, `ib_order_status.py` / `journal_action.py` / order machines / `useArmedConfirm.ts` each have dedicated tests. The checked-in archive hook had none.
+
+`ci.yml` in the range is a comment-only change on the tag job. Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. One new skip: `test_release_version.py:26` on a shallow clone; the pin literal and `ci_version` refuse-without-base cases still run, and `release-tag` clones with `fetch-depth: 0`. Re-triaged `TEST_LOG.md`: T-585 remains DONE.
+
+The delta touches 298 test files, so a scoped 3× rerun is a full gate. Standing sweeps on this Mac: root pytest 21,001 passed / 1 failed / 12 skipped / 63 subtests (204.82s); the failure is the credentials xdist clock bound, serial file 11 passed. Vitest 11,853 passed / 21 skipped / 1,226 files (122.22s). cloud/tests 58 failed / 4,002 passed / 23 skipped (1068.99s). Versus the 2026-11-06 Darwin 42-list: +16, all bash 3.2 (`mapfile` / `{fd}` / `pin[@]`), 5 of them in new `test_operator_topology_lifecycle.py` and 11 extra in `test_ib_gateway_control.py`. Linux CI is the authority.
+
+Not filed: Turso-only routes (`api-routes-no-disk-snapshot-contract.test.ts`), permId-as-PendingSubmit (`test_order_indeterminate.py:287`), alert throttle fail-closed (`test_alerts_evaluate.py:150`), grok empty-output (`test_runner_run_loop.py:237`).
+
+### T-586 — P1 — retired-JSON archive hook is untested and not declared idempotent
+
+`cloud/post_deploy/hooks/0001-archive-retired-json.sh:11` archives then deletes `trade_log.json` (the only full 2026 rationale copy) plus five other retired snapshots. `cloud/tests/test_post_deploy_hooks.py:827` only SHA-pins the tree; `test_cli_check_validates_repo_manifest` is returncode 0. `cloud/post_deploy/manifest.json:4` omits `"idempotent": true`. `cloud/scripts/post_deploy.py:461` pages an interrupted hook forever unless that flag is set, so a mid-run crash leaves JSON on disk and never retries. Deleting the tar step and keeping `rm -f` left the new archive case red (`archive.is_file()` False).
+
+Acceptance: the manifest entry has `"idempotent": true`. Running the hook against a fake `RADON_DIR/data` writes `retired-json-<sha>.tar.gz` mode 0600 containing exactly the six names, removes those files, leaves other JSON, and a second run exits 0. Skipping the tar step fails `archive.is_file()`.
+
+Audited through: 751a9d0d8818bcda1c4f2cd40b77d00d847eff1d on 2026-11-07 — 1 new finding
+
+## Remediation 2026-11-07
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-586 | DONE | Idempotent assert: `None is True` (1 failed / 1 passed). Delete-without-archive mutation: `archive.is_file()` False (1 failed). Restored hook SHA `3cc0432456`. Manifest `"idempotent": true`. Green: 2 passed; file 83 passed ×3. Hook body unchanged. |
+
+### Closing gates 2026-11-07
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially after isolated retries (round 3). Round 1 also had `test_health_dependency_faults.py` stall TimeoutError (serial 40 passed with credentials). Round 2 also had `test_cta_share_llm_copy.py` copy drift (serial 44 passed with credentials). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as each other and as the standing HEAD run (0 added / 0 removed). Versus the 2026-11-06 Darwin 42-list the extra 16 are new bash 3.2 cases in `test_operator_topology_lifecycle.py` (5) and `test_ib_gateway_control.py` (11). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | credentials + health-stall xdist flakes then serial 40 passed; 21,000 passed / 12 skipped / 63 subtests (275.08s) | 11,853 passed / 21 skipped / 1,226 files (101.56s) | 58 failed / 4,004 passed / 23 skipped (1144.13s) | — |
+| 2 | credentials + cta-copy xdist flakes then serial 44 passed; 21,000 passed / 12 skipped / 63 subtests (168.83s) | 11,853 passed / 21 skipped / 1,226 files (109.72s) | 58 failed / 4,004 passed / 23 skipped (1053.41s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then isolated misses and file 11 passed; 21,001 passed / 12 skipped / 63 subtests (185.10s) | 11,853 passed / 21 skipped / 1,226 files (117.49s) | 58 failed / 4,004 passed / 23 skipped (1273.47s) | 0 added / 0 removed |
