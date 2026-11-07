@@ -104,11 +104,12 @@ class TestCli:
         def fake_targets(strategy, as_of, rows, *, rebalance_today=False, recorded_at=None):
             calls["targets"] = (strategy, as_of, rows, rebalance_today)
 
-        def fake_health(service, state, **kw):
-            calls.setdefault("health", []).append((service, state))
+        def fake_health(state, **kw):
+            calls.setdefault("health", []).append(("quant-targets", state))
 
         monkeypatch.setattr(quant_run, "_DATA_DIR", tmp_path)
-        monkeypatch.setattr(quant_run, "_writer_funcs", lambda: (fake_run, fake_targets, fake_health))
+        monkeypatch.setattr(quant_run, "_writer_funcs", lambda: (fake_run, fake_targets))
+        monkeypatch.setattr(quant_run, "_heartbeat", fake_health)
         rc = quant_run.main(
             ["--strategy", "monthly_rotation", "--mode", "targets", "--sleeve-nav", "50000", "--persist"],
             load_prices=_fake_prices,
@@ -140,10 +141,11 @@ class TestScheduled:
         def fake_targets(strategy, as_of, rows, *, rebalance_today=False, recorded_at=None):
             calls.setdefault("targets", []).append((strategy, rows))
 
-        def fake_health(service, state, **kw):
-            calls.setdefault("health", []).append((service, state, kw))
+        def fake_health(state, **kw):
+            calls.setdefault("health", []).append(("quant-targets", state, kw))
 
-        monkeypatch.setattr(quant_run, "_writer_funcs", lambda: (fake_run, fake_targets, fake_health))
+        monkeypatch.setattr(quant_run, "_writer_funcs", lambda: (fake_run, fake_targets))
+        monkeypatch.setattr(quant_run, "_heartbeat", fake_health)
 
     def test_enabled_strategies_parse_and_drop_unknown_keys(self, capsys):
         env = {"RADON_QUANT_STRATEGIES": " inverse_vol, nope ,dual_momentum,"}
@@ -160,6 +162,7 @@ class TestScheduled:
         self._writers(monkeypatch, calls)
         monkeypatch.setattr(quant_run, "_DATA_DIR", tmp_path)
         rc = quant_run.run_scheduled(
+            heartbeat=quant_run._heartbeat,
             load_prices=_fake_prices,
             env={"RADON_QUANT_STRATEGIES": "inverse_vol,monthly_rotation", "RADON_QUANT_SLEEVE_PCT": "0.2"},
             net_liq=1_000_000.0,
@@ -174,7 +177,9 @@ class TestScheduled:
     def test_scheduled_with_nothing_enabled_heartbeats_ok_and_touches_nothing(self, monkeypatch):
         calls = {}
         self._writers(monkeypatch, calls)
-        assert quant_run.run_scheduled(load_prices=_fake_prices, env={}, net_liq=None) == 0
+        assert (
+            quant_run.run_scheduled(heartbeat=quant_run._heartbeat, load_prices=_fake_prices, env={}, net_liq=None) == 0
+        )
         assert "targets" not in calls and [h[:2] for h in calls["health"]] == [("quant-targets", "ok")]
 
     def test_scheduled_strategy_failure_heartbeats_error_and_continues(self, tmp_path, monkeypatch):
@@ -188,6 +193,7 @@ class TestScheduled:
             return _fake_prices(symbols, since=since)
 
         rc = quant_run.run_scheduled(
+            heartbeat=quant_run._heartbeat,
             load_prices=flaky,
             env={"RADON_QUANT_STRATEGIES": "trend_inverse_vol,inverse_vol", "RADON_QUANT_SLEEVE_PCT": "0.1"},
             net_liq=500_000.0,

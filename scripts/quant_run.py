@@ -190,11 +190,18 @@ def run_targets(
 # --------------------------------------------------------------------------- #
 # persistence: Turso first, disk fallback                                      #
 # --------------------------------------------------------------------------- #
-def _writer_funcs() -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
-    from db.writer import ensure_no_replica_for_writers, record_service_health, upsert_quant_run, upsert_quant_targets
+def _writer_funcs() -> tuple[Callable[..., Any], Callable[..., Any]]:
+    from db.writer import ensure_no_replica_for_writers, upsert_quant_run, upsert_quant_targets
 
     ensure_no_replica_for_writers()
-    return upsert_quant_run, upsert_quant_targets, record_service_health
+    return upsert_quant_run, upsert_quant_targets
+
+
+def _heartbeat(state: str, **kw: Any) -> None:
+    """The one ``quant-targets`` health row the scheduled run writes."""
+    from db.writer import record_service_health
+
+    record_service_health(TARGETS_SERVICE, state, **kw)
 
 
 def _write_disk(path: Path, payload: dict[str, Any]) -> None:
@@ -209,7 +216,7 @@ def _persist(strategy: QuantStrategy, result: dict[str, Any]) -> None:
     on-demand; the scheduled run writes the one ``quant-targets`` heartbeat."""
     mode = result["mode"]
     _write_disk(_DATA_DIR / "quant" / f"{strategy.key}_{mode}.json", result)
-    upsert_run, upsert_targets, _record_health = _writer_funcs()
+    upsert_run, upsert_targets = _writer_funcs()
     if True:
         if mode == "backtest":
             m = result["metrics"]
@@ -247,16 +254,16 @@ def run_scheduled(
     load_prices: Callable[..., PriceMatrix],
     env: Optional[dict] = None,
     net_liq: Optional[float] = None,
+    heartbeat: Callable[..., None] = _heartbeat,
 ) -> int:
     """radon-quant-targets.timer entry: persist targets for every enabled
     strategy, then one heartbeat. A strategy failure records ``error`` and
     continues with the rest; nothing enabled heartbeats ``ok``."""
     keys = enabled_strategies(env)
-    _upsert_run, _upsert_targets, record_health = _writer_funcs()
     finished = _iso_now()
     if not keys:
         print(f"{ENV_STRATEGIES} is empty; nothing to do", file=sys.stderr)
-        record_health(TARGETS_SERVICE, "ok", finished_at=finished)
+        heartbeat("ok", finished_at=finished)
         return 0
     pct = sleeve_pct(env)
     nav = sleeve_nav_from_snapshot(pct, net_liq if net_liq is not None else _snapshot_net_liq())
@@ -276,9 +283,9 @@ def run_scheduled(
             print(f"{key}: {exc}", file=sys.stderr)
             failures.append(f"{key}: {str(exc)[:160]}")
     if failures:
-        record_health(TARGETS_SERVICE, "error", finished_at=_iso_now(), error={"message": "; ".join(failures)[:512]})
+        heartbeat("error", finished_at=_iso_now(), error={"message": "; ".join(failures)[:512]})
         return 1
-    record_health(TARGETS_SERVICE, "ok", finished_at=_iso_now())
+    heartbeat("ok", finished_at=_iso_now())
     return 0
 
 
@@ -323,7 +330,7 @@ def main(argv: Optional[list[str]] = None, *, load_prices: Callable[..., PriceMa
         print(json.dumps(list_strategies(), indent=2))
         return 0
     if args.scheduled:
-        return run_scheduled(load_prices=load_prices)
+        return run_scheduled(load_prices=load_prices, heartbeat=_heartbeat)
     if not args.strategy:
         parser.print_usage(sys.stderr)
         print("error: --strategy is required unless --list", file=sys.stderr)
