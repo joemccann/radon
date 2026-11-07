@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon quant sleeve execution - weekdays 09:35 ET after the open
+
+[Timer]
+# 09:35 America/New_York, Mon..Fri: five minutes after the 09:30 ET open so
+# the opening auction has printed before limit orders are priced off the
+# prior close. Trades only the targets the 16:25 ET run flagged
+# rebalance_today, and only when RADON_QUANT_EXECUTE=1; otherwise it logs
+# the plan. Heartbeat `quant-execute` (74h window: Friday covers the weekend).
+OnCalendar=Mon..Fri *-*-* 09:35:00 America/New_York
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

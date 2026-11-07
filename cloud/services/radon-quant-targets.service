@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon quant sleeve targets (systematic strategies, docs/quant-strategies.md)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/quant_run.py --scheduled
+StandardOutput=journal
+StandardError=journal
+# Turso read per strategy plus, on a thin or stale symbol, one IB history
+# session for the universe (15 Y daily bars, bounded per request).
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

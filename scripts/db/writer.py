@@ -3741,12 +3741,27 @@ ON CONFLICT(strategy, run_at) DO UPDATE SET
 """
 
 QUANT_TARGET_UPSERT_SQL = """
-INSERT INTO quant_targets (strategy, as_of, symbol, weight, notional, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO quant_targets
+  (strategy, as_of, symbol, weight, notional, close, rebalance_today, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(strategy, as_of, symbol) DO UPDATE SET
-  weight      = excluded.weight,
-  notional    = excluded.notional,
-  recorded_at = excluded.recorded_at
+  weight          = excluded.weight,
+  notional        = excluded.notional,
+  close           = excluded.close,
+  rebalance_today = excluded.rebalance_today,
+  recorded_at     = excluded.recorded_at
+"""
+
+QUANT_ORDER_INSERT_SQL = """
+INSERT INTO quant_orders
+  (strategy, as_of, symbol, action, quantity, limit_price, order_ref, status,
+   order_id, perm_id, message, placed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, placed_at, symbol) DO UPDATE SET
+  status   = excluded.status,
+  order_id = excluded.order_id,
+  perm_id  = excluded.perm_id,
+  message  = excluded.message
 """
 
 
@@ -3775,16 +3790,57 @@ def upsert_quant_run(strategy: str, run_at: str, summary: dict[str, Any], payloa
 
 
 def upsert_quant_targets(
-    strategy: str, as_of: str, rows: list[dict[str, Any]], recorded_at: Optional[str] = None
+    strategy: str,
+    as_of: str,
+    rows: list[dict[str, Any]],
+    *,
+    rebalance_today: bool = False,
+    recorded_at: Optional[str] = None,
 ) -> None:
     """Current target weights per symbol, idempotent on (strategy, as_of, symbol).
     A universe is at most a dozen names, so per-row statements stay well under
-    the Hrana bound."""
+    the Hrana bound. ``close`` is the session close the weights were computed
+    on; ``rebalance_today`` is the flag the execution bridge trades on."""
     stamp = recorded_at or _now_iso()
     db = get_db()
     for row in rows:
         db.execute(
             QUANT_TARGET_UPSERT_SQL,
-            (strategy, as_of, row["symbol"], float(row["weight"]), row.get("notional"), stamp),
+            (
+                strategy,
+                as_of,
+                row["symbol"],
+                float(row["weight"]),
+                row.get("notional"),
+                row.get("close"),
+                1 if rebalance_today else 0,
+                stamp,
+            ),
+        )
+    db.commit()
+
+
+def insert_quant_orders(strategy: str, rows: list[dict[str, Any]], placed_at: Optional[str] = None) -> None:
+    """The sleeve's order log: one row per symbol per placement, dry runs
+    included (status ``planned``)."""
+    stamp = placed_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            QUANT_ORDER_INSERT_SQL,
+            (
+                strategy,
+                row["as_of"],
+                row["symbol"],
+                row["action"],
+                int(row["quantity"]),
+                float(row["limit_price"]),
+                row["order_ref"],
+                row["status"],
+                row.get("order_id"),
+                row.get("perm_id"),
+                row.get("message"),
+                stamp,
+            ),
         )
     db.commit()
