@@ -455,6 +455,7 @@ def test_darwin_runner_exception_only_verifies_native_consumer_artifacts() -> No
     assert not _touches_production_host(native)
     assert native["permissions"] == {"contents": "read"}
     assert "darwin-clients" in _needs(jobs["python-image"])
+    assert "darwin-clients" in _needs(jobs["gateway-image"])
     commands = "\n".join(str(step.get("run", "")) for step in native["steps"])
     for evidence in (
         'test "$(uname -m)" = arm64',

@@ -41,8 +41,16 @@ PATH_TOKEN = re.compile(r"(?<![\w./-])((?:\.github|cloud|docker|scripts|web)/[\w
 REPO_LITERAL = re.compile(r"""["']([\w.-]+(?:/[\w.-]+)+)["']""")
 
 
+def _jobs() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+
+def _job_steps(job_name: str) -> list[dict]:
+    return _jobs()[job_name]["steps"]
+
+
 def _steps() -> list[dict]:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["python-image"]["steps"]
+    return _job_steps("python-image") + _job_steps("gateway-image")
 
 
 def _step(name: str) -> dict:
@@ -172,12 +180,17 @@ def _reuse_hit(tmp_path: Path, name: str, *, unhashed: dict[str, str]) -> str:
 
 
 def test_the_diff_step_runs_only_on_pull_requests_before_both_lookups() -> None:
-    names = [step.get("name") for step in _steps()]
+    python_names = [step.get("name") for step in _job_steps("python-image")]
+    gateway_names = [step.get("name") for step in _job_steps("gateway-image")]
     step = _step(UNHASHED)
     assert step["id"] == "unhashed"
     assert step["if"] == "github.event_name == 'pull_request'"
-    assert names.index("Hash python image inputs") < names.index(UNHASHED)
-    assert names.index(UNHASHED) < names.index(PYTHON_REUSE) < names.index(GATEWAY_REUSE)
+    assert python_names.index("Hash python image inputs") < python_names.index(UNHASHED)
+    assert python_names.index(UNHASHED) < python_names.index(PYTHON_REUSE)
+    assert GATEWAY_REUSE not in python_names
+    assert gateway_names.index("Hash python image inputs") < gateway_names.index(UNHASHED)
+    assert gateway_names.index(UNHASHED) < gateway_names.index(GATEWAY_REUSE)
+    assert PYTHON_REUSE not in gateway_names
     # Read-only: it fetches the public base commit and diffs. No registry,
     # no token, no write.
     assert "imagetools" not in step["run"] and "docker" not in step["run"]
