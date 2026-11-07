@@ -3370,3 +3370,38 @@ class TestDocumentation20261106:
         engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
         assert "def _note_provider_cooldown" in engine
         assert "is_quota_exhausted" in engine
+
+
+class TestDocumentation20261107:
+    """DOC-257: replace places only on cancelOutcome=cancelled, never on absence."""
+
+    def test_replace_owner_does_not_treat_absence_as_cancel(self):
+        web = (_ROOT / "web/CLAUDE.md").read_text()
+        web_cancel = web.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+        assert "Disappearance after cancel = success" not in web_cancel
+        assert "records a 202 or an already-`Cancelled` status as a successful cancel" not in web_cancel
+        assert "classify_cancel" in web_cancel
+        assert "cancelOutcome" in web_cancel
+        assert "CANCEL_NOT_CONFIRMED" in web_cancel
+
+        scripts = (_ROOT / "scripts/CLAUDE.md").read_text()
+        scripts_cancel = scripts.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+        assert "cancelOutcome" in scripts_cancel
+        assert "CANCEL_NOT_CONFIRMED" in scripts_cancel
+
+        incident = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = incident.split("## combo-replace-ib-202-cancel", 1)[1].split("\n## ", 1)[0]
+        assert "records 202 / already-Cancelled as cancelled and continues" not in case
+        assert "must still call place" not in case
+        assert "cancelOutcome" in case
+        assert "CANCEL_NOT_CONFIRMED" in case
+
+        manage = (_ROOT / "scripts/ib_order_manage.py").read_text()
+        classify = manage.split("def classify_cancel", 1)[1].split("\ndef ", 1)[0]
+        assert "vanished or acknowledged order is named only" in classify
+        assert "from its executions" in classify
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        replace = server.split("async def _orders_replace_after_rate_reservation", 1)[1]
+        replace = replace.split("\n@app.post", 1)[0]
+        assert 'CancelOutcome.CANCELLED.value' in replace
+        assert '"CANCEL_NOT_CONFIRMED"' in replace

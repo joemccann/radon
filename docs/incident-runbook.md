@@ -149,12 +149,14 @@ Mobile later pushed that the original was cancelled.
   plus `IB error 202`; IBKR push "order cancelled"; open-order snapshot missing
   the row and no new working replacement.
 - **Discriminating check:** `cancel_order` with errorEvent 202 while the
-  snapshot is still `PendingCancel` must return `status=ok`. `POST /orders/replace`
-  whose cancel step raises `IB error 202` must still call place. A 201 / already
-  Filled cancel must not place.
-- **Fix:** treat 202 as cancel confirmation in `ib_order_manage.cancel_order`;
-  `/orders/replace` records 202 / already-Cancelled as cancelled and continues
-  to place. Already-Filled stays a hard abort.
+  snapshot is still `PendingCancel` is `acked` for `classify_cancel`, then named
+  from executions. `POST /orders/replace` places only when `cancelOutcome` is
+  `cancelled`. A 201, filled, partial, unknown, or still-working cancel must not
+  place (`CANCEL_NOT_CONFIRMED`).
+- **Fix:** treat 202 as cancel acknowledgement in `ib_order_manage.cancel_order`;
+  `classify_cancel` names the outcome from executions. `/orders/replace` places
+  only when `cancelOutcome` is `cancelled`. Filled, partial, unknown, and
+  still-working raise `CANCEL_NOT_CONFIRMED`.
 - **Regression:**
   `scripts/tests/test_ib_order_manage.py::TestCancelOrder::test_cancel_succeeds_when_ib_202_arrives_while_order_still_working`,
   `scripts/api/tests/test_order_replace_state_machine.py::test_replace_treats_ib_202_cancel_as_confirmed_and_places`.
