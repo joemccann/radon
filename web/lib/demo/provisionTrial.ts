@@ -55,6 +55,25 @@ export function isDemoSignup(data: ClerkUserCreatedData): boolean {
   return data.unsafe_metadata?.demo === true;
 }
 
+/**
+ * The row read before a Clerk stamp is not the last word: `revokeTrial`
+ * commits the row and only then mirrors Clerk, so a revoke that interleaved
+ * after that read would be erased by the stamp and leave demo access live
+ * (request authorization reads trial state from Clerk metadata). Re-read the
+ * row after the write; when it no longer grants a trial, return Clerk to
+ * "pending", which the demo gate denies.
+ */
+async function clerkStampSurvivedARevoke(
+  deps: ProvisionDeps,
+  userId: string,
+  now: Date,
+): Promise<boolean> {
+  const settled = trialStateFromRow(await getDemoUser(deps.db, userId), now.getTime());
+  if (settled?.kind !== "revoked" && settled?.kind !== "invalid") return true;
+  await deps.setClerkMetadata(userId, { demoRole: "pending" });
+  return false;
+}
+
 export async function provisionDemoTrial(
   data: ClerkUserCreatedData,
   deps: ProvisionDeps,
@@ -68,6 +87,8 @@ export async function provisionDemoTrial(
   if (!deps.assumeDemo && !isDemoSignup(data)) {
     return { provisioned: false, reason: "not a demo signup (no demo marker)" };
   }
+
+  const now = deps.now ?? new Date();
 
   // RC-B11: user.created can be re-delivered. An existing row means this user
   // was already provisioned — never restart the trial clock, and never
@@ -86,11 +107,16 @@ export async function provisionDemoTrial(
         demoTrialStartedAt: existing.started_at,
         demoTrialExpiresAt: existing.expires_at,
       });
+      // Same reconciliation as the fresh-provisioning path below: a revoke
+      // that committed after the read above must not be erased by this
+      // replay's stamp.
+      if (!(await clerkStampSurvivedARevoke(deps, userId, now))) {
+        return { provisioned: false, reason: "row was revoked — Clerk returned to pending" };
+      }
       return { provisioned: true, expiresAt: existing.expires_at };
     }
   }
 
-  const now = deps.now ?? new Date();
   const startIsoEt = now.toISOString();
   // Mark the Clerk identity as pending before any slow calendar/DB work. The
   // demo gate treats missing expiry as denied, so webhook failure cannot leave
@@ -130,15 +156,8 @@ export async function provisionDemoTrial(
     demoTrialExpiresAt: window.expiresAt,
   });
 
-  // The row read above is not the last word: an operator revoke commits the
-  // row and only then mirrors Clerk, so one that interleaved after that read
-  // would be erased by the stamp just written and leave demo access live. The
-  // row is re-read after the write and wins; Clerk returns to "pending"
-  // (denied) when it no longer grants a trial.
-  const settled = trialStateFromRow(await getDemoUser(deps.db, userId), now.getTime());
-  if (settled?.kind === "revoked" || settled?.kind === "invalid") {
-    await deps.setClerkMetadata(userId, { demoRole: "pending" });
-    return { provisioned: false, reason: `row is ${settled.kind} — Clerk returned to pending` };
+  if (!(await clerkStampSurvivedARevoke(deps, userId, now))) {
+    return { provisioned: false, reason: "row was revoked — Clerk returned to pending" };
   }
 
   return { provisioned: true, expiresAt: window.expiresAt };

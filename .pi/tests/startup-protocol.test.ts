@@ -506,6 +506,49 @@ test("a trusted entry script is refused while its sibling import surface is unpi
   assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), null);
 });
 
+test("an ignored importable artifact beside the entry script is refused", async () => {
+  const {
+    createWorkspaceTrust,
+    resolveTrustedWorkspaceScript,
+  } = await import("../extensions/startup-protocol.ts");
+  const root = mkdtempSync(join(tmpdir(), "radon-startup-ignored-"));
+  mkdirSync(join(root, "scripts"));
+  const helper = join(root, "scripts", "helper.py");
+  writeFileSync(helper, "import json\n");
+  writeFileSync(join(root, ".gitignore"), "*.py[cod]\n*.so\n__pycache__/\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "scripts", ".gitignore"], { cwd: root });
+  execFileSync(
+    "git",
+    ["-c", "user.name=Radon Test", "-c", "user.email=test@radon.invalid", "commit", "-qm", "fixture"],
+    { cwd: root },
+  );
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const trust = createWorkspaceTrust(root, {
+    RADON_PI_TRUSTED_WORKSPACE: root,
+    RADON_PI_TRUSTED_REVISION: revision,
+  });
+  assert.ok(trust);
+
+  // A cached-bytecode directory is not an import source of its own.
+  mkdirSync(join(root, "scripts", "__pycache__"));
+  writeFileSync(join(root, "scripts", "__pycache__", "helper.cpython-313.pyc"), "x");
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), realpathSync(helper));
+
+  // A bare .pyc is imported sourcelessly and shadows the stdlib module, and
+  // `.gitignore` hides it from a plain porcelain status.
+  for (const planted of ["scripts/json.pyc", "scripts/json.so"]) {
+    writeFileSync(join(root, planted), "x");
+    assert.strictEqual(
+      resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"),
+      null,
+      `${planted} was not refused`,
+    );
+    execFileSync("git", ["clean", "-qfdx", "--", "scripts"], { cwd: root });
+    mkdirSync(join(root, "scripts", "__pycache__"), { recursive: true });
+  }
+});
+
 test("startup python runs without ambient PYTHONPATH or user site packages", () => {
   const current = readFileSync(
     join(import.meta.dirname, "../extensions/startup-protocol.ts"),

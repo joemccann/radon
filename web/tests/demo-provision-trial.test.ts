@@ -175,6 +175,37 @@ describe("provisionDemoTrial", () => {
     expect((await getDemoUser(d.db, "user_demo"))?.status).toBe("revoked");
   });
 
+  it("a replayed delivery does not restore access over a concurrent revoke", async () => {
+    // The replay branch mirrors the already-committed window into Clerk. A
+    // revoke that commits between that read and the write used to be erased
+    // by it, restoring the original expiry on the surface that gates access.
+    const d = deps();
+    d.db.users.set("user_demo", {
+      user_id: "user_demo",
+      email: "trial@demo.test",
+      demo_role: "trial",
+      started_at: EXPIRY.startedAt,
+      expires_at: EXPIRY.expiresAt,
+      status: "active",
+      revoked_at: null,
+      created_at: EXPIRY.startedAt,
+    });
+    let interleaved = false;
+    const stamp = vi.fn(async (_userId: string, meta: { demoRole: string }) => {
+      if (meta.demoRole === "trial" && !interleaved) {
+        interleaved = true;
+        await revokeDemoUser({ db: d.db, userId: "user_demo", now: d.now });
+      }
+    });
+    d.setClerkMetadata = stamp;
+
+    const result = await provisionDemoTrial(demoUser(), d);
+
+    expect(interleaved).toBe(true);
+    expect(result.provisioned).toBe(false);
+    expect(stamp.mock.calls.at(-1)?.[1]).toEqual({ demoRole: "pending" });
+  });
+
   it("leaves a failed provisioning attempt explicitly pending in Clerk", async () => {
     const setClerkMetadata = vi.fn().mockResolvedValue(undefined);
     await expect(provisionDemoTrial(demoUser(), deps({

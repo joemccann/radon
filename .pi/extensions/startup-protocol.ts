@@ -94,22 +94,40 @@ export function createWorkspaceTrust(
   }
 }
 
+// Every suffix Python will import from a directory on `sys.path`. A bare
+// `.pyc` is imported sourcelessly, so `.gitignore`-hidden bytecode shadows a
+// stdlib module (`scripts/json.pyc`) just as well as a planted `.py`.
+const IMPORTABLE_SUFFIXES = [".py", ".pyc", ".pyo", ".pyd", ".so"];
+
 /**
  * Python puts the entry script's own directory on `sys.path`, so every module
  * under it is executable content even when the entry file still matches its
  * pinned blob. Pinning the entry script alone therefore does not deliver what
- * the trust check promises. Require that directory's Python surface to be
- * identical to the pinned revision: no modified and no untracked `.py` file.
+ * the trust check promises. Require that directory's import surface to be
+ * identical to the pinned revision: no modified, untracked or ignored
+ * importable file. Ignored files are included because the repository ignores
+ * exactly the compiled forms. A `__pycache__` entry is exempt: it is a cache
+ * keyed to an existing source, not an import source of its own.
  */
 function importSurfaceIsPinned(trust: WorkspaceTrust, relativeDir: string): boolean {
   const status = execFileSync(
     "git",
-    ["status", "--porcelain", "--untracked-files=all", "--", relativeDir],
+    [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--ignored=matching",
+      "--",
+      relativeDir,
+    ],
     { cwd: trust.root, encoding: "utf8", timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
   );
-  return !status
-    .split("\n")
-    .some((line) => line.trim().length > 0 && line.trimEnd().endsWith(".py"));
+  return !status.split("\n").some((line) => {
+    const entry = line.slice(3).trim().replace(/^"|"$/g, "");
+    if (!entry) return false;
+    if (entry.split("/").includes("__pycache__")) return false;
+    return IMPORTABLE_SUFFIXES.some((suffix) => entry.endsWith(suffix));
+  });
 }
 
 export function resolveTrustedWorkspaceScript(
