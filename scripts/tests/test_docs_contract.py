@@ -3405,3 +3405,36 @@ class TestDocumentation20261107:
         replace = replace.split("\n@app.post", 1)[0]
         assert 'CancelOutcome.CANCELLED.value' in replace
         assert '"CANCEL_NOT_CONFIRMED"' in replace
+
+    def test_kelly_and_execution_owners_do_not_name_retired_json(self):
+        kelly = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        assert "data/portfolio.json" not in kelly
+        assert "portfolio_snapshots" in kelly
+        guard = (_ROOT / "scripts/kelly_guard.py").read_text()
+        assert "_load_latest_snapshot" in guard
+        evaluate = (_ROOT / "scripts/evaluate.py").read_text()
+        losses = evaluate.split("def _open_max_losses_from_portfolio", 1)[1]
+        losses = losses.split("\ndef ", 1)[0]
+        assert "latest Turso snapshot" in losses
+        assert "_load_latest_snapshot" in losses
+
+        for rel in (
+            "docs/prompt.md",
+            "docs/plans.md",
+            "docs/strategies.md",
+            "docs/implement.md",
+        ):
+            text = (_ROOT / rel).read_text()
+            assert "logged to trade_log.json" not in text
+            assert "Append to `data/trade_log.json`" not in text
+            assert "Log all decisions in `data/trade_log.json`" not in text
+            assert "Log executed trades to trade_log.json" not in text
+            assert "Update trade_log.json with close data" not in text
+        implement = (_ROOT / "docs/implement.md").read_text()
+        assert "Turso `journal` table" in implement
+        prompt = (_ROOT / "docs/prompt.md").read_text()
+        assert "Turso `journal`" in prompt
+        plans = (_ROOT / "docs/plans.md").read_text()
+        assert "Turso `journal`" in plans
+        strategies = (_ROOT / "docs/strategies.md").read_text()
+        assert "Turso `journal`" in strategies
