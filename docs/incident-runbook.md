@@ -4629,6 +4629,52 @@ long grok run.** Peak: 2026-10-17 06:54:48Z, page
   `scripts/grok_page_responder.py` (`_load_trusted_lkg`; `error` row and
   no pin warning on a refuse).
 
+## grok-responder-deploy-journal-eacces
+
+**`radon-grok-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a rerunnable unit page is actionable and the deploy
+transition journal cannot be stat'd.** Peak: 2026-11-07 16:02:22Z, page
+`afc05cfe50243228a5be2fbdecfb9b82`, paged 16:05:00Z. The same traceback
+repeated at 16:03:59Z and 16:04:31Z. InactiveEnter on the paged invocation
+is 16:04:31Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The isolated unit runs as
+  `radon-responder` with `ProtectHome=yes`, so `/home/radon` is not
+  searchable. `attempt_oneshot_rerun` calls
+  `DEPLOY_TRANSITION_JOURNAL.exists()` before any grok launch.
+  `Path.exists()` stats the path and raises `PermissionError` on EACCES
+  (it only swallows ENOENT). The exception is not `HranaHttpError`, so
+  `run_cycle` re-raises and the interpreter exits 1. systemd records
+  `Result=exit-code`, `NRestarts=0`. The watchdog then pages this unit
+  about itself. Cycles with no actionable rerunnable page still log
+  `pending: 0` and exit 0. `requires_ib` is false. Exec span is about
+  2 seconds, not `TimeoutStartSec=3900`.
+- **Detection:** journal traceback ends at
+  `PermissionError: [Errno 13] Permission denied: '/home/radon/.radon-deploy-transition.json'`
+  in `attempt_oneshot_rerun` ← `run_cycle`. `systemctl show
+  radon-grok-responder.service -p Result,NRestarts,ExecMainStatus` on
+  that invocation is `exit-code` / `0` / `1`.
+- **Discriminating check:** the traceback names that path and
+  `Path.exists`, not a missing `GROK_BIN` (`grok-page-responder-missing-binary`)
+  and not a hrana `TimeoutError` or `RemoteDisconnected`
+  (`grok-page-responder-ledger-timeout`,
+  `grok-page-responder-ledger-disconnect`). A readable journal that
+  exists still skips the rerun and falls through to grok. A readable
+  absent journal still allows a rerun. Python Turso `SELECT 1` is not
+  this exit. `/health/lite` down is the API, stand down. Not
+  `ib-gateway-grouped`. `Result=signal` or exit 143 inside a deploy
+  window is `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** an unreadable journal fails closed the same
+  way a present journal does: skip the oneshot rerun, do not start the
+  unit, and continue the cycle so grok still triages the page. Do not
+  restart-flap. The unit is not on `RERUNNABLE_ONESHOT_UNITS`. A page
+  already claimed by a crashing cycle stays claimed until
+  `STALE_CLAIM_SECS` (2h).
+- **Regression:**
+  `scripts/tests/test_watchdog/test_page_responder.py::TestSignalKilledOneshotRerun::test_unreadable_deploy_journal_does_not_fail_the_oneshot`.
+- **Code:** `scripts/grok_page_responder.py`
+  (`_deploy_transition_blocks_rerun`, `attempt_oneshot_rerun`).
+
 ## grok-upgrade-update-rejects-no-auto-update
 
 **`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
