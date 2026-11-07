@@ -468,6 +468,59 @@ test("trusted startup scripts must match the pinned Git revision and stay beneat
   assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/outside.py"), null);
 });
 
+test("a trusted entry script is refused while its sibling import surface is unpinned", async () => {
+  const {
+    createWorkspaceTrust,
+    resolveTrustedWorkspaceScript,
+  } = await import("../extensions/startup-protocol.ts");
+  const root = mkdtempSync(join(tmpdir(), "radon-startup-imports-"));
+  mkdirSync(join(root, "scripts"));
+  const helper = join(root, "scripts", "helper.py");
+  writeFileSync(helper, "import sibling\n");
+  writeFileSync(join(root, "scripts", "sibling.py"), "VALUE = 1\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "scripts"], { cwd: root });
+  execFileSync(
+    "git",
+    ["-c", "user.name=Radon Test", "-c", "user.email=test@radon.invalid", "commit", "-qm", "fixture"],
+    { cwd: root },
+  );
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const trust = createWorkspaceTrust(root, {
+    RADON_PI_TRUSTED_WORKSPACE: root,
+    RADON_PI_TRUSTED_REVISION: revision,
+  });
+  assert.ok(trust);
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), realpathSync(helper));
+
+  // python puts the entry script's own directory on sys.path, so a planted
+  // module there executes even though the entry script still matches its blob.
+  writeFileSync(join(root, "scripts", "json.py"), "import os\n");
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), null);
+
+  execFileSync("git", ["clean", "-qfd", "scripts"], { cwd: root });
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), realpathSync(helper));
+
+  // A modified sibling is the same gap as an added one.
+  writeFileSync(join(root, "scripts", "sibling.py"), "import os\n");
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), null);
+});
+
+test("startup python runs without ambient PYTHONPATH or user site packages", () => {
+  const current = readFileSync(
+    join(import.meta.dirname, "../extensions/startup-protocol.ts"),
+    "utf8",
+  );
+  const invocations = current.match(/"python3\.13",\s*\[[^\]]*\]/g) ?? [];
+  assert.strictEqual(invocations.length, 5);
+  for (const invocation of invocations) {
+    assert.ok(
+      /\[\s*"-E",\s*"-s",/.test(invocation),
+      `startup python invocation is not isolated: ${invocation}`,
+    );
+  }
+});
+
 // ============================================================
 // RUN ALL TESTS
 // ============================================================

@@ -94,6 +94,24 @@ export function createWorkspaceTrust(
   }
 }
 
+/**
+ * Python puts the entry script's own directory on `sys.path`, so every module
+ * under it is executable content even when the entry file still matches its
+ * pinned blob. Pinning the entry script alone therefore does not deliver what
+ * the trust check promises. Require that directory's Python surface to be
+ * identical to the pinned revision: no modified and no untracked `.py` file.
+ */
+function importSurfaceIsPinned(trust: WorkspaceTrust, relativeDir: string): boolean {
+  const status = execFileSync(
+    "git",
+    ["status", "--porcelain", "--untracked-files=all", "--", relativeDir],
+    { cwd: trust.root, encoding: "utf8", timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
+  );
+  return !status
+    .split("\n")
+    .some((line) => line.trim().length > 0 && line.trimEnd().endsWith(".py"));
+}
+
 export function resolveTrustedWorkspaceScript(
   trust: WorkspaceTrust,
   relativePath: string,
@@ -112,6 +130,8 @@ export function resolveTrustedWorkspaceScript(
       { cwd: trust.root, timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
     );
     if (hashBytes(fs.readFileSync(candidate)) !== hashBytes(revisionBytes)) return null;
+    const relativeDir = path.dirname(relativePath).replaceAll(path.sep, "/");
+    if (!importSurfaceIsPinned(trust, relativeDir)) return null;
     return candidate;
   } catch {
     return null;
@@ -419,7 +439,7 @@ export default function (pi: ExtensionAPI) {
     }
     
     try {
-      const output = execFileSync("python3.13", [scriptPath, "--json", "--budget", "8000"], {
+      const output = execFileSync("python3.13", ["-E", "-s", scriptPath, "--json", "--budget", "8000"], {
         cwd: trust.root,
         encoding: "utf-8",
         timeout: 10000,
@@ -492,7 +512,7 @@ ${memoryContent}
       return;
     }
     
-    runBoundedStartupJob("python3.13", [scriptPath], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+    runBoundedStartupJob("python3.13", ["-E", "-s", scriptPath], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
       if (timedOut) {
         tracker.complete("ib", "warning", "IB reconciliation timed out");
         onComplete?.();
@@ -545,7 +565,7 @@ ${memoryContent}
       return;
     }
     
-    runBoundedStartupJob("python3.13", [scriptPath, "--table"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+    runBoundedStartupJob("python3.13", ["-E", "-s", scriptPath, "--table"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
       if (timedOut) {
         tracker.complete("free_trade", "warning", "Free trade analysis timed out");
         return;
@@ -632,7 +652,7 @@ ${memoryContent}
       }
     }
 
-    runBoundedStartupJob("python3.13", [scriptPath, "--json"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+    runBoundedStartupJob("python3.13", ["-E", "-s", scriptPath, "--json"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
       if (timedOut) {
         tracker.complete("cri", "warning", "CRI scan timed out");
         return;
@@ -726,7 +746,7 @@ ${memoryContent}
       return;
     }
     
-    runBoundedStartupJob("python3.13", [scriptPath, "--account", account], trust.root, ({ code, stdout: output, timedOut }) => {
+    runBoundedStartupJob("python3.13", ["-E", "-s", scriptPath, "--account", account], trust.root, ({ code, stdout: output, timedOut }) => {
       if (timedOut) {
         tracker.complete(processName, "warning", `@${account}: scan timed out`);
         return;
