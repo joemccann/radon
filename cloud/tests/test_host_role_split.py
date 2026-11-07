@@ -110,6 +110,8 @@ class TestAutoSyncStrays:
         "radon-hyad.timer",
         "radon-record-high-breadth.service",
         "radon-record-high-breadth.timer",
+        "radon-imbalance.service",
+        "radon-imbalance.timer",
         "radon-vixts.service",
         "radon-vixts.timer",
     )

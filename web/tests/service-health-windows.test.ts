@@ -586,6 +586,15 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
   // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
   // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
   // matches its daily siblings. UW VIX options-volume only — no IB.
+  it("imbalance is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS.imbalance).toBeDefined();
+    expect(getServiceCategory("imbalance")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("imbalance", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("imbalance")).toBe(false);
+  });
+
   it("vix-pc is registered as scheduled with a uniform 26h window", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["vix-pc"]).toBeDefined();
     expect(getServiceCategory("vix-pc")).toBe("scheduled");

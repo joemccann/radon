@@ -18,6 +18,7 @@ export type RegimeTab =
   | "ma-ratio"
   | "high-low"
   | "record-high-breadth"
+  | "imbalance"
   | "rsi-oversold"
   | "calm-streak"
   | "streaks" | "exports";
@@ -28,7 +29,7 @@ export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
   { label: "Volatility", tabs: ["vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "calm-streak"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "cot", "short", "ats"] },
-  { label: "Breadth & sentiment", tabs: ["breadth", "high-low", "record-high-breadth", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
+  { label: "Breadth & sentiment", tabs: ["breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["exports", "backtest"] },
 ];
 
@@ -63,6 +64,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   breadth: "BREADTH",
   "high-low": "HIGH LOW",
   "record-high-breadth": "SPX BREADTH",
+  imbalance: "IMBALANCE",
   "ma-ratio": "MA RATIO",
   "rsi-oversold": "RSI OVERSOLD",
   trin: "TRIN",

@@ -91,6 +91,7 @@ describe.each([
   ["panic-index", "app/regime/panic-index/page.tsx"],
   ["dispersion", "app/regime/dispersion/page.tsx"],
   ["streaks", "app/regime/streaks/page.tsx"],
+  ["imbalance", "app/regime/imbalance/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -219,6 +220,9 @@ vi.mock("../components/DispersionPanel", () => ({
 }));
 vi.mock("../components/StreaksPanel", () => ({
   default: () => <div data-testid="streaks-panel-stub" />,
+}));
+vi.mock("../components/ImbalancePanel", () => ({
+  default: () => <div data-testid="imbalance-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -759,5 +763,16 @@ describe("export lead route", () => {
     expect(within(container).getByTestId("high-low-panel-stub")).toBeTruthy();
     within(container).getByRole("button", { name: /^HIGH LOW$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/high-low");
+  });
+ });
+
+ describe("Imbalance route", () => {
+  afterEach(() => cleanup());
+  it("renders and navigates through the breadth rail", () => {
+    mockedPathname = "/regime/imbalance";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("imbalance-panel-stub")).toBeTruthy();
+    within(container).getByRole("button", { name: /^IMBALANCE$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/imbalance");
   });
  });
