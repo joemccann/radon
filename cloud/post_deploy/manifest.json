@@ -4,6 +4,7 @@
     {
       "id": "0001-archive-retired-json",
       "sha256": "3cc0432456f14229ca210a6f88ff993f19053a6c3bb5c9f5eae2ba090ad3e914",
+      "idempotent": true,
       "description": "Archive and remove retired JSON state files that no released code reads"
     }
   ],
