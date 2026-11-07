@@ -39,7 +39,7 @@ def _deps(*, targets=None, fills=(), prior=(), net_liq=None, placer=None, persis
         net_liq=lambda: net_liq,
         placer=_placer,
         persist=persist or (lambda key, result: calls["persisted"].append((key, result))),
-        heartbeat=heartbeat or (lambda service, state, **kw: calls["health"].append((service, state, kw))),
+        heartbeat=heartbeat or (lambda state, **kw: calls["health"].append(("quant-execute", state, kw))),
     )
     return deps, calls
 

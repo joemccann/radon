@@ -372,10 +372,11 @@ def _persist(strategy_key: str, result: dict[str, Any]) -> None:
         insert_quant_orders(strategy_key, result["orders"], placed_at=result["run_at"])
 
 
-def _heartbeat(service: str, state: str, **kw: Any) -> None:
+def _heartbeat(state: str, **kw: Any) -> None:
+    """The one ``quant-execute`` health row the scheduled run writes."""
     from db.writer import record_service_health
 
-    record_service_health(service, state, **kw)
+    record_service_health(EXECUTE_SERVICE, state, **kw)
 
 
 def default_deps() -> Deps:
@@ -450,7 +451,7 @@ def run_scheduled(*, deps: Deps, env: Optional[dict] = None) -> int:
     execute = env_flag(ENV_EXECUTE, env)
     if not keys:
         print("RADON_QUANT_STRATEGIES is empty; nothing to do", file=sys.stderr)
-        deps.heartbeat(EXECUTE_SERVICE, "ok", finished_at=_iso_now())
+        deps.heartbeat("ok", finished_at=_iso_now())
         return 0
     problems: list[str] = []
     for key in keys:
@@ -464,9 +465,9 @@ def run_scheduled(*, deps: Deps, env: Optional[dict] = None) -> int:
             print(f"{key}: {exc}", file=sys.stderr)
             problems.append(f"{key}: {str(exc)[:160]}")
     if problems:
-        deps.heartbeat(EXECUTE_SERVICE, "error", finished_at=_iso_now(), error={"message": "; ".join(problems)[:512]})
+        deps.heartbeat("error", finished_at=_iso_now(), error={"message": "; ".join(problems)[:512]})
         return 1
-    deps.heartbeat(EXECUTE_SERVICE, "ok", finished_at=_iso_now())
+    deps.heartbeat("ok", finished_at=_iso_now())
     return 0
 
 
