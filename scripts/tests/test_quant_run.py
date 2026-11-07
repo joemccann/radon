@@ -101,8 +101,8 @@ class TestCli:
         def fake_run(strategy, run_at, summary, payload):
             calls["run"] = (strategy, run_at, summary, payload)
 
-        def fake_targets(strategy, as_of, rows, recorded_at=None):
-            calls["targets"] = (strategy, as_of, rows)
+        def fake_targets(strategy, as_of, rows, *, rebalance_today=False, recorded_at=None):
+            calls["targets"] = (strategy, as_of, rows, rebalance_today)
 
         def fake_health(service, state, **kw):
             calls.setdefault("health", []).append((service, state))
@@ -114,10 +114,11 @@ class TestCli:
             load_prices=_fake_prices,
         )
         assert rc == 0
-        strategy, as_of, rows = calls["targets"]
+        strategy, as_of, rows, rebalance_today = calls["targets"]
         assert strategy == "monthly_rotation" and len(rows) == 8
         assert {r["symbol"] for r in rows} == set(quant_run.get_strategy("monthly_rotation").universe)
-        assert calls["health"] == [("quant-monthly-rotation", "ok")]
+        assert all(isinstance(r["close"], float) for r in rows) and isinstance(rebalance_today, bool)
+        assert "health" not in calls  # manual runs are on-demand: no heartbeat
         disk = json.loads((tmp_path / "quant" / "monthly_rotation_targets.json").read_text())
         assert disk["as_of"] == as_of
 
@@ -131,6 +132,79 @@ class TestCli:
         assert "equity" in payload and summary["n_sessions"] == 320
 
 
+class TestScheduled:
+    def _writers(self, monkeypatch, calls):
+        def fake_run(strategy, run_at, summary, payload):
+            calls.setdefault("runs", []).append(strategy)
+
+        def fake_targets(strategy, as_of, rows, *, rebalance_today=False, recorded_at=None):
+            calls.setdefault("targets", []).append((strategy, rows))
+
+        def fake_health(service, state, **kw):
+            calls.setdefault("health", []).append((service, state, kw))
+
+        monkeypatch.setattr(quant_run, "_writer_funcs", lambda: (fake_run, fake_targets, fake_health))
+
+    def test_enabled_strategies_parse_and_drop_unknown_keys(self, capsys):
+        env = {"RADON_QUANT_STRATEGIES": " inverse_vol, nope ,dual_momentum,"}
+        assert quant_run.enabled_strategies(env) == ["inverse_vol", "dual_momentum"]
+        assert "nope" in capsys.readouterr().err
+        assert quant_run.enabled_strategies({}) == []
+        assert quant_run.sleeve_pct({"RADON_QUANT_SLEEVE_PCT": "0.2"}) == 0.2
+        assert quant_run.sleeve_pct({"RADON_QUANT_SLEEVE_PCT": "1.5"}) == 0.0
+        assert quant_run.sleeve_nav_from_snapshot(0.2, 1_000_000.0) == 200_000.0
+        assert quant_run.sleeve_nav_from_snapshot(0.0, 1_000_000.0) is None
+
+    def test_scheduled_persists_each_strategy_with_sleeve_notional_and_one_heartbeat(self, tmp_path, monkeypatch):
+        calls = {}
+        self._writers(monkeypatch, calls)
+        monkeypatch.setattr(quant_run, "_DATA_DIR", tmp_path)
+        rc = quant_run.run_scheduled(
+            load_prices=_fake_prices,
+            env={"RADON_QUANT_STRATEGIES": "inverse_vol,monthly_rotation", "RADON_QUANT_SLEEVE_PCT": "0.2"},
+            net_liq=1_000_000.0,
+        )
+        assert rc == 0
+        assert [t[0] for t in calls["targets"]] == ["inverse_vol", "monthly_rotation"]
+        for row in calls["targets"][0][1]:
+            assert row["notional"] == pytest.approx(row["weight"] * 200_000.0)
+        assert [h[:2] for h in calls["health"]] == [("quant-targets", "ok")]
+        assert (tmp_path / "quant" / "inverse_vol_targets.json").exists()
+
+    def test_scheduled_with_nothing_enabled_heartbeats_ok_and_touches_nothing(self, monkeypatch):
+        calls = {}
+        self._writers(monkeypatch, calls)
+        assert quant_run.run_scheduled(load_prices=_fake_prices, env={}, net_liq=None) == 0
+        assert "targets" not in calls and [h[:2] for h in calls["health"]] == [("quant-targets", "ok")]
+
+    def test_scheduled_strategy_failure_heartbeats_error_and_continues(self, tmp_path, monkeypatch):
+        calls = {}
+        self._writers(monkeypatch, calls)
+        monkeypatch.setattr(quant_run, "_DATA_DIR", tmp_path)
+
+        def flaky(symbols, *, since=None, **_):
+            if "QQQ" in symbols:  # the futures-proxy universe
+                raise RuntimeError("IB unreachable")
+            return _fake_prices(symbols, since=since)
+
+        rc = quant_run.run_scheduled(
+            load_prices=flaky,
+            env={"RADON_QUANT_STRATEGIES": "trend_inverse_vol,inverse_vol", "RADON_QUANT_SLEEVE_PCT": "0.1"},
+            net_liq=500_000.0,
+        )
+        assert rc == 1
+        assert [t[0] for t in calls["targets"]] == ["inverse_vol"]
+        service, state, kw = calls["health"][0]
+        assert (service, state) == ("quant-targets", "error") and "trend_inverse_vol" in kw["error"]["message"]
+
+    def test_cli_scheduled_flag_dispatches(self, monkeypatch):
+        calls = {}
+        self._writers(monkeypatch, calls)
+        monkeypatch.delenv("RADON_QUANT_STRATEGIES", raising=False)
+        assert quant_run.main(["--scheduled"], load_prices=_fake_prices) == 0
+        assert [h[:2] for h in calls["health"]] == [("quant-targets", "ok")]
+
+
 # --------------------------------------------------------------------------- #
 # Turso contract (sqlite3 stand-in for libsql)                                 #
 # --------------------------------------------------------------------------- #
@@ -139,11 +213,12 @@ class TestStorage:
         db = sqlite3.connect(":memory:")
         db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)")
         db.executescript(MIGRATION.read_text())
+        db.executescript((MIGRATION.parent / "0109_quant_execution.sql").read_text())
         return db
 
     def test_migration_registers_version_108_and_tables(self):
         db = self._db()
-        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 108
+        assert {r[0] for r in db.execute("SELECT version FROM schema_migrations")} == {108, 109}
         runs = {r[1] for r in db.execute("PRAGMA table_info(quant_runs)")}
         assert {
             "strategy",
@@ -166,11 +241,11 @@ class TestStorage:
         from db import writer
 
         db = self._db()
-        args = ("inverse_vol", "2026-10-30", "SPY", 0.25, 25000.0, "2026-10-30T21:00:00Z")
+        args = ("inverse_vol", "2026-10-30", "SPY", 0.25, 25000.0, 500.0, 0, "2026-10-30T21:00:00Z")
         db.execute(writer.QUANT_TARGET_UPSERT_SQL, args)
-        db.execute(writer.QUANT_TARGET_UPSERT_SQL, args[:3] + (0.30, 30000.0, "2026-10-30T21:05:00Z"))
-        rows = db.execute("SELECT symbol, weight, notional FROM quant_targets").fetchall()
-        assert rows == [("SPY", 0.30, 30000.0)]
+        db.execute(writer.QUANT_TARGET_UPSERT_SQL, args[:3] + (0.30, 30000.0, 501.0, 1, "2026-10-30T21:05:00Z"))
+        rows = db.execute("SELECT symbol, weight, notional, close, rebalance_today FROM quant_targets").fetchall()
+        assert rows == [("SPY", 0.30, 30000.0, 501.0, 1)]
 
         run_args = (
             "inverse_vol",

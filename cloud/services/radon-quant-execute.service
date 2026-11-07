@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon quant sleeve execution bridge (targets to IB stock orders, docs/quant-strategies.md)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/quant_execute.py --scheduled
+StandardOutput=journal
+StandardError=journal
+# At most a dozen stock orders per strategy, each acknowledged within the
+# ib_place_order 6s single-leg deadline.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

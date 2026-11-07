@@ -214,6 +214,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # only, so Friday's run must still read fresh at Monday's 21:10 fire:
     # uniform 74h (72h Fri->Mon gap + 2h slack). Turso + UW only, no IB.
     "bounce-setup":     {"open": 74 * _HOUR, "closed": 74 * _HOUR, "requires_ib": False},
+    # quant-targets — radon-quant-targets.timer, Mon..Fri 16:25 ET. Weekday
+    # only, so Friday's run must still read fresh at Monday's fire: uniform
+    # 74h like bounce-setup. Turso price_history_daily first; the IB rung of
+    # the backfill ladder has Robinhood/UW/Yahoo fallbacks, so not IB-bound.
+    "quant-targets":    {"open": 74 * _HOUR, "closed": 74 * _HOUR, "requires_ib": False},
+    # quant-execute — radon-quant-execute.timer, Mon..Fri 09:35 ET. Places the
+    # sleeve's stock orders through ib_place_order.py (IBClient), so IB-bound.
+    "quant-execute":    {"open": 74 * _HOUR, "closed": 74 * _HOUR, "requires_ib": True},
     # credit-spread — radon-credit-spread.timer, daily 21:45 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. IB HYG + SPX first,
@@ -649,6 +657,11 @@ BUCKETS: dict[str, list[str]] = {
         # Mon..Fri 21:10 UTC BOUNCE SETUP scan — hourly check surfaces a
         # missed run within 1h of the 74h window expiring.
         "bounce-setup",
+        # Mon..Fri 16:25 ET quant sleeve targets and 09:35 ET execution
+        # bridge — hourly check surfaces a missed run within 1h of the 74h
+        # window expiring.
+        "quant-targets",
+        "quant-execute",
         # Tue..Sat 11:00 UTC FINRA HY bond breadth pull — hourly check
         # surfaces a missed run within 1h of the 120h window expiring.
         "hy-ad",

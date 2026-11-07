@@ -12,6 +12,12 @@ Usage:
     python3 scripts/quant_run.py --list
     python3 scripts/quant_run.py --strategy inverse_vol --mode backtest --json
     python3 scripts/quant_run.py --strategy trend_inverse_vol --mode targets --sleeve-nav 250000 --json --persist
+    python3 scripts/quant_run.py --scheduled      # radon-quant-targets.timer: RADON_QUANT_STRATEGIES x sleeve NAV
+
+Scheduled mode reads ``RADON_QUANT_STRATEGIES`` (comma-separated registry
+keys) and ``RADON_QUANT_SLEEVE_PCT`` (fraction of net liquidation from the
+latest portfolio snapshot), persists each strategy's targets and writes one
+``quant-targets`` heartbeat. Nothing enabled is a clean no-op, not an error.
 """
 
 from __future__ import annotations
@@ -42,18 +48,60 @@ except Exception:  # pragma: no cover - dotenv optional at import
 
 from quant.data import PriceMatrix, load_price_matrix  # noqa: E402 - sys.path + dotenv must precede
 from quant.engine import latest_targets, rebalance_mask, run_weights_backtest  # noqa: E402 - sys.path + dotenv must precede
-from quant.strategies import QuantStrategy, get_strategy, list_strategies  # noqa: E402 - sys.path + dotenv must precede
+from quant.strategies import STRATEGIES, QuantStrategy, get_strategy, list_strategies  # noqa: E402 - sys.path + dotenv must precede
 
 DEFAULT_COST_BPS = 5.0
 DEFAULT_CAPITAL = 100_000.0
+TARGETS_SERVICE = "quant-targets"
+ENV_STRATEGIES = "RADON_QUANT_STRATEGIES"
+ENV_SLEEVE_PCT = "RADON_QUANT_SLEEVE_PCT"
+
+
+def enabled_strategies(env: Optional[dict] = None) -> list[str]:
+    """Registry keys named in RADON_QUANT_STRATEGIES, in order, unknown keys dropped loudly."""
+    raw = (env if env is not None else os.environ).get(ENV_STRATEGIES, "")
+    keys = []
+    for token in raw.split(","):
+        key = token.strip()
+        if not key:
+            continue
+        if key not in STRATEGIES:
+            print(f"warning: {ENV_STRATEGIES} names unknown strategy {key!r}; skipped", file=sys.stderr)
+            continue
+        keys.append(key)
+    return keys
+
+
+def sleeve_pct(env: Optional[dict] = None) -> float:
+    raw = (env if env is not None else os.environ).get(ENV_SLEEVE_PCT, "0")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if 0.0 <= value <= 1.0 else 0.0
+
+
+def _snapshot_net_liq() -> Optional[float]:
+    """Net liquidation from the latest Turso portfolio snapshot, or None."""
+    from db.readers import read_latest_portfolio_snapshot
+
+    snapshot = read_latest_portfolio_snapshot()
+    raw = ((snapshot or {}).get("account_summary") or {}).get("net_liquidation")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def sleeve_nav_from_snapshot(pct: float, net_liq: Optional[float]) -> Optional[float]:
+    if pct <= 0 or net_liq is None:
+        return None
+    return round(net_liq * pct, 2)
 
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def service_name(strategy_key: str) -> str:
-    return "quant-" + strategy_key.replace("_", "-")
 
 
 def run_backtest(
@@ -157,11 +205,12 @@ def _write_disk(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _persist(strategy: QuantStrategy, result: dict[str, Any]) -> None:
+    """Disk fallback first, then the Turso rows. No heartbeat: manual runs are
+    on-demand; the scheduled run writes the one ``quant-targets`` heartbeat."""
     mode = result["mode"]
     _write_disk(_DATA_DIR / "quant" / f"{strategy.key}_{mode}.json", result)
-    upsert_run, upsert_targets, record_health = _writer_funcs()
-    service = service_name(strategy.key)
-    try:
+    upsert_run, upsert_targets, _record_health = _writer_funcs()
+    if True:
         if mode == "backtest":
             m = result["metrics"]
             upsert_run(
@@ -184,13 +233,53 @@ def _persist(strategy: QuantStrategy, result: dict[str, Any]) -> None:
             upsert_targets(
                 strategy.key,
                 result["as_of"],
-                [{"symbol": r["symbol"], "weight": r["weight"], "notional": r["notional"]} for r in result["targets"]],
+                [
+                    {"symbol": r["symbol"], "weight": r["weight"], "notional": r["notional"], "close": r["close"]}
+                    for r in result["targets"]
+                ],
+                rebalance_today=bool(result["rebalance_today"]),
                 recorded_at=result["run_at"],
             )
-        record_health(service, "ok", finished_at=result["run_at"])
-    except Exception as exc:  # noqa: BLE001 - the disk copy already landed
-        record_health(service, "error", finished_at=_iso_now(), error={"message": str(exc)[:512]})
-        raise
+
+
+def run_scheduled(
+    *,
+    load_prices: Callable[..., PriceMatrix],
+    env: Optional[dict] = None,
+    net_liq: Optional[float] = None,
+) -> int:
+    """radon-quant-targets.timer entry: persist targets for every enabled
+    strategy, then one heartbeat. A strategy failure records ``error`` and
+    continues with the rest; nothing enabled heartbeats ``ok``."""
+    keys = enabled_strategies(env)
+    _upsert_run, _upsert_targets, record_health = _writer_funcs()
+    finished = _iso_now()
+    if not keys:
+        print(f"{ENV_STRATEGIES} is empty; nothing to do", file=sys.stderr)
+        record_health(TARGETS_SERVICE, "ok", finished_at=finished)
+        return 0
+    pct = sleeve_pct(env)
+    nav = sleeve_nav_from_snapshot(pct, net_liq if net_liq is not None else _snapshot_net_liq())
+    if nav is None:
+        print(f"no sleeve NAV ({ENV_SLEEVE_PCT}={pct:g}); targets persist without notional", file=sys.stderr)
+    failures: list[str] = []
+    for key in keys:
+        strategy = get_strategy(key)
+        try:
+            prices = load_prices(list(strategy.universe), since=strategy.default_since, allow_backfill=True)
+            if prices.n_sessions <= strategy.warmup:
+                raise RuntimeError(f"{prices.n_sessions} sessions is not enough for warmup {strategy.warmup}")
+            result = run_targets(strategy, prices, sleeve_nav=nav)
+            print(_summary(result), file=sys.stderr)
+            _persist(strategy, result)
+        except Exception as exc:  # noqa: BLE001 - one strategy must not hide the others
+            print(f"{key}: {exc}", file=sys.stderr)
+            failures.append(f"{key}: {str(exc)[:160]}")
+    if failures:
+        record_health(TARGETS_SERVICE, "error", finished_at=_iso_now(), error={"message": "; ".join(failures)[:512]})
+        return 1
+    record_health(TARGETS_SERVICE, "ok", finished_at=_iso_now())
+    return 0
 
 
 def _summary(result: dict[str, Any]) -> str:
@@ -222,12 +311,19 @@ def main(argv: Optional[list[str]] = None, *, load_prices: Callable[..., PriceMa
     parser.add_argument("--sleeve-nav", type=float, help="targets mode: sleeve NAV to turn weights into notional")
     parser.add_argument("--no-backfill", action="store_true", help="read Turso only; never fetch")
     parser.add_argument("--json", action="store_true", help="print the full result JSON to stdout")
-    parser.add_argument("--persist", action="store_true", help="write Turso rows + data/quant/ fallback + heartbeat")
+    parser.add_argument("--persist", action="store_true", help="write Turso rows + data/quant/ fallback")
+    parser.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="timer entry: targets for every RADON_QUANT_STRATEGIES key, persisted, one quant-targets heartbeat",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
         print(json.dumps(list_strategies(), indent=2))
         return 0
+    if args.scheduled:
+        return run_scheduled(load_prices=load_prices)
     if not args.strategy:
         parser.print_usage(sys.stderr)
         print("error: --strategy is required unless --list", file=sys.stderr)

@@ -35,6 +35,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) (22:20 UTC sweep, 23:20 UTC if a deploy killed the first run) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
+| quant | `/regime/quant` | `quant-targets`, `quant-execute` | [quant-strategies.md](../quant-strategies.md) (systematic sleeve, outside the Four Gates) |
 
 `divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
 

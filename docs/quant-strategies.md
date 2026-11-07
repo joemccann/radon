@@ -1,8 +1,7 @@
 # Quant strategies: the systematic sleeve
 
-Owner spec for `scripts/quant/` and `scripts/quant_run.py`. Status: engine
-slice shipped (data, backtest, registry, CLI, storage, tests). Execution
-bridge, timers and UI are specified below and not built.
+Owner spec for `scripts/quant/`, `scripts/quant_run.py`, `scripts/quant_execute.py`,
+the two `radon-quant-*` timers and the `/regime/quant` tab.
 
 ## 1. What it is and what it is not
 
@@ -132,39 +131,73 @@ and re-raises; the disk copy is never treated as success.
 - Neither table carries orders. Verify the row lands in Turso in production
   before calling a run done; the disk file is not evidence.
 
-## 8. Execution bridge (specified, not built)
+## 8. Execution bridge (`scripts/quant_execute.py`)
 
-`scripts/quant_execute.py`, operator-invoked or on a timer after the targets
-run:
+The bridge turns the latest `quant_targets` session into IB stock orders. It
+is the only piece of the sleeve that can touch the broker, and it is off
+until the operator arms it.
 
-1. Read the latest `quant_targets` for the strategy and the sleeve NAV
-   (`RADON_QUANT_SLEEVE_PCT` of net liquidation from the latest portfolio
-   snapshot; default 0, which disables the bridge).
-2. Read current sleeve holdings: positions whose journal `orderRef` starts
-   with `quant:<strategy>`. The sleeve never touches positions it did not open.
-3. Diff target shares (`notional / last close`, whole shares) against
-   holdings; emit one stock order per symbol with `orderRef quant:<strategy>`,
-   limit at last close plus or minus a configurable offset, DAY, through
-   `ib_place_order.py` (`type: stock`). Short targets are allowed only when
-   `long_short` is declared and `RADON_QUANT_ALLOW_SHORT=1`.
-4. `RADON_QUANT_EXECUTE` unset or `0` prints the order list and places
-   nothing. Paper account first.
-5. Timer: targets at 16:25 America/New_York on rebalance sessions only
-   (`rebalance_today`), execution at the next open. Both units follow the
-   new-indicator pattern (`setup-vps.sh`, `installed-units.sha256`,
-   `test_systemd_services.py`, `serviceHealthWindows.ts`,
-   `refreshSchedule.ts`, `watchdog/services.py`).
-6. The order funnel's fat-finger caps, the trading halt and the all-placer
-   bankroll gate apply unchanged. Kelly does not.
+```
+python3 scripts/quant_execute.py --strategy inverse_vol            # plan only, nothing placed
+python3 scripts/quant_execute.py --strategy inverse_vol --json --persist
+python3 scripts/quant_execute.py --scheduled                      # radon-quant-execute.timer
+```
 
-## 9. API and UI (specified, not built)
+| Env | Default | Meaning |
+|---|---|---|
+| `RADON_QUANT_EXECUTE` | unset | `1` places orders. Anything else logs the plan with status `planned`. |
+| `RADON_QUANT_STRATEGIES` | empty | Comma-separated registry keys the timers run. Empty is a clean no-op. |
+| `RADON_QUANT_SLEEVE_PCT` | `0` | Fraction of net liquidation (latest portfolio snapshot) the sleeve may hold. Targets persist `notional = weight x sleeve NAV`; `0` leaves notional null and the bridge has nothing to size. |
+| `RADON_QUANT_ALLOW_SHORT` | unset | `1` lets a `long_short` strategy hold negative shares. Otherwise negative targets clamp to zero and a sell never exceeds what the sleeve holds. |
+| `RADON_QUANT_LIMIT_OFFSET_BPS` | `20` | Limit offset from the target session's close: buys at close + offset, sells at close - offset, DAY. |
 
-- `GET /api/quant/[strategy]` through `dbFirstRead`: latest `quant_runs`
-  summary plus the latest `quant_targets` rows; `missing: true` at 200.
-- Regime tab `quant` in the Models rail (`regimeRail.ts`): equity curve with
-  SPY overlay (`CriHistoryChart`, log scale), a metrics strip, a targets table
-  with `rebalance_today`, and a `FreshnessRail` once a timer exists.
-- Assistant catalog pins per the new-indicator skill.
+Admission, per strategy, before any order:
+
+1. The latest targets exist and carry `rebalance_today = 1` (the 16:25 ET run
+   sets it on BME/BMS/BQE/W sessions, or on a SIGNAL change). `--force`
+   overrides for a manual run.
+2. `as_of` is at most 4 calendar days old. Stale targets never trade.
+3. No `quant_orders` rows exist for that `as_of`. A second run on the same
+   session is a no-op, so a timer retry cannot double-trade.
+
+Sizing: `target_shares = sign(notional) * floor(|notional| / close)`,
+`delta = target - held`; a `|delta| * close` under $50 is dust and skipped;
+a symbol the sleeve holds but the targets no longer name is sold to zero.
+Holdings are the signed sum of journal fills whose `order_ref` starts with
+`quant:<strategy>` (`read_quant_sleeve_fills`), so the sleeve only ever
+counts positions it opened. The discretionary book is invisible to it and
+untouchable by it.
+
+Every order goes through `ib_place_order.place_order` as
+`{"type": "stock", "symbol", "action", "quantity", "limitPrice", "tif": "DAY",
+"orderRef": "quant:<strategy>"}`. The order funnel's fat-finger caps, the
+trading halt and the armed bankroll gate apply unchanged inside that call.
+Kelly does not. Results land in `quant_orders` (`ok`, `error`,
+`indeterminate`, or `planned` on a dry run), the disk fallback
+`data/quant/<strategy>_execution.json`, and in scheduled mode one
+`quant-execute` heartbeat (`error` when any order was rejected or left
+indeterminate, so the watchdog pages).
+
+Timers (`cloud/services/`): `radon-quant-targets.timer` fires
+`quant_run.py --scheduled` Mon..Fri 16:25 America/New_York;
+`radon-quant-execute.timer` fires `quant_execute.py --scheduled` Mon..Fri
+09:35 America/New_York. Both are registered in `setup-vps.sh`,
+`installed-units.sha256`, `test_systemd_services.py`,
+`web/lib/serviceHealthWindows.ts` and `scripts/watchdog/services.py` (74h
+windows, `quant-execute` is IB-dependent) and `web/lib/refreshSchedule.ts`.
+
+## 9. API and UI
+
+- `GET /api/quant/[strategy]` (`web/app/api/quant/[strategy]/route.ts`):
+  Turso through `dbFirstRead`, label `quant:<strategy>`, freshness budget
+  from the `quant-targets` window. Returns the latest backtest run (dates,
+  equity, metrics, final weights), the latest targets session (rows with
+  weight, notional, close, `rebalance_today`) and that session's order log.
+  No rows is HTTP 200 with `missing: true`; an unknown key is 400.
+- Regime tab `/regime/quant` in the Models rail (`QuantPanel.tsx`): strategy
+  chips, equity curve with drawdown, metrics strip, freshness rail driven by
+  `QUANT_TARGETS_REFRESH`, targets table with estimated shares, and the order
+  log. Copy states that the sleeve runs outside the Four Gates.
 
 ## 10. Tests
 
