@@ -441,6 +441,27 @@ def _next_timer_elapse(unit: str, runner: SystemctlRunner) -> Optional[datetime]
     )
 
 
+def _deploy_transition_blocks_rerun() -> bool:
+    """True when a oneshot rerun must not start.
+
+    A present journal means a deploy is in flight. ``Path.exists()`` raises
+    ``PermissionError`` when a parent directory is not searchable. The isolated
+    responder has ``ProtectHome=yes``, so
+    ``/home/radon/.radon-deploy-transition.json`` is EACCES, not missing. An
+    unreadable journal is not proof the deploy finished. Fail closed: skip
+    the rerun. Do not let the stat fail the oneshot.
+    """
+    try:
+        return DEPLOY_TRANSITION_JOURNAL.exists()
+    except OSError as exc:
+        print(
+            "deploy transition journal unreadable; skipping oneshot rerun: "
+            f"{exc}",
+            file=sys.stderr,
+        )
+        return True
+
+
 def attempt_oneshot_rerun(
     page: dict,
     *,
@@ -455,7 +476,8 @@ def attempt_oneshot_rerun(
     through to the ordinary grok path. Every precondition fails CLOSED:
     the restart is an auto-fix action, so it takes the same explicit
     GROK_PAGE_AUTOSHIP opt-in as shipping a code fix, never runs while a
-    deploy transition journal exists, and trusts only systemd's own state.
+    deploy transition journal exists or cannot be stat'd, and trusts only
+    systemd's own state.
     """
     if page.get("kind") != "unit":
         return None
@@ -464,7 +486,7 @@ def attempt_oneshot_rerun(
         return None
     if not autoship_enabled():
         return None
-    if DEPLOY_TRANSITION_JOURNAL.exists():
+    if _deploy_transition_blocks_rerun():
         return None
     try:
         spent = pages_mod.reruns_since(unit, since=_utc_day_start(now))
