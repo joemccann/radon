@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 _PACKAGES = {'claude': '@anthropic-ai/claude-code', 'codex': '@openai/codex', 'grok': '@xai-official/grok'}
 _PROTOCOLS = {'claude': 'messages', 'codex': 'responses', 'grok': 'chat_completions'}
@@ -26,16 +27,36 @@ def _versions(path):
     return doc.get('cli_versions') or {kind: doc.get('dependencies', {}).get(package) for kind, package in _PACKAGES.items()}
 
 
+def _exited(process):
+    """True once the child has exited, without reaping it."""
+    if process.returncode is not None:
+        return True
+    try:
+        return os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None
+    except ChildProcessError:
+        return True
+
+
+def _signal_group(process, sig):
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS answers EPERM, not ESRCH, when the group's only member has
+        # exited but is not yet reaped: the child finished between poll() and
+        # killpg(). A live group refusing the signal is still an error.
+        if not _exited(process):
+            raise
+
+
 def _stop_owned(process):
     if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        _signal_group(process, signal.SIGTERM)
     try:
         process.communicate(timeout=2)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        _signal_group(process, signal.SIGKILL)
         process.communicate(timeout=2)
 
 
@@ -144,10 +165,21 @@ def main(argv=None):
     return 0
 
 
-if __name__ == '__main__':
+def _run():
     try:
         raise SystemExit(main())
     except Exception as exc:
         # Never print child output, native bodies or application auth tokens.
-        print('Native CLI transport gate failed: ' + (str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__), file=sys.stderr)
+        # An unexpected exception prints only its type and the file:line that
+        # raised it, so a failure is diagnosable without its message.
+        if isinstance(exc, RuntimeError):
+            detail = str(exc)
+        else:
+            frame = traceback.extract_tb(exc.__traceback__)[-1]
+            detail = f'{type(exc).__name__} at {Path(frame.filename).name}:{frame.lineno}'
+        print('Native CLI transport gate failed: ' + detail, file=sys.stderr)
         raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    _run()

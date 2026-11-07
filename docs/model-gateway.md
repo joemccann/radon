@@ -51,6 +51,8 @@ target-named root-private directory before creating the next receipt.
 
 Production verification must cover service readiness, isolated consumer environments, actual native client requests, provider fallback, token renewal, the forecasting and embedding spaces, and a real pipeline publication. A passing canary is not a deployed repair.
 
+The native CLI transport canary (`scripts/ci/check_model_cli_transport.py`) stops each client's process group once the bridge captures its request. On macOS, `killpg` of a group whose only member has exited but is not yet reaped fails with EPERM rather than ESRCH, so the canary treats EPERM from an exited child as already stopped. An unexpected exception prints only its type and the raising `file:line`, never its message or child output.
+
 Before allocating prestage worktrees, after exact image pulls and immediately
 before stopping consumers, deployment runs the root-owned, read-only
 `sudo /usr/local/sbin/radon-app-runtime check-model-space` action. Its fixed
