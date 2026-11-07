@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -126,9 +127,20 @@ class AnalysisResult(NamedTuple):
 
 
 def load_state(state_path: Path) -> dict:
+    # The state lives inside the rsync-populated mirror, so the name can be a
+    # symlink the remote host planted: O_NOFOLLOW keeps a read inside the
+    # mirror, and an unreadable state is an empty state (same as a first run).
     try:
-        state = json.loads(state_path.read_text())
-    except (OSError, ValueError):
+        fd = os.open(state_path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        state = {}
+    else:
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            try:
+                state = json.load(handle)
+            except ValueError:
+                state = {}
+    if not isinstance(state, dict):
         state = {}
     state.setdefault("analyzed", {})
     state.setdefault("attempts", {})
@@ -137,10 +149,21 @@ def load_state(state_path: Path) -> dict:
 
 
 def save_state(state_path: Path, state: dict) -> None:
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2) + "\n")
-    tmp.replace(state_path)
+    parent = state_path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    # A fixed temp name beside the state is itself mirrored content a remote
+    # writer can pre-create as a symlink, and no rsync exclude covers it.
+    # mkstemp opens O_CREAT|O_EXCL on an unguessable name, so the write cannot
+    # land outside the mirror.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=parent, prefix=".responder-state.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(state, indent=2) + "\n")
+        os.replace(tmp_name, state_path)
+    except BaseException:
+        os.unlink(tmp_name)
+        raise
 
 
 def mark_analyzed(state_path: Path, state: dict, incident_id: str,
