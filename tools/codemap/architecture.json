@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-03T17:16:23Z",
-  "node_count": 4343,
-  "edge_count": 8815,
+  "generated_at": "2026-11-08T10:00:07Z",
+  "node_count": 4460,
+  "edge_count": 9024,
   "areas": {
-    "web": 2398,
+    "web": 2449,
     "site": 159,
-    "scripts": 1580,
-    "cloud": 158,
+    "scripts": 1643,
+    "cloud": 161,
     "lib": 28,
     "tests": 17,
     "tools": 3
@@ -25,7 +25,7 @@
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 246
+      "count": 247
     },
     {
       "id": "web/e2e-setup-gate",
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 462
+      "count": 468
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1139
+      "count": 1183
     },
     {
       "id": "site/app",
@@ -105,7 +105,7 @@
     {
       "id": "scripts/ai_cycle",
       "area": "scripts",
-      "count": 13
+      "count": 14
     },
     {
       "id": "scripts/alerts",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 150
+      "count": 159
     },
     {
       "id": "scripts/backtest",
@@ -125,7 +125,7 @@
     {
       "id": "scripts/ci",
       "area": "scripts",
-      "count": 11
+      "count": 12
     },
     {
       "id": "scripts/clients",
@@ -205,7 +205,7 @@
     {
       "id": "scripts/newsfeed",
       "area": "scripts",
-      "count": 36
+      "count": 37
     },
     {
       "id": "scripts/paper",
@@ -235,7 +235,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 834
+      "count": 883
     },
     {
       "id": "scripts/trade_blotter",
@@ -245,7 +245,7 @@
     {
       "id": "scripts/utils",
       "area": "scripts",
-      "count": 47
+      "count": 49
     },
     {
       "id": "scripts/uw_stream",
@@ -280,7 +280,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 133
+      "count": 136
     },
     {
       "id": "lib/tools",
@@ -312,14 +312,14 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 306,
+      "in": 321,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 210,
+      "in": 216,
       "out": 0,
       "test": false
     },
@@ -340,14 +340,14 @@
     {
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
-      "in": 25,
-      "out": 86,
+      "in": 28,
+      "out": 87,
       "test": false
     },
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 109,
+      "in": 112,
       "out": 0,
       "test": false
     },
@@ -361,14 +361,14 @@
     {
       "id": "scripts/db/writer.py",
       "area": "scripts",
-      "in": 101,
+      "in": 102,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 61,
+      "in": 62,
       "out": 44,
       "test": false
     },
@@ -389,7 +389,7 @@
     {
       "id": "scripts/db/client.py",
       "area": "scripts",
-      "in": 78,
+      "in": 79,
       "out": 1,
       "test": false
     },
@@ -403,22 +403,22 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 67,
+      "in": 69,
       "out": 4,
       "test": false
     },
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
-      "in": 50,
-      "out": 18,
+      "in": 52,
+      "out": 19,
       "test": false
     },
     {
-      "id": "web/lib/db.ts",
+      "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 65,
-      "out": 2,
+      "in": 62,
+      "out": 6,
       "test": false
     },
     {
@@ -429,9 +429,16 @@
       "test": false
     },
     {
+      "id": "web/lib/db.ts",
+      "area": "web",
+      "in": 64,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 59,
+      "in": 60,
       "out": 6,
       "test": false
     },
@@ -443,9 +450,9 @@
       "test": false
     },
     {
-      "id": "web/lib/dbFirstRead.ts",
+      "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 54,
+      "in": 52,
       "out": 5,
       "test": false
     },
@@ -454,13 +461,6 @@
       "area": "web",
       "in": 56,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/dbExecute.ts",
-      "area": "web",
-      "in": 50,
-      "out": 5,
       "test": false
     },
     {
@@ -494,7 +494,7 @@
     {
       "id": "scripts/watchdog/__init__.py",
       "area": "scripts",
-      "in": 48,
+      "in": 49,
       "out": 0,
       "test": false
     },
@@ -513,17 +513,24 @@
       "test": false
     },
     {
+      "id": "scripts/utils/__init__.py",
+      "area": "scripts",
+      "in": 45,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
+      "in": 45,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "scripts/clients/ib_client.py",
       "area": "scripts",
       "in": 42,
       "out": 3,
-      "test": false
-    },
-    {
-      "id": "scripts/utils/__init__.py",
-      "area": "scripts",
-      "in": 44,
-      "out": 0,
       "test": false
     },
     {
@@ -534,17 +541,24 @@
       "test": false
     },
     {
-      "id": "scripts/api/auth.py",
-      "area": "scripts",
-      "in": 43,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "scripts/research/__init__.py",
       "area": "scripts",
       "in": 42,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/PositionTable.tsx",
+      "area": "web",
+      "in": 25,
+      "out": 17,
+      "test": false
+    },
+    {
+      "id": "web/components/ticker-detail/OrderTab.tsx",
+      "area": "web",
+      "in": 15,
+      "out": 27,
       "test": false
     },
     {
@@ -562,31 +576,17 @@
       "test": false
     },
     {
-      "id": "web/components/PositionTable.tsx",
-      "area": "web",
-      "in": 24,
-      "out": 16,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 39,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/TickerDetailContext.tsx",
       "area": "web",
-      "in": 37,
+      "in": 38,
       "out": 2,
       "test": false
     },
     {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
+      "id": "web/lib/OrderActionsContext.tsx",
+      "area": "web",
       "in": 36,
-      "out": 3,
+      "out": 4,
       "test": false
     }
   ],
