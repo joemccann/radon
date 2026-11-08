@@ -74,7 +74,7 @@ describe("buildArticlePdf", () => {
     const pdf = await pdfText(file);
     expect(pdf.startsWith("%PDF-")).toBe(true);
     expect(pdf.match(/\/I\d+ Do/g)).toHaveLength(3);
-    for (const text of ["RADON", "MARKET ANALYSIS", "NOV 8, 2026", "Data-center power >= supply", "MARKETDESK", "60bp wider than CDX IG", "Source: Morgan Stanley", "radon.run", "Page 1 of"]) {
+    for (const text of ["RADON", "MARKET ANALYSIS", "NOV 8, 2026", "Data-center power >= supply", "DATA-CENTERS  ·  CREDIT", "60bp wider than CDX IG", "Source: Morgan Stanley", "radon.run", "Page 1 of"]) {
       expect(pdf).toContain(text);
     }
     expect(pdf).toContain("/URI (https://example.com/dc-power)");
@@ -99,5 +99,31 @@ describe("buildArticlePdf", () => {
     const pages = Number(/Page 1 of (\d+)/.exec(pdf)?.[1]);
     expect(pages).toBeGreaterThan(1);
     expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(pages);
+  });
+});
+
+describe("MarketDesk provenance stays out of the PDF", () => {
+  const marketDeskPost: SharePost = {
+    ...researchPost,
+    title: "MarketDesk: AI capacity limits",
+    content: "Per MarketDesk, financing is tighter. See https://marketdesk.ai/library/browse/123 for the note.\n\nThe CDS AI basket trades >60bp wider than CDX IG.",
+    tags: ["MARKETDESK", "MARKET-DESK", "AI", "CREDIT"],
+    source: { ...researchPost.source!, kind: "marketdesk", articleUrl: "https://marketdesk.ai/library/browse/123", url: "https://marketdesk.ai/library/browse/123",
+      figures: [{ url: "/api/newsfeed/research/files/a.png", caption: "Exhibit 1 (MarketDesk): AI debt issuance" }] } as SharePost["source"],
+  };
+
+  it("removes MarketDesk tags, text, captions and links", async () => {
+    const { file } = await buildArticlePdf(marketDeskPost, { loadFigure: async () => chart, compress: false });
+    const pdf = await pdfText(file);
+    expect(pdf).not.toMatch(/market[\s-]*desk/i);
+    for (const kept of ["AI capacity limits", "financing is tighter", "60bp wider than CDX IG", "AI  ·  CREDIT", "AI debt issuance", "MORGAN STANLEY"]) {
+      expect(pdf).toContain(kept);
+    }
+  });
+
+  it("drops a publisher line that is MarketDesk itself", async () => {
+    const post = { ...marketDeskPost, source: { ...marketDeskPost.source!, publisher: "MarketDesk" } } as SharePost;
+    const { file } = await buildArticlePdf(post, { loadFigure: async () => chart, compress: false });
+    expect(await pdfText(file)).not.toMatch(/market[\s-]*desk/i);
   });
 });

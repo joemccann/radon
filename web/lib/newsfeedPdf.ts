@@ -46,9 +46,23 @@ const WIN_ANSI_SUBSTITUTES: Record<string, string> = {
 // Characters outside cp1252 that the standard PDF fonts cannot draw.
 const CP1252_EXTRAS = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–˜™š›œžŸ";
 
-/** Text drawable by the standard PDF fonts, with the house punctuation policy applied. */
+const MARKETDESK_LINK = /(?:https?:\/\/|www\.)?[^\s<>()]*marketdesk\.ai[^\s<>()]*/gi;
+const MARKETDESK_NAME = /(?:\b(?:source|via|per|according to)\s*:?\s*)?\(?\bmarket[\s-]*desk\b\)?\s*[:,]?/gi;
+
+/** The PDF is a Radon publication: the MarketDesk aggregator is never named or linked in it. */
+export function isMarketDeskReference(text: string): boolean {
+  return /market[\s-]*desk/i.test(text);
+}
+
+function withoutMarketDesk(text: string): string {
+  return text.replace(MARKETDESK_LINK, "").replace(MARKETDESK_NAME, "")
+    .split("\n").map(line => line.replace(/[ \t]+/g, " ").replace(/ ([.,;:])/g, "$1").trim().replace(/^[:;,·]\s*/, ""))
+    .join("\n");
+}
+
+/** Text drawable by the standard PDF fonts, with the house punctuation and attribution policy applied. */
 export function toPdfText(text: string): string {
-  return Array.from(sanitizeShareText(text)).map(character => {
+  return Array.from(withoutMarketDesk(sanitizeShareText(text))).map(character => {
     if (character in WIN_ANSI_SUBSTITUTES) return WIN_ANSI_SUBSTITUTES[character];
     const code = character.codePointAt(0) ?? 0;
     if (code === 10 || (code >= 32 && code <= 126) || (code >= 160 && code <= 255) || CP1252_EXTRAS.includes(character)) return character;
@@ -121,10 +135,12 @@ class ArticleLayout {
 
   render(post: SharePost, figures: PlacedFigure[], exportedAt: Date): void {
     this.masthead(exportedAt);
-    if (post.source) this.line(toPdfText(post.source.publisher).toUpperCase(), { size: 9, color: MUTED, style: "bold", after: 6 });
+    const publisher = post.source ? toPdfText(post.source.publisher) : "";
+    if (publisher) this.line(publisher.toUpperCase(), { size: 9, color: MUTED, style: "bold", after: 6 });
     this.wrapped(toPdfText(post.title), { size: 20, leading: 25, color: INK, style: "bold", after: 6 });
     this.line(`${formatAbsolute(post.isoTimestamp)}  ·  ${estimateReadMinutes(post.content ?? "")} min read`, { size: 9, color: MUTED, after: 8 });
-    if (post.tags?.length) this.wrapped(post.tags.map(toPdfText).join("  ·  "), { size: 8, leading: 11, color: SIGNAL, style: "bold", after: 14 });
+    const tags = (post.tags ?? []).map(toPdfText).filter(Boolean);
+    if (tags.length) this.wrapped(tags.join("  ·  "), { size: 8, leading: 11, color: SIGNAL, style: "bold", after: 14 });
     for (const paragraph of articleParagraphs(post.content ?? "")) {
       this.wrapped(paragraph, { size: BODY.size, leading: BODY.leading, color: INK, after: BODY.paragraphGap });
     }
@@ -163,8 +179,9 @@ class ArticleLayout {
 
   private sourceLink(post: SharePost): void {
     const href = post.source ? researchSourceHref(post.source) : post.href;
-    if (!/^https?:\/\//i.test(href)) return;
-    const label = post.source ? `${toPdfText(post.source.publisher)} · ${researchSourceLabel(post.source)}` : "Original article";
+    if (!/^https?:\/\//i.test(href) || isMarketDeskReference(href)) return;
+    const publisher = post.source ? toPdfText(post.source.publisher) : "";
+    const label = post.source ? [publisher, researchSourceLabel(post.source)].filter(Boolean).join(" · ") : "Original article";
     this.y += 4;
     this.ensureRoom(14);
     this.font({ size: 9, color: SIGNAL });
