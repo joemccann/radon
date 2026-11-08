@@ -164,7 +164,11 @@ reviewed hook in `cloud/post_deploy/hooks/`, pinned by SHA-256 in
 `cloud/post_deploy/manifest.json`. After the live gate passes, `deploy.sh`
 runs each pending hook once, in numeric order, as `radon`, and records
 completion in `/home/radon/.radon-post-deploy-state.json`. A failed hook pages
-P1 and is retried on the next deploy. The manifest's `verify` checks (unit
+P1 and is retried on the next deploy. A hook whose runner died mid-run
+(`running`) is retried only when its manifest entry declares `"idempotent":
+true`; otherwise it is marked `interrupted`, pages P1, and later hooks wait
+until a reviewed manifest change declares it idempotent or retires it. The
+manifest's `verify` checks (unit
 active, journal pattern present or absent, localhost HTTP) run read-only after
 every deploy and page on failure. Neither can roll back a verified release.
 Root-only work (editing `/etc/radon/env`, secrets, 2FA) stays an operator step.
