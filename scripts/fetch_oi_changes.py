@@ -21,7 +21,7 @@ See docs/options-flow-verification.md for methodology.
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -42,13 +42,21 @@ _OI_PAGE_LIMIT = 500
 _OI_MAX_PAGES = 40
 # Market-wide /api/market/oi-change: max 200, no page cursor.
 _MARKET_OI_LIMIT = 200
-# The 20:00 UTC timer fire shares its minute with radon-garch, radon-catalysts
-# and radon-flow-refresh, which saturate the shared UW admission governor. Its
-# 5s default turned that into a 429 that failed the oneshot and latched the
-# service_health row in error until the next fire. A 60s Retry-After embargo
-# plus one saturated minute is 120s (uw_governor.MAX_WAIT_SECONDS), which still
-# fits inside radon-oi-changes.service TimeoutStartSec=180.
+# The 14:00, 17:00, and 20:00 UTC timer fires share their minute with
+# radon-garch and the 5-minute UW writers. A 5s admission default turned that
+# into a 429 that failed the oneshot. A 60s Retry-After plus one saturated
+# minute is 120s (uw_governor.MAX_WAIT_SECONDS), which still fits inside
+# radon-oi-changes.service TimeoutStartSec=180. A 429 after that wait exits 0:
+# Type=oneshot has no Restart=, so exit 1 only pages.
 OI_ADMISSION_WAIT_S = 120.0
+_TIMER_HOURS_UTC = (14, 17, 20)
+_ONESHOT_QUIET_AFTER_FIRE = timedelta(minutes=15)
+# Governor refusals that last until the 20:00 ET reset, not the next minute.
+_ONESHOT_QUOTA_MARKERS = (
+    "daily request limit",
+    "quota is exhausted",
+    "budget is reserved",
+)
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -70,10 +78,6 @@ def _is_uw_daily_quota(exc: BaseException) -> bool:
     return is_daily_quota(exc)
 
 
-def _uw_retry_at(exc: BaseException, now: datetime) -> str:
-    return retry_at(exc, now)
-
-
 def _save_uw_embargo(next_attempt_at: str) -> None:
     _EMBARGO.arm(next_attempt_at)
 
@@ -90,18 +94,55 @@ def _record_cycle_error(exc: BaseException, *, now: datetime, next_attempt_at: s
     _EMBARGO.record_error(exc, now=now, next_attempt_at=next_attempt_at)
 
 
+def _is_oneshot_quota(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _ONESHOT_QUOTA_MARKERS)
+
+
+def _next_oneshot_quiet_until(now: datetime) -> str:
+    """ISO time after the next weekday timer fire.
+
+    The hourly error bucket must stay quiet until that fire can replace the
+    row. A 5-minute burst retry is the right wait for a 1-minute writer. This
+    oneshot cannot run again before the next OnCalendar slot.
+    """
+    moment = now.astimezone(timezone.utc)
+    for day_offset in range(0, 5):
+        day = (moment + timedelta(days=day_offset)).date()
+        if day.weekday() >= 5:
+            continue
+        for hour in _TIMER_HOURS_UTC:
+            slot = datetime(day.year, day.month, day.day, hour, 0, tzinfo=timezone.utc)
+            if slot > moment:
+                quiet = slot + _ONESHOT_QUIET_AFTER_FIRE
+                return quiet.isoformat().replace("+00:00", "Z")
+    return (moment + timedelta(days=3)).isoformat().replace("+00:00", "Z")
+
+
 def _handle_market_uw_limit(exc: UWRateLimitError, now: datetime) -> int:
-    """Heartbeat + embargo. Daily cap exits 0 so the oneshot does not page."""
-    next_attempt = _uw_retry_at(exc, now)
-    if _is_uw_daily_quota(exc):
+    """Heartbeat and exit 0. Exit 1 pages and does not retry any sooner.
+
+    Daily-cap family (HTTP daily limit, provider quota exhausted, reserved
+    budget) arms the sidecar until 20:00 ET so later fires do not call UW.
+    A burst or admission-busy 429 does not arm it, so the next timer still
+    fetches. Its health embargo covers that fire.
+    """
+    if _is_uw_daily_quota(exc) or _is_oneshot_quota(exc):
+        next_attempt = retry_at(
+            UWRateLimitError("daily request limit"),
+            now,
+        )
         _save_uw_embargo(next_attempt)
+        keep = "keeping last snapshot until"
+    else:
+        next_attempt = _next_oneshot_quiet_until(now)
+        keep = "retry on the next timer after"
     _record_cycle_error(exc, now=now, next_attempt_at=next_attempt)
     print(
-        f"[oi-changes] {str(exc).splitlines()[0].strip()}; "
-        f"{'keeping last snapshot until' if _is_uw_daily_quota(exc) else 'retry after'} {next_attempt}",
+        f"[oi-changes] {str(exc).splitlines()[0].strip()}; {keep} {next_attempt}",
         file=sys.stderr,
     )
-    return 0 if _is_uw_daily_quota(exc) else 1
+    return 0
 
 
 def _passes_filters(item: dict, min_oi_change: int, min_premium: float) -> bool:

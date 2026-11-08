@@ -817,6 +817,10 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 
 Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
 
+### ASK-BID imbalance (`radon-imbalance.timer`)
+
+Post-close TradingView USI comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula, units (`trade_count`, verified), BATD parity, and unverified universe/session/tick-rule coverage are [the indicator spec](indicators/imbalance.md). This unit does not install account credentials. Missing ASK or BID is a gap, never a zero. Share-volume siblings `USI:VOL.ASK.US` / `USI:BAVD.US` are unused.
+
 ### BOUNCE SETUP (`radon-bounce-setup.timer`)
 
 `Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot

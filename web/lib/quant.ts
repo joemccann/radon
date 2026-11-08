@@ -73,7 +73,7 @@ export interface QuantTargetRow {
   weight: number;
   /** weight x sleeve NAV at target time; null when no sleeve NAV was given. */
   notional: number | null;
-  /** Close the weights were computed on; null before migration 0109. */
+  /** Close the weights were computed on; null before migration 0110. */
   close: number | null;
 }
 

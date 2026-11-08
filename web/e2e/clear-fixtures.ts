@@ -60,6 +60,7 @@ const fixtures: Record<string, unknown> = {
   "/api/vixcor": VixcorFixture(),
   "/api/hyad": HyadFixture(),
   "/api/record-high-breadth": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
+  "/api/imbalance": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
   "/api/high-low-line": {
     missing: true, degraded: false, scan_time: null, source_last_modified: null,
     data_date: null, expected_session_date: null, count: 0, weekly_count: 0,

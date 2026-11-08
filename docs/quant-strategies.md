@@ -33,7 +33,7 @@ on its own data rather than trust a library's dashboard.
 | Registry | `scripts/quant/strategies.py` | `QuantStrategy` entries with provenance, universe, policy, warmup, params. |
 | Data | `scripts/quant/data.py` | `load_price_matrix`: Turso `price_history_daily` first, then IB (deep) > Robinhood > UW > Yahoo backfill, persisted back. |
 | CLI | `scripts/quant_run.py` | `--list`, `--mode backtest`, `--mode targets`, `--persist`. |
-| Storage | `scripts/db/migrations/0108_quant_strategies.sql`, `db/writer.py` | `quant_runs`, `quant_targets`; `upsert_quant_run`, `upsert_quant_targets`. |
+| Storage | `scripts/db/migrations/0109_quant_strategies.sql`, `db/writer.py` | `quant_runs`, `quant_targets`; `upsert_quant_run`, `upsert_quant_targets`. |
 | Tests | `scripts/tests/test_quant_engine.py`, `test_quant_strategies.py`, `test_quant_run.py` | Pure synthetic series; the price loader is injected. |
 
 ## 3. Engine semantics
@@ -210,5 +210,5 @@ Engine: rebalance calendars incl. a month ending on a weekend, no look-ahead
 prices, gross cap, SIGNAL trigger, JSON-serialisable metrics, vol-target
 scale and prior-window isolation. Strategies: registry contract and each rule
 on synthetic closes. CLI: alignment, `--list`, exit codes, backtest and
-targets payloads, `--persist` with stubbed writers, migration 0108 into
+targets payloads, `--persist` with stubbed writers, migration 0109 into
 in-memory sqlite, idempotent upserts.

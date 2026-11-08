@@ -123,7 +123,7 @@ async function readOrders(db: ReturnType<typeof getDb>, strategy: string): Promi
     });
     return res.rows as unknown as Row[];
   } catch {
-    // The execution bridge's table lands with migration 0109; a run without it
+    // The execution bridge's table lands with migration 0110; a run without it
     // still serves the backtest and the targets.
     return [];
   }

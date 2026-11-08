@@ -14,7 +14,7 @@ import pytest
 import quant_run
 from quant.data import PriceMatrix, align_closes
 
-MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0108_quant_strategies.sql"
+MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0109_quant_strategies.sql"
 
 
 # --------------------------------------------------------------------------- #
@@ -219,7 +219,7 @@ class TestStorage:
         db = sqlite3.connect(":memory:")
         db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)")
         db.executescript(MIGRATION.read_text())
-        db.executescript((MIGRATION.parent / "0109_quant_execution.sql").read_text())
+        db.executescript((MIGRATION.parent / "0110_quant_execution.sql").read_text())
         return db
 
     def test_migration_registers_version_108_and_tables(self):

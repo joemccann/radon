@@ -171,6 +171,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-rsi-oversold.timer",
     "radon-record-high-breadth.service",
     "radon-record-high-breadth.timer",
+    "radon-imbalance.service",
+    "radon-imbalance.timer",
     "radon-calm-streak.service",
     "radon-calm-streak.timer",
     "radon-bounce-setup.service",

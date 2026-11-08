@@ -1,4 +1,4 @@
--- 0109_quant_execution.sql — quant sleeve execution bridge (docs/quant-strategies.md §8).
+-- 0110_quant_execution.sql — quant sleeve execution bridge (docs/quant-strategies.md §8).
 --
 -- quant_targets gains the session close the weights were computed on (the
 -- bridge sizes shares off it) and the rebalance flag the 16:25 ET run sets,

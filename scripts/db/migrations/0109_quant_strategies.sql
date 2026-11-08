@@ -1,4 +1,4 @@
--- 0108_quant_strategies.sql — systematic strategy runner (docs/quant-strategies.md).
+-- 0109_quant_strategies.sql — systematic strategy runner (docs/quant-strategies.md).
 --
 -- quant_runs: one row per backtest run per strategy (latest by run_at); the
 -- summary columns are what the UI lists, payload holds the full result JSON.

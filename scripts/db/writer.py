@@ -3657,6 +3657,35 @@ def upsert_record_high_breadth_rows(rows: list[dict[str, Any]], recorded_at: Opt
     db.commit()
 
 
+def upsert_imbalance_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Bounded idempotent ASK-BID trade-count rows; NULL preserves gaps."""
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        params = []
+        for row in chunk:
+            params.extend((
+                row["date"], row.get("ask"), row.get("bid"), row.get("batd"),
+                row.get("imbalance"), row.get("ema10"), row.get("spx_close"),
+                json.dumps(row.get("source_timestamps", {})), stamp,
+            ))
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        db.execute(
+            "INSERT INTO imbalance_history "
+            "(date, ask, bid, batd, imbalance, ema10, spx_close, source_timestamps, recorded_at) "
+            f"VALUES {placeholders} ON CONFLICT(date) DO UPDATE SET "
+            "ask=excluded.ask, bid=excluded.bid, batd=excluded.batd, "
+            "imbalance=excluded.imbalance, ema10=excluded.ema10, "
+            "spx_close=excluded.spx_close, source_timestamps=excluded.source_timestamps, "
+            "recorded_at=excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_newsfeed_explanation(
     post_id: str,
     content_hash: str,
@@ -3720,7 +3749,7 @@ def get_newsfeed_explanation(post_id: str, content_hash: str) -> Optional[dict[s
 
 
 
-# ── Quant sleeve (docs/quant-strategies.md, migration 0108) ──────────────────
+# ── Quant sleeve (docs/quant-strategies.md, migration 0109) ──────────────────
 
 QUANT_RUN_UPSERT_SQL = """
 INSERT INTO quant_runs

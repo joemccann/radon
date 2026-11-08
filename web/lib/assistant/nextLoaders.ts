@@ -39,6 +39,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "hhlev": () => import("@/app/api/hhlev/route") as Promise<NextRouteModule>,
   "hyad": () => import("@/app/api/hyad/route") as Promise<NextRouteModule>,
   "record-high-breadth": () => import("@/app/api/record-high-breadth/route") as Promise<NextRouteModule>,
+  "imbalance": () => import("@/app/api/imbalance/route") as Promise<NextRouteModule>,
   "iei-hyg": () => import("@/app/api/iei-hyg/route") as Promise<NextRouteModule>,
   "index-quote": () => import("@/app/api/index-quote/route") as Promise<NextRouteModule>,
   "internals": () => import("@/app/api/internals/route") as Promise<NextRouteModule>,

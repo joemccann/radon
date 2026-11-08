@@ -1,5 +1,5 @@
 """Quant sleeve execution bridge: sizing, admission, holdings attribution,
-the exact order payload on the wire, dry-run safety, migration 0109.
+the exact order payload on the wire, dry-run safety, migration 0110.
 
 Every dependency is injected; nothing here touches IB or Turso.
 """
@@ -281,8 +281,8 @@ class TestStorage:
     def _db(self):
         db = sqlite3.connect(":memory:")
         db.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)")
-        db.executescript((MIGRATIONS / "0108_quant_strategies.sql").read_text())
-        db.executescript((MIGRATIONS / "0109_quant_execution.sql").read_text())
+        db.executescript((MIGRATIONS / "0109_quant_strategies.sql").read_text())
+        db.executescript((MIGRATIONS / "0110_quant_execution.sql").read_text())
         return db
 
     def test_migration_109_adds_columns_table_and_version(self):
