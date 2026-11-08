@@ -71,6 +71,8 @@ const fixtures: Record<string, unknown> = {
     count: 0, series: [], current: null, sources: null,
     comparison: { available: false, label: "MSCI US forward 12-month EPS", reason: "Licensed EPS series not connected" },
   },
+  // Quant sleeve GET contract: nothing persisted is HTTP 200 with missing: true.
+  "/api/quant/trend_inverse_vol": { strategy: "trend_inverse_vol", missing: true, run: null, targets: null, orders: null },
   "/api/hhlev": HhlevFixture(),
   "/api/ma-ratio": MaRatioFixture(),
   "/api/rsi-oversold": RsiOversoldFixture(),
