@@ -124,6 +124,7 @@ class TestImageWorkflowTokenScope:
         values = {
             "${{ steps.pyimage.outputs.tag }}": "ghcr.io/joemccann/radon-python:ihash-" + "a" * 64,
             "${{ steps.pyimage.outputs.hash }}": "a" * 64,
+            "${{ steps.pyimage.outputs.payload }}": "a" * 64,
             "${{ github.sha }}": "c" * 40,
         }
         docker = tmp_path / "bin" / "docker"
@@ -166,7 +167,11 @@ class TestImageWorkflowTokenScope:
                 assert completed.returncode == 0, f"{step['name']}: {completed.stderr}"
                 exercised.append(step["name"])
         calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-        assert {"Reuse identical python image", "Reuse identical model gateway image"} <= set(exercised)
+        assert {
+            "Reuse identical python image",
+            "Reuse identical model gateway image",
+            "Reuse verified client disk bounds",
+        } <= set(exercised)
         assert calls, "no PR-reachable registry lookup ran"
         assert all(call.startswith("buildx imagetools inspect ") for call in calls), calls
         assert not any("--raw" in call or "buildcache" in call for call in calls), calls
@@ -199,7 +204,7 @@ class TestPythonImage:
         images = _from_images(text)
         # DS-2026-10-09-01: the runtime base is digest-pinned like the vendor stage.
         assert re.fullmatch(r"python:3\.13\.\d+-slim@sha256:[0-9a-f]{64}", images[-1])
-        assert len(images) == 6
+        assert len(images) == 7
         assert len(set(images)) == 2
         for image in images[:2]:
             assert re.fullmatch(r"node:22\.23\.4-bookworm-slim@sha256:[0-9a-f]{64}", image)

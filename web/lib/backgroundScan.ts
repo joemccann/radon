@@ -1,5 +1,6 @@
 /**
- * Stale-while-revalidate trigger shared by the GEX / VCG / regime GET routes.
+ * Stale-while-revalidate trigger shared by the GEX / VCG / regime / internals /
+ * gamma-rotation GET routes.
  *
  * Dedupes while a scan is in flight and arms a backoff after a failure, so a
  * refused scan (FastAPI 429 inside its cooldown/backoff, or 502 on a lane-
@@ -13,11 +14,31 @@ export interface BackgroundScanTriggerOptions {
   run: () => Promise<unknown>;
   backoffMs?: number;
   now?: () => number;
+  /**
+   * Routes that revalidate the SAME upstream scan (internals + regime both
+   * POST /regime/scan) pass one key so they share a single in-flight/backoff
+   * machine instead of each firing its own subprocess. The first creation
+   * for a key wins; later callers get that trigger back.
+   */
+  sharedKey?: string;
 }
 
 export type BackgroundScanTrigger = () => boolean;
 
-export function createBackgroundScanTrigger({
+const sharedTriggers = new Map<string, BackgroundScanTrigger>();
+
+export function createBackgroundScanTrigger(options: BackgroundScanTriggerOptions): BackgroundScanTrigger {
+  const { sharedKey } = options;
+  if (sharedKey === undefined) return buildTrigger(options);
+  let trigger = sharedTriggers.get(sharedKey);
+  if (!trigger) {
+    trigger = buildTrigger(options);
+    sharedTriggers.set(sharedKey, trigger);
+  }
+  return trigger;
+}
+
+function buildTrigger({
   label,
   run,
   backoffMs = BACKGROUND_SCAN_BACKOFF_MS,

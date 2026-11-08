@@ -23,6 +23,7 @@ import grok_runtime
 from grok_page_responder import run_cycle
 from watchdog.pages import (
     actions_since,
+    claim_page,
     enqueue_delivered_page,
     record_action_attempt,
     record_attempt_failure,
@@ -205,9 +206,12 @@ class TestRetrySemanticsUnchanged:
 
     def test_third_failure_still_skips_the_ticket(self, db_conn, tmp_path):
         pid = _enqueue()
-        record_attempt_failure(pid, now=NOW, error="x")
-        record_attempt_failure(pid, now=NOW, error="x")
-        assert record_attempt_failure(pid, now=NOW, error="x") == "skipped"
+        for attempt, expected in enumerate(("pending", "pending", "skipped")):
+            token = f"tok-{attempt}"
+            assert claim_page(pid, now=NOW, claim_token=token)
+            assert record_attempt_failure(
+                pid, now=NOW, error="x", claim_token=token
+            ) == expected
         assert db_conn.execute(
             "SELECT status, claimed_at, attempts FROM watchdog_pages WHERE page_id=?",
             (pid,),

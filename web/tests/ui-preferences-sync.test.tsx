@@ -228,6 +228,41 @@ describe("uiPreferences client module", () => {
     });
   });
 
+  it("a save BEFORE hydrate starts does not short-circuit hydrate for the session", async () => {
+    vi.useFakeTimers();
+    const calls = stubFetch({
+      ui_preferences: { theme: "light", columns: { orders: { qty: false } } },
+    });
+    const mod = await import("../lib/uiPreferences");
+    mod.__resetUiPreferencesForTests();
+    mod.saveUiTheme("dark");
+    const prefs = await mod.hydrateUiPreferences();
+    expect(calls.filter((c) => c.method === "GET")).toHaveLength(1);
+    expect(prefs).toEqual({ theme: "dark", columns: { orders: { qty: false } } });
+    await vi.advanceTimersByTimeAsync(1000);
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0].body).toEqual({
+      ui_preferences: { theme: "dark", columns: { orders: { qty: false } } },
+    });
+  });
+
+  it("a save-only session still merges server columns before its PUT", async () => {
+    vi.useFakeTimers();
+    const calls = stubFetch({
+      ui_preferences: { columns: { orders: { qty: false } } },
+    });
+    const mod = await import("../lib/uiPreferences");
+    mod.__resetUiPreferencesForTests();
+    mod.saveUiTheme("dark");
+    await vi.advanceTimersByTimeAsync(1000);
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0].body).toEqual({
+      ui_preferences: { theme: "dark", columns: { orders: { qty: false } } },
+    });
+  });
+
   it("failed hydrate does not poison cache with an empty object", async () => {
     vi.stubGlobal(
       "fetch",

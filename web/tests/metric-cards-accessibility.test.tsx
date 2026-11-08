@@ -81,3 +81,14 @@ describe("MetricCards keyboard access", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });
+
+describe("MetricCards breakdown modals", () => {
+  it("shows at most one breakdown at a time", () => {
+    render(<MetricCards portfolio={portfolio} section="portfolio" />);
+    fireEvent.click(screen.getByRole("button", { name: "View Net Liquidation breakdown" }));
+    fireEvent.click(screen.getByRole("button", { name: "View Dividends breakdown" }));
+    const dialogs = screen.getAllByRole("dialog");
+    expect(dialogs).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "Accrued Dividends" })).toBeTruthy();
+  });
+});

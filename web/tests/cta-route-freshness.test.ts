@@ -1,25 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockReaddir = vi.fn();
-const mockReadFile = vi.fn();
-const mockStat = vi.fn();
-const mockMkdir = vi.fn();
 const mockSpawn = vi.fn();
-
-vi.mock("fs/promises", () => ({
-  readdir: mockReaddir,
-  readFile: mockReadFile,
-  stat: mockStat,
-  mkdir: mockMkdir,
-}));
+const mockExecute = vi.fn();
 
 vi.mock("child_process", () => ({
   spawn: mockSpawn,
 }));
 
-function makeMtime(ageSeconds: number): Date {
-  return new Date(Date.now() - ageSeconds * 1000);
-}
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 function makeCtaPayload(date: string) {
   return {
@@ -46,12 +34,43 @@ function makeCtaPayload(date: string) {
   };
 }
 
+type HealthRow = {
+  state: string;
+  last_attempt_started_at: string | null;
+  last_attempt_finished_at: string | null;
+  last_error: string | null;
+  updated_at: string;
+};
+
+function mockTurso({ cta, ageSeconds = 0, health }: {
+  cta?: ReturnType<typeof makeCtaPayload>;
+  ageSeconds?: number;
+  health?: HealthRow;
+}) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (sql.includes("menthorq_cta")) {
+      return {
+        rows: cta
+          ? [{
+              date: cta.date,
+              payload: JSON.stringify(cta),
+              fetched_at: new Date(Date.now() - ageSeconds * 1000).toISOString(),
+            }]
+          : [],
+      };
+    }
+    if (sql.includes("service_health")) return { rows: health ? [health] : [] };
+    throw new Error(`unexpected query: ${sql}`);
+  });
+}
+
 describe("GET /api/menthorq/cta — freshness contract", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-11T22:15:00Z"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     mockSpawn.mockReturnValue({
       stdout: { on: vi.fn() },
@@ -65,19 +84,8 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
     vi.useRealTimers();
   });
 
-  it("marks the cache stale when the newest cache file is behind the latest closed trading day and triggers a background sync", async () => {
-    mockReaddir.mockResolvedValue(["cta_2026-03-10.json"]);
-    mockReadFile.mockImplementation(async (path: string | Buffer | URL) => {
-      const target = String(path);
-      if (target.includes("cta-sync.json")) {
-        throw new Error("ENOENT");
-      }
-      return JSON.stringify(makeCtaPayload("2026-03-10"));
-    });
-    mockStat.mockResolvedValue({
-      mtimeMs: makeMtime(3_600).getTime(),
-      mtime: makeMtime(3_600),
-    });
+  it("marks the cache stale when the newest row is behind the latest closed trading day and triggers a background sync", async () => {
+    mockTurso({ cta: makeCtaPayload("2026-03-10"), ageSeconds: 3_600 });
 
     const { GET } = await import("../app/api/menthorq/cta/route");
     const response = await GET();
@@ -100,31 +108,17 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
     expect(args.some((arg) => arg.includes("scripts/run_cta_sync.sh"))).toBe(true);
   });
 
-  it("returns a fresh cache_meta contract and does not trigger sync when the latest cache matches the target trading day", async () => {
-    mockReaddir.mockResolvedValue(["cta_2026-03-11.json"]);
-    mockReadFile.mockImplementation(async (path: string | Buffer | URL) => {
-      const target = String(path);
-      if (target.includes("cta-sync.json")) {
-        return JSON.stringify({
-          service: "cta-sync",
-          status: "success",
-          trigger: "launchd",
-          target_date: "2026-03-11",
-          started_at: "2026-03-11T22:05:00Z",
-          finished_at: "2026-03-11T22:05:31Z",
-          duration_ms: 31_000,
-          attempt_count: 1,
-          cache_path: "data/menthorq_cache/cta_2026-03-11.json",
-          error_type: null,
-          error_excerpt: null,
-          artifact_log_path: null,
-        });
-      }
-      return JSON.stringify(makeCtaPayload("2026-03-11"));
-    });
-    mockStat.mockResolvedValue({
-      mtimeMs: makeMtime(120).getTime(),
-      mtime: makeMtime(120),
+  it("returns a fresh cache_meta contract and does not trigger sync when the latest row matches the target trading day", async () => {
+    mockTurso({
+      cta: makeCtaPayload("2026-03-11"),
+      ageSeconds: 120,
+      health: {
+        state: "ok",
+        last_attempt_started_at: "2026-03-11T22:05:00Z",
+        last_attempt_finished_at: "2026-03-11T22:05:31Z",
+        last_error: null,
+        updated_at: "2026-03-11T22:05:31Z",
+      },
     });
 
     const { GET } = await import("../app/api/menthorq/cta/route");
@@ -145,29 +139,18 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  it("ignores a stale sync health target_date that is ahead of the computed trading day", async () => {
-    // Bug reproduction: sync health had target_date "2026-03-12" from a previous
-    // bad run, but the actual latest closed trading day is "2026-03-11".
-    // The route must use the computed date, not the stale sync health override.
-    mockReaddir.mockResolvedValue(["cta_2026-03-10.json"]);
-    mockReadFile.mockImplementation(async (path: string | Buffer | URL) => {
-      const target = String(path);
-      if (target.includes("cta-sync.json")) {
-        return JSON.stringify({
-          service: "cta-sync",
-          state: "degraded",
-          target_date: "2026-03-12",
-          latest_available_date: "2026-03-10",
-          last_attempt_started_at: "2026-03-12T02:55:58Z",
-          last_error: { type: "unexpected_failure", message: "S3 download failed" },
-          attempt_count: 1,
-        });
-      }
-      return JSON.stringify(makeCtaPayload("2026-03-10"));
-    });
-    mockStat.mockResolvedValue({
-      mtimeMs: makeMtime(86_400).getTime(),
-      mtime: makeMtime(86_400),
+  it("uses the computed trading day and maps a failed service_health row to degraded", async () => {
+    // service_health carries no target_date: the route must use the computed date.
+    mockTurso({
+      cta: makeCtaPayload("2026-03-10"),
+      ageSeconds: 86_400,
+      health: {
+        state: "error",
+        last_attempt_started_at: "2026-03-11T02:55:58Z",
+        last_attempt_finished_at: "2026-03-11T02:56:58Z",
+        last_error: JSON.stringify({ type: "unexpected_failure", message: "S3 download failed" }),
+        updated_at: "2026-03-11T02:56:58Z",
+      },
     });
 
     const { GET } = await import("../app/api/menthorq/cta/route");
@@ -175,20 +158,57 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    // Key assertion: target_date must be the computed "2026-03-11", NOT the
-    // stale sync health "2026-03-12"
     expect(body.cache_meta.target_date).toBe("2026-03-11");
     expect(body.cache_meta.is_stale).toBe(true);
     expect(body.cache_meta.stale_reason).toBe("behind_target");
+    expect(body.sync_health).toMatchObject({
+      state: "degraded",
+      target_date: "2026-03-11",
+      last_error: { type: "unexpected_failure", message: "S3 download failed" },
+    });
+    expect(body.sync_status).toMatchObject({
+      status: "error",
+      error_type: "unexpected_failure",
+      error_excerpt: "S3 download failed",
+    });
     expect(mockSpawn).toHaveBeenCalledOnce();
-    // Background sync should use the correct date
     const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
     expect(args).toContain("2026-03-11");
   });
 
-  it("returns a degraded 503 response with stale metadata when no CTA cache exists yet", async () => {
-    mockReaddir.mockResolvedValue([]);
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
+  it("does not retrigger while service_health says a recent sync is running", async () => {
+    mockTurso({
+      cta: makeCtaPayload("2026-03-10"),
+      health: {
+        state: "syncing",
+        last_attempt_started_at: new Date(Date.now() - 60_000).toISOString(),
+        last_attempt_finished_at: null,
+        last_error: null,
+        updated_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+
+    const { GET } = await import("../app/api/menthorq/cta/route");
+    await GET();
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("serves the last good row from memory when Turso fails, still judged against the target date", async () => {
+    mockTurso({ cta: makeCtaPayload("2026-03-10"), ageSeconds: 3_600 });
+    const { GET } = await import("../app/api/menthorq/cta/route");
+    await GET();
+    mockExecute.mockRejectedValue(new Error("offline"));
+
+    const response = await GET();
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.date).toBe("2026-03-10");
+    expect(body.cache_meta.is_stale).toBe(true);
+    expect(body.cache_meta.stale_reason).toBe("behind_target");
+  });
+
+  it("returns a degraded 503 response with stale metadata when no CTA row exists yet", async () => {
+    mockTurso({});
 
     const { GET } = await import("../app/api/menthorq/cta/route");
     const response = await GET();
@@ -204,5 +224,15 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
       stale_reason: "missing_cache",
     });
     expect(mockSpawn).toHaveBeenCalledOnce();
+  });
+
+  it("treats a row with no tables as absent", async () => {
+    mockExecute.mockImplementation(async ({ sql }: { sql: string }) => ({
+      rows: sql.includes("menthorq_cta")
+        ? [{ date: "2026-03-11", payload: JSON.stringify({ date: "2026-03-11" }), fetched_at: "2026-03-11T21:00:00Z" }]
+        : [],
+    }));
+    const { GET } = await import("../app/api/menthorq/cta/route");
+    expect((await GET()).status).toBe(503);
   });
 });

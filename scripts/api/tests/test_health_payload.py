@@ -285,13 +285,14 @@ class TestHealthLite:
         result = await asyncio.wait_for(server.health_lite(), timeout=0.5)
 
         assert isinstance(result.pop("loop_lag_ms"), float)
+        # A probe that never answered observed nothing: null, not a confirmed down.
         assert result == {
             "status": "ok",
             "dependencies": {"database": "unknown", "market_data": "unknown"},
             "auth_state": "unknown",
             "service_state": "unknown",
-            "upstream_dead": False,
-            "port_listening": False,
+            "upstream_dead": None,
+            "port_listening": None,
             "operator_hold": None,
         }
 

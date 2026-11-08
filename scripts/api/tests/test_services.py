@@ -169,14 +169,12 @@ class TestNonSystemdHost:
         monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
-        remote = admin_services.ActionResult(
-            "radon-ib-gateway.service", "status", True, "running", 0,
-        )
-        async def fake_remote(_action: str):
-            return remote
+        admin_services._reset_remote_status_cache()
+        reply = (200, {"ok": True, "state": "running", "detail": "running", "returncode": 0})
         with patch.object(admin_services, "is_systemd_available", return_value=False), \
-             patch.object(admin_services, "remote_gateway_action", side_effect=fake_remote):
+             patch.object(admin_services, "_remote_http", return_value=reply):
             status = asyncio.run(admin_services.show_unit("radon-ib-gateway.service"))
+        admin_services._reset_remote_status_cache()
         assert status.can_control is True
         assert status.active_state == "active"
         assert status.sub_state == "running"

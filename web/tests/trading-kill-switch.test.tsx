@@ -157,7 +157,7 @@ describe("<TradingKillSwitch />", () => {
   describe("Halt confirm gate", () => {
     it("clicking Halt Trading posts nothing until the dialog is confirmed", async () => {
       render(<TradingKillSwitch />);
-      await waitFor(() => screen.getByTestId("trading-halt-button"));
+      await waitFor(() => expect(screen.getByTestId("trading-halt-button")).toHaveProperty("disabled", false));
 
       fireEvent.click(screen.getByTestId("trading-halt-button"));
       expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
@@ -174,7 +174,7 @@ describe("<TradingKillSwitch />", () => {
 
     it("dismissing the Halt dialog posts nothing", async () => {
       render(<TradingKillSwitch />);
-      await waitFor(() => screen.getByTestId("trading-halt-button"));
+      await waitFor(() => expect(screen.getByTestId("trading-halt-button")).toHaveProperty("disabled", false));
 
       fireEvent.click(screen.getByTestId("trading-halt-button"));
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

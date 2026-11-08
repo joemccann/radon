@@ -303,15 +303,48 @@ def _holder_is_running(lock_path: Path) -> bool:
     return True
 
 
-def acquire_lock(lock_path: Path, now: datetime) -> bool:
-    if lock_path.exists():
-        age = now.timestamp() - lock_path.stat().st_mtime
-        if age < LOCK_STALE_SECS and _holder_is_running(lock_path):
-            return False
-        lock_path.unlink(missing_ok=True)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()))
+def _create_lock(lock_path: Path) -> bool:
+    """Atomically create the lock holding our pid; False if it exists."""
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as fh:
+        fh.write(str(os.getpid()))
     return True
+
+
+def _break_stale_lock(lock_path: Path, stale_inode: int) -> None:
+    """Move the lock judged stale aside by rename (only one breaker wins).
+    If a racer already replaced it with a fresh lock, put that one back."""
+    aside = lock_path.with_name(f"{lock_path.name}.stale.{os.getpid()}")
+    try:
+        os.rename(lock_path, aside)
+    except FileNotFoundError:
+        return
+    try:
+        if aside.stat().st_ino != stale_inode:
+            try:
+                os.link(aside, lock_path)
+            except FileExistsError:
+                pass
+    finally:
+        aside.unlink(missing_ok=True)
+
+
+def acquire_lock(lock_path: Path, now: datetime) -> bool:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if _create_lock(lock_path):
+        return True
+    try:
+        held = lock_path.stat()
+    except FileNotFoundError:
+        return _create_lock(lock_path)
+    age = now.timestamp() - held.st_mtime
+    if age < LOCK_STALE_SECS and _holder_is_running(lock_path):
+        return False
+    _break_stale_lock(lock_path, held.st_ino)
+    return _create_lock(lock_path)
 
 
 def build_grok_command(
@@ -408,6 +441,27 @@ def _next_timer_elapse(unit: str, runner: SystemctlRunner) -> Optional[datetime]
     )
 
 
+def _deploy_transition_blocks_rerun() -> bool:
+    """True when a oneshot rerun must not start.
+
+    A present journal means a deploy is in flight. ``Path.exists()`` raises
+    ``PermissionError`` when a parent directory is not searchable. The isolated
+    responder has ``ProtectHome=yes``, so
+    ``/home/radon/.radon-deploy-transition.json`` is EACCES, not missing. An
+    unreadable journal is not proof the deploy finished. Fail closed: skip
+    the rerun. Do not let the stat fail the oneshot.
+    """
+    try:
+        return DEPLOY_TRANSITION_JOURNAL.exists()
+    except OSError as exc:
+        print(
+            "deploy transition journal unreadable; skipping oneshot rerun: "
+            f"{exc}",
+            file=sys.stderr,
+        )
+        return True
+
+
 def attempt_oneshot_rerun(
     page: dict,
     *,
@@ -422,7 +476,8 @@ def attempt_oneshot_rerun(
     through to the ordinary grok path. Every precondition fails CLOSED:
     the restart is an auto-fix action, so it takes the same explicit
     GROK_PAGE_AUTOSHIP opt-in as shipping a code fix, never runs while a
-    deploy transition journal exists, and trusts only systemd's own state.
+    deploy transition journal exists or cannot be stat'd, and trusts only
+    systemd's own state.
     """
     if page.get("kind") != "unit":
         return None
@@ -431,7 +486,7 @@ def attempt_oneshot_rerun(
         return None
     if not autoship_enabled():
         return None
-    if DEPLOY_TRANSITION_JOURNAL.exists():
+    if _deploy_transition_blocks_rerun():
         return None
     try:
         spent = pages_mod.reruns_since(unit, since=_utc_day_start(now))

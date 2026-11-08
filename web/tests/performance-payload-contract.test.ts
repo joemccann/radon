@@ -383,10 +383,6 @@ describe("status and degradation semantics", () => {
 // §C.6 / §E.9 tests 86-87 — the route
 // ---------------------------------------------------------------------------
 
-const mockReadFile = vi.fn();
-const mockStat = vi.fn();
-vi.mock("fs/promises", () => ({ readFile: mockReadFile, stat: mockStat }));
-
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
@@ -410,12 +406,8 @@ describe("/api/performance v2 route contract", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-15T14:56:40Z"));
     vi.clearAllMocks();
-    mockReadFile.mockReset();
-    mockStat.mockReset();
     mockRadonFetch.mockReset();
     mockGetDb.mockReset();
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
-    mockStat.mockRejectedValue(new Error("ENOENT"));
     // Default so a fire-and-forget background rebuild resolves instead of
     // throwing inside the route; individual tests override it.
     mockRadonFetch.mockResolvedValue({ status: "accepted" });

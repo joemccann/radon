@@ -8,12 +8,11 @@ print, volume 50) with a 15:59 midpoint of 8.15, while tick 9 CLOSE was
 
 from __future__ import annotations
 
-import json
 import math
-from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
-DEFAULT_CACHE_NAME = "option_session_mark_cache.json"
+MARK_FIELDS = ("last", "bid", "ask", "mid")
+MARK_CHUNK = 200
 
 
 def _positive_price(value: Any) -> Optional[float]:
@@ -63,10 +62,6 @@ def option_mark_key(symbol, expiry, strike, right) -> Optional[str]:
     else:
         strike_token = f"{strike_value:.4f}".rstrip("0").rstrip(".")
     return f"{symbol_value}_{digits}_{strike_token}_{right_value}"
-
-
-def default_cache_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "data" / DEFAULT_CACHE_NAME
 
 
 def session_is_fresh(entry: Optional[dict], today: str) -> bool:
@@ -220,6 +215,8 @@ def poll_contract_mark(
     session_mark: Optional[dict],
     today: str,
     fetch_history: Optional[Callable[[], tuple[Any, Any]]] = None,
+    volume: Optional[float] = None,
+    broker_mark: Optional[float] = None,
 ) -> tuple[Optional[float], bool, Optional[dict]]:
     live_price = _positive_price(market_price)
     live_bid = _positive_price(bid)
@@ -228,6 +225,11 @@ def poll_contract_mark(
     live = live_price is not None or live_book
     fresh = session_is_fresh(session_mark, today)
     is_opt = str(sec_type or "").upper() == "OPT"
+    # IB reports no trade today and no two-sided book: any last in hand is an
+    # older print, so IB's own position mark is the only current value.
+    broker = _positive_price(broker_mark)
+    if is_opt and broker is not None and not live_book and _nonneg_number(volume) == 0:
+        return broker, True, None
     need_history = is_opt and not live and not fresh
     trade_bars = midpoint_bars = None
     if need_history and fetch_history is not None:
@@ -273,48 +275,67 @@ def poll_contract_mark(
     return price, calculated, updated
 
 
-def load_session_marks(path: Optional[Path] = None) -> dict:
-    cache_path = Path(path) if path is not None else default_cache_path()
-    try:
-        raw = json.loads(cache_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
+def _read_rows(sql: str, args: tuple) -> list:
+    from api import db_http
+
+    return db_http.hrana_execute(sql, args)
+
+
+def _write(sql: str, args: tuple) -> None:
+    from db.hrana_http import hrana_execute
+
+    hrana_execute(sql, args)
+
+
+def load_session_marks(keys: Iterable[str]) -> dict:
+    """Stored marks for these contracts. A failed read is an empty cache: the
+    sync falls through to live quotes and history instead of failing."""
+    wanted = sorted({key for key in keys if key})
     out: dict[str, dict] = {}
-    for key, val in raw.items():
-        if not isinstance(key, str) or not isinstance(val, dict):
-            continue
-        entry: dict[str, Any] = {}
-        for field in ("last", "bid", "ask", "mid"):
-            price = _positive_price(val.get(field))
-            if price is not None:
-                entry[field] = price
-        checked = val.get("checked_on")
-        if isinstance(checked, str) and checked:
-            entry["checked_on"] = checked
-        if entry:
-            out[key] = entry
+    try:
+        for start in range(0, len(wanted), MARK_CHUNK):
+            chunk = wanted[start:start + MARK_CHUNK]
+            slots = ",".join("?" * len(chunk))
+            rows = _read_rows(
+                f"SELECT mark_key, last, bid, ask, mid, checked_on FROM option_session_marks "
+                f"WHERE mark_key IN ({slots})",
+                tuple(chunk),
+            )
+            for key, *prices, checked in rows:
+                entry: dict[str, Any] = {
+                    field: price
+                    for field, price in zip(MARK_FIELDS, map(_positive_price, prices))
+                    if price is not None
+                }
+                if checked:
+                    entry["checked_on"] = checked
+                if entry:
+                    out[key] = entry
+    except Exception as exc:
+        print(f"  Warning: option session marks unreadable: {exc}")
+        return {}
     return out
 
 
-def save_session_marks(marks: dict, path: Optional[Path] = None) -> None:
-    cache_path = Path(path) if path is not None else default_cache_path()
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, dict] = {}
+def save_session_marks(marks: dict) -> None:
+    """Upsert marks. Prices are validated so a close-shaped or zero value never
+    lands as a last. A failed write loses one cache update, never the sync."""
+    rows = []
     for key, val in marks.items():
         if not isinstance(key, str) or not isinstance(val, dict):
             continue
-        entry: dict[str, Any] = {}
-        for field in ("last", "bid", "ask", "mid"):
-            price = _positive_price(val.get(field))
-            if price is not None:
-                entry[field] = price
-        checked = val.get("checked_on")
-        if isinstance(checked, str) and checked:
-            entry["checked_on"] = checked
-        if entry:
-            payload[key] = entry
-    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, separators=(",", ":"), sort_keys=True))
-    tmp.replace(cache_path)
+        prices = [_positive_price(val.get(field)) for field in MARK_FIELDS]
+        checked = val.get("checked_on") if isinstance(val.get("checked_on"), str) else None
+        if any(price is not None for price in prices) or checked:
+            rows.append((key, *prices, checked))
+    try:
+        for start in range(0, len(rows), MARK_CHUNK):
+            chunk = rows[start:start + MARK_CHUNK]
+            slots = ",".join(["(?,?,?,?,?,?)"] * len(chunk))
+            _write(
+                f"INSERT OR REPLACE INTO option_session_marks "
+                f"(mark_key, last, bid, ask, mid, checked_on) VALUES {slots}",
+                tuple(value for row in chunk for value in row),
+            )
+    except Exception as exc:
+        print(f"  Warning: option session marks not saved: {exc}")

@@ -15,6 +15,7 @@ from scripts.ai_cycle.collectors import (
     Transport,
     archive_raw,
     collect_gpu_history,
+    collect_source,
     parse_aa,
     parse_disclosures,
     parse_eia,
@@ -167,6 +168,64 @@ def test_gpu_history_uses_dated_snapshots_and_deduplicates_latest():
     rows = collect_gpu_history(FakeTransport(), "2026-07-05", "2026-07-05")
     assert len(rows) == 1
     assert rows[0]["period_end"] == "2026-07-05"
+
+
+def test_aa_collection_follows_paginated_free_catalog_after_data_endpoint_410(tmp_path):
+    """The 2026-11-06 frontier refresh and ai-cycle oneshots both died on
+    HTTP 410 from the retired data catalog. The basket member on page 2
+    must be collected from the free language-model list."""
+    free = "https://artificialanalysis.ai/api/v2/language/models/free"
+    calls = []
+
+    class RecordingTransport:
+        archive = tmp_path
+
+        def fetch(self, url, params=None, headers=None, body=None):
+            calls.append((url, params, headers))
+            if "/api/v2/data/" in url:
+                raise SourceError("Publisher returned HTTP 410")
+            page = (params or {}).get("page")
+            if page == 1:
+                payload = {
+                    "pagination": {"page": 1, "has_more": True, "page_size": 200, "total_pages": 2},
+                    "data": [
+                        {
+                            "id": "stable-cheap-id",
+                            "slug": "cheap",
+                            "name": "Cheap frontier",
+                            "model_creator": {"id": "creator-id"},
+                            "pricing": {"price_1m_input_tokens": 1, "price_1m_output_tokens": 2},
+                        }
+                    ],
+                }
+            else:
+                payload = {
+                    "pagination": {"page": 2, "has_more": False, "page_size": 200, "total_pages": 2},
+                    "data": [
+                        {
+                            "id": "stable-expensive-id",
+                            "slug": "expensive",
+                            "name": "Expensive frontier",
+                            "model_creator": {"id": "creator-id"},
+                            "pricing": {"price_1m_input_tokens": 3, "price_1m_output_tokens": 4},
+                        }
+                    ],
+                }
+            return payload, HASH, FETCHED
+
+    rows = collect_source(
+        "artificial-analysis",
+        RecordingTransport(),
+        "2026-11-06",
+        "2026-11-06",
+        env={"ARTIFICIAL_ANALYSIS_API_KEY": "secret"},
+        basket=["cheap", "expensive"],
+    )
+
+    assert [call[0] for call in calls] == [free, free]
+    assert [call[1] for call in calls] == [{"page": 1}, {"page": 2}]
+    assert [call[2]["x-api-key"] for call in calls] == ["secret", "secret"]
+    assert [row["series_id"] for row in rows] == ["stable-cheap-id", "stable-expensive-id"]
 
 
 def test_aa_missing_expensive_member_suppresses_entire_basket():
@@ -1422,11 +1481,16 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     500s deadline is checked only between attempts. NOAA ended at 600s with
     Publisher transport failed, then ramp and the later publishers saw
     Per-run time budget exhausted and the oneshot exited 1.
+
+    Connect time is collectors.time.monotonic, not a host sleep. A 0.4s
+    leftover-deadline assert against real sleeps was red on a correct wall
+    (T-584): two 0.15s sleeps plus collect.main overhead exhausted the
+    fixture before vercel was recorded.
     """
     import socket
-    import time
 
     from scripts.ai_cycle import collect as collect_mod
+    from scripts.ai_cycle import collectors as col
     from scripts.ai_cycle.collectors import Transport
 
     addresses = [
@@ -1434,6 +1498,8 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
         for i in range(1, 9)
     ]
     original_connect = socket.socket.connect
+    now = [1_000.0]
+    monkeypatch.setattr(col.time, "monotonic", lambda: now[0])
 
     def getaddrinfo(host, port, *args, **kwargs):
         if host == "www.ncei.noaa.gov":
@@ -1443,8 +1509,7 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     def connect(self, address):
         if isinstance(address, tuple) and str(address[0]).startswith("192.0.2."):
             timeout = self.gettimeout()
-            if timeout:
-                time.sleep(timeout)
+            now[0] += float(timeout or 0)
             raise TimeoutError("timed out")
         return original_connect(self, address)
 
@@ -1456,7 +1521,7 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     def init(self, archive, **kwargs):
         kwargs.setdefault("timeout", 0.15)
         real_init(self, archive, **kwargs)
-        self.deadline = time.monotonic() + 0.4
+        self.deadline = col.time.monotonic() + 0.4
 
     monkeypatch.setattr(Transport, "__init__", init)
 
@@ -1464,13 +1529,13 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     real_collect = collect_mod.collect_source
 
     def wrapped(source, transport, *args, **kwargs):
-        called.append((source, time.monotonic() < transport.deadline))
+        called.append((source, col.time.monotonic() < transport.deadline))
         if source == "noaa":
             return real_collect(source, transport, *args, **kwargs)
         return []
 
     monkeypatch.setattr(collect_mod, "collect_source", wrapped)
-    started = time.monotonic()
+    started = now[0]
     code = collect_mod.main(
         [
             "--verify",
@@ -1484,13 +1549,14 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
             str(tmp_path / "raw"),
         ]
     )
-    elapsed = time.monotonic() - started
+    elapsed = now[0] - started
     assert code == 1
     assert [item[0] for item in called] == ["noaa", "vercel"]
     # Eight blackholed addresses at 0.15s is 1.2s for one walk, 2.4s for two.
-    # The attempt wall is 0.15s, so both attempts and the next publisher fit
-    # inside the 0.4s run deadline.
-    assert elapsed < 0.7, elapsed
+    # The attempt wall spends one connect timeout per attempt (0.30s) so the
+    # next publisher still sees the 0.4s run deadline. An uncapped walk is 1.2s
+    # on the first GET and leaves vercel with no budget.
+    assert elapsed == pytest.approx(0.15 * 2), elapsed
     assert called[1][1] is True
 
 

@@ -53,6 +53,16 @@ vi.mock("@/lib/orders/readOrdersFromDb", () => ({
   readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
 }));
 
+function dbRow(snapshot: Record<string, unknown>) {
+  return {
+    rows: [{
+      payload: JSON.stringify(snapshot),
+      scan_time: snapshot.scan_time ?? snapshot.discovery_time ?? snapshot.analysis_time,
+      taken_at: snapshot.scan_time,
+    }],
+  };
+}
+
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
 vi.mock("@/lib/db", () => ({
   resetDb: () => {},
@@ -87,7 +97,7 @@ vi.mock("@/lib/criStaleness", () => ({
   isCriDataStale: vi.fn().mockReturnValue(false),
 }));
 vi.mock("@/lib/criCache", () => ({
-  selectPreferredCriCandidate: vi.fn().mockReturnValue(null),
+  hasCompleteRvolHistory: vi.fn().mockReturnValue(true),
 }));
 vi.mock("@/lib/regimeHistory", () => ({
   backfillRealizedVolHistory: vi.fn().mockReturnValue([]),
@@ -159,10 +169,9 @@ describe("POST /api/scanner (via radonFetch)", () => {
 
   it("falls back to cached data on radonFetch failure", async () => {
     mockRadonFetch.mockRejectedValue(new Error("Connection refused"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       scan_time: "2026-03-13", tickers_scanned: 25, signals_found: 3, top_signals: [],
     }));
-    mockStatSync.mockReturnValue({ mtime: new Date(Date.now() - 900_000) });
 
     const { POST } = await import("../app/api/scanner/route");
     const res = await POST();
@@ -204,10 +213,9 @@ describe("POST /api/discover (via radonFetch)", () => {
 
   it("falls back to cache on failure", async () => {
     mockRadonFetch.mockRejectedValue(new Error("timeout"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       discovery_time: "2026-03-13", candidates_found: 8, candidates: [],
     }));
-    mockStatSync.mockReturnValue({ mtime: new Date(Date.now() - 900_000) });
 
     const { POST } = await import("../app/api/discover/route");
     const res = await POST();
@@ -237,10 +245,9 @@ describe("POST /api/flow-analysis (via radonFetch)", () => {
 
   it("falls back to cache on failure", async () => {
     mockRadonFetch.mockRejectedValue(new Error("502"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
+    mockExecute.mockResolvedValueOnce(dbRow({
       analysis_time: "old", positions_scanned: 10, supports: [], against: [],
     }));
-    mockStatSync.mockReturnValue({ mtime: new Date(Date.now() - 900_000) });
 
     const { POST } = await import("../app/api/flow-analysis/route");
     const res = await POST();
@@ -513,7 +520,7 @@ describe("POST /api/orders/place (via radonFetch)", () => {
     expect(body.error).toContain("rejected");
   });
 
-  it("detects IB silent rejection (Unknown status)", async () => {
+  it("does not call an acknowledged order (permId, status Unknown) a rejection", async () => {
     mockRadonFetch.mockResolvedValueOnce({
       status: "ok",
       orderId: 42,
@@ -528,9 +535,10 @@ describe("POST /api/orders/place (via radonFetch)", () => {
       body: JSON.stringify({ type: "stock", symbol: "AAPL", action: "BUY", quantity: 10, limitPrice: 150 }),
     });
     const res = await POST(req);
-    expect(res.status).toBe(502);
+    // A nonzero permId is IB's acknowledgement (audit 2026-11-03 §1 #4).
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("no acknowledgement");
+    expect(body.permId).toBe(9999);
   });
 
   it("succeeds with valid stock order", async () => {

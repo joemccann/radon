@@ -35,11 +35,14 @@ runs this as ExecStartPre so mirrored tables exist before the Node write.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -80,6 +83,58 @@ _BOOTSTRAP_SQL = """
       applied_at TEXT    NOT NULL
     )
     """
+
+# One advisory row lock, shared with migrate.ts (identical statements, pinned
+# by test_migrate.py::TestMigrationLock). Two migrators against one Turso (a
+# laptop `bun run db:migrate` and a radon-api boot) used to rely on "already
+# exists" to survive each other. The lease is a TTL on the DATABASE clock, so
+# hosts with skewed clocks agree on expiry, and a holder killed mid-run (boot
+# runs under `timeout 30`) frees it within MIGRATION_LOCK_TTL_SECONDS.
+# Release is bound to the owner, so a late release cannot drop a successor.
+MIGRATION_LOCK_TABLE_SQL = "CREATE TABLE IF NOT EXISTS schema_migrations_lock (id INTEGER PRIMARY KEY CHECK (id = 1), owner TEXT NOT NULL, expires_at TEXT NOT NULL)"
+MIGRATION_LOCK_ACQUIRE_SQL = "INSERT INTO schema_migrations_lock (id, owner, expires_at) VALUES (1, ?, datetime('now', ?)) ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, expires_at = excluded.expires_at WHERE schema_migrations_lock.expires_at < datetime('now')"
+MIGRATION_LOCK_RELEASE_SQL = "DELETE FROM schema_migrations_lock WHERE id = 1 AND owner = ?"
+MIGRATION_LOCK_TTL_SECONDS = 120
+# The manual DiskANN drop runs ~14 minutes in one statement.
+MANUAL_MIGRATION_LOCK_TTL_SECONDS = 1800
+
+
+class MigrationLockBusy(RuntimeError):
+    """Another migrator holds an unexpired schema_migrations_lock row."""
+
+
+def _acquire_migration_lock(db, owner: str, ttl_seconds: int) -> bool:
+    db.execute(MIGRATION_LOCK_TABLE_SQL)
+    cursor = db.execute(MIGRATION_LOCK_ACQUIRE_SQL, (owner, f"+{int(ttl_seconds)} seconds"))
+    db.commit()
+    taken = getattr(cursor, "rowcount", None)
+    return isinstance(taken, int) and taken > 0
+
+
+def _release_migration_lock(db, owner: str) -> None:
+    db.execute(MIGRATION_LOCK_RELEASE_SQL, (owner,))
+    db.commit()
+
+
+@contextlib.contextmanager
+def migration_lock(db, *, owner: str | None = None, ttl_seconds: int | None = None):
+    owner = owner or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+    if ttl_seconds is None:
+        ttl_seconds = (
+            MANUAL_MIGRATION_LOCK_TTL_SECONDS
+            if _manual_migrations_enabled()
+            else MIGRATION_LOCK_TTL_SECONDS
+        )
+    if not _acquire_migration_lock(db, owner, ttl_seconds):
+        raise MigrationLockBusy("another migrator holds schema_migrations_lock")
+    try:
+        yield
+    finally:
+        try:
+            _release_migration_lock(db, owner)
+        except Exception as exc:  # the TTL frees it; never mask the migration result
+            sys.stderr.write(f"[migrate] lock release failed ({exc}); it expires on its own\n")
+
 
 def _is_transport_error(exc: BaseException) -> bool:
     """libsql_experimental raises bare ValueError for everything, so classify
@@ -193,7 +248,15 @@ def is_schema_known_current(label: str) -> bool:
 
 
 def _migrate(libsql, url: str, token: str, label: str) -> None:
-    apply_pending_migrations(_connect_with_retry(libsql, url, token))
+    db = _connect_with_retry(libsql, url, token)
+    try:
+        with migration_lock(db):
+            apply_pending_migrations(db)
+    except MigrationLockBusy as exc:
+        # Same exit as an unreachable database: boot falls back to the
+        # schema-known-current check instead of failing hard.
+        sys.stderr.write(f"[migrate] {exc}; not applying\n")
+        sys.exit(EXIT_DATABASE_UNREACHABLE)
     record_current_schema(label)
 
 

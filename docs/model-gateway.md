@@ -8,7 +8,7 @@ Python app callers use `clients.model_ladder` for text/vision JSON and its local
 
 Fixed operations cover normalized chat with tools/images, JSON, vision extraction, explicit 384/2048-dimensional embedding spaces, OCR, X search, Chronos forecasting, and Clairic dates. Inputs cannot supply upstream URLs, headers, credentials, paths, or arbitrary commands. Existing publication, Humanizer, portfolio, source, trading and provider pacing rules remain in their owning pipelines.
 
-The default text/JSON order starts with Antigravity. Requests needing images or native tools use compatible providers. Native Messages, Responses and Chat Completions preserve their original schemas, including custom tool grammars, and use only providers supporting that protocol. A response must reach a verified terminal state before delivery. Unsupported capability is an error; schemas and images are never silently discarded.
+The default text/JSON order starts with Antigravity. Requests needing images or native tools use compatible providers. Native Messages, Responses and Chat Completions preserve their original schemas, including custom tool grammars, and use only providers supporting that protocol. A response must reach a verified terminal state before delivery. Unsupported capability is an error; schemas and images are never silently discarded. The loopback bridge forwards only the request body, so native Claude requests get the pinned client's beta list from the gateway. Auto-mode body fields add their own betas: `thinking.display: "updates"` and `safeguards` (`native._claude_field_betas`). Without those betas, Claude Security sessions with `--permission-mode auto --verbose` get a 400.
 
 ## Authentication and renewal
 
@@ -28,7 +28,7 @@ NVIDIA and Cerebras are paused in every environment by `engine.PAUSED_BY_DEFAULT
 
 ## Upgrades and rollback
 
-CLI packages and inference dependencies are built at reviewed pins in immutable release images. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
+CLI packages and inference dependencies are built at reviewed pins in immutable release images. The gateway target starts from `runtime-deps` and copies `scripts/` after the torch lock so a scripts-only push reuses those layers. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
 
 A release needs all required checks on its exact head and matching immutable application, archive and gateway images. The managed gateway status reports the SHA of its already-selected immutable gateway image. The runtime supplies a gateway-only `RADON_DEPLOY_SHA` after validating the fixed image repository and full lowercase SHA; caller environment, dotenv values and a later checkout lookup are not identity authorities. Host coding clients are promoted from verified release artifacts; automated consumers do not install or upgrade provider CLIs. The first gateway cutover records a root-owned, hash-verified previous control-plane bundle for bounded rollback to that exact serving release. The privileged control-plane floor remains monotonic.
 
@@ -51,6 +51,8 @@ target-named root-private directory before creating the next receipt.
 
 Production verification must cover service readiness, isolated consumer environments, actual native client requests, provider fallback, token renewal, the forecasting and embedding spaces, and a real pipeline publication. A passing canary is not a deployed repair.
 
+The native CLI transport canary (`scripts/ci/check_model_cli_transport.py`) stops each client's process group once the bridge captures its request. On macOS, `killpg` of a group whose only member has exited but is not yet reaped fails with EPERM rather than ESRCH, so the canary treats EPERM from an exited child as already stopped. An unexpected exception prints only its type and the raising `file:line`, never its message or child output.
+
 Before allocating prestage worktrees, after exact image pulls and immediately
 before stopping consumers, deployment runs the root-owned, read-only
 `sudo /usr/local/sbin/radon-app-runtime check-model-space` action. Its fixed
@@ -62,7 +64,10 @@ release in `cloud/scripts/model_clients.py` (Linux payload 2030000000 bytes /
 1024 members, Darwin export 880000000 bytes, about 25% over the observed
 release); export and extraction refuse anything larger, and app-images runs
 `scripts/ci/check_model_client_bounds.py` against the exact built image so a
-bigger bundle fails CI. The shared 4KiB filesystem budget is 5144893312
+bigger bundle fails CI. A later rebuild whose client payload hash already
+passed that check (GHCR tag `pbounds-<64 hex>`, not a deploy SHA and not
+`:latest`) skips the export and still smokes the new image; a missing tag
+or payload hash still measures. The shared 4KiB filesystem budget is 5144893312
 writable bytes (plus 545128448 when the model cache must be fetched) and 3209 inodes.
 Unknown inode capacity refuses; root-reserved blocks never satisfy the check.
 There is no threshold override or automatic data deletion. A rejected prestage

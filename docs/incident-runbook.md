@@ -3036,7 +3036,9 @@ after one curl-7 retry. Discover then shed a short UW rate limit.
   `curl: (7)` then fallback is `flow-refresh-connect-refused`.
   Discover HTTP 400 `discover rate limit shed` is
   `flow-refresh-discover-rate-limit-shed` and is not this page when
-  flow-analysis already returned OK. `Result=signal` is deploy
+  flow-analysis already returned OK. Discover `curl=28` / `http=000`
+  at the 180s deadline, after flow-analysis OK, is
+  `flow-refresh-discover-budget-timeout`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
   in the same minute, stand down.
 - **Remediation (code):** the portfolio scan passes
@@ -3258,6 +3260,69 @@ retries, then completed.
 - **Code:** `scripts/discover.py` (`_provider_error_key`,
   `_apply_provider_failures`), `scripts/run_flow_refresh.sh`
   (`_is_admission_shed`).
+
+---
+
+## flow-refresh-discover-budget-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when the market-wide discover walk is admitted and
+outlives the wrapper curl deadline.** Peak: 2026-11-04 21:03:52Z,
+page `9b494e21badd31a9ff5cbef6a2532940`. Scanner and flow-analysis in
+the same fire exited OK. Earlier hours that session shed discover on
+a short UW rate limit in a few seconds.
+
+- **Mechanism:** the wrapper `SCAN_TIMEOUT` and `POST /discover`
+  `run_script` timeout are both 180s and start together. A walk that
+  is still running at that instant never writes an HTTP body. The
+  journal is `curl: (28) Operation timed out after 180002 milliseconds
+  with 0 bytes received`, then
+  `discover FastAPI outcome indeterminate (curl=28, http=000)`. The
+  wrapper does not launch a direct `discover.py` (BUG-013) and exits 1.
+  `fetch_options_flow` walked up to `FLOW_ALERTS_MAX_PAGES` (25) with
+  no deadline, and darkpool scoring submitted every candidate at once.
+  The UW client retry ladder (3 extra 30s attempts) can add another
+  full curl budget onto one page. Hours that hit a short embargo
+  return HTTP 400 in seconds and do not page. The close fire was the
+  one that got a lane and ran the tape. `/health/lite` stayed
+  authenticated. Database stayed up.
+- **Detection:** unit journal scanner OK, flow-analysis OK, then one
+  discover POST, then `curl: (28)` at 180s with 0 bytes and
+  `http=000`, then `Flow refresh finished with 1 failed scan(s)`.
+  `systemctl show` is `exit-code` / `ExecMainStatus=1` /
+  `NRestarts=0`. Duration from the discover POST is the curl budget,
+  not ~2s and not ~30-70s.
+- **Discriminating check:** `curl=28` and `http=000` with 0 bytes on
+  the discover POST, after flow-analysis already returned OK. A
+  flow-analysis `curl=28` is `flow-refresh-analysis-admission-wait`.
+  Instant `Subprocess capacity exhausted` is
+  `flow-refresh-capacity-502`. HTTP 400 `discover rate limit shed`
+  is `flow-refresh-discover-rate-limit-shed`. HTTP 400
+  `required provider data unavailable` after a scored walk is
+  `flow-refresh-discover-partial-400`. `curl: (7)` then fallback is
+  `flow-refresh-connect-refused`. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
+  in the same minute, stand down.
+- **Remediation (code):** the market-wide scan uses a fail-fast client
+  (`max_retries=0`, 30s page timeout, 5s admission) and stops new UW
+  work `DISCOVER_POST_BUDGET_S` before the curl deadline, leaving one
+  in-flight page plus the JSON response. A short admission wait that
+  would start after that budget is already gone is not started. A tape that does not finish,
+  with nothing scored, sets `error` to `discover budget shed`. The
+  wrapper returns exit 75 and the oneshot exits 0 with a warn health
+  row. It does not retry the POST and does not launch a direct
+  `discover.py`. Scored names still return 200. Quota exhaustion and
+  any non-rate-limit provider error still set the hard error and the
+  oneshot still exits 1. Do not `reset-failed`. The next timer after
+  deploy is enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_market_wide_walk_returns_before_the_wrapper_curl_budget`,
+  `test_late_admission_busy_does_not_sleep_past_the_curl_budget`,
+  `scripts/tests/test_run_flow_refresh_wrapper.py::test_discover_budget_400_sheds_without_retry_or_fallback`,
+  `test_discover_provider_outage_400_still_fails_the_unit`.
+- **Code:** `scripts/discover.py` (`discover`, `fetch_options_flow`,
+  `fetch_darkpool_multi`), `scripts/run_flow_refresh.sh`
+  (`_is_budget_shed`).
 
 ---
 
@@ -4608,6 +4673,52 @@ long grok run.** Peak: 2026-10-17 06:54:48Z, page
   `scripts/grok_page_responder.py` (`_load_trusted_lkg`; `error` row and
   no pin warning on a refuse).
 
+## grok-responder-deploy-journal-eacces
+
+**`radon-grok-responder.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a rerunnable unit page is actionable and the deploy
+transition journal cannot be stat'd.** Peak: 2026-11-07 16:02:22Z, page
+`afc05cfe50243228a5be2fbdecfb9b82`, paged 16:05:00Z. The same traceback
+repeated at 16:03:59Z and 16:04:31Z. InactiveEnter on the paged invocation
+is 16:04:31Z.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The isolated unit runs as
+  `radon-responder` with `ProtectHome=yes`, so `/home/radon` is not
+  searchable. `attempt_oneshot_rerun` calls
+  `DEPLOY_TRANSITION_JOURNAL.exists()` before any grok launch.
+  `Path.exists()` stats the path and raises `PermissionError` on EACCES
+  (it only swallows ENOENT). The exception is not `HranaHttpError`, so
+  `run_cycle` re-raises and the interpreter exits 1. systemd records
+  `Result=exit-code`, `NRestarts=0`. The watchdog then pages this unit
+  about itself. Cycles with no actionable rerunnable page still log
+  `pending: 0` and exit 0. `requires_ib` is false. Exec span is about
+  2 seconds, not `TimeoutStartSec=3900`.
+- **Detection:** journal traceback ends at
+  `PermissionError: [Errno 13] Permission denied: '/home/radon/.radon-deploy-transition.json'`
+  in `attempt_oneshot_rerun` ← `run_cycle`. `systemctl show
+  radon-grok-responder.service -p Result,NRestarts,ExecMainStatus` on
+  that invocation is `exit-code` / `0` / `1`.
+- **Discriminating check:** the traceback names that path and
+  `Path.exists`, not a missing `GROK_BIN` (`grok-page-responder-missing-binary`)
+  and not a hrana `TimeoutError` or `RemoteDisconnected`
+  (`grok-page-responder-ledger-timeout`,
+  `grok-page-responder-ledger-disconnect`). A readable journal that
+  exists still skips the rerun and falls through to grok. A readable
+  absent journal still allows a rerun. Python Turso `SELECT 1` is not
+  this exit. `/health/lite` down is the API, stand down. Not
+  `ib-gateway-grouped`. `Result=signal` or exit 143 inside a deploy
+  window is `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** an unreadable journal fails closed the same
+  way a present journal does: skip the oneshot rerun, do not start the
+  unit, and continue the cycle so grok still triages the page. Do not
+  restart-flap. The unit is not on `RERUNNABLE_ONESHOT_UNITS`. A page
+  already claimed by a crashing cycle stays claimed until
+  `STALE_CLAIM_SECS` (2h).
+- **Regression:**
+  `scripts/tests/test_watchdog/test_page_responder.py::TestSignalKilledOneshotRerun::test_unreadable_deploy_journal_does_not_fail_the_oneshot`.
+- **Code:** `scripts/grok_page_responder.py`
+  (`_deploy_transition_blocks_rerun`, `attempt_oneshot_rerun`).
+
 ## grok-upgrade-update-rejects-no-auto-update
 
 **`radon-grok-upgrade.service` oneshot pages P1 `Result=exit-code`
@@ -4995,6 +5106,49 @@ already contained the 2026-10-28 display-name fix.
   `test_selects_highest_scoring_current_text_model_per_provider`.
 - **Code:** `scripts/aa_frontier_refresh.py` (`_PREVIEW_SLUG`,
   `_candidate`, `select_frontier_models`).
+
+## aa-frontier-catalog-410
+
+**`radon-aa-frontier-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`, `ExecMainStatus=1`) on the 07:00 UTC timer, and the
+07:16 ai-cycle start repeats it, when the catalog URL returns HTTP 410.**
+Peak: 2026-11-06 07:16Z, page `9734adb77f1e50445f2c0ec402aaba14`. Health
+row `aa-frontier-basket` stored
+`Artificial Analysis catalog returned HTTP 410`. The same minute
+`ai-cycle` stored `Enabled publisher collection failed; inspect source statuses`.
+
+- **Mechanism:** Daily 07:00 UTC timer, then `radon-ai-cycle.service`
+  `Wants=` the same oneshot at 07:16. Both callers GET
+  `https://artificialanalysis.ai/api/v2/data/llms/models`. That path
+  returned HTTP 410 with `The legacy /api/v2/data/* endpoints were
+  retired on Wed, 04 Nov 2026 23:59:59 GMT`. The run was under a second
+  of container time, so this was not the 30s transport timeout. The
+  error row was written. `/health/lite` stayed `database: up`. Not IB.
+  Not the 2026-10-08 ok-heartbeat case and not a missing-provider
+  `CatalogError`: the detail is the HTTP status sentence.
+- **Detection:** journal stdout
+  `{"status": "error", "reason": "Artificial Analysis catalog returned HTTP 410"}`.
+  `systemctl show` is `exit-code` / `NRestarts=0` / `ExecMainStatus=1`.
+  An unauthenticated GET of the legacy path returns the same 410 JSON
+  and names `https://artificialanalysis.ai/data-api/migrate-v2-data`.
+- **Discriminating check:** the legacy path is HTTP 410 even with a
+  dummy key. `GET /api/v2/language/models/free` is 401 without a key
+  and 401 for a dummy key, not 410. Python Turso `SELECT 1` failing in
+  the same minute is a platform outage: stand down. `Result=signal` or
+  exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** call the free language-model list, which
+  accepts any valid key and still has slug, creator id, release date,
+  input and output prices, and the intelligence index. Follow `page`
+  until `has_more` is false. A page loop past 25 pages fails closed.
+  Do not `reset-failed` as the fix. The next timer is 07:00 UTC. A
+  manual start after the deploy rewrites the state file.
+- **Regression:**
+  `scripts/tests/test_aa_frontier_refresh.py::test_retired_data_endpoint_410_follows_paginated_free_catalog`,
+  `test_catalog_pagination_bound_fails_closed_without_a_partial_basket`,
+  `scripts/tests/test_ai_cycle_collectors.py::test_aa_collection_follows_paginated_free_catalog_after_data_endpoint_410`.
+- **Code:** `scripts/ai_cycle/aa_catalog.py`, `scripts/aa_frontier_refresh.py`
+  (`fetch_catalog`), `scripts/ai_cycle/collectors.py` (`_collect_aa_catalog`),
+  `scripts/credential_validators.py`, `scripts/llm_token_index.py`.
 
 ## pnl-story-stock-entry-timing
 

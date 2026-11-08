@@ -53,15 +53,6 @@ vi.mock("@/lib/db", () => ({
   getDb: () => mockGetDb(),
 }));
 
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
-
 // Window-relative weekend anchor: the most recent Saturday in ET, its
 // Friday session, and the Friday one week earlier.
 const todayEt = new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
@@ -69,8 +60,6 @@ let saturday = todayEt;
 while (weekdayOf(saturday) !== 6) saturday = addCalendarDays(saturday, -1);
 const fridaySession = addCalendarDays(saturday, -1);
 const previousFridaySession = addCalendarDays(fridaySession, -7);
-
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 type Payload = Record<string, unknown>;
 
@@ -100,7 +89,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -122,7 +110,7 @@ describe("GET /api/options/rv-ratio", () => {
     expect(await response.json()).toMatchObject({ error: expectedError, code: "BAD_REQUEST" });
   });
 
-  it("returns 200 missing:true with no-store headers when both sources are absent", async () => {
+  it("returns 200 missing:true with no-store headers when nothing exists", async () => {
     const { GET } = await import("../app/api/options/rv-ratio/route");
     const response = await GET(new Request("http://localhost/api/options/rv-ratio?symbol=SMH"));
 
@@ -131,14 +119,9 @@ describe("GET /api/options/rv-ratio", () => {
     expect(await response.json()).toEqual({ schema_version: 1, symbol: "SMH", missing: true });
   });
 
-  it("normalizes the symbol and serves the newer DB snapshot over an older disk cache", async () => {
+  it("normalizes the symbol and serves the DB snapshot", async () => {
     const dbPayload = buildPartialRvRatioFixture({ endDate: fridaySession });
     await insertSnapshot(dbPayload, `${fridaySession}T21:05:00Z`);
-    const diskPayload = {
-      ...buildPartialRvRatioFixture({ endDate: previousFridaySession }),
-      scan_time: `${previousFridaySession}T21:05:00Z`,
-    };
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload));
 
     const { GET } = await import("../app/api/options/rv-ratio/route");
     const response = await GET(new Request("http://localhost/api/options/rv-ratio?symbol=smh"));
@@ -149,21 +132,18 @@ describe("GET /api/options/rv-ratio", () => {
     expect(json.stale).toBe(false);
   });
 
-  it("serves the disk snapshot when it is newer than the DB row", async () => {
-    const dbPayload = buildPartialRvRatioFixture({ endDate: previousFridaySession });
-    await insertSnapshot(dbPayload, `${previousFridaySession}T21:05:00Z`);
-    const diskPayload = buildPartialRvRatioFixture({ endDate: fridaySession });
-    mockReadFile.mockResolvedValue(JSON.stringify(diskPayload));
+  it("serves the symbol's last good read from memory, and never another symbol's", async () => {
+    const dbPayload = buildPartialRvRatioFixture({ endDate: fridaySession });
+    await insertSnapshot(dbPayload, `${fridaySession}T21:05:00Z`);
 
     const { GET } = await import("../app/api/options/rv-ratio/route");
-    const response = await GET(new Request("http://localhost/api/options/rv-ratio?symbol=SMH"));
+    await GET(new Request("http://localhost/api/options/rv-ratio?symbol=SMH"));
+    await db.execute("DELETE FROM rv_ratio_snapshots");
 
-    const json = await jsonOf(response);
-    expect((json.coverage as Payload).last_date).toBe(fridaySession);
-    expect(mockReadFile).toHaveBeenCalledWith(
-      expect.stringContaining(`rv_ratio/SMH.json`),
-      "utf-8",
-    );
+    const smh = await jsonOf(await GET(new Request("http://localhost/api/options/rv-ratio?symbol=SMH")));
+    expect((smh.coverage as Payload).last_date).toBe(fridaySession);
+    const qqq = await jsonOf(await GET(new Request("http://localhost/api/options/rv-ratio?symbol=QQQ")));
+    expect(qqq).toEqual({ schema_version: 1, symbol: "QQQ", missing: true });
   });
 
   it("marks Friday's snapshot fresh on a weekend read (session rule, not wall clock)", async () => {

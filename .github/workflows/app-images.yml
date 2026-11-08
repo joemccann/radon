@@ -234,6 +234,93 @@ jobs:
             exit 0
           fi
 
+  # CIP-027: scripts-rebuild 42314939571 serialized a 51s python publish in
+  # front of a 115s gateway publish on the same runner. The targets do not
+  # need each other. Darwin still verifies before either publishes.
+  gateway-image:
+    needs: darwin-clients
+    name: Build gateway image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify model-only SSH and read-only export boundary
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openssh-server
+          sudo env GITHUB_ACTIONS=true python3 -I cloud/scripts/check_model_transport.py
+      - name: Prepare build context
+        run: cp docker/app/.dockerignore .dockerignore
+      - name: Free runner disk
+        run: |
+          df -h /
+          avail_kb="$(df -Pk / | awk 'NR==2 { print $4 }')"
+          threshold_kb=$((40 * 1024 * 1024))
+          if printf '%s' "$avail_kb" | grep -Eq '^[0-9]+$' && [ "$avail_kb" -ge "$threshold_kb" ]; then
+            echo "disk already has ${avail_kb} KiB free; skipping toolchain delete"
+          else
+            echo "free space ${avail_kb:-unknown} KiB is below ${threshold_kb}; deleting preinstalled toolchains"
+            sudo rm -rf /usr/local/lib/android || true
+            sudo rm -rf /usr/share/dotnet || true
+            sudo rm -rf /opt/ghc || true
+            sudo rm -rf /usr/local/.ghcup || true
+            sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+            docker system prune -af || true
+          fi
+          df -h /
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Hash python image inputs
+        id: pyimage
+        run: |
+          set -euo pipefail
+          if hash="$(python3 scripts/ci/python_image_inputs.py)"; then
+            echo "hash=${hash}" >> "$GITHUB_OUTPUT"
+            echo "tag=ghcr.io/joemccann/radon-python:ihash-${hash}" >> "$GITHUB_OUTPUT"
+          else
+            echo "hash=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "python image input hash refused; building"
+          fi
+          if payload="$(python3 scripts/ci/model_client_payload_inputs.py)"; then
+            echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+          else
+            echo "payload=" >> "$GITHUB_OUTPUT"
+            echo "model client payload hash refused; deploy will export"
+          fi
+      - name: Find pull request edits outside the image inputs
+        id: unhashed
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PYTHON_UNHASHED: .github/workflows/app-images.yml
+          GATEWAY_UNHASHED: .github/workflows/app-images.yml cloud/scripts/model_clients.py
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+              || ! git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+            echo "pull request base unavailable; building both images"
+            exit 0
+          fi
+          # Unquoted on purpose: each list is space-separated repo paths.
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $PYTHON_UNHASHED; then
+            echo "python=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the python image input hash; building it"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet "$BASE_SHA" HEAD -- $GATEWAY_UNHASHED; then
+            echo "gateway=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "edits outside the model gateway input hash; building it"
+          fi
       # Same read-only pull request lookup as the python image: a hit skips
       # the build, smoke and bounds check main already ran on these inputs.
       - name: Reuse identical model gateway image
@@ -291,16 +378,55 @@ jobs:
             --entrypoint python \
             ghcr.io/joemccann/radon-model-gateway:${{ github.sha }} \
             -c "import importlib.metadata; import chronos, torch; from scripts.model_gateway import server; assert importlib.metadata.version('chronos-forecasting') == '2.3.0'; assert torch.__version__ == '2.12.1+cpu'; assert torch.version.cuda is None"
+      # CIP-026: export_from_image only reads the payload hasher's files.
+      # A scripts-only gateway miss still rebuilds, then spent 77s
+      # re-exporting identical clients (run 42142783710). A prior passing
+      # check writes pbounds-<64 hex>; inspect that receipt and skip the
+      # export. Empty/malformed payload or a missing tag still measures.
+      # pbounds is not a deploy tag.
+      - name: Reuse verified client disk bounds
+        id: reuse-bounds
+        if: steps.reuse-gateway.outputs.hit != 'true' && (github.event_name != 'pull_request' || steps.unhashed.outputs.gateway == 'unchanged')
+        run: |
+          set -euo pipefail
+          payload="${{ steps.pyimage.outputs.payload }}"
+          if ! printf '%s\n' "$payload" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "payload hash unavailable; measuring bounds"
+            exit 0
+          fi
+          source="ghcr.io/joemccann/radon-model-gateway:pbounds-${payload}"
+          if ! docker buildx imagetools inspect "$source" >/dev/null 2>&1; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "no bounds receipt for payload ${payload}"
+            exit 0
+          fi
+          echo "hit=true" >> "$GITHUB_OUTPUT"
+          echo "payload ${payload} already passed disk bounds"
       # Production admits model-client disk from pinned per-release bounds and
       # refuses exports past them. Run the production export code against
       # this exact image so a bundle that outgrows its pin fails here.
       - name: Enforce pinned model client disk bounds
-        if: steps.reuse-gateway.outputs.hit != 'true'
+        if: steps.reuse-gateway.outputs.hit != 'true' && steps.reuse-bounds.outputs.hit != 'true'
         run: |
           set -euo pipefail
           python3 -I scripts/ci/check_model_client_bounds.py \
             --engine docker --scratch "$RUNNER_TEMP" \
             --image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"
+      - name: Record client disk bounds receipt
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse-gateway.outputs.hit != 'true' && steps.reuse-bounds.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          payload="${{ steps.pyimage.outputs.payload }}"
+          if ! printf '%s\n' "$payload" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "::warning title=model client bounds receipt::payload hash was not recorded; the next identical payload will remeasure"
+            exit 0
+          fi
+          if ! docker buildx imagetools create \
+              -t "ghcr.io/joemccann/radon-model-gateway:pbounds-${payload}" \
+              "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"; then
+            echo "::warning title=model client bounds receipt::payload bounds tag was not recorded; the next identical payload will remeasure"
+          fi
       - name: Record model gateway image input hash
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse-gateway.outputs.hit != 'true'
         run: |

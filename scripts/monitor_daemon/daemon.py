@@ -9,11 +9,12 @@ Supports state persistence and market hours awareness.
 import asyncio
 import concurrent.futures
 import contextlib
+import copy
 import logging
 import os
 import socket
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, Any, Iterator, List, Optional
 
@@ -362,6 +363,11 @@ class MonitorDaemon:
                 retained = True
                 error = f"handler {handler.name} timed out after {deadline:.0f}s"
                 logger.error(error)
+                # The late worker must not latch last_run or heartbeat ok
+                # over the timeout row recorded below.
+                mark_timed_out = getattr(handler, "mark_run_timed_out", None)
+                if callable(mark_timed_out):
+                    mark_timed_out()
                 # R-109: the worker thread keeps running. When it finally
                 # finishes it calls _mark_success -> record_success, which
                 # CLEARS blocked_until and writes an ok row over the embargo
@@ -465,12 +471,17 @@ class MonitorDaemon:
             return
 
         state = {
-            "saved_at": datetime.now().isoformat(),
+            "saved_at": datetime.now(timezone.utc).isoformat(),
             "handlers": {}
         }
 
         for handler in self.handlers:
-            state["handlers"][handler.name] = handler.get_state()
+            # A timed-out worker may still be mutating this handler: copy its
+            # state under the handler's lock instead of serializing live
+            # containers.
+            lock = getattr(handler, "state_lock", None)
+            with lock if lock is not None else contextlib.nullcontext():
+                state["handlers"][handler.name] = copy.deepcopy(handler.get_state())
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         atomic_save(str(self.state_file), state)

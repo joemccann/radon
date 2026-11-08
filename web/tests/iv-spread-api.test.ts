@@ -7,7 +7,7 @@
  * GET-only: the series updates once per session (radon-iv-spread.timer runs
  * fetch_iv_spread.py directly), so there is no manual-scan POST. Reads
  * through the dbFirstRead chokepoint — Turso scan_snapshots row
- * (service='iv-spread') first, disk data/iv_spread.json fallback — and
+ * (service='iv-spread') first, last-in-memory fallback — and
  * ALWAYS returns 200; absent, stale and degraded data are all 200, never a
  * 4xx/5xx (feedback_http_status_for_real_errors).
  *
@@ -28,15 +28,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: mockGetDb,
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -117,8 +108,6 @@ beforeEach(async () => {
   vi.resetModules();
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
-  mockReadFile.mockReset();
-  mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 });
 
 afterEach(() => {
@@ -126,14 +115,14 @@ afterEach(() => {
 });
 
 describe("GET /api/iv-spread — source selection", () => {
-  it("serves the latest Turso snapshot (Turso-first over an older disk cache)", async () => {
+  it("serves the latest Turso snapshot (newest row wins)", async () => {
     const fresh = buildPayload();
     await insertSnapshot(fresh);
     const stale = buildPayload({
       scan_time: new Date(Date.now() - 6 * 3_600_000).toISOString(),
       status: "stale_source",
     });
-    mockReadFile.mockResolvedValue(JSON.stringify(stale));
+    await insertSnapshot(stale);
 
     const { GET } = await import("../app/api/iv-spread/route");
     const res = await GET();
@@ -143,10 +132,12 @@ describe("GET /api/iv-spread — source selection", () => {
     expect(body.scan_time).toBe(fresh.scan_time);
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload());
 
     const { GET } = await import("../app/api/iv-spread/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -154,13 +145,14 @@ describe("GET /api/iv-spread — source selection", () => {
     expect(body.missing).toBeUndefined();
   });
 
-  it("serves disk with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+  it("serves the last good read from memory with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+    await insertSnapshot(buildPayload());
+    const { GET } = await import("../app/api/iv-spread/route");
+    await GET();
+
     mockGetDb.mockImplementationOnce(() => {
       throw new Error("hrana stream not found");
     });
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload()));
-
-    const { GET } = await import("../app/api/iv-spread/route");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -318,7 +310,7 @@ describe("GET /api/iv-spread — degradation passes through untransformed", () =
 });
 
 describe("GET /api/iv-spread — route contract", () => {
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/iv-spread/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

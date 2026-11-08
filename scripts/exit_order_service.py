@@ -22,6 +22,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import pytz
@@ -34,6 +35,7 @@ except ImportError:
     sys.exit(1)
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from utils.ib_order_status import FILLED, TERMINAL_FAILED, UNACKNOWLEDGED, WORKING
 
 # Configuration
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
@@ -48,6 +50,45 @@ SERVICE_LOG_PATH = PROJECT_DIR / "data" / "exit_order_service.log"
 # IB will accept limit orders within this percentage of current price
 # e.g., 0.5 means we can place orders up to 50% above current price
 IB_LIMIT_THRESHOLD = 0.40  # 40% above current - conservative estimate
+
+
+class ExitTargetStatus(str, Enum):
+    """``journal.payload.exit_orders.target.status`` for this legacy service.
+
+    PENDING_MANUAL -> ACTIVE is the only transition, taken only when
+    classify_placement() returns ACCEPTED. The monitor daemon's handler uses
+    its own PENDING/PLACED vocabulary and ``price`` field on separate rows.
+    """
+
+    PENDING_MANUAL = "PENDING_MANUAL"
+    ACTIVE = "ACTIVE"
+
+
+class PlacementOutcome(str, Enum):
+    ACCEPTED = "accepted"              # broker acknowledged (working, filled, or permId)
+    REJECTED = "rejected"              # terminal failure: never live
+    UNACKNOWLEDGED = "unacknowledged"  # no broker identity yet: outcome unknown
+
+
+def classify_placement(status: Optional[str], perm_id: Optional[int]) -> PlacementOutcome:
+    """Name a just-placed order's outcome from its status and broker permId."""
+    if status in TERMINAL_FAILED:
+        return PlacementOutcome.REJECTED
+    if status in FILLED or (status in WORKING and status not in UNACKNOWLEDGED):
+        return PlacementOutcome.ACCEPTED
+    # Either nonzero broker id establishes identity (scripts/CLAUDE.md, ack rule 1).
+    if perm_id:
+        return PlacementOutcome.ACCEPTED
+    return PlacementOutcome.UNACKNOWLEDGED
+
+
+def _trade_perm_id(trade: Any) -> int:
+    """First nonzero int permId on the order or its status, else 0."""
+    for source in (getattr(trade, "order", None), getattr(trade, "orderStatus", None)):
+        perm_id = getattr(source, "permId", None)
+        if isinstance(perm_id, int) and not isinstance(perm_id, bool) and perm_id:
+            return perm_id
+    return 0
 
 
 def log(message: str, level: str = "INFO"):
@@ -129,7 +170,7 @@ def load_pending_exits() -> List[Dict[str, Any]]:
         target = exit_orders.get("target", {})
         
         # Check if this has a pending manual target order
-        if target.get("status") == "PENDING_MANUAL":
+        if target.get("status") == ExitTargetStatus.PENDING_MANUAL.value:
             pending.append({
                 "trade_id": trade.get("id"),
                 "ticker": trade.get("ticker"),
@@ -443,15 +484,22 @@ def place_target_order(
         trade = client.place_order(combo, order)
         client.sleep(3)
         
-        if trade.orderStatus.status in ['Submitted', 'PreSubmitted']:
-            log(f"✓ Target order placed: #{trade.order.orderId} @ ${target_price:.2f}")
+        status = getattr(trade.orderStatus, "status", None)
+        outcome = classify_placement(status, _trade_perm_id(trade))
+        if outcome is PlacementOutcome.ACCEPTED:
+            log(f"✓ Target order placed: #{trade.order.orderId} @ ${target_price:.2f} ({status})")
             return trade.order.orderId
-        elif trade.orderStatus.status in ['Cancelled', 'Inactive']:
-            log(f"✗ Order rejected: {trade.orderStatus.status}", "WARNING")
+        if outcome is PlacementOutcome.REJECTED:
+            log(f"✗ Order rejected: {status}", "WARNING")
             return None
-        else:
-            log(f"Order status: {trade.orderStatus.status}")
-            return trade.order.orderId
+        # No broker acknowledgement: the journal stays PENDING_MANUAL, so a
+        # late ack would leave a live order the next run places again.
+        log(f"✗ Order not acknowledged ({status or 'no status'}); cancelling", "WARNING")
+        try:
+            client.cancel_order(trade.order)
+        except Exception as cancel_exc:  # noqa: BLE001 - best effort on a likely-dropped order
+            log(f"Cancel of unacknowledged order #{trade.order.orderId} failed: {cancel_exc}", "ERROR")
+        return None
     
     except Exception as e:
         log(f"Error placing order: {e}", "ERROR")
@@ -522,14 +570,26 @@ def check_and_place_orders(dry_run: bool = False) -> Dict[str, Any]:
                 )
                 
                 if order_id:
-                    result["placed_orders"].append({
+                    placed = {
                         "ticker": ticker,
                         "order_id": order_id,
                         "target_price": target_price
-                    })
-                    
+                    }
+                    result["placed_orders"].append(placed)
+
                     if not dry_run:
-                        update_trade_log(trade_id, order_id, "ACTIVE")
+                        placed["journaled"] = update_trade_log(
+                            trade_id, order_id, ExitTargetStatus.ACTIVE.value,
+                        )
+                        if not placed["journaled"]:
+                            # The row still reads PENDING_MANUAL with a live
+                            # order at IB: the next run would place it again.
+                            message = (
+                                f"{ticker}: order #{order_id} is live but the journal "
+                                f"write failed (trade {trade_id} still PENDING_MANUAL)"
+                            )
+                            log(message, "ERROR")
+                            result["errors"].append(message)
             else:
                 gap = target_price - current_price
                 gap_pct = (gap / current_price) * 100
@@ -630,11 +690,15 @@ def main():
     else:
         # Single check
         result = check_and_place_orders(dry_run=args.dry_run)
-        
+
         if result["placed_orders"]:
             print(f"\n✓ Placed {len(result['placed_orders'])} order(s)")
         elif result["pending_orders"]:
             print(f"\n⏳ {len(result['pending_orders'])} order(s) still pending - target too far from market")
+        if result["errors"]:
+            for error in result["errors"]:
+                print(f"✗ {error}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

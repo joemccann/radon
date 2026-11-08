@@ -45,7 +45,6 @@ Hosts without systemctl (the laptop) degrade to a no-op.
 """
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 import subprocess
@@ -54,6 +53,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .check import CheckOutcome
+
+try:
+    from utils.atomic_io import atomic_save, verified_load
+except ImportError:  # pragma: no cover - package-qualified import path
+    from scripts.utils.atomic_io import atomic_save, verified_load
 
 log = logging.getLogger("watchdog.units")
 
@@ -281,13 +285,19 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
 
 def _load_state(path: Path) -> dict:
     """Previous-cycle snapshot keyed by unit id; {} when missing or
-    corrupt (a corrupt file just costs one cycle of flap/delta memory).
+    corrupt. Writes are atomic (temp + replace + checksum), so corrupt means
+    tampered or a disk fault: it costs one cycle of flap/delta memory and
+    fails toward paging (an already-paged oneshot failure pages again), and
+    it is logged rather than silently treated as a first run.
     """
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        payload = verified_load(str(path))
+    except FileNotFoundError:
         return {}
-    units = payload.get("units")
+    except (OSError, ValueError) as exc:  # JSONDecodeError is a ValueError
+        log.warning("units state unreadable (%s), starting from empty: %s", path, exc)
+        return {}
+    units = payload.get("units") if isinstance(payload, dict) else None
     return units if isinstance(units, dict) else {}
 
 
@@ -303,8 +313,7 @@ def _save_state(path: Path, current: list[dict], now: datetime) -> None:
         for unit in current
     }
     payload = {"cycle_at": now.isoformat().replace("+00:00", "Z"), "units": snapshot}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_save(str(path), payload)
 
 
 # ── evaluation ───────────────────────────────────────────────────────

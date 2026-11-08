@@ -4,30 +4,35 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { readFile, readdir, writeFile, stat, mkdir } from "fs/promises";
+import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { isCriDataStale } from "@/lib/criStaleness";
-import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
+import { hasCompleteRvolHistory } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
-import { isSkewCacheFresh, matchesInternalsSkewVariant } from "@/lib/internalsSkewCache";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
+import { isSkewCacheFresh } from "@/lib/internalsSkewCache";
 import { dbExecute } from "@/lib/dbExecute";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import {
   toLongRangeSkewPoints,
   type LongRangeSkewHistoryPayload,
 } from "@/lib/internalsSkewSeries";
 
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state. Without
+// this, the framework freezes the first response and serves stale data until
+// the dev server restarts.
 export const dynamic = "force-dynamic";
 
 const PROJECT_ROOT = join(/* turbopackIgnore: true */ process.cwd(), "..");
-const CACHE_PATH = join(PROJECT_ROOT, "data", "cri.json");
+// Write-only archive consumed by scripts/strength_confirmation_scanner.py and
+// scripts/generate_regime_share.py. This route never reads it back.
 const SCHEDULED_DIR = join(PROJECT_ROOT, "data", "cri_scheduled");
-const MENTHORQ_DIR = join(PROJECT_ROOT, "data", "menthorq_cache");
-const CACHE_DIR = join(PROJECT_ROOT, "data", "cache");
+// Bound on the Turso reads below; memory serves past it.
+const DB_READ_TIMEOUT_MS = 2500;
+// Enough sessions to chart; menthorq_cta holds one row per trading day.
+const MENTHORQ_SKEW_HISTORY_ROWS = 400;
 
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
 function todayET(): string {
@@ -193,81 +198,52 @@ type MenthorqSkewHistoryPoint = {
   spx_skew?: number | null;
 };
 
+/** Menthorq CTA position-spread history from Turso (last-in-memory on failure). */
 async function readMenthorqSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
-  try {
-    const files = await readdir(MENTHORQ_DIR);
-    const ctaFiles = files
-      .filter((f) => /^cta_\d{4}-\d{2}-\d{2}\.json$/.test(f))
-      .sort();
-    const points: MenthorqSkewHistoryPoint[] = [];
-
-    for (const file of ctaFiles) {
-      const path = join(MENTHORQ_DIR, file);
-      let raw: unknown;
-      try {
-        raw = JSON.parse(await readFile(path, "utf-8"));
-      } catch {
-        continue;
-      }
-
-      if (!raw || typeof raw !== "object") continue;
-      const payload = raw as Record<string, unknown>;
-      const extracted = extractNqSkewFromMenthorqPayload(payload);
-      if (extracted.nq_skew == null && extracted.spx_position == null && extracted.nq_position == null) continue;
-
-      const dateRaw = asString(payload.date);
-      const fileDate = file.slice(4, 14);
-      const date = dateRaw || fileDate;
-      if (!date) continue;
-
-      points.push({
-        date,
-        metric: "cta_position_spread",
-        nq_skew: extracted.nq_skew,
-        spx_position: extracted.spx_position,
-        nq_position: extracted.nq_position,
-        spx_skew: extracted.spx_position,
-      });
-    }
-
-    return points;
-  } catch {
-    return [];
-  }
+  const result = await dbFirstRead({
+    fromDb: readMenthorqSkewHistoryFromDb,
+    // Unused: the route only charts this history.
+    maxAgeMs: DB_READ_TIMEOUT_MS,
+    label: "internals-menthorq-history",
+    sourceTimeoutMs: DB_READ_TIMEOUT_MS,
+  });
+  return result.ok ? result.data : [];
 }
 
-async function readCachedLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
-  try {
-    const files = await readdir(CACHE_DIR);
-    const candidates = files.filter((file) => /^internals_skew_history_.*\.json$/.test(file));
-    if (candidates.length === 0) return [];
+async function readMenthorqSkewHistoryFromDb(): Promise<TimestampedRead<MenthorqSkewHistoryPoint[]> | null> {
+  const result = await dbExecute({
+    sql: `SELECT date, payload FROM menthorq_cta ORDER BY date DESC LIMIT ?`,
+    args: [MENTHORQ_SKEW_HISTORY_ROWS],
+  }, { label: "internals-menthorq-history", timeoutMs: DB_READ_TIMEOUT_MS });
+  if (result.rows.length === 0) return null;
 
-    const ranked = await Promise.all(candidates.map(async (file) => {
-      const path = join(CACHE_DIR, file);
-      const fileStat = await stat(path);
-      return { path, mtimeMs: fileStat.mtimeMs };
-    }));
-    ranked.sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-    for (const candidate of ranked) {
-      try {
-        const raw = JSON.parse(await readFile(candidate.path, "utf-8")) as LongRangeSkewHistoryPayload;
-        if (matchesInternalsSkewVariant(raw, {
-          nqTicker: "NDX",
-          spxTicker: "SPX",
-          timeframe: "5Y",
-          nqDelta: 25,
-          spxDelta: 25,
-        })) return toLongRangeSkewPoints(raw);
-      } catch {
-        // Skip corrupt or mismatched variants.
-      }
+  const rows = (result.rows as unknown as Array<{ date: string; payload: string }>).slice().reverse();
+  const points: MenthorqSkewHistoryPoint[] = [];
+  for (const row of rows) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(row.payload) as Record<string, unknown>;
+    } catch {
+      continue;
     }
-    return [];
-  } catch {
-    return [];
+    const extracted = extractNqSkewFromMenthorqPayload(payload);
+    if (extracted.nq_skew == null && extracted.spx_position == null && extracted.nq_position == null) continue;
+    points.push({
+      date: asString(payload.date) || row.date,
+      metric: "cta_position_spread",
+      nq_skew: extracted.nq_skew,
+      spx_position: extracted.spx_position,
+      nq_position: extracted.nq_position,
+      spx_skew: extracted.spx_position,
+    });
   }
+  return { data: points, timestampMs: contentTimestampMs(rows[rows.length - 1].date) };
 }
+
+// FastAPI's /internals/skew-history is the source; its own UW cache sits behind
+// it. The last good response is held here so a poll within a calendar day stays
+// off the network and an outage keeps serving it.
+let lastLongRangeSkewHistory: MenthorqSkewHistoryPoint[] = [];
 
 async function readInternalsSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
   const longRangeHistory = await readLongRangeSkewHistory();
@@ -280,9 +256,9 @@ function toSafeNumber(value: unknown): number | null {
 }
 
 async function readLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
-  const cached = await readCachedLongRangeSkewHistory();
+  const cached = lastLongRangeSkewHistory;
 
-  // If the cache already has recent data, serve it without a network round-trip.
+  // If memory already has recent data, serve it without a network round-trip.
   // "Recent" = latest data-point within 1 calendar day of today (ET).
   if (cached.length > 0) {
     const latestDate = cached[cached.length - 1].date;
@@ -291,7 +267,7 @@ async function readLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
     }
   }
 
-  // Cache is stale or empty — fetch fresh from FastAPI (which has its own
+  // Memory is stale or empty — fetch fresh from FastAPI (which has its own
   // 15-min UW cache).  This runs even when the market is closed so that
   // overnight / weekend UW publishes are picked up.
   try {
@@ -300,9 +276,12 @@ async function readLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
       timeout: 90_000,
     });
     const points = toLongRangeSkewPoints(response);
-    if (points.length > 0) return points;
+    if (points.length > 0) {
+      lastLongRangeSkewHistory = points;
+      return points;
+    }
   } catch {
-    // fall through to stale cache
+    // fall through to the last good response
   }
 
   return cached;
@@ -451,154 +430,88 @@ function normalizeCriPayload(
   };
 }
 
-let bgScanInFlight = false;
+type LatestCri = { data: Record<string, unknown>; takenAtMs: number | null };
 
-/** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
- *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
-async function readLatestCri(): Promise<{ data: object; path: string } | null> {
-  async function readCriCandidate(filePath: string): Promise<CriCacheCandidate | null> {
-    try {
-      const raw = await readFile(filePath, "utf-8");
-      const jsonStart = raw.indexOf("{");
-      if (jsonStart === -1) return null;
-      const fileStat = await stat(filePath);
-      return {
-        path: filePath,
-        mtimeMs: fileStat.mtimeMs,
-        data: JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async function readLatestScheduledCri(): Promise<CriCacheCandidate | null> {
-    try {
-      const files = await readdir(SCHEDULED_DIR);
-      const jsonFiles = files.filter((f) => f.startsWith("cri-") && f.endsWith(".json")).sort();
-      for (let index = jsonFiles.length - 1; index >= 0; index -= 1) {
-        const candidate = await readCriCandidate(join(SCHEDULED_DIR, jsonFiles[index]));
-        if (candidate) return candidate;
-      }
-    } catch {
-      // dir may not exist yet
-    }
-
-    return null;
-  }
-
-  async function readLatestDbCri(): Promise<CriCacheCandidate | null> {
-    try {
-      // Same bounded read as the regime route: dbExecute caps the read and
-      // drops a wedged client so the disk fallback still serves this request.
-      const result = await dbExecute({
-        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
-        args: [],
-      }, { label: "internals-cri", timeoutMs: 2500 });
-      if (result.rows.length === 0) return null;
-      const row = result.rows[0] as unknown as { taken_at: string; payload: string };
-      const mtimeMs = Date.parse(row.taken_at);
-      return {
-        path: `db:cri_snapshots/${row.taken_at}`,
-        mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : Date.now(),
-        data: JSON.parse(row.payload) as Record<string, unknown>,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  const dbCandidate = await readLatestDbCri();
-  const selected = selectPreferredCriCandidate(
-    dbCandidate ?? (await readLatestScheduledCri()),
-    await readCriCandidate(CACHE_PATH),
-  );
-
-  return selected ? { data: selected.data, path: selected.path } : null;
+async function readLatestCriFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  // Same bounded read as the regime route: dbExecute caps the read and drops a
+  // wedged client, and the last good read serves this request from memory.
+  const result = await dbExecute({
+    sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
+    args: [],
+  }, { label: "internals-cri", timeoutMs: DB_READ_TIMEOUT_MS });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { taken_at: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    timestampMs: contentTimestampMs(row.taken_at),
+  };
 }
 
-/** Latest Menthorq CTA payload from Turso — shared across hosts. Only used
- *  when the row actually carries tables; otherwise the disk cache serves. */
-async function readLatestMenthorqCacheFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const result = await dbExecute({
-      sql: `SELECT payload FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
-      args: [],
-    }, { label: "internals-menthorq", timeoutMs: 2500 });
-    if (result.rows.length === 0) return null;
-    const payload = JSON.parse(
-      String((result.rows[0] as unknown as { payload: string }).payload),
-    ) as Record<string, unknown>;
-    return payload.tables && typeof payload.tables === "object" ? payload : null;
-  } catch {
-    return null;
-  }
+/** Latest CRI snapshot from Turso, or the last good read held in memory. */
+async function readLatestCri(): Promise<LatestCri | null> {
+  const result = await dbFirstRead({
+    fromDb: readLatestCriFromDb,
+    // Unused: isCriDataStale judges the served read's own date and taken_at.
+    maxAgeMs: DB_READ_TIMEOUT_MS,
+    label: "internals-cri",
+    sourceTimeoutMs: DB_READ_TIMEOUT_MS,
+    // A row with a truncated RVOL history loses to the last complete read.
+    isDegraded: (data) => !hasCompleteRvolHistory(data),
+  });
+  return result.ok ? { data: result.data, takenAtMs: result.timestampMs } : null;
 }
 
-/** Read latest Menthorq CTA cache — Turso first, disk dir fallback. */
+async function readLatestMenthorqCacheFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const result = await dbExecute({
+    sql: `SELECT date, payload FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
+    args: [],
+  }, { label: "internals-menthorq", timeoutMs: DB_READ_TIMEOUT_MS });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { date: string; payload: string };
+  const payload = JSON.parse(String(row.payload)) as Record<string, unknown>;
+  return { data: payload, timestampMs: contentTimestampMs(row.date) };
+}
+
+/** Latest Menthorq CTA payload from Turso, or the last good one held in memory. */
 async function readLatestMenthorqCache(): Promise<Record<string, unknown> | null> {
-  return (await readLatestMenthorqCacheFromDb()) ?? readLatestMenthorqCacheFromDisk();
+  const result = await dbFirstRead({
+    fromDb: readLatestMenthorqCacheFromDb,
+    // Unused: this read only feeds a chart overlay.
+    maxAgeMs: DB_READ_TIMEOUT_MS,
+    label: "internals-menthorq",
+    sourceTimeoutMs: DB_READ_TIMEOUT_MS,
+    // A row without tables carries nothing to extract.
+    isDegraded: (payload) => !payload.tables || typeof payload.tables !== "object",
+  });
+  return result.ok && result.data.tables && typeof result.data.tables === "object"
+    ? result.data
+    : null;
 }
 
-async function readLatestMenthorqCacheFromDisk(): Promise<Record<string, unknown> | null> {
-  try {
-    const files = await readdir(MENTHORQ_DIR);
-    const ctaFiles = files
-      .filter((f) => /^cta_\d{4}-\d{2}-\d{2}\.json$/.test(f))
-      .sort();
-    if (ctaFiles.length === 0) return null;
-
-    for (let index = ctaFiles.length - 1; index >= 0; index -= 1) {
-      const path = join(MENTHORQ_DIR, ctaFiles[index]);
-      try {
-        const raw = await readFile(path, "utf-8");
-        return JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        // Skip corrupt file and continue to older cache.
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Check if the latest cached data is stale (market-hours aware). */
-async function isCacheStale(filePath: string, data: Record<string, unknown>): Promise<boolean> {
-  try {
-    if (filePath.startsWith("db:cri_snapshots/")) {
-      const takenAtIso = filePath.slice("db:cri_snapshots/".length);
-      const mtimeMs = Date.parse(takenAtIso);
-      if (!Number.isFinite(mtimeMs)) return true;
-      return isCriDataStale(data, mtimeMs, todayET(), isMarketOpenNow());
-    }
-    const s = await stat(filePath);
-    return isCriDataStale(data, s.mtimeMs, todayET(), isMarketOpenNow());
-  } catch {
-    return true;
-  }
+/** Check if the latest snapshot is stale (market-hours aware). */
+function isCacheStale(takenAtMs: number | null, data: Record<string, unknown>): boolean {
+  if (takenAtMs === null) return true;
+  return isCriDataStale(data, takenAtMs, todayET(), isMarketOpenNow());
 }
 
 /** Fire-and-forget: run CRI scan via FastAPI and save results */
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-
-  console.log("[CRI] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 })
-    .then(async (data) => {
-      await mkdir(SCHEDULED_DIR, { recursive: true });
-      const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
-        .replace(" ", "T").slice(0, 16).replace(":", "-");
-      const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
-      const payload = JSON.stringify(data, null, 2);
-      await writeFile(outPath, payload);
-      console.log(`[CRI] Background scan complete → ${outPath}`);
-    })
-    .catch((err) => { console.error("[CRI] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
+async function runCriScanAndArchive(): Promise<void> {
+  const data = await radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 });
+  await mkdir(SCHEDULED_DIR, { recursive: true });
+  const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
+    .replace(" ", "T").slice(0, 16).replace(":", "-");
+  const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
+  await writeFile(outPath, JSON.stringify(data, null, 2));
+  console.log(`[CRI] Background scan archived → ${outPath}`);
 }
+
+// One CRI machine with /api/regime (sharedKey "cri"): both routes revalidate
+// the same /regime/scan, so a scan in flight or backing off in one gates both.
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "CRI",
+  run: runCriScanAndArchive,
+  sharedKey: "cri",
+});
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
@@ -611,7 +524,7 @@ export async function GET(): Promise<Response> {
     readLatestMenthorqCache(),
     readInternalsSkewHistory(),
   ]);
-  const data = normalizeCriPayload((result?.data ?? EMPTY_CRI) as Record<string, unknown>, menthorqCache, menthorqSkewHistory);
+  const data = normalizeCriPayload(result?.data ?? EMPTY_CRI, menthorqCache, menthorqSkewHistory);
   const currentMarketOpen = isMarketOpenNow();
 
   // Keep market_open aligned with the current session state for every request.
@@ -619,7 +532,7 @@ export async function GET(): Promise<Response> {
 
   // Stale-while-revalidate: return cached data immediately,
   // kick off a background scan if today's data is stale or from stale date.
-  if (!result || await isCacheStale(result.path, data)) {
+  if (!result || isCacheStale(result.takenAtMs, data)) {
     triggerBackgroundScan();
   }
 

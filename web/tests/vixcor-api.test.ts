@@ -6,7 +6,7 @@
  * GET-only: the series updates once per session (radon-vixcor.timer runs
  * fetch_vixcor.py directly), so there is no manual-scan POST. Reads through
  * the dbFirstRead chokepoint — Turso scan_snapshots row (service='vixcor')
- * first, disk data/vixcor.json fallback — and ALWAYS returns 200; absent,
+ * first, last-in-memory fallback — and ALWAYS returns 200; absent,
  * stale, degraded and parent-lagging data are all 200, never a 4xx/5xx
  * (feedback_http_status_for_real_errors).
  *
@@ -28,15 +28,6 @@ vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: mockGetDb,
 }));
-
-const mockReadFile = vi.fn();
-vi.mock("fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    readFile: (...args: unknown[]) => mockReadFile(...args),
-  };
-});
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE scan_snapshots (
@@ -157,7 +148,6 @@ async function insertSnapshot(payload: Payload, scanTime?: string): Promise<void
   });
 }
 
-const ENOENT = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
 
 async function jsonOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
@@ -182,7 +172,6 @@ beforeEach(async () => {
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockReturnValue(db);
-  mockReadFile.mockRejectedValue(ENOENT);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -193,12 +182,10 @@ afterEach(() => {
 });
 
 describe("GET /api/vixcor — source selection", () => {
-  it("serves the latest Turso snapshot (Turso-first over an older disk cache)", async () => {
+  it("serves the latest Turso snapshot (newest row wins)", async () => {
     await insertSnapshot(buildPayload());
     const staleTime = new Date(Date.now() - 60 * 60_000).toISOString();
-    mockReadFile.mockResolvedValue(
-      JSON.stringify(buildPayload({ scan_time: staleTime, count: 1 })),
-    );
+    await insertSnapshot(buildPayload({ scan_time: staleTime, count: 1 }));
 
     const { GET } = await import("../app/api/vixcor/route");
     const res = await GET();
@@ -211,10 +198,12 @@ describe("GET /api/vixcor — source selection", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("falls back to the disk cache when Turso has no rows", async () => {
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ count: 5170 })));
+  it("serves the last good read from memory when Turso has no rows", async () => {
+    await insertSnapshot(buildPayload({ count: 5170 }));
 
     const { GET } = await import("../app/api/vixcor/route");
+    await GET();
+    await db.execute("DELETE FROM scan_snapshots");
     const res = await GET();
     expect(res.status).toBe(200);
     const json = await jsonOf(res);
@@ -222,13 +211,14 @@ describe("GET /api/vixcor — source selection", () => {
     expect(json.missing).toBeUndefined();
   });
 
-  it("serves disk with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+  it("serves the last good read from memory with HTTP 200 when the Turso read throws (never a 5xx)", async () => {
+    await insertSnapshot(buildPayload({ count: 5169 }));
+    const { GET } = await import("../app/api/vixcor/route");
+    await GET();
+
     mockGetDb.mockReturnValue({
       execute: () => Promise.reject(new Error("hrana: stream closed")),
     } as unknown as Client);
-    mockReadFile.mockResolvedValue(JSON.stringify(buildPayload({ count: 5169 })));
-
-    const { GET } = await import("../app/api/vixcor/route");
     const res = await GET();
     expect(res.status).toBe(200);
     const json = await jsonOf(res);
@@ -390,7 +380,7 @@ describe("GET /api/vixcor — degradation statuses pass through untransformed", 
 });
 
 describe("GET /api/vixcor — route contract", () => {
-  it("declares force-dynamic per the disk-backed route cache contract", async () => {
+  it("declares force-dynamic per the snapshot route cache contract", async () => {
     const route = await import("../app/api/vixcor/route");
     expect(route.dynamic).toBe("force-dynamic");
   });

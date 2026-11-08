@@ -485,3 +485,5 @@ whichever code default is deployed.
 
 Implement default is `0.5`. `0.25` is the opt-in stricter setting.
 `1.0` is refused. Production `RADON_KELLY_ENFORCE_ORDERS` still waits Joe.
+
+The order-path guard reads its bankroll from the latest Turso `portfolio_snapshots` row. Evaluate M6 reads open max losses from the same row and fails closed when it is unreadable.

@@ -344,6 +344,23 @@ def test_discover_is_idempotent_without_claiming_attempts(db):
     assert db.execute("SELECT count(*) FROM marketdesk_articles WHERE last_error IS NOT NULL OR attempts != 0").fetchone()[0] == 0
 
 
+def test_discover_twenty_five_refs_is_one_statement(db):
+    """PERF-044: the latest-25 listing must not pay one Hrana POST per article."""
+    refs = [ref(f"Disc{i:07d}") for i in range(25)]
+    db.calls.clear()
+    store.discover(refs)
+    assert len(db.calls) == 1, (
+        f"Turso statements {len(db.calls)} "
+        "(want 1 multi-row INSERT for 25 articles)"
+    )
+    assert db.execute("SELECT count(*) FROM marketdesk_articles").fetchone()[0] == 25
+    ids = {row[0] for row in db.execute("SELECT article_id FROM marketdesk_articles")}
+    assert ids == {item.article_id for item in refs}
+    assert db.execute(
+        "SELECT count(*) FROM marketdesk_articles WHERE last_error IS NOT NULL OR attempts != 0"
+    ).fetchone()[0] == 0
+
+
 def test_pending_replays_off_listing_fairly_without_lookback(db):
     store.discover([ref("PENDING0001", hours_ago=200), ref("PENDING0002")])
     db.execute("UPDATE marketdesk_articles SET updated_at='2026-10-25T00:00:00Z' WHERE article_id='PENDING0002'")

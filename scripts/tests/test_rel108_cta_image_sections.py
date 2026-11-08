@@ -1,4 +1,4 @@
-"""REL-108 / R-315: execute image loading and GET admission with a synthetic disk cache."""
+"""REL-108 / R-315: execute image loading and GET admission with a synthetic Turso read."""
 import json
 from pathlib import Path
 import shutil
@@ -27,9 +27,9 @@ const get = source.slice(getStart, getEnd).replace('export async', 'async')
   .replace('request: Request', 'request') +
   '  await loadFonts(); return render(); }';
 if (start < 0 || end < 0 || getStart < 0 || getEnd < 0) throw Error('admission boundary missing');
-const context = vm.createContext({Response, URL, CACHE_DIR: '/mock/cache',
-  readdir: async () => ['cta_mock.json'], readFile: async () => JSON.stringify(input.cache),
-  join: require('node:path').join, reconcileCtaTables: value => value,
+const context = vm.createContext({Response, URL, readLatestCtaFromDb: null, CTA_IMAGE_MAX_AGE_MS: 0,
+  dbFirstRead: async () => ({ok: true, source: 'db', data: input.cache, timestampMs: 0, fresh: true}),
+  reconcileCtaTables: value => value,
   deduplicateTables: value => value,
   requireRouteAccess: async () => ({ok: true}),
   loadFonts: async () => {fontCalls++; return [];},

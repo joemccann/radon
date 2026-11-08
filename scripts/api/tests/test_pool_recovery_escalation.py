@@ -24,10 +24,11 @@ import scripts.api.server as server
 
 
 @pytest.fixture(autouse=True)
-def _reset_state(monkeypatch):
+def _reset_state(monkeypatch, tmp_path):
     """Reset the guard state, force out of test_mode (the guard short-circuits
     on test_mode by design), and install a sentinel pool + restart hook.
     """
+    monkeypatch.setattr(server, "POOL_RECOVERY_STATE_FILE", tmp_path / "pool-recovery.json")
     server._pool_recovery_state["in_progress"] = False
     server._pool_recovery_state["last_attempt_at"] = 0.0
     server._pool_recovery_state["consecutive_failures"] = 0

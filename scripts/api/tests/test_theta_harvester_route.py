@@ -9,6 +9,14 @@ from api import auth, server
 from api.subprocess import ScriptResult
 
 
+def _gate(name, cooldown_s, *, armed):
+    """A fresh route gate; ``armed`` = a preset scan just succeeded."""
+    gate = server._preset_scan_gate(name, cooldown_s)
+    if armed:
+        gate.mark_success()
+    return gate
+
+
 @pytest.fixture(autouse=True)
 def force_live_mode(monkeypatch):
     """Pin test_mode False — RADON_API_TEST_MODE leaks process-wide from
@@ -28,8 +36,7 @@ def test_theta_harvester_preset_scan_second_post_inside_hourly_window_returns_ca
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
-    monkeypatch.setattr(server, "_theta_last_scan", -1e9)
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=False))
 
     payload = {
         "scan_time": "2026-06-24T16:00:00Z",
@@ -65,8 +72,7 @@ def test_theta_harvester_preset_scan_second_post_inside_hourly_window_returns_ca
 def test_theta_harvester_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_theta_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=True))
 
     payload = {
         "scan_time": "2026-06-24T16:00:00Z",
@@ -102,8 +108,7 @@ def test_theta_harvester_ticker_scan_bypasses_preset_cooldown(monkeypatch):
 def test_theta_harvester_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_theta_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=True))
 
     explicit_payload = {
         "scan_time": "2026-06-24T16:00:00Z",
@@ -150,13 +155,11 @@ def test_theta_harvester_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
 def test_theta_harvester_forwards_dte_and_credit_params(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    # Force the cooldown window to zero so the subprocess always runs. Setting
-    # only _theta_last_scan = 0.0 is fragile: `monotonic() - 0.0 < 600` on a
-    # freshly-booted CI runner (uptime < 10 min) leaves the cooldown active, so
-    # the params-matching mocked cache short-circuits and run_script never fires.
+    # Force the cooldown window to zero so the subprocess always runs. (The old
+    # bare float started at 0.0, so `monotonic() - 0.0 < 600` on a freshly
+    # booted runner kept the cooldown active; a fresh ScanGate never ran.)
     monkeypatch.setattr(server, "THETA_COOLDOWN_S", 0)
-    monkeypatch.setattr(server, "_theta_last_scan", 0.0)
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=False))
 
     payload = {
         "universe": "fallback:ndx100",
@@ -184,8 +187,7 @@ def test_theta_harvester_cooldown_does_not_serve_stale_params(monkeypatch):
     # than return the cached snapshot from the previous parameters.
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_theta_last_scan", time.monotonic())  # inside cooldown
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=True))  # inside cooldown
 
     cached_old = {
         "universe": "fallback:ndx100",
@@ -235,8 +237,7 @@ def test_theta_cooldown_skips_pre_earnings_snapshot(monkeypatch):
     """Pre-feature rows omit the earnings key — cooldown must not serve them."""
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server, "_theta_last_scan", time.monotonic())  # inside cooldown
-    monkeypatch.setattr(server, "_theta_scan_lock", None)
+    monkeypatch.setattr(server, "_THETA_GATE", _gate("theta", server.THETA_COOLDOWN_S, armed=True))  # inside cooldown
 
     pre_feature = {
         "universe": "fallback:ndx100",

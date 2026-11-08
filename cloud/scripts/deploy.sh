@@ -535,7 +535,7 @@ quarantine_green_marker() {
   green_marker_matches "$requested_sha" || return 0
   quarantine="${GREEN_MARKER_FILE}.invalid.${requested_sha:0:12}.$(date -u +%Y%m%dT%H%M%SZ).$$"
   mv "$GREEN_MARKER_FILE" "$quarantine"
-  log_warn "Quarantined stale green marker after the live gate failed"
+  log_warn "Quarantined green marker for ${requested_sha:0:12}: that release is not serving"
 }
 
 write_web_env() {
@@ -1368,6 +1368,9 @@ recover_pending_transition() {
   DEPLOY_SERVICES_RECOVERED=0
   sudo "$DEPLOY_ROOT_HELPER" stop-clean || return 1
   restore_release_backup "$JOURNAL_PREVIOUS_SHA" "$JOURNAL_BACKUP_DIR" || return 1
+  # The verified path writes the green marker before commit-transition. Once
+  # the previous release is back, a marker naming the failed SHA is false.
+  quarantine_green_marker "$JOURNAL_REQUESTED_SHA" || return 1
   revert_release_units
   sudo "$DEPLOY_ROOT_HELPER" recover || return 1
   DEPLOY_SERVICES_RECOVERED=1

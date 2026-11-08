@@ -15,6 +15,7 @@
 
 import { createClient } from "@libsql/client";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,6 +77,36 @@ async function appliedVersions(db: ReturnType<typeof createClient>): Promise<Set
   return set;
 }
 
+// Advisory row lock shared with migrate.py: the statements are identical and
+// pinned by scripts/tests/test_migrate.py::TestMigrationLock. TTL is on the
+// database clock; release is bound to the owner.
+const MIGRATION_LOCK_TABLE_SQL = "CREATE TABLE IF NOT EXISTS schema_migrations_lock (id INTEGER PRIMARY KEY CHECK (id = 1), owner TEXT NOT NULL, expires_at TEXT NOT NULL)";
+const MIGRATION_LOCK_ACQUIRE_SQL = "INSERT INTO schema_migrations_lock (id, owner, expires_at) VALUES (1, ?, datetime('now', ?)) ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, expires_at = excluded.expires_at WHERE schema_migrations_lock.expires_at < datetime('now')";
+const MIGRATION_LOCK_RELEASE_SQL = "DELETE FROM schema_migrations_lock WHERE id = 1 AND owner = ?";
+const MIGRATION_LOCK_TTL_SECONDS = 120;
+const MANUAL_MIGRATION_LOCK_TTL_SECONDS = 1800;
+
+async function acquireMigrationLock(
+  db: ReturnType<typeof createClient>,
+  owner: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  await db.execute(MIGRATION_LOCK_TABLE_SQL);
+  const result = await db.execute({
+    sql: MIGRATION_LOCK_ACQUIRE_SQL,
+    args: [owner, `+${ttlSeconds} seconds`],
+  });
+  return Number(result.rowsAffected ?? 0) > 0;
+}
+
+async function releaseMigrationLock(db: ReturnType<typeof createClient>, owner: string): Promise<void> {
+  try {
+    await db.execute({ sql: MIGRATION_LOCK_RELEASE_SQL, args: [owner] });
+  } catch (err) {
+    console.error(`[migrate] lock release failed (${String(err)}); it expires on its own`);
+  }
+}
+
 function splitStatements(sql: string): string[] {
   // Strip line comments, then split on `;` keeping non-empty statements.
   // libSQL doesn't support multi-statement execute() in one call, so
@@ -115,6 +146,21 @@ async function main(): Promise<void> {
   const db = createClient({ url, authToken });
 
   await ensureMigrationsTable(db);
+  const owner = `${os.hostname()}:${process.pid}:ts:${Date.now()}`;
+  const ttl = manualMigrationsEnabled() ? MANUAL_MIGRATION_LOCK_TTL_SECONDS : MIGRATION_LOCK_TTL_SECONDS;
+  if (!(await acquireMigrationLock(db, owner, ttl))) {
+    console.error("[migrate] another migrator holds schema_migrations_lock; not applying");
+    process.exit(75);
+    return;
+  }
+  try {
+    await applyPending(db, url);
+  } finally {
+    await releaseMigrationLock(db, owner);
+  }
+}
+
+async function applyPending(db: ReturnType<typeof createClient>, url: string): Promise<void> {
   const applied = await appliedVersions(db);
   const all = listMigrations();
   const pending = all.filter((m) => !applied.has(m.version));

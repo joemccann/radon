@@ -6,11 +6,8 @@ Fetches trading history from IB and reconciles with the Turso journal and
 latest portfolio snapshot.
 Designed to run asynchronously at startup without blocking the UI.
 
-Actions detected:
-- BUY: Opening long stock/option position
-- SELL: Closing long position (realized P&L)
-- SHORT: Opening short stock position
-- COVER: Closing short position (realized P&L)
+Actions: the shared journal labels (utils.journal_action), with the prior
+position derived from the broker's current position.
 - New positions not in the latest portfolio snapshot
 - Closed positions still in the latest portfolio snapshot
 """
@@ -28,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 from db.readers import read_journal_trades, read_latest_portfolio_snapshot
+from utils.journal_action import classify_net, side_sign
 
 
 def log(msg: str, level: str = "info"):
@@ -144,9 +142,27 @@ def _contract_key(e: dict) -> str:
     return f"{e['symbol']}|{e['sec_type']}"
 
 
-def group_executions_by_symbol(executions: list) -> dict:
-    """Group executions by contract (symbol + strike/expiry/right for options) and determine net action."""
+def _current_quantities(positions: Optional[list]) -> Optional[dict]:
+    """Broker position per contract key, or None when positions are unknown."""
+    if positions is None:
+        return None
+    current: dict = {}
+    for p in positions:
+        key = _contract_key(p)
+        current[key] = current.get(key, 0) + float(p.get("quantity") or 0)
+    return current
+
+
+def group_executions_by_symbol(executions: list, positions: Optional[list] = None) -> dict:
+    """Group executions by contract and label each group's net action.
+
+    The label comes from the shared classifier
+    (``utils.journal_action.classify_net``). The prior position is the
+    broker's current position less this session's net; without
+    ``positions`` it is unknown and the group's action is None (refused).
+    """
     grouped = {}
+    current = _current_quantities(positions)
 
     for e in executions:
         key = _contract_key(e)
@@ -170,40 +186,33 @@ def group_executions_by_symbol(executions: list) -> dict:
         if e.get("exec_id"):
             g["exec_ids"].append(str(e["exec_id"]))
 
-        qty = e["shares"] if e["side"] == "BOT" else -e["shares"]
+        qty = (side_sign(e["side"]) or 0) * e["shares"]
+        g.setdefault("buy_qty", 0)
+        g.setdefault("sell_qty", 0)
+        g["buy_qty" if qty > 0 else "sell_qty"] += abs(qty)
         g["net_quantity"] += qty
         g["total_value"] += e["shares"] * e["price"]
         g["total_commission"] += e["commission"]
         g["total_realized_pnl"] += e["realized_pnl"]
 
-    # Determine action for each group
     for key, g in grouped.items():
-        if g["net_quantity"] > 0:
-            g["action"] = "BUY" if g["sec_type"] == "STK" else "BUY_OPTION"
-        elif g["net_quantity"] < 0:
-            # Check if it's a close (has realized P&L) or short opening
-            if g["total_realized_pnl"] != 0:
-                g["action"] = "SELL" if g["sec_type"] == "STK" else "SELL_OPTION"
-            else:
-                g["action"] = "SHORT" if g["sec_type"] == "STK" else "SELL_TO_OPEN"
-        else:
-            # Net zero - could be a day trade or covered
-            if g["total_realized_pnl"] != 0:
-                g["action"] = "CLOSED"
-            else:
-                g["action"] = "NEUTRAL"
+        prior = None if current is None else current.get(key, 0) - g["net_quantity"]
+        label = classify_net(g["sec_type"], prior, g.get("buy_qty", 0), g.get("sell_qty", 0))
+        g["action"] = label.action.value if label is not None else None
+        g["label_fields"] = label.payload_fields() if label is not None else {}
 
     return grouped
 
-def find_new_trades(executions: list, trade_log: dict) -> list:
+def find_new_trades(executions: list, trade_log: dict, positions: Optional[list] = None) -> list:
     """Find executions that aren't in the trade log.
 
     Dedupe priority: ib_exec_id (preferred) → (ticker, date, structure)
     fingerprint (legacy fallback for rows imported before exec_id existed).
+    A group the classifier cannot label (unknown positions) is not reported.
     """
     existing_legacy = get_trade_log_trades(trade_log)
     existing_exec_ids = get_trade_log_exec_ids(trade_log)
-    grouped = group_executions_by_symbol(executions)
+    grouped = group_executions_by_symbol(executions, positions)
 
     new_trades = []
     for key, g in grouped.items():
@@ -227,7 +236,7 @@ def find_new_trades(executions: list, trade_log: dict) -> list:
                     already_logged = True
                     break
 
-        if already_logged or g["action"] in ["NEUTRAL"]:
+        if already_logged or g["action"] is None:
             continue
 
         entry = {
@@ -239,6 +248,7 @@ def find_new_trades(executions: list, trade_log: dict) -> list:
             "commission": g["total_commission"],
             "realized_pnl": g["total_realized_pnl"],
             "sec_type": g["sec_type"],
+            **g["label_fields"],
         }
         if composite_exec_id:
             entry["ib_exec_id"] = composite_exec_id
@@ -531,7 +541,7 @@ def main():
         
         # Find discrepancies
         log("Checking for new trades...")
-        new_trades = find_new_trades(executions, trade_log)
+        new_trades = find_new_trades(executions, trade_log, positions)
         
         log("Checking position discrepancies...")
         discrepancies = find_position_discrepancies(positions, portfolio)

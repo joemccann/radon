@@ -14,7 +14,15 @@ import type { TSchema, Static } from "@sinclair/typebox";
 // ── Result types ──────────────────────────────────────────────────────
 
 export type ScriptSuccess<T> = { ok: true; data: T };
-export type ScriptFailure = { ok: false; exitCode: number | null; stderr: string };
+export type ScriptFailure = {
+  ok: false;
+  exitCode: number | null;
+  stderr: string;
+  /** The runner killed the script at `timeout`; not the script's own failure. */
+  timedOut?: true;
+  /** stdout passed `maxOutput` and was cut, so it was never parsed. */
+  truncated?: true;
+};
 export type ScriptResult<T> = ScriptSuccess<T> | ScriptFailure;
 
 // ── Options ───────────────────────────────────────────────────────────
@@ -154,11 +162,18 @@ export function runScript<T = unknown, S extends TSchema | undefined = undefined
 
     let stdout = "";
     let stderr = "";
+    let truncated = false;
+    let timedOut = false;
 
     proc.stdout?.on("data", (chunk: Buffer) => {
+      if (truncated) return;
       const text = chunk.toString();
       if (stdout.length + text.length <= maxOutput) {
         stdout += text;
+      } else {
+        // Keep nothing past the cap: a later small chunk must not be spliced
+        // onto a prefix with a hole in it.
+        truncated = true;
       }
     });
 
@@ -167,6 +182,7 @@ export function runScript<T = unknown, S extends TSchema | undefined = undefined
     });
 
     const timer = setTimeout(() => {
+      timedOut = true;
       proc.kill("SIGKILL");
     }, timeout);
 
@@ -178,6 +194,16 @@ export function runScript<T = unknown, S extends TSchema | undefined = undefined
     proc.on("close", (code: number | null) => {
       clearTimeout(timer);
 
+      if (timedOut) {
+        resolve({
+          ok: false,
+          exitCode: code,
+          stderr: `Script timed out after ${timeout}ms${stderr ? `: ${stderr}` : ""}`,
+          timedOut: true,
+        });
+        return;
+      }
+
       if (code !== 0) {
         resolve({ ok: false, exitCode: code, stderr });
         return;
@@ -186,6 +212,17 @@ export function runScript<T = unknown, S extends TSchema | undefined = undefined
       // Skip JSON parsing for scripts that write to files instead of stdout
       if (rawOutput) {
         resolve({ ok: true, data: stdout as S extends TSchema ? Static<S> : T });
+        return;
+      }
+
+      // A cut document is not malformed JSON; say what actually happened.
+      if (truncated) {
+        resolve({
+          ok: false,
+          exitCode: code,
+          stderr: `Output exceeded ${maxOutput} chars and was truncated: ${stdout.slice(0, 500)}`,
+          truncated: true,
+        });
         return;
       }
 

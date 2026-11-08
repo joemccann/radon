@@ -455,6 +455,7 @@ describe("ListedContractOrderForm — a suppressed duplicate is a warning, not a
     const fetchMock = stubFetch();
     const { container } = render(
       <ListedContractOrderForm
+        contractKey="9001"
         eyebrow="VIX"
         contractSelector={null}
         multiplier={1000}
@@ -471,7 +472,8 @@ describe("ListedContractOrderForm — a suppressed duplicate is a warning, not a
       />,
     );
     fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "20" } });
-    await clickWhenEnabled("BUY VIXU6");
+    await clickWhenEnabled("Review BUY VIXU6");
+    await clickWhenEnabled("Transmit BUY VIXU6");
 
     await waitFor(() => expect(container.querySelector(".futures-form-success")).toBeTruthy());
     expect(placeCalls(fetchMock)).toHaveLength(1);

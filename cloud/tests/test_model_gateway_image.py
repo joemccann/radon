@@ -22,12 +22,38 @@ def test_release_admission_refuses_a_missing_gateway_image(tmp_path):
     assert "incomplete" in result.stderr or "failed" in result.stderr
 
 
+def test_gateway_torch_layer_does_not_follow_copy_scripts():
+    """CIP-025: a scripts-only push must not rebuild torch.
+
+    Mixed rebuild 41949521130 (job 126990250055) paid 38.7s pip plus 79s
+    image export inside a 232s gateway step because `FROM runtime AS
+    model-gateway` inherited `COPY scripts ./scripts`. Torch belongs on a
+    scripts-free `runtime-deps` parent; the gateway copies scripts after
+    the lock install.
+    """
+    text = (ROOT / "docker/app/Dockerfile.python").read_text()
+    assert "FROM runtime-deps AS runtime" in text
+    assert "FROM runtime-deps AS model-gateway" in text
+    gateway = text.split("FROM runtime-deps AS model-gateway", 1)[1].split(
+        "FROM runtime AS python", 1
+    )[0]
+    torch_at = gateway.index("-r requirements-model-gateway.txt")
+    scripts_at = gateway.index("COPY scripts ./scripts")
+    assert torch_at < scripts_at
+    runtime = text.split("FROM runtime-deps AS runtime", 1)[1].split(
+        "FROM runtime-deps AS model-gateway", 1
+    )[0]
+    assert "COPY scripts ./scripts" in runtime
+    deps = text.split("AS runtime-deps", 1)[1].split("FROM runtime-deps AS runtime", 1)[0]
+    assert "COPY scripts ./scripts" not in deps
+
+
 def test_gateway_image_preserves_forecasting_outside_the_ordinary_python_image():
     text = (ROOT / "docker/app/Dockerfile.python").read_text()
     assert "AS runtime" in text
-    assert "FROM runtime AS model-gateway" in text
+    assert "FROM runtime-deps AS model-gateway" in text
     assert text.rstrip().endswith("FROM runtime AS python\nUSER radon")
-    gateway = text.split("FROM runtime AS model-gateway", 1)[1].split("FROM runtime AS python", 1)[0]
+    gateway = text.split("FROM runtime-deps AS model-gateway", 1)[1].split("FROM runtime AS python", 1)[0]
     assert "--index-url https://download.pytorch.org/whl/cpu" in gateway
     # DS-2026-10-28-02: the forecasting closure installs from a hash lock.
     assert "--require-hashes --no-deps" in gateway
@@ -42,7 +68,7 @@ def test_gateway_image_preserves_forecasting_outside_the_ordinary_python_image()
 
 def test_both_pr_and_release_build_and_smoke_the_gateway_image():
     wf = yaml.safe_load((ROOT / ".github/workflows/app-images.yml").read_text())
-    job = wf['jobs']['python-image']
+    job = wf['jobs']['gateway-image']
     build = next(s for s in job['steps'] if s.get('with', {}).get('target') == 'model-gateway')
     assert build['with']['file'] == 'docker/app/Dockerfile.python'
     assert f"{GATEWAY_REPO}:${{{{ github.sha }}}}" in build['with']['tags']
@@ -115,7 +141,7 @@ GATEWAY_SHA = "c" * 40
 
 def _gateway_steps():
     wf = yaml.safe_load((ROOT / ".github/workflows/app-images.yml").read_text())
-    return wf["jobs"]["python-image"]["steps"]
+    return wf["jobs"]["gateway-image"]["steps"]
 
 
 def _run_gateway_reuse(tmp_path, *, event, ref, inspect_status, digest=GATEWAY_HASH):

@@ -12222,3 +12222,110 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 3 | xdist 1 failed credentials clock, serial file 11 passed; 20,296 passed / 12 skipped / 63 subtests (264.80s) | 11,610 passed / 21 skipped / 1,184 files (118.70s) | 42 failed / 3,976 passed / 23 skipped (1042.04s) | 0 added / 0 removed |
 
 Base cloud at `ab4e6b45` on this Mac (standing sweep before the test commit; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (952.28s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-05
+
+Range `ab4e6b45315f642423da6bb71a6be8a8e6010be4..ad42fbeba4fb5cf5813f6e777c8614838965ba51`: 20 commits / 31 paths. Newest trusted checkpoint on issue #83 is `audited-through: ab4e6b45315f642423da6bb71a6be8a8e6010be4` (collaborator, 2026-11-04). It carried no open verified finding. No open `testing/` pull request. Highest id T-583. Next id T-584. `#1426` is merged.
+
+`ci.yml` and coverage thresholds are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-583 remains DONE. T-581 and T-582 remain DONE.
+
+Delta Python tests 661 passed / 1 failed ×3 (`test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline`). Serial isolation of that case: 1 failed in 0.62s, `elapsed < 0.7` held, `called[1][1] is True` did not. Linux CI on `ad42fbeba` is green.
+
+Not filed: event-odds TTL, credit-vix 502, MarketDesk fallback slice, and MCP azp each shipped with behavioral tests. Unstamped event-odds still spawns via `test_workstation_flow_contracts.py` (payload has no `scan_time`). Credentials xdist clock bound is serial-green when it appears.
+
+### T-584 — P1 — NOAA address-walk proof sleeps on the host clock
+
+`scripts/tests/test_ai_cycle_collectors.py:1494` asserted leftover run budget with `called[1][1] is True` after `time.sleep` on each blackholed connect and a 0.4s `Transport.deadline`. Two 0.15s sleeps plus `collect.main` overhead expire that fixture before vercel is recorded, so a correct `_request_within_attempt_wall` (`scripts/ai_cycle/collectors.py:280`) is red here. `elapsed < 0.7` stayed true (0.62s serial), which is the wall working. Linux CI at `ad42fbeba` is green.
+
+Acceptance: connect time is `collectors.time.monotonic`, not a host sleep. Fake elapsed is `pytest.approx(0.15 * 2)` and vercel still sees the 0.4s deadline. `_request_within_attempt_wall` reduced to `return fn()` fails `called[1][1] is True`.
+
+Audited through: ad42fbeba4fb5cf5813f6e777c8614838965ba51 on 2026-11-05 — 1 new finding
+
+## Remediation 2026-11-05
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-584 | DONE | Pre-fix: 4/4 red (`called[1][1] is True`, serial 0.62s). Wall mutation `return fn()` failed the rewritten case the same way (1 failed / 0.14s, `requests == 1`). Restored `collectors.py`. Fake clock: elapsed `pytest.approx(0.30)`, vercel still inside the 0.4s deadline. Case 1 passed ×3 (0.16s/0.12s/0.12s). File 97 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-05
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest round 2 had one xdist load flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other (0 added / 0 removed). Cloud product tree unchanged vs `ad42fbeba`; FAILED composition matches the 2026-11-04 Darwin baseline.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | 20,312 passed / 12 skipped / 63 subtests (130.30s), EXIT 0 | 11,610 passed / 21 skipped / 1,184 files (45.05s) | 42 failed / 3,976 passed / 23 skipped (1017.17s) | — |
+| 2 | xdist 1 failed credentials clock, serial file 11 passed; 20,311 passed / 12 skipped / 63 subtests (206.55s) | 11,610 passed / 21 skipped / 1,184 files (93.65s) | 42 failed / 3,976 passed / 23 skipped (1187.79s) | 0 added / 0 removed |
+| 3 | 20,312 passed / 12 skipped / 63 subtests (167.03s), EXIT 0 | 11,610 passed / 21 skipped / 1,184 files (95.53s) | 42 failed / 3,976 passed / 23 skipped (996.48s) | 0 added / 0 removed |
+## Delta audit 2026-11-06
+
+Range `ad42fbeba4fb5cf5813f6e777c8614838965ba51..62f08ffcdbac96c1f6120004de5dd02b47bc12de`: 7 commits / 9 paths (PRs #1430 Caddy floor mid-deploy, #1438 quota backoff, #1439 busy-provider retry). Newest trusted checkpoint on issue #83 is `audited-through: ad42fbeba4fb5cf5813f6e777c8614838965ba51` (collaborator, 2026-11-05). It carried no open verified finding. Open `testing/` PR #1433 carries T-584 and is not repeated. Highest id across ledgers and that PR is T-584. Next id T-585.
+
+Codemap (`tools/codemap/codemap.json`, generated 2026-11-03) lists `scripts/tests/test_model_gateway_service.py` as an importer of `scripts/model_gateway/engine.py` and `scripts/tests/test_watchdog/test_external_probe_deadman.py` as an importer of `scripts/watchdog/external_probe.py`. It does not yet list `scripts/tests/test_provider_cooldown.py` as an importer of `scripts/clients/provider_cooldown.py` (only `scripts/tests/conftest.py`). `rg` confirmed the cooldown tests and the three new engine cases.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-581, T-582, T-583 remain DONE. T-492 / T-493 / T-495 stay DONE from later 2026-09-27+ evidence.
+
+Not filed: T-584 NOAA walk clock (open #1433; standing pytest 1 failed, serial 1 failed at `test_ai_cycle_collectors.py:1494`). Quota backoff cases drive `provider_cooldown._now`. Caddy-floor cases assert fired plus the no-journal and stranded-journal pages. Credentials xdist clock bound is serial-green.
+
+Standing sweeps on this Mac: root pytest 20,329 passed / 1 failed / 12 skipped / 63 subtests (154.14s); serial NOAA case 1 failed (0.68s) — T-584, already on #1433. Vitest 11,610 passed / 21 skipped / 1,184 files (47.63s). cloud/tests 42 failed / 3,976 passed / 23 skipped (1130.42s). Delta Python 85 passed ×3.
+
+### T-585 — P1 — busy-provider retry wait is capped by the test deadline, so 60s is unpinned
+
+`scripts/model_gateway/engine.py:141` `_DEFERRED_LOCK_WAIT_SECONDS = 60.0`, inserted at `_defer_busy_provider` `:1548`. `scripts/tests/test_model_gateway_service.py:581` asserted `busy.timeouts[0] <= 1.0 < busy.timeouts[1]` under `deadline=time.monotonic() + 30` (`:573`). `scoped_timeout` at `engine.py:105` returns `min(timeout, slice_seconds, remaining)`, so the second acquire was ~30s, never 60. Mutating `_DEFERRED_LOCK_WAIT_SECONDS` 60.0 → 5.0 left the three busy cases **3 passed**. The 1s first-pass probe is the defect #1439 fixed; a 5s second pass would drop a still-working Anthropic lock the same way.
+
+Acceptance: freeze `clock=lambda: 0.0` with `deadline=1000.0` and assert `busy.timeouts == [1.0, 60.0]` as literals. Mutating 60.0 → 5.0 fails `assert [1.0, 5.0] == [1.0, 60.0]`. Product source unchanged.
+
+Audited through: 62f08ffcdbac96c1f6120004de5dd02b47bc12de on 2026-11-06 — 1 new finding
+
+## Remediation 2026-11-06
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-585 | DONE | Pre-fix assertion under 60→5: 3 passed. New literals under 60→5: `assert [1.0, 5.0] == [1.0, 60.0]` (1 failed). Restored 60.0: 1 passed. Product source unchanged. Focused file cluster 85 passed ×3. |
+
+### Closing gates 2026-11-06
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially (round 3: one serial miss at 1.002s, then 2 passed isolated and 11 passed on the file). Round 1 also failed the NOAA walk case (T-584, already on #1433); rounds 2 and 3 did not. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 42 nodes as each other and as origin/main `62f08ffc` (0 added / 0 removed). Cloud product tree is unchanged from that SHA, so the standing cloud run is the base.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs base `62f08ffc` |
+|---|---|---|---|---|
+| 1 | NOAA T-584 + credentials xdist flake, serial credentials 11 passed, serial NOAA 1 failed; 20,328 passed / 12 skipped / 63 subtests (155.17s) | 11,610 passed / 21 skipped / 1,184 files (174.31s) | 42 failed / 3,976 passed / 23 skipped (1182.87s) | 0 added / 0 removed |
+| 2 | credentials xdist flake, serial file 11 passed; 20,329 passed / 12 skipped / 63 subtests (159.03s) | 11,610 passed / 21 skipped / 1,184 files (92.77s) | 42 failed / 3,976 passed / 23 skipped (1040.04s) | 0 added / 0 removed |
+| 3 | credentials xdist flake, serial miss then isolated 2 passed and file 11 passed; 20,329 passed / 12 skipped / 63 subtests (165.71s) | 11,610 passed / 21 skipped / 1,184 files (94.68s) | 42 failed / 3,976 passed / 23 skipped (1042.33s) | 0 added / 0 removed |
+
+Base cloud at `62f08ffc` on this Mac (standing sweep; cloud product tree unchanged): 42 failed / 3,976 passed / 23 skipped (1130.42s). The failed-node set matches all three rounds: 24 in `test_ib_gateway_control.py`, 6 in `test_control_service_wiring.py`, 9 in `test_sync_control_plane.py`, 1 in `test_app_runtime.py`, 1 in `test_media_publication.py`, 1 in `test_monorepo_cutover.py`. Linux CI is the authority for `cloud/tests`. Playwright was not run. No local screenshot or 390px result is claimed. The shared cloud errors are bash 3.2 `mapfile` / `pin[@]` unbound.
+
+## Delta audit 2026-11-07
+
+Range `62f08ffcdbac96c1f6120004de5dd02b47bc12de..751a9d0d8818bcda1c4f2cd40b77d00d847eff1d`: 185 commits / 551 paths. Newest trusted checkpoint on issue #83 is `audited-through: 62f08ffcdbac96c1f6120004de5dd02b47bc12de` (collaborator, 2026-11-06). It carried no open verified finding. No open `testing/` pull request. Highest id T-585. Next id T-586. `#1443` is merged.
+
+Codemap (`tools/codemap/codemap.json`) is stale for files added after 2026-11-03. `rg` confirmed importers for the 38 codemap gaps: `aa_catalog.py` via `test_aa_frontier_refresh.py`, `authGate.js` via `newsfeed-delivery-health.test.ts`, `ib_order_status.py` / `journal_action.py` / order machines / `useArmedConfirm.ts` each have dedicated tests. The checked-in archive hook had none.
+
+`ci.yml` in the range is a comment-only change on the tag job. Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. One new skip: `test_release_version.py:26` on a shallow clone; the pin literal and `ci_version` refuse-without-base cases still run, and `release-tag` clones with `fetch-depth: 0`. Re-triaged `TEST_LOG.md`: T-585 remains DONE.
+
+The delta touches 298 test files, so a scoped 3× rerun is a full gate. Standing sweeps on this Mac: root pytest 21,001 passed / 1 failed / 12 skipped / 63 subtests (204.82s); the failure is the credentials xdist clock bound, serial file 11 passed. Vitest 11,853 passed / 21 skipped / 1,226 files (122.22s). cloud/tests 58 failed / 4,002 passed / 23 skipped (1068.99s). Versus the 2026-11-06 Darwin 42-list: +16, all bash 3.2 (`mapfile` / `{fd}` / `pin[@]`), 5 of them in new `test_operator_topology_lifecycle.py` and 11 extra in `test_ib_gateway_control.py`. Linux CI is the authority.
+
+Not filed: Turso-only routes (`api-routes-no-disk-snapshot-contract.test.ts`), permId-as-PendingSubmit (`test_order_indeterminate.py:287`), alert throttle fail-closed (`test_alerts_evaluate.py:150`), grok empty-output (`test_runner_run_loop.py:237`).
+
+### T-586 — P1 — retired-JSON archive hook is untested and not declared idempotent
+
+`cloud/post_deploy/hooks/0001-archive-retired-json.sh:11` archives then deletes `trade_log.json` (the only full 2026 rationale copy) plus five other retired snapshots. `cloud/tests/test_post_deploy_hooks.py:827` only SHA-pins the tree; `test_cli_check_validates_repo_manifest` is returncode 0. `cloud/post_deploy/manifest.json:4` omits `"idempotent": true`. `cloud/scripts/post_deploy.py:461` pages an interrupted hook forever unless that flag is set, so a mid-run crash leaves JSON on disk and never retries. Deleting the tar step and keeping `rm -f` left the new archive case red (`archive.is_file()` False).
+
+Acceptance: the manifest entry has `"idempotent": true`. Running the hook against a fake `RADON_DIR/data` writes `retired-json-<sha>.tar.gz` mode 0600 containing exactly the six names, removes those files, leaves other JSON, and a second run exits 0. Skipping the tar step fails `archive.is_file()`.
+
+Audited through: 751a9d0d8818bcda1c4f2cd40b77d00d847eff1d on 2026-11-07 — 1 new finding
+
+## Remediation 2026-11-07
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-586 | DONE | Idempotent assert: `None is True` (1 failed / 1 passed). Delete-without-archive mutation: `archive.is_file()` False (1 failed). Restored hook SHA `3cc0432456`. Manifest `"idempotent": true`. Green: 2 passed; file 83 passed ×3. Hook body unchanged. |
+
+### Closing gates 2026-11-07
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially after isolated retries (round 3). Round 1 also had `test_health_dependency_faults.py` stall TimeoutError (serial 40 passed with credentials). Round 2 also had `test_cta_share_llm_copy.py` copy drift (serial 44 passed with credentials). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as each other and as the standing HEAD run (0 added / 0 removed). Versus the 2026-11-06 Darwin 42-list the extra 16 are new bash 3.2 cases in `test_operator_topology_lifecycle.py` (5) and `test_ib_gateway_control.py` (11). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | credentials + health-stall xdist flakes then serial 40 passed; 21,000 passed / 12 skipped / 63 subtests (275.08s) | 11,853 passed / 21 skipped / 1,226 files (101.56s) | 58 failed / 4,004 passed / 23 skipped (1144.13s) | — |
+| 2 | credentials + cta-copy xdist flakes then serial 44 passed; 21,000 passed / 12 skipped / 63 subtests (168.83s) | 11,853 passed / 21 skipped / 1,226 files (109.72s) | 58 failed / 4,004 passed / 23 skipped (1053.41s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then isolated misses and file 11 passed; 21,001 passed / 12 skipped / 63 subtests (185.10s) | 11,853 passed / 21 skipped / 1,226 files (117.49s) | 58 failed / 4,004 passed / 23 skipped (1273.47s) | 0 added / 0 removed |

@@ -48,7 +48,6 @@ def _pool_with(monkeypatch, role: str, client: _FakeClient) -> pool_module.IBPoo
     monkeypatch.setattr(pool_module, "POOL_ROLES", {role: 3})
     pool = pool_module.IBPool()
     pool._clients[role] = client
-    pool._connected[role] = True
     return pool
 
 

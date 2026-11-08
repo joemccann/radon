@@ -120,9 +120,10 @@ export function setupTokenRejection(provided: unknown, requestId: string): Respo
   );
 }
 
-/** Test-only: reset the generated token, consumption, and the failure budget. */
+/** Test-only: reset the generated token, its TTL window, consumption, and the failure budget. */
 export function __resetSetupTokenForTests(): void {
   generated = null;
+  issuedAt = null;
   consumed = false;
   failures = [];
 }

@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -12,7 +10,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const radonCapability = "read";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "high_low_line.json");
 const MISSING_HIGH_LOW_LINE: HighLowLineData = {
   missing: true, degraded: false, scan_time: null, source_last_modified: null,
   data_date: null, expected_session_date: null, count: 0, weekly_count: 0,
@@ -105,14 +102,11 @@ async function readFromDb(): Promise<TimestampedRead<HighLowLineData> | null> {
   }, { label: "high-low-line" });
   return result.rows.length ? snapshot(String(result.rows[0].payload)) : null;
 }
-async function readFromDisk(): Promise<TimestampedRead<HighLowLineData>> {
-  return snapshot(await readFile(CACHE_PATH, "utf-8"));
-}
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, { operatorOnly: true });
   if (!access.ok) return access.response;
   const result = await dbFirstRead({
-    fromDb: readFromDb, fromDisk: readFromDisk,
+    fromDb: readFromDb,
     // Daily writer runs on weekends too; two hours of slack in every market state.
     maxAgeMs: getFreshnessWindowMs("high-low-line", "closed"),
     label: "high-low-line", isDegraded: isMissingPayload,

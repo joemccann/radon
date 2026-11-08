@@ -134,7 +134,7 @@ Next.js routes call FastAPI via `radonFetch()` (`web/lib/radonApi.ts`). **No `sp
 
 ### Deployment
 
-Production Linux processes read and write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`) direct-to-cloud. No embedded replica anywhere as of 2026-05-20. A non-Linux process is refused: `RADON_MODE` is not a permit (the [database bullet](docs/cloud-services.md) in the cloud runbook). JSON files in `data/` are written alongside as fallback. The libsql embedded replica was retired after WAL conflicts between multi-writer-per-host and direct-cloud writers. Direct-to-cloud is the code default (DUR-07): a replica needs an explicit `RADON_DB_USE_REPLICA=1` opt-in, the legacy `RADON_DB_NO_REPLICA=1` kill switch always wins, and the fleet drop-in `radon-.service.d/common.conf` sets it on every `radon-*` unit as belt-and-suspenders. Reads +30–60 ms (absorbed by SWR); WAL contention structurally impossible. See `feedback_libsql_replica_one_writer.md`.
+Production Linux processes read and write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`) direct-to-cloud. No embedded replica anywhere as of 2026-05-20. A non-Linux process is refused: `RADON_MODE` is not a permit (the [database bullet](docs/cloud-services.md) in the cloud runbook). JSON files in `data/` are written alongside for Python readers; Next.js routes do not read them. The libsql embedded replica was retired after WAL conflicts between multi-writer-per-host and direct-cloud writers. Direct-to-cloud is the code default (DUR-07): a replica needs an explicit `RADON_DB_USE_REPLICA=1` opt-in, the legacy `RADON_DB_NO_REPLICA=1` kill switch always wins, and the fleet drop-in `radon-.service.d/common.conf` sets it on every `radon-*` unit as belt-and-suspenders. Reads +30–60 ms (absorbed by SWR); WAL contention structurally impossible. See `feedback_libsql_replica_one_writer.md`.
 
 Production hosts own every process; the laptop is a thin client
 ([attach contract](docs/cloud-services.md#mode-switch)). Scheduling and
@@ -142,7 +142,7 @@ deployment are owned by the cloud runbook.
 
 **Auto-deploy on push to main.** `.github/workflows/ci.yml` runs the Vitest + pytest gate then deploys on green via the immutable `cloud/` runner's `deploy.sh`; no manual approval. Confirm: `gh run list --workflow=ci.yml --limit 1`. Runner materialization, control-plane sync, health-gated relay restart, rollback: `cloud/CLAUDE.md` § Deployment Contract.
 
-Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,py}`. Routes prefer DB, fall back to disk.
+Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,py}`. Routes read Turso, then the last good read held in memory; never disk (`web/CLAUDE.md`).
 
 ## Data Persistence
 
@@ -151,7 +151,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 **Image host:** `https://media.radon.run` (Caddy on Hetzner; `radon-newsfeed` writes `/var/lib/radon/media/` directly). Posts use absolute URLs.
 
-**Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` with fallback to `data/blotter.json` for legacy rows lacking `realized_pnl`/`cost_basis`/`proceeds`. See `docs/cloud-services.md`.
+**Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()`. See `docs/cloud-services.md`.
 
 ## Commit Hygiene
 
@@ -175,10 +175,10 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 ## Critical Data Files
 
+Open positions, bankroll and exposure live in Turso `portfolio_snapshots`; trades in Turso `journal`. `portfolio.json`, `trade_log.json`, `orders.json`, `blotter.json` and `reconciliation.json` are retired: nothing may read them (`scripts/tests/test_legacy_json_source_truth.py`).
+
 | File | Purpose |
 |---|---|
-| `data/portfolio.json` | Open positions, bankroll, exposure |
-| `data/trade_log.json` | **Append-only** trade journal |
 | `data/watchlist.json` | Surveillance tickers |
 | `data/tag_taxonomy.json` | Auto-growing UPPERCASE tag list (gitignored, runtime-owned by newsfeed; canonical tags in Turso `tag_taxonomy`). Untracked 2026-07-15 — was force-tracked, but runtime mutation drifted it and tripped `deploy.sh`'s tracked-drift guard, blocking deploys. |
 | `data/{vcg,gex}.json` | Scan caches |

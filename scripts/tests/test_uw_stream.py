@@ -252,6 +252,46 @@ def test_gap_during_current_connection_keeps_degraded_after_acks():
     assert model.state["status"] == "degraded"
 
 
+def test_mid_connection_gap_recovers_to_live_on_sustained_flow():
+    """A gap inside the connection used to pin status degraded until the next
+    subscribe ack, which only a reconnect sends."""
+    from uw_stream.model import GAP_RECOVERY_SECS
+
+    model = ready("market_tide")
+    assert model.state["status"] == "live"
+    model.gap(NOW + 5, "input-queue-overflow")
+    model.apply("market_tide", {"ticker": "market", "timestamp": NOW + 6}, NOW + 6, 2)
+    assert model.state["status"] == "degraded"
+    late = NOW + 5 + GAP_RECOVERY_SECS
+    model.apply("market_tide", {"ticker": "market", "timestamp": late}, late, 3)
+    assert model.state["status"] == "live"
+    # History still discloses the hole.
+    assert model.state["channels"]["market_tide"]["complete"] is False
+
+
+def test_recovery_needs_every_channel_acknowledged():
+    from uw_stream.model import GAP_RECOVERY_SECS
+
+    model = Materializer(("market_tide", "interval_flow"))
+    model.connect(NOW)
+    model.apply("market_tide", {"response": {}, "status": "ok"}, NOW, 1)
+    model.apply("interval_flow", {"error": "not entitled"}, NOW, 2)
+    late = NOW + GAP_RECOVERY_SECS + 1
+    model.apply("market_tide", {"ticker": "market", "timestamp": late}, late, 3)
+    assert model.state["status"] == "degraded"
+
+
+def test_status_transition_table():
+    from uw_stream.model import GAP_RECOVERY_SECS, settled_status
+
+    base = dict(connected=True, all_acknowledged=True, gap_age=None)
+    assert settled_status(**base) == "live"
+    assert settled_status(**{**base, "gap_age": 1.0}) == "degraded"
+    assert settled_status(**{**base, "gap_age": GAP_RECOVERY_SECS}) == "live"
+    assert settled_status(**{**base, "all_acknowledged": False}) == "degraded"
+    assert settled_status(**{**base, "connected": False}) == "disconnected"
+
+
 def test_compact_mirror_uses_socket_bounded_turso_writes(monkeypatch):
     """Sync libsql holds the GIL with no client timeout. A hung Turso call
     froze the whole collector on 2026-10-31 09:05Z: no flush, no mirror, the

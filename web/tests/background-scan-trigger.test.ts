@@ -36,6 +36,20 @@ describe("createBackgroundScanTrigger", () => {
     vi.restoreAllMocks();
   });
 
+  it("triggers created with the same sharedKey are one machine", async () => {
+    const pending = deferred<void>();
+    const runA = vi.fn(() => pending.promise);
+    const runB = vi.fn(() => Promise.resolve());
+    const a = createBackgroundScanTrigger({ label: "CRI", run: runA, now: clock, sharedKey: "cri-test" });
+    const b = createBackgroundScanTrigger({ label: "CRI", run: runB, now: clock, sharedKey: "cri-test" });
+
+    expect(a()).toBe(true);
+    expect(b()).toBe(false);
+    expect(runB).not.toHaveBeenCalled();
+    pending.resolve();
+    await flush();
+  });
+
   it("dedupes while a scan is in flight", async () => {
     const pending = deferred<void>();
     const run = vi.fn(() => pending.promise);

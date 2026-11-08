@@ -34,6 +34,7 @@ import argparse
 import sys
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -52,12 +53,47 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from utils.ib_order_status import API_CANCELLED, CANCELLED, FILLED_STATUS, TERMINAL_FAILED
 
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS.get("ib_execute", 25)
 DEFAULT_TIMEOUT = 60  # 1 minute default monitor timeout
 DEFAULT_INTERVAL = 3  # Check every 3 seconds
 EXIT_FILLED_NOT_JOURNALED = 4
+
+
+class MonitorOutcome(str, Enum):
+    """How a monitored order ended; the value is the result's ``status``."""
+
+    FILLED = "filled"
+    PARTIALLY_FILLED = "partially_filled"  # ended (or vanished) with some, not all, filled
+    CANCELLED = "cancelled"                # Cancelled / ApiCancelled, nothing filled
+    REJECTED = "rejected"                  # Inactive / Rejected, nothing filled
+    UNKNOWN = "unknown"                    # left the open list with no status and no fills
+    TIMEOUT = "timeout"                    # still working at the deadline
+
+
+def classify_monitor(status: str, *, is_open: bool, filled: float, target: float) -> Optional[MonitorOutcome]:
+    """The single transition out of "working": None while the order still works.
+
+    Absence from the open list covers Filled, Cancelled, ApiCancelled and
+    Inactive alike, so a vanished order is named only from its own fills.
+    """
+    if status == FILLED_STATUS:
+        return MonitorOutcome.FILLED
+    if status in TERMINAL_FAILED:
+        if filled > 0:
+            return MonitorOutcome.PARTIALLY_FILLED
+        if status in (CANCELLED, API_CANCELLED):
+            return MonitorOutcome.CANCELLED
+        return MonitorOutcome.REJECTED
+    if is_open:
+        return None
+    if target > 0 and filled >= target:
+        return MonitorOutcome.FILLED
+    if filled > 0:
+        return MonitorOutcome.PARTIALLY_FILLED
+    return MonitorOutcome.UNKNOWN
 
 
 class OrderExecutor:
@@ -149,12 +185,29 @@ class OrderExecutor:
         print(f"✓ Order submitted - ID: {trade.order.orderId}")
         return trade
 
+    def _order_fills(self, trade) -> List[Any]:
+        """This order's executions, matched by permId (orderId + clientId when
+        IB has not assigned one) and deduplicated by execId. Never by symbol:
+        that summed every same-day fill in the name."""
+        order = trade.order
+        by_exec_id: Dict[Any, Any] = {}
+        for fill in [*self.client.get_fills(), *(getattr(trade, "fills", None) or [])]:
+            execution = fill.execution
+            if order.permId:
+                if execution.permId != order.permId:
+                    continue
+            elif execution.orderId != order.orderId or execution.clientId != order.clientId:
+                continue
+            by_exec_id.setdefault(execution.execId, fill)
+        return list(by_exec_id.values())
+
     def monitor_order(self, trade, timeout: int = DEFAULT_TIMEOUT, interval: int = DEFAULT_INTERVAL) -> Dict[str, Any]:
         """
-        Monitor an order for fills.
+        Monitor an order until classify_monitor names an outcome or timeout.
 
         Returns:
-            dict with status, fills, total_qty, avg_price, total_value
+            dict with status (a MonitorOutcome value), broker_status, and for
+            any execution: quantity, avg_price, total_value, commission, fills
         """
         order_id = trade.order.orderId
         symbol = trade.contract.symbol
@@ -166,10 +219,7 @@ class OrderExecutor:
         print(f"   Timeout: {timeout}s")
         print("=" * 50)
 
-        fills = []
         total_filled = 0
-        start_time = datetime.now()
-
         checks = 0
         max_checks = timeout // interval
 
@@ -177,105 +227,79 @@ class OrderExecutor:
             self.client.sleep(interval)
             checks += 1
 
-            # Get current order status
-            trades = self.client.get_open_orders()
+            # Refresh open orders so the trade object carries the latest status
+            self.client.get_open_orders()
             self.client.sleep(0.5)
-            
-            # Check order status from trade object
+
             status = trade.orderStatus
-            current_filled = int(status.filled)
-            
-            timestamp = datetime.now().strftime('%H:%M:%S')
-            
-            if status.status == 'Filled':
-                print(f"\n✅ ORDER FILLED!")
-                print(f"   Filled: {current_filled}")
-                print(f"   Avg Price: ${status.avgFillPrice:.2f}")
-                
-                return {
-                    'status': 'filled',
-                    'order_id': order_id,
-                    'symbol': symbol,
-                    'side': trade.order.action,
-                    'quantity': current_filled,
-                    'avg_price': status.avgFillPrice,
-                    'total_value': current_filled * status.avgFillPrice,
-                    'commission': 0,  # Will be updated from fills
-                }
-            
-            elif current_filled > total_filled:
-                # Partial fill
-                new_fills = current_filled - total_filled
-                total_filled = current_filled
-                print(f"[{timestamp}] Partial fill: {current_filled}/{target_qty} @ ${status.avgFillPrice:.2f}")
-            
-            elif status.status in ['Cancelled', 'ApiCancelled']:
-                print(f"\n⚠️ Order cancelled")
-                return {
-                    'status': 'cancelled',
-                    'order_id': order_id,
-                    'symbol': symbol,
-                    'quantity': current_filled,
-                }
-            
-            else:
-                # Still working
-                print(f"[{timestamp}] Working... {status.status}")
-            
-            # Check if order disappeared (filled outside our view)
-            open_orders = self.client.get_open_trades()
-            order_still_open = any(t.order.orderId == order_id for t in open_orders)
-            
-            if not order_still_open:
-                # Order is no longer open - check executions
-                executions = self.client.get_fills()
-                order_fills = [f for f in executions if f.contract.symbol == symbol]
-                
-                if order_fills:
-                    total_qty = sum(int(f.execution.shares) for f in order_fills)
-                    total_value = sum(f.execution.shares * f.execution.avgPrice for f in order_fills)
-                    avg_price = total_value / total_qty if total_qty > 0 else 0
-                    total_commission = sum(f.commissionReport.commission for f in order_fills if f.commissionReport)
-                    
-                    print(f"\n✅ ORDER FILLED (confirmed via executions)")
-                    print(f"   Total Qty: {total_qty}")
-                    print(f"   Avg Price: ${avg_price:.2f}")
-                    print(f"   Total Value: ${total_value:,.2f}")
-                    if total_commission:
-                        print(f"   Commission: ${total_commission:.2f}")
-                    
-                    return {
-                        'status': 'filled',
-                        'order_id': order_id,
-                        'symbol': symbol,
-                        'side': trade.order.action,
-                        'quantity': int(total_qty),
-                        'avg_price': round(avg_price, 2),
-                        'total_value': round(total_value, 2),
-                        'commission': round(total_commission, 2) if total_commission else 0,
-                        'fills': [{
-                            'qty': int(f.execution.shares),
-                            'price': f.execution.avgPrice,
-                            'time': str(f.execution.time)
-                        } for f in order_fills]
-                    }
-                
+            broker_status = status.status
+            is_open = any(t.order.orderId == order_id for t in self.client.get_open_trades())
+            order_fills = self._order_fills(trade)
+            filled = max(
+                float(status.filled or 0),
+                float(sum(f.execution.shares for f in order_fills)),
+            )
+            outcome = classify_monitor(broker_status, is_open=is_open, filled=filled, target=target_qty)
+
+            if outcome is None:
+                timestamp = datetime.now().strftime('%H:%M:%S')
+                if filled > total_filled:
+                    total_filled = filled
+                    print(f"[{timestamp}] Partial fill: {filled:g}/{target_qty} @ ${status.avgFillPrice:.2f}")
+                else:
+                    print(f"[{timestamp}] Working... {broker_status}")
+                continue
+
+            result: Dict[str, Any] = {
+                'status': outcome.value,
+                'broker_status': broker_status,
+                'order_id': order_id,
+                'symbol': symbol,
+                'side': trade.order.action,
+                'quantity': int(filled),
+                'avg_price': status.avgFillPrice,
+                'total_value': filled * status.avgFillPrice,
+                'commission': 0,
+            }
+            if order_fills:
+                total_qty = sum(f.execution.shares for f in order_fills)
+                total_value = sum(f.execution.shares * f.execution.avgPrice for f in order_fills)
+                total_commission = sum(
+                    f.commissionReport.commission for f in order_fills if f.commissionReport
+                )
+                result.update({
+                    'quantity': int(total_qty),
+                    'avg_price': round(total_value / total_qty, 2) if total_qty else 0,
+                    'total_value': round(total_value, 2),
+                    'commission': round(total_commission, 2) if total_commission else 0,
+                    'fills': [{
+                        'qty': int(f.execution.shares),
+                        'price': f.execution.avgPrice,
+                        'time': str(f.execution.time),
+                    } for f in order_fills],
+                })
+
+            if outcome is MonitorOutcome.FILLED:
+                print(f"\n✅ ORDER FILLED")
+                print(f"   Filled: {result['quantity']}")
+                print(f"   Avg Price: ${result['avg_price']:.2f}")
+            elif outcome is MonitorOutcome.PARTIALLY_FILLED:
+                print(f"\n⚠️ Order ended {broker_status} after a partial fill of {result['quantity']}/{target_qty}")
+            elif outcome is MonitorOutcome.UNKNOWN:
                 print(f"\n⚠️ Order no longer open but no fills found")
-                return {
-                    'status': 'unknown',
-                    'order_id': order_id,
-                    'symbol': symbol,
-                }
-        
+            else:
+                print(f"\n⚠️ Order {broker_status}")
+            return result
+
         # Timeout
         print(f"\n⏳ Timeout after {timeout}s - order still working")
         return {
-            'status': 'timeout',
+            'status': MonitorOutcome.TIMEOUT.value,
             'order_id': order_id,
             'symbol': symbol,
             'filled_so_far': total_filled,
         }
-    
+
     def log_trade(self, result: Dict[str, Any], contract, side: str, limit_price: float, 
                   thesis: str = "", notes: str = "") -> bool:
         """

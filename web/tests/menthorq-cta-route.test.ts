@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("fs/promises", () => ({
-  readdir: vi.fn(),
-  readFile: vi.fn(),
-  stat: vi.fn(),
-}));
+const mockExecute = vi.fn();
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 vi.mock("child_process", () => ({
   spawn: vi.fn(() => ({
@@ -15,11 +12,40 @@ vi.mock("child_process", () => ({
   })),
 }));
 
-import { readFile, readdir, stat } from "fs/promises";
 import { spawn } from "child_process";
 
 async function importRoute() {
   return import(`../app/api/menthorq/cta/route?t=${Date.now()}`);
+}
+
+function mockTurso(date: string, health?: { state: string; last_error?: unknown }) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (sql.includes("menthorq_cta")) {
+      return {
+        rows: [{
+          date,
+          fetched_at: new Date(Date.now() - 60_000).toISOString(),
+          payload: JSON.stringify({
+            date,
+            fetched_at: `${date}T21:30:00Z`,
+            tables: { main: [{ underlying: "SPX" }], index: [], commodity: [], currency: [] },
+          }),
+        }],
+      };
+    }
+    if (sql.includes("service_health") && health) {
+      return {
+        rows: [{
+          state: health.state,
+          last_attempt_started_at: "2026-03-12T21:35:00Z",
+          last_attempt_finished_at: "2026-03-12T21:35:31Z",
+          last_error: health.last_error ? JSON.stringify(health.last_error) : null,
+          updated_at: "2026-03-12T21:35:31Z",
+        }],
+      };
+    }
+    return { rows: [] };
+  });
 }
 
 describe("GET /api/menthorq/cta", () => {
@@ -34,34 +60,12 @@ describe("GET /api/menthorq/cta", () => {
     vi.useRealTimers();
   });
 
-  it("returns stale cache metadata and triggers background sync when expected date is newer than latest cache", async () => {
+  it("returns stale cache metadata and triggers background sync when expected date is newer than latest row", async () => {
     vi.setSystemTime(new Date("2026-03-12T22:15:00Z"));
-    vi.mocked(readdir).mockResolvedValue(["cta_2026-03-11.json"] as never);
-    vi.mocked(readFile).mockImplementation(async (path) => {
-      const target = String(path);
-      if (target.includes("cta-sync.json")) {
-        return JSON.stringify({
-          service: "cta-sync",
-          status: "error",
-          trigger: "launchd",
-          target_date: "2026-03-12",
-          started_at: "2026-03-12T21:35:00Z",
-          finished_at: "2026-03-12T21:35:31Z",
-          duration_ms: 31_000,
-          attempt_count: 2,
-          cache_path: null,
-          error_type: "auth_rejected",
-          error_excerpt: "Your username or password was incorrect",
-          artifact_log_path: "logs/cta-sync-artifacts/cta-sync-2026-03-12-attempt-2.log",
-        });
-      }
-      return JSON.stringify({
-        date: "2026-03-11",
-        fetched_at: "2026-03-12T01:00:00Z",
-        tables: { main: [{ underlying: "SPX" }], index: [], commodity: [], currency: [] },
-      });
+    mockTurso("2026-03-11", {
+      state: "error",
+      last_error: { type: "auth_rejected", message: "Your username or password was incorrect" },
     });
-    vi.mocked(stat).mockResolvedValue({ mtimeMs: Date.now() - 60_000 } as never);
 
     const { GET } = await importRoute();
     const response = await GET();
@@ -76,34 +80,9 @@ describe("GET /api/menthorq/cta", () => {
     expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
   });
 
-  it("returns fresh cache metadata and does not trigger sync when latest cache matches target date", async () => {
+  it("returns fresh cache metadata and does not trigger sync when latest row matches target date", async () => {
     vi.setSystemTime(new Date("2026-03-12T22:15:00Z"));
-    vi.mocked(readdir).mockResolvedValue(["cta_2026-03-12.json"] as never);
-    vi.mocked(readFile).mockImplementation(async (path) => {
-      const target = String(path);
-      if (target.includes("cta-sync.json")) {
-        return JSON.stringify({
-          service: "cta-sync",
-          status: "success",
-          trigger: "launchd",
-          target_date: "2026-03-12",
-          started_at: "2026-03-12T21:35:00Z",
-          finished_at: "2026-03-12T21:35:31Z",
-          duration_ms: 31_000,
-          attempt_count: 1,
-          cache_path: "data/menthorq_cache/cta_2026-03-12.json",
-          error_type: null,
-          error_excerpt: null,
-          artifact_log_path: null,
-        });
-      }
-      return JSON.stringify({
-        date: "2026-03-12",
-        fetched_at: "2026-03-12T03:00:00Z",
-        tables: { main: [{ underlying: "SPX" }], index: [], commodity: [], currency: [] },
-      });
-    });
-    vi.mocked(stat).mockResolvedValue({ mtimeMs: Date.now() - 30_000 } as never);
+    mockTurso("2026-03-12", { state: "ok" });
 
     const { GET } = await importRoute();
     const response = await GET();
@@ -119,18 +98,7 @@ describe("GET /api/menthorq/cta", () => {
 
   it("holiday after close uses the previous trading session", async () => {
     vi.setSystemTime(new Date("2026-07-03T22:15:00Z"));
-    vi.mocked(readdir).mockResolvedValue(["cta_2026-07-02.json"] as never);
-    vi.mocked(readFile).mockImplementation(async (path) => {
-      if (String(path).includes("cta_2026-07-02.json")) {
-        return JSON.stringify({
-          date: "2026-07-02",
-          fetched_at: "2026-07-02T21:30:00Z",
-          tables: { main: [{ underlying: "SPX" }], index: [], commodity: [], currency: [] },
-        });
-      }
-      throw new Error("ENOENT");
-    });
-    vi.mocked(stat).mockResolvedValue({ mtimeMs: Date.now() - 60_000 } as never);
+    mockTurso("2026-07-02");
 
     const { GET } = await importRoute();
     const body = await (await GET()).json();

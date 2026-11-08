@@ -52,9 +52,9 @@ class TestDaemonNoLongerRunsCashFlowSync:
 @pytest.fixture
 def claims(monkeypatch):
     monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *_a, **_k: True)
-    monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True, raising=False)
+    monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d, **_k: True, raising=False)
     monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: None, raising=False)
-    monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True, raising=False)
+    monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d, **_k: True, raising=False)
 
 
 @pytest.fixture

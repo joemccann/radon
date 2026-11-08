@@ -21,6 +21,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 from utils.working_orders import working_order_missing_message
+from utils.ib_order_status import (
+    CANCELLED,
+    FILLED_STATUS,
+    TERMINAL,
+    TERMINAL_FAILED,
+    CancelOutcome,
+)
 
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS["ib_order_manage"]
@@ -163,6 +170,111 @@ def _bankroll_modify_violation(client: IBClient, trade, order_type: str,
         return check_bankroll_admission(params)
 
 
+def _quantity(value) -> float:
+    """A broker quantity as a float; anything non-numeric reads as 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
+def executed_quantity(client: IBClient, trade) -> tuple:
+    """(quantity, any_execution) executed for this order at the broker.
+
+    Reads reqExecutions plus the session's fills on the trade, matched by
+    permId (orderId + clientId when IB has not assigned one) and deduplicated
+    by execId. A combo reports each leg and the BAG itself, so only fills on
+    the order's own contract type count toward quantity; a leg-only execution
+    still marks the order as executed. Raises when executions cannot be read:
+    an unreadable book is not zero fills.
+    """
+    order = trade.order
+    sec_type = getattr(trade.contract, "secType", None)
+    by_exec_id = {}
+    executed = False
+    for fill in [*client.get_executions(), *(getattr(trade, "fills", None) or [])]:
+        execution = fill.execution
+        if order.permId:
+            if execution.permId != order.permId:
+                continue
+        elif execution.orderId != order.orderId or execution.clientId != order.clientId:
+            continue
+        executed = True
+        if getattr(fill.contract, "secType", None) == sec_type:
+            by_exec_id[execution.execId] = _quantity(execution.shares)
+    quantity = max(sum(by_exec_id.values()), _quantity(getattr(trade.orderStatus, "filled", None)))
+    return quantity, executed or quantity > 0
+
+
+def classify_cancel(status, *, gone: bool, acked: bool, filled: Optional[float],
+                    total: float, executed: bool = False) -> CancelOutcome:
+    """Name a cancel's outcome; the single transition out of "cancel sent".
+
+    Absence from openTrades() covers Filled, Cancelled, ApiCancelled and
+    Inactive alike (§1#1), so a vanished or acknowledged order is named only
+    from its executions. ``filled`` is None when executions were unreadable.
+    """
+    if status == FILLED_STATUS:
+        return CancelOutcome.FILLED
+    if not (gone or acked or status in TERMINAL_FAILED):
+        return CancelOutcome.STILL_WORKING
+    if filled is None:
+        return CancelOutcome.UNKNOWN
+    if total > 0 and filled >= total:
+        return CancelOutcome.FILLED
+    if filled > 0 or executed:
+        return CancelOutcome.PARTIALLY_FILLED_THEN_CANCELLED
+    return CancelOutcome.CANCELLED
+
+
+def resolve_cancel_outcome(client: IBClient, trade, status, *, gone=False, acked=False):
+    """(outcome, filled, read_error) for ``trade`` in broker ``status``."""
+    total = _quantity(trade.order.totalQuantity)
+    if classify_cancel(status, gone=gone, acked=acked, filled=0.0, total=total) in (
+        CancelOutcome.FILLED, CancelOutcome.STILL_WORKING,
+    ):
+        filled = _quantity(getattr(trade.orderStatus, "filled", None)) or (total if status == FILLED_STATUS else 0.0)
+        outcome = classify_cancel(status, gone=gone, acked=acked, filled=filled, total=total)
+        return outcome, filled, None
+    try:
+        filled, executed = executed_quantity(client, trade)
+    except Exception as exc:  # noqa: BLE001 - any read failure leaves the outcome unknown
+        return CancelOutcome.UNKNOWN, None, str(exc) or type(exc).__name__
+    outcome = classify_cancel(status, gone=gone, acked=acked, filled=filled,
+                              total=total, executed=executed)
+    return outcome, filled, None
+
+
+def cancel_result(trade, outcome: CancelOutcome, status, filled, read_error):
+    """(status, message, extra) the CLI emits for a settled cancel."""
+    order_id = trade.order.orderId
+    final_status = status if status in TERMINAL else CANCELLED
+    extra = {
+        "orderId": order_id,
+        "cancelOutcome": outcome.value,
+        "filledQuantity": json_number(filled),
+    }
+    if outcome is CancelOutcome.CANCELLED:
+        return "ok", f"Order cancelled (orderId={order_id})", {**extra, "finalStatus": final_status}
+    if outcome is CancelOutcome.PARTIALLY_FILLED_THEN_CANCELLED:
+        return (
+            "ok",
+            f"Order cancelled after a partial fill of {json_number(filled)} (orderId={order_id})",
+            {**extra, "finalStatus": final_status},
+        )
+    if outcome is CancelOutcome.FILLED:
+        return (
+            "error",
+            f"Order filled before the cancel took effect (orderId={order_id})",
+            {**extra, "finalStatus": FILLED_STATUS},
+        )
+    return (
+        "error",
+        f"Cancel outcome unknown: order left the working list and its executions "
+        f"could not be read ({read_error})",
+        {**extra, "finalStatus": status},
+    )
+
+
 def cancel_order(client: IBClient, order_id: int, perm_id: int,
                  host: str, port: int):
     """Cancel an open order.
@@ -171,14 +283,21 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     different clientId than the one that placed the order fails with
     Error 10147 (order not found).  We detect the original clientId
     from trade.order.clientId and reconnect as that client before cancelling.
+
+    Every exit carries ``cancelOutcome`` (utils.ib_order_status.CancelOutcome).
+    Only ``cancelled`` means the order is gone with no execution; a caller
+    that places a replacement must require exactly that.
     """
     trade = find_modify_trade(client, order_id, perm_id)
     if trade is None:
         output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")
 
     status = trade.orderStatus.status
-    if status in ("Filled", "Cancelled", "ApiCancelled"):
-        output("error", f"Order already {status} — cannot cancel")
+    if status in TERMINAL:
+        outcome, filled, _ = resolve_cancel_outcome(client, trade, status)
+        output("error", f"Order already {status} — cannot cancel",
+               orderId=trade.order.orderId, finalStatus=status,
+               cancelOutcome=outcome.value, filledQuantity=json_number(filled))
 
     # Reconnect as the original placer if needed (fixes Error 10147)
     original_client_id = trade.order.clientId
@@ -208,8 +327,22 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     client.cancel_order(trade.order)
     latest_trade = trade
 
-    def finish(status_text: str, message: str, **extra):
+    def settle_if_done(current, *, gone=False):
+        """Exit with the cancel outcome unless the order is still working."""
+        # REL-233 (R-634): a broadcast 202 (reqId=-1) can belong to a
+        # DIFFERENT order on the same clientId. Only a 202 addressed to this
+        # orderId acknowledges; broadcasts confirm solely via the refreshed
+        # trade snapshot (gone / terminal).
+        acked = any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs)
+        outcome, filled, read_error = resolve_cancel_outcome(
+            client, current, current.orderStatus.status, gone=gone, acked=acked,
+        )
+        if outcome is CancelOutcome.STILL_WORKING:
+            return
         client.ib.errorEvent -= on_error
+        status_text, message, extra = cancel_result(
+            current, outcome, current.orderStatus.status, filled, read_error,
+        )
         output(status_text, message, **extra)
 
     # Wait for refreshed open-order state to acknowledge the cancel.
@@ -217,51 +350,27 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
         client.sleep(0.5)
         refreshed_trade = find_trade(client, order_id, perm_id)
         if refreshed_trade is None:
-            finish(
-                "ok",
-                f"Order cancelled (orderId={trade.order.orderId})",
-                orderId=trade.order.orderId,
-                finalStatus="Cancelled",
-            )
+            # ib_insync keeps updating the dropped trade in place, so its
+            # status (Filled / Cancelled / stale) and fills stay readable.
+            settle_if_done(latest_trade, gone=True)
 
         latest_trade = refreshed_trade
-        if refreshed_trade.orderStatus.status in ("Cancelled", "ApiCancelled"):
-            finish(
-                "ok",
-                f"Order cancelled (orderId={refreshed_trade.order.orderId})",
-                orderId=refreshed_trade.order.orderId,
-                finalStatus=refreshed_trade.orderStatus.status,
-            )
+        settle_if_done(refreshed_trade)
 
         # 10147/201 are real rejects. 202 ("Order Canceled - reason:") is IB's
         # cancel confirmation — treating it as fatal left combo replacements
         # unplaced after the original was already gone at the broker.
         fatal = [e for e in error_msgs if e[1] in (10147, 201)]
         if fatal:
-            finish("error", f"IB rejected cancel: {fatal[0][2]}")
-        # REL-233 (R-634): a broadcast 202 (reqId=-1) can belong to a
-        # DIFFERENT order on the same clientId. Only a 202 addressed to this
-        # orderId confirms; broadcasts confirm solely via the refreshed
-        # trade snapshot (gone / Cancelled) checked above.
-        if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
-            finish(
-                "ok",
-                f"Order cancelled (orderId={trade.order.orderId})",
-                orderId=trade.order.orderId,
-                finalStatus="Cancelled",
-            )
+            client.ib.errorEvent -= on_error
+            output("error", f"IB rejected cancel: {fatal[0][2]}",
+                   orderId=trade.order.orderId, cancelOutcome=CancelOutcome.STILL_WORKING.value)
 
-    if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
-        finish(
-            "ok",
-            f"Order cancelled (orderId={trade.order.orderId})",
-            orderId=trade.order.orderId,
-            finalStatus="Cancelled",
-        )
-
-    final_status = latest_trade.orderStatus.status if latest_trade is not None else trade.orderStatus.status
-    finish("error", f"Cancel failed — order still {final_status}",
-           orderId=trade.order.orderId, finalStatus=final_status)
+    final_status = latest_trade.orderStatus.status
+    client.ib.errorEvent -= on_error
+    output("error", f"Cancel failed — order still {final_status}",
+           orderId=trade.order.orderId, finalStatus=final_status,
+           cancelOutcome=CancelOutcome.STILL_WORKING.value)
 
 
 def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optional[float],

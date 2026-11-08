@@ -74,7 +74,7 @@ class TestDeliveryFingerprintIsConsulted:
         import flex_delivery_ingest as ingest
 
         monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
-        monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True)
+        monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d, **_k: True)
         monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied")
 
     def test_the_same_file_twice_runs_the_writers_once(self, monkeypatch, tmp_path):

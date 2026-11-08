@@ -157,9 +157,17 @@ describe("websocket ticket backoff", () => {
     controller.abort();
     await expect(first).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The caller's deadline aborts the POST itself.
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true);
+
+    // A caller abort is not a ticket-service failure (7e6aeff); a transport
+    // failure is, and it holds the next request off the wire.
+    fetchMock.mockImplementationOnce(() => Promise.reject(new TypeError("Failed to fetch")));
+    await expect(getWsTicket("clerk-token")).rejects.toThrow("Failed to fetch");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await expect(getWsTicket("clerk-token")).rejects.toBeInstanceOf(TicketBackoffError);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

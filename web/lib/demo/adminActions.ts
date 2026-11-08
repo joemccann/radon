@@ -3,14 +3,16 @@
 // REVOKE and EXTEND must keep the two sources of truth in lock-step: the demo
 // Turso `demo_users` row AND the Clerk publicMetadata the middleware reads. A
 // row-only change wouldn't actually gate access; a metadata-only change would
-// drift the operator panel. Both are written here. Side effects are injected so
-// the orchestration is unit-testable.
+// drift the operator panel. Both are written here, DB first (see
+// commitThenMirror). Side effects are injected so the orchestration is
+// unit-testable.
 
 import {
   listDemoUsers,
   getDemoUser,
   revokeDemoUser,
   extendDemoUser,
+  restoreDemoUserState,
   getDemoUserAiUsage,
   type DemoDbClient,
   type DemoUserRow,
@@ -44,7 +46,29 @@ export async function listDemoUsersWithUsage(
   return out;
 }
 
-/** REVOKE — expire the trial immediately in BOTH stores. */
+/**
+ * One write order for every operator action: the demo_users row is the source
+ * of truth and is committed FIRST, then Clerk is brought in line. If the Clerk
+ * write fails, the row is restored to its prior snapshot (compensating action)
+ * and the error propagates. A DB failure therefore never leaves Clerk revoked
+ * over an active row, which a replayed user.created would re-stamp active.
+ */
+async function commitThenMirror(
+  existing: DemoUserRow,
+  deps: AdminActionDeps,
+  writeDb: () => Promise<void>,
+  meta: DemoPublicMetadata,
+): Promise<void> {
+  await writeDb();
+  try {
+    await deps.setClerkMetadata(existing.user_id, meta);
+  } catch (error) {
+    await restoreDemoUserState({ db: deps.db, userId: existing.user_id, prior: existing });
+    throw error;
+  }
+}
+
+/** REVOKE — expire the trial immediately in BOTH stores (DB first). */
 export async function revokeTrial(
   userId: string,
   deps: AdminActionDeps,
@@ -53,19 +77,21 @@ export async function revokeTrial(
   const existing = await getDemoUser(deps.db, userId);
   if (!existing) return { ok: false, reason: "no such demo user" };
 
-  // Expire in Clerk by stamping the expiry at "now" — middleware treats any
-  // demoRole user whose expiry is in the past as blocked. Clerk is authority,
-  // so revoke there before reflecting the state in the reporting database.
-  await deps.setClerkMetadata(userId, {
-    demoRole: "trial",
-    demoTrialStartedAt: existing.started_at ?? undefined,
-    demoTrialExpiresAt: now.toISOString(),
-  });
-  await revokeDemoUser({ db: deps.db, userId, now });
+  // Clerk side stamps the expiry at "now", which resolves to `lapsed` (denied).
+  await commitThenMirror(
+    existing,
+    deps,
+    () => revokeDemoUser({ db: deps.db, userId, now }),
+    {
+      demoRole: "trial",
+      demoTrialStartedAt: existing.started_at ?? undefined,
+      demoTrialExpiresAt: now.toISOString(),
+    },
+  );
   return { ok: true };
 }
 
-/** EXTEND — grant N more trading days from now, in BOTH stores. */
+/** EXTEND — grant N more trading days from now, in BOTH stores (DB first). */
 export async function extendTrial(
   userId: string,
   tradingDays: number,
@@ -79,11 +105,15 @@ export async function extendTrial(
   if (!existing) return { ok: false, reason: "no such demo user" };
 
   const expiry = await deps.computeExpiry(now.toISOString(), tradingDays);
-  await extendDemoUser({ db: deps.db, userId, expiresAt: expiry.expiresAt });
-  await deps.setClerkMetadata(userId, {
-    demoRole: "trial",
-    demoTrialStartedAt: existing.started_at ?? expiry.startedAt,
-    demoTrialExpiresAt: expiry.expiresAt,
-  });
+  await commitThenMirror(
+    existing,
+    deps,
+    () => extendDemoUser({ db: deps.db, userId, expiresAt: expiry.expiresAt }),
+    {
+      demoRole: "trial",
+      demoTrialStartedAt: existing.started_at ?? expiry.startedAt,
+      demoTrialExpiresAt: expiry.expiresAt,
+    },
+  );
   return { ok: true, expiresAt: expiry.expiresAt };
 }

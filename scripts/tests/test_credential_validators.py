@@ -136,7 +136,7 @@ class TestWireShapes:
     def test_artificial_analysis_key_header(self, http):
         cv.validate("artificial_analysis", {"ARTIFICIAL_ANALYSIS_API_KEY": "aa-1"})
         (call,) = http.calls
-        assert call.url == "https://artificialanalysis.ai/api/v2/data/llms/models"
+        assert call.url == "https://artificialanalysis.ai/api/v2/language/models/free"
         assert call.headers["x-api-key"] == "aa-1"
 
     def test_openrouter_data_api_bearer(self, http):

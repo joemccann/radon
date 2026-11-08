@@ -1,7 +1,7 @@
 "use client";
 
 import ResearchTicketContext from "@/components/research/ResearchTicketContext";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -12,6 +12,14 @@ import { fmtPrice, legPriceKey, resolveClosingBasis, resolveNaturalSpreadQuote }
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
+import CancelOrderDialog from "@/components/CancelOrderDialog";
+import {
+  isOrderDialogInFlight,
+  ORDER_NO_LONGER_WORKING,
+  orderRefOf,
+  resolveLiveOrder,
+  useOrderDialogMachine,
+} from "@/lib/orders/orderDialogMachine";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
@@ -19,6 +27,7 @@ import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
 import { OrderRiskGate, type OrderRiskInput, useOrderRisk } from "@/lib/order";
 import { heldComboUnits, isPureComboClose } from "@/lib/order/positionTrade";
+import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfirm";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import {
   type IbOrderType,
@@ -99,13 +108,14 @@ function ExistingOrderRow({
   order,
   prices,
   onModify,
+  onCancel,
 }: {
   order: OpenOrder;
   prices: Record<string, PriceData>;
   onModify: (order: OpenOrder) => void;
+  onCancel: (order: OpenOrder) => void;
 }) {
-  const { pendingCancels, pendingModifies, requestCancel } = useOrderActions();
-  const [actionLoading, setActionLoading] = useState(false);
+  const { pendingCancels, pendingModifies } = useOrderActions();
 
   const isPendingCancel = pendingCancels.has(order.permId);
   const isPendingModify = pendingModifies.has(order.permId);
@@ -136,12 +146,6 @@ function ExistingOrderRow({
       { riskFreeRate },
     ).perContract;
   }, [order, prices, riskFreeRate]);
-
-  const handleCancel = useCallback(async () => {
-    setActionLoading(true);
-    await requestCancel(order);
-    setActionLoading(false);
-  }, [order, requestCancel]);
 
   // Contract description
   const c = order.contract;
@@ -203,10 +207,9 @@ function ExistingOrderRow({
           </button>
           <button
             className="btn-order-action btn-cancel"
-            onClick={handleCancel}
-            disabled={actionLoading}
+            onClick={() => onCancel(order)}
           >
-            {actionLoading ? "..." : "CANCEL"}
+            CANCEL
           </button>
         </div>
       )}
@@ -321,8 +324,10 @@ function NewOrderForm({
   const [orderType, setOrderType] = useState<IbOrderType>("LMT");
   const [stopPrice, setStopPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // R-281: `loading` is render state, so two clicks in one tick both see
+  // false. The ref is the synchronous double-submit guard.
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
 
@@ -341,7 +346,7 @@ function NewOrderForm({
     setLimitPrice(p.price.toFixed(2));
     if (p.action) setAction(p.action);
     if (p.quantity != null && quantity.trim() === "") setQuantity(String(p.quantity));
-    setConfirmStep(false);
+    disarm();
     // Intentionally keyed on the nonce alone (see comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillNonce]);
@@ -524,28 +529,31 @@ function NewOrderForm({
   }, [action, parsedQty, ticker, position, portfolio]);
   const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
 
+  // The exact request transmit sends. The confirm step arms for this body,
+  // so any change under it (including a polled `position`) disarms.
+  const placePayload = useMemo(
+    () => isValid
+      ? buildSingleLegOrderPayload({ ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, position, orderType, stopPrice: parsedStop })
+      : null,
+    [isValid, ticker, action, parsedQty, parsedPrice, tif, position, orderType, parsedStop],
+  );
+  const payloadKey = placePayload ? canonicalPayloadKey({ url: "/api/orders/place", body: placePayload }) : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
-    if (!submitPermitted) return;
+    if (!placePayload || !submitPermitted || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
 
     try {
-      const payload = buildSingleLegOrderPayload({
-        ticker,
-        action,
-        quantity: parsedQty,
-        limitPrice: parsedPrice,
-        tif,
-        position,
-        orderType,
-        stopPrice: parsedStop,
-      });
+      const payload = placePayload;
 
       // Final naked short guard check before submission
       const guardPortfolio = toNakedShortPortfolio(portfolio);
@@ -567,15 +575,16 @@ function NewOrderForm({
       } else {
         const feedback = placeOrderFeedback(json, `Order placed: ${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`);
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
         onOrderPlaced?.();
       }
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions, submitPermitted]);
+  }, [confirmStep, arm, disarm, placePayload, ticker, action, parsedQty, parsedPrice, portfolio, onOrderPlaced, orderActions, submitPermitted]);
 
   return (
     <div className="order-form">
@@ -586,13 +595,13 @@ function NewOrderForm({
         <div className="order-action-buttons">
           <button
             className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
-            onClick={() => { setAction("BUY"); setConfirmStep(false); }}
+            onClick={() => { setAction("BUY"); disarm(); }}
           >
             BUY
           </button>
           <button
             className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
-            onClick={() => { setAction("SELL"); setConfirmStep(false); }}
+            onClick={() => { setAction("SELL"); disarm(); }}
           >
             SELL
           </button>
@@ -604,7 +613,7 @@ function NewOrderForm({
         onChange={(next) => {
           setOrderType(next);
           if (isStopOrderType(next)) setTif("GTC");
-          setConfirmStep(false);
+          disarm();
         }}
       />
 
@@ -616,7 +625,7 @@ function NewOrderForm({
           min="1"
           step="1"
           value={quantity}
-          onChange={(e) => { setQuantity(e.target.value); setConfirmStep(false); }}
+          onChange={(e) => { setQuantity(e.target.value); disarm(); }}
           placeholder="Shares"
         />
       </div>
@@ -632,15 +641,15 @@ function NewOrderForm({
               step="0.01"
               min="0.01"
               value={stopPrice}
-              onChange={(e) => { setStopPrice(e.target.value); setConfirmStep(false); }}
+              onChange={(e) => { setStopPrice(e.target.value); disarm(); }}
               placeholder="0.00"
               data-testid="order-stop-price"
             />
           </div>
           <div className="modify-quick-buttons">
-            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); setConfirmStep(false); } }}>BID</button>
-            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); setConfirmStep(false); } }}>MID</button>
-            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
+            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); disarm(); } }}>BID</button>
+            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); disarm(); } }}>MID</button>
+            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); disarm(); } }}>ASK</button>
           </div>
         </div>
       )}
@@ -656,14 +665,14 @@ function NewOrderForm({
             step="0.01"
             min="0.01"
             value={limitPrice}
-            onChange={(e) => { setLimitPrice(e.target.value); setConfirmStep(false); }}
+            onChange={(e) => { setLimitPrice(e.target.value); disarm(); }}
             placeholder="0.00"
           />
         </div>
         <div className="modify-quick-buttons">
-          <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); setConfirmStep(false); } }}>BID</button>
-          <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); setConfirmStep(false); } }}>MID</button>
-          <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
+          <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); disarm(); } }}>BID</button>
+          <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); disarm(); } }}>MID</button>
+          <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); disarm(); } }}>ASK</button>
         </div>
       </div>
       )}
@@ -671,8 +680,8 @@ function NewOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); disarm(); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); disarm(); }}>GTC</button>
         </div>
       </div>
 
@@ -698,7 +707,7 @@ function NewOrderForm({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={() => disarm()} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
@@ -738,8 +747,10 @@ function ComboOrderForm({
   const [quantity, setQuantity] = useState(() => String(comboUnits));
   const [limitPrice, setLimitPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("GTC");
-  const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
+  // R-281: `loading` is render state, so two clicks in one tick both see
+  // false. The ref is the synchronous double-submit guard.
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
   const tickerDetail = useTickerDetailOptional();
@@ -750,7 +761,7 @@ function ComboOrderForm({
     if (!prefill) return;
     setLimitPrice(prefill.price.toFixed(2));
     if (prefill.action) setAction(prefill.action);
-    setConfirmStep(false);
+    disarm();
     // A repeated click at the same price must still reapply after manual edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillNonce]);
@@ -899,32 +910,36 @@ function ComboOrderForm({
   const riskState = useOrderRisk(riskInput, portfolio);
   const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
 
+  // The exact request transmit sends. Legs and ratios derive from the live
+  // `position`, so the confirm step arms for this body: a polled change to
+  // the held legs disarms instead of transmitting unreviewed ratios.
+  const placePayload = useMemo(() => {
+    if (!isValid) return null;
+    const legs = legsWithActions.map((leg) => ({
+      expiry: leg.expiry,
+      strike: leg.strike!,
+      right: leg.right,
+      action: leg.legAction,
+      ratio: leg.ratio,
+    }));
+    return { type: "combo" as const, symbol: ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, legs };
+  }, [isValid, legsWithActions, ticker, action, parsedQty, parsedPrice, tif]);
+  const payloadKey = placePayload ? canonicalPayloadKey({ url: "/api/orders/place", body: placePayload }) : null;
+  const { armed: confirmStep, arm, disarm } = useArmedConfirm(payloadKey);
+
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
-      setConfirmStep(true);
+      arm();
       return;
     }
-    if (!submitPermitted) return;
+    if (!placePayload || !submitPermitted || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
     try {
-      const legs = legsWithActions.map((leg) => ({
-        expiry: leg.expiry,
-        strike: leg.strike!,
-        right: leg.right,
-        action: leg.legAction,
-        ratio: leg.ratio,
-      }));
-      const guardResult = checkNakedShortRisk({
-        type: "combo",
-        symbol: ticker,
-        action,
-        quantity: parsedQty,
-        limitPrice: parsedPrice,
-        legs,
-      }, toNakedShortPortfolio(portfolio));
+      const guardResult = checkNakedShortRisk(placePayload, toNakedShortPortfolio(portfolio));
       if (!guardResult.allowed) {
         setError(guardResult.reason ?? "Order blocked: naked short exposure");
         return;
@@ -932,22 +947,23 @@ function ComboOrderForm({
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "combo", symbol: ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, legs }),
+        body: JSON.stringify(placePayload),
       });
       const json = await res.json();
       if (!res.ok) setError(json.error || "Order placement failed");
       else {
         const feedback = placeOrderFeedback(json, `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}`);
         orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
-        setConfirmStep(false);
+        disarm();
         onOrderPlaced?.();
       }
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  }, [confirmStep, submitPermitted, legsWithActions, ticker, action, parsedQty, parsedPrice, tif, portfolio, orderActions, position.structure, onOrderPlaced]);
+  }, [confirmStep, arm, disarm, placePayload, submitPermitted, action, parsedQty, parsedPrice, portfolio, orderActions, position.structure, onOrderPlaced]);
 
   return (
     <div className="order-form">
@@ -1001,13 +1017,13 @@ function ComboOrderForm({
         <div className="order-action-buttons">
           <button
             className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
-            onClick={() => { setAction("BUY"); setConfirmStep(false); }}
+            onClick={() => { setAction("BUY"); disarm(); }}
           >
             BUY
           </button>
           <button
             className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
-            onClick={() => { setAction("SELL"); setConfirmStep(false); }}
+            onClick={() => { setAction("SELL"); disarm(); }}
           >
             SELL
           </button>
@@ -1023,7 +1039,7 @@ function ComboOrderForm({
           min="1"
           step="1"
           value={quantity}
-          onChange={(e) => { setQuantity(e.target.value); setConfirmStep(false); }}
+          onChange={(e) => { setQuantity(e.target.value); disarm(); }}
           placeholder="Contracts"
         />
       </div>
@@ -1038,18 +1054,18 @@ function ComboOrderForm({
             type="number"
             step="0.01"
             value={limitPrice}
-            onChange={(e) => { setLimitPrice(e.target.value); setConfirmStep(false); }}
+            onChange={(e) => { setLimitPrice(e.target.value); disarm(); }}
             placeholder="0.00"
           />
         </div>
         <div className="modify-quick-buttons">
-          <button className="btn-quick" disabled={netPrices.bid == null} onClick={() => { if (netPrices.bid != null) { setLimitPrice(netPrices.bid.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.bid == null} onClick={() => { if (netPrices.bid != null) { setLimitPrice(netPrices.bid.toFixed(2)); disarm(); } }}>
             BID{netPrices.bid != null ? ` ${netPrices.bid.toFixed(2)}` : ""}
           </button>
-          <button className="btn-quick" disabled={netPrices.mid == null} onClick={() => { if (netPrices.mid != null) { setLimitPrice(netPrices.mid.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.mid == null} onClick={() => { if (netPrices.mid != null) { setLimitPrice(netPrices.mid.toFixed(2)); disarm(); } }}>
             MID{netPrices.mid != null ? ` ${netPrices.mid.toFixed(2)}` : ""}
           </button>
-          <button className="btn-quick" disabled={netPrices.ask == null} onClick={() => { if (netPrices.ask != null) { setLimitPrice(netPrices.ask.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={netPrices.ask == null} onClick={() => { if (netPrices.ask != null) { setLimitPrice(netPrices.ask.toFixed(2)); disarm(); } }}>
             ASK{netPrices.ask != null ? ` ${netPrices.ask.toFixed(2)}` : ""}
           </button>
         </div>
@@ -1059,8 +1075,8 @@ function ComboOrderForm({
       <div className="order-field">
         <label className="order-label">Time in Force</label>
         <div className="order-action-buttons">
-          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
-          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => { setTif("DAY"); disarm(); }}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => { setTif("GTC"); disarm(); }}>GTC</button>
         </div>
       </div>
 
@@ -1087,7 +1103,7 @@ function ComboOrderForm({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={() => disarm()} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
@@ -1112,35 +1128,95 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
   const isCombo = position != null && position.legs.length > 1 && position.structure_type !== "Stock";
   const isIndex = isIndexSymbol(ticker);
 
-  const { requestModify } = useOrderActions();
+  const { requestModify, requestCancel, pushNotification } = useOrderActions();
   // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
   // owner surface supplies real connectivity.
   const { connected, ibConnected, marketDataDegraded } = useRealtimePrices();
   // REL-236 / NF-3: relay pings continue when the broker feed is down.
   const feedConnected = connected && ibConnected && !marketDataDegraded;
-  const [modifyTarget, setModifyTarget] = useState<OpenOrder | null>(null);
-  const [modifyLoading, setModifyLoading] = useState(false);
+  // The dialogs hold order IDENTITY; the live order is re-resolved from the
+  // polled `openOrders` every render so ModifyOrderModal sees live fills.
+  const { state: dialog, send: sendDialog, nextRequestId } = useOrderDialogMachine();
+  const liveTarget = useMemo((): OpenOrder | null | undefined => {
+    if (dialog.phase === "confirmCancel") return resolveLiveOrder(dialog.ref, openOrders);
+    if (dialog.phase === "editing" && dialog.subject.kind === "single") {
+      return resolveLiveOrder(dialog.subject.ref, openOrders);
+    }
+    return undefined;
+  }, [dialog, openOrders]);
+
+  const targetGone = liveTarget === null;
+  useEffect(() => {
+    if (!targetGone) return;
+    if (sendDialog({ type: "targetGone" })) {
+      pushNotification({ type: "warning", message: ORDER_NO_LONGER_WORKING });
+    }
+  }, [targetGone, sendDialog, pushNotification]);
+
+  const closeDialog = useCallback(() => {
+    sendDialog({ type: "close" });
+  }, [sendDialog]);
+
+  const openModify = useCallback((order: OpenOrder) => {
+    sendDialog({ type: "openModify", subject: { kind: "single", ref: orderRefOf(order) } });
+  }, [sendDialog]);
+
+  const openCancel = useCallback((order: OpenOrder) => {
+    sendDialog({ type: "openCancel", ref: orderRefOf(order) });
+  }, [sendDialog]);
 
   const handleModifyConfirm = useCallback(async (request: ModifyOrderRequest) => {
-    if (!modifyTarget) return;
-    setModifyLoading(true);
-    await requestModify(modifyTarget, request);
-    setModifyLoading(false);
-    setModifyTarget(null);
-  }, [modifyTarget, requestModify]);
+    if (dialog.phase !== "editing" || !liveTarget) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitModify", requestId, modalOrder: liveTarget })) return;
+    try {
+      await requestModify(liveTarget, request);
+    } finally {
+      sendDialog({ type: "settled", requestId });
+    }
+  }, [dialog.phase, liveTarget, nextRequestId, sendDialog, requestModify]);
+
+  const handleCancelConfirm = useCallback(async () => {
+    if (dialog.phase !== "confirmCancel" || !liveTarget) return;
+    const requestId = nextRequestId();
+    if (!sendDialog({ type: "submitCancel", requestId, orders: [liveTarget] })) return;
+    try {
+      await requestCancel(liveTarget);
+    } finally {
+      sendDialog({ type: "settled", requestId });
+    }
+  }, [dialog.phase, liveTarget, nextRequestId, sendDialog, requestCancel]);
 
   return (
     <>
+      <CancelOrderDialog
+        order={
+          dialog.phase === "confirmCancel"
+            ? liveTarget ?? null
+            : dialog.phase === "cancelling"
+              ? dialog.orders[0]
+              : null
+        }
+        loading={dialog.phase === "cancelling"}
+        onConfirm={handleCancelConfirm}
+        onClose={closeDialog}
+      />
       <ModifyOrderModal
-        order={modifyTarget}
-        loading={modifyLoading}
+        order={
+          dialog.phase === "modifying"
+            ? dialog.modalOrder
+            : dialog.phase === "editing"
+              ? liveTarget ?? null
+              : null
+        }
+        loading={isOrderDialogInFlight(dialog)}
         prices={prices}
         portfolio={portfolio}
         // R-112: a close-out must count the SELL combos already working.
         openOrders={{ open_orders: openOrders }}
         feedConnected={feedConnected}
         onConfirm={handleModifyConfirm}
-        onClose={() => setModifyTarget(null)}
+        onClose={closeDialog}
       />
 
       <div className="order-tab">
@@ -1225,7 +1301,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
           <div className="existing-orders-section">
             <div className="existing-orders-title">Open Orders ({openOrders.length})</div>
             {openOrders.map((o) => (
-              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={setModifyTarget} />
+              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={openModify} onCancel={openCancel} />
             ))}
           </div>
         )}

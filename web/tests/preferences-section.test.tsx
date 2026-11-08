@@ -560,3 +560,65 @@ describe("PreferencesSection", () => {
     expect(control?.textContent ?? "").not.toContain("contracts");
   });
 });
+
+describe("PreferencesSection group save machine", () => {
+  function saved(entry: Entry, value: number) {
+    return { preference: { ...structuredClone(entry), value, source: "db" }, store: { ...STORE_OK } };
+  }
+
+  it("26. a confirmed widen continues saving the remaining dirty rows in the group", async () => {
+    await renderSection();
+    mocks.savePreference.mockImplementation(async (key: string, value: number) => (
+      saved(key === QTY.key ? QTY : NOTIONAL, value)
+    ));
+    // QTY widens (400 -> 450) and needs confirmation; NOTIONAL tightens.
+    fireEvent.change(screen.getByTestId("preference-input-RADON_MAX_ORDER_QTY"), { target: { value: "450" } });
+    fireEvent.change(screen.getByTestId("preference-input-RADON_MAX_ORDER_NOTIONAL"), { target: { value: "100000" } });
+    fireEvent.click(screen.getByTestId("preference-group-save-order-limits"));
+
+    await screen.findByTestId("preference-widen-confirm");
+    expect(mocks.savePreference).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), { target: { value: "RADON_MAX_ORDER_QTY" } });
+    fireEvent.click(screen.getByRole("button", { name: /widen cap/i }));
+
+    await waitFor(() => {
+      expect(mocks.savePreference).toHaveBeenCalledWith("RADON_MAX_ORDER_QTY", 450);
+      expect(mocks.savePreference).toHaveBeenCalledWith("RADON_MAX_ORDER_NOTIONAL", 100000);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("preference-group-save-order-limits")).toBeNull();
+    });
+    expect(mocks.savePreference).toHaveBeenCalledTimes(2);
+  });
+
+  it("27. group Save is disabled while saving, so a double click cannot run the loop twice", async () => {
+    await renderSection();
+    let release: (v: unknown) => void = () => {};
+    mocks.savePreference.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    fireEvent.change(screen.getByTestId("preference-input-RADON_SCANNER_WORKERS"), { target: { value: "40" } });
+    const saveGroup = screen.getByTestId("preference-group-save-scanning") as HTMLButtonElement;
+    fireEvent.click(saveGroup);
+    fireEvent.click(saveGroup);
+    await waitFor(() => expect(saveGroup.disabled).toBe(true));
+    expect((screen.getByTestId("preference-save-RADON_SCANNER_WORKERS") as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.savePreference).toHaveBeenCalledTimes(1);
+    release(saved(WORKERS, 40));
+    await waitFor(() => {
+      expect(screen.queryByTestId("preference-group-save-scanning")).toBeNull();
+    });
+    expect(mocks.savePreference).toHaveBeenCalledTimes(1);
+  });
+
+  it("28. cancelling the widen stops the group and leaves every row dirty", async () => {
+    await renderSection();
+    fireEvent.change(screen.getByTestId("preference-input-RADON_MAX_ORDER_QTY"), { target: { value: "450" } });
+    fireEvent.change(screen.getByTestId("preference-input-RADON_MAX_ORDER_NOTIONAL"), { target: { value: "100000" } });
+    fireEvent.click(screen.getByTestId("preference-group-save-order-limits"));
+    await screen.findByTestId("preference-widen-confirm");
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByTestId("preference-widen-confirm")).toBeNull());
+    expect(mocks.savePreference).not.toHaveBeenCalled();
+    const groupSave = screen.getByTestId("preference-group-save-order-limits") as HTMLButtonElement;
+    expect(groupSave.disabled).toBe(false);
+  });
+});

@@ -180,7 +180,7 @@ class TestDeliveredGroupedPageArmsItsRoster:
             row[0]
             for row in db_conn.execute(
                 "SELECT service FROM watchdog_cooldowns "
-                "WHERE kind='severity:P1' AND last_outcome='notified'"
+                "WHERE kind='severity:P1' AND last_outcome LIKE 'notified%'"
             ).fetchall()
         }
         assert stamped == {*COHORT, grouping.GROUPED_ALERT_KEY}, (

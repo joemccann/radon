@@ -181,6 +181,10 @@ def _required_on_pull_request(condition: str | None) -> bool:
     first = text.split("||", 1)[0]
     if "github.event_name == 'push'" in first and "pull_request" not in first:
         return False
+    # Label-gated: an unlabeled PR reports one skipped row under the
+    # unexpanded matrix name, so the shard names would never arrive.
+    if "github.event.pull_request.labels" in first:
+        return False
     return True
 
 

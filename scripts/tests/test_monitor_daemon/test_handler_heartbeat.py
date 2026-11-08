@@ -39,8 +39,13 @@ if str(SCRIPTS_DIR) not in sys.path:
 # --------------------------------------------------------------------- helpers
 
 
-def _install_fake_db_writer() -> MagicMock:
-    """Stub ``db.writer.record_service_health`` for hermetic tests."""
+def _install_fake_db_writer(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stub ``db.writer.record_service_health`` for hermetic tests.
+
+    Every patch goes through ``monkeypatch`` so later files on the same xdist
+    worker get the real writer back (a leaked frozen ``_now_iso`` made
+    ``replace_open_orders_for_session`` stamp a 2026-05-09 snapshot).
+    """
     record_mock = MagicMock(name="record_service_health")
     now_iso_mock = MagicMock(name="_now_iso", return_value="2026-05-09T09:00:00Z")
 
@@ -48,8 +53,8 @@ def _install_fake_db_writer() -> MagicMock:
     # synthesize the package + module so lazy imports inside handlers resolve.
     real_writer = sys.modules.get("db.writer")
     if real_writer is not None:
-        real_writer.record_service_health = record_mock  # type: ignore[attr-defined]
-        real_writer._now_iso = now_iso_mock  # type: ignore[attr-defined]
+        monkeypatch.setattr(real_writer, "record_service_health", record_mock, raising=False)
+        monkeypatch.setattr(real_writer, "_now_iso", now_iso_mock, raising=False)
         return record_mock
 
     fake_writer = types.ModuleType("db.writer")
@@ -59,18 +64,19 @@ def _install_fake_db_writer() -> MagicMock:
     fake_writer.upsert_journal_entry = MagicMock(name="upsert_journal_entry")  # type: ignore[attr-defined]
     fake_writer.upsert_app_config = MagicMock(name="upsert_app_config")  # type: ignore[attr-defined]
 
-    fake_db_pkg = sys.modules.get("db") or types.ModuleType("db")
-    fake_db_pkg.writer = fake_writer  # type: ignore[attr-defined]
-
-    sys.modules["db"] = fake_db_pkg
-    sys.modules["db.writer"] = fake_writer
+    fake_db_pkg = sys.modules.get("db")
+    if fake_db_pkg is None:
+        fake_db_pkg = types.ModuleType("db")
+        monkeypatch.setitem(sys.modules, "db", fake_db_pkg)
+    monkeypatch.setattr(fake_db_pkg, "writer", fake_writer, raising=False)
+    monkeypatch.setitem(sys.modules, "db.writer", fake_writer)
     return record_mock
 
 
 @pytest.fixture(autouse=True)
-def fake_db_writer():
+def fake_db_writer(monkeypatch: pytest.MonkeyPatch):
     """Reset the stub between tests so call-history doesn't bleed across."""
-    yield _install_fake_db_writer()
+    yield _install_fake_db_writer(monkeypatch)
 
 
 def _called_with_state(spy: MagicMock, expected_service: str, expected_state: str) -> bool:

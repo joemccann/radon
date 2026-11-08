@@ -242,10 +242,43 @@ def test_missing_pushover_creds_does_not_stamp_digest(env, monkeypatch):
     _insert(conn, symbol="NVDA")
     drain.run(now=NOW)
     row = conn.execute("SELECT processed_at, digest_sent_at FROM tv_alert_events").fetchone()
-    assert row[0] is not None
-    assert row[1] is None
+    # Not sent, so not processed: the next cycle with credentials delivers it.
+    assert row == (None, None)
     assert pushes == []
     assert health[-1][0] == "error"
+
+
+def test_failed_push_is_retried_next_cycle(env, monkeypatch):
+    """processed_at used to be stamped before the send, and the reader
+    filters processed_at IS NULL: one failed Pushover lost the alerts."""
+    conn, pushes, health = env
+    first = _insert(conn, symbol="NVDA", received=NOW)
+    echo = _insert(conn, symbol="NVDA", received=NOW + timedelta(seconds=2))
+
+    def down(payload):
+        raise RuntimeError("pushover 503")
+
+    monkeypatch.setattr(drain, "_send_pushover", down)
+    drain.run(now=NOW + timedelta(minutes=1))
+    assert health[-1][0] == "error"
+    assert conn.execute(
+        "SELECT processed_at, digest_sent_at FROM tv_alert_events WHERE id=?", (first,)
+    ).fetchone() == (None, None)
+
+    monkeypatch.setattr(drain, "_send_pushover", lambda payload: pushes.append(payload))
+    summary = drain.run(now=NOW + timedelta(minutes=6))
+    assert len(pushes) == 1
+    assert pushes[0]["message"].startswith("1 TradingView alert: NVDA x1")
+    assert summary["digested"] == 1
+    rows = dict(
+        (r[0], r[1:]) for r in conn.execute(
+            "SELECT id, duplicate_of, processed_at IS NOT NULL, digest_sent_at IS NOT NULL "
+            "FROM tv_alert_events"
+        ).fetchall()
+    )
+    assert rows[first] == (None, 1, 1)
+    assert rows[echo][0] == first
+    assert health[-1] == ("ok", None)
 
 
 def test_digest_sanitizes_hostile_symbols():

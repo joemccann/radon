@@ -19,6 +19,7 @@ import pwd
 import shlex
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 
@@ -29,6 +30,15 @@ CLOUD_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUNNER = CLOUD_ROOT / "scripts" / "post_deploy.py"
 DEPLOY = CLOUD_ROOT / "scripts" / "deploy.sh"
 REPO_POST_DEPLOY = CLOUD_ROOT / "post_deploy"
+ARCHIVE_HOOK = REPO_POST_DEPLOY / "hooks" / "0001-archive-retired-json.sh"
+RETIRED_JSON = (
+    "portfolio.json",
+    "trade_log.json",
+    "orders.json",
+    "blotter.json",
+    "reconciliation.json",
+    "option_session_mark_cache.json",
+)
 SHA = "a" * 40
 
 
@@ -216,16 +226,73 @@ def test_failed_hook_stops_later_hooks_is_paged_and_retried_next_deploy(tree):
     assert len(tree.pages) == 2
 
 
-def test_hook_interrupted_mid_run_is_retried(tree):
-    tree.log_hook("0001-interrupted")
+def _seed_running(tree, hook_id: str) -> None:
+    """A runner killed mid-hook leaves `running`; the next runner holds the
+    lock, so that record can only belong to a dead run."""
     tree.state.parent.mkdir(parents=True)
     tree.state.write_text(json.dumps({
         "version": 1,
-        "hooks": {"0001-interrupted": {"status": "running", "attempts": 1, "sha256": "x"}},
+        "hooks": {hook_id: {
+            "status": "running", "attempts": 1, "sha256": "x",
+            "started_at": "2026-11-03T00:00:00Z",
+        }},
     }))
+
+
+def test_interrupted_idempotent_hook_is_rerun(tree):
+    tree.add_hook(
+        "0001-interrupted",
+        '#!/bin/bash\nprintf "%s\\n" 0001-interrupted >> "$RADON_DIR/order.log"\n',
+        idempotent=True,
+    )
+    _seed_running(tree, "0001-interrupted")
     assert tree.run_hooks() == 0
     assert tree.order() == ["0001-interrupted"]
-    assert tree.read_state()["hooks"]["0001-interrupted"]["attempts"] == 2
+    record = tree.read_state()["hooks"]["0001-interrupted"]
+    assert record["status"] == "done"
+    assert record["attempts"] == 2
+
+
+def test_interrupted_hook_without_idempotent_flag_is_paged_not_rerun(tree):
+    tree.log_hook("0001-interrupted")
+    tree.log_hook("0002-later")
+    _seed_running(tree, "0001-interrupted")
+
+    assert tree.run_hooks() == 1
+    assert tree.order() == [], "neither the interrupted hook nor a later one may run"
+    record = tree.read_state()["hooks"]["0001-interrupted"]
+    assert record["status"] == "interrupted"
+    assert record["attempts"] == 1
+    assert record["started_at"] == "2026-11-03T00:00:00Z"
+    assert len(tree.pages) == 1
+    assert "0001-interrupted" in tree.pages[0][1]
+    assert "idempotent" in tree.pages[0][1]
+
+    # Still blocked and still paged on the next deploy: nothing reruns it
+    # until a reviewed manifest change declares it idempotent or retires it.
+    assert tree.run_hooks(deploy_sha="b" * 40) == 1
+    assert tree.order() == []
+    assert len(tree.pages) == 2
+
+
+def test_interrupted_hook_reruns_once_manifest_declares_it_idempotent(tree):
+    tree.log_hook("0001-interrupted")
+    _seed_running(tree, "0001-interrupted")
+    assert tree.run_hooks() == 1
+    tree.hooks[0]["idempotent"] = True
+    tree.write_manifest()
+    assert tree.run_hooks() == 0
+    assert tree.order() == ["0001-interrupted"]
+    assert tree.read_state()["hooks"]["0001-interrupted"]["status"] == "done"
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def test_idempotent_flag_must_be_a_boolean(tree, value):
+    tree.log_hook("0001-any")
+    tree.hooks[0]["idempotent"] = value
+    tree.write_manifest()
+    with pytest.raises(pd.Refusal, match="idempotent"):
+        pd.load_manifest(tree.root)
 
 
 def test_hook_timeout_kills_process_group_and_records_failure(tree):
@@ -772,6 +839,66 @@ def test_repo_manifest_pins_every_checked_in_hook():
     hooks = pd.validate_tree(REPO_POST_DEPLOY, manifest, euid=os.geteuid(), check_owner=False)
     pd.validate_checks(manifest["verify"])
     assert [h.id for h in hooks] == sorted(h["id"] for h in manifest["hooks"])
+
+
+def test_repo_archive_hook_is_declared_idempotent():
+    """An interrupted run is not retried unless the manifest says so.
+
+    The hook is a no-op when the retired files are already gone, so a
+    mid-run crash must retry instead of paging forever with JSON still on
+    disk (or a half-written archive).
+    """
+    manifest = pd.load_manifest(REPO_POST_DEPLOY)
+    entry = next(h for h in manifest["hooks"] if h["id"] == "0001-archive-retired-json")
+    assert entry.get("idempotent") is True
+
+
+def test_archive_retired_json_hook_archives_then_removes_and_is_rerunnable(tmp_path):
+    radon_dir = tmp_path / "radon"
+    data = radon_dir / "data"
+    data.mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    keep = data / "watchlist.json"
+    keep.write_text('{"keep": true}\n')
+    for name in RETIRED_JSON:
+        (data / name).write_text(f'{{"name": "{name}"}}\n')
+    sha = "b" * 40
+    env = {
+        **os.environ,
+        "RADON_DIR": str(radon_dir),
+        "RADON_DEPLOY_SHA": sha,
+        "HOME": str(home),
+        # macOS tar otherwise writes AppleDouble `._*` members; production is Linux.
+        "COPYFILE_DISABLE": "1",
+    }
+    result = subprocess.run(
+        [str(ARCHIVE_HOOK)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive = home / "retired-json" / f"retired-json-{sha}.tar.gz"
+    assert archive.is_file()
+    assert oct(archive.stat().st_mode & 0o777) == "0o600"
+    with tarfile.open(archive, "r:gz") as tar:
+        names = set(tar.getnames())
+    assert names == set(RETIRED_JSON)
+    for name in RETIRED_JSON:
+        assert not (data / name).exists(), name
+    assert keep.read_text() == '{"keep": true}\n'
+    result = subprocess.run(
+        [str(ARCHIVE_HOOK)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert archive.is_file()
+    assert keep.exists()
 
 
 # -- deploy.sh wiring ---------------------------------------------------------

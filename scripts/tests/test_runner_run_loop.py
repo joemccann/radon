@@ -29,6 +29,7 @@ pwd > "$CALLS/$name.cwd"
 env > "$CALLS/$name.env"
 case "$name" in codex|fx) cat > "$CALLS/$name.stdin" ;; esac
 var="STUB_$(echo "$name" | tr a-z A-Z)"
+[[ -n "${STUB_QUIET:-}" ]] || echo "stub session output"
 eval "${!var:-exit 0}"
 """
 GH_STUB = f"""#!/bin/bash
@@ -230,6 +231,49 @@ def test_a_failing_agent_falls_through_to_the_next(rig):
     assert proc.returncode == 0
     assert rig.called() == ["grok", "codex"]
     assert (rig.calls / "codex.stdin").read_text().endswith(PROMPT_BODY)
+    assert rig.notification()["title"] == "radon doc: done via codex"
+
+
+def test_a_grok_exit_0_with_no_output_falls_through_to_the_next(rig):
+    # Grok 1.0.70 with an empty model catalog prints one newline and exits 0.
+    proc = rig.run(STUB_QUIET="1", STUB_GROK="echo; exit 0")
+
+    assert proc.returncode == 0, rig.log()
+    assert rig.called() == ["grok", "codex"]
+    assert rig.notification()["title"] == "radon doc: done via codex"
+    assert "grok exited 0 with no output" in rig.log()
+
+
+def test_a_silent_grok_with_no_other_rung_fails_and_posts_no_audited_sha(rig):
+    rig.configure(AGENTS="grok", DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    proc = rig.run(STUB_QUIET="1")
+
+    assert proc.returncode == 1, rig.log()
+    note = rig.notification()
+    assert note["title"] == "radon doc: FAILED"
+    assert "grok=65" in note["message"]
+    posted = _gh_argv(rig)
+    assert "loop=doc phase=audit exit=1" in posted
+    assert "audited-through" not in posted
+
+
+def test_a_silent_grok_rerun_cannot_pass_on_the_same_days_earlier_output(rig):
+    rig.configure(AGENTS="grok", DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
+    first = rig.run(STUB_GROK="echo 'RESULT: https://x/pull/7 - real work'; exit 0")
+    assert first.returncode == 0, rig.log()
+    (rig.calls / "gh.argv").unlink()
+
+    rerun = rig.run(STUB_QUIET="1", STUB_GROK="echo; exit 0")
+
+    assert rerun.returncode == 1, rig.log()
+    assert rig.notification()["title"] == "radon doc: FAILED"
+    assert "audited-through" not in _gh_argv(rig)
+
+
+def test_only_grok_is_held_to_the_output_check(rig):
+    proc = rig.run(STUB_QUIET="1", STUB_GROK="exit 3")
+
+    assert proc.returncode == 0, rig.log()
     assert rig.notification()["title"] == "radon doc: done via codex"
 
 

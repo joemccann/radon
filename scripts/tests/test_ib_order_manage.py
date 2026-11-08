@@ -326,6 +326,196 @@ class TestCancelOrder:
         assert "cannot cancel" in data["message"]
 
 
+# ─── cancel outcome (§1#1: absence is not Cancelled) ────
+
+def make_execution(perm_id=12345, order_id=10, shares=50, exec_id="e1", sec_type="STK", client_id=0):
+    fill = MagicMock()
+    fill.execution.permId = perm_id
+    fill.execution.orderId = order_id
+    fill.execution.clientId = client_id
+    fill.execution.shares = shares
+    fill.execution.execId = exec_id
+    fill.contract.secType = sec_type
+    return fill
+
+
+def _gone_after_cancel(t, executions=None, executions_error=None):
+    """Order vanishes from refreshed openTrades() after cancelOrder."""
+    t.order.clientId = 0
+    t.contract.secType = "STK"
+    t.fills = []
+    t.orderStatus.filled = 0
+    client = make_client()
+    client.ib.client.clientId = 0
+    client.get_open_orders.side_effect = [[t], [], [], []]
+    client.cancel_order = MagicMock()
+    if executions_error is not None:
+        client.get_executions.side_effect = executions_error
+    else:
+        client.get_executions.return_value = executions or []
+    return client
+
+
+class TestCancelOutcomeFromExecutions:
+    def test_order_gone_with_full_execution_is_filled_not_cancelled(self, capsys):
+        t = make_trade(status="Submitted")
+        client = _gone_after_cancel(t, [make_execution(shares=50)])
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert exc.value.code == 1
+        assert data["status"] == "error"
+        assert data["cancelOutcome"] == "filled"
+        assert data["finalStatus"] == "Filled"
+
+    def test_order_gone_with_partial_execution_is_partial(self, capsys):
+        t = make_trade(status="Submitted")
+        client = _gone_after_cancel(t, [make_execution(shares=20)])
+
+        with pytest.raises(SystemExit):
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert data["cancelOutcome"] == "partially_filled_then_cancelled"
+        assert data["filledQuantity"] == 20
+
+    def test_execution_for_another_order_does_not_count(self, capsys):
+        t = make_trade(status="Submitted")
+        client = _gone_after_cancel(t, [make_execution(perm_id=999, order_id=11, shares=50)])
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert exc.value.code == 0
+        assert data["cancelOutcome"] == "cancelled"
+        assert data["finalStatus"] == "Cancelled"
+
+    def test_duplicate_exec_ids_count_once(self, capsys):
+        t = make_trade(status="Submitted")
+        dup = make_execution(shares=20, exec_id="x1")
+        t_fill = make_execution(shares=20, exec_id="x1")
+        client = _gone_after_cancel(t, [dup])
+        t.fills = [t_fill]
+
+        with pytest.raises(SystemExit):
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert data["cancelOutcome"] == "partially_filled_then_cancelled"
+        assert data["filledQuantity"] == 20
+
+    def test_unreadable_executions_is_unknown_not_cancelled(self, capsys):
+        t = make_trade(status="Submitted")
+        client = _gone_after_cancel(t, executions_error=RuntimeError("socket closed"))
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert exc.value.code == 1
+        assert data["status"] == "error"
+        assert data["cancelOutcome"] == "unknown"
+        assert "socket closed" in data["message"]
+
+    def test_refreshed_filled_status_ends_the_wait_as_filled(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        t.fills = []
+        client = make_client([t])
+        client.get_executions.return_value = []
+
+        def side_effect(order):
+            t.orderStatus.status = "Filled"
+            t.orderStatus.filled = 50
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert exc.value.code == 1
+        assert data["cancelOutcome"] == "filled"
+        assert client.sleep.call_count == 1
+
+    def test_targeted_202_with_execution_is_partial(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        t.fills = []
+        t.orderStatus.filled = 0
+        client = make_client([t])
+        client.get_executions.return_value = [make_execution(shares=5)]
+
+        def side_effect(order):
+            t.orderStatus.status = "PendingCancel"
+            client.ib.errorEvent.emit(order.orderId, 202, "Order Canceled - reason:")
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit):
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert data["cancelOutcome"] == "partially_filled_then_cancelled"
+
+    def test_cancelled_status_with_broker_filled_qty_is_partial(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        t.fills = []
+        client = make_client([t])
+        client.get_executions.return_value = []
+
+        def side_effect(order):
+            t.orderStatus.status = "Cancelled"
+            t.orderStatus.filled = 7
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit):
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert data["cancelOutcome"] == "partially_filled_then_cancelled"
+        assert data["filledQuantity"] == 7
+
+    def test_already_cancelled_reports_its_outcome(self, capsys):
+        t = make_trade(status="Cancelled")
+        t.fills = []
+        t.orderStatus.filled = 0
+        client = make_client([t])
+        client.get_executions.return_value = [make_execution(shares=3)]
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert exc.value.code == 1
+        assert "already Cancelled" in data["message"]
+        assert data["cancelOutcome"] == "partially_filled_then_cancelled"
+        client.cancel_order.assert_not_called()
+
+    def test_timeout_reports_still_working(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        client = make_client([t])
+        client.cancel_order = MagicMock()
+
+        with pytest.raises(SystemExit):
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        data = json.loads(capsys.readouterr().out)
+        assert data["cancelOutcome"] == "still_working"
+
+
+class TestClassifyCancel:
+    def test_table(self):
+        from ib_order_manage import classify_cancel
+        from utils.ib_order_status import CancelOutcome as C
+
+        assert classify_cancel("Submitted", gone=False, acked=False, filled=0, total=10) is C.STILL_WORKING
+        assert classify_cancel("PendingCancel", gone=False, acked=False, filled=None, total=10) is C.STILL_WORKING
+        assert classify_cancel("Filled", gone=True, acked=False, filled=None, total=10) is C.FILLED
+        assert classify_cancel("Submitted", gone=True, acked=False, filled=None, total=10) is C.UNKNOWN
+        assert classify_cancel("Submitted", gone=True, acked=False, filled=0, total=10) is C.CANCELLED
+        assert classify_cancel("Submitted", gone=True, acked=False, filled=10, total=10) is C.FILLED
+        assert classify_cancel("Cancelled", gone=False, acked=False, filled=4, total=10) is C.PARTIALLY_FILLED_THEN_CANCELLED
+        assert classify_cancel("Inactive", gone=False, acked=False, filled=0, total=10) is C.CANCELLED
+        assert classify_cancel("PendingCancel", gone=False, acked=True, filled=0, total=10) is C.CANCELLED
+
+
 # ─── modify_order ───────────────────────────────────────
 
 class TestModifyOrder:

@@ -171,8 +171,7 @@ async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, 
     monkeypatch.setattr(server, "_ib_last_failure", 0.0)
     monkeypatch.setattr(server, "ib_pool", None)
     monkeypatch.setattr(server, "is_cloud_mode", lambda: mode == "cloud")
-    monkeypatch.setattr(server, "is_docker_mode", lambda: False)
-    monkeypatch.setattr(server, "is_launchd_mode", lambda: mode == "managed")
+    monkeypatch.setattr(server, "_should_auto_restart_ib_gateway_after_runtime_failure", lambda: mode.startswith("restart-"))
 
     with pytest.raises(HTTPException) as exc:
         await server._orders_place_after_rate_reservation(body)

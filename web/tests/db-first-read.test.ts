@@ -1,16 +1,21 @@
 /**
- * Freshness-aware DB-vs-disk chokepoint (DUR-01).
+ * Turso-first chokepoint with a last-in-memory fallback (DUR-01).
  *
- * The helper must serve whichever source carries the NEWER content
- * timestamp so a stalled writer on either side (frozen Turso mirror,
- * stale disk fallback) can never freeze the UI. Missing/unparseable
- * timestamps are infinitely stale; the DB wins ties.
+ * A valid, non-degraded DB row is served and remembered. When Turso fails, times
+ * out, returns nothing, returns a future-dated row or returns a degraded row, the
+ * last good read for that label serves instead. Disk is never a source.
+ *
+ * `fresh` always comes from the served read's OWN timestamp, so memory can keep a
+ * panel rendering through an outage but can never make dead data look current.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { runWithDemoDbPrincipal } from "../lib/demo/demoDbIsolation";
 import {
   dbFirstRead,
   contentTimestampMs,
   isMissingPayload,
+  staleCollapse,
+  __resetDbFirstReadMemoryForTests,
   type TimestampedRead,
 } from "../lib/dbFirstRead";
 
@@ -23,29 +28,39 @@ function source<T>(data: T, timestampMs: number | null) {
 }
 
 const absent = async () => null;
+const failing = async () => {
+  throw new Error("WAL locked");
+};
 
-const baseOptions = { maxAgeMs: 10 * MINUTE, now: () => NOW };
+const baseOptions = { maxAgeMs: 10 * MINUTE, now: () => NOW, label: "test" };
 
-/** T-042 fixture predicate: a route whose degraded shape is an empty `results` array. */
+/** Fixture predicate: a route whose degraded shape is an empty `results` array. */
 const isEmptyResults = (data: { results: unknown[] }): boolean => data.results.length === 0;
 
 let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  __resetDbFirstReadMemoryForTests();
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   warn.mockRestore();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
-describe("dbFirstRead — fresher-source selection", () => {
-  it("serves the DB snapshot when it is fresher than disk", async () => {
+function warned(...fragments: string[]): boolean {
+  return warn.mock.calls.some((call: unknown[]) =>
+    fragments.every((fragment) => String(call[0]).includes(fragment)),
+  );
+}
+
+describe("dbFirstRead — DB selection", () => {
+  it("serves a valid DB row with source db", async () => {
     const result = await dbFirstRead({
       ...baseOptions,
       fromDb: source({ v: "db" }, NOW - 1 * MINUTE),
-      fromDisk: source({ v: "disk" }, NOW - 5 * MINUTE),
     });
     expect(result).toEqual({
       ok: true,
@@ -54,61 +69,21 @@ describe("dbFirstRead — fresher-source selection", () => {
       timestampMs: NOW - 1 * MINUTE,
       fresh: true,
     });
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it("serves the disk snapshot when it is fresher than the DB (frozen DB mirror / laptop-thin mode)", async () => {
+  it("an older healthy DB row replaces a newer memory entry: Turso is the source of truth", async () => {
+    await dbFirstRead({ ...baseOptions, fromDb: source({ v: "newer" }, NOW - 1 * MINUTE) });
     const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ v: "db" }, NOW - 24 * HOUR),
-      fromDisk: source({ v: "disk" }, NOW - 1 * MINUTE),
-      label: "vcg",
-    });
-    expect(result).toEqual({
-      ok: true,
-      source: "disk",
-      data: { v: "disk" },
-      timestampMs: NOW - 1 * MINUTE,
-      fresh: true,
-    });
-    // Drift signal: a present-but-staler DB row must be flagged in logs.
-    expect(warn.mock.calls.some((c: unknown[]) => String(c[0]).includes("vcg"))).toBe(true);
-  });
-
-  it("DB wins timestamp ties", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ v: "db" }, NOW - 2 * MINUTE),
-      fromDisk: source({ v: "disk" }, NOW - 2 * MINUTE),
+      fromDb: source({ v: "older" }, NOW - 5 * MINUTE),
     });
     expect(result.ok && result.source).toBe("db");
-  });
-});
-
-describe("dbFirstRead — missing timestamps are infinitely stale", () => {
-  it("a timestamped disk snapshot beats an untimestamped DB snapshot", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ v: "db" }, null),
-      fromDisk: source({ v: "disk" }, NOW - 9 * HOUR),
-    });
-    expect(result.ok && result.source).toBe("disk");
+    expect(result.ok && result.data).toEqual({ v: "older" });
   });
 
-  it("a timestamped DB snapshot beats an untimestamped disk snapshot", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ v: "db" }, NOW - 9 * HOUR),
-      fromDisk: source({ v: "disk" }, null),
-    });
-    expect(result.ok && result.source).toBe("db");
-  });
-
-  it("both untimestamped → legacy DB-first order, fresh=false", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ v: "db" }, null),
-      fromDisk: source({ v: "disk" }, null),
-    });
+  it("an untimestamped row is served and reads stale", async () => {
+    const result = await dbFirstRead({ ...baseOptions, fromDb: source({ v: "db" }, null) });
     expect(result).toEqual({
       ok: true,
       source: "db",
@@ -119,121 +94,208 @@ describe("dbFirstRead — missing timestamps are infinitely stale", () => {
   });
 });
 
-describe("dbFirstRead — per-route max-age", () => {
-  it("rejects a future-dated source beyond the clock-skew allowance", async () => {
+describe("dbFirstRead — last-in-memory fallback", () => {
+  async function remember(data: unknown = { v: "remembered" }, ageMs = 1 * MINUTE): Promise<void> {
+    await dbFirstRead({ ...baseOptions, fromDb: source(data, NOW - ageMs) });
+  }
+
+  it("serves memory when the DB read throws, with a labelled warning", async () => {
+    await remember();
+    const result = await dbFirstRead({ ...baseOptions, fromDb: failing, label: "test" });
+    expect(result).toEqual({
+      ok: true,
+      source: "memory",
+      data: { v: "remembered" },
+      timestampMs: NOW - 1 * MINUTE,
+      fresh: true,
+    });
+    expect(warned("test", "WAL locked")).toBe(true);
+    expect(warned("test", "memory")).toBe(true);
+  });
+
+  it("serves memory when the DB returns no row", async () => {
+    await remember();
+    const result = await dbFirstRead({ ...baseOptions, fromDb: absent });
+    expect(result.ok && result.source).toBe("memory");
+    expect(result.ok && result.data).toEqual({ v: "remembered" });
+  });
+
+  it("serves memory when the DB row is future-dated beyond the skew allowance", async () => {
+    await remember();
     const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ v: "future-db" }, NOW + 5 * MINUTE),
-      fromDisk: source({ v: "disk" }, NOW - 2 * MINUTE),
+      fromDb: source({ v: "future" }, NOW + 5 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("disk");
-    expect(result.ok && result.fresh).toBe(true);
+    expect(result.ok && result.source).toBe("memory");
+    expect(result.ok && result.data).toEqual({ v: "remembered" });
   });
 
-  it("returns unavailable when the only source is implausibly future-dated", async () => {
-    await expect(dbFirstRead({
+  it("reports fresh=false for a memory entry past maxAgeMs, so stale gating still fires", async () => {
+    await remember({ v: "old" }, 2 * HOUR);
+    const result = await dbFirstRead({ ...baseOptions, fromDb: failing });
+    expect(result).toEqual({
+      ok: true,
+      source: "memory",
+      data: { v: "old" },
+      timestampMs: NOW - 2 * HOUR,
+      fresh: false,
+    });
+  });
+
+  it("memory ages on the serving clock, never freezes at the time it was stored", async () => {
+    await remember({ v: "aging" }, 1 * MINUTE);
+    const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ v: "future-db" }, NOW + 5 * MINUTE),
-      fromDisk: absent,
-    })).resolves.toEqual({ ok: false });
-  });
-
-  it("reports fresh=true when the served snapshot is within maxAgeMs", async () => {
-    const result = await dbFirstRead({
-      fromDb: source({ v: "db" }, NOW - 5 * MINUTE),
-      fromDisk: absent,
-      maxAgeMs: 10 * MINUTE,
-      now: () => NOW,
+      fromDb: failing,
+      now: () => NOW + 30 * MINUTE,
     });
-    expect(result.ok && result.fresh).toBe(true);
-  });
-
-  it("reports fresh=false when the served snapshot exceeds maxAgeMs", async () => {
-    const result = await dbFirstRead({
-      fromDb: source({ v: "db" }, NOW - 5 * MINUTE),
-      fromDisk: absent,
-      maxAgeMs: 2 * MINUTE,
-      now: () => NOW,
-    });
+    expect(result.ok && result.source).toBe("memory");
+    expect(result.ok && result.timestampMs).toBe(NOW - 1 * MINUTE);
     expect(result.ok && result.fresh).toBe(false);
   });
 
-  it("treats age exactly equal to maxAgeMs as fresh", async () => {
-    const result = await dbFirstRead({
-      fromDb: source({ v: "db" }, NOW - 2 * MINUTE),
-      fromDisk: absent,
-      maxAgeMs: 2 * MINUTE,
-      now: () => NOW,
+  it("a memory entry with no timestamp stays stale", async () => {
+    await dbFirstRead({ ...baseOptions, fromDb: source({ v: "undated" }, null) });
+    const result = await dbFirstRead({ ...baseOptions, fromDb: failing });
+    expect(result.ok && result.source).toBe("memory");
+    expect(result.ok && result.fresh).toBe(false);
+  });
+
+  it("staleCollapse on a stale memory read collapses to missing and carries the row's own scan_time", async () => {
+    await remember({ scan_time: "2026-06-12T13:00:00Z", v: "old" }, 2 * HOUR);
+    const result = await dbFirstRead({ ...baseOptions, fromDb: failing });
+    expect(result.ok && result.fresh).toBe(false);
+    expect(staleCollapse({ missing: true, scan_time: null }, result)).toEqual({
+      missing: true,
+      stale: true,
+      scan_time: "2026-06-12T13:00:00Z",
     });
-    expect(result.ok && result.fresh).toBe(true);
+  });
+
+  it("returns ok=false with no row and no memory", async () => {
+    await expect(dbFirstRead({ ...baseOptions, fromDb: absent })).resolves.toEqual({ ok: false });
+  });
+
+  it("returns ok=false when the DB throws and memory is empty", async () => {
+    await expect(dbFirstRead({ ...baseOptions, fromDb: failing })).resolves.toEqual({ ok: false });
+  });
+
+  it("returns ok=false when the only read is future-dated: it must not be remembered either", async () => {
+    await expect(dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ v: "future" }, NOW + 5 * MINUTE),
+    })).resolves.toEqual({ ok: false });
+    await expect(dbFirstRead({ ...baseOptions, fromDb: failing })).resolves.toEqual({ ok: false });
   });
 });
 
-describe("dbFirstRead — failure handling", () => {
-  it("falls back to disk when fromDb throws", async () => {
-    const result = await dbFirstRead({
+describe("dbFirstRead — labels do not bleed", () => {
+  it("memory is keyed by label", async () => {
+    await dbFirstRead({
       ...baseOptions,
-      fromDb: async () => {
-        throw new Error("WAL locked");
-      },
-      fromDisk: source({ v: "disk" }, NOW - 1 * MINUTE),
+      label: "vixts",
+      fromDb: source({ v: "vixts" }, NOW - 1 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("disk");
-    expect(warn.mock.calls.some((c: unknown[]) => String(c[0]).includes("WAL locked"))).toBe(true);
+    await expect(dbFirstRead({
+      ...baseOptions,
+      label: "skew",
+      fromDb: failing,
+    })).resolves.toEqual({ ok: false });
+    const vixts = await dbFirstRead({ ...baseOptions, label: "vixts", fromDb: failing });
+    expect(vixts.ok && vixts.data).toEqual({ v: "vixts" });
   });
 
-  it("serves DB when fromDisk throws", async () => {
-    const result = await dbFirstRead({
+  it("evicts the least recently stored label past the bound, and keeps labels it keeps seeing", async () => {
+    await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ v: "db" }, NOW - 1 * MINUTE),
-      fromDisk: async () => {
-        throw new Error("ENOENT");
-      },
+      label: "survivor",
+      fromDb: source({ v: "survivor" }, NOW - 1 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("db");
-  });
-
-  it("warns with the disk-fallback message when DB is empty", async () => {
-    const result = await dbFirstRead({
+    await dbFirstRead({
       ...baseOptions,
-      fromDb: absent,
-      fromDisk: source({ v: "disk" }, NOW - 1 * MINUTE),
-      label: "scanner",
+      label: "victim",
+      fromDb: source({ v: "victim" }, NOW - 1 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("disk");
-    expect(warn.mock.calls.some((c: unknown[]) => String(c[0]).includes("scanner"))).toBe(true);
-  });
-
-  it("returns ok=false when both sources are absent", async () => {
-    const result = await dbFirstRead({
+    await dbFirstRead({
       ...baseOptions,
-      fromDb: absent,
-      fromDisk: absent,
+      label: "survivor",
+      fromDb: source({ v: "survivor" }, NOW - 1 * MINUTE),
     });
-    expect(result).toEqual({ ok: false });
-  });
-
-  it("returns ok=false when both sources throw", async () => {
-    const result = await dbFirstRead({
+    for (let i = 0; i < 256; i += 1) {
+      await dbFirstRead({
+        ...baseOptions,
+        label: `ticker:${i}`,
+        fromDb: source({ i }, NOW - 1 * MINUTE),
+      });
+    }
+    await expect(dbFirstRead({
       ...baseOptions,
-      fromDb: async () => {
-        throw new Error("db");
-      },
-      fromDisk: async () => {
-        throw new Error("disk");
-      },
-    });
-    expect(result).toEqual({ ok: false });
+      label: "victim",
+      fromDb: failing,
+    })).resolves.toEqual({ ok: false });
+    await expect(dbFirstRead({
+      ...baseOptions,
+      label: "ticker:255",
+      fromDb: failing,
+    })).resolves.toMatchObject({ ok: true, source: "memory" });
   });
 });
 
-describe("dbFirstRead — source deadlines", () => {
-  it("serves disk when the DB read hangs past the source timeout", async () => {
+describe("dbFirstRead — tenant isolation", () => {
+  it("a demo-scoped caller never receives memory stored from an operator read", async () => {
+    await dbFirstRead({
+      ...baseOptions,
+      label: "performance",
+      fromDb: source({ operator_nav: 1_000_000 }, NOW - 1 * MINUTE),
+    });
+    // In the prod process getDb() throws DemoDbIsolationError for this scope, so
+    // the DB-failed path is exactly how a shared key would have leaked the row.
+    const demo = await runWithDemoDbPrincipal(() => dbFirstRead({
+      ...baseOptions,
+      label: "performance",
+      fromDb: failing,
+    }));
+    expect(demo).toEqual({ ok: false });
+  });
+
+  it("an operator caller never receives memory stored from a demo-scoped read", async () => {
+    await runWithDemoDbPrincipal(() => dbFirstRead({
+      ...baseOptions,
+      label: "vixts",
+      fromDb: source({ v: "demo-mirror" }, NOW - 1 * MINUTE),
+    }));
+    await expect(dbFirstRead({
+      ...baseOptions,
+      label: "vixts",
+      fromDb: failing,
+    })).resolves.toEqual({ ok: false });
+  });
+
+  it("memory is keyed by database, so a changed TURSO_DB_URL starts empty", async () => {
+    vi.stubEnv("TURSO_DB_URL", "libsql://radon-one.example");
+    await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ v: "one" }, NOW - 1 * MINUTE),
+    });
+    vi.stubEnv("TURSO_DB_URL", "libsql://radon-two.example");
+    await expect(dbFirstRead({ ...baseOptions, fromDb: failing })).resolves.toEqual({ ok: false });
+    vi.stubEnv("TURSO_DB_URL", "libsql://radon-one.example");
+    const one = await dbFirstRead({ ...baseOptions, fromDb: failing });
+    expect(one.ok && one.data).toEqual({ v: "one" });
+  });
+});
+
+describe("dbFirstRead — source deadline", () => {
+  it("serves memory when the DB read hangs past the source timeout", async () => {
+    await dbFirstRead({
+      ...baseOptions,
+      label: "live-data",
+      fromDb: source({ v: "remembered" }, NOW - 1 * MINUTE),
+    });
     vi.useFakeTimers();
     const resultPromise = dbFirstRead({
       ...baseOptions,
       fromDb: () => new Promise(() => {}),
-      fromDisk: source({ v: "disk" }, NOW - 1 * MINUTE),
       sourceTimeoutMs: 10,
       label: "live-data",
     });
@@ -243,25 +305,19 @@ describe("dbFirstRead — source deadlines", () => {
 
     expect(result).toEqual({
       ok: true,
-      source: "disk",
-      data: { v: "disk" },
+      source: "memory",
+      data: { v: "remembered" },
       timestampMs: NOW - 1 * MINUTE,
       fresh: true,
     });
-    expect(
-      warn.mock.calls.some((c: unknown[]) =>
-        String(c[0]).includes("live-data") &&
-        String(c[0]).includes("DB read timed out"),
-      ),
-    ).toBe(true);
+    expect(warned("live-data", "DB read timed out")).toBe(true);
   });
 
-  it("returns ok=false when both live-data sources hang past their source timeout", async () => {
+  it("returns ok=false when the DB read hangs and memory is empty", async () => {
     vi.useFakeTimers();
     const resultPromise = dbFirstRead({
       ...baseOptions,
       fromDb: () => new Promise(() => {}),
-      fromDisk: () => new Promise(() => {}),
       sourceTimeoutMs: 10,
       label: "live-data",
     });
@@ -272,81 +328,80 @@ describe("dbFirstRead — source deadlines", () => {
 });
 
 describe("dbFirstRead — isDegraded gate (T-042)", () => {
-  it("a fresher structurally-empty {results: []} source loses to a populated older source", async () => {
+  it("a degraded DB row loses to healthy memory, even though it is fresher", async () => {
+    await dbFirstRead({
+      ...baseOptions,
+      isDegraded: isEmptyResults,
+      fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE),
+    });
     const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE),
-      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
       isDegraded: isEmptyResults,
+      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
     });
     expect(result).toEqual({
       ok: true,
-      source: "db",
+      source: "memory",
       data: { results: [1, 2, 3] },
       timestampMs: NOW - 20 * MINUTE,
       fresh: false,
     });
+    expect(warned("test", "memory")).toBe(true);
   });
 
-  it("(and vice versa) a fresher structurally-empty DB source loses to a populated older disk source", async () => {
-    const result = await dbFirstRead({
+  it("missing:true loses to healthy memory", async () => {
+    await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
-      fromDisk: source({ results: [1] }, NOW - 20 * MINUTE),
-      isDegraded: isEmptyResults,
-    });
-    expect(result.ok && result.source).toBe("disk");
-    expect(result.ok && result.data).toEqual({ results: [1] });
-  });
-
-  it("missing:true loses to a populated older source regardless of freshness", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ v: "stale-but-real" }, NOW - 30 * MINUTE),
-      fromDisk: source({ v: "x", missing: true }, NOW - 1 * MINUTE),
       isDegraded: isMissingPayload,
+      fromDb: source({ v: "stale-but-real" }, NOW - 30 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("db");
+    const result = await dbFirstRead({
+      ...baseOptions,
+      isDegraded: isMissingPayload,
+      fromDb: source({ v: "x", missing: true }, NOW - 1 * MINUTE),
+    });
+    expect(result.ok && result.source).toBe("memory");
     expect(result.ok && result.data).toEqual({ v: "stale-but-real" });
   });
 
-  it("both sources degraded → keeps the ordinary freshness order (fresher of the two still wins)", async () => {
+  it("a degraded row with no memory is still served, from the DB, with its own freshness", async () => {
     const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ results: [] as number[] }, NOW - 20 * MINUTE),
-      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
       isDegraded: isEmptyResults,
+      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
     });
-    expect(result.ok && result.source).toBe("disk");
+    expect(result).toEqual({
+      ok: true,
+      source: "db",
+      data: { results: [] },
+      timestampMs: NOW - 1 * MINUTE,
+      fresh: true,
+    });
   });
 
-  it("both sources degraded and tied on timestamp → DB still wins ties", async () => {
+  it("a degraded row is never remembered", async () => {
+    await dbFirstRead({
+      ...baseOptions,
+      isDegraded: isEmptyResults,
+      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
+    });
+    await expect(dbFirstRead({
+      ...baseOptions,
+      isDegraded: isEmptyResults,
+      fromDb: failing,
+    })).resolves.toEqual({ ok: false });
+  });
+
+  it("without isDegraded (opt-out routes), an empty row is a legitimate read and replaces memory", async () => {
+    await dbFirstRead({ ...baseOptions, fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE) });
     const result = await dbFirstRead({
       ...baseOptions,
-      fromDb: source({ results: [] as number[] }, NOW - 5 * MINUTE),
-      fromDisk: source({ results: [] as number[] }, NOW - 5 * MINUTE),
-      isDegraded: isEmptyResults,
+      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
     });
     expect(result.ok && result.source).toBe("db");
-  });
-
-  it("neither source degraded → behaves exactly like the freshness-only path", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ results: [1] }, NOW - 1 * MINUTE),
-      fromDisk: source({ results: [2] }, NOW - 5 * MINUTE),
-      isDegraded: isEmptyResults,
-    });
-    expect(result.ok && result.source).toBe("db");
-  });
-
-  it("without isDegraded (opt-out routes), a fresher empty payload still wins on timestamp alone — unchanged legacy behavior", async () => {
-    const result = await dbFirstRead({
-      ...baseOptions,
-      fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE),
-      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
-    });
-    expect(result.ok && result.source).toBe("disk");
+    expect(result.ok && result.data).toEqual({ results: [] });
+    const fallback = await dbFirstRead({ ...baseOptions, fromDb: failing });
+    expect(fallback.ok && fallback.data).toEqual({ results: [] });
   });
 });
 

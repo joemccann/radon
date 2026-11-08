@@ -2,9 +2,12 @@
 
 One file per incident under data/incidents/. Repeat detections of the same
 fingerprint update the open file (observations, last_seen_at) instead of
-spawning duplicates; a cycle that no longer observes an open fingerprint
-resolves it. A later re-detection opens a fresh file so incident history
-stays append-only.
+spawning duplicates. An open fingerprint resolves only after
+RESOLVE_AFTER_CLEAN_CYCLES consecutive cycles that definitively did not
+observe it (``clean_cycles``), so a one-cycle flap keeps its file. A later
+re-detection after resolution opens a fresh file so incident history stays
+append-only. If two open files ever share a fingerprint, the oldest carries
+the incident and the others are resolved as ``duplicate_of`` it.
 """
 
 from __future__ import annotations
@@ -25,6 +28,9 @@ PLAYBOOK = ".claude/skills/incident-response/SKILL.md"
 # only known after the parse). The horizon is generous — an incident is a
 # forensic record — but it is finite.
 RESOLVED_RETENTION_DAYS = 90
+
+# Consecutive definitive non-observations before an open incident resolves.
+RESOLVE_AFTER_CLEAN_CYCLES = 2
 
 
 def prune_resolved(directory: Path, *, now: datetime) -> int:
@@ -62,17 +68,49 @@ def prune_resolved(directory: Path, *, now: datetime) -> int:
     return removed
 
 
-def _open_incidents(directory: Path) -> dict[str, Path]:
-    """Map fingerprint -> file path for every open incident on disk."""
-    open_by_fingerprint: dict[str, Path] = {}
+def _open_incidents(directory: Path) -> dict[str, list[Path]]:
+    """Map fingerprint -> every open file for it, oldest first.
+
+    The first path is the canonical incident; any others are duplicates.
+    """
+    found: dict[str, list[tuple[str, str, Path]]] = {}
     for path in sorted(directory.glob("incident-*.json")):
         try:
             payload = json.loads(path.read_text())
         except (ValueError, OSError):
             continue
         if payload.get("status") == "open":
-            open_by_fingerprint[payload.get("fingerprint", "")] = path
-    return open_by_fingerprint
+            found.setdefault(payload.get("fingerprint", ""), []).append(
+                (str(payload.get("detected_at") or ""), path.name, path)
+            )
+    return {fp: [path for *_key, path in sorted(rows)] for fp, rows in found.items()}
+
+
+def _observed(payload: dict, incident: dict, now: datetime) -> dict:
+    """open --observed--> open, clean streak reset."""
+    payload["observations"] = int(payload.get("observations", 0)) + 1
+    payload["last_seen_at"] = now.isoformat()
+    payload["evidence"] = incident.get("evidence", payload["evidence"])
+    payload["clean_cycles"] = 0
+    return payload
+
+
+def _not_observed(payload: dict, now: datetime) -> dict:
+    """open --clean--> open (streak + 1) | resolved at the threshold."""
+    clean = int(payload.get("clean_cycles", 0)) + 1
+    payload["clean_cycles"] = clean
+    if clean >= RESOLVE_AFTER_CLEAN_CYCLES:
+        payload["status"] = "resolved"
+        payload["resolved_at"] = now.isoformat()
+    return payload
+
+
+def _superseded(payload: dict, canonical: dict, now: datetime) -> dict:
+    """open --duplicate--> resolved, pointing at the canonical incident."""
+    payload["status"] = "resolved"
+    payload["resolved_at"] = now.isoformat()
+    payload["duplicate_of"] = canonical.get("incident_id")
+    return payload
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -135,15 +173,24 @@ def record_cycle(incidents: list[dict], directory: Path | str,
 
     opened: list[str] = []
     updated: list[str] = []
+    resolved: list[str] = []
+
+    # Duplicates first: every open file for a fingerprint stays tracked.
+    for paths in open_by_fingerprint.values():
+        if len(paths) < 2:
+            continue
+        canonical = json.loads(paths[0].read_text())
+        for extra in paths[1:]:
+            _write(extra, _superseded(json.loads(extra.read_text()), canonical, now))
+            resolved.append(str(extra))
+        del paths[1:]
+
     for incident in incidents:
         existing = open_by_fingerprint.get(incident["fingerprint"])
         if existing:
-            payload = json.loads(existing.read_text())
-            payload["observations"] = int(payload.get("observations", 0)) + 1
-            payload["last_seen_at"] = now.isoformat()
-            payload["evidence"] = incident.get("evidence", payload["evidence"])
-            _write(existing, payload)
-            updated.append(str(existing))
+            path = existing[0]
+            _write(path, _observed(json.loads(path.read_text()), incident, now))
+            updated.append(str(path))
             continue
         stamp = now.strftime("%Y%m%dT%H%M%SZ")
         incident_id = f"{stamp}-{incident['case_id']}"
@@ -157,16 +204,18 @@ def record_cycle(incidents: list[dict], directory: Path | str,
         _write(path, payload)
         opened.append(str(path))
 
-    resolved: list[str] = []
-    for fingerprint, path in open_by_fingerprint.items():
+    for fingerprint, paths in open_by_fingerprint.items():
         if fingerprint in seen:
             continue
+        path = paths[0]
         payload = json.loads(path.read_text())
+        # An indeterminate bearing probe is no evidence either way: the clean
+        # streak neither grows nor resets.
         if _resolution_blocked(payload, indeterminate_probes):
             continue
-        payload["status"] = "resolved"
-        payload["resolved_at"] = now.isoformat()
+        payload = _not_observed(payload, now)
         _write(path, payload)
-        resolved.append(str(path))
+        if payload["status"] == "resolved":
+            resolved.append(str(path))
 
     return {"opened": opened, "updated": updated, "resolved": resolved}

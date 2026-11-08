@@ -57,9 +57,13 @@ export default function ConfirmDialog({
   const [exiting, setExiting] = useState(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Escape follows the same gate as the backdrop and Cancel: inert while the
+  // confirmed action is in flight or the exit paint is running.
   const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({
     open,
-    onClose: onCancel,
+    onClose: () => {
+      if (!pending && !exiting) onCancel();
+    },
   });
 
   // Enter/exit paint: keep the portal mounted ~120ms after open becomes false

@@ -109,7 +109,10 @@ class TestExitOrdersHandlerBoundsItsPlacement:
         monkeypatch.setattr(mod, "LimitOrder", MagicMock(name="LimitOrder"))
 
         handler = mod.ExitOrdersHandler(db=object())
-        monkeypatch.setattr(handler, "_load_pending_orders", lambda: self._pending(contracts))
+        monkeypatch.setattr(
+            handler, "_load_exit_legs",
+            lambda: mod.ExitLegScan(pending=self._pending(contracts), placed=[]),
+        )
         monkeypatch.setattr(handler, "_can_place_order", lambda *_a: True)
         monkeypatch.setattr(handler, "_is_halted", lambda _ticker: False)
         monkeypatch.setattr(handler, "_update_journal_trade", lambda *_a, **_k: True)

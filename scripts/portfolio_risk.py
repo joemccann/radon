@@ -444,7 +444,7 @@ def _has_target_depth(series: Optional[Dict[str, float]]) -> bool:
     return max(series) >= cutoff
 
 
-# ── Backfill ladder (IB -> UW -> RH -> Yahoo, persisted to Turso) ────────────
+# ── Backfill ladder (IB -> RH -> UW -> Yahoo, persisted to Turso) ────────────
 
 
 def backfill_price_history(

@@ -29,6 +29,7 @@ describe("ListedContractOrderForm quote provenance", () => {
   it("discloses, outside the panel, that the quote is not the traded contract's book", () => {
     const { container } = render(
       <ListedContractOrderForm
+        contractKey={null}
         eyebrow="VIX FUTURES"
         quoteLabel="VIX Index"
         quoteProvenance="Cash index, not the book for the contract selected below."
@@ -42,7 +43,7 @@ describe("ListedContractOrderForm quote provenance", () => {
         buildRiskInput={() => null}
         portfolio={null}
         surface="futures-form"
-        buildSubmit={() => null}
+        buildSubmit={() => ({ error: "Pick an expiry" })}
         submitLabel={(action: string) => action}
       />,
     );

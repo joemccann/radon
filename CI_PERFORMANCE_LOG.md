@@ -2581,3 +2581,160 @@ red (hasher and LABEL missing) then green (5 passed).
 that were red then green; image-id miss without a label still exports.
 Related scripts (39) and cloud gateway/reuse (26) stayed green. Full
 suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+
+## CIP-025 - keep torch cached across scripts-only python rebuilds (2026-11-05) - VALIDATING
+
+`FROM runtime AS model-gateway` inherited `COPY scripts ./scripts`, so every
+scripts-only python-image miss rebuilt Chronos/torch and re-exported the
+gateway. Mixed rebuild
+[41949521130](https://github.com/joemccann/radon/actions/runs/41949521130)
+(job 126990250055) is the comparable before sample: clock 788s, python image
+408s, gateway step 232s (`pip` 38.7s at +118s, export 79.4s). Sibling
+rebuilds 41946994935 (790s/415s), 41944557269 (707s/358s), 41924285373
+(819s/411s), 41911098537 (783s/388s). Ten percent of the 788s clock is 79s.
+Caching torch on a scripts-free `runtime-deps` parent is expected to drop
+the gateway step by about 120s when vendor-clis are unchanged, which clears
+15s and 10%. A vendor-clis or Dockerfile.python change still rebuilds torch.
+Ihash retags are a different class. Runner minutes do not increase.
+
+**Change.** `runtime-deps` holds python, browsers, charts, and the logs
+directory. `runtime` and `model-gateway` copy `scripts/` after that base.
+The gateway copies scripts after the torch lock. Exact SHA tags, smokes,
+bounds check, payload LABEL, Darwin-before-python, and fail-closed reuse
+are unchanged. No `needs` edge, test inventory, coverage, health check,
+stability window, rollback, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Revert if a scripts-only main rebuild still
+runs `pip install ... requirements-model-gateway.txt` instead of CACHED, if
+the gateway image ships without `scripts/`, or if the python image CMD/user
+## CIP-026 - skip client disk bounds when the payload already passed (2026-11-06) - VALIDATING
+
+Scripts-only python/gateway rebuilds still run the production client export
+inside `Enforce pinned model client disk bounds` even though
+`export_from_image` only reads vendor-clis, Darwin, `node`, and the four
+`model_gateway` helpers — the same files `model_client_payload_inputs.py`
+hashes. CIP-025 (open #1432) caches torch layers; it does not skip this
+export.
+
+Evidence, attempt-1 mixed rebuild python-image steps (`gh run view --json
+jobs` plus job logs):
+
+| Run | Clock | Python image | Gateway build | Bounds | Deploy |
+|---|---|---|---|---|---|
+| [42142783710](https://github.com/joemccann/radon/actions/runs/42142783710) | 741s | 368s (job 127647258925) | 202s | 77s | 235s |
+| [42141085036](https://github.com/joemccann/radon/actions/runs/42141085036) | 828s | 417s | 240s | 77s | 281s |
+| [42065978857](https://github.com/joemccann/radon/actions/runs/42065978857) | 788s | 393s | 223s | 79s | 234s |
+| [41949521130](https://github.com/joemccann/radon/actions/runs/41949521130) | 788s | 408s | 232s | 80s | 233s |
+| [41946994935](https://github.com/joemccann/radon/actions/runs/41946994935) | 790s | 415s | 237s | 79s | 239s |
+
+Newest mixed-rebuild p50 clock is 789s (n=10). Bounds p50 is 79s on those
+rebuilds (linux 1621822708 bytes + darwin 700866560 in 77s on
+42142783710). Ten percent of 789s is 79s. Queue is 2–3s and is not part of
+the gain. Ihash runs already skip the step (`reuse-gateway` hit). A payload
+that has never been checked still measures; the first rebuild after merge
+writes `pbounds-<64 hex>` and later identical payloads skip. Runner minutes
+fall with the skipped export.
+
+**Change.** After gateway smoke, inspect
+`ghcr.io/joemccann/radon-model-gateway:pbounds-<payload>`. A hit skips the
+export. A missing tag, empty payload, or malformed hash measures. Main
+records the tag with `imagetools create` from the exact SHA after a passing
+check. Pull requests that edit `GATEWAY_UNHASHED` (workflow or
+`model_clients.py` pins) do not consult the receipt. `:latest` and
+`ihash-` are not donors. `pbounds-` is not a deploy tag. Smoke, Darwin
+before python, exact SHA publish, health, recovery, rollback, and the
+40-second stability window stay.
+
+**Safety and revert trigger.** Fail closed to measure. Revert if a
+scripts-only main rebuild with an unchanged payload hash still runs
+`check_model_client_bounds.py`, if a pin-edit PR skips the check, if a
+`pbounds-` tag is used as a deploy image, or if the python image CMD/user
+smokes disappear.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 408s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 41949521130 (job 126990250055).
+Acceptance remains five comparable mixed python-rebuild deploys before and
+five after: same-class p50 at least 10% and 15s faster; p95 no worse than
+5% or 15s; cold p50 no worse than 10%; runner minutes no more than 20%
+higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_model_gateway_image.py::test_gateway_torch_layer_does_not_follow_copy_scripts`
+was red (`FROM runtime-deps` missing) then green. Cloud image contracts 145
+passed / 2 skipped; scripts payload/hash tests 60 passed. YAML unchanged.
+Full suites, Vitest, Docker builds, and workflow lint are left to PR CI.
+| Exact app images / Build python image | 368s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 42142783710 (job 127647258925),
+the newest attempt-1 mixed rebuild that paid the 77s export. Acceptance
+remains five comparable mixed python-rebuilds whose payload hash already
+has a `pbounds-` receipt, before and after: same-class p50 at least 10% and
+15s faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner
+minutes no more than 20% higher. The first after-run still measures.
+Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip026_payload_bounds_reuse.py` was
+red (10 failed: missing reuse/record steps) then green (11 passed).
+Related scripts (51) and cloud bounds/images (61) stayed green. YAML
+parses. Full suites, Vitest, Docker builds, and workflow lint are left to
+PR CI.
+
+## CIP-027 - publish python and gateway images as sibling jobs (2026-11-07) - VALIDATING
+
+Scripts-rebuild mixed runs still serialize the python publish and the
+gateway publish on one `python-image` runner. The targets do not share a
+`needs` edge: python is `FROM runtime AS python`, gateway is `FROM
+runtime-deps AS model-gateway`. CIP-025 cached torch; CIP-026 skipped the
+bounds export; neither overlap the two publishes.
+
+Evidence, attempt-1 mixed scripts-rebuild python-image steps (`gh run view
+--json jobs` plus job logs). Queue 2s is excluded from the gain:
+
+| Run | Clock | Python image | Python publish | Gateway publish | Exact app images |
+|---|---|---|---|---|---|
+| [42314939571](https://github.com/joemccann/radon/actions/runs/42314939571) | 531s | 212s (job 128225458846) | 51s | 115s | 273s |
+| [42312549679](https://github.com/joemccann/radon/actions/runs/42312549679) | 490s | 184s | 43s | 103s | 234s |
+| [42299953372](https://github.com/joemccann/radon/actions/runs/42299953372) | 527s | 214s | 51s | 113s | 275s |
+| [42287093673](https://github.com/joemccann/radon/actions/runs/42287093673) | 532s | 203s | 49s | 112s | 264s |
+
+Newest mixed scripts-rebuild p50 clock is 529s (n=4; 10% is 53s). On
+42314939571 the python job spent 51s publishing python then 115s
+publishing gateway (`load: true` tarball 53s with torch CACHED), so Exact
+app images authorized at 273s. Overlapping those publishes is expected to
+cut the app-images tail by about 59s (gateway job wall ~153s including
+startup, vs 212s serial), which clears 15s and approaches 10% of the 529s
+clock. Ihash retags (42298095410, python-image 29s) and full torch
+rebuilds (42284827311, 42265873092) are different classes. Runner-seconds
+on 42314939571 were 3205s; the extra sibling preamble is well under 20%.
+
+**Change.** `gateway-image` is a sibling of `python-image` and
+`node-image`. Both python and gateway `needs: darwin-clients`; neither
+needs the other; node still has no needs. Exact SHA tags, `load: true`,
+smokes, CIP-026 `pbounds-` skip, ihash receipts, Darwin-before-publish,
+and fail-closed reuse stay. Deploy still waits on the whole
+`app-images.yml` reusable workflow. No test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Revert if a main rebuild publishes gateway
+before Darwin finishes, if either image loses its 40-character SHA tag,
+if smoke or bounds skip the built image, or if deploy no longer waits for
+gateway. Do not retry CIP-022/023/024 client-reuse.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 212s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 42314939571 (job 128225458846),
+which still included the 115s gateway publish. Acceptance remains five
+comparable mixed scripts-rebuild deploys before and after: same-class p50
+at least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no
+worse than 10%; runner minutes no more than 20% higher. Status
+`VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip027_parallel_gateway_image.py` was
+red (3 failed: missing `gateway-image` job) then green (4 passed).
+Related cloud image contracts 147 passed / 2 skipped; scripts image/gate
+tests 73 passed. YAML parses. Full suites, Vitest, Docker builds, and
+workflow lint are left to PR CI.

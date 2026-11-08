@@ -335,8 +335,15 @@ class MenthorQClient:
             parent = self._storage_state_path.parent
             parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(parent, 0o700)
-            self._browser_context.storage_state(path=str(self._storage_state_path))
-            os.chmod(self._storage_state_path, 0o600)
+            # Atomic: a browser that dies mid-write must not tear the only
+            # jar a restart can resume from. Mode is fixed before the rename.
+            tmp = self._storage_state_path.with_name(self._storage_state_path.name + ".tmp")
+            try:
+                self._browser_context.storage_state(path=str(tmp))
+                os.chmod(tmp, 0o600)
+                os.replace(tmp, self._storage_state_path)
+            finally:
+                tmp.unlink(missing_ok=True)
         except Exception as exc:
             logger.warning(f"Failed to persist MenthorQ storage state: {exc}")
 
@@ -1436,8 +1443,11 @@ class MenthorQClient:
                 if not img_src:
                     logger.warning(f"No img src found for card slug: {slug}")
                     return {}
+                if not img_src.startswith("https://"):
+                    logger.warning(f"Non-https img src for card slug: {slug}")
+                    return {}
 
-                resp = httpx.get(img_src, timeout=30.0)
+                resp = httpx.get(img_src, timeout=30.0, follow_redirects=False)
                 if resp.status_code != 200:
                     logger.warning(
                         f"S3 download failed for {slug}: HTTP {resp.status_code}"

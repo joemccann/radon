@@ -73,6 +73,12 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
 
   const [data, setData] = useState<T | null>(null);
+  /** Mirror of `data` so failure handling reads it without an impure updater. */
+  const dataRef = useRef<T | null>(null);
+  const commitData = useCallback((next: T | null) => {
+    dataRef.current = next;
+    setData(next);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +101,14 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const returnCache = useReturnCache();
   /** Last good payload, including one hydrated from the return cache before paint. */
   const rememberedRef = useRef<T | null>(null);
+  /**
+   * One response sequence across GET, POST and the mount read. Every request
+   * takes the next number; a response (or failure) whose number is not newer
+   * than the last one applied is dropped, so an older GET that resolves after
+   * a newer POST cannot overwrite it.
+   */
+  const issuedSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
 
   const clearRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
@@ -144,6 +158,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       return;
     }
     const identityGeneration = getReturnCacheGeneration();
+    const seq = ++issuedSeqRef.current;
+    const superseded = () => seq <= appliedSeqRef.current;
     inFlightRef.current.add(method);
     if (!background && method === "POST") {
       setSyncing(true);
@@ -172,6 +188,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       }
       const json = (await res.json()) as T;
       if (identityGeneration !== getReturnCacheGeneration()) return;
+      if (superseded()) return;
+      appliedSeqRef.current = seq;
       const scanFailed = (json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false;
       const held = scanFailed ? (rememberedRef.current ?? json) : json;
       if (!scanFailed && !meta.servedOffline) {
@@ -182,7 +200,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
           lastSync: extractTimestamp ? extractTimestamp(json) : new Date().toISOString(),
         }, identityGeneration);
       }
-      setData(previous => scanFailed ? previous ?? held : json);
+      commitData(scanFailed ? dataRef.current ?? held : json);
       setLastSync(previous => scanFailed ? previous : extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
       // R-643: a 2xx body can still carry a body-level scan failure (cached
       // fallback attached). Surface it instead of pretending the sync worked.
@@ -197,16 +215,16 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     } catch (err) {
       if (identityGeneration !== getReturnCacheGeneration()) return;
       if (!networkResolved) reportFetchFailure();
+      // A newer response already landed; this failure describes older state.
+      if (superseded()) return;
       // Only show error if we don't already have valid cached data —
       // unless the caller explicitly wants the stale view marked as degraded.
       const scanFailed = err instanceof Error && (err as Error & { scanFailed?: boolean }).scanFailed === true;
-      setData((prev) => {
-        const held = prev ?? rememberedRef.current;
-        if (!held || showBackgroundError || scanFailed) {
-          setError(userErrorMessage(err, "The data could not be refreshed. Please try again."));
-        }
-        return held;
-      });
+      const held = dataRef.current ?? rememberedRef.current;
+      commitData(held);
+      if (!held || showBackgroundError || scanFailed) {
+        setError(userErrorMessage(err, "The data could not be refreshed. Please try again."));
+      }
     } finally {
       inFlightRef.current.delete(method);
       if (!background && method === "POST") {
@@ -216,7 +234,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         void requestRef.current(method, true);
       }
     }
-  }, [armRetry, clearRetry, endpoint, extractTimestamp, returnCache, showBackgroundError]);
+  }, [armRetry, clearRetry, commitData, endpoint, extractTimestamp, returnCache, showBackgroundError]);
 
   requestRef.current = executeRequest;
 
@@ -239,12 +257,19 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       return;
     }
     if (initialLoadKeyRef.current === endpoint) return;
+    if (initialLoadKeyRef.current !== null) {
+      // Endpoint change: responses still in flight describe the old endpoint,
+      // and its stale-data retry streak is not this endpoint's.
+      appliedSeqRef.current = issuedSeqRef.current;
+      retryAttemptRef.current = 0;
+      clearRetry();
+    }
 
     const cached = returnCache?.read<T>(endpoint) ?? null;
     const fresh = isReturnCacheFresh(cached, interval > 0 ? interval : Number.POSITIVE_INFINITY);
     if (cached) {
       rememberedRef.current = cached.data;
-      setData(cached.data);
+      commitData(cached.data);
       setLastSync(cached.lastSync);
       setError(null);
       setLoading(false);
@@ -261,6 +286,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
 
     const init = async () => {
       const identityGeneration = getReturnCacheGeneration();
+      const seq = ++issuedSeqRef.current;
       let networkResolved = false;
       try {
         if (!didInitialRead.current) setLoading(true);
@@ -277,13 +303,15 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         if (!res.ok) throw new Error(await readErrorResponse(res, "The data could not be loaded. Please try again."));
         const json = (await res.json()) as T;
         if (identityGeneration !== getReturnCacheGeneration()) return;
+        if (seq <= appliedSeqRef.current) return;
+        appliedSeqRef.current = seq;
         const scanFailed = (json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false;
         const sync = extractTimestamp ? extractTimestamp(json) : null;
         if (!scanFailed && !meta.servedOffline) {
           rememberedRef.current = json;
           returnCache?.write(endpoint, { data: json, fetchedAt: Date.now(), lastSync: sync }, identityGeneration);
         }
-        setData((prev) => scanFailed ? prev ?? rememberedRef.current ?? json : json);
+        commitData(scanFailed ? dataRef.current ?? rememberedRef.current ?? json : json);
         setLastSync(sync);
         setError(scanFailed
           ? userErrorMessage((json as { error?: string }).error, "The scan could not be completed. Showing the last available data.")
@@ -296,12 +324,14 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       } catch (err) {
         if (identityGeneration !== getReturnCacheGeneration()) return;
         if (!networkResolved) reportFetchFailure();
-        setData((prev) => {
-          const held = prev ?? rememberedRef.current;
-          if (!held) setError(userErrorMessage(err, "The data could not be loaded. Please try again."));
-          return held;
-        });
-        if (!rememberedRef.current) {
+        if (seq <= appliedSeqRef.current) {
+          setLoading(false);
+          didInitialRead.current = true;
+          return;
+        }
+        const held = dataRef.current ?? rememberedRef.current;
+        commitData(held);
+        if (!held || !rememberedRef.current) {
           setError(userErrorMessage(err, "The data could not be loaded. Please try again."));
         }
         setLoading(false);
@@ -310,7 +340,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     };
 
     void init();
-  }, [active, armRetry, clearRetry, endpoint, extractTimestamp, interval, loadWhenInactive, returnCache]);
+  }, [active, armRetry, clearRetry, commitData, endpoint, extractTimestamp, interval, loadWhenInactive, returnCache]);
 
   // If the hook mounted while inactive (with loadWhenInactive), issue the first
   // POST/sync when it later becomes active. When loadWhenInactive is false the

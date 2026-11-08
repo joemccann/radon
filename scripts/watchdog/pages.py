@@ -13,7 +13,8 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from enum import Enum
+from typing import Optional, Union
 
 try:
     from credential_redaction import scrub_credential_text
@@ -41,6 +42,29 @@ def _hrana():
             is_transport_error,
         )
     return HranaHttpError, _close_keepalive, hrana_execute, hrana_query, is_transport_error
+
+class PageStatus(str, Enum):
+    """``watchdog_pages.status``. pending -> claimed -> done | pending | skipped.
+
+    ``claim_page`` makes the only pending -> claimed edge; ``complete_page``
+    and ``record_attempt_failure`` leave claimed, and only for the holder of
+    the claim token.
+    """
+
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
+_TERMINAL = frozenset({PageStatus.DONE, PageStatus.SKIPPED})
+
+
+def _require_token(claim_token: Optional[str]) -> str:
+    if not isinstance(claim_token, str) or not claim_token:
+        raise ValueError("watchdog_pages writes after a claim require its claim_token")
+    return claim_token
+
 
 SERVICE_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,64}$")
 KIND_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,32}$")
@@ -313,21 +337,41 @@ def claim_page(page_id: str, *, now: datetime, claim_token: str) -> bool:
 def complete_page(
     page_id: str,
     *,
-    status: str,
+    status: Union[PageStatus, str],
     result: str,
     now: datetime,
-    claim_token: Optional[str] = None,
+    claim_token: str,
 ) -> None:
+    """claimed -> done | skipped, for the claim holder only.
+
+    Raises ValueError for a non-terminal or unknown status, or a missing
+    token, before any write.
+    """
+    terminal = PageStatus(status)
+    if terminal not in _TERMINAL:
+        raise ValueError(f"complete_page needs a terminal status, got {terminal.value!r}")
+    token = _require_token(claim_token)
     _HranaHttpError, _close, hrana_execute, _query, _is_transport = _hrana()
     hrana_execute(
         """
         UPDATE watchdog_pages
         SET status = ?, finished_at = ?, result = ?, claim_token = NULL
         WHERE page_id = ?
-          AND (? IS NULL OR claim_token = ?)
+          AND claim_token = ?
         """,
-        (status, _iso(now), (result or "")[:2000], page_id, claim_token, claim_token),
+        (terminal.value, _iso(now), (result or "")[:2000], page_id, token),
     )
+
+
+_ATTEMPT_FAILURE_SQL = """
+UPDATE watchdog_pages
+SET attempts = attempts + 1,
+    status = CASE WHEN attempts + 1 >= ? THEN 'skipped' ELSE 'pending' END,
+    claim_token = NULL, claimed_at = NULL, finished_at = ?, result = ?
+WHERE page_id = ?
+  AND claim_token = ?
+RETURNING status
+"""
 
 
 def record_attempt_failure(
@@ -335,54 +379,43 @@ def record_attempt_failure(
     *,
     now: datetime,
     error: str,
-    claim_token: Optional[str] = None,
+    claim_token: str,
 ) -> str:
-    HranaHttpError, close_keepalive, hrana_execute, hrana_query, is_transport = _hrana()
+    """claimed -> pending (retry) | skipped (MAX_ATTEMPTS), for the claim holder.
 
-    rows = hrana_query(
-        "SELECT attempts FROM watchdog_pages WHERE page_id = ?",
-        (page_id,),
-    )
-    attempts = int(rows[0][0] or 0) + 1 if rows else 1
-    status = "skipped" if attempts >= MAX_ATTEMPTS else "pending"
-    args = (
-        attempts,
-        status,
-        _iso(now),
-        (error or "")[:1000],
-        page_id,
-        claim_token,
-        claim_token,
-    )
+    One statement increments ``attempts`` and picks the next status, so no
+    read-modify-write window. It clears the token, so a retry after a
+    transport loss that did commit matches nothing and reads the row back.
+    Returns the row's status; a foreign or lost claim changes nothing and
+    returns whatever the row holds.
+    """
+    token = _require_token(claim_token)
+    HranaHttpError, close_keepalive, _execute, hrana_query, is_transport = _hrana()
+    args = (MAX_ATTEMPTS, _iso(now), (error or "")[:1000], page_id, token)
 
-    def write() -> None:
-        hrana_execute(
-            """
-            UPDATE watchdog_pages
-            SET attempts = ?, status = ?, claim_token = NULL, claimed_at = NULL,
-                finished_at = ?, result = ?
-            WHERE page_id = ?
-              AND (? IS NULL OR claim_token = ?)
-            """,
-            args,
-        )
+    def write() -> Optional[str]:
+        rows = hrana_query(_ATTEMPT_FAILURE_SQL, args)
+        return str(rows[0][0]) if rows else None
 
     try:
-        write()
+        status = write()
     except HranaHttpError as exc:
         if not is_transport(exc):
             raise
         close_keepalive()
         try:
-            write()
+            status = write()
         except HranaHttpError as retry_exc:
             if not is_transport(retry_exc):
                 raise
             row = get_page(page_id)
-            if row and row.get("status") in {"pending", "skipped"}:
+            if row and row.get("status") in {PageStatus.PENDING.value, PageStatus.SKIPPED.value}:
                 return str(row["status"])
             raise exc
-    return status
+    if status is not None:
+        return status
+    row = get_page(page_id)
+    return str(row["status"]) if row else "lost"
 
 
 _PAGE_ROW_SQL = """

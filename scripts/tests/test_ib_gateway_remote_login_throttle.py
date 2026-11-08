@@ -118,7 +118,7 @@ def test_non_login_verbs_are_never_throttle_gated(daemon, certs, tmp_path, verb)
     assert _helper_calls(tmp_path) == [verb]
 
 
-@pytest.mark.parametrize("contents", [None, "{not json", json.dumps({"login_throttle_since": 0.0})])
+@pytest.mark.parametrize("contents", [None, json.dumps({"login_throttle_since": 0.0})])
 def test_no_recorded_throttle_leaves_restart_alone(daemon, certs, tmp_path, contents):
     httpd, state = daemon
     if contents is not None:
@@ -128,3 +128,17 @@ def test_no_recorded_throttle_leaves_restart_alone(daemon, certs, tmp_path, cont
 
     assert (status, body["ok"]) == (200, True)
     assert _helper_calls(tmp_path) == ["restart"]
+
+
+def test_corrupt_watchdog_state_refuses_login_verbs(daemon, certs, tmp_path):
+    """Audit 2026-11-03 §1 #21: unreadable state may hide a live throttle, so it
+    fails closed (bounded: one base quiet period from the file's mtime)."""
+    httpd, state = daemon
+    state.write_text("{not json")
+
+    status, body = _post(httpd, certs, "restart")
+
+    assert status == 409
+    assert body["ok"] is False
+    assert "watchdog state is unreadable" in body["detail"]
+    assert _helper_calls(tmp_path) == []

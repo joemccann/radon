@@ -24,6 +24,51 @@ function isOpaqueEdgeTimeout(res: Response): boolean {
   return !isJson && (res.status === 502 || res.status === 504);
 }
 
+/**
+ * The hook's error sources, one slot each, so clearing one cannot erase
+ * another. `read`: the cached GET failed. `warning`: the snapshot on screen
+ * carries X-Sync-Warning. `sync`: the operator's manual sync failed, or the
+ * edge gave up while it kept running; it stays until the snapshot it failed
+ * to replace is superseded or the next manual sync settles.
+ */
+export type PortfolioErrorState = {
+  read: string | null;
+  warning: string | null;
+  sync: { kind: "failed" | "pending"; message: string; snapshotAt: string | null } | null;
+};
+
+export type PortfolioErrorEvent =
+  | { type: "read-failed"; message: string }
+  /** A snapshot was applied, from the cached GET or (`fromSync`) the sync POST. */
+  | { type: "snapshot"; lastSync: string | null; warning: string | null; fromSync: boolean }
+  | { type: "sync-failed"; message: string; snapshotAt: string | null }
+  | { type: "sync-pending"; message: string; snapshotAt: string | null };
+
+export function portfolioErrorTransition(
+  state: PortfolioErrorState,
+  event: PortfolioErrorEvent,
+): PortfolioErrorState {
+  switch (event.type) {
+    case "read-failed":
+      return { ...state, read: event.message };
+    case "snapshot": {
+      const superseded = event.fromSync
+        || (state.sync !== null && event.lastSync !== null && event.lastSync !== state.sync.snapshotAt);
+      return { read: null, warning: event.warning, sync: superseded ? null : state.sync };
+    }
+    case "sync-failed":
+      return { ...state, sync: { kind: "failed", message: event.message, snapshotAt: event.snapshotAt } };
+    case "sync-pending":
+      return { ...state, sync: { kind: "pending", message: event.message, snapshotAt: event.snapshotAt } };
+  }
+}
+
+/** The single `error` string the hook exposes: the operator's own action
+ *  first, then the snapshot's warning, then the read failure. */
+export function portfolioErrorMessage(state: PortfolioErrorState): string | null {
+  return state.sync?.message ?? state.warning ?? state.read;
+}
+
 type UsePortfolioReturn = {
   data: PortfolioData | null;
   loading: boolean;
@@ -50,8 +95,17 @@ export function usePortfolio(
   const [data, setData] = useState<PortfolioData | null>(() => initialSnapshot?.data ?? null);
   const [loading, setLoading] = useState(() => initialSnapshot === undefined);
   const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(() => initialSnapshot?.warning ?? null);
+  const [errors, setErrors] = useState<PortfolioErrorState>(() => ({
+    read: null,
+    warning: initialSnapshot?.warning ?? null,
+    sync: null,
+  }));
+  const dispatchError = useCallback((event: PortfolioErrorEvent) => {
+    setErrors((prev) => portfolioErrorTransition(prev, event));
+  }, []);
+  const error = portfolioErrorMessage(errors);
   const [lastSync, setLastSync] = useState<string | null>(() => initialSnapshot?.data.last_sync ?? null);
+  const lastSyncRef = useRef<string | null>(initialSnapshot?.data.last_sync ?? null);
   const syncingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCachedRef = useRef<() => Promise<void>>(async () => {});
@@ -130,15 +184,15 @@ export function usePortfolio(
       failureRetryUntilRef.current = 0;
       setData(json);
       setLastSync(json.last_sync);
+      lastSyncRef.current = json.last_sync;
       const warning = res.headers.get("X-Sync-Warning");
+      dispatchError({ type: "snapshot", lastSync: json.last_sync, warning, fromSync: false });
       if (warning) {
         warningSnapshotRef.current = json.last_sync;
-        setError(warning);
         return retryDelayMs;
       }
       warningSnapshotRef.current = null;
       rateLimitedUntilRef.current = 0;
-      setError(null);
     } catch (err) {
       const isCurrentRead = readId === latestReadIdRef.current
         && endpoint === currentEndpointRef.current;
@@ -150,7 +204,7 @@ export function usePortfolio(
       ) {
         retryDelayMs = retryDelayMs ?? POLL_INTERVAL_MS;
         failureRetryUntilRef.current = Date.now() + retryDelayMs;
-        setError(err instanceof Error ? err.message : "Unknown error");
+        dispatchError({ type: "read-failed", message: err instanceof Error ? err.message : "Unknown error" });
       }
     } finally {
       if (readId === latestReadIdRef.current) {
@@ -162,7 +216,7 @@ export function usePortfolio(
       }
     }
     return retryDelayMs;
-  }, [endpoint]);
+  }, [endpoint, dispatchError]);
 
   const scheduleNext = useCallback((delay: number) => {
     if (!mountedRef.current || !activeRef.current) return;
@@ -208,7 +262,9 @@ export function usePortfolio(
       // read bucket, so the poll is deliberately NOT backed off here).
       if (res.status === 429) return;
       if (isOpaqueEdgeTimeout(res)) {
-        if (mountedRef.current) setError(EDGE_PENDING_MESSAGE);
+        if (mountedRef.current) {
+          dispatchError({ type: "sync-pending", message: EDGE_PENDING_MESSAGE, snapshotAt: lastSyncRef.current });
+        }
         scheduleNext(SYNC_PENDING_REPOLL_MS);
         return;
       }
@@ -228,22 +284,24 @@ export function usePortfolio(
           }
         : json);
       setLastSync(json.last_sync);
+      lastSyncRef.current = json.last_sync;
       const warning = res.headers.get("X-Sync-Warning");
-      if (warning) {
-        warningSnapshotRef.current = json.last_sync;
-        setError(warning);
-      } else {
-        warningSnapshotRef.current = null;
-        setError(null);
-      }
+      warningSnapshotRef.current = warning ? json.last_sync : null;
+      dispatchError({ type: "snapshot", lastSync: json.last_sync, warning, fromSync: true });
       if (res.headers.get("X-Sync-Pending") === "1") scheduleNext(SYNC_PENDING_REPOLL_MS);
     } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : "Sync failed");
+      if (mountedRef.current) {
+        dispatchError({
+          type: "sync-failed",
+          message: err instanceof Error ? err.message : "Sync failed",
+          snapshotAt: lastSyncRef.current,
+        });
+      }
     } finally {
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, [fetchPortfolio, includeEntryDates, scheduleNext]);
+  }, [fetchPortfolio, includeEntryDates, scheduleNext, dispatchError]);
 
   const syncNow = useCallback(() => {
     void doSync();

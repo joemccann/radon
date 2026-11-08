@@ -38,6 +38,7 @@ from clients.ib_client import IBClient, DEFAULT_HOST
 from clients.journal_basis import normalize_expiry_compact, prior_net_qty_for_contract
 from utils.atomic_io import atomic_save, verified_load
 from utils.exec_ids import exec_id_root
+from utils.journal_action import classify_fill, side_sign, signed_qty, structure_side
 
 try:
     # Phase-3 dual-write: each new row also lands in Turso so app.radon.run
@@ -81,6 +82,13 @@ _FILL_MONITOR_TRADE_ID = re.compile(
 )
 
 
+def _identity(value: Any) -> int:
+    """A positive int IB identity (conId/permId), else 0."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value if value > 0 else 0
+
+
 class JournalSyncHandler(BaseHandler):
     """Append fresh IB executions to the Turso journal."""
 
@@ -106,6 +114,8 @@ class JournalSyncHandler(BaseHandler):
         self.trade_log_path = trade_log_path
         self.ib_port = ib_port
         self.client_id = client_id
+        # Fills the last _fills_to_entries pass refused to label.
+        self.unlabelled = 0
 
     # -- public ------------------------------------------------------------
 
@@ -188,6 +198,14 @@ class JournalSyncHandler(BaseHandler):
             result["imported"] = len(candidates)
             result["superseded"] = len(corrections)
             result["skipped"] = result["fills_seen"] - len(candidates) - len(corrections)
+            if self.unlabelled:
+                # Not a no-op: these fills stay unjournaled until a later
+                # cycle can read the prior position.
+                result["unlabelled"] = self.unlabelled
+                result["error"] = (
+                    f"{self.unlabelled} fill(s) not labelled (prior position "
+                    f"unreadable or unknown side); retried next cycle"
+                )
 
             if candidates or corrections:
                 # Corrections carry the superseded row's ib_exec_id, so the upsert
@@ -234,6 +252,7 @@ class JournalSyncHandler(BaseHandler):
             "imported": len(candidates),
             "superseded": len(corrections),
             "skipped": len(fills) - len(candidates) - len(corrections),
+            "unlabelled": self.unlabelled,
         }
 
     def _reconcile_db_missing(
@@ -728,24 +747,11 @@ class JournalSyncHandler(BaseHandler):
 
     @staticmethod
     def _trade_signed_qty(trade: Dict[str, Any]) -> float:
-        """Signed qty of an already-written journal row (BUY +, SELL/CLOSED −).
-
-        Mirrors ``clients.journal_basis._signed_qty`` — the same convention
-        that produced the prior-qty this rebases.
-        """
+        """Signed qty of an already-written journal row (shared convention)."""
         qty_raw = trade.get("contracts")
         if qty_raw is None:
             qty_raw = trade.get("shares")
-        try:
-            qty = abs(float(qty_raw))
-        except (TypeError, ValueError):
-            return 0.0
-        action = str(trade.get("action") or "").upper()
-        if action.startswith("BUY"):
-            return qty
-        if action.startswith("SELL") or action.startswith("SHORT") or action == "CLOSED":
-            return -qty
-        return 0.0
+        return signed_qty(trade.get("action"), qty_raw)
 
     def _fills_to_entries(
         self,
@@ -774,9 +780,15 @@ class JournalSyncHandler(BaseHandler):
         if db is None:
             db = self._open_db()
         prior_state: Dict[str, float] = {}
+        # Signed qty of fill_monitor mirrors duplicating executions already
+        # journaled or in this batch, per conId (read lazily; False = the
+        # mirror read failed, so every prior is unknown this cycle).
+        mirror_dupes: Any = None
 
         rows: List[Dict[str, Any]] = []
         corrections: List[Dict[str, Any]] = []
+        # Fills the classifier refuses (unknown side or unreadable prior qty).
+        self.unlabelled = 0
         # Walk fills in EXECUTION-TIME order, not delivery order: IB can
         # replay executions out of order (corrections after a reconnect,
         # cross-session replay), and labelling a close before its own
@@ -795,9 +807,21 @@ class JournalSyncHandler(BaseHandler):
 
             contract_key = self._fill_contract_key(fill)
             if contract_key and contract_key not in prior_state:
-                prior_state[contract_key] = self._lookup_prior_qty(db, fill)
+                prior = self._lookup_prior_qty(db, fill)
+                if prior is not None:
+                    if mirror_dupes is None:
+                        mirror_dupes = self._mirror_duplicate_qty(db, existing["trades"], fills)
+                    con_id = _identity(getattr(getattr(fill, "contract", None), "conId", None))
+                    dupe = mirror_dupes.get(con_id, 0.0) if mirror_dupes is not False else None
+                    prior = None if dupe is None else prior - dupe
+                prior_state[contract_key] = prior
 
-            prior_qty = prior_state.get(contract_key, 0.0) if contract_key else 0.0
+            # Unknown prior (failed lookup) refuses every fill of the contract
+            # this cycle; the DB-sourced dedupe re-imports them next cycle.
+            prior_qty = prior_state.get(contract_key) if contract_key else None
+            if prior_qty is None:
+                self.unlabelled += 1
+                continue
             if superseded is not None:
                 # The correction REPLACES the earlier fill, so it must be
                 # labelled against the position as it stood BEFORE that fill —
@@ -807,6 +831,7 @@ class JournalSyncHandler(BaseHandler):
 
             entry = self._fill_to_entry(fill, next_id, prior_qty=prior_qty)
             if entry is None:
+                self.unlabelled += 1
                 continue
 
             if superseded is None:
@@ -824,9 +849,65 @@ class JournalSyncHandler(BaseHandler):
                     "in_cycle": True,
                 }
 
-            if contract_key:
-                prior_state[contract_key] = prior_qty + self._fill_signed_qty(fill)
+            prior_state[contract_key] = prior_qty + self._fill_signed_qty(fill)
         return rows, corrections
+
+    def _mirror_duplicate_qty(
+        self,
+        db: Any,
+        existing_trades: List[Dict[str, Any]],
+        fills: List[Any],
+    ) -> Any:
+        """conId → signed qty of mirror rows that duplicate known executions.
+
+        ``prior_net_qty_for_contract`` sums every journal row, fill_monitor
+        mirrors included. A mirror ``filled-N`` carrying ``newly`` contracts
+        records the order's fills (N-newly, N]; the part of that range the
+        order's execId rows (journaled or in this batch) already cover is
+        counted twice, so a close read its own fill in its prior (a full
+        close labelled SELL_TO_OPEN, a split close a phantom FLIP). Returns
+        False when the mirrors cannot be read.
+        """
+        if db is None:
+            return {}
+        try:
+            rows = self._journal_rows(db, "trade_id, payload", mirrors_only=True)
+        except Exception as exc:  # noqa: BLE001 — unknown prior, never guess
+            logger.warning("journal_sync: mirror read for prior qty failed: %s", exc)
+            return False
+
+        batch = []
+        for fill in fills:
+            execution = getattr(fill, "execution", None)
+            contract = getattr(fill, "contract", None)
+            ib_time = getattr(execution, "time", None)
+            batch.append({
+                "ib_exec_id": self._fill_exec_id(fill),
+                "con_id": _identity(getattr(contract, "conId", None)),
+                "perm_id": _identity(getattr(execution, "permId", None)),
+                "date": et_session_date(ib_time if isinstance(ib_time, datetime) else None),
+                "contracts": abs(self._fill_signed_qty(fill)),
+            })
+        covered = self._exec_qty_by_order(list(existing_trades) + batch)
+
+        dupes: Dict[int, float] = {}
+        for row in rows:
+            match = _FILL_MONITOR_TRADE_ID.match(str(self._row_value(row, 0, "trade_id") or ""))
+            if match is None:
+                continue
+            try:
+                payload = self._decode_journal_payload(self._row_value(row, 1, "payload"))
+            except Exception:  # noqa: BLE001
+                continue
+            order_key = (int(match["con"]), int(match["order"]), match["date"])
+            total = float(match["filled"])
+            newly = abs(self._trade_signed_qty({"action": "BUY", "contracts": payload.get(
+                "newly_filled", payload.get("contracts", payload.get("shares")))}))
+            overlap = min(max(covered.get(order_key, 0.0) - (total - newly), 0.0), newly)
+            if overlap:
+                sign = signed_qty(payload.get("action"), 1)
+                dupes[order_key[0]] = dupes.get(order_key[0], 0.0) + sign * overlap
+        return dupes
 
     @staticmethod
     def _as_correction_of(
@@ -913,22 +994,22 @@ class JournalSyncHandler(BaseHandler):
             qty = abs(float(getattr(execution, "shares", 0) or 0))
         except (TypeError, ValueError):
             return 0.0
-        side = str(getattr(execution, "side", "") or "").upper()
-        if side in ("BOT", "BUY"):
-            return qty
-        if side in ("SLD", "SELL"):
-            return -qty
-        return 0.0
+        return (side_sign(getattr(execution, "side", None)) or 0) * qty
 
-    def _lookup_prior_qty(self, db: Any, fill: Any) -> float:
+    def _lookup_prior_qty(self, db: Any, fill: Any) -> Optional[float]:
+        """Signed prior journal qty, or None when it cannot be read.
+
+        None refuses the label: defaulting to 0 wrote a close as a phantom
+        SELL_TO_OPEN.
+        """
         if db is None:
-            return 0.0
+            return None
         contract = getattr(fill, "contract", None)
         if contract is None:
-            return 0.0
+            return None
         ticker = getattr(contract, "symbol", None)
         if not ticker:
-            return 0.0
+            return None
         sec_type = getattr(contract, "secType", "STK") or "STK"
         try:
             return prior_net_qty_for_contract(
@@ -941,9 +1022,9 @@ class JournalSyncHandler(BaseHandler):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("journal_sync: prior-qty lookup failed for %s: %s", ticker, exc)
-            return 0.0
+            return None
 
-    def _fill_to_entry(self, fill: Any, next_id: int, prior_qty: float = 0.0) -> Optional[Dict[str, Any]]:
+    def _fill_to_entry(self, fill: Any, next_id: int, prior_qty: Optional[float] = 0.0) -> Optional[Dict[str, Any]]:
         execution = getattr(fill, "execution", None)
         contract = getattr(fill, "contract", None)
         commission_report = getattr(fill, "commissionReport", None)
@@ -955,15 +1036,14 @@ class JournalSyncHandler(BaseHandler):
             return None
 
         sec_type = getattr(contract, "secType", "STK")
-        side = getattr(execution, "side", "")
-        action = self._side_to_action(side, sec_type, prior_qty=prior_qty)
-        if action is None:
-            return None
-
         try:
             shares = Decimal(str(getattr(execution, "shares", 0) or 0))
         except Exception:
             shares = Decimal(0)
+        label = classify_fill(getattr(execution, "side", ""), sec_type, prior_qty, shares)
+        if label is None:
+            return None
+        action = label.action.value
         try:
             price = float(getattr(execution, "price", 0) or 0)
         except Exception:
@@ -1041,6 +1121,7 @@ class JournalSyncHandler(BaseHandler):
                 entry["expiry"] = expiry
         else:
             entry["shares"] = abs_qty
+        entry.update(label.payload_fields())
 
         return entry
 
@@ -1067,43 +1148,9 @@ class JournalSyncHandler(BaseHandler):
         return multiplier
 
     @staticmethod
-    def _side_to_action(side: str, sec_type: str, prior_qty: float = 0.0) -> Optional[str]:
-        """Map (side, sec_type, prior_qty) → action label.
-
-        ``prior_qty`` is the contract's signed net position before this
-        fill, derived from already-imported journal rows. Without it, a
-        SELL that closes a prior long was mislabeled ``SELL_TO_OPEN``
-        (the "open short" label) instead of ``SELL_OPTION`` (close
-        long). ``fromJournal.ts`` treats those differently —
-        SELL_TO_OPEN sets isOpen=true with net_quantity=-qty (phantom
-        new short), SELL_OPTION sets isOpen=false with net_quantity=0.
-        Companion to ``_resolve_action`` in journal_rehydrate.py.
-        """
-        upper = (side or "").upper()
-        if upper in ("BOT", "BUY"):
-            if sec_type == "STK":
-                return "BUY"
-            # Covering a short (prior signed qty negative) is a close.
-            # fromJournal treats BUY_TO_CLOSE as closed; bare BUY_OPTION is open long.
-            return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
-        if upper in ("SLD", "SELL"):
-            if sec_type == "STK":
-                # STK has no OPEN/CLOSE distinction.
-                return "SELL"
-            return "SELL_OPTION" if prior_qty > 0 else "SELL_TO_OPEN"
-        return None
-
-    @staticmethod
     def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
         type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
-        # Opens: Long / Short. Closes: Closed (SELL_OPTION, BUY_TO_CLOSE, CLOSED).
-        a = (action or "").upper()
-        if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
-            side_label = "Long"
-        elif a == "SELL_TO_OPEN":
-            side_label = "Short"
-        else:
-            side_label = "Closed"
+        side_label = structure_side(action)
         if sec_type in ("OPT", "BAG") and strike and right:
             right_label = "Call" if right == "C" else "Put" if right == "P" else right
             if expiry and len(str(expiry)) == 8 and str(expiry).isdigit():

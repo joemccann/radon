@@ -100,7 +100,7 @@ def test_payload_hash_tracks_the_base_images_that_build_the_clients(tmp_path: Pa
 
 def test_dockerfile_records_the_payload_label_only_on_the_gateway_target() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
-    gateway = text.split("FROM runtime AS model-gateway", 1)[1].split(
+    gateway = text.split("FROM runtime-deps AS model-gateway", 1)[1].split(
         "FROM runtime AS python", 1
     )[0]
     python = text.split("FROM runtime AS python", 1)[1]
@@ -117,7 +117,7 @@ def test_dockerfile_records_the_payload_label_only_on_the_gateway_target() -> No
 
 def test_gateway_build_passes_the_payload_hash_build_arg() -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["python-image"]["steps"]
+    steps = workflow["jobs"]["gateway-image"]["steps"]
     hashed = next(step for step in steps if step.get("name") == "Hash python image inputs")
     assert "model_client_payload_inputs.py" in hashed["run"]
     assert "payload=" in hashed["run"]

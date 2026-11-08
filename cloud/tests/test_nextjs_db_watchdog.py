@@ -265,3 +265,93 @@ class TestHealthRowServiceIsInBothCatalogs:
 
     def test_registered_in_the_typescript_catalog(self):
         assert '"nextjs-db-read"' in WINDOWS_TS.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Audit 2026-11-03 §3.2: the restart ladder's state must survive a failed or
+# slow restart and an unreadable state file, and the health row must report
+# what the restart actually did.
+# ---------------------------------------------------------------------------
+
+
+def _wedge_probe(module, monkeypatch, *, clock: list[float]) -> None:
+    monkeypatch.setenv("RADON_PROBE_FRESHNESS_TOKEN", "tok")
+    body = json.dumps({"services": [{
+        "service": "turso-db", "state": "error", "error_summary": "read timed out",
+    }]}).encode("utf-8")
+    monkeypatch.setattr(
+        module.urllib.request, "urlopen", lambda req, timeout=None: _FakeResp(body, 200)
+    )
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        __import__("subprocess").CalledProcessError(70, ["sudo"]),
+        __import__("subprocess").TimeoutExpired(["sudo"], 45),
+    ],
+    ids=["exit-70", "timeout"],
+)
+def test_failed_restart_still_starts_the_cooldown(watchdog, monkeypatch, failure):
+    module, state_path, _restarts, health, _canary = watchdog
+    _seed_state(state_path, consecutive_wedges=2, last_restart_epoch=0)
+    clock = [1_000_000.0]
+    _wedge_probe(module, monkeypatch, clock=clock)
+    attempts: list[float] = []
+
+    def _restart():
+        attempts.append(clock[0])
+        raise failure
+
+    monkeypatch.setattr(module, "restart_nextjs", _restart)
+    module.main()  # must not raise past the state write
+
+    saved = json.loads(state_path.read_text())
+    assert saved["last_restart_epoch"] == 1_000_000.0
+    assert saved["consecutive_wedges"] == 0
+    assert health[-1][0] == "error"
+    assert "failed" in health[-1][1]
+    assert not any("restarted radon-nextjs" in detail for _s, detail in health)
+
+    # The next three wedge cycles sit inside the cooldown: no restart storm.
+    for _ in range(3):
+        clock[0] += 60
+        module.main()
+    assert attempts == [1_000_000.0]
+
+
+def test_restarted_row_is_written_only_after_the_restart_succeeds(watchdog, monkeypatch):
+    module, state_path, _restarts, health, _canary = watchdog
+    _seed_state(state_path, consecutive_wedges=2, last_restart_epoch=0)
+    _wedge_probe(module, monkeypatch, clock=[1_000_000.0])
+    rows_at_restart: list[int] = []
+    monkeypatch.setattr(module, "restart_nextjs", lambda: rows_at_restart.append(len(health)))
+
+    module.main()
+
+    assert rows_at_restart == [0]
+    assert health[-1][0] == "error"
+    assert "restarted radon-nextjs" in health[-1][1]
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    ["{not json", '["list"]', '{"consecutive_wedges": "x", "last_restart_epoch": 0}'],
+    ids=["truncated", "wrong-shape", "wrong-type"],
+)
+def test_unreadable_state_never_skips_the_cooldown(watchdog, monkeypatch, corrupt):
+    module, state_path, restarts, _health, _canary = watchdog
+    clock = [1_000_000.0]
+    _wedge_probe(module, monkeypatch, clock=clock)
+    state_path.write_text(corrupt, encoding="utf-8")
+
+    for _ in range(3):
+        module.main()
+        clock[0] += 60
+
+    # The prior restart time is unknowable, so an unreadable file holds the
+    # cooldown instead of resetting it to "never restarted".
+    assert restarts == []
+    saved = json.loads(state_path.read_text())
+    assert saved["consecutive_wedges"] == 3

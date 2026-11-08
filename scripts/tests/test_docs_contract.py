@@ -2209,7 +2209,7 @@ class TestDocumentation20261012:
         deploy = _section((_ROOT / "docs/operations.md").read_text(), "Deployment")
         assert "scripts/release_version.py" in deploy
         assert "package.json" in deploy
-        assert "can lag" in deploy
+        assert "Repin `BASE_SHA`" in deploy
         assert "release-tag" in deploy
         ci = (_ROOT / ".github/workflows/ci.yml").read_text()
         start = ci.index("  release-tag:")
@@ -3319,3 +3319,54 @@ class TestDocumentation20261104:
         agents = (_ROOT / "scripts/watchdog/AGENTS.md").read_text()
         assert "laptop Grok auto-response" not in agents
         assert "VPS Grok responder" in agents
+
+
+class TestDocumentation20261105:
+    """DOC-255: GET /event-odds serves a fresh cache without a spawn."""
+
+    def test_api_subprocess_owner_names_event_odds_cache_hit(self):
+        claude = (_ROOT / "scripts/api/CLAUDE.md").read_text()
+        section = claude.split("## Subprocess Pattern (`run_script`)", 1)[1]
+        section = section.split("\n## ", 1)[0]
+        assert "GET /event-odds/{ticker}" in section
+        assert "fetch_event_odds.py" in section
+        assert "PERF-043" in section
+        assert "serviceHealthWindows.ts" in section
+        assert "triggers refresh" not in section
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        assert "_EVENT_ODDS_CACHE_TTL_S = 7 * 60 * 60" in server
+        assert "event_odds_get" in server
+
+    def test_watchdog_owner_does_not_say_every_get_refreshes(self):
+        claude = (_ROOT / "scripts/watchdog/CLAUDE.md").read_text()
+        line = next(
+            row
+            for row in claude.splitlines()
+            if "event-odds" in row.lower() or "Event-odds" in row
+        )
+        assert "triggers refresh" not in line
+        assert "GET /event-odds/{ticker}" in line
+        assert "No VPS timer owns it" in line
+        agents = (_ROOT / "scripts/watchdog/AGENTS.md").read_text()
+        assert "event-odds" in agents
+        assert "request-driven" in agents
+        assert "triggers refresh" not in agents
+class TestDocumentation20261106:
+    """DOC-256: spent quota at any status persists a cooldown, not 429-only."""
+
+    def test_research_cooldown_owner_names_spent_quota_and_defers_to_gateway(self):
+        research = (_ROOT / "docs/dropbox-research.md").read_text()
+        auth = research.split("#### Auth matrix", 1)[1].split(
+            "**Expired subscription token.**", 1
+        )[0]
+        assert "A rung's HTTP 429 whose body names a reset" not in auth
+        assert "spent quota" in auth
+        assert "model-gateway.md" in auth
+        assert "A bare 429 persists nothing" in auth
+        assert "RADON_PROVIDER_COOLDOWN_STATE" in auth
+
+        gateway = (_ROOT / "docs/model-gateway.md").read_text()
+        assert "A spent quota, at any status, also records that cooldown" in gateway
+        engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
+        assert "def _note_provider_cooldown" in engine
+        assert "is_quota_exhausted" in engine

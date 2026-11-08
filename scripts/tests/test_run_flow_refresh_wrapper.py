@@ -553,6 +553,43 @@ def test_discover_rate_limit_400_sheds_without_retry_or_fallback(tmp_path: Path)
     assert stub.hits.get(SCAN_PATH, 0) == 1
 
 
+def test_discover_budget_400_sheds_without_retry_or_fallback(tmp_path: Path) -> None:
+    """2026-11-04 21:03Z: discover returns before curl dies, with a budget shed.
+
+    Scanner and flow-analysis were OK. The walk cannot finish inside the
+    curl budget, so the body is the shed signal. Do not retry the POST, do
+    not launch discover.py, and do not exit 1.
+    """
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "scanner.py", "scanner-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "flow_analysis.py", "flow-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "discover.py", "discover-direct")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        fail_paths=frozenset({DISCOVER_PATH}),
+        fail_status=400,
+        fail_body=b'{"detail": "discover budget shed"}',
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    combined = (result.stdout + result.stderr).lower()
+    assert "shed" in combined
+    assert "post budget" in combined
+    assert "indeterminate" not in combined
+    assert "fallback" not in combined
+    assert "discover-direct" not in combined
+    assert stub.hits.get(DISCOVER_PATH, 0) == 1, stub.hits
+    assert stub.hits.get(SCAN_PATH, 0) == 1
+
+
 def test_discover_provider_outage_400_still_fails_the_unit(tmp_path: Path) -> None:
     """A real provider miss stays exit 1. Only the shed body is quiet."""
     repo_dir = _repo(tmp_path)
