@@ -89,6 +89,40 @@ class TestState:
         assert reloaded["analyzed"]["20260804T020000Z-alpha"] == NOW.isoformat()
 
 
+    def test_state_write_never_follows_a_planted_symlink(self, tmp_path: Path):
+        """The state file lives inside the rsync-populated mirror, so any name
+        the exclude list does not cover arrives from the remote host — a
+        symlink included. A privileged write must not follow it."""
+        outside = tmp_path / "outside.txt"
+        outside.write_text("operator data\n")
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        state_path = mirror / ".responder-state.json"
+        for planted in (".responder-state.tmp", ".responder-state.json.tmp"):
+            (mirror / planted).symlink_to(outside)
+
+        state = load_state(state_path)
+        mark_analyzed(state_path, state, "20260804T020000Z-alpha", NOW)
+
+        assert outside.read_text() == "operator data\n"
+        assert not state_path.is_symlink()
+        assert load_state(state_path)["analyzed"]
+        leftovers = [q.name for q in mirror.iterdir()
+                     if q.name.endswith(".tmp") and not q.is_symlink()]
+        assert leftovers == []
+
+    def test_state_read_refuses_a_symlinked_state_file(self, tmp_path: Path):
+        secret = tmp_path / "secret.json"
+        secret.write_text('{"analyzed": {"leaked": "x"}}')
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        state_path = mirror / ".responder-state.json"
+        state_path.symlink_to(secret)
+
+        assert load_state(state_path) == {
+            "analyzed": {}, "attempts": {}, "gave_up": {}}
+
+
 class TestAnalyzeBounds:
     def test_analysis_timeout_is_recorded_not_retried(self, tmp_path: Path):
         """A hung headless analysis must not crash the cycle unrecorded —
