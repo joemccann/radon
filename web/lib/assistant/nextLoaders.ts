@@ -16,6 +16,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "bookmarks": () => import("@/app/api/bookmarks/route") as Promise<NextRouteModule>,
   "bookmarks/[post_id]": () => import("@/app/api/bookmarks/[post_id]/route") as Promise<NextRouteModule>,
   "bpi": () => import("@/app/api/bpi/route") as Promise<NextRouteModule>,
+  "quant/[strategy]": () => import("@/app/api/quant/[strategy]/route") as Promise<NextRouteModule>,
   "breadth": () => import("@/app/api/breadth/route") as Promise<NextRouteModule>,
   "calm-streak": () => import("@/app/api/calm-streak/route") as Promise<NextRouteModule>,
   "cor": () => import("@/app/api/cor/route") as Promise<NextRouteModule>,

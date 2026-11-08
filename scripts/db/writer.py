@@ -3747,3 +3747,129 @@ def get_newsfeed_explanation(post_id: str, content_hash: str) -> Optional[dict[s
         "created_at": row[6],
     }
 
+
+
+# ── Quant sleeve (docs/quant-strategies.md, migration 0109) ──────────────────
+
+QUANT_RUN_UPSERT_SQL = """
+INSERT INTO quant_runs
+  (strategy, run_at, mode, since, until, n_sessions, n_rebalances,
+   ann_return, ann_vol, sharpe, max_drawdown, payload)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, run_at) DO UPDATE SET
+  mode         = excluded.mode,
+  since        = excluded.since,
+  until        = excluded.until,
+  n_sessions   = excluded.n_sessions,
+  n_rebalances = excluded.n_rebalances,
+  ann_return   = excluded.ann_return,
+  ann_vol      = excluded.ann_vol,
+  sharpe       = excluded.sharpe,
+  max_drawdown = excluded.max_drawdown,
+  payload      = excluded.payload
+"""
+
+QUANT_TARGET_UPSERT_SQL = """
+INSERT INTO quant_targets
+  (strategy, as_of, symbol, weight, notional, close, rebalance_today, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, as_of, symbol) DO UPDATE SET
+  weight          = excluded.weight,
+  notional        = excluded.notional,
+  close           = excluded.close,
+  rebalance_today = excluded.rebalance_today,
+  recorded_at     = excluded.recorded_at
+"""
+
+QUANT_ORDER_INSERT_SQL = """
+INSERT INTO quant_orders
+  (strategy, as_of, symbol, action, quantity, limit_price, order_ref, status,
+   order_id, perm_id, message, placed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(strategy, placed_at, symbol) DO UPDATE SET
+  status   = excluded.status,
+  order_id = excluded.order_id,
+  perm_id  = excluded.perm_id,
+  message  = excluded.message
+"""
+
+
+def upsert_quant_run(strategy: str, run_at: str, summary: dict[str, Any], payload: dict[str, Any]) -> None:
+    """One backtest run per (strategy, run_at); the summary columns are what
+    the UI lists, payload is the full result JSON."""
+    db = get_db()
+    db.execute(
+        QUANT_RUN_UPSERT_SQL,
+        (
+            strategy,
+            run_at,
+            summary["mode"],
+            summary.get("since"),
+            summary.get("until"),
+            int(summary["n_sessions"]),
+            int(summary["n_rebalances"]),
+            summary.get("ann_return"),
+            summary.get("ann_vol"),
+            summary.get("sharpe"),
+            summary.get("max_drawdown"),
+            json.dumps(payload),
+        ),
+    )
+    db.commit()
+
+
+def upsert_quant_targets(
+    strategy: str,
+    as_of: str,
+    rows: list[dict[str, Any]],
+    *,
+    rebalance_today: bool = False,
+    recorded_at: Optional[str] = None,
+) -> None:
+    """Current target weights per symbol, idempotent on (strategy, as_of, symbol).
+    A universe is at most a dozen names, so per-row statements stay well under
+    the Hrana bound. ``close`` is the session close the weights were computed
+    on; ``rebalance_today`` is the flag the execution bridge trades on."""
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            QUANT_TARGET_UPSERT_SQL,
+            (
+                strategy,
+                as_of,
+                row["symbol"],
+                float(row["weight"]),
+                row.get("notional"),
+                row.get("close"),
+                1 if rebalance_today else 0,
+                stamp,
+            ),
+        )
+    db.commit()
+
+
+def insert_quant_orders(strategy: str, rows: list[dict[str, Any]], placed_at: Optional[str] = None) -> None:
+    """The sleeve's order log: one row per symbol per placement, dry runs
+    included (status ``planned``)."""
+    stamp = placed_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            QUANT_ORDER_INSERT_SQL,
+            (
+                strategy,
+                row["as_of"],
+                row["symbol"],
+                row["action"],
+                int(row["quantity"]),
+                float(row["limit_price"]),
+                row["order_ref"],
+                row["status"],
+                row.get("order_id"),
+                row.get("perm_id"),
+                row.get("message"),
+                stamp,
+            ),
+        )
+    db.commit()

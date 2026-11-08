@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon quant sleeve targets - weekdays 16:25 ET after the close
+
+[Timer]
+# 16:25 America/New_York, Mon..Fri: after the 16:00 ET close so the session's
+# close is final, across DST like radon-ma-ratio (16:20 ET) and before
+# rsi-oversold (16:40 ET). Weekday only: the strategies rebalance on
+# session calendars, so a weekend run has nothing new to say. Heartbeat
+# `quant-targets` (74h window: Friday's run covers the weekend).
+OnCalendar=Mon..Fri *-*-* 16:25:00 America/New_York
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
