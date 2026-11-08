@@ -86,12 +86,15 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
-  "hhlev", "hyad", "record-high-breadth", "index-quote",
+  "hhlev", "hyad", "record-high-breadth", "imbalance", "index-quote",
   "informed-flow/[ticker]", "ivrank", "iv-spread", "llm-token-index", "margin-debt",
   // models: read-only chat model picker catalog. Reports WHICH provider keys
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
+  // quant/[strategy]: read-only quant sleeve read (latest backtest, targets,
+  // order log from Turso), same posture as margin-debt; it places nothing.
+  "quant/[strategy]",
   "risk-free-rate", "skew", "skew2d", "straddle", "version", "vix-pc", "vixcor", "vixts", "panic-index",
   "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",

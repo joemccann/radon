@@ -262,8 +262,8 @@ is a placeholder, so:
 - When `structure` is supplied (CLI `--structure '<json>'` or the FastAPI
   `/evaluate` caller once M5 is real), M6 calls `kelly_ticket()` with
   `bankroll` and the open positions' worst-case losses from
-  `data/portfolio.json` (or the DB-first equivalent; the reader already exists
-  in `ib_sync.py`).
+  the latest Turso `portfolio_snapshots` row (`_open_max_losses_from_portfolio`).
+  An unreadable row fails M6 closed.
 - M6 `passed=True` iff `edge_exists and contracts >= 1 and reason is None`.
   Otherwise `passed=False`, `decision="NO_TRADE"`, `failing_gate="RISK"`, and
   `data.reason` set (`"NO_EDGE"`, `"CAP_BELOW_ONE_CONTRACT"`,
@@ -296,9 +296,9 @@ for sizing/eval is unchanged.
   `order_limits.check_placement_limits` uses. A client flag (`isClosing`,
   `closeOut`, `reducing`) is not proof (R-740); a stale or unreadable snapshot
   keeps the warning.
-- Bankroll source in a fresh interpreter: `NetLiquidation` from the connected
-  `IBClient` account summary, falling back to `data/portfolio.json`
-  `net_liquidation`. If neither is available the guard **warns** with
+- Bankroll source in a fresh interpreter: `net_liquidation` (or `bankroll`) on
+  the latest Turso `portfolio_snapshots` row via `_load_latest_snapshot`. If
+  that row is unreadable the guard **warns** with
   `code: "KELLY_BANKROLL_UNKNOWN"` and continues; an unknown bankroll is not a
   silent pass.
 - Warning shape: `{"code": "KELLY_CAP_EXCEEDED", "message": "<max_loss> is

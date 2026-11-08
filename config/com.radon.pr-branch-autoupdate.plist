@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.pr-branch-autoupdate</string>
+
+    <!-- __HOME__ is substituted by scripts/setup_pr_branch_autoupdate.sh. It
+         runs an installed copy, so a checkout on another branch cannot change
+         what launchd executes. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3.13</string>
+        <string>-I</string>
+        <string>__HOME__/.local/share/radon/pr-autoupdate/pr_branch_autoupdate.py</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/radon-weekend/logs/pr-branch-autoupdate.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/radon-weekend/logs/pr-branch-autoupdate.err</string>
+</dict>
+</plist>

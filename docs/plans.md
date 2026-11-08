@@ -26,33 +26,14 @@ python3.13 scripts/evaluate.py [TICKER] --json  # structured JSON
 
 ---
 
-## Milestone 0: Startup Reconciliation (Automatic + Auto-Log)
+## Milestone 0: Startup Reconciliation
 **Action**: Pi startup extension runs IB reconciliation asynchronously
-**Validation**: Check notification or `data/reconciliation.json`
+**Validation**: Interactive Brokers live state via `python3.13 scripts/ib_sync.py`
 **Acceptance Criteria**:
 - New trades detected and flagged
 - New positions identified
 - Closed positions identified
-- Notification shown if action needed
-- **⚠️ If `needs_attention: true` → Auto-log trades immediately**
-
-**Auto-Log Workflow (MANDATORY when new trades detected):**
-1. Read `data/reconciliation.json`
-2. For each trade in `new_trades`:
-   - Assign next ID (max existing ID + 1)
-   - Create trade_log entry with full details
-   - Set `validation_method: "ib_reconciliation"`
-3. Append to `data/trade_log.json`
-4. Update `docs/status.md`:
-   - Trade Log Summary table
-   - Today's Trades section
-   - Portfolio State metrics
-5. Clear reconciliation:
-   - Set `needs_attention: false`
-   - Move to `processed_trades`
-6. Validate: `python3.13 -m json.tool data/trade_log.json`
-
-**Do NOT wait for user request — this is automatic on every startup with new trades.**
+- Executed trades land in the Turso `journal` table through the fill handlers
 
 ---
 
@@ -314,10 +295,10 @@ python3.13 scripts/kelly.py --prob [P] --odds [ODDS] --bankroll [B]
 ---
 
 ## Milestone 7: Final Decision & Log
-**Action**: Log executed trades to trade_log.json; log rejections to docs/status.md
+**Action**: Log executed trades to the Turso `journal` table; log rejections to docs/status.md
 
 **If TRADE (executed)**:
-Log to `data/trade_log.json` with fields:
+Fills land in the Turso `journal` table through the fill handlers with fields:
 - id (auto-increment)
 - date, time
 - ticker, company_name (VERIFIED)
@@ -338,7 +319,7 @@ Update existing entry or add new entry with:
 Log to `docs/status.md` under "Recent Evaluations" with:
 - ticker, date, failing_gate, reason
 
-**Validation**: JSON schema valid for trade_log.json
+**Validation**: Turso `journal` row present
 
 ---
 
@@ -361,7 +342,7 @@ For each logged position:
 When position closes:
 1. Fetch fills from IB (today) or Flex Query (historical)
 2. Calculate realized P&L with commissions
-3. Update trade_log.json with close data
+3. Confirm the close in the Turso `journal` table
 4. Generate P&L report if significant
 
 ### Scenario Stress Testing

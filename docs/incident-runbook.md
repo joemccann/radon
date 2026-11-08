@@ -149,12 +149,14 @@ Mobile later pushed that the original was cancelled.
   plus `IB error 202`; IBKR push "order cancelled"; open-order snapshot missing
   the row and no new working replacement.
 - **Discriminating check:** `cancel_order` with errorEvent 202 while the
-  snapshot is still `PendingCancel` must return `status=ok`. `POST /orders/replace`
-  whose cancel step raises `IB error 202` must still call place. A 201 / already
-  Filled cancel must not place.
-- **Fix:** treat 202 as cancel confirmation in `ib_order_manage.cancel_order`;
-  `/orders/replace` records 202 / already-Cancelled as cancelled and continues
-  to place. Already-Filled stays a hard abort.
+  snapshot is still `PendingCancel` is `acked` for `classify_cancel`, then named
+  from executions. `POST /orders/replace` places only when `cancelOutcome` is
+  `cancelled`. A 201, filled, partial, unknown, or still-working cancel must not
+  place (`CANCEL_NOT_CONFIRMED`).
+- **Fix:** treat 202 as cancel acknowledgement in `ib_order_manage.cancel_order`;
+  `classify_cancel` names the outcome from executions. `/orders/replace` places
+  only when `cancelOutcome` is `cancelled`. Filled, partial, unknown, and
+  still-working raise `CANCEL_NOT_CONFIRMED`.
 - **Regression:**
   `scripts/tests/test_ib_order_manage.py::TestCancelOrder::test_cancel_succeeds_when_ib_202_arrives_while_order_still_working`,
   `scripts/api/tests/test_order_replace_state_machine.py::test_replace_treats_ib_202_cancel_as_confirmed_and_places`.
@@ -2004,7 +2006,8 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
     cap on the market-wide path, write `error` with `next_attempt_at` =
     20:00 ET, persist `data/oi_changes_uw_embargo.json`, keep the last
     snapshot, exit 0 so the unit does not page. Ticker eval lookups still
-    exit 1. Other 429s still fail the oneshot.
+    exit 1. A burst or admission-busy 429 on this oneshot is
+    `oi-changes-admission-429-pages-p1`, not this daily-cap case.
     Regression: `test_fetch_oi_changes.py::test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset`.
 - **(g) data-refresh soft-fail silence (2026-08-28, `cri-scan`):**
   `radon-refresh.timer` runs `scripts.data_refresh` every 15m. `cri_scan.py`
@@ -2034,6 +2037,49 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
 - **Registration contract:** a new scheduled writer lands in FOUR places:
   `web/lib/serviceHealthWindows.ts`, `scripts/watchdog/services.py`, the right
   watchdog bucket, and a heartbeat on every run INCLUDING skip paths.
+
+---
+
+## oi-changes-admission-429-pages-p1
+
+**`radon-oi-changes.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a market-path UW 429.** Peak: 2026-11-04 17:05Z, page
+`4a285d2b1d422f4c5c8073aec86a1aec`. Alert text was the generic unit line
+`systemd unit failed (Result=exit-code, NRestarts=0)`.
+
+- **Mechanism:** the 14:00 / 17:00 / 20:00 UTC fires share the minute with
+  `radon-garch` and the 5-minute UW writers. `fetch_oi_changes.py --market`
+  waits 120s for admission. A burst 429 or `UW admission is busy` after that
+  wait is not the daily-cap string, so `_handle_market_uw_limit` wrote the
+  error heartbeat and `sys.exit(1)`. `Type=oneshot` has no `Restart=`. Exit 1
+  does not retry before the next timer. It only pages. Governor text
+  `UW provider quota is exhausted` took the same exit-1 path because it is
+  not the HTTP sentence `daily request limit of 40000`.
+- **Detection:** unit journal `OI-changes refresh FAILED (exit 1)` in the
+  same minute as the timer; `logs/oi_changes.err.log` has `admission is busy`,
+  `429`, or `quota is exhausted`. `service_health[oi-changes].last_attempt_finished_at`
+  matches that fire. Success mirrors pass `finished_at=None` (the payload has
+  no `scan_time`), so a later ok run clears `last_error` and moves
+  `updated_at` without moving `finished_at`. `:8321/health/lite` stays up.
+- **Discriminating check:** `finished_at` set on that fire means the rate-limit
+  heartbeat ran (`UwEmbargo.record_error`). A generic exception prints
+  `Error:` and exits 1 without stamping `finished_at`. Daily-cap text is
+  case (f2) above and already exits 0. `Result=signal` is deploy stop-clean.
+  If `/health/lite` is down too, stand down.
+- **Remediation (code):** market-path `UWRateLimitError` exits 0, keeps the
+  last snapshot, and heartbeats `error`. Daily-cap family (HTTP daily limit,
+  quota exhausted, budget reserved) still arms `data/oi_changes_uw_embargo.json`
+  until 20:00 ET. Burst and admission-busy do not arm it. Their
+  `next_attempt_at` is 15 minutes after the next weekday 14:00 / 17:00 / 20:00
+  UTC slot, so the hourly error bucket stays quiet until that fire. Ticker
+  eval lookups still exit 1. Do not restart-flap. The next timer recovers
+  the unit.
+- **Regression:**
+  `test_fetch_oi_changes.py::test_market_admission_busy_does_not_page_the_oneshot`,
+  `test_market_transient_429_exits_zero_until_next_timer`,
+  `test_market_provider_quota_exhausted_exits_zero_and_embargoes`,
+  `test_market_non_rate_limit_error_still_exits_nonzero`.
+- **Code:** `scripts/fetch_oi_changes.py` (`_handle_market_uw_limit`).
 
 ---
 
@@ -4238,6 +4284,14 @@ filename). Click opens the HTML card. Analyze-only by design — shipping a
 fix is human-gated. The analysis session's tool surface is an allowlist
 (`--tools Read Grep Glob --strict-mcp-config`): no MCP server or other
 built-in tool is loaded, and the deny rules remain a second layer.
+
+The dedup state lives inside that mirror, so its name and every name derived
+from it arrive from the remote host on each sync. `load_state` opens
+`O_NOFOLLOW` and `save_state` creates its temp file with `tempfile.mkstemp`
+(`O_CREAT|O_EXCL`, unguessable name) before renaming it over the state, so a
+responder write stays inside the mirror even when the remote planted a link
+at that name. Regression:
+`test_incident_responder.py::TestState::test_state_write_never_follows_a_planted_symlink`.
 
 Do not post via `osascript -e 'display notification'`. That banner is owned
 by Script Editor, so a click opens an empty Untitled document. Delivery

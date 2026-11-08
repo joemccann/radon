@@ -99,6 +99,12 @@ export const BREADTH_REFRESH: RefreshSchedule = [
 ];
 
 /** cloud/services/radon-bpi.timer */
+/** cloud/services/radon-quant-targets.timer */
+export const QUANT_TARGETS_REFRESH: RefreshSchedule = [{ tz: "America/New_York", weekdays: MON_FRI, hours: [16], minutes: [25] }];
+
+/** cloud/services/radon-quant-execute.timer */
+export const QUANT_EXECUTE_REFRESH: RefreshSchedule = [{ tz: "America/New_York", weekdays: MON_FRI, hours: [9], minutes: [35] }];
+
 export const BPI_REFRESH: RefreshSchedule = [
   { weekdays: MON_FRI, hours: [21], minutes: [30] },
   { weekdays: MON_FRI, hours: [23], minutes: [30] },
@@ -175,6 +181,9 @@ export const HY_AD_REFRESH: RefreshSchedule = [{ weekdays: TUE_SAT, hours: [11],
 
 /** cloud/services/radon-record-high-breadth.timer */
 export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [15] }];
+
+/** cloud/services/radon-imbalance.timer */
+export const IMBALANCE_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [25] }];
 
 /** cloud/services/radon-hhlev.timer */
 export const HH_LEV_REFRESH: RefreshSchedule = [daily(13, 20)];

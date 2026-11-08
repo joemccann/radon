@@ -221,6 +221,7 @@ ma-ratio-tab.spec.ts
 #   mocked /api/rsi-oversold, no live IB/network/DB. Vitest rsi-oversold-panel
 #   and rsi-oversold-api cover the strip and missing contract. Held out of
 #   e2e-financial-smoke pending next start preflight.
+quant-tab.spec.ts
 rsi-oversold-tab.spec.ts
 calm-streak-tab.spec.ts
 fill-toast.spec.ts
@@ -549,3 +550,4 @@ newsfeed-explain.spec.ts
 public-share-preview-limit.spec.ts
 
 # REVIEWED 2026-10-29 mobile-newsfeed-layout.spec.ts - All 12 iPhone Safari cases passed locally against Next dev on current main plus the sharing fix; horizontal 44px action targets, simultaneous feedback/Share panels, original caption and active X link verified. Dark mobile screenshot inspected. Held-out membership unchanged; this layout suite remains outside the financial-browser CI list.
+# REVIEWED 2026-11-07 quant-tab.spec.ts - New spec for the /regime/quant tab; 4/4 passed locally against next dev with route mocks (chips, strip, chart paths, targets table, missing state), screenshot captured in the session; held out like its margin-debt-tab sibling.

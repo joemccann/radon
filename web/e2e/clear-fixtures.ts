@@ -60,6 +60,7 @@ const fixtures: Record<string, unknown> = {
   "/api/vixcor": VixcorFixture(),
   "/api/hyad": HyadFixture(),
   "/api/record-high-breadth": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
+  "/api/imbalance": { missing: true, scan_time: null, data_date: null, current: null, series: [] },
   "/api/high-low-line": {
     missing: true, degraded: false, scan_time: null, source_last_modified: null,
     data_date: null, expected_session_date: null, count: 0, weekly_count: 0,
@@ -71,6 +72,8 @@ const fixtures: Record<string, unknown> = {
     count: 0, series: [], current: null, sources: null,
     comparison: { available: false, label: "MSCI US forward 12-month EPS", reason: "Licensed EPS series not connected" },
   },
+  // Quant sleeve GET contract: nothing persisted is HTTP 200 with missing: true.
+  "/api/quant/trend_inverse_vol": { strategy: "trend_inverse_vol", missing: true, run: null, targets: null, orders: null },
   "/api/hhlev": HhlevFixture(),
   "/api/ma-ratio": MaRatioFixture(),
   "/api/rsi-oversold": RsiOversoldFixture(),
