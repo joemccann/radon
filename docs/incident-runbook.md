@@ -2006,7 +2006,8 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
     cap on the market-wide path, write `error` with `next_attempt_at` =
     20:00 ET, persist `data/oi_changes_uw_embargo.json`, keep the last
     snapshot, exit 0 so the unit does not page. Ticker eval lookups still
-    exit 1. Other 429s still fail the oneshot.
+    exit 1. A burst or admission-busy 429 on this oneshot is
+    `oi-changes-admission-429-pages-p1`, not this daily-cap case.
     Regression: `test_fetch_oi_changes.py::test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset`.
 - **(g) data-refresh soft-fail silence (2026-08-28, `cri-scan`):**
   `radon-refresh.timer` runs `scripts.data_refresh` every 15m. `cri_scan.py`
@@ -2036,6 +2037,49 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
 - **Registration contract:** a new scheduled writer lands in FOUR places:
   `web/lib/serviceHealthWindows.ts`, `scripts/watchdog/services.py`, the right
   watchdog bucket, and a heartbeat on every run INCLUDING skip paths.
+
+---
+
+## oi-changes-admission-429-pages-p1
+
+**`radon-oi-changes.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a market-path UW 429.** Peak: 2026-11-04 17:05Z, page
+`4a285d2b1d422f4c5c8073aec86a1aec`. Alert text was the generic unit line
+`systemd unit failed (Result=exit-code, NRestarts=0)`.
+
+- **Mechanism:** the 14:00 / 17:00 / 20:00 UTC fires share the minute with
+  `radon-garch` and the 5-minute UW writers. `fetch_oi_changes.py --market`
+  waits 120s for admission. A burst 429 or `UW admission is busy` after that
+  wait is not the daily-cap string, so `_handle_market_uw_limit` wrote the
+  error heartbeat and `sys.exit(1)`. `Type=oneshot` has no `Restart=`. Exit 1
+  does not retry before the next timer. It only pages. Governor text
+  `UW provider quota is exhausted` took the same exit-1 path because it is
+  not the HTTP sentence `daily request limit of 40000`.
+- **Detection:** unit journal `OI-changes refresh FAILED (exit 1)` in the
+  same minute as the timer; `logs/oi_changes.err.log` has `admission is busy`,
+  `429`, or `quota is exhausted`. `service_health[oi-changes].last_attempt_finished_at`
+  matches that fire. Success mirrors pass `finished_at=None` (the payload has
+  no `scan_time`), so a later ok run clears `last_error` and moves
+  `updated_at` without moving `finished_at`. `:8321/health/lite` stays up.
+- **Discriminating check:** `finished_at` set on that fire means the rate-limit
+  heartbeat ran (`UwEmbargo.record_error`). A generic exception prints
+  `Error:` and exits 1 without stamping `finished_at`. Daily-cap text is
+  case (f2) above and already exits 0. `Result=signal` is deploy stop-clean.
+  If `/health/lite` is down too, stand down.
+- **Remediation (code):** market-path `UWRateLimitError` exits 0, keeps the
+  last snapshot, and heartbeats `error`. Daily-cap family (HTTP daily limit,
+  quota exhausted, budget reserved) still arms `data/oi_changes_uw_embargo.json`
+  until 20:00 ET. Burst and admission-busy do not arm it. Their
+  `next_attempt_at` is 15 minutes after the next weekday 14:00 / 17:00 / 20:00
+  UTC slot, so the hourly error bucket stays quiet until that fire. Ticker
+  eval lookups still exit 1. Do not restart-flap. The next timer recovers
+  the unit.
+- **Regression:**
+  `test_fetch_oi_changes.py::test_market_admission_busy_does_not_page_the_oneshot`,
+  `test_market_transient_429_exits_zero_until_next_timer`,
+  `test_market_provider_quota_exhausted_exits_zero_and_embargoes`,
+  `test_market_non_rate_limit_error_still_exits_nonzero`.
+- **Code:** `scripts/fetch_oi_changes.py` (`_handle_market_uw_limit`).
 
 ---
 

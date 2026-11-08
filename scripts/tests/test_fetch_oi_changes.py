@@ -1,5 +1,6 @@
 """OI change fetch must page the full ticker book before any result cap."""
 
+import json
 import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -151,7 +152,45 @@ def test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset(tmp_path, mo
     assert healths[-1][2]["error"]["next_attempt_at"] == "2026-08-15T00:00:00Z"
 
 
-def test_market_transient_429_still_fails_oneshot(tmp_path, monkeypatch):
+def test_market_admission_busy_does_not_page_the_oneshot(tmp_path, monkeypatch):
+    # 2026-11-04 17:05Z: radon-oi-changes.service Result=exit-code, NRestarts=0.
+    # The 17:00 UTC fire shares the minute with garch and the 5-minute UW
+    # writers. After the 120s admission wait a burst 429 still called
+    # sys.exit(1). The error heartbeat is the only writer that stamps
+    # last_attempt_finished_at, and that stamp is 17:01:46Z. The next timer
+    # is 20:00 UTC, so failing the oneshot does not retry sooner. It only
+    # pages. Keep the last snapshot, stay quiet until that fire can finish,
+    # and do not arm the daily sidecar.
+    from clients.uw_client import UWRateLimitError
+    import fetch_oi_changes as m
+
+    incident = datetime(2026, 11, 4, 17, 1, 46, tzinfo=timezone.utc)
+    mock_client = MagicMock()
+    mock_client.get_oi_change.side_effect = UWRateLimitError(
+        "UW admission is busy; retry after the current window"
+    )
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_client
+    mock_cm.__exit__.return_value = False
+    healths, mirrors = _stub_health_and_embargo(monkeypatch, tmp_path)
+    monkeypatch.setattr(m, "_now", lambda: incident)
+    monkeypatch.setattr(m, "UWClient", lambda *a, **k: mock_cm)
+
+    assert _run_main(["--market", "--json"]) == 0
+    assert mock_client.get_oi_change.call_count == 1
+    assert mirrors == []
+    assert not (tmp_path / "oi_changes_uw_embargo.json").exists()
+    service, state, kwargs = healths[0]
+    assert service == "oi-changes"
+    assert state == "error"
+    assert "admission is busy" in kwargs["error"]["message"]
+    assert kwargs["error"]["next_attempt_at"] == "2026-11-04T20:15:00Z"
+    assert kwargs["finished_at"] == "2026-11-04T17:01:46Z"
+
+
+def test_market_transient_429_exits_zero_until_next_timer(tmp_path, monkeypatch):
+    # Stub clock is Friday 2026-08-14 20:00:40Z, after the last weekday fire.
+    # Quiet until Monday 14:15Z. Do not arm the daily sidecar.
     from clients.uw_client import UWRateLimitError
     import fetch_oi_changes as m
 
@@ -160,11 +199,56 @@ def test_market_transient_429_still_fails_oneshot(tmp_path, monkeypatch):
     mock_cm = MagicMock()
     mock_cm.__enter__.return_value = mock_client
     mock_cm.__exit__.return_value = False
+    healths, mirrors = _stub_health_and_embargo(monkeypatch, tmp_path)
+    monkeypatch.setattr(m, "UWClient", lambda *a, **k: mock_cm)
+
+    assert _run_main(["--market", "--json"]) == 0
+    assert mock_client.get_oi_change.call_count == 1
+    assert mirrors == []
+    assert not (tmp_path / "oi_changes_uw_embargo.json").exists()
+    assert healths[0][1] == "error"
+    assert healths[0][2]["error"]["next_attempt_at"] == "2026-08-17T14:15:00Z"
+
+
+def test_market_provider_quota_exhausted_exits_zero_and_embargoes(tmp_path, monkeypatch):
+    # Governor wording is not the HTTP "daily request limit" sentence. It is
+    # still the daily cap. Exit 1 paged the oneshot and the next fire called
+    # UW again.
+    from clients.uw_client import UWRateLimitError
+    import fetch_oi_changes as m
+
+    incident = datetime(2026, 11, 4, 17, 1, 46, tzinfo=timezone.utc)
+    mock_client = MagicMock()
+    mock_client.get_oi_change.side_effect = UWRateLimitError(
+        "UW provider quota is exhausted"
+    )
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_client
+    mock_cm.__exit__.return_value = False
+    healths, mirrors = _stub_health_and_embargo(monkeypatch, tmp_path)
+    monkeypatch.setattr(m, "_now", lambda: incident)
+    monkeypatch.setattr(m, "UWClient", lambda *a, **k: mock_cm)
+
+    assert _run_main(["--market", "--json"]) == 0
+    assert mirrors == []
+    sidecar = json.loads((tmp_path / "oi_changes_uw_embargo.json").read_text())
+    assert sidecar["next_attempt_at"] == "2026-11-05T01:00:00Z"
+    assert healths[0][1] == "error"
+    assert healths[0][2]["error"]["next_attempt_at"] == "2026-11-05T01:00:00Z"
+
+
+def test_market_non_rate_limit_error_still_exits_nonzero(tmp_path, monkeypatch):
+    import fetch_oi_changes as m
+
+    mock_client = MagicMock()
+    mock_client.get_oi_change.side_effect = RuntimeError("uw connection reset")
+    mock_cm = MagicMock()
+    mock_cm.__enter__.return_value = mock_client
+    mock_cm.__exit__.return_value = False
     _stub_health_and_embargo(monkeypatch, tmp_path)
     monkeypatch.setattr(m, "UWClient", lambda *a, **k: mock_cm)
 
     assert _run_main(["--market", "--json"]) == 1
-    assert mock_client.get_oi_change.call_count == 1
 
 
 def test_ticker_uw_daily_quota_still_exits_nonzero(tmp_path, monkeypatch):
