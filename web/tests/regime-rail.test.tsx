@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 39 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(39);
-    expect(new Set(REGIME_TABS).size).toBe(39);
+  it("flattens to all 40 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(40);
+    expect(new Set(REGIME_TABS).size).toBe(40);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "credit-vix", "straddle", "cor", "streaks", "vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest", "exports", "quant"].sort(),
     );
   });
 
@@ -90,6 +90,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.streaks).toBe("Breadth & sentiment");
     expect(groupOf.llm).toBeUndefined();
     expect(groupOf.backtest).toBe("Models");
+    expect(groupOf.quant).toBe("Models");
   });
 
   it("every tab has a display label", () => {
@@ -185,12 +186,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 39 items", () => {
+  it("renders all five group headers and 40 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(39);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(40);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

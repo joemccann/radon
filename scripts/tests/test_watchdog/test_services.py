@@ -137,6 +137,9 @@ class TestServiceCatalogContract:
             # _real_ib_fetch connects via IBClient; no UW/Yahoo rung serves
             # index-level 30d IV).
             "iv-spread",
+            # Quant sleeve execution bridge: scripts/quant_execute.py places
+            # every order through ib_place_order.place_order (IBClient).
+            "quant-execute",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"

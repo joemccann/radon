@@ -21,7 +21,8 @@ export type RegimeTab =
   | "imbalance"
   | "rsi-oversold"
   | "calm-streak"
-  | "streaks" | "exports";
+  | "streaks" | "exports"
+  | "quant";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
@@ -30,7 +31,7 @@ export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Volatility", tabs: ["vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "calm-streak"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
-  { label: "Models", tabs: ["exports", "backtest"] },
+  { label: "Models", tabs: ["exports", "backtest", "quant"] },
 ];
 
 export const REGIME_TABS: readonly RegimeTab[] = REGIME_RAIL_GROUPS.flatMap((g) => g.tabs);
@@ -76,6 +77,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   llm: "AI infrastructure",
   backtest: "BACKTEST",
   exports: "EXPORT LEAD",
+  quant: "QUANT",
 };
 
 /** Same clarity/severity vocabulary as the dashboard engine rows. */
