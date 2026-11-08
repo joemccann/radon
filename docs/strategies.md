@@ -955,7 +955,7 @@ The "NEVER sell naked options" constraint can be overridden by the manager (huma
 
 ## Performance Tracking
 
-Log all decisions in `data/trade_log.json`:
+Log all decisions in the Turso `journal` table:
 
 ```json
 {

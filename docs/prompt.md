@@ -43,7 +43,7 @@ An evaluation is complete when:
 3. All four gates are evaluated in order
 4. Failing gate stops evaluation (no rationalization)
 5. Decision is logged with full rationale
-6. If TRADE: logged to trade_log.json + position synced to portfolio.json
+6. If TRADE: fills land in the Turso `journal` table through the fill handlers; positions come from `python3.13 scripts/ib_sync.py`
 7. If NO TRADE: documented in docs/status.md (Recent Evaluations)
 
 ## Portfolio Management
@@ -51,18 +51,17 @@ An evaluation is complete when:
 ### ⚠️ IB Is the Source of Truth for Portfolio State (CRITICAL)
 - **Interactive Brokers is the ONLY source of truth** for what positions are currently held.
 - `docs/status.md` is a decision log, NOT a live portfolio view. It goes stale.
-- `data/portfolio.json` is a cache. It may be hours or days old.
 - **ALWAYS run `python3.13 scripts/ib_sync.py`** before claiming a position exists or doesn't exist.
-- When IB is unavailable, say so — do NOT fall back to status.md or portfolio.json for current state.
+- When IB is unavailable, say so. Do NOT fall back to status.md for current state.
 
 ### Startup Reconciliation
 - Pi startup automatically runs IB reconciliation (async)
 - Detects new trades, new positions, closed positions
 - Shows notification if action needed
-- Results in `data/reconciliation.json`
+- Results in Turso
 
 ### Trade Logging
-- Executed trades → `data/trade_log.json`
+- Executed trades → Turso `journal` table
 - Include: entry/exit fills, commissions, P&L, thesis
 - Use Flex Query for historical trade data
 
