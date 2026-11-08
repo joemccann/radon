@@ -207,7 +207,11 @@ for (const width of [375, 768, 1024, 1440]) for (const theme of ["dark", "light"
   expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await dialog.getByRole("button", { name: "Share", exact: true }).focus();
   await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Export PDF", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(dialog.getByRole("button", { name: "Next article", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "Export PDF", exact: true })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(dialog.getByRole("button", { name: "Share", exact: true })).toBeFocused();
   await dialog.getByRole("button", { name: "Next article", exact: true }).click();
