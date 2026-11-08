@@ -985,6 +985,7 @@ jobs:
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-generated-charts.spec.ts
           e2e/newsfeed-sharing.spec.ts
+          e2e/newsfeed-pdf-export.spec.ts
           e2e/research-feedback.spec.ts
           e2e/research-held-review.spec.ts
           e2e/vol-skew-mr-scanner.spec.ts
