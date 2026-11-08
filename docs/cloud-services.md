@@ -250,7 +250,7 @@ the production copies under `~/retired-json/`.
 | Cold-start a new laptop | Clone the repo, `bun install`, set the attach env in `web/.env` (`ALLOWED_USER_IDS` and the Clerk keys), then `scripts/cloud.sh`. Do not run `bun run db:migrate` against the shared database from the laptop. `radon-api` applies `scripts/db/migrate.py` on the VPS before start. No replica file to seed. |
 | Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
-| Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
+| Turso outage | Next.js snapshot routes serve the last good in-memory read (`source: "memory"`); they never fall through to retired JSON. Memory starts empty on restart. Kelly and evaluate treat a Turso miss as unknown bankroll, not a file. |
 | Hetzner outage | No laptop fallback: the laptop cannot hold an IB socket (broker 4001 binds `10.0.0.4`/loopback, ACL-denied). Recover the hosts per [cloud/README.md](../cloud/README.md) and [Gateway recovery](ib-gateway-recovery.md). |
 
 ## Health & observability

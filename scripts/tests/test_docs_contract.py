@@ -3373,7 +3373,8 @@ class TestDocumentation20261106:
 
 
 class TestDocumentation20261108:
-    """DOC-259: interrupted post-deploy hooks retry only when declared idempotent."""
+    """DOC-259/260: interrupted post-deploy hooks retry only when declared
+    idempotent; Turso outage reads do not fall through to retired JSON."""
 
     def test_post_deploy_owner_names_idempotent_interrupt_contract(self):
         cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
@@ -3391,3 +3392,15 @@ class TestDocumentation20261108:
         summary = summary.split("#### ", 1)[0]
         assert "idempotent" in summary
         assert "interrupted" in summary
+
+    def test_turso_outage_recovery_does_not_fall_through_to_retired_json(self):
+        services = (_ROOT / "docs/cloud-services.md").read_text()
+        recovery = services.split("## Bootstrap & disaster recovery", 1)[1]
+        recovery = recovery.split("\n## ", 1)[0]
+        assert "Read paths fall through to JSON files" not in recovery
+        assert "dual-write retains them" not in recovery
+        assert "last good" in recovery and "memory" in recovery
+        web = (_ROOT / "web/CLAUDE.md").read_text()
+        assert 'source: "memory"' in web
+        assert "never disk" in web
+        assert "nothing may read them" in (_ROOT / "CLAUDE.md").read_text()
