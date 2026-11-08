@@ -9,6 +9,7 @@ import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import NewsfeedGallery from "./NewsfeedGallery";
 import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedPdfExport from "./NewsfeedPdfExport";
 import NewsfeedExplain from "./NewsfeedExplain";
 import feedStyles from "./DashboardNewsFeed.module.css";
 import NewsfeedPostContent from "./NewsfeedPostContent";
@@ -211,6 +212,7 @@ export default function NewsfeedLightbox({
                 imageUrls={imageUrl ? [imageUrl] : (post.images ?? [])}
               />
               <NewsfeedShare key={`share:${post.id}`} post={post} imageUrl={imageUrl} />
+              <NewsfeedPdfExport key={`pdf:${post.id}`} post={post} />
             </div>
           </article>
         </div>
