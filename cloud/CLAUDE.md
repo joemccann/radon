@@ -1010,6 +1010,10 @@ Image pre-pull compares each cached release tag with its registry manifest diges
 
 `setup-vps.sh` inventories `radon-record-high-breadth.{service,timer}` and enables the timer on full-host setup. The bounded auto-sync manifest installs both files on existing app-plane hosts. The daily 18:15 America/New_York run reconciles TradingView MCP source history, writes `record-high-breadth` service health, and retains prior data on authentication failure. Its 26h freshness budget also covers weekend heartbeat runs. Provision the production OAuth store through explicit consent and configure `TRADINGVIEW_MCP_TOKEN_FILE`; setup does not install or copy account credentials. This provider-coherent comparison does not change generic commodity-price failover. Source-universe and history limits are documented in `docs/indicators/record-high-breadth-source-parity.md`.
 
+### ASK-BID imbalance scheduled comparison
+
+`setup-vps.sh` inventories `radon-imbalance.{service,timer}` and enables the timer on full-host setup. The bounded auto-sync manifest installs both files on existing app-plane hosts. The daily 18:25 America/New_York run (10 minutes after record-high-breadth) reads `USI:TRDS.ASK.US` and `USI:TRDS.BID.US` through the same official TradingView MCP client, writes `imbalance` service health, and retains prior data on authentication failure. Units are trade counts, not share volume. BATD is a parity check only. Missing ASK or BID stays null. Provision the production OAuth store through explicit consent and configure `TRADINGVIEW_MCP_TOKEN_FILE`; setup does not install or copy account credentials. Spec: `docs/indicators/imbalance.md`.
+
 
 ### Unusual Whales Advanced collectors
 

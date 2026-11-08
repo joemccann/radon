@@ -176,6 +176,9 @@ export const HY_AD_REFRESH: RefreshSchedule = [{ weekdays: TUE_SAT, hours: [11],
 /** cloud/services/radon-record-high-breadth.timer */
 export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [15] }];
 
+/** cloud/services/radon-imbalance.timer */
+export const IMBALANCE_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [25] }];
+
 /** cloud/services/radon-hhlev.timer */
 export const HH_LEV_REFRESH: RefreshSchedule = [daily(13, 20)];
 

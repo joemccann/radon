@@ -225,6 +225,7 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/hhlev": { GET: SCAN_SNAPSHOTS },
   "/api/hyad": { GET: SCAN_SNAPSHOTS },
   "/api/iei-hyg": { GET: SCAN_SNAPSHOTS },
+  "/api/imbalance": { GET: SCAN_SNAPSHOTS },
   "/api/internals": {
     GET: {
       mode: "demo-db",

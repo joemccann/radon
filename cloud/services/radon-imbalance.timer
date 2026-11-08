@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon imbalance - daily 18:25 Eastern
+
+[Timer]
+# Conservative after-close collection, not a TradingView finality guarantee.
+# Offset 10 minutes after record-high-breadth to avoid concurrent TV OAuth.
+# Calendar-day runs reconcile revisions and heartbeat unchanged weekends.
+OnCalendar=*-*-* 18:25:00 America/New_York
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
