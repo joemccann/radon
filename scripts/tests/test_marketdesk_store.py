@@ -52,7 +52,11 @@ def db(monkeypatch):
         calls.append((sql, tuple(args)))
         return [tuple(r) for r in conn.execute(sql, tuple(args)).fetchall()]
 
+    def execute_many(statements, timeout=4.0):
+        return [execute(sql, args, timeout) for sql, args in statements]
+
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     yield SimpleNamespace(execute=conn.execute, calls=calls)
     conn.close()
 

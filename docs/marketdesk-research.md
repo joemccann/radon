@@ -124,10 +124,14 @@ fetched with a cookie-less opener that never follows redirects.
 | `scripts/research/marketdesk_bootstrap.py` | Laptop only. `--from-cdp` reads the Firebase refresh token from a signed-in marketdesk.ai tab in Chrome; `--check` exchanges it, logs in and lists. Never run in a unit. |
 | `scripts/research/marketdesk_scrape.py` | JSON API client: latest listing, summary, chart images, folder chain, PDF blob, PNG re-encode. |
 | `scripts/research/marketdesk_copy.py` | System prompt (voice doc plus humanize rules), em-dash scrub, `copy_problems` validator, model ladder call. |
-| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, admission decision, bounded policy replay, re-queue, upload outbox) and `marketdesk_feedback_handled`. |
+| `scripts/research/marketdesk_store.py` | Turso ledger `marketdesk_articles` (claim, status, admission decision, bounded policy replay, re-queue, upload outbox) and `marketdesk_feedback_handled`. `claim` is one `/v2/pipeline` POST (PERF-045). |
 | `scripts/research/dropbox_writer.py` | Write-scoped Dropbox client: identity check, idempotent upload, mirrored library path. Reuses one HTTP/1.1 socket per origin (PERF-047). |
 | `scripts/research/publish.py` | `kind: "marketdesk"` provenance branch beside the unchanged `dropbox` branch. |
 | `scripts/db/migrations/0102_marketdesk_articles.sql` | Ledger table; deletes the retired `dropbox-research` health row. |
+
+## Claim pipeline (PERF-045)
+
+`research.marketdesk_store.claim` sends insert, interrupted-lease accounting, attempt retirement, status read, and the new lease in one `/v2/pipeline` POST. The lease `UPDATE` repeats `attempts < MAX_ATTEMPTS` so a spent row cannot be leased if an earlier step errors. The write path still calls the developer-host refuse gate (`hrana_execute_many` is a read helper and does not). Budget: `scripts/tests/test_marketdesk_claim_pipeline_budget.py`.
 
 ## Dropbox write HTTP keep-alive (PERF-047)
 

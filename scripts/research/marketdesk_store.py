@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 
-from api.db_http import hrana_execute
+from api.db_http import _refuse_developer_host, hrana_execute, hrana_execute_many
 
 MAX_ATTEMPTS = 5
 LEASE = "attempt_in_progress"
@@ -110,25 +110,45 @@ def claim(ref) -> bool:
     """Insert the article if new (never overwrites), count an interrupted previous attempt, then lease it.
 
     True when it should be processed now. A pending row whose attempts are spent becomes 'failed'.
+    One /v2/pipeline POST (PERF-045). The lease UPDATE repeats the Python
+    attempts cap in SQL so a later step cannot lease a spent row if an
+    earlier step errors. ``hrana_execute_many`` does not refuse developer
+    hosts; this write path keeps the same gate as ``hrana_execute``.
     """
     now = _now()
-    hrana_execute(
-        "INSERT INTO marketdesk_articles (article_id,title,article_url,published_at,first_seen_at,updated_at) "
-        "VALUES (?,?,?,?,?,?) ON CONFLICT(article_id) DO NOTHING",
-        (ref.article_id, str(ref.title or "")[:500], ref.url, _utc(ref.published_at).isoformat(), now, now))
-    hrana_execute(
-        "UPDATE marketdesk_articles SET attempts=attempts+1, last_error=?, updated_at=? "
-        "WHERE article_id=? AND status='pending' AND last_error=?",
-        (INTERRUPTED, now, ref.article_id, LEASE))
-    hrana_execute(
-        "UPDATE marketdesk_articles SET status='failed', updated_at=? "
-        "WHERE article_id=? AND status='pending' AND attempts>=?",
-        (now, ref.article_id, MAX_ATTEMPTS))
-    rows = hrana_execute("SELECT status, attempts FROM marketdesk_articles WHERE article_id=?", (ref.article_id,))
+    _refuse_developer_host()
+    results = hrana_execute_many([
+        (
+            "INSERT INTO marketdesk_articles (article_id,title,article_url,published_at,first_seen_at,updated_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(article_id) DO NOTHING",
+            (ref.article_id, str(ref.title or "")[:500], ref.url, _utc(ref.published_at).isoformat(), now, now),
+        ),
+        (
+            "UPDATE marketdesk_articles SET attempts=attempts+1, last_error=?, updated_at=? "
+            "WHERE article_id=? AND status='pending' AND last_error=?",
+            (INTERRUPTED, now, ref.article_id, LEASE),
+        ),
+        (
+            "UPDATE marketdesk_articles SET status='failed', updated_at=? "
+            "WHERE article_id=? AND status='pending' AND attempts>=?",
+            (now, ref.article_id, MAX_ATTEMPTS),
+        ),
+        (
+            "SELECT status, attempts FROM marketdesk_articles WHERE article_id=?",
+            (ref.article_id,),
+        ),
+        (
+            "UPDATE marketdesk_articles SET last_error=?, updated_at=? "
+            "WHERE article_id=? AND status='pending' AND attempts<?",
+            (LEASE, now, ref.article_id, MAX_ATTEMPTS),
+        ),
+    ])
+    for result in results:
+        if isinstance(result, Exception):
+            raise result
+    rows = results[3]
     if not rows or rows[0][0] != "pending" or int(rows[0][1]) >= MAX_ATTEMPTS:
         return False
-    hrana_execute("UPDATE marketdesk_articles SET last_error=?, updated_at=? WHERE article_id=? AND status='pending'",
-                  (LEASE, now, ref.article_id))
     return True
 
 
