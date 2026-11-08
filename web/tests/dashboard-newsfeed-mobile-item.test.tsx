@@ -232,9 +232,9 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
       ".tsCompact",
       ".tagMore.tagMore",
       ".postActions",
-      ".postActions :global([data-newsfeed-share]),\n.postActions :global([data-research-feedback]),\n.postActions :global([data-research-feedback]) > div:first-child",
-      ".postActions :global([data-newsfeed-share]) > button",
-      ".postActions :global([data-newsfeed-share]) > section,\n.postActions :global([data-research-feedback]) > section,\n.postActions :global([data-research-feedback]) :global([role=\"status\"])",
+      ".postActions :global([data-newsfeed-share]),\n.postActions :global([data-newsfeed-pdf]),\n.postActions :global([data-research-feedback]),\n.postActions :global([data-research-feedback]) > div:first-child",
+      ".postActions :global([data-newsfeed-share]) > button,\n.postActions :global([data-newsfeed-pdf]) > button",
+      ".postActions :global([data-newsfeed-share]) > section,\n.postActions :global([data-newsfeed-pdf]) > :not(button),\n.postActions :global([data-research-feedback]) > section,\n.postActions :global([data-research-feedback]) :global([role=\"status\"])",
     ]);
   });
 
