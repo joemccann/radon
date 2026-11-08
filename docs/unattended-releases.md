@@ -85,6 +85,20 @@ Public CI and the ordinary release sequence still
 apply. P0 findings remain under explicit incident coordination. Source contents
 and raw findings never belong in public controller status or notifications.
 
+## Branch auto-update
+
+Strict protection puts every other open PR behind main after each merge. The
+controller updates only the branches it releases, so
+`com.radon.pr-branch-autoupdate` on the Mac mini runs
+`scripts/pr_branch_autoupdate.py` every five minutes and updates every open,
+non-draft PR on this repository that is behind main, whatever its prefix or
+author. It uses GitHub's update-branch API bound to the head it read, under the
+operator's gh login, so CI runs on the new head. Drafts, fork PRs, dependabot
+and PRs not based on main are skipped. A conflict is logged as `update-failed`
+and left for the branch owner. Install or refresh it with
+`bash scripts/setup_pr_branch_autoupdate.sh`; the log is
+`~/radon-weekend/logs/pr-branch-autoupdate.log`.
+
 ## Private validation feedback
 
 The controller checkpoints bounded diagnostic feedback before sending it to an
