@@ -180,6 +180,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-hyad.timer",
     "radon-iei-hyg.service",
     "radon-iei-hyg.timer",
+    "radon-imbalance.service",
+    "radon-imbalance.timer",
     "radon-incident-watchdog.service",
     "radon-incident-watchdog.timer",
     "radon-ivrank.service",
