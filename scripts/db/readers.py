@@ -551,3 +551,71 @@ def read_twr_subperiods(
             }
         )
     return result
+
+
+# ── Quant sleeve (docs/quant-strategies.md) ─────────────────────────────────
+
+
+def read_latest_quant_targets(strategy: str, db: Optional[Any] = None) -> Optional[dict[str, Any]]:
+    """The newest ``quant_targets`` session for a strategy, or None.
+
+    Returns ``{"as_of", "recorded_at", "rebalance_today", "rows": [{symbol,
+    weight, notional, close}]}``. One bounded read: the universe is at most a
+    dozen symbols.
+    """
+    target = _db(db)
+    rows = target.execute(
+        "SELECT symbol, weight, notional, close, rebalance_today, recorded_at FROM quant_targets "
+        "WHERE strategy = ? AND as_of = (SELECT MAX(as_of) FROM quant_targets WHERE strategy = ?) "
+        "ORDER BY symbol",
+        (strategy, strategy),
+    ).fetchall()
+    if not rows:
+        return None
+    as_of_row = target.execute(
+        "SELECT MAX(as_of) FROM quant_targets WHERE strategy = ?", (strategy,)
+    ).fetchone()
+    return {
+        "as_of": _cell(as_of_row, 0),
+        "recorded_at": _cell(rows[0], 5, "recorded_at"),
+        "rebalance_today": bool(_cell(rows[0], 4, "rebalance_today")),
+        "rows": [
+            {
+                "symbol": _cell(row, 0, "symbol"),
+                "weight": float(_cell(row, 1, "weight")),
+                "notional": _cell(row, 2, "notional"),
+                "close": _cell(row, 3, "close"),
+            }
+            for row in rows
+        ],
+    }
+
+
+def read_quant_orders(strategy: str, as_of: str, db: Optional[Any] = None) -> list[dict[str, Any]]:
+    """Every order row the bridge logged for a strategy's targets session."""
+    rows = _db(db).execute(
+        "SELECT symbol, action, quantity, limit_price, status, order_id, perm_id, message, placed_at "
+        "FROM quant_orders WHERE strategy = ? AND as_of = ? ORDER BY placed_at, symbol",
+        (strategy, as_of),
+    ).fetchall()
+    keys = ("symbol", "action", "quantity", "limit_price", "status", "order_id", "perm_id", "message", "placed_at")
+    return [{k: _cell(row, i, k) for i, k in enumerate(keys)} for row in rows]
+
+
+def read_quant_sleeve_fills(strategy: str, db: Optional[Any] = None) -> list[dict[str, Any]]:
+    """Journal fills tagged with the sleeve's order ref (``quant:<strategy>``).
+
+    The filter runs in SQL so one bounded result crosses Hrana, never the
+    whole journal.
+    """
+    rows = _db(db).execute(
+        "SELECT payload FROM journal WHERE json_extract(payload, '$.order_ref') LIKE ? "
+        f"ORDER BY {JOURNAL_EFFECTIVE_ORDER_SQL}",
+        (f"quant:{strategy}%",),
+    ).fetchall()
+    fills: list[dict[str, Any]] = []
+    for row in rows:
+        payload = _json_payload(_cell(row, 0, "payload"))
+        if payload is not None:
+            fills.append(payload)
+    return fills

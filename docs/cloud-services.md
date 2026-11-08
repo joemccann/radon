@@ -835,6 +835,20 @@ Writes `data/bounce_setup.json` plus the `scan_snapshots` row for service
 the deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`bounce-setup.md`](bounce-setup.md).
 
+### QUANT SLEEVE (`radon-quant-targets.timer`, `radon-quant-execute.timer`)
+
+`radon-quant-targets.timer` runs `scripts/quant_run.py --scheduled` Mon..Fri
+16:25 America/New_York: for every key in `RADON_QUANT_STRATEGIES` it reads
+Turso closes (IB backfill when thin or stale), persists `quant_targets` with
+`notional = weight x RADON_QUANT_SLEEVE_PCT x net liquidation`, and heartbeats
+`quant-targets` (74h window). `radon-quant-execute.timer` runs
+`scripts/quant_execute.py --scheduled` Mon..Fri 09:35 America/New_York: it
+trades only a `rebalance_today` session, once, through `ib_place_order.py`
+with `orderRef quant:<strategy>`, and only when `RADON_QUANT_EXECUTE=1`;
+otherwise it logs the plan. Heartbeat `quant-execute` (74h, IB-dependent).
+Spec and env contract: `docs/quant-strategies.md` §8. Installed by
+`install-units` from the manifest like every other unit pair.
+
 ### HY AD (`radon-hyad.timer`)
 
 `Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
