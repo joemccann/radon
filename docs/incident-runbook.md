@@ -4285,6 +4285,14 @@ fix is human-gated. The analysis session's tool surface is an allowlist
 (`--tools Read Grep Glob --strict-mcp-config`): no MCP server or other
 built-in tool is loaded, and the deny rules remain a second layer.
 
+The dedup state lives inside that mirror, so its name and every name derived
+from it arrive from the remote host on each sync. `load_state` opens
+`O_NOFOLLOW` and `save_state` creates its temp file with `tempfile.mkstemp`
+(`O_CREAT|O_EXCL`, unguessable name) before renaming it over the state, so a
+responder write stays inside the mirror even when the remote planted a link
+at that name. Regression:
+`test_incident_responder.py::TestState::test_state_write_never_follows_a_planted_symlink`.
+
 Do not post via `osascript -e 'display notification'`. That banner is owned
 by Script Editor, so a click opens an empty Untitled document. Delivery
 order in `scripts/incident_notify.py`: `terminal-notifier -open file://card`

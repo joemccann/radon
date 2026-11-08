@@ -316,14 +316,53 @@ if [[ "$requested_action" == "unit" ]]; then
   exit 0
 fi
 
+# Root unlinks the retired embedded-replica artifacts inside a directory the
+# radon account owns end to end. `rm` keeps its hands off a final-component
+# symlink but still resolves every parent, so the directory is pinned with
+# O_NOFOLLOW on each component and the fixed basenames are unlinked relative
+# to that descriptor. Any symlinked component refuses the repair (74).
+unlink_replica_files() {
+  local data_dir="$1"
+  "${OPERATOR_PYTHON:-/usr/bin/python3.13}" -I - "$data_dir" \
+    replica.db replica.db-wal replica.db-shm replica.db-info <<'PY_UNLINK_REPLICA'
+import os
+import sys
+
+directory, *names = sys.argv[1:]
+if not directory.startswith("/"):
+    print("REFUSING replica repair: data directory must be absolute", file=sys.stderr)
+    raise SystemExit(2)
+fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for part in [component for component in directory.split("/") if component]:
+        child = os.open(
+            part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        os.close(fd)
+        fd = child
+    for name in names:
+        try:
+            os.unlink(name, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+except OSError as exc:
+    print(f"REFUSING replica repair: {exc.strerror}", file=sys.stderr)
+    raise SystemExit(74)
+finally:
+    os.close(fd)
+PY_UNLINK_REPLICA
+}
+
 if [[ "$requested_action" == "repair-nextjs-replica" ]]; then
   run_systemctl_bounded stop radon-nextjs.service
-  rm -f -- \
-    /home/radon/radon/data/replica.db \
-    /home/radon/radon/data/replica.db-wal \
-    /home/radon/radon/data/replica.db-shm \
-    /home/radon/radon/data/replica.db-info
+  unlink_rc=0
+  unlink_replica_files "/home/radon/radon/data" || unlink_rc=$?
+  # A refused unlink must not leave the site down: bring Next.js back either
+  # way and report the refusal through the exit code.
   run_systemctl_bounded start radon-nextjs.service
+  if (( unlink_rc != 0 )); then
+    echo "REFUSING replica repair: data directory is not trustworthy" >&2
+    exit "$unlink_rc"
+  fi
   echo "repaired Next.js replica under deploy/control lock"
   exit 0
 fi
