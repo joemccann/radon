@@ -3370,3 +3370,71 @@ class TestDocumentation20261106:
         engine = (_ROOT / "scripts/model_gateway/engine.py").read_text()
         assert "def _note_provider_cooldown" in engine
         assert "is_quota_exhausted" in engine
+
+
+class TestDocumentation20261107:
+    """DOC-257: replace places only on cancelOutcome=cancelled, never on absence."""
+
+    def test_replace_owner_does_not_treat_absence_as_cancel(self):
+        web = (_ROOT / "web/CLAUDE.md").read_text()
+        web_cancel = web.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+        assert "Disappearance after cancel = success" not in web_cancel
+        assert "records a 202 or an already-`Cancelled` status as a successful cancel" not in web_cancel
+        assert "classify_cancel" in web_cancel
+        assert "cancelOutcome" in web_cancel
+        assert "CANCEL_NOT_CONFIRMED" in web_cancel
+
+        scripts = (_ROOT / "scripts/CLAUDE.md").read_text()
+        scripts_cancel = scripts.split("## Cancel / Modify", 1)[1].split("\n## ", 1)[0]
+        assert "cancelOutcome" in scripts_cancel
+        assert "CANCEL_NOT_CONFIRMED" in scripts_cancel
+
+        incident = (_ROOT / "docs/incident-runbook.md").read_text()
+        case = incident.split("## combo-replace-ib-202-cancel", 1)[1].split("\n## ", 1)[0]
+        assert "records 202 / already-Cancelled as cancelled and continues" not in case
+        assert "must still call place" not in case
+        assert "cancelOutcome" in case
+        assert "CANCEL_NOT_CONFIRMED" in case
+
+        manage = (_ROOT / "scripts/ib_order_manage.py").read_text()
+        classify = manage.split("def classify_cancel", 1)[1].split("\ndef ", 1)[0]
+        assert "vanished or acknowledged order is named only" in classify
+        assert "from its executions" in classify
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        replace = server.split("async def _orders_replace_after_rate_reservation", 1)[1]
+        replace = replace.split("\n@app.post", 1)[0]
+        assert 'CancelOutcome.CANCELLED.value' in replace
+        assert '"CANCEL_NOT_CONFIRMED"' in replace
+
+    def test_kelly_and_execution_owners_do_not_name_retired_json(self):
+        kelly = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        assert "data/portfolio.json" not in kelly
+        assert "portfolio_snapshots" in kelly
+        guard = (_ROOT / "scripts/kelly_guard.py").read_text()
+        assert "_load_latest_snapshot" in guard
+        evaluate = (_ROOT / "scripts/evaluate.py").read_text()
+        losses = evaluate.split("def _open_max_losses_from_portfolio", 1)[1]
+        losses = losses.split("\ndef ", 1)[0]
+        assert "latest Turso snapshot" in losses
+        assert "_load_latest_snapshot" in losses
+
+        for rel in (
+            "docs/prompt.md",
+            "docs/plans.md",
+            "docs/strategies.md",
+            "docs/implement.md",
+        ):
+            text = (_ROOT / rel).read_text()
+            assert "logged to trade_log.json" not in text
+            assert "Append to `data/trade_log.json`" not in text
+            assert "Log all decisions in `data/trade_log.json`" not in text
+            assert "Log executed trades to trade_log.json" not in text
+            assert "Update trade_log.json with close data" not in text
+        implement = (_ROOT / "docs/implement.md").read_text()
+        assert "Turso `journal` table" in implement
+        prompt = (_ROOT / "docs/prompt.md").read_text()
+        assert "Turso `journal`" in prompt
+        plans = (_ROOT / "docs/plans.md").read_text()
+        assert "Turso `journal`" in plans
+        strategies = (_ROOT / "docs/strategies.md").read_text()
+        assert "Turso `journal`" in strategies
