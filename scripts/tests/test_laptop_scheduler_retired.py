@@ -48,6 +48,7 @@ SURVIVING_LAUNCHD_AGENTS = {
     "com.radon.grok-fix-pickup",
     "com.radon.grok-page-responder",
     "com.radon.incident-responder",
+    "com.radon.pr-branch-autoupdate",
 }
 
 PRODUCTION_EXEC_START_WRAPPERS = (
