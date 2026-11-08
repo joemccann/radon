@@ -222,9 +222,9 @@ class TestStorage:
         db.executescript((MIGRATION.parent / "0110_quant_execution.sql").read_text())
         return db
 
-    def test_migration_registers_version_108_and_tables(self):
+    def test_migration_registers_version_109_and_tables(self):
         db = self._db()
-        assert {r[0] for r in db.execute("SELECT version FROM schema_migrations")} == {108, 109}
+        assert {r[0] for r in db.execute("SELECT version FROM schema_migrations")} == {109, 110}
         runs = {r[1] for r in db.execute("PRAGMA table_info(quant_runs)")}
         assert {
             "strategy",

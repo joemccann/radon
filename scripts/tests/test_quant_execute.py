@@ -285,10 +285,10 @@ class TestStorage:
         db.executescript((MIGRATIONS / "0110_quant_execution.sql").read_text())
         return db
 
-    def test_migration_109_adds_columns_table_and_version(self):
+    def test_migration_110_adds_columns_table_and_version(self):
         db = self._db()
         versions = {r[0] for r in db.execute("SELECT version FROM schema_migrations")}
-        assert versions == {108, 109}
+        assert versions == {109, 110}
         targets = {r[1] for r in db.execute("PRAGMA table_info(quant_targets)")}
         assert {"close", "rebalance_today"} <= targets
         orders = {r[1] for r in db.execute("PRAGMA table_info(quant_orders)")}

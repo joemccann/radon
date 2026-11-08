@@ -28,4 +28,4 @@ CREATE TABLE IF NOT EXISTS quant_orders (
 
 CREATE INDEX IF NOT EXISTS idx_quant_orders_latest ON quant_orders(strategy, as_of DESC, placed_at DESC);
 
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (109, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (110, datetime('now'));
