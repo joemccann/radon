@@ -51,6 +51,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Historical social-voice provenance and share retirement | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
+| Systematic sleeve (outside the Four Gates; IB stock orders only when armed) | [`docs/quant-strategies.md`](quant-strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md) |
 | GARCH convergence | [`docs/strategy-garch-convergence.md`](strategy-garch-convergence.md) |
 | Options structures | [`docs/options-structures.md`](options-structures.md) |

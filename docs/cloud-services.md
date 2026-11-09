@@ -164,7 +164,11 @@ reviewed hook in `cloud/post_deploy/hooks/`, pinned by SHA-256 in
 `cloud/post_deploy/manifest.json`. After the live gate passes, `deploy.sh`
 runs each pending hook once, in numeric order, as `radon`, and records
 completion in `/home/radon/.radon-post-deploy-state.json`. A failed hook pages
-P1 and is retried on the next deploy. The manifest's `verify` checks (unit
+P1 and is retried on the next deploy. A hook whose runner died mid-run
+(`running`) is retried only when its manifest entry declares `"idempotent":
+true`; otherwise it is marked `interrupted`, pages P1, and later hooks wait
+until a reviewed manifest change declares it idempotent or retires it. The
+manifest's `verify` checks (unit
 active, journal pattern present or absent, localhost HTTP) run read-only after
 every deploy and page on failure. Neither can roll back a verified release.
 Root-only work (editing `/etc/radon/env`, secrets, 2FA) stays an operator step.
@@ -246,7 +250,7 @@ the production copies under `~/retired-json/`.
 | Cold-start a new laptop | Clone the repo, `bun install`, set the attach env in `web/.env` (`ALLOWED_USER_IDS` and the Clerk keys), then `scripts/cloud.sh`. Do not run `bun run db:migrate` against the shared database from the laptop. `radon-api` applies `scripts/db/migrate.py` on the VPS before start. No replica file to seed. |
 | Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
-| Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
+| Turso outage | Next.js snapshot routes serve the last good in-memory read (`source: "memory"`); they never fall through to retired JSON. Memory starts empty on restart. Kelly and evaluate treat a Turso miss as unknown bankroll, not a file. |
 | Hetzner outage | No laptop fallback: the laptop cannot hold an IB socket (broker 4001 binds `10.0.0.4`/loopback, ACL-denied). Recover the hosts per [cloud/README.md](../cloud/README.md) and [Gateway recovery](ib-gateway-recovery.md). |
 
 ## Health & observability
