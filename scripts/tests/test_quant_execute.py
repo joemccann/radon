@@ -32,13 +32,18 @@ def _deps(*, targets=None, fills=(), prior=(), net_liq=None, placer=None, persis
         calls["placed"].append(params)
         return placer(params) if placer else {"status": "ok", "orderId": 7, "permId": 99}
 
+    def _persist(key, result):
+        snapshot = dict(result)
+        snapshot["orders"] = [dict(o) for o in result.get("orders") or []]
+        calls["persisted"].append((key, snapshot))
+
     deps = qe.Deps(
         load_targets=lambda key: targets,
         load_fills=lambda key: list(fills),
         prior_orders=lambda key, as_of: list(prior),
         net_liq=lambda: net_liq,
         placer=_placer,
-        persist=persist or (lambda key, result: calls["persisted"].append((key, result))),
+        persist=persist or _persist,
         heartbeat=heartbeat or (lambda state, **kw: calls["health"].append(("quant-execute", state, kw))),
     )
     return deps, calls
@@ -233,6 +238,72 @@ class TestWire:
         assert long_only["allow_short"] is False
 
 
+class TestDurability:
+    """R-748 / REL-337: a timer retry must not double-trade.
+
+    The 09:35 oneshot persists after ``place_order``. Turso down or a
+    SIGKILL after the broker ack leaves ``quant_orders`` empty, so the
+    Persistent=true retry admits the same session and places again.
+    """
+
+    ROWS = [_row("SPY", 1.0, 10_000.0, 100.0)]
+
+    def test_persist_failure_does_not_reach_the_broker(self):
+        def persist(key, result):
+            raise RuntimeError("turso down")
+
+        deps, calls = _deps(targets=_targets(self.ROWS), persist=persist)
+        with pytest.raises(RuntimeError, match="turso down"):
+            qe.run_strategy(
+                "inverse_vol",
+                deps=deps,
+                execute=True,
+                persist=True,
+                today=TODAY,
+                env={"RADON_QUANT_EXECUTE": "1"},
+            )
+        assert calls["placed"] == []
+
+    def test_scheduled_persist_failure_does_not_place_and_retry_is_still_blocked(self):
+        def persist(key, result):
+            raise RuntimeError("turso down")
+
+        deps, calls = _deps(targets=_targets(self.ROWS), persist=persist)
+        env = {"RADON_QUANT_STRATEGIES": "inverse_vol", "RADON_QUANT_EXECUTE": "1"}
+        assert qe.main(["--scheduled"], deps=deps, env=env) == 1
+        assert calls["placed"] == []
+        service, state, kw = calls["health"][0]
+        assert (service, state) == ("quant-execute", "error") and "turso down" in kw["error"]["message"]
+
+        deps2, calls2 = _deps(targets=_targets(self.ROWS), persist=persist)
+        assert qe.main(["--scheduled"], deps=deps2, env=env) == 1
+        assert calls2["placed"] == []
+
+    def test_claim_is_persisted_before_the_first_broker_call(self):
+        order: list = []
+
+        def persist(key, result):
+            order.append(("persist", [o["status"] for o in result["orders"]]))
+
+        def placer(params):
+            order.append(("place", params["symbol"]))
+            return {"status": "ok", "orderId": 1, "permId": 2}
+
+        deps, _calls = _deps(targets=_targets(self.ROWS), persist=persist, placer=placer)
+        result = qe.run_strategy(
+            "inverse_vol",
+            deps=deps,
+            execute=True,
+            persist=True,
+            today=TODAY,
+            env={"RADON_QUANT_EXECUTE": "1"},
+        )
+        assert order[0] == ("persist", ["planned"])
+        assert order[1] == ("place", "SPY")
+        assert order[2] == ("persist", ["ok"])
+        assert result["orders"][0]["status"] == "ok"
+
+
 class TestCli:
     def test_scheduled_runs_enabled_strategies_and_heartbeats(self, capsys):
         deps, calls = _deps(targets=_targets([_row("SPY", 1.0, 10_000.0, 100.0)]))
@@ -243,9 +314,12 @@ class TestCli:
         )
         assert rc == 0
         assert [p["symbol"] for p in calls["placed"]] == ["SPY", "SPY"]
-        assert [(k, r["mode"]) for k, r in calls["persisted"]] == [
-            ("inverse_vol", "execute"),
-            ("dual_momentum", "execute"),
+        persisted = [(k, r["mode"], [o["status"] for o in r["orders"]]) for k, r in calls["persisted"]]
+        assert persisted == [
+            ("inverse_vol", "execute", ["planned"]),
+            ("inverse_vol", "execute", ["ok"]),
+            ("dual_momentum", "execute", ["planned"]),
+            ("dual_momentum", "execute", ["ok"]),
         ]
         assert [h[:2] for h in calls["health"]] == [("quant-execute", "ok")]
 

@@ -162,7 +162,10 @@ Admission, per strategy, before any order:
    overrides for a manual run.
 2. `as_of` is at most 4 calendar days old. Stale targets never trade.
 3. No `quant_orders` rows exist for that `as_of`. A second run on the same
-   session is a no-op, so a timer retry cannot double-trade.
+   session is a no-op, so a timer retry cannot double-trade. An armed run
+   writes those rows (status `planned`) before the first `place_order`, so
+   Turso down or a SIGKILL after ack cannot leave live orders unrecorded
+   (R-748).
 
 Sizing: `target_shares = sign(notional) * floor(|notional| / close)`,
 `delta = target - held`; a `|delta| * close` under $50 is dust and skipped;
