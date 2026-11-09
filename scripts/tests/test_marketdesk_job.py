@@ -271,6 +271,9 @@ def db(monkeypatch, tmp_path):
     def execute(sql, args=(), timeout=4.0):
         return [tuple(r) for r in conn.execute(sql, tuple(args)).fetchall()]
 
+    def execute_many(statements, timeout=4.0):
+        return [execute(sql, args, timeout) for sql, args in statements]
+
     def transaction(statements, timeout=4.0):
         conn.execute("BEGIN")
         try:
@@ -282,10 +285,12 @@ def db(monkeypatch, tmp_path):
         conn.execute("COMMIT")
 
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(publish, "hrana_transaction", transaction)
     monkeypatch.setattr(publish, "hrana_execute", execute)
     from api import db_http
     monkeypatch.setattr(db_http, "hrana_execute", execute)  # research.learn.sync resolves it at call time
+    monkeypatch.setattr(db_http, "hrana_execute_many", execute_many)
     yield conn
     conn.close()
 
