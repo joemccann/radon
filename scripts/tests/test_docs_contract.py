@@ -3438,3 +3438,61 @@ class TestDocumentation20261107:
         assert "Turso `journal`" in plans
         strategies = (_ROOT / "docs/strategies.md").read_text()
         assert "Turso `journal`" in strategies
+
+
+class TestDocumentation20261109:
+    """Quant sleeve operator contract after 492f78ebe / ae775daea / 0f70e4bf2."""
+
+    _QUANT_ENV = (
+        "RADON_QUANT_STRATEGIES",
+        "RADON_QUANT_SLEEVE_PCT",
+        "RADON_QUANT_EXECUTE",
+        "RADON_QUANT_ALLOW_SHORT",
+        "RADON_QUANT_LIMIT_OFFSET_BPS",
+    )
+
+    def test_ops_table_and_cloud_runbook_name_the_quant_timers(self):
+        operations = (_ROOT / "docs/operations.md").read_text()
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        for name in ("radon-quant-targets.timer", "radon-quant-execute.timer"):
+            assert name in operations, name
+            assert name in cloud, name
+        assert "RADON_QUANT_EXECUTE" in operations
+        assert "quant-strategies.md" in operations
+
+    def test_env_examples_name_the_quant_sleeve_flags(self):
+        root_example = (_ROOT / ".env.example").read_text()
+        cloud_example = (_ROOT / "cloud/.env.example").read_text()
+        required = (_ROOT / "cloud/config/required-env.txt").read_text()
+        for name in self._QUANT_ENV:
+            assert name in root_example, name
+            assert name in cloud_example, name
+            assert name not in required, name
+
+    def test_quant_owner_persist_has_no_per_strategy_heartbeat(self):
+        text = (_ROOT / "docs/quant-strategies.md").read_text()
+        cli = text.split("## 6. CLI", 1)[1].split("## 7. Storage", 1)[0]
+        assert "`quant-<strategy>` heartbeat" not in cli
+        assert "`error` heartbeat" not in cli
+        assert "does not write a heartbeat" in cli
+        assert "quant-targets" in cli
+        persist = (_ROOT / "scripts/quant_run.py").read_text()
+        persist_fn = persist.split("def _persist", 1)[1].split("\ndef ", 1)[0]
+        assert "No heartbeat" in persist_fn
+
+    def test_quant_owner_storage_names_execution_columns_and_orders(self):
+        text = (_ROOT / "docs/quant-strategies.md").read_text()
+        storage = text.split("## 7. Storage", 1)[1].split("## 8. ", 1)[0]
+        assert "quant_orders" in storage
+        assert "rebalance_today" in storage
+        assert "close" in storage
+        assert "0110" in storage
+        assert "Neither table carries orders" not in storage
+
+    def test_docs_index_lists_the_quant_sleeve_owner(self):
+        index = (_ROOT / "docs/README.md").read_text()
+        assert "quant-strategies.md" in index
+        claude = (_ROOT / "CLAUDE.md").read_text()
+        pin = [ln for ln in claude.splitlines() if "docs/quant-strategies.md" in ln]
+        assert pin, "CLAUDE.md must keep the quant-strategies pointer"
+        assert "execution" in pin[0]
