@@ -553,11 +553,12 @@ release.
 Hooks:
 
 - File `hooks/NNNN-lower-kebab.sh` (bash) or `.py` (release venv python),
-  manifest entry `{"id", "sha256", "description", "timeout_seconds"?}`
-  (default 120s, max 300s; all hooks share a 300s budget per deploy). Pin
-  with `shasum -a 256`. `python3 cloud/scripts/post_deploy.py check --root
-  cloud/post_deploy` validates the tree; `cloud/tests/test_post_deploy_hooks.py`
-  runs it on the repo copy.
+  manifest entry `{"id", "sha256", "description", "timeout_seconds"?, "idempotent"?}`
+  (default 120s, max 300s; all hooks share a 300s budget per deploy).
+  `"idempotent"` is a boolean; omit or `false` means a mid-run crash will
+  not retry. Pin with `shasum -a 256`. `python3 cloud/scripts/post_deploy.py
+  check --root cloud/post_deploy` validates the tree;
+  `cloud/tests/test_post_deploy_hooks.py` runs it on the repo copy.
 - Runs pending hooks in numeric order, as `radon` (the runner refuses root
   and any user other than `--expect-user`), cwd `/home/radon/radon`, with a
   minimal env: `RADON_DIR`, `RADON_DEPLOY_SHA`, `RADON_ENV_FILE`,
@@ -567,13 +568,17 @@ Hooks:
   `sudo -n /usr/local/bin/radon unit restart radon-model-gateway.service`.
 - State is `/home/radon/.radon-post-deploy-state.json` (`0600`, fsynced
   temp+rename, `.lock` flock). A hook is marked `running` before it starts
-  and `done` after exit 0, so it runs once on success and at least once
-  across a crash: every hook must be idempotent. Failure, timeout (process
-  group killed) or an interrupted `running` record leaves it pending, stops
+  and `done` after exit 0. A `done` hook never reruns; editing one pages
+  "changed after it completed". Add a new number instead. Delete retired
+  hooks and their manifest entries freely; state keeps the record.
+- Failure or timeout (process group killed) leaves the hook pending, stops
   the hooks after it, pages P1, and retries on the next deploy or CI rerun.
-  A `done` hook never reruns; editing one pages "changed after it
-  completed". Add a new number instead. Delete retired hooks and their
-  manifest entries freely; state keeps the record.
+- A runner that dies mid-hook leaves `running`. The next run holds the
+  lock, so that record belongs to a dead process. If the manifest declares
+  `"idempotent": true`, it reruns. Otherwise it marks the hook
+  `interrupted`, pages P1, and later hooks wait on every deploy until a
+  reviewed manifest change sets `"idempotent": true` or retires the hook.
+  Check the hook's effect on the host before declaring it idempotent.
 - Refused before anything runs, and paged: a file in `hooks/` the manifest
   does not list, a SHA-256 mismatch, a symlink, a group/world-writable file
   or directory, a foreign owner (runner files are `radon`-owned `a-w`), a

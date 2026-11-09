@@ -3496,3 +3496,35 @@ class TestDocumentation20261109:
         pin = [ln for ln in claude.splitlines() if "docs/quant-strategies.md" in ln]
         assert pin, "CLAUDE.md must keep the quant-strategies pointer"
         assert "execution" in pin[0]
+class TestDocumentation20261108:
+    """DOC-259/260: interrupted post-deploy hooks retry only when declared
+    idempotent; Turso outage reads do not fall through to retired JSON."""
+
+    def test_post_deploy_owner_names_idempotent_interrupt_contract(self):
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        hooks = cloud.split("## Post-deploy hooks", 1)[1].split("\n## ", 1)[0]
+        assert "across a crash" not in hooks
+        assert "interrupted `running` record leaves it pending" not in hooks
+        assert '"idempotent"' in hooks
+        assert "interrupted" in hooks
+        assert "later hooks" in hooks
+        runner = (_ROOT / "cloud/scripts/post_deploy.py").read_text()
+        assert 'HOOK_KEYS = {"id", "sha256", "description", "timeout_seconds", "idempotent"}' in runner
+        assert 'is rerun only when its manifest entry declares `"idempotent": true`' in runner
+        services = (_ROOT / "docs/cloud-services.md").read_text()
+        summary = services.split("#### Post-deploy hooks and verification", 1)[1]
+        summary = summary.split("#### ", 1)[0]
+        assert "idempotent" in summary
+        assert "interrupted" in summary
+
+    def test_turso_outage_recovery_does_not_fall_through_to_retired_json(self):
+        services = (_ROOT / "docs/cloud-services.md").read_text()
+        recovery = services.split("## Bootstrap & disaster recovery", 1)[1]
+        recovery = recovery.split("\n## ", 1)[0]
+        assert "Read paths fall through to JSON files" not in recovery
+        assert "dual-write retains them" not in recovery
+        assert "last good" in recovery and "memory" in recovery
+        web = (_ROOT / "web/CLAUDE.md").read_text()
+        assert 'source: "memory"' in web
+        assert "never disk" in web
+        assert "nothing may read them" in (_ROOT / "CLAUDE.md").read_text()
