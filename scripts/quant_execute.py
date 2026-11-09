@@ -6,7 +6,9 @@ reach the broker, and it is off until the operator arms it:
 
 * ``RADON_QUANT_EXECUTE=1`` places orders; anything else logs the plan.
 * Trades only a ``rebalance_today`` targets session, at most 4 calendar days
-  old, and only once per session (a timer retry cannot double-trade).
+  old, and only once per session (a timer retry cannot double-trade). The
+  session is claimed in ``quant_orders`` before the first ``place_order``
+  so a persist failure cannot leave live orders unrecorded (R-748).
 * Holdings are the signed sum of journal fills tagged ``quant:<strategy>``,
   so the sleeve counts only what it opened. The discretionary book is
   invisible to it and untouchable by it.
@@ -429,6 +431,13 @@ def run_strategy(
     if any(r.get("notional") is None for r in rows):
         sleeve_nav = sleeve_nav_from_snapshot(sleeve_pct(env), deps.net_liq())
     plan = plan_orders(rows, holdings, allow_short=allow_short, offset_bps=limit_offset_bps(env), sleeve_nav=sleeve_nav)
+    # R-748 / REL-337: claim the session before any broker call. Persist used
+    # to run after execute_plan, so Turso down or a SIGKILL after ack left
+    # quant_orders empty and the Persistent=true 09:35 retry double-traded.
+    claimed = execute_plan(plan, strategy_key=strategy_key, as_of=as_of, execute=False, placer=deps.placer)
+    result.update({"holdings": holdings, "sleeve_nav": sleeve_nav, "plan": plan, "orders": claimed})
+    if persist and execute and claimed:
+        deps.persist(strategy_key, result)
     orders = execute_plan(plan, strategy_key=strategy_key, as_of=as_of, execute=execute, placer=deps.placer)
     result.update({"holdings": holdings, "sleeve_nav": sleeve_nav, "plan": plan, "orders": orders})
     if persist:
