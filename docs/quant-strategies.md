@@ -32,9 +32,9 @@ on its own data rather than trust a library's dashboard.
 | Engine | `scripts/quant/engine.py` | `RebalancePolicy`, `rebalance_mask`, `run_weights_backtest`, `latest_targets`, `apply_vol_target`. |
 | Registry | `scripts/quant/strategies.py` | `QuantStrategy` entries with provenance, universe, policy, warmup, params. |
 | Data | `scripts/quant/data.py` | `load_price_matrix`: Turso `price_history_daily` first, then IB (deep) > Robinhood > UW > Yahoo backfill, persisted back. |
-| CLI | `scripts/quant_run.py` | `--list`, `--mode backtest`, `--mode targets`, `--persist`. |
-| Storage | `scripts/db/migrations/0109_quant_strategies.sql`, `db/writer.py` | `quant_runs`, `quant_targets`; `upsert_quant_run`, `upsert_quant_targets`. |
-| Tests | `scripts/tests/test_quant_engine.py`, `test_quant_strategies.py`, `test_quant_run.py` | Pure synthetic series; the price loader is injected. |
+| CLI | `scripts/quant_run.py` | `--list`, `--mode backtest`, `--mode targets`, `--persist`, `--scheduled`. |
+| Storage | `scripts/db/migrations/0109_quant_strategies.sql`, `0110_quant_execution.sql`, `db/writer.py` | `quant_runs`, `quant_targets`, `quant_orders`; `upsert_quant_run`, `upsert_quant_targets`. |
+| Tests | `scripts/tests/test_quant_engine.py`, `test_quant_strategies.py`, `test_quant_run.py`, `test_quant_execute.py` | Pure synthetic series; the price loader is injected. |
 
 ## 3. Engine semantics
 
@@ -110,6 +110,7 @@ python3 scripts/quant_run.py --list
 python3 scripts/quant_run.py --strategy inverse_vol --mode backtest --json
 python3 scripts/quant_run.py --strategy trend_inverse_vol --mode backtest --since 2012-01-01 --cost-bps 8 --max-gross 1.0 --json
 python3 scripts/quant_run.py --strategy monthly_rotation --mode targets --sleeve-nav 250000 --json --persist
+python3 scripts/quant_run.py --scheduled
 ```
 
 Exit codes: 0 ok, 1 not enough history for the warmup, 2 bad arguments or
@@ -117,19 +118,22 @@ unknown strategy. stdout carries only the JSON (`--json`); the one-line
 summary and all progress go to stderr.
 
 `--persist` writes `data/quant/<strategy>_<mode>.json` (atomic, fallback
-only), then the Turso rows, then the `quant-<strategy>` heartbeat
-(kebab-case service name). A failed Turso write records an `error` heartbeat
-and re-raises; the disk copy is never treated as success.
+only), then the Turso rows. Manual persist does not write a heartbeat; the
+scheduled run writes the one `quant-targets` heartbeat. A failed Turso write
+re-raises; the disk copy is never treated as success.
 
 ## 7. Storage
 
 - `quant_runs (strategy, run_at, mode, since, until, n_sessions,
   n_rebalances, ann_return, ann_vol, sharpe, max_drawdown, payload)`, PK
-  `(strategy, run_at)`, latest by `run_at DESC`.
-- `quant_targets (strategy, as_of, symbol, weight, notional, recorded_at)`,
-  PK `(strategy, as_of, symbol)`.
-- Neither table carries orders. Verify the row lands in Turso in production
-  before calling a run done; the disk file is not evidence.
+  `(strategy, run_at)`, latest by `run_at DESC`. Migration `0109`.
+- `quant_targets (strategy, as_of, symbol, weight, notional, close,
+  rebalance_today, recorded_at)`, PK `(strategy, as_of, symbol)`.
+  `close` and `rebalance_today` come from migration `0110`.
+- `quant_orders` logs each bridge placement, including dry-run `planned`
+  rows. It never substitutes for the broker ledger. Migration `0110`.
+- Verify the row lands in Turso in production before calling a run done;
+  the disk file is not evidence.
 
 ## 8. Execution bridge (`scripts/quant_execute.py`)
 
@@ -205,7 +209,7 @@ windows, `quant-execute` is IB-dependent) and `web/lib/refreshSchedule.ts`.
 ## 10. Tests
 
 ```
-python3 -m pytest scripts/tests/test_quant_engine.py scripts/tests/test_quant_strategies.py scripts/tests/test_quant_run.py -q
+python3 -m pytest scripts/tests/test_quant_engine.py scripts/tests/test_quant_strategies.py scripts/tests/test_quant_run.py scripts/tests/test_quant_execute.py -q
 ```
 
 Engine: rebalance calendars incl. a month ending on a weekend, no look-ahead
