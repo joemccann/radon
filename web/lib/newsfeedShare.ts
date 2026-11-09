@@ -230,7 +230,7 @@ function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   return { bottom: y + shown.length * lineHeight, truncated };
 }
 
-function loadShareImage(source: string): Promise<HTMLImageElement> {
+export function loadShareImage(source: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.crossOrigin = "anonymous";

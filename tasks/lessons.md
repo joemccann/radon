@@ -1,3 +1,9 @@
+# 2026-11-04: oi-changes burst 429 must not fail the oneshot
+
+- `Type=oneshot` has no `Restart=`. A market-path UW 429 that heartbeats `error` and then `sys.exit(1)` pages the unit watchdog and does not retry before the next timer. The August contract that left "other 429s" exiting 1 was the page.
+- The rate-limit heartbeat is the only writer that stamps `last_attempt_finished_at`. A later success passes `finished_at=None`, so `updated_at` moves and `last_error` clears while `finished_at` stays on the failed fire. That stamp plus exit-code is the burst/admission class, not a generic exception.
+- Daily-cap family (HTTP daily limit, `quota is exhausted`, `budget is reserved`) still arms the sidecar until 20:00 ET. Burst and admission-busy must not, or the next timer skips the fetch.
+
 # 2026-11-03: Caddy floor after healthd returns mid-deploy
 
 - A fresh transition journal plus an unread `:8330` is only the first half of stop-clean. restart-managed brings radon-health back before the serving path is up, and the latest off-box row can still be `status_unreachable:caddy`. That readable down aggregate is the same restart. Suppress only that reason. A raw 5xx, a stranded journal, and the floor outside the journal still page.

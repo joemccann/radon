@@ -225,10 +225,16 @@ readonly SERVICE_FILES=(
   radon-rsi-oversold.timer
   radon-record-high-breadth.service
   radon-record-high-breadth.timer
+  radon-imbalance.service
+  radon-imbalance.timer
   radon-calm-streak.service
   radon-calm-streak.timer
   radon-bounce-setup.service
   radon-bounce-setup.timer
+  radon-quant-targets.service
+  radon-quant-targets.timer
+  radon-quant-execute.service
+  radon-quant-execute.timer
   radon-hyad.service
   radon-hyad.timer
   radon-hhlev.service

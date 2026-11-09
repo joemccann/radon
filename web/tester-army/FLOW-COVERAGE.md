@@ -2,7 +2,7 @@
 
 Coverage levels: SDK route checks verify visible measurement/empty state and redirects. SDK journeys verify named interactions and mocked wire payloads. Existing Playwright suites are retained and CI curation is unchanged; the financial smoke job is non-gating and historical held-out specs remain held out. References identify coverage code, not execution evidence.
 
-All current 72 App Router pages appear exactly once in the manifest test. Four guarded leaves require real Clerk/server authorization and are outside the deterministic authless browser fixture. Authentication/MFA, real brokerage execution/fills, entitlement behavior, third-party exports, every chart gesture and all combinatorial trades remain explicit limitations.
+All current 73 App Router pages appear exactly once in the manifest test. Four guarded leaves require real Clerk/server authorization and are outside the deterministic authless browser fixture. Authentication/MFA, real brokerage execution/fills, entitlement behavior, third-party exports, every chart gesture and all combinatorial trades remain explicit limitations.
 
 | Route | Added SDK coverage | Existing focused coverage / limitation |
 |---|---|---|
@@ -67,6 +67,7 @@ All current 72 App Router pages appear exactly once in the manifest test. Four g
 | `/regime/vix-pc` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/vixts` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/panic-index` | explicit empty measurement state | canonical Clear inventory asserts the same empty state; deterministic fixture has no panic reading |
+| `/regime/quant` | explicit empty measurement state | canonical Clear inventory asserts the same empty state; quant-tab.spec.ts (held out) covers the populated panel; deterministic fixture has no persisted run |
 | `/regime/vol-cone` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/internals` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/setup` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |

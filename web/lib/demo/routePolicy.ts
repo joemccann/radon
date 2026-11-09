@@ -225,6 +225,7 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/hhlev": { GET: SCAN_SNAPSHOTS },
   "/api/hyad": { GET: SCAN_SNAPSHOTS },
   "/api/iei-hyg": { GET: SCAN_SNAPSHOTS },
+  "/api/imbalance": { GET: SCAN_SNAPSHOTS },
   "/api/internals": {
     GET: {
       mode: "demo-db",
@@ -274,6 +275,12 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   // ── demo VM FastAPI ──────────────────────────────────────────────────────
   "/api/attribution": { GET: { mode: "backend", endpoints: ["/attribution"] } },
   "/api/backtest/[strategy]": { GET: { mode: "backend", endpoints: ["/backtest/"] } },
+  "/api/quant/[strategy]": {
+    GET: {
+      mode: "unavailable",
+      note: "The quant sleeve is operator-only: no mirror or seed produces quant_runs, quant_targets or quant_orders on demo, so the tab renders its empty state.",
+    },
+  },
   "/api/futures/chain": { GET: { mode: "backend", endpoints: ["/futures/chain"] } },
   "/api/garch-convergence/scan": { POST: { mode: "backend", endpoints: ["/garch-convergence/scan"] } },
   "/api/gex/share": { POST: { mode: "backend", endpoints: ["/gex/share"] } },

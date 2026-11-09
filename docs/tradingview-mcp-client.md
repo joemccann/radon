@@ -94,6 +94,17 @@ NYSE `INDEX:MAHN` and `INDEX:MALN` are a different universe and do not fill
 those panels. This client stays out of generic price failover. Missing history
 stays an error, not a zero.
 
+## ASK-BID imbalance dependency
+
+The shipped collector reads `USI:TRDS.ASK.US`, `USI:TRDS.BID.US`,
+parity `USI:BATD.US`, and `SP:SPX` through this client. Public USI titles
+are NUMBER OF TRADES AT ASK/BID. Published close is ASK minus BID trade
+counts; BATD is never substituted. Spec:
+[imbalance](indicators/imbalance.md). The timer and the production token
+file live in [operations](operations.md). Share-volume siblings
+`USI:VOL.ASK.US` / `USI:BAVD.US` are unused. Missing ASK or BID stays
+null, not zero.
+
 ## Primary reference
 
 [TradingView official MCP documentation](https://www.tradingview.com/mcp/docs).

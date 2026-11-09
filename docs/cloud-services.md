@@ -817,6 +817,10 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 
 Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
 
+### ASK-BID imbalance (`radon-imbalance.timer`)
+
+Post-close TradingView USI comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula, units (`trade_count`, verified), BATD parity, and unverified universe/session/tick-rule coverage are [the indicator spec](indicators/imbalance.md). This unit does not install account credentials. Missing ASK or BID is a gap, never a zero. Share-volume siblings `USI:VOL.ASK.US` / `USI:BAVD.US` are unused.
+
 ### BOUNCE SETUP (`radon-bounce-setup.timer`)
 
 `Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot
@@ -830,6 +834,20 @@ Writes `data/bounce_setup.json` plus the `scan_snapshots` row for service
 `bounce-setup` (74h window: Friday's run covers the weekend). Installed by
 the deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`bounce-setup.md`](bounce-setup.md).
+
+### QUANT SLEEVE (`radon-quant-targets.timer`, `radon-quant-execute.timer`)
+
+`radon-quant-targets.timer` runs `scripts/quant_run.py --scheduled` Mon..Fri
+16:25 America/New_York: for every key in `RADON_QUANT_STRATEGIES` it reads
+Turso closes (IB backfill when thin or stale), persists `quant_targets` with
+`notional = weight x RADON_QUANT_SLEEVE_PCT x net liquidation`, and heartbeats
+`quant-targets` (74h window). `radon-quant-execute.timer` runs
+`scripts/quant_execute.py --scheduled` Mon..Fri 09:35 America/New_York: it
+trades only a `rebalance_today` session, once, through `ib_place_order.py`
+with `orderRef quant:<strategy>`, and only when `RADON_QUANT_EXECUTE=1`;
+otherwise it logs the plan. Heartbeat `quant-execute` (74h, IB-dependent).
+Spec and env contract: `docs/quant-strategies.md` §8. Installed by
+`install-units` from the manifest like every other unit pair.
 
 ### HY AD (`radon-hyad.timer`)
 
