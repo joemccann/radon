@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -141,7 +142,7 @@ import SpectralLoader from "./SpectralLoader";
 import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
-import RegimePanel from "./RegimePanel";
+import InstrumentSkeleton from "@/components/ui/InstrumentSkeleton";
 import AiInfrastructurePanel from "./AiInfrastructurePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
@@ -168,6 +169,10 @@ import FlowScanSummary from "./flow-analysis/FlowScanSummary";
 import { AlertsPanel } from "./alerts/AlertsPanel";
 import ResearchWorkbench from "@/components/research/ResearchWorkbench";
 import { MarketState } from "@/lib/useMarketHours";
+
+const RegimePanel = dynamic(() => import("./RegimePanel"), {
+  loading: () => <InstrumentSkeleton testId="regime-panel-skeleton" />,
+});
 
 /* ─── Re-exports for backward compat ──────────────────── */
 
