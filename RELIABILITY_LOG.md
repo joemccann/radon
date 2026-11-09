@@ -1087,3 +1087,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-335 / R-746 | DONE | RED 1 failed, 4 passed in `test_earnings_cache_budget.py` (`days_until` stayed 40). GREEN 16 passed across `test_earnings_cache_budget.py` and `test_earnings_route.py`; focused `-n auto` rerun 24 passed including service registration. Catalog parity 13 passed. Permanent drills 120 passed, 1 warning. | A live earnings miss now recomputes `days_until` and `within_dte` from `report_date` for the request. A missing marker is unchanged. A batch whose every ticker missed cache still returns 502. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-11-09
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-337 / R-748 | DONE | RED 3 failed in `TestDurability` (persist-raises still called the placer; scheduled retry placed again; first event was `place` not `persist planned`). GREEN 3 passed there; 79 passed across `test_quant_execute.py` + `test_quant_run.py` + `test_quant_engine.py` + `test_quant_strategies.py`. Funnel/halt/limits/catalog 124 passed, 17 warnings. Permanent drills 131 passed, 1 warning. | An armed execute persists `quant_orders` with status `planned` before the first `place_order`, then writes the broker result. Persist failure never reaches the broker. A timer retry that sees those rows stays `already_executed`. No catch was widened and no retry was added. |
