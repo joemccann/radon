@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon MSR Indicator - daily Cboe SPX/VIX/VXN/RVX + NDX/RUT close pull
+
+[Timer]
+# Cboe's last row (RUT) lands ~21:31 ET = 02:31 UTC under EST; 03:00 UTC
+# clears both DST regimes, sits in the free slot between 02:50 and 03:10,
+# and runs well before IB's ~23:45 ET reset. Runs daily including weekends:
+# weekend/holiday runs are 304 heartbeats that keep service_health fresh.
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

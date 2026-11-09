@@ -91,7 +91,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // models: read-only chat model picker catalog. Reports WHICH provider keys
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
-  "models", "prices",
+  "models", "msr", "prices",
   // quant/[strategy]: read-only quant sleeve read (latest backtest, targets,
   // order log from Turso), same posture as margin-debt; it places nothing.
   "quant/[strategy]",

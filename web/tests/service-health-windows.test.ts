@@ -683,6 +683,21 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("straddle")).toBe(false);
   });
 
+  // ``msr`` — radon-msr.timer fires daily 03:00 UTC every calendar day
+  // (weekend runs are 304 heartbeats), so a uniform 26h window matches its
+  // straddle sibling. IB-first NDX/RUT closes fall back to Cboe/Yahoo.
+  it("msr is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["msr"]).toBeDefined();
+    expect(getServiceCategory("msr")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("msr", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("msr", state)).toBe(
+        getFreshnessWindowMs("straddle", state),
+      );
+    }
+    expect(requiresIb("msr")).toBe(false);
+  });
+
   // ``cor`` — radon-cor.timer fires daily 02:20 UTC every calendar day
   // (Cboe overwrites the COR CSVs after each session; weekend runs are 304
   // heartbeats), so a uniform 26h window matches its straddle / margin-debt
@@ -976,6 +991,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["ib-watchdog", false],
     ["dispersion", false],
     ["asia-export-lead", false],
+    ["msr", false],
   ])("%s requires_ib = %s", (service, expected) => {
     expect(SERVICE_FRESHNESS_WINDOWS[service]?.requires_ib).toBe(expected);
   });
