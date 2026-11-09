@@ -12,7 +12,7 @@ import type { DispersionData } from "./dispersion";
 
 export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
-  | "breadth" | "bpi" | "margin" | "straddle"
+  | "breadth" | "bpi" | "margin" | "straddle" | "msr"
   | "cor" | "vixcor" | "vixts" | "vix-pc" | "vix-model-spread" | "panic-index" | "dispersion" | "ivrank" | "iv-spread" | "skew" | "skew2d" | "curve"
   | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "credit-vix" | "trin" | "divyield" | "hyad" | "hhlev"
   | "ma-ratio"
@@ -28,7 +28,7 @@ export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
-  { label: "Volatility", tabs: ["vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "calm-streak"] },
+  { label: "Volatility", tabs: ["vixcor", "vixts", "vix-pc", "vix-model-spread", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "msr", "calm-streak"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "credit-vix", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "high-low", "record-high-breadth", "imbalance", "ma-ratio", "rsi-oversold", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["exports", "backtest", "quant"] },
@@ -52,6 +52,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   skew2d: "SKEW 2D",
   curve: "CURVE",
   straddle: "STRADDLE",
+  msr: "MSR",
   "calm-streak": "CALM STREAK",
   gex: "GEX",
   margin: "MARGIN",
