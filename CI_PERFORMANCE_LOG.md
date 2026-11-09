@@ -2738,3 +2738,59 @@ red (3 failed: missing `gateway-image` job) then green (4 passed).
 Related cloud image contracts 147 passed / 2 skipped; scripts image/gate
 tests 73 passed. YAML parses. Full suites, Vitest, Docker builds, and
 workflow lint are left to PR CI.
+
+## CIP-029 - skip the gateway docker-load tarball on main publish (2026-11-09) - VALIDATING
+
+Main gateway rebuilds still set `load: true` so the next step can
+`docker run --pull=never`. That export is the job tail after torch.
+CIP-028 (open #1465) moves torch before vendor-clis; it does not remove
+the tarball. Dockerfile.python already smokes chronos/torch as `USER
+radon` with `--network=none`.
+
+Evidence, attempt-1 mixed scripts-rebuild gateway steps (`gh run view
+--json jobs` plus job logs). Queue 2s is excluded from the gain:
+
+| Run | Clock | Gateway image | Load tarball | Torch pip |
+|---|---|---|---|---|
+| [42507490215](https://github.com/joemccann/radon/actions/runs/42507490215) | 725s | 320s (job 128813422372) | 137s (`#53`/`#55` 18:00:39Z–18:02:56Z) | 28s |
+| [42506516243](https://github.com/joemccann/radon/actions/runs/42506516243) | 668s | 262s | present | present |
+| [42421162278](https://github.com/joemccann/radon/actions/runs/42421162278) | 617s | 268s | 71.3s | 58s collect |
+
+Newest mixed scripts-rebuild p50 clock in the 2026-11-08 window is 611s
+(n=8 rebuilds; 10% is 61s). On 42507490215 the load tarball is 137s of
+the 320s gateway wall, after Exact app images authorized deploy. Skipping
+that export on main is expected to cut the gateway job by about 71–137s,
+which clears 15s and 10%. Pull requests still `load: true` (they cannot
+push). A pbounds miss pulls the exact SHA before the bounds checker.
+Ihash retags (42530306829, gateway 23s) are a different class. Runner
+minutes fall with the skipped export.
+
+**Change.** Gateway `load:` is true only when the run is not a main
+push. Main smoke prints that the image build already ran the forecast
+assertions and exits 0. PR smoke keeps `docker run --pull=never`. Bounds
+`docker image inspect`s the exact SHA and `docker pull`s only on a miss.
+Exact SHA tags, Darwin-before-publish, CIP-026 `pbounds-` skip, ihash
+receipts, and fail-closed reuse stay. No `needs` edge, test inventory,
+coverage, health check, stability window, rollback, or exact-SHA image
+admission change. Do not retry CIP-022/023/024 client-reuse.
+
+**Safety and revert trigger.** Revert if a main rebuild publishes a
+gateway SHA that fails `docker run --pull=never` of that tag, if a PR
+rebuild skips the local docker-run smoke, if bounds runs without a local
+image, or if deploy no longer waits for gateway.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 320s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 42507490215 (job
+128813422372). Acceptance remains five comparable mixed scripts-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip029_gateway_skip_load.py` was red
+(3 failed: unconditional `load: true`) then green (4 passed). Related
+cloud image/bounds tests 36 passed; scripts CIP-026 11 passed. YAML
+parses. Full suites, Vitest, Docker builds, and workflow lint are left
+to PR CI.

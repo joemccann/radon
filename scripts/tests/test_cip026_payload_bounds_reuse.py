@@ -86,7 +86,8 @@ def test_bounds_check_still_runs_unless_gateway_or_payload_reused() -> None:
         " && steps.reuse-bounds.outputs.hit != 'true'"
     )
     assert "scripts/ci/check_model_client_bounds.py" in check["run"]
-    assert '--image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"' in check["run"]
+    assert 'image="ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"' in check["run"]
+    assert '--image "$image"' in check["run"]
     assert "continue-on-error" not in check
     smoke = _step(SMOKE)
     assert smoke["if"] == "steps.reuse-gateway.outputs.hit != 'true'"
