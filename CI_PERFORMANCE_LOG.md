@@ -2739,6 +2739,65 @@ Related cloud image contracts 147 passed / 2 skipped; scripts image/gate
 tests 73 passed. YAML parses. Full suites, Vitest, Docker builds, and
 workflow lint are left to PR CI.
 
+## CIP-028 - install torch before vendor CLIs on the gateway image (2026-11-08) - VALIDATING
+
+CIP-027 split `gateway-image` onto its own runner. Scripts-only mixed
+rebuilds after that merge still ran `pip install` for torch even though
+runtime-deps was CACHED and CIP-025 already moved `COPY scripts` after
+the lock. `COPY --from=vendor-clis` and `COPY --from=vendor-clis-darwin`
+still sat above the lock, so a sibling runner that missed those CLI
+layers rebuilt torch too.
+
+Evidence, attempt-1 mixed scripts-rebuild gateway jobs (`gh run view
+--json jobs` plus job logs). Queue 2s is excluded from the gain. Ihash
+42393074525 (gateway 25s reuse) is a different class.
+
+| Run | Clock | Gateway job | Torch pip | load:true tarball | Deploy |
+|---|---|---|---|---|---|
+| [42421162278](https://github.com/joemccann/radon/actions/runs/42421162278) | 617s | 268s (job 128549861709) | Collecting torch at +58s | 71.3s | 222s |
+| [42406241392](https://github.com/joemccann/radon/actions/runs/42406241392) | 648s | 203s (job 128504683523) | pip install at +22s | 82.3s | 303s |
+
+Newest mixed scripts-rebuild p50 clock after CIP-027 is 617s (n=2; 10% is
+62s). On 42421162278 runtime-deps layers were CACHED at 22:34:34, then
+`install-antigravity` and `pip install ... torch==2.12.1+cpu` still ran.
+The files in that merge were `scripts/ci/check_model_cli_transport.py`
+and its test — not the torch lock. Moving the lock to immediately follow
+`FROM runtime-deps` is expected to drop the ~40s pip plus the Darwin
+extract that currently busts it, about 60–80s of the 268s gateway job
+once a later identical lock hits cache. The first after-run still
+measures (new layer digest). `load: true` tarball 71–82s stays; that is
+a separate candidate. Runner minutes fall with the skipped pip.
+
+**Change.** `model-gateway` copies `requirements-model-gateway.txt` and
+runs the hashed torch install before `COPY --from=vendor-clis`, Darwin
+clients, or `COPY scripts`. Exact SHA tags, smokes, CIP-026 `pbounds-`
+skip, Darwin-before-publish, `load: true`, health, recovery, rollback,
+and the 40-second stability window stay. No `needs` edge, test
+inventory, coverage, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Fail closed to build. Revert if a
+scripts-only main rebuild with an unchanged `requirements-model-gateway.txt`
+still runs `pip install ... torch==2.12.1+cpu`, if the gateway image
+ships without `/opt/radon-clis` or `/opt/radon-darwin`, or if python
+CMD/user smokes disappear.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 268s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 42421162278 (job
+128549861709). Acceptance remains five comparable mixed scripts-rebuild
+deploys whose torch lock is unchanged, before and after: same-class p50
+at least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no
+worse than 10%; runner minutes no more than 20% higher. The first
+after-run still measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip028_torch_before_vendor_clis.py`
+was red (1 failed: vendor-clis COPY before torch) then green (2 passed).
+Related cloud image contracts 135 passed / 2 skipped; scripts payload
+tests 39 passed. YAML parses. Full suites, Vitest, Docker builds, and
+workflow lint are left to PR CI.
+
 ## CIP-029 - skip the gateway docker-load tarball on main publish (2026-11-09) - VALIDATING
 
 Main gateway rebuilds still set `load: true` so the next step can

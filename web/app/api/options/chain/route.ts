@@ -16,7 +16,7 @@ export const radonCapability = "read";
 
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, {
-    rate: { key: "options/chain:route", limit: 20, windowMs: 60_000 },
+    rate: { key: "options/chain:route", limit: 120, windowMs: 60_000 },
     durableRateTier: "A",
   });
   if (!access.ok) return access.response;
