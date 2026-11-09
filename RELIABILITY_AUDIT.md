@@ -3334,3 +3334,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:710-759` and `:871-917`, wire `placeOrder` at `:759` and `:917`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6372` (used at `:6481`, `:6503`, and `:6573`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:216` (used at `:249`, placement at `:802`), Hrana daemon-state at `scripts/db/writer.py:2852-2865`. Whole-repo `.placeOrder(` is only those two call sites. `ib_execute.place_order` calls `client.place_order`. Catalog parity 13 passed. Service registration 8 passed. The range did not add a service_health writer. Permanent drills 120 passed, 1 warning.
 
 Audited through: 3cb47c7c5abe01c33be6f1f2cbd78b3178c3f964 on 2026-10-30 — 1 new finding
+
+## Delta audit 2026-11-09
+
+Trusted cursor `0b7a8141bc4b5bacea144e8ba0cd6a68288ae926` (rolling issue #81, 2026-11-08) through `3a1986dd8cc80aaf32e891de98c3c6f8acadeaee`: 65 commits (10 first-parent), 124 paths. No open `reliability/` PR. Highest IDs before tonight: R-747 / REL-336. Codemap `generated_at` 2026-11-08T10:00:07Z omits the quant sleeve, imbalance, newsfeed PDF, and PR autoupdate files merged after that refresh; those files and the importers of `scripts/db/writer.py` / `scripts/db/readers.py` / `scripts/watchdog/services.py` were confirmed with `rg`.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-748 / REL-337 | P1 | `scripts/quant_execute.py` `run_strategy` | DONE. The new 09:35 ET execution bridge places through `ib_place_order.place_order` then persists `quant_orders`. `admit` treats any prior row for that `as_of` as `already_executed`, which is the only retry guard. Persist after the broker ack means Turso down or a SIGKILL after acknowledgement leaves the table empty, and `radon-quant-execute.timer` `Persistent=true` admits the same session and places again. Acceptance: an armed persist that raises records nothing and must not call the placer; a second scheduled instance with empty prior still must not place; a successful persist writes status `planned` before the first placer call and `ok` after. RED 3 failed (`placed` nonempty; order started with `place`). GREEN 3 passed in `TestDurability`; 79 passed across the quant suites. |
+
+Reviewed and not filed: every live order still goes through `ib_place_order.place_order` (halt and limits unchanged). Dry-run persist of `planned` rows is the same claim that blocks a later armed retry for that `as_of`; arming `RADON_QUANT_EXECUTE=1` before 09:35 is the documented path. `read_quant_sleeve_fills` filters `order_ref` in SQL (NF-2 has no new unfiltered full-table instance). OI-changes burst UW 429 still heartbeats and exits 0 so the oneshot does not page; the next timer still fetches. `imbalance`, `quant-targets`, and `quant-execute` are in both watchdog catalogs. Newsfeed PDF export does not place orders. REL-021b remainder has no new changed-surface instance.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse).
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:724-773` and `:885-931`, wire `placeOrder` at `:773` and `:931`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6528` (used at `:6563`, `:6676`, and `:6758`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:350` (used at `:372`, placement at `:1298`), Hrana daemon-state at `scripts/db/writer.py:2898-2922`. Whole-repo `.placeOrder(` is only those two call sites. Funnel, halt, limits, and catalog parity: 124 passed, 17 warnings. Permanent Python drills: 131 passed, 1 warning.
+
+Audited through: 3a1986dd8cc80aaf32e891de98c3c6f8acadeaee on 2026-11-09 — 1 new finding
