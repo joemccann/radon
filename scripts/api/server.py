@@ -1570,71 +1570,6 @@ def _is_orders_session_live_now_et() -> bool:
         return _is_market_open_now_et()
 
 
-def _scan_time_to_et_date(scan_time: str) -> Optional[str]:
-    try:
-        ts = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
-        from zoneinfo import ZoneInfo
-        return ts.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    except Exception:
-        return None
-
-
-def _is_gex_cache_stale(data: Optional[dict], *, now_ts: Optional[float] = None, current_market_open: Optional[bool] = None, today_et: Optional[str] = None) -> bool:
-    """Market-aware GEX staleness check mirrored from the Next route logic."""
-    if not data or not isinstance(data, dict):
-        return True
-
-    scan_time = data.get("scan_time")
-    if not isinstance(scan_time, str) or not scan_time:
-        return True
-
-    today_et = today_et or _today_et_str()
-    current_market_open = _is_market_open_now_et() if current_market_open is None else current_market_open
-
-    session_date = _scan_time_to_et_date(scan_time)
-    if not session_date or session_date != today_et:
-        return True
-
-    if not current_market_open:
-        return False
-
-    try:
-        scan_dt = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
-        current_ts = now_ts if now_ts is not None else time.time()
-        return (current_ts - scan_dt.timestamp()) > 60
-    except Exception:
-        return True
-
-
-def _is_cri_cache_stale(data: Optional[dict], *, mtime_ms: Optional[float] = None, now_ts: Optional[float] = None, current_market_open: Optional[bool] = None, today_et: Optional[str] = None) -> bool:
-    """Market-aware CRI staleness check mirrored from the Next route logic."""
-    if not data or not isinstance(data, dict):
-        return True
-
-    today_et = today_et or _today_et_str()
-    current_market_open = _is_market_open_now_et() if current_market_open is None else current_market_open
-
-    data_date = data.get("date")
-    if not isinstance(data_date, str) or data_date != today_et:
-        return True
-
-    market_open_flag = data.get("market_open")
-    if market_open_flag is False and not current_market_open:
-        return False
-
-    if mtime_ms is None:
-        scan_time = data.get("scan_time")
-        if not isinstance(scan_time, str) or not scan_time:
-            return True
-        try:
-            mtime_ms = datetime.fromisoformat(scan_time.replace("Z", "+00:00")).timestamp() * 1000
-        except Exception:
-            return True
-
-    current_ms = (now_ts if now_ts is not None else time.time()) * 1000
-    return (current_ms - mtime_ms) > 60_000
-
-
 # market_state() reasons that mean the whole day is a non-session (as opposed
 # to a trading day merely outside 09:30-16:00 ET). Unknown/new reasons fall
 # through as trading days so the gate can only ever fail open.
@@ -1684,12 +1619,6 @@ async def _warm_knowledge_embedder_on_startup() -> None:
 # deleted alongside their lifespan-task call sites. The Turso embedded
 # replica keeps both caches current without any FastAPI-side bootstrap;
 # scheduled refreshes are owned by the VPS systemd timers.
-
-
-def _atomic_save(path: str, data: dict) -> str:
-    """Use the project's atomic_save for portfolio/orders files."""
-    from utils.atomic_io import atomic_save
-    return atomic_save(path, data)
 
 
 def _coerce_float(value: object) -> Optional[float]:
@@ -1771,29 +1700,6 @@ def _extract_expiry_candidates(raw: object) -> List[str]:
     return candidates
 
 
-def _pick_preferred_expiry(raw: object, now: Optional[datetime] = None) -> Optional[str]:
-    """Choose the nearest expiry that is today or newer, else the most recent expiry."""
-    candidates = _extract_expiry_candidates(raw)
-    if not candidates:
-        return None
-
-    parsed: List[Tuple[str, datetime]] = []
-    for expiry in candidates:
-        parsed_date = _coerce_date(expiry)
-        if parsed_date is None:
-            continue
-        parsed.append((expiry, parsed_date))
-
-    if not parsed:
-        return candidates[0]
-
-    current = now or datetime.now(timezone.utc)
-    future_candidates = [(expiry, expiry_date) for expiry, expiry_date in parsed if expiry_date.date() >= current.date()]
-    if future_candidates:
-        return min(future_candidates, key=lambda item: item[1])[0]
-    return max(parsed, key=lambda item: item[1])[0]
-
-
 def _normalize_expiry_string(value: object) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -1839,92 +1745,6 @@ def _sort_expiry_candidates(expiries: Iterable[str], now: Optional[datetime] = N
         reverse=True,
     )
     return [expiry for expiry, _ in [*future, *past]]
-
-
-def _extract_ib_expiry_candidates(raw: object) -> List[str]:
-    rows: Iterable[object] = raw if isinstance(raw, list) else []
-    candidates: List[str] = []
-    for row in rows:
-        expirations = getattr(row, "expirations", None)
-        if not expirations:
-            continue
-        for expiry in expirations:
-            normalized = _normalize_expiry_string(expiry)
-            if normalized and normalized not in candidates:
-                candidates.append(normalized)
-    return candidates
-
-
-async def _fetch_ib_expiry_candidates(ticker: str) -> List[str]:
-    normalized_ticker = ticker.upper()
-    if ib_pool is None:
-        return []
-
-    attempts = [
-        ("NASDAQ", "IND"),
-        ("CBOE", "IND"),
-        ("SMART", "IND"),
-        ("", "IND"),
-    ]
-    for exchange, sec_type in attempts:
-        try:
-            async with ib_pool.acquire("data") as client:
-                chains = await _bounded_chain_fetch(
-                    client,
-                    normalized_ticker,
-                    exchange,
-                    sec_type,
-                )
-            candidates = _sort_expiry_candidates(_extract_ib_expiry_candidates(chains))
-            if candidates:
-                logger.info(
-                    "Internals skew: IB expiries for %s resolved via %s/%s (%d candidates)",
-                    normalized_ticker,
-                    exchange or "default",
-                    sec_type,
-                    len(candidates),
-                )
-                return candidates
-        except Exception as exc:
-            logger.warning(
-                "Internals skew: IB expiry lookup failed for %s via %s/%s: %s",
-                normalized_ticker,
-                exchange or "default",
-                sec_type,
-                exc,
-            )
-    return []
-
-
-def _preferred_index_exchange(ticker: str) -> str:
-    return "NASDAQ" if ticker.upper() == "NDX" else "CBOE"
-
-
-# REL-013 / R-014: qualifyContracts + reqSecDefOptParams have no native
-# timeout — a wedged gateway would hold the pool's data-role lock forever
-# and strand one executor thread per exchange attempt. wait_for abandons
-# the thread but releases the lock and bounds the request.
-_CHAIN_FETCH_TIMEOUT_SECS = 15.0
-
-
-async def _bounded_chain_fetch(
-    client: Any, ticker: str, exchange: str, sec_type: str
-):
-    return await asyncio.wait_for(
-        asyncio.to_thread(
-            _fetch_ib_index_option_chain, client, ticker, exchange, sec_type
-        ),
-        timeout=_CHAIN_FETCH_TIMEOUT_SECS,
-    )
-
-
-def _fetch_ib_index_option_chain(client: Any, ticker: str, exchange: str, sec_type: str) -> object:
-    if sec_type != "IND":
-        return client.get_option_chain(ticker, exchange, sec_type)
-
-    contract = Index(symbol=ticker, exchange=exchange or _preferred_index_exchange(ticker))
-    qualified = client.qualify_contract(contract)
-    return client.ib.reqSecDefOptParams(ticker, exchange, sec_type, qualified.conId)
 
 
 def _prepend_expiry(candidates: List[str], expiry: Optional[str]) -> List[str]:
@@ -2724,33 +2544,6 @@ async def uw_usage():
     """Operator UW daily request budget from data/uw_budget.json."""
     from utils.uw_budget import usage_snapshot
 
-    return usage_snapshot()
-
-
-@app.post("/uw/usage/record")
-async def uw_usage_record(
-    count: int = 1,
-    caller: str = "web",
-    endpoint: str = "",
-):
-    """Mirror UW hits made outside UWClient into the shared daily budget.
-
-    The Next.js route handlers fetch UW directly and used to increment
-    nothing, leaving /uw/usage and the universe-scan brake blind to
-    browsing-driven traffic (REL-036 / R-062). The flock write runs off the
-    event loop.
-    """
-    from utils.uw_budget import record_hits, usage_snapshot
-
-    if not (1 <= count <= 500):
-        raise HTTPException(status_code=400, detail="count must be between 1 and 500")
-    try:
-        await asyncio.to_thread(
-            record_hits, count, caller=caller or "web", endpoint=endpoint
-        )
-    except TimeoutError as exc:
-        # REL-052 / NF-5: bounded contention is explicit, never a false count.
-        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "1"}) from exc
     return usage_snapshot()
 
 
@@ -4128,19 +3921,6 @@ async def journal_reconcile():
     if not snapshot_at:
         raise HTTPException(status_code=502, detail="Reconciliation snapshot was not persisted")
     return {"ok": True, "snapshot_at": snapshot_at}
-
-
-@app.post("/journal/rehydrate")
-async def journal_rehydrate(days: int = 365):
-    """Removed. Journal recon is file ingest (flex_delivery_ingest / --from-file).
-
-    Live fills stay on journal_sync. A page-driven SendRequest is how this
-    token earned Flex 1025.
-    """
-    raise HTTPException(
-        status_code=404,
-        detail="Journal rehydrate is file-ingest only. Use journal_rehydrate.py --from-file.",
-    )
 
 
 # ── Intraday scan admission (regime / breadth / vcg / gex) ──────────
@@ -5690,73 +5470,6 @@ async def internals_skew_history(
     return payload
 
 
-@app.post("/blotter")
-async def blotter_sync():
-    """Removed. Historical blotter is Turso journal. Flex recon is --from-file."""
-    raise HTTPException(
-        status_code=404,
-        detail="POST /blotter is file-ingest only. GET /orders reads journal_sync.",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Performance — task registry for deduplication (single-worker assumed)
-# ---------------------------------------------------------------------------
-_running_build: Optional[asyncio.Task] = None
-
-
-PERFORMANCE_SCHEMA_VERSION = 2
-
-
-def _refuse_legacy_performance_payload(payload: dict) -> dict:
-    """A payload that is not schema_version 2 never reaches the page as a number.
-
-    The pre-refactor builder published an unversioned shape with no `status`,
-    which the read path defaulted to healthy — that is how a contaminated
-    +951.28% rendered with an empty warnings array. Anything that is not v2 is
-    served with its headline stripped and a loud status instead of silently.
-    """
-    if payload.get("schema_version") == PERFORMANCE_SCHEMA_VERSION:
-        return payload
-    refused = {k: v for k, v in payload.items() if k not in ("summary", "twr", "benchmark")}
-    refused.update(
-        {
-            "schema_version": payload.get("schema_version"),
-            "status": "degraded",
-            "twr": None,
-            "warnings": [
-                {
-                    "code": "LEGACY_PAYLOAD_REFUSED",
-                    "severity": "error",
-                    "message": (
-                        "The performance builder returned a pre-v2 payload; its "
-                        "return figures are suppressed because they carry no "
-                        "integrity status."
-                    ),
-                    "context": {"schema_version": payload.get("schema_version")},
-                }
-            ],
-        }
-    )
-    return refused
-
-
-async def _do_performance_rebuild() -> dict:
-    """Run the TWR builder (scripts/perf_twr_builder.py) and cache the result.
-
-    One writer owns performance_snapshots. The builder persists to Turso itself
-    and prints the v2 payload on stdout.
-    """
-    result = await run_script("perf_twr_builder.py", ["--json"], timeout=180)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    if not isinstance(result.data, dict):
-        raise HTTPException(status_code=502, detail="performance builder returned no payload")
-    payload = _refuse_legacy_performance_payload(result.data)
-    _write_cache(DATA_DIR / "performance.json", payload)
-    return payload
-
-
 @app.post("/performance")
 async def performance_sync():
     """Run portfolio performance metrics. 180s timeout.
@@ -5772,94 +5485,6 @@ async def performance_sync():
     raise HTTPException(
         status_code=404,
         detail="Performance rebuild is file-ingest only. Use perf_twr_builder.py --from-file.",
-    )
-
-
-# Floor between on-demand rebuilds. Every rebuild attempts an IBKR Flex fetch,
-# and the endpoint previously guarded only against a CONCURRENT build -- so each
-# page load that found a stale snapshot fired another one, roughly every 15
-# minutes all day. IBKR answered with code 1025 ("Too many failed attempts"), a
-# lockout earned by repeated failures, which took out /performance AND
-# cash-flow-sync since they share the one token. radon-perf-twr.timer owns the
-# schedule now (Tue..Sat 07:30 ET); this path is a fallback and needs a floor.
-PERFORMANCE_BACKGROUND_COOLDOWN_S = 20 * 60
-
-# R-102: the cooldown used to be a process-local `time.monotonic()` float.
-# Any radon-api restart (deploy, watchdog, OOM) reset it to None and re-opened
-# an immediate Flex fetch; under a crash loop the 20-minute floor was zero.
-# It lives on disk now, in UTC epoch seconds, so a restart cannot buy a fetch.
-PERFORMANCE_REBUILD_SIDECAR = DATA_DIR / "performance_rebuild_cooldown.json"
-
-
-def _last_rebuild_epoch() -> Optional[float]:
-    try:
-        raw = json.loads(PERFORMANCE_REBUILD_SIDECAR.read_text())
-        value = float(raw.get("last_rebuild_at"))
-    except (OSError, ValueError, TypeError, AttributeError):
-        return None
-    return value
-
-
-def _record_rebuild_attempt() -> None:
-    try:
-        PERFORMANCE_REBUILD_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-        from utils.atomic_io import atomic_save
-
-        atomic_save(
-            str(PERFORMANCE_REBUILD_SIDECAR),
-            {"last_rebuild_at": datetime.now(timezone.utc).timestamp()},
-        )
-    except Exception:  # noqa: BLE001 — a cooldown write must never fail a build
-        logger.warning("could not persist the performance rebuild cooldown")
-
-
-def _rebuild_refusal() -> Optional[dict]:
-    """`None` when a rebuild may proceed, else a refusal payload."""
-    try:
-        from utils.flex_embargo import active_until
-
-        until = active_until()
-    except Exception:
-        until = None
-    if until:
-        return {"status": "lockout", "next_attempt_at": until}
-
-    last = _last_rebuild_epoch()
-    if last is None:
-        return None
-    age = datetime.now(timezone.utc).timestamp() - last
-    if 0 <= age < PERFORMANCE_BACKGROUND_COOLDOWN_S:
-        return {
-            "status": "cooldown",
-            "retry_in_seconds": int(PERFORMANCE_BACKGROUND_COOLDOWN_S - age),
-        }
-    return None
-
-
-def _refuse_rebuild_or_none() -> None:
-    """R-102: a refusal used to be a 202 to a caller that swallows the body,
-    so `/performance` served a stale snapshot with no explanation anywhere.
-    The synchronous endpoint answers with a real status code and logs."""
-    refusal = _rebuild_refusal()
-    if refusal is None:
-        return
-    logger.warning("performance rebuild refused: %s", refusal)
-    raise HTTPException(
-        status_code=503 if refusal["status"] == "lockout" else 429,
-        detail=refusal,
-    )
-
-
-@app.post("/performance/background", status_code=202)
-async def performance_background():
-    """Fire-and-forget performance rebuild. Returns 202 immediately.
-
-    Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
-    inside the cooldown window or during a token lockout.
-    """
-    return JSONResponse(
-        status_code=404,
-        content={"status": "file_ingest_only", "detail": "Use perf_twr_builder.py --from-file."},
     )
 
 

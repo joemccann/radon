@@ -67,9 +67,9 @@ See `scripts/cri_scan.py:_fetch_ib` for the canonical pattern. Background in `fe
 - **Atomic state:** `scripts/utils/atomic_io.py` — `atomic_save()` (temp + `os.replace()` + SHA-256), `verified_load()`.
 - **Batched WS relay:** per-client last-write-wins, 100ms flush. 5000 msg/s → 10 batched/s.
 - **Stale tick recovery:** the [Gateway recovery owner](../docs/ib-gateway-recovery.md#relay-recovery) defines mode-specific escalation and operator gates; thresholds and retry bounds live in `scripts/lib/staleDataMachine.js`.
-- **Vectorized:** `kelly_size_batch()` (NumPy), `portfolio_greeks_vectorized()`. Cross-validated to 10⁻¹².
+- **Vectorized:** `kelly_size_batch()` (NumPy). Cross-validated to 10⁻¹².
 - **IBClient resilience:** NO in-client auto-reconnect (REL-014 — deleted; recovery lives at higher layers: pool acquire-time reconnect, per-cycle daemon reconnects, relay stale-tick ladder); pacing (162/366: per-reqId retry count, cap 3); invalid contracts (200/354: no retry, `_failed_contracts`).
-- **Performance page:** Phase A sequential IB+cache; Phase B ThreadPool UW/Yahoo. `PERF_FETCH_WORKERS` (default 8). Disk cache TTL 15min/24h. SWR via `POST /performance/background`.
+- **Performance page:** Phase A sequential IB+cache; Phase B ThreadPool UW/Yahoo. `PERF_FETCH_WORKERS` (default 8). Disk cache TTL 15min/24h.
 
 ---
 

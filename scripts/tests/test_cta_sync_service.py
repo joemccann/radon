@@ -13,7 +13,6 @@ import pytest
 
 from utils.cta_sync import CTA_SYNC_ET_SLOTS, latest_closed_trading_day
 from utils.cta_sync_health import retry_backoffs_for_error
-from utils.launchd_schedule import convert_et_calendar_entries, expand_intraday_slots
 
 import cta_sync_service as cta_sync_svc
 
@@ -73,34 +72,6 @@ class TestLatestClosedTradingDay:
     def test_weekend_uses_prior_friday(self):
         now = datetime(2026, 3, 14, 12, 0)
         assert latest_closed_trading_day(now) == "2026-03-13"
-
-
-class TestLaunchdCalendarEntries:
-    def test_data_refresh_slots_convert_from_et_to_pacific(self):
-        slots = expand_intraday_slots((9, 30), (10, 0), 15)
-        entries = convert_et_calendar_entries(
-            [(1, hour, minute) for hour, minute in slots],
-            local_tz="America/Los_Angeles",
-            reference_date=date(2026, 3, 9),
-        )
-
-        assert entries == [
-            {"Weekday": 1, "Hour": 6, "Minute": 30},
-            {"Weekday": 1, "Hour": 6, "Minute": 45},
-            {"Weekday": 1, "Hour": 7, "Minute": 0},
-        ]
-
-    def test_cta_slots_only_include_two_post_close_runs(self):
-        entries = convert_et_calendar_entries(
-            [(1, hour, minute) for hour, minute in CTA_SYNC_ET_SLOTS],
-            local_tz="America/Los_Angeles",
-            reference_date=date(2026, 3, 9),
-        )
-
-        assert entries == [
-            {"Weekday": 1, "Hour": 13, "Minute": 15},
-            {"Weekday": 1, "Hour": 14, "Minute": 0},
-        ]
 
 
 class TestFetchTimeoutEnvelope:
