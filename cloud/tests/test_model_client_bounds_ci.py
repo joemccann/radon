@@ -100,9 +100,15 @@ def test_app_images_enforces_bounds_on_the_exact_built_gateway_image():
         "steps.reuse-gateway.outputs.hit != 'true'"
         " && steps.reuse-bounds.outputs.hit != 'true'"
     )
-    assert steps[build]["with"]["load"] == "true"
+    # CIP-029: main does not load the tarball; PRs still do. Bounds pulls
+    # the exact SHA when the daemon has no image.
+    assert steps[build]["with"]["load"] == (
+        "${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}"
+    )
     assert "scripts/ci/check_model_client_bounds.py" in step["run"]
-    assert '--image "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}"' in step["run"]
+    assert "docker image inspect" in step["run"]
+    assert "docker pull" in step["run"]
+    assert "ghcr.io/joemccann/radon-model-gateway:${{ github.sha }}" in step["run"]
     assert "continue-on-error" not in step
 
 
