@@ -89,14 +89,10 @@ const PINNED: Record<string, PinnedCapability> = {
   "index-quote": "read",
   "informed-flow/[ticker]": "read",
   "internals": { GET: "read", POST: "read.spawn" },
-  "internals/share": "internal",
-  "internals/share/content": "internal",
   "ivrank": "read",
   "iv-spread": "read",
   "journal": { GET: "read", POST: "mutate.workspace" },
   "journal/sync": "mutate.workspace",
-  "knowledge/prior-evals": "read",
-  "knowledge/search": "read",
   "leap": "read",
   "leap/scan": "read.spawn",
   "ai-cycle": "read",
@@ -133,7 +129,6 @@ const PINNED: Record<string, PinnedCapability> = {
   "portfolio": { GET: "read", POST: "mutate.workspace" },
   "preferences": { GET: "admin", PUT: "admin", DELETE: "admin" },
   "previous-close": "read",
-  "prices": { GET: "read", POST: "read" },
   "probe/freshness": "internal",
   "profile": { GET: "read", PUT: "mutate.workspace" },
   "research/evidence/[asset]": "read",
@@ -296,7 +291,6 @@ describe("assistant catalog pin", () => {
     expect(PINNED.pi).toBe("internal");
     expect(PINNED["webhooks/clerk"]).toBe("internal");
     expect(PINNED["gex/share/content"]).toBe("internal");
-    expect(PINNED["internals/share/content"]).toBe("internal");
     expect(PINNED["menthorq/cta/share/content"]).toBe("internal");
     expect(PINNED["regime/share/content"]).toBe("internal");
     expect(PINNED["vcg/share/content"]).toBe("internal");

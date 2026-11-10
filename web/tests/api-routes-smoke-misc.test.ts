@@ -16,7 +16,6 @@ vi.mock("@/lib/uwCountedFetch", () => ({
  *   - POST /api/leap/scan
  *   - GET /api/options/chain
  *   - POST /api/ib/ws-ticket
- *   - GET/POST /api/prices (deprecated 405)
  *   - GET /api/ticker/info
  *
  * Companion file to `api-routes-smoke.test.ts`.
@@ -440,30 +439,6 @@ describe("POST /api/ib/ws-ticket", () => {
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.detail).toBeDefined();
     expect(res.headers.get("cache-control") || "").toMatch(/no-store/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// /api/prices — both verbs return 405 (deprecated SSE → WS)
-// ---------------------------------------------------------------------------
-
-describe("GET /api/prices", () => {
-  it("returns 405 with deprecation envelope", async () => {
-    const { GET } = await import("../app/api/prices/route");
-    const res = await GET();
-    expect(res.status).toBe(405);
-    const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.error).toContain("deprecated");
-  });
-});
-
-describe("POST /api/prices", () => {
-  it("returns 405 with deprecation envelope", async () => {
-    const { POST } = await import("../app/api/prices/route");
-    const res = await POST();
-    expect(res.status).toBe(405);
-    const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.error).toContain("deprecated");
   });
 });
 
