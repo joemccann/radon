@@ -177,6 +177,8 @@ readonly SERVICE_FILES=(
   radon-yield-curve.timer
   radon-straddle.service
   radon-straddle.timer
+  radon-msr.service
+  radon-msr.timer
   radon-cor.service
   radon-cor.timer
   radon-vixcor.service

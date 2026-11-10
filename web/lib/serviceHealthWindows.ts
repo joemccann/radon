@@ -207,6 +207,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Cboe CDN CSVs only — no IB.
   "straddle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``msr`` — radon-msr.timer fires daily 03:00 UTC every calendar day
+  // (Cboe appends the RUT row ~02:31 UTC; weekend runs are 304 heartbeats),
+  // so a uniform 26h window fits like its straddle sibling. Cboe CDN plus
+  // IB-first NDX/RUT closes with Cboe/Yahoo fallback, so not grouped with
+  // IB outages (requires_ib: false).
+  "msr": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``cor`` — radon-cor.timer fires daily 02:20 UTC every calendar day
   // (Cboe overwrites the COR CSVs after each session; weekend runs are 304
   // heartbeats), so a uniform 26h window fits like its straddle sibling.

@@ -289,6 +289,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # calendar day (Cboe VIX/VIX3M/VVIX/SKEW composite; weekend/holiday runs
     # are 304 heartbeats). Uniform 26h window mirrors its Cboe siblings.
     "panic-index":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # msr — radon-msr.timer, daily 03:00 UTC every calendar day, after the
+    # last Cboe row (RUT ~21:31 ET) lands under both DST regimes
+    # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors
+    # straddle. IB is tried first for NDX/RUT closes but Cboe/Yahoo
+    # fallbacks keep it writing through an IB outage: requires_ib False.
+    "msr":              {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # dispersion — radon-dispersion.timer, 22:20 UTC plus a 23:20 recovery slot,
     # after the 16:00 ET close year-round (weekend/holiday runs are no-new-
     # session heartbeats). Uniform 26h window matches its daily siblings. IB
@@ -699,6 +705,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:50 + 13:15 UTC Cboe Panic Proxy pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "panic-index",
+        # Daily 03:00 UTC Cboe SPX/VIX/VXN/RVX + NDX/RUT close MSR pull —
+        # hourly check surfaces a missed run within 1h of the 26h window.
+        "msr",
         # Daily 22:20 UTC IB daily-bar dispersion sweep (post-close, Yahoo
         # fallback) — hourly check surfaces a missed run within 1h of the 26h
         # window expiring.
