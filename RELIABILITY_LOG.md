@@ -1093,3 +1093,9 @@ Exact-head CI repair (2026-10-07): initial scripts-df gate reported 1 failed / 1
 | ID | Status | Red / green evidence | Change |
 |---|---|---|---|
 | REL-337 / R-748 | DONE | RED 3 failed in `TestDurability` (persist-raises still called the placer; scheduled retry placed again; first event was `place` not `persist planned`). GREEN 3 passed there; 79 passed across `test_quant_execute.py` + `test_quant_run.py` + `test_quant_engine.py` + `test_quant_strategies.py`. Funnel/halt/limits/catalog 124 passed, 17 warnings. Permanent drills 131 passed, 1 warning. | An armed execute persists `quant_orders` with status `planned` before the first `place_order`, then writes the broker result. Persist failure never reaches the broker. A timer retry that sees those rows stays `already_executed`. No catch was widened and no retry was added. |
+
+## Nightly remediation 2026-11-10
+
+| ID | Status | Red / green evidence | Change |
+|---|---|---|---|
+| REL-338 / R-749 | DONE | RED 1 failed in `test_api_execute_and_transaction_refuse_before_any_request` (`hrana_execute_many` reached `_post_statements`, `DbHttpError: AssertionError: must not reach the wire`). GREEN 1 passed there; focused 250 passed across the guard, db_http, MarketDesk, and Hrana keepalive suites. Permanent drills 131 passed, 1 warning. | `hrana_execute_many` calls `_refuse_developer_host` before `read_env`, matching `hrana_execute` and `hrana_transaction`. A non-Linux process does not open a production write. Linux is unchanged. No catch was widened and no retry was added. |

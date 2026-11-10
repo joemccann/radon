@@ -3350,3 +3350,19 @@ Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (lega
 Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:724-773` and `:885-931`, wire `placeOrder` at `:773` and `:931`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6528` (used at `:6563`, `:6676`, and `:6758`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:350` (used at `:372`, placement at `:1298`), Hrana daemon-state at `scripts/db/writer.py:2898-2922`. Whole-repo `.placeOrder(` is only those two call sites. Funnel, halt, limits, and catalog parity: 124 passed, 17 warnings. Permanent Python drills: 131 passed, 1 warning.
 
 Audited through: 3a1986dd8cc80aaf32e891de98c3c6f8acadeaee on 2026-11-09 — 1 new finding
+
+## Delta audit 2026-11-10
+
+Trusted cursor `3a1986dd8cc80aaf32e891de98c3c6f8acadeaee` (rolling issue #81, 2026-11-09) through `132f9ab02313217d0663c8cea498478f41d60f75`: 37 commits (8 first-parent), 41 paths. No open `reliability/` PR. Highest IDs before tonight: R-748 / REL-337. Codemap `generated_at` 2026-11-09T10:00:08Z. Importers of `scripts/research/marketdesk_store.py` and `scripts/api/db_http.py` confirmed with `rg`.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-749 / REL-338 | P1 | `scripts/api/db_http.py` `hrana_execute_many` | DONE. REL-330 / R-741 refuses a non-Linux process on `hrana_execute`, `hrana_transaction`, `get_db`. PERF-045 moved `marketdesk_store.claim` writes onto `hrana_execute_many`, whose docstring still called it a read helper and which never called `_refuse_developer_host`. A darwin process with `RADON_MODE` unset reached `_post_statements` (`AssertionError: must not reach the wire` wrapped as `DbHttpError`). Acceptance: the same unset-mode darwin fixture raises `ProductionWriterRefused` from `hrana_execute_many` and does not open a request; `hrana_execute` and `hrana_transaction` still refuse; Linux is unchanged. RED 1 failed. GREEN 1 passed; focused 250 passed. |
+
+Reviewed and not filed: the claim pipeline is not a transaction, but the lease UPDATE repeats `attempts < MAX` in SQL so a spent row cannot be leased if an earlier step errors. Quant execute still claims `planned` before `place_order` (R-748 holds). Options-chain per-user 120/min is a read proxy, not a placer. CIP-029 skips the gateway `docker run` smoke on main because the image build already imports chronos/torch. WorkspaceSections lazy-load does not touch orders. REL-021b remainder has no new changed-surface instance. NF-2 has no new unfiltered full-table journal read.
+
+Inherited operator-only items remain: NF-1 (live bankroll admission), NF-4 (legacy Flex reconstruction), REL-087 / R-232 (container lifecycle design), REL-261 / R-682 (recover original task before reuse).
+
+Standing sweeps HOLD: halt and limits at `scripts/clients/ib_client.py:724-773` and `:885-931`, wire `placeOrder` at `:773` and `:931`, `_NON_IDEMPOTENT_IB_SCRIPTS` at `scripts/api/server.py:6528` (used at `:6563`, `:6676`, and `:6758`), exit ack at `scripts/monitor_daemon/handlers/exit_orders.py:350` (used at `:372`, placement at `:1300`), Hrana daemon-state at `scripts/db/writer.py:2898-2922`. Permanent Python drills: 131 passed, 1 warning.
+
+Audited through: 132f9ab02313217d0663c8cea498478f41d60f75 on 2026-11-10 — 1 new finding
