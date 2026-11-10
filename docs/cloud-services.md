@@ -1019,6 +1019,21 @@ On the broker it also compares `/usr/local/sbin/radon-ib-gateway-credential`
 (drift id `file-mismatch:ib-gateway-credential`); app-role hosts report it as
 `role-skipped:ib-gateway-credential`.
 
+### MSR (`radon-msr.timer`)
+
+Daily `03:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_msr.py`,
+`TimeoutStartSec=900`. Move Surprise Ratio for SPX, NDX and RUT: absolute
+1-day % move over the prior close's VIX, VXN or RVX. SPX, VIX, VXN and RVX
+come from the Cboe CDN through the shared `CboeClient` with per-file
+`If-Modified-Since`. NDX and RUT closes live in the shared
+`price_history_daily` table: IB first every cycle, then Cboe (RUT only), then
+Yahoo as last resort; the first run seeds back to 2009-09-11, which is why the
+timeout is 900s. 03:00 clears Cboe's last row (RUT, ~21:31 ET) in both DST
+regimes. Runs every calendar day; weekend and holiday runs are 304 heartbeats
+that keep `msr` inside its 26h window. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/msr.md`](indicators/msr.md).
+
 ### Model catalog (`radon-model-catalog.timer`)
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot

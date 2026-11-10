@@ -55,6 +55,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "menthorq/cta": () => import("@/app/api/menthorq/cta/route") as Promise<NextRouteModule>,
   "menthorq/cta/image": () => import("@/app/api/menthorq/cta/image/route") as Promise<NextRouteModule>,
   "models": () => import("@/app/api/models/route") as Promise<NextRouteModule>,
+  "msr": () => import("@/app/api/msr/route") as Promise<NextRouteModule>,
   "newsfeed/posts": () => import("@/app/api/newsfeed/posts/route") as Promise<NextRouteModule>,
   "options/rv-ratio": () => import("@/app/api/options/rv-ratio/route") as Promise<NextRouteModule>,
   "orders": () => import("@/app/api/orders/route") as Promise<NextRouteModule>,

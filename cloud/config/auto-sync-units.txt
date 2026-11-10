@@ -87,6 +87,8 @@ radon-skew2d.service
 radon-skew2d.timer
 radon-straddle.service
 radon-straddle.timer
+radon-msr.service
+radon-msr.timer
 radon-subscription-tokens.service
 radon-subscription-tokens.timer
 radon-trin.service
