@@ -180,7 +180,7 @@ same rule, extended to every long-running stage this phase started, such as
 the full pytest suite).
 
 DeepSec is not a stage of this loop. Do not start `deepsec process` inside
-the 2h audit cap; the DeepSec loop owns process, revalidate, export,
+the 8h audit cap; the DeepSec loop owns process, revalidate, export,
 verification, remediation and delivery of its own findings.
 
 Any other stage expected to exceed a couple of minutes (a full
