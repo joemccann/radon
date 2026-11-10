@@ -75,8 +75,7 @@ function declaredStatus(data: Record<string, unknown>): PerformanceStatus | unde
  * happens to spell a status. The row production actually serves declares
  * `status: "ok"` while carrying no `schema_version`, so a writer that ran none
  * of the v2 integrity gates gets to name its own health. `schema_version: 2`
- * is the only evidence that the gates ran at all, which is the same test the
- * API applies in `_refuse_legacy_performance_payload`.
+ * is the only evidence that the gates ran at all.
  */
 function isLegacyPayload(data: Record<string, unknown>): boolean {
   return !isV2Payload(data);

@@ -25,8 +25,6 @@ from api import db_http
 
 logger = logging.getLogger("radon-api")
 
-DEMO_DISABLED_MESSAGE = "Live scans are disabled in the demo environment."
-
 # surface key → SQL returning the newest seeded snapshot payload.
 _SNAPSHOT_SQL: dict[str, str] = {
     "scanner": "SELECT payload FROM scanner_snapshots ORDER BY scan_time DESC LIMIT 1",

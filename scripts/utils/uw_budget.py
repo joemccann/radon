@@ -214,8 +214,7 @@ def record_hits(
 ) -> int:
     """Increment today's HTTP hit count by ``hits`` under one flock write.
 
-    The counted path for UW requests made outside ``UWClient`` — the Next.js
-    route handlers mirror their hits here via POST /uw/usage/record so the
+    The counted path for UW requests made outside ``UWClient``, so the
     gauge and the universe-scan brake see browsing traffic (REL-036 / R-062).
     """
     target = _path(path)

@@ -61,10 +61,6 @@ THROTTLE_EMBARGO_SECS = (
     60 * 60,         # 1h cap
 )
 
-# A non-throttle transient (network blip, parse error) does not escalate.
-# Daily handlers re-fire the next 17:00 ET window — short embargo only.
-SOFT_EMBARGO_SECS = 0
-
 
 class FlexThrottleError(RuntimeError):
     """Raised when IBKR returns its one documented rate-limit code, 1018.
