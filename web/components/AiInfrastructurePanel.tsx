@@ -5,7 +5,7 @@ import { aiMetricChartPoint, aiMetricDescription, aiMetricDisplay, aiMetricLabel
 import InfoTooltip from "./InfoTooltip";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { aiDate, aiObservationDate, historyGroups, sourceHref, type AiHistoryPoint, type AiIndicator, type AiSnapshot, type AiSource } from "@/lib/aiInfrastructure";
+import { aiDate, aiObservationDate, historyGroups, sourceHref, type AiIndicator, type AiSnapshot, type AiSource } from "@/lib/aiInfrastructure";
 import { useAiInfrastructure } from "@/lib/useAiInfrastructure";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
@@ -15,10 +15,6 @@ import styles from "./AiInfrastructure.module.css";
 function SourceLink({ url, children }: { url: string; children: React.ReactNode }) {
   const href = sourceHref(url);
   return href ? <a href={href} target="_blank" rel="noopener noreferrer">{children} ↗</a> : <span>{children} · link unavailable</span>;
-}
-
-export function AiSeriesChart({ points }: { points: AiHistoryPoint[] }) {
-  return <AiIndustryHistoryChart points={points} />;
 }
 
 function SourceDrawer({ indicator, data, close, opener }: { indicator: AiIndicator; data: AiSnapshot; close: () => void; opener: HTMLElement | null }) {

@@ -59,8 +59,6 @@ export const CHAIN_COLUMNS: readonly ChainColumn[] = [
   { key: "last", header: "Last", label: "Last", group: "Quote", title: "Last trade" },
 ];
 
-export const CHAIN_COLUMN_GROUPS: readonly ChainColumnGroup[] = ["Greeks", "Volatility", "Valuation", "Quote"];
-
 /** Defaults reproduce the chain as it shipped before the toggle existed. */
 export const CHAIN_COLUMN_DEFAULTS: Record<ChainColumnKey, boolean> = {
   delta: true,

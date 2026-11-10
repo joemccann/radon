@@ -110,10 +110,6 @@ export type WSBatchMessage = {
   updates: Record<string, PriceData>;
 };
 
-/* ─── Depth-of-book (L2) types ─────────────────────────── */
-
-export type DepthSide = "bid" | "ask";
-
 /** One book row. marketMaker/exchange null for futures (no venue attribution). */
 export type DepthLevel = {
   price: number;

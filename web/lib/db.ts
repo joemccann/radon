@@ -492,8 +492,3 @@ export function __resetDbForTests(): void {
 export function __setDbForTests(client: Client): void {
   cached = client;
 }
-
-// Test seam — inject the demo libSQL client.
-export function __setDemoDbForTests(client: Client): void {
-  cachedDemo = client;
-}

@@ -102,14 +102,6 @@ export type ServicesListResponse = {
 
 export type ServiceAction = "start" | "stop" | "restart";
 
-export type ServiceActionResult = {
-  unit: string;
-  action: ServiceAction;
-  ok: boolean;
-  detail: string;
-  returncode: number;
-};
-
 export type RestartLogEntry = {
   at: string;             // ISO timestamp written by the client
   action: "force-2fa" | "reset-backoff" | "service-action" | "stack-restart";

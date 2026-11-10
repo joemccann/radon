@@ -30,8 +30,6 @@ export const RANGE_PRESETS: ReadonlyArray<RangePreset> = [
   { slug: "all", label: "All", sessions: Number.POSITIVE_INFINITY },
 ];
 
-export const DEFAULT_RANGE_PRESET: RangePresetSlug = "1y";
-
 export function presetSessions(slug: RangePresetSlug): number {
   const preset = RANGE_PRESETS.find((entry) => entry.slug === slug);
   return preset?.sessions ?? Number.POSITIVE_INFINITY;

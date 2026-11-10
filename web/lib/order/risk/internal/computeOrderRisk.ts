@@ -492,7 +492,6 @@ function legsAreBounded(sameRightLegs: OrderRiskLeg[]): {
   };
 }
 
-/** Exact same-expiry intrinsic extrema at every payoff kink. */
 /**
  * Signed expiry P&L range in dollars: best and worst outcome across every
  * settlement, NOT clamped at zero. A combo whose credit exceeds its width
@@ -512,6 +511,7 @@ export function signedPayoffRange(
   };
 }
 
+/** Exact same-expiry intrinsic extrema at every payoff kink. */
 function intrinsicPayoffExtrema(legs: OrderRiskLeg[]): { min: number; max: number } {
   const points = [0, ...legs.map((leg) => leg.strike)].filter(
     (value, index, all) => Number.isFinite(value) && value >= 0 && all.indexOf(value) === index,
@@ -558,270 +558,6 @@ function effectiveNakedContracts(leg: OrderRiskLeg, contracts: number): number {
   if (leg.action !== "SELL") return contracts;
   const covering = Math.max(0, leg.coveringLongContracts ?? 0);
   return Math.max(0, contracts - covering);
-}
-
-/**
- * Compute max loss for a fully-bounded combo (call side covered).
- *
- * Algorithm
- * ---------
- * Sum per-leg max losses at their worst-case strike, where:
- *   - Long call/put losses = premium paid for that leg
- *   - Short call: covered by paired long call → use strike-spread - credit
- *   - Short put: max loss = strike × ratio × 100 - premium received
- *
- * For vertical spreads (one long + one short, same right) this reduces to
- * the standard "width - credit" formula. For complex multi-leg structures
- * we use the symmetric Black-Scholes-style payoff floor heuristic: combine
- * leg-level worst cases, which strictly matches verticals, straddles,
- * strangles, butterflies, and iron condors.
- *
- * We do NOT need leg-level premiums to drive max loss for verticals — the
- * net combo premium drops out: sum(long premiums) − sum(short premiums) =
- * netPremium × comboQuantity. So we drive everything from netPremium and
- * structural strikes.
- */
-function computeBoundedMaxLoss(
-  legs: OrderRiskLeg[],
-  netPremium: number,
-  comboQuantity: number,
-): number {
-  // Pair shorts with longs at the most-protective long strike (call side:
-  // long below short = bull call; long above short = bear call. Both cap.)
-  // Unpaired shorts on the put side bound at strike-to-zero (naked short put).
-
-  // 1. Group by right. `sideMaxLoss` returns intrinsic loss PER COMBO in
-  //    dollars (already multiplied by the 100-share contract multiplier).
-  const callLegs = legs.filter((l) => l.right === "C");
-  const putLegs = legs.filter((l) => l.right === "P");
-
-  const callSideLossPerCombo = sideMaxLoss(callLegs, "C");
-  const putSideLossPerCombo = sideMaxLoss(putLegs, "P");
-
-  // Stock can only be at one price at a time → take the side with the
-  // larger intrinsic loss. Then scale by comboQuantity for total dollars.
-  const intrinsicTotal =
-    Math.max(callSideLossPerCombo, putSideLossPerCombo) * comboQuantity;
-
-  // Net premium: positive debit increases loss; negative (credit) reduces it
-  const netCashDollars = netPremium * comboQuantity * MULTIPLIER;
-  return Math.max(0, intrinsicTotal + netCashDollars);
-}
-
-/**
- * Worst-case INTRINSIC loss on one side of the strike chain.
- *
- * Call side: at stock → +∞, every short call loses (S - K_short), every
- * long call gains (S - K_long). Net = -(K_short - K_long) × ratio.
- * Sorted by strike, the worst intrinsic is the sum over each short of
- * (K_long_pair - K_short), where the pair is the long call protecting it.
- *
- * Put side: at stock → 0, every short put loses K_short, every long put
- * gains K_long. Net = K_short - K_long per pair (or K_short if uncovered).
- *
- * This is the strike-only piece; premiums are added back via netPremium.
- */
-function sideMaxLoss(sameRightLegs: OrderRiskLeg[], right: LegRight): number {
-  if (sameRightLegs.length === 0) return 0;
-
-  // Build per-strike net ratio: positive = net long, negative = net short
-  const ratioByStrike = new Map<number, number>();
-  for (const leg of sameRightLegs) {
-    const sign = leg.action === "BUY" ? 1 : -1;
-    ratioByStrike.set(
-      leg.strike,
-      (ratioByStrike.get(leg.strike) ?? 0) + sign * leg.quantity,
-    );
-  }
-
-  // Sort strikes ascending; for puts we sweep low → high (worst case at 0
-  // is bounded by lowest long-put strike); for calls we sweep high → low
-  // (worst case at +∞ is bounded by highest long-call strike).
-  const strikes = Array.from(ratioByStrike.keys()).sort((a, b) => a - b);
-
-  // Walk strikes computing the cumulative open short position at each
-  // boundary. Multiply by strike-width segments to get intrinsic loss.
-  //
-  // Concrete derivation for a CALL bull spread (long 100C, short 110C):
-  //   strikes ascending: 100, 110
-  //   ratio at 100: +1 (long)
-  //   ratio at 110: −1 (short)
-  //   net ratio above 110: 0  → bounded
-  //   intrinsic worst case at any S above 110: (S-100) - (S-110) = 10
-  //   ⇒ loss = (K_short - K_long) × 100 (per contract) = 10 × 100 = $1000
-  //
-  // For a PUT bull spread (short 100P, long 90P):
-  //   strikes ascending: 90, 100
-  //   ratio at 90: +1 (long)
-  //   ratio at 100: −1 (short)
-  //   net ratio below 90: 0 → bounded
-  //   intrinsic worst case at S=0: max(0, 100-S) - max(0, 90-S) = 10
-  //   ⇒ loss = (K_short - K_long) × 100 = $1000
-
-  let maxIntrinsicLoss = 0;
-
-  if (right === "C") {
-    // Sweep ascending. At each segment [K_i, K_{i+1}], the cumulative net
-    // ratio above K_i determines slope. If net ratio above some K_i is < 0
-    // (net short), and there are no further long calls above it, the
-    // intrinsic loss is unbounded — but `legsAreBounded` already guards
-    // against that case. So if we get here, the integral converges.
-    //
-    // The structural max loss in dollars = max over strikes of:
-    //   sum_{j: K_j <= K_i} (net_short_above_K_j × (K_j - K_long_strike))
-    //
-    // Simpler closed form: the worst case occurs at the strike where
-    // remaining net ratio first becomes ≥ 0 walking up. We compute the
-    // integral via trapezoidal accumulation.
-    let cumulativeRatio = 0;
-    let lastStrike = 0;
-    let intrinsicAtStrike = 0;
-    let worstSoFar = 0;
-    // Index-based first-iteration skip — NOT `lastStrike > 0`. The old guard
-    // silently broke when a virtual stock-coverage leg landed at strike=0
-    // (after processing k=0, lastStrike stayed at 0, so the next segment
-    // failed the > 0 check and integration was dropped). Index check survives
-    // any strike value including zero and negative sentinels.
-    for (let i = 0; i < strikes.length; i++) {
-      const k = strikes[i];
-      // Between lastStrike and k, every contract above k contributes
-      // (k - lastStrike) × cumulativeRatio. Negative ratio = losing.
-      if (i > 0) {
-        intrinsicAtStrike += (k - lastStrike) * cumulativeRatio;
-      }
-      // Update worst BEFORE applying this strike's ratio so we capture
-      // pre-strike loss at large stock prices going down.
-      // (Loss is the negative of intrinsicAtStrike.)
-      worstSoFar = Math.max(worstSoFar, -intrinsicAtStrike);
-      cumulativeRatio += ratioByStrike.get(k) ?? 0;
-      lastStrike = k;
-    }
-    // After the highest strike, cumulativeRatio should be ≥ 0 (bounded).
-    // The worst point is the local minimum of the intrinsic curve which
-    // we already tracked.
-    maxIntrinsicLoss = worstSoFar * MULTIPLIER;
-  } else {
-    // Put side — sweep descending so worst case at S→0 is captured.
-    // Equivalent: compute intrinsic loss at S=0 directly. Each short put
-    // contributes +K_short to loss; each long put contributes −K_long.
-    // For a put bull spread (short 100, long 90): loss at 0 = 100 - 90 = 10
-    //
-    // But if shorts and longs are mismatched at intermediate strikes we
-    // need the same trapezoidal walk on the put side. Easier: at every
-    // strike S = 0, the intrinsic loss is:
-    //
-    //   loss(0) = sum over short puts (K_short × ratio)
-    //           − sum over long puts (K_long × ratio)
-    //
-    // For a covered put spread the long ratio matches short ratio with
-    // K_long ≤ K_short, yielding a positive (bounded) loss. For naked
-    // short puts (no long protection) the loss is K_short × ratio.
-    let lossAtZero = 0;
-    for (const leg of sameRightLegs) {
-      const sign = leg.action === "SELL" ? 1 : -1;
-      lossAtZero += sign * leg.strike * leg.quantity;
-    }
-    maxIntrinsicLoss = Math.max(0, lossAtZero) * MULTIPLIER;
-  }
-
-  return maxIntrinsicLoss;
-}
-
-/**
- * Symmetric to computeBoundedMaxLoss: sum per-leg upside potential.
- *
- * For most defined-risk structures gain is bounded by long-strike spreads
- * (bull put: credit + spread width; iron condor: net credit + best wing).
- * Pure long calls have unbounded upside — handled at the leg level.
- *
- * Returns a positive dollar magnitude.
- */
-function computeBoundedMaxGain(
-  legs: OrderRiskLeg[],
-  netPremium: number,
-  comboQuantity: number,
-): number {
-  // Symmetric to computeBoundedMaxLoss: per-side intrinsic gain at the
-  // favorable extreme strike, scaled by comboQuantity.
-  const callLegs = legs.filter((l) => l.right === "C");
-  const putLegs = legs.filter((l) => l.right === "P");
-
-  const callGainPerCombo = sideMaxGain(callLegs, "C");
-  const putGainPerCombo = sideMaxGain(putLegs, "P");
-
-  const intrinsicTotal =
-    Math.max(callGainPerCombo, putGainPerCombo) * comboQuantity;
-
-  // netPremium > 0 = debit (we paid → reduces gain).
-  // netPremium < 0 = credit (we received → adds to gain).
-  const netCashDollars = -netPremium * comboQuantity * MULTIPLIER;
-  return Math.max(0, intrinsicTotal + netCashDollars);
-}
-
-function sideMaxGain(sameRightLegs: OrderRiskLeg[], right: LegRight): number {
-  if (sameRightLegs.length === 0) return 0;
-
-  // Mirror of sideMaxLoss: find the worst gain ceiling reachable at any
-  // single stock price S on this side of the chain.
-  //
-  // For CALL side at S → +∞:
-  //   intrinsic value of leg = sign × max(0, S - K) = sign × (S - K)
-  //   total = sum(sign × (S - K)) = S × net_ratio − sum(sign × K)
-  //   If net_ratio == 0 (covered): total collapses to −sum(sign × K),
-  //     which is +sum(K_short) − sum(K_long) — positive when shorts have
-  //     higher strikes (bull spread). At S=K_short the long is ITM and
-  //     short OTM, then short kicks in. Maximum intrinsic on the call side
-  //     is bounded by spread width — equivalent to integrating up.
-  //
-  // For a bull call spread (long 100C, short 110C):
-  //   intrinsic gain at S→∞: (S-100) − (S-110) = 10 → $1000
-  //
-  // The trapezoidal walk used in sideMaxLoss applies symmetrically here:
-  // worst case at the highest strike when sweeping ascending, before the
-  // short leg starts losing back the gains.
-
-  const ratioByStrike = new Map<number, number>();
-  for (const leg of sameRightLegs) {
-    const sign = leg.action === "BUY" ? 1 : -1;
-    ratioByStrike.set(
-      leg.strike,
-      (ratioByStrike.get(leg.strike) ?? 0) + sign * leg.quantity,
-    );
-  }
-  const strikes = Array.from(ratioByStrike.keys()).sort((a, b) => a - b);
-
-  if (right === "C") {
-    // Sweep ascending. Intrinsic value above each strike grows by
-    // (segment_width × cumulative_long_ratio). Peak gain = highest point
-    // on the curve before short legs reverse it.
-    let cumulativeRatio = 0;
-    let lastStrike = 0;
-    let intrinsic = 0;
-    let bestSoFar = 0;
-    // Index-based first-iteration skip — mirror of the sideMaxLoss fix so
-    // strike=0 virtual stock-coverage legs are walked correctly.
-    for (let i = 0; i < strikes.length; i++) {
-      const k = strikes[i];
-      if (i > 0) {
-        intrinsic += (k - lastStrike) * cumulativeRatio;
-      }
-      bestSoFar = Math.max(bestSoFar, intrinsic);
-      cumulativeRatio += ratioByStrike.get(k) ?? 0;
-      lastStrike = k;
-    }
-    return bestSoFar * MULTIPLIER;
-  }
-
-  // PUT side: intrinsic value at S = 0 across each long leg.
-  // For a bear put spread (long 110P, short 100P): max gain = (110-100) = 10
-  // = +K_long − K_short = +110 − 100 at S=0.
-  // Walking descending strikes, accumulate net LONG put ratio gains.
-  let lossAtZero = 0;
-  for (const leg of sameRightLegs) {
-    const sign = leg.action === "BUY" ? 1 : -1;
-    lossAtZero += sign * leg.strike * leg.quantity;
-  }
-  return Math.max(0, lossAtZero) * MULTIPLIER;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1105,8 +841,8 @@ export function augmentOrderLegsWithPortfolioCoverage(
   //     is true of the held shares but not of THIS order's structure).
   //   - inject a virtual `BUY C strike=0` leg whose ratio = shares / (100 ×
   //     comboQuantity). Strike=0 is mathematically equivalent to long stock
-  //     (intrinsic = max(0, S - 0) = S), and `sideMaxLoss` / `sideMaxGain`
-  //     handle it correctly after the index-based first-iteration fix.
+  //     (intrinsic = max(0, S - 0) = S), and `intrinsicPayoffExtrema`
+  //     evaluates it like any other strike.
   //   - fold the stock's per-share cost basis into `netPremiumAdjustment`
   //     so the synthetic combo's net debit reflects sunk basis. Without
   //     this, the model would say "long stock at $0 + short call" → max

@@ -29,9 +29,6 @@ export type RefreshRule = {
 
 export type RefreshSchedule = readonly RefreshRule[];
 
-/** Older name for the same shape; every schedule is resolved to UTC instants. */
-export type UtcSchedule = RefreshSchedule;
-
 const MON_FRI: readonly number[] = [1, 2, 3, 4, 5];
 const TUE_SAT: readonly number[] = [2, 3, 4, 5, 6];
 

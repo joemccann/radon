@@ -51,10 +51,6 @@ export interface UseShortAvailabilityResult {
 const CACHE_TTL_MS = 60_000;
 const responseCache = new Map<string, { data: ShortAvailabilityData; at: number }>();
 
-export function __clearShortAvailabilityCacheForTest(): void {
-  responseCache.clear();
-}
-
 /**
  * Fetches short-availability data for a single ticker from the Next.js proxy
  * route, which in turn calls FastAPI GET /short-availability/{ticker}.

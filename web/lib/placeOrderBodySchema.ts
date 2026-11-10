@@ -1,4 +1,4 @@
-import { Type, type Static } from "@sinclair/typebox";
+import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
 /** IB + chain UI use C/P; OrderBuilder sends CALL/PUT for HTTP clarity — both allowed here. */
@@ -56,8 +56,6 @@ export const PlaceOrderBodySchema = Type.Object({
    *  back to a short-window content hash. */
   idempotencyKey: Type.Optional(Type.String()),
 });
-
-export type PlaceOrderBodyValidated = Static<typeof PlaceOrderBodySchema>;
 
 /** Normalize to IB `C` / `P` for guards and `ib_place_order.py`. */
 export function normalizeOptionRight(r: string): "C" | "P" {

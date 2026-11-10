@@ -15,10 +15,6 @@ export function fmtPct(v: number | null | undefined, decimals = 2, raw = false):
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(decimals)}%`;
 }
 
-/** Format as rounded USD: "$45,678" / "-$1,234" (no millions abbreviation) */
-export const fmtUsdRound = (n: number): string =>
-  `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-
 /** Format as USD: "$1.23M" / "$45,678" / "-$1,234" */
 export function fmtUsd(value: number): string {
   const abs = Math.abs(value);
@@ -65,13 +61,6 @@ export function fmtRatio(value: number | null | undefined): string {
 export function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return v.toFixed(decimals);
-}
-
-/** Format as signed exact USD: "+$1,234.56" / "-$1,234.56" / "---" for null */
-export function fmtSignedUsdExact(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "---";
-  const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${n >= 0 ? "+" : "-"}$${abs}`;
 }
 
 /** Format nullable exact USD: "$1,234.56" / "---" */
