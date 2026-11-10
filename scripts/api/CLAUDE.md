@@ -86,6 +86,13 @@ cache still goes live; a failed live fetch still falls back to disk.
 interpreter on every panel poll (PERF-043). Stale or unstamped cache
 still goes live; a failed live fetch still falls back to disk.
 
+`GET /ticker/ratings` serves the ticker row from
+`data/analyst_ratings_cache.json` when `fetched_at` is younger than the
+writer's 4-hour TTL (`fetch_analyst_ratings.CACHE_TTL_HOURS`) and only
+then spawns `fetch_analyst_ratings_rh.py`. Analyst consensus does not
+justify a new interpreter on every Ratings-tab open (PERF-051). Stale,
+missing, empty, or error rows still go live.
+
 `GET /short-availability/{ticker}` overlaps the IB tick-46/89 probe and the
 UW `get_short_data` fee overlay (PERF-024). Merge after both complete;
 source priority stays IB then UW.

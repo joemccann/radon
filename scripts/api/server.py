@@ -6485,6 +6485,45 @@ async def pi_exec(payload: dict, request: Request):
     }
 
 
+_ANALYST_RATINGS_CACHE = DATA_DIR / "analyst_ratings_cache.json"
+# Writer CACHE_TTL_HOURS = 4. Analyst consensus does not move intra-session.
+# Match that so a Ratings-tab poll does not spawn fetch_analyst_ratings_rh.py
+# (PERF-051). serviceHealthWindows open window is 30 min; the writer is the
+# freshness source of truth.
+_ANALYST_RATINGS_CACHE_TTL_S = 4 * 60 * 60
+
+
+def _analyst_ratings_cache_age_seconds(payload: dict) -> Optional[float]:
+    stamp = payload.get("fetched_at")
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    now = datetime.now(parsed.tzinfo) if parsed.tzinfo is not None else datetime.now()
+    age = (now - parsed).total_seconds()
+    if age < 0:
+        return None
+    return age
+
+
+def _fresh_analyst_ratings_cache(ticker: str) -> Optional[dict]:
+    cached = _read_cache(_ANALYST_RATINGS_CACHE)
+    if not isinstance(cached, dict):
+        return None
+    ratings = cached.get("ratings")
+    if not isinstance(ratings, dict):
+        return None
+    row = ratings.get(ticker)
+    if not isinstance(row, dict) or row.get("error") or not row.get("ratings"):
+        return None
+    age = _analyst_ratings_cache_age_seconds(row)
+    if age is None or age >= _ANALYST_RATINGS_CACHE_TTL_S:
+        return None
+    return row
+
+
 @app.get("/ticker/ratings")
 async def ticker_ratings(ticker: str):
     """Analyst ratings + targets for a single ticker.
@@ -6493,11 +6532,17 @@ async def ticker_ratings(ticker: str):
     consensus -> UW) with --json. The
     script outputs a JSON array (one entry per ticker requested); for the
     single-ticker case we unwrap and return the first element so the Next.js
-    route can render it directly.
+    route can render it directly. A cache whose ``fetched_at`` is inside
+    ``_ANALYST_RATINGS_CACHE_TTL_S`` is served without a spawn (PERF-051).
     """
     upper = ticker.upper().strip()
     if not upper:
         raise HTTPException(status_code=400, detail="ticker is required")
+
+    cached = _fresh_analyst_ratings_cache(upper)
+    if cached is not None:
+        return cached
+
     result = await run_script(
         "fetch_analyst_ratings_rh.py", [upper, "--json"], timeout=60
     )
