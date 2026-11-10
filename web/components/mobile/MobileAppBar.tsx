@@ -14,8 +14,6 @@ import ClearBrandMark from "../ClearBrandMark";
 type MobileAppBarProps = {
   title: string;
   isPageHeading?: boolean;
-  /** @deprecated read from useIBStatusContext().displayStatus directly. */
-  ibConnected?: boolean;
   onOpenSearch?: () => void;
   onOpenMore?: () => void;
 };

@@ -24,10 +24,6 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: false, userId: null }),
 }));
 
-vi.mock("../components/PriceChart", () => ({
-  default: () => React.createElement("div", { "data-testid": "price-chart" }),
-}));
-
 vi.mock("../components/QuoteTelemetry", () => ({
   TickerQuoteTelemetry: () => React.createElement("div", { "data-testid": "quote-telemetry" }),
   OrderQuoteTelemetry: () => React.createElement("div", { "data-testid": "order-quote-telemetry" }),

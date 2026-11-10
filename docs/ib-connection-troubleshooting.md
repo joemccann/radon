@@ -200,7 +200,6 @@ Understanding where time goes when Gateway is unreachable:
 |-------|----------------|-------|
 | `IBClient.connect()` | **3s** | `ib_insync` TCP + handshake timeout |
 | `runScript()` (Node wrapper) | 30s | Python script spawn + execution |
-| `syncMutex` (API route) | Coalesced | Multiple requests share one in-flight sync |
 | Cached fallback read | <50ms | Read JSON from disk |
 | **Total worst case (unreachable)** | **~3.5s** | Sync fails at 3s, fallback serves cached data |
 
