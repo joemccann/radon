@@ -48,7 +48,6 @@ export default function MobileShell({ title, isPageHeading, ibConnected, lastSyn
       <MobileAppBar
         title={title}
         isPageHeading={isPageHeading}
-        ibConnected={ibConnected}
         onOpenSearch={openSearch}
         onOpenMore={() => setDrawerOpen(true)}
       />

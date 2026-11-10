@@ -23,10 +23,6 @@ vi.mock("@/lib/useWatchlist", () => ({
   useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
 }));
 
-vi.mock("../components/PriceChart", () => ({
-  default: () => React.createElement("div", { "data-testid": "price-chart" }),
-}));
-
 import TickerDetailContent from "../components/TickerDetailContent";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
 import { OrderActionsProvider } from "../lib/OrderActionsContext";

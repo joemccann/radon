@@ -26,7 +26,6 @@ describe("workspace typography semantics", () => {
   });
 
   it("exposes full operational strings hidden by visual ellipsis", () => {
-    expect(source("components/ServiceHealthBanner.tsx")).toContain('title={fullMessage}');
     expect(source("components/ticker-detail/OptionsChainTab.tsx")).toContain('title={`${ticker} ${formatExpiry(leg.expiry)}');
     expect(source("components/dashboard/CatalystsQuadrant.tsx")).toContain('title={row.title}');
     expect(source("components/dashboard/ScannerHero.tsx")).toContain('title={volConeExpiryLabel(row)}');

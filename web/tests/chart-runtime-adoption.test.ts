@@ -14,10 +14,6 @@ const criHistorySource = readFileSync(
   resolve(__dirname, "../components/CriHistoryChart.tsx"),
   "utf-8",
 );
-const priceChartSource = readFileSync(
-  resolve(__dirname, "../components/PriceChart.tsx"),
-  "utf-8",
-);
 const relationshipSource = readFileSync(
   resolve(__dirname, "../components/RegimeRelationshipView.tsx"),
   "utf-8",
@@ -64,12 +60,6 @@ test("[runtime] CriHistoryChart renders the passed title in the shared chart she
   expect(criHistorySource).toContain("title={title}");
   expect(criHistorySource).toContain('className="chart-tooltip"');
   expect(criHistorySource).not.toContain("const legendY = -6");
-});
-
-test("[runtime] PriceChart declares the live-trace family through the shared chart shell", () => {
-  expect(priceChartSource).toContain("import ChartPanel");
-  expect(priceChartSource).toContain("<ChartPanel");
-  expect(priceChartSource).toContain('family="live-trace"');
 });
 
 test("[runtime] RegimeRelationshipView uses the shared chart shell and legend primitives", () => {

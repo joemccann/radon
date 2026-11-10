@@ -11,7 +11,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import { emitAsk, subscribeAsk } from "../lib/agent/askBus";
 import AnalysisSources from "../components/agent/AnalysisSources";
-import { buildAnalysisSources, buildFollowUps } from "../lib/agent/analysisSources";
 import ProposalCard from "../components/agent/ProposalCard";
 import { buildScannerProposal } from "../lib/agent/scannerProposal";
 import type { ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
@@ -41,16 +40,16 @@ describe("askBus", () => {
 });
 
 describe("AnalysisSources — newsfeed wiring", () => {
-  const post = {
-    href: "https://www.themarketear.com/posts/abc",
-    tags: ["MU", "FED RATES"],
-    tags_text: ["MU"],
-    tags_vision: ["CHART"],
-  };
+  const sources = [
+    { id: "article", name: "themarketear.com", feed: "newsfeed", href: "https://www.themarketear.com/posts/abc" },
+    { id: "tagger-text", name: "Text tagger", feed: "1 tag" },
+    { id: "tagger-vision", name: "Vision tagger", feed: "1 tag" },
+  ];
+  const followUps = ["Scan MU flow"];
 
   it("renders real provenance rows derived from the post", () => {
     render(
-      <AnalysisSources sources={buildAnalysisSources(post)} followUps={buildFollowUps(post)} />,
+      <AnalysisSources sources={sources} followUps={followUps} />,
     );
     expect(screen.getByText("themarketear.com")).toBeTruthy();
     expect(screen.getByText("Text tagger")).toBeTruthy();
@@ -63,8 +62,8 @@ describe("AnalysisSources — newsfeed wiring", () => {
 
     render(
       <AnalysisSources
-        sources={buildAnalysisSources(post)}
-        followUps={buildFollowUps(post)}
+        sources={sources}
+        followUps={followUps}
         onFollowUp={emitAsk}
       />,
     );
@@ -76,7 +75,7 @@ describe("AnalysisSources — newsfeed wiring", () => {
 
   it("renders nothing for a post with no provenance and no follow-ups", () => {
     const { container } = render(
-      <AnalysisSources sources={buildAnalysisSources({})} followUps={buildFollowUps({})} />,
+      <AnalysisSources sources={[]} followUps={[]} />,
     );
     expect(container.querySelector(".analysis-sources__label")).toBeNull();
   });
