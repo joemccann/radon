@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { createRequire } from "node:module";
-import { CalmStreakFixture, CorFixture, CreditSpreadFixture, CreditVixFixture, CurveFixture, DivyieldFixture, HhlevFixture, HyadFixture, IeiHygFixture, IvSpreadFixture, IvrankFixture, MaRatioFixture, MarginDebtFixture, RsiOversoldFixture, Skew2dFixture, SkewFixture, StraddleFixture, StreaksFixture, VixcorFixture, VixPcFixture, VixtsFixture } from "./clear-indicator-fixtures";
+import { CalmStreakFixture, CorFixture, CreditSpreadFixture, CreditVixFixture, CurveFixture, DivyieldFixture, HhlevFixture, HyadFixture, IeiHygFixture, IvSpreadFixture, IvrankFixture, MaRatioFixture, MarginDebtFixture, RsiOversoldFixture, Skew2dFixture, SkewFixture, MsrFixture, StraddleFixture, StreaksFixture, VixcorFixture, VixPcFixture, VixtsFixture } from "./clear-indicator-fixtures";
 import { AtsFixture, BreadthFixture, CotFixture, ShortFixture } from "./clear-positioning-fixtures";
 import { CtaFixture, DiscoverFixture, GarchFixture, JournalFixture, LeapFixture, PreferencesFixture, VolConeFixture } from "./clear-workspace-fixtures";
 import { buildDemoOptionChain, buildDemoOptionExpirations, buildDemoOptionsExposure } from "../lib/demo/fixtures/options";
@@ -52,6 +52,7 @@ const fixtures: Record<string, unknown> = {
   "/api/skew": SkewFixture(),
   "/api/skew2d": Skew2dFixture(),
   "/api/straddle": StraddleFixture(),
+  "/api/msr": MsrFixture(),
   "/api/margin-debt": MarginDebtFixture(),
   "/api/ivrank": IvrankFixture(),
   "/api/iv-spread": IvSpreadFixture(),

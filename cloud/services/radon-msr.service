@@ -1,0 +1,21 @@
+[Unit]
+Description=Radon MSR Indicator (Cboe SPX/VIX/VXN/RVX + NDX/RUT closes, daily)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_msr.py
+StandardOutput=journal
+StandardError=journal
+# First run deep-seeds ~17 years of NDX/RUT closes (IB 20 Y, then fallbacks).
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
