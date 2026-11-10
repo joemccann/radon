@@ -55,8 +55,6 @@ PRODUCTION_EXEC_START_WRAPPERS = (
     "scripts/run_cta_sync.sh",
     "scripts/run_vcg_refresh.sh",
     "scripts/run_catalysts.sh",
-    "scripts/run_informed_flow.sh",
-    "scripts/run_event_odds.sh",
 )
 
 
