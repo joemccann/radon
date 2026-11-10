@@ -54,6 +54,7 @@ All current 73 App Router pages appear exactly once in the manifest test. Four g
 | `/regime/ivrank` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/ma-ratio` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/margin` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
+| `/regime/msr` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/rsi-oversold` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/short` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
 | `/regime/skew` | render/redirect smoke | clear-all-pages.spec.ts; smoke only |
