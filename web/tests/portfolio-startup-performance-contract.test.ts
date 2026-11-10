@@ -202,7 +202,7 @@ describe("portfolio startup performance contracts", () => {
     const specs = eagerImportSpecifiers(source("components/WorkspaceSections.tsx"));
 
     // Guard against a parser that silently matches nothing.
-    expect(specs.has("RegimePanel"), "parser must see the workspace's real imports").toBe(true);
+    expect(specs.has("InstrumentSkeleton"), "parser must see the workspace's real imports").toBe(true);
     expect([...specs]).not.toContain("PositionTable");
     expect([...specs]).not.toContain("PortfolioSections");
   });
