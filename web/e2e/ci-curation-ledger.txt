@@ -263,7 +263,6 @@ modify-combo-order.spec.ts
 modify-order-confirmation.spec.ts
 modify-order-resting-limit.spec.ts
 modify-order-spread-telemetry.spec.ts
-msr-tab.spec.ts
 newsfeed-lightbox-image-fit.spec.ts
 open-order-combo.spec.ts
 open-order-single-detail.spec.ts

@@ -97,6 +97,7 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-cor.service",
     "radon-vixcor.service",
     "radon-straddle.service",
+    "radon-msr.service",
     "radon-credit-spread.service",
     "radon-ivrank.service",
     "radon-yield-curve.service",
