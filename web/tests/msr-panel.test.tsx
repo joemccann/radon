@@ -407,6 +407,13 @@ describe("MsrPanel — chart", () => {
       }
     }
   });
+
+  it("draws the dense daily series as a line without a marker on every session", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const sessions = buildMsrChartRows(buildData().series, "SPX").length;
+    expect(sessions).toBeGreaterThan(10);
+    expect(document.querySelectorAll("circle.dot-msr").length).toBeLessThan(sessions / 2);
+  });
 });
 
 describe("MsrPanel — top table", () => {

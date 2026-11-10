@@ -266,6 +266,7 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/skew": { GET: SCAN_SNAPSHOTS },
   "/api/skew2d": { GET: SCAN_SNAPSHOTS },
   "/api/straddle": { GET: SCAN_SNAPSHOTS },
+  "/api/msr": { GET: SCAN_SNAPSHOTS },
   "/api/vix-pc": { GET: SCAN_SNAPSHOTS },
   "/api/vixcor": { GET: SCAN_SNAPSHOTS },
   "/api/vixts": { GET: SCAN_SNAPSHOTS },

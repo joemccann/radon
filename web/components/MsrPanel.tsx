@@ -247,6 +247,7 @@ function MsrChart({ rows, index }: { rows: MsrChartRow[]; index: MsrIndex }) {
       axis: "right",
       scaleType: "linear",
       yDomain: zeroFloorDomain(slice),
+      pointMarkers: "isolated",
       format: formatMsr,
     },
   ];
