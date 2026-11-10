@@ -2,7 +2,7 @@
 
 Rides the continuous bucket (radon-watchdog-continuous.timer, every
 5 min, 24/7) via ``__main__._cmd_bucket``. The DUR-02 StartLimit brake
-(radon-cloud unit files: StartLimitIntervalSec=300, StartLimitBurst=5)
+(cloud/services unit files: StartLimitIntervalSec=300, StartLimitBurst=5)
 parks a crash-looping unit as ``failed`` with ``Result=start-limit-hit``
 instead of restarting it forever — but a parked unit NEVER auto-recovers,
 so the brake without this alarm converts an infinite flap into a

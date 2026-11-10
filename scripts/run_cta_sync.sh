@@ -1,11 +1,10 @@
 #!/bin/bash
 #
-# MenthorQ CTA refresh wrapper for launchd
+# MenthorQ CTA refresh wrapper for radon-cta-sync.service
 #
-# Runs at the scheduled post-close windows, with `RunAtLoad` handling
-# reboot/login/wake catch-up. The target date is always the latest closed US
-# trading session, so if the machine slept through the scheduled run the next
-# load-triggered execution backfills the missing session automatically.
+# Runs at the timer's scheduled post-close windows. The target date is always
+# the latest closed US trading session, so if a scheduled run is missed the
+# next execution backfills the missing session automatically.
 #
 
 cd "$(dirname "$0")/.."

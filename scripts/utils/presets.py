@@ -107,7 +107,7 @@ def list_presets() -> List[Tuple[str, str, int]]:
 
     Returns:
         List of (name, description, ticker_count) tuples, sorted by name.
-        Includes the virtual `indexes` union (no indexes.json).
+        Includes the virtual unions (`indexes`, `largecaps`; no JSON file).
     """
     results = []
     if not PRESETS_DIR.exists():

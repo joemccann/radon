@@ -56,7 +56,7 @@ def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) ->
     return max(minimum, min(maximum, parsed))
 
 def get_open_positions():
-    """Get list of tickers with open positions."""
+    """Get the set of tickers with open positions."""
     return {
         str(p.get("ticker") or "").upper()
         for p in read_portfolio_positions()
@@ -196,7 +196,7 @@ def _process_ticker(
     
     Args:
         item: Watchlist item with 'ticker' key
-        client: Optional shared UWClient (passed via functools.partial)
+        client: Unused.
     """
     ticker = item["ticker"]
     try:

@@ -212,7 +212,7 @@ def _refresh() -> int:
     # process crash. Exiting non-zero would mark the systemd unit "failed" and
     # page the operator for self-healing noise (cri_scan timed out once
     # post-close on 2026-06-15, fine on every neighbouring run). Soft-fail now
-    # heartbeats the child service (error + next_attempt_at) so the cri-scan /
+    # heartbeats the child service (error row, no next_attempt_at) so the cri-scan /
     # vcg-scan staleness watchers see activity rather than silence. The unit
     # still succeeds whenever the refresh RAN; only an unhandled crash
     # (Python's own non-zero exit) trips the unit-failed alarm.

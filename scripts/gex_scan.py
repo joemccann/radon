@@ -772,7 +772,6 @@ def build_gex_output(
     day_change = round(spot - close, 2) if close else None
     day_change_pct = round((spot - close) / close * 100, 4) if close else None
 
-    # Count contracts and expirations from raw data
     data_date = strike_data[0].get("date") if strike_data else today_et
 
     all_levels = {**levels}

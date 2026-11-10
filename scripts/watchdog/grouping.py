@@ -22,12 +22,11 @@ isolated stale on an IB service is more likely a one-off retry than a
 gateway outage.
 
 The ``service_health`` table is still written for each underlying
-service's OWN row is the one to consult for downstream truth; the
+service; that service's OWN row is the one to consult for downstream truth; the
 meta-row ``watchdog-alerts`` reflects DISPATCHER HEALTH ONLY (see
 ``notify`` module docstring).
 
-Discord is intentionally NOT touched here — a parallel agent is removing
-Discord from the watchdog. Only Pushover is grouped.
+Only Pushover is grouped.
 
 Cooldown semantics: the grouped alert key is ``ib-gateway-grouped``
 with severity ``P1``. ``cooldown.mark_notified`` + ``cooldown_allows_fire``

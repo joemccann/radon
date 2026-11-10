@@ -7,9 +7,10 @@ The existing `journal` table tracks executions only. Capital movements
 This script bridges that gap.
 
 Usage:
-    python -m scripts.cash_flow_sync
-    python -m scripts.cash_flow_sync --types Deposit,Withdrawal
-    python -m scripts.cash_flow_sync --json          # print parsed rows, don't write
+    # Live pull needs --sendrequest; with neither it nor --from-file the run exits 17:
+    python -m scripts.cash_flow_sync --sendrequest
+    python -m scripts.cash_flow_sync --sendrequest --types Deposit,Withdrawal
+    python -m scripts.cash_flow_sync --sendrequest --json   # print parsed rows, don't write
 
     # Operator recovery — no network, no credentials required:
     python -m scripts.cash_flow_sync --from-file ~/Downloads/statement.xml
@@ -43,10 +44,15 @@ failure by substring-matching stderr again):
     13  the statement came back but would not parse. Soft lane.
     14  the WRITE failed. The fetch already succeeded — a retry must replay
         the statement, never spend another SendRequest.
+    16  pre-flight embargo: a prior 1025 embargo is still live, so no HTTP
+        was sent. Never re-arms the lockout.
+    17  no statement source (neither --from-file nor --sendrequest). No
+        work was done; not success, not an error.
 
 Cadence:
-    monitor_daemon `cash_flow_sync` handler runs this once per ET trading
-    day at 08:00 ET (pre-open). IBKR Flex publishes cash
+    radon-flex-pull.timer -> flex_delivery_ingest runs this with
+    --from-file; the monitor_daemon `cash_flow_sync` handler (08:00 ET,
+    pre-open) is not registered. IBKR Flex publishes cash
     transactions once per day with a ~1-day settlement lag — a single
     well-timed daily call after the publication window is sufficient.
 
@@ -368,6 +374,8 @@ def _send_request_once(token: str, query_id: str) -> str:
 
     Raises:
         FlexThrottleError    on the rate-limit code (1018)
+        _FlexLockoutError    on the lockout code (1025)
+        _FlexTransientError  on a transient or still-generating code
         _FlexAppError        on any other structured Flex error
         Exception            on transport / parse failure
     """
@@ -440,9 +448,9 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     become Deposit/Withdrawal. Securities ACATS with cash 0 are not cash
     flows (TWR already counts them as external flow).
 
-    Rows sharing a `transactionID` are all kept. The first keeps that id;
-    later ones get `{transactionID}#{n}` so upsert cannot last-write-wins
-    the extra amounts (2026-07-06 interest trio: $38.18).
+    Rows sharing a `transactionID` are all kept. Each one, the first
+    included, gets `{transactionID}#{content hash}` so upsert cannot
+    last-write-wins the extra amounts (2026-07-06 interest trio: $38.18).
 
     Returns a list of dicts ready to feed `upsert_cash_flow_rows`.
     """
@@ -689,6 +697,7 @@ def fetch_statement_xml(
         FlexThrottleError    on the Flex rate-limit code 1018,
                              from EITHER leg.
         _FlexLockoutError    on undocumented 1025 (failed-attempts lockout).
+        _FlexTransientError  on a transient or still-generating code.
         _FlexAppError        on any other structured Flex error.
         _StatementNotReady   when the poll budget expires.
         FlexTokenLocked      when a prior 1025 embargo is still live.
@@ -911,9 +920,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
             return EXIT_FLEX_PREFLIGHT_EMBARGO
         if type(exc).__name__ == "FlexSendDisabled":
-            # NOT `ok`, and NOT EXIT_OK. The scheduled daily unit passes
-            # neither --from-file nor --sendrequest, so this branch runs every
-            # night; reporting healthy meant the 25h `cash-flow-sync`
+            # NOT `ok`, and NOT EXIT_OK. A run that passes neither
+            # --from-file nor --sendrequest lands here;
+            # reporting healthy meant the 25h `cash-flow-sync`
             # staleness window could never fire — the exact stale-data
             # condition it exists to catch. R-328.
             print(f"SKIP: {exc}", file=sys.stderr)

@@ -460,7 +460,7 @@ def _heartbeat(until: str, code: str) -> bool:
 
 # --- CLI entry point ---------------------------------------------------------
 #
-# `clear()` previously had no caller outside `active_until`'s own lapse branch,
+# Without this CLI `clear()` had no caller,
 # so the only manual escape from a bad embargo was deleting the sidecar — which
 # the next `active_until()` silently undid by rehydrating from the still-error
 # health row. R-213.

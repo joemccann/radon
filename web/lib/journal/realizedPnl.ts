@@ -26,7 +26,8 @@
  *
  * Residual option inventory after the fill walk (no opposite fill, no Flex
  * CLOSED row) is treated as a worthless expiry at $0 on the contract's
- * expiry date when that date is on or before the report as-of day (`opts.to`).
+ * expiry date when a row carries IB's `Ep` lapse code and that date is on or
+ * before the report as-of day (`opts.to`, capped at today ET).
  * IB rarely writes a trade for OTM lapse; without this, monthly realized P&L
  * misses full debit losses (long) and credit kept (short) — e.g. KWEB Jul-17.
  */
@@ -422,7 +423,8 @@ function matchInventory(
 }
 
 /**
- * Residual option inventory with expiry on or before `asOfDay` lapses at $0.
+ * Residual option inventory with expiry on or before `asOfDay` lapses at $0,
+ * but only when `worthlessProven` (a row carries IB's `Ep` lapse code).
  * Long: realized = −basis (full debit loss). Short: realized = +basis (credit kept).
  * Stocks and unexpired options return null.
  */
@@ -522,7 +524,7 @@ function closeEventsForGroup(
   const inventory = matchInventory(execs, resolveFallback);
   events.push(...inventory.events);
 
-  // Always synthesize residual OPT inventory at expiry (as-of opts.to). CLOSED
+  // Synthesize lapse-coded residual OPT inventory at expiry (as-of asOfDay). CLOSED
   // pass-throughs do not clear the fill inventory; skipping expiry when any
   // CLOSED exists would drop true residual lapses (KWEB long after cover flip).
   if (rep) {
@@ -616,6 +618,8 @@ export function computeRealizedPnl(
   },
 ): RealizedPnlSummary {
   const todayEt = toEtDay(new Date().toISOString()) ?? opts.to;
+  // As-of for expiry synthesis is the window end, capped at today ET: unexpired
+  // residual after it stays open (e.g. partial short cover with later expiry).
   const asOfDay = opts.to < todayEt ? opts.to : todayEt;
   const { rows } = dedupJournalRows(allRows);
   const tickerFilter = opts.ticker?.trim().toUpperCase() || undefined;
@@ -634,8 +638,6 @@ export function computeRealizedPnl(
 
   const roundTrips: RealizedRoundTrip[] = [];
   for (const [key, group] of groups) {
-    // As-of for expiry synthesis is the window end: unexpired residual after
-    // `to` stays open (e.g. partial short cover with later expiry).
     const resolveFallback = key.endsWith("|STK")
       ? (event: MatchExec): number | null => {
           const ticker = resolveTickerUpper(group.rep);
