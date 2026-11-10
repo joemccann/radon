@@ -101,11 +101,6 @@ vi.mock("@tools/schemas/ib-sync", () => ({
   PortfolioData: {},
 }));
 
-// Mock @/lib/syncMutex — return a factory that wraps the provided fn
-vi.mock("@/lib/syncMutex", () => ({
-  createSyncMutex: (fn: () => Promise<unknown>) => fn,
-}));
-
 // Mock fs/promises for blotter + journal + portfolio routes
 const mockReadFile = vi.fn();
 const mockReaddir = vi.fn().mockResolvedValue([]);

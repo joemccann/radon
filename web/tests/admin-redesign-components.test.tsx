@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  *
- * Component tests for the /admin redesign: ReliabilityStrip, SystemStatusBar,
+ * Component tests for the /admin redesign: ReliabilityStrip,
  * WriterFreshnessTable, and the extended ConfirmDialog (type-to-confirm +
  * cascade enumeration).
  */
@@ -11,7 +11,6 @@ import React from "react";
 
 afterEach(cleanup);
 import ReliabilityStrip from "../components/admin/ReliabilityStrip";
-import SystemStatusBar from "../components/admin/SystemStatusBar";
 import WriterFreshnessTable from "../components/admin/WriterFreshnessTable";
 import ConfirmDialog from "../components/admin/ConfirmDialog";
 import ServiceControlPanel from "../components/admin/ServiceControlPanel";
@@ -67,35 +66,6 @@ describe("ReliabilityStrip", () => {
     expect(screen.getByTestId("tile-liveness").textContent).toContain("2/2");
     expect(screen.getByTestId("tile-ib-auth").textContent).toContain("Authenticated");
     expect(screen.getByTestId("tile-off-box-probe").textContent).toContain("142ms");
-  });
-});
-
-describe("SystemStatusBar", () => {
-  it("shows the rollup + IB state when loaded", () => {
-    render(
-      <SystemStatusBar
-        units={[daemon("radon-api.service"), daemon("radon-relay.service")]}
-        health={HEALTH}
-        updatedSecsAgo={3}
-        stalled={false}
-      />,
-    );
-    const bar = screen.getByTestId("system-status-bar");
-    expect(bar.textContent).toContain("2/2 OK");
-    expect(bar.textContent).toContain("IB Authenticated");
-    expect(bar.textContent).toContain("updated");
-  });
-
-  it("shows a stale badge when polling stalled", () => {
-    render(
-      <SystemStatusBar units={[daemon("radon-api.service")]} health={HEALTH} updatedSecsAgo={40} stalled />,
-    );
-    expect(screen.getByTestId("status-bar-stalled").textContent).toContain("Polling stalled");
-  });
-
-  it("renders a skeleton while loading", () => {
-    render(<SystemStatusBar units={[]} health={null} updatedSecsAgo={null} stalled={false} loading />);
-    expect(screen.getByTestId("system-status-bar").querySelector(".admin-skeleton")).toBeTruthy();
   });
 });
 
