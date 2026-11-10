@@ -40,8 +40,6 @@ All IB and UW access goes through centralized clients in `scripts/clients/`:
 
 **UWClient** wraps all Unusual Whales REST endpoints with session pooling, automatic retry/backoff, and context manager support. Exception hierarchy: `UWAPIError` → `UWAuthError`, `UWRateLimitError`, `UWNotFoundError`, `UWValidationError`, `UWServerError`. 50+ methods covering dark pool, options flow, stock info, GEX, volatility, ratings, seasonality, and more.
 
-**Legacy utils** (`scripts/utils/ib_connection.py`, `scripts/utils/uw_api.py`) are preserved but all scripts have been migrated to the new clients.
-
 ---
 
 ## Operating Rules
