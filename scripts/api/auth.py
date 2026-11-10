@@ -17,7 +17,7 @@ import time
 from collections import OrderedDict
 from urllib.parse import urlsplit
 
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, HTTPException
 
 logger = logging.getLogger("radon.auth")
 
@@ -564,14 +564,6 @@ async def verify_clerk_bearer(request: Request) -> dict:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     return payload
-
-
-def auth_required():
-    """Return the verify_clerk_jwt dependency for use in route decorators.
-
-    Usage: @app.get("/protected", dependencies=[Depends(auth_required())])
-    """
-    return Depends(verify_clerk_jwt)
 
 
 # ---------------------------------------------------------------------------

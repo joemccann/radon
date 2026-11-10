@@ -175,13 +175,6 @@ prior Friday). The Next.js side mirrors it with `web/lib/backgroundScan.ts`
 (in-flight dedupe + 60 s backoff on any failure). Tests:
 `scripts/api/tests/test_scan_gate.py`, `web/tests/background-scan-trigger.test.ts`.
 
-## Legacy order helpers (REL-021b / R-039)
-
-Production cancel/modify routes retain the original-client subprocess path.
-Do not import the unused pooled shortcut into the server. Legacy helpers
-must refuse unknown or mismatched client ownership before mutation; modify
-also respects trading halt, while owned cancellation remains available.
-
 ## Passive dependency health (R-028 / REL-316)
 
 Trusted `/health` and protected `/health/lite` include coarse `dependencies`
