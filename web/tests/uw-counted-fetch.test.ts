@@ -4,8 +4,8 @@
  * UWClient (Python) records each UW HTTP hit into the flock-shared budget
  * file; the six route-handler call sites fetched UW directly and incremented
  * nothing, so browsing-driven traffic was invisible to /uw/usage and the
- * universe-scan brake. countedUwFetch mirrors one hit per UW response into
- * the shared counter via POST /uw/usage/record (fire-and-forget).
+ * universe-scan brake. countedUwFetch sends each UW request through
+ * POST /uw/request, which counts it into the shared counter.
  */
 import { readdirSync, readFileSync } from "fs";
 import path from "path";

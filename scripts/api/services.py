@@ -893,7 +893,6 @@ async def remote_gateway_action(action: str) -> ActionResult:
 
 
 OPERATOR_CLI_PATH = "/usr/local/bin/radon"
-OPERATOR_UNIT_TIMEOUT_S = 75.0
 # Shared with radon-cloud deploy/operator control so admin mutations never
 # race a release mid-transition. Override only in tests.
 DEPLOY_LOCK_FILE = Path(

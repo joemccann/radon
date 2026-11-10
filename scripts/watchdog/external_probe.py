@@ -230,11 +230,6 @@ def _transition_journal_age_seconds(now: datetime) -> float | None:
     return (now - datetime.fromtimestamp(mtime, tz=timezone.utc)).total_seconds()
 
 
-def _transition_journal_is_stranded(now: datetime) -> bool:
-    age = _transition_journal_age_seconds(now)
-    return age is not None and age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
-
-
 def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
     """True when the off-box sample overlaps a deploy's service restart.
 

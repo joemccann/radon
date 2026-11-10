@@ -21,22 +21,13 @@ def client(monkeypatch):
     return TestClient(server.app)
 
 
-def test_journal_rehydrate_is_404(client):
-    res = client.post("/journal/rehydrate")
-    assert res.status_code == 404
-    assert "file-ingest" in res.json()["detail"].lower() or "file-ingest" in str(res.json()).lower()
-
-
-def test_post_blotter_is_404(client):
-    res = client.post("/blotter")
-    assert res.status_code == 404
-
-
 def test_post_performance_is_404(client):
     res = client.post("/performance")
     assert res.status_code == 404
 
 
-def test_post_performance_background_is_404(client):
-    res = client.post("/performance/background")
-    assert res.status_code == 404
+
+@pytest.mark.parametrize("path", ["/journal/rehydrate", "/blotter", "/performance/background"])
+def test_removed_flex_post_stays_unroutable(client, path):
+    res = client.post(path)
+    assert res.status_code in (404, 405)

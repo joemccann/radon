@@ -122,7 +122,6 @@ function isOperatorOnly(pin: PinRecord): boolean {
   if (pin.capability === "mutate.workspace") return true;
   return (
     pin.path === "/performance"
-    || pin.path === "/performance/background"
     || pin.path === "/portfolio/sync"
     || pin.path === "/portfolio/background-sync"
     || pin.path === "/orders/refresh"
