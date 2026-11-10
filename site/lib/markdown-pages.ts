@@ -13,7 +13,6 @@ import {
   regimeModels,
 } from "./editorial-content";
 import { faqEntries } from "./faq-content";
-import { legalPages } from "./legal-pages";
 import { PRIVACY_H1, PRIVACY_INTRO, privacySections } from "./pages/privacy";
 import { TERMS_H1, TERMS_INTRO, termsSections } from "./pages/terms";
 import {
@@ -148,8 +147,6 @@ pages.set(
       .join("\n\n"),
   ]),
 );
-
-export const MARKDOWN_PATHS = [...pages.keys()].sort();
 
 export function lookupMarkdown(pathname: string): string | null {
   const trimmed =
