@@ -1851,6 +1851,52 @@ def upsert_straddle_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
+_MSR_COLUMNS = "(index_symbol, date, close, iv_prior, move_pct, msr, recorded_at)"
+_MSR_ON_CONFLICT = (
+    "ON CONFLICT(index_symbol, date) DO UPDATE SET "
+    "close = excluded.close, iv_prior = excluded.iv_prior, "
+    "move_pct = excluded.move_pct, msr = excluded.msr, "
+    "recorded_at = excluded.recorded_at"
+)
+
+MSR_UPSERT_SQL = (
+    f"INSERT INTO msr_history {_MSR_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?) {_MSR_ON_CONFLICT}"
+)
+
+
+def upsert_msr_rows(index_symbol: str, rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """MSR indicator — one row per (index, session), idempotent on both.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a rebuild rewrites the
+    full ~4,800-session SPX series, ~12 round-trips instead of thousands.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    index_symbol,
+                    row["date"],
+                    float(row["close"]),
+                    float(row["iv_prior"]),
+                    float(row["move_pct"]),
+                    float(row["msr"]),
+                    stamp,
+                )
+            )
+        db.execute(
+            f"INSERT INTO msr_history {_MSR_COLUMNS} VALUES {placeholders} {_MSR_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
 COR_UPSERT_SQL = """
 INSERT INTO cor_history
   (date, cor1m, cor3m, cor6m, cor1y, recorded_at)

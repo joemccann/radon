@@ -67,6 +67,7 @@ describe.each([
   ["quant", "app/regime/quant/page.tsx"],
   ["exports", "app/regime/exports/page.tsx"],
   ["straddle", "app/regime/straddle/page.tsx"],
+  ["msr", "app/regime/msr/page.tsx"],
   ["cor", "app/regime/cor/page.tsx"],
   ["skew", "app/regime/skew/page.tsx"],
   ["skew2d", "app/regime/skew2d/page.tsx"],
@@ -149,6 +150,9 @@ vi.mock("../components/QuantPanel", () => ({
 }));
 vi.mock("../components/StraddlePanel", () => ({
   default: () => <div data-testid="straddle-panel-stub" />,
+}));
+vi.mock("../components/MsrPanel", () => ({
+  default: () => <div data-testid="msr-panel-stub" />,
 }));
 vi.mock("../components/CorPanel", () => ({
   default: () => <div data-testid="cor-panel-stub" />,
@@ -374,6 +378,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^STRADDLE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/straddle");
+  });
+
+  it("renders the MSR panel when pathname is /regime/msr", () => {
+    mockedPathname = "/regime/msr";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("msr-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
+  });
+
+  it("clicking MSR tab pushes /regime/msr", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^MSR$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/msr");
   });
 
   it("renders the Cor panel when pathname is /regime/cor", () => {
