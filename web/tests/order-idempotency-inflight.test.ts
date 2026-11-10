@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import fs, { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -88,13 +88,27 @@ describe("in-flight placements survive a restart", () => {
   });
 });
 
+// The cap is an in-memory rule. Filling it through the real store costs about
+// 4,000 synchronous snapshot writes, which outran the 5s timeout on loaded CI
+// runners (5.5s and 6.1s on 2026-11-09 and 2026-11-10).
+async function overflowCapWithSettledKeys(): Promise<void> {
+  const write = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+  const rename = vi.spyOn(fs, "renameSync").mockImplementation(() => {});
+  try {
+    for (let i = 0; i < 1_005; i += 1) {
+      await runIdempotentOrder(`fill-${i}`, 300_000, async () => i);
+    }
+  } finally {
+    write.mockRestore();
+    rename.mockRestore();
+  }
+}
+
 describe("MAX_ENTRIES eviction never drops a live guard", () => {
   it("keeps an in-flight key while settled keys overflow the cap", async () => {
     let release: (v: string) => void = () => {};
     const first = runIdempotentOrder("guard", 300_000, () => new Promise<string>((r) => { release = r; }));
-    for (let i = 0; i < 1_005; i += 1) {
-      await runIdempotentOrder(`fill-${i}`, 300_000, async () => i);
-    }
+    await overflowCapWithSettledKeys();
 
     const duplicate = vi.fn(async () => "DUPLICATE");
     const dup = runIdempotentOrder("guard", 300_000, duplicate);
@@ -107,9 +121,7 @@ describe("MAX_ENTRIES eviction never drops a live guard", () => {
 
   it("keeps an indeterminate key while settled keys overflow the cap", async () => {
     await rejection(runIdempotentOrder("held", 15_000, async () => { throw timeoutError(); }));
-    for (let i = 0; i < 1_005; i += 1) {
-      await runIdempotentOrder(`fill-${i}`, 300_000, async () => i);
-    }
+    await overflowCapWithSettledKeys();
 
     const duplicate = vi.fn(async () => "DUPLICATE");
     const retry = await rejection(runIdempotentOrder("held", 15_000, duplicate));
