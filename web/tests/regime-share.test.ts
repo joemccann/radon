@@ -102,41 +102,6 @@ describe("Next.js /api/regime/share routes", () => {
   });
 });
 
-describe("Next.js /api/internals/share routes", () => {
-  it("POST route exists", async () => {
-    const routePath = path.join(
-      PROJECT_ROOT, "web", "app", "api", "internals", "share", "route.ts"
-    );
-    await expect(readFile(routePath, "utf-8")).resolves.toContain("POST");
-  });
-
-  it("POST route proxies to /internals/share on FastAPI", async () => {
-    const routePath = path.join(
-      PROJECT_ROOT, "web", "app", "api", "internals", "share", "route.ts"
-    );
-    const content = await readFile(routePath, "utf-8");
-    expect(content).toContain("/internals/share");
-  });
-
-  it("content GET route exists", async () => {
-    const routePath = path.join(
-      PROJECT_ROOT, "web", "app", "api", "internals", "share", "content", "route.ts"
-    );
-    await expect(readFile(routePath, "utf-8")).resolves.toContain("GET");
-  });
-
-  it("content route is restricted to public share cards", async () => {
-    // Hardened 2026-06-28: serves only tweet-internals-* cards via the shared
-    // validator, not arbitrary files under reports/.
-    const routePath = path.join(
-      PROJECT_ROOT, "web", "app", "api", "internals", "share", "content", "route.ts"
-    );
-    const content = await readFile(routePath, "utf-8");
-    expect(content).toContain("isAllowedShareCardPath");
-    expect(content).toContain('"internals"');
-  });
-});
-
 // ── 4. RegimePanel component has Share button ──────────────────────
 
 describe("RegimePanel share button", () => {

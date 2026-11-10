@@ -62,7 +62,6 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "performance": () => import("@/app/api/performance/route") as Promise<NextRouteModule>,
   "portfolio": () => import("@/app/api/portfolio/route") as Promise<NextRouteModule>,
   "previous-close": () => import("@/app/api/previous-close/route") as Promise<NextRouteModule>,
-  "prices": () => import("@/app/api/prices/route") as Promise<NextRouteModule>,
   "profile": () => import("@/app/api/profile/route") as Promise<NextRouteModule>,
   "research/evidence/[asset]": () => import("@/app/api/research/evidence/[asset]/route") as Promise<NextRouteModule>,
   "research/governance": () => import("@/app/api/research/governance/route") as Promise<NextRouteModule>,

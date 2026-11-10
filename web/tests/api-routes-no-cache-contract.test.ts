@@ -42,8 +42,6 @@ const DYNAMIC_ROUTES = [
   "app/api/profile/route.ts",
   "app/api/bookmarks/route.ts",
   "app/api/watchlist/route.ts",
-  "app/api/knowledge/search/route.ts",
-  "app/api/knowledge/prior-evals/route.ts",
   "app/api/options/rv-ratio/route.ts",
   "app/api/bpi/route.ts",
   "app/api/skew/route.ts",
@@ -292,8 +290,6 @@ const NO_STORE_ROUTES = [
   "app/api/bookmarks/[post_id]/route.ts",
   "app/api/watchlist/route.ts",
   "app/api/watchlist/[symbol]/route.ts",
-  "app/api/knowledge/search/route.ts",
-  "app/api/knowledge/prior-evals/route.ts",
   "app/api/bpi/route.ts",
   "app/api/skew/route.ts",
 ];

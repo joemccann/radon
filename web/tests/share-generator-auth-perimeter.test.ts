@@ -47,7 +47,6 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => ({
 
 const GENERATOR_ROUTES = [
   "/api/gex/share",
-  "/api/internals/share",
   "/api/menthorq/cta/share",
   "/api/newsfeed/share",
   "/api/regime/share",
@@ -56,7 +55,6 @@ const GENERATOR_ROUTES = [
 
 const PREVIEW_ROUTES = [
   "/api/gex/share/content",
-  "/api/internals/share/content",
   "/api/menthorq/cta/share/content",
   "/api/regime/share/content",
   "/api/share/pnl",
@@ -140,7 +138,6 @@ describe("share generator responses — no absolute reports/ path disclosure", (
     ["gex", "../app/api/gex/share/route"],
     ["vcg", "../app/api/vcg/share/route"],
     ["regime", "../app/api/regime/share/route"],
-    ["internals", "../app/api/internals/share/route"],
     ["cta", "../app/api/menthorq/cta/share/route"],
   ];
 

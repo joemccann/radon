@@ -212,29 +212,3 @@ test.skipIf(!hasPython313())(python313Label("kelly command returns valid risk si
   expect(typeof payload.fractional_kelly_pct).toBe("number");
   expect(payload.use_size > 0).toBeTruthy();
 });
-
-test("GET /api/prices returns deprecation response", async () => {
-  const { GET } = await import("../app/api/prices/route");
-
-  const response = await GET();
-  const body = await response.json() as { error?: string };
-
-  expect(response.status).toBe(405);
-  expect(typeof body.error === "string").toBeTruthy();
-  expect(body.error!.includes("deprecated")).toBeTruthy();
-});
-
-test("POST /api/prices returns deprecation response", async () => {
-  const { POST } = await import("../app/api/prices/route");
-  const request = new NextRequest("http://localhost/api/prices", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
-
-  const response = await POST(request);
-  const body = await response.json() as { error?: string };
-
-  expect(response.status).toBe(405);
-  expect(body.error).toContain("deprecated");
-});

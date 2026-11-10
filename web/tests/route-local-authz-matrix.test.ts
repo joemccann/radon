@@ -7,7 +7,7 @@ const ROUTES = [
   "assistant", "attribution", "backtest/[strategy]", "blotter", "breadth",
   "cash-flows", "discover", "flow-analysis", "flow-analysis/[ticker]",
   "futures/chain", "gamma-rotation", "gex", "headlines", "index-options/chain", "internals",
-  "journal", "journal/sync", "knowledge/prior-evals", "knowledge/search", "leap",
+  "journal", "journal/sync", "leap",
   "leap/scan", "menthorq/[command]/image", "menthorq/cta", "menthorq/cta/image", "newsfeed/posts",
   "options/chain", "options/expirations", "options/exposure", "options/rv-ratio",
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
@@ -19,7 +19,7 @@ const ROUTES = [
   "service-health",
 ] as const;
 
-const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
+const SHARE_ROUTES = ["gex", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
 const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "logs", "reliability", "slo"] as const;
 
 // Guarded routes outside the security-report ROUTES list — admin actions and
@@ -91,7 +91,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // models: read-only chat model picker catalog. Reports WHICH provider keys
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
-  "models", "msr", "prices",
+  "models", "msr",
   // quant/[strategy]: read-only quant sleeve read (latest backtest, targets,
   // order log from Turso), same posture as margin-debt; it places nothing.
   "quant/[strategy]",
@@ -104,7 +104,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
 // (public share cards, webhooks, bearer-gated probes) — enumerated here only
 // so the disk sweep proves every route file has exactly one home.
 const PINNED_ELSEWHERE_ROUTES = [
-  "gex/share/content", "internals/share/content", "menthorq/cta/share/content",
+  "gex/share/content", "menthorq/cta/share/content",
   "probe/freshness", "regime/share/content", "share/pnl", "vcg/share/content",
   "webhooks/clerk", "webhooks/tradingview/[token]",
 ] as const;

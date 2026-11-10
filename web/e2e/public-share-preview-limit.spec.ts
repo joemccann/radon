@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 const paths = [
   "/api/gex/share/content",
-  "/api/internals/share/content",
   "/api/menthorq/cta/share/content",
   "/api/regime/share/content",
   "/api/share/pnl",

@@ -105,7 +105,7 @@ describe("isPublicRoute — explicit allowlist", () => {
   // FastAPI trusts as server-to-server, so an anonymous caller had a 120s
   // script execution behind nothing but an in-memory rate limit.
   it("exempts /api/<scope>/share/content but NOT the /api/<scope>/share generator", () => {
-    const scopes = ["menthorq/cta", "vcg", "internals", "regime", "gex"];
+    const scopes = ["menthorq/cta", "vcg", "regime", "gex"];
     for (const scope of scopes) {
       expect(isPublicRoute(reqFor(`/api/${scope}/share`))).toBe(false);
       expect(isPublicRoute(reqFor(`/api/${scope}/share/content`))).toBe(true);
