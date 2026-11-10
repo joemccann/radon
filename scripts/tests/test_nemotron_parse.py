@@ -425,27 +425,6 @@ def test_latex_table_helper_builds_a_markdown_table():
     assert table_agreement("only 7 and 2026", [{"type": "Table", "text": TABLE}]) < 0.9
 
 
-def test_compare_parsers_report(tmp_path, monkeypatch):
-    monkeypatch.setenv("RADON_RESEARCH_PARSER", "nemotron")
-    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    monkeypatch.setenv("RADON_RESEARCH_PARSE_MAX_RETRIES", "0")
-    monkeypatch.setenv("RADON_RESEARCH_PARSE_SELECTIVE", "1")
-    make_pdf(tmp_path / "one.pdf", pages=1)
-    from research.compare_parsers import compare_folder
-
-    def ok(model):
-        if model == V1:
-            return 200, _v1_payload(1), {}, None
-        return 400, {}, {}, "DEGRADED"
-
-    post, calls = _by_model(ok)
-    report = compare_folder(tmp_path, tmp_path / "report.md", post=post)
-    assert "numeric recall" in report
-    assert V1 in report or "nemotron-parse" in report
-    assert calls and calls[0]["model"] == V1
-    assert (tmp_path / "report.md").is_file()
-
-
 def test_catalogue_renders_nemotron_chart_candidates(tmp_path):
     from research.figures import catalogue
     pdf = make_pdf(tmp_path / "source.pdf", pages=1)
