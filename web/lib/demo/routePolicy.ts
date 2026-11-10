@@ -287,9 +287,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/gex/share": { POST: { mode: "backend", endpoints: ["/gex/share"] } },
   "/api/index-options/chain": { GET: { mode: "backend", endpoints: ["/index-options/chain"] } },
   "/api/informed-flow/[ticker]": { GET: { mode: "backend", endpoints: ["/informed-flow/"] } },
-  "/api/internals/share": { POST: { mode: "backend", endpoints: ["/internals/share"] } },
-  "/api/knowledge/prior-evals": { GET: { mode: "backend", endpoints: ["/knowledge/prior-evals"] } },
-  "/api/knowledge/search": { POST: { mode: "backend", endpoints: ["/knowledge/search"] } },
   "/api/leap/scan": { POST: { mode: "backend", endpoints: ["/leap/scan"] } },
   "/api/llm-token-index": { GET: { mode: "backend", endpoints: ["/llm-token-index"] } },
   "/api/menthorq/cta/share": { POST: { mode: "backend", endpoints: ["/cta/share"] } },
@@ -317,9 +314,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
 
   // ── signed-out surfaces ──────────────────────────────────────────────────
   "/api/gex/share/content": {
-    GET: { mode: "public", endpoints: ["/share/content"], note: "Share-card preview proxied from the backend." },
-  },
-  "/api/internals/share/content": {
     GET: { mode: "public", endpoints: ["/share/content"], note: "Share-card preview proxied from the backend." },
   },
   "/api/menthorq/cta/share/content": {
@@ -355,10 +349,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/flex-token": { GET: { mode: "infra", note: "Disk token metadata; absent on Vercel." } },
   "/api/models": {
     GET: { mode: "backend", endpoints: ["/model-gateway/models"], note: "Service-owned model catalog; no local provider grants or fallback." },
-  },
-  "/api/prices": {
-    GET: { mode: "infra", note: "Deprecated: static 405." },
-    POST: { mode: "infra", note: "Deprecated: static 405." },
   },
   "/api/version": { GET: { mode: "infra", note: "Release metadata from env." } },
 

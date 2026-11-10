@@ -149,7 +149,6 @@ export default defineConfig({
         "lib/tools/wrappers/ib-sync.ts",    // Thin runScript wrapper
         "lib/tools/wrappers/scanner.ts",    // Thin runScript wrapper
         "web/app/api/pi/**",         // Large PI dispatcher, tested via integration.test.ts
-        "web/app/api/prices/**",     // WebSocket client, needs live IB server
         "web/app/api/blotter/**",    // Spawns Python subprocess for Flex Query
         "web/app/api/discover/**",   // Spawns Python subprocess for discover.py
         "web/app/api/flow-analysis/**", // Spawns Python subprocess for flow_analysis.py

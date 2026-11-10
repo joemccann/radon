@@ -43,8 +43,7 @@ IB Gateway (4001)
   │
   └──▶ ib_realtime_server.js (port 8765)
          │
-         ├──▶ Browser WebSocket (usePrices hook) ── live bid/ask/last
-         └──▶ /api/prices POST (one-time snapshot)
+         └──▶ Browser WebSocket (usePrices hook) ── live bid/ask/last
 
 FastAPI (port 8321)
   └──▶ Python scripts as async subprocesses (scanner, sync, perf, etc.)
@@ -121,7 +120,7 @@ cp .env.example .env
 
 **Optional:**
 - `RADON_SERVICE_TOKEN` - Application authentication for deployments outside the trusted local topology.
-- `IB_REALTIME_WS_URL` - Server-side websocket URL used by `/api/prices` for one-time snapshots (default: `ws://localhost:8765`)
+- `IB_REALTIME_WS_URL` - Server-side websocket URL used by `/api/previous-close` for one-time snapshots (default: `ws://localhost:8765`)
 - `NEXT_PUBLIC_IB_REALTIME_WS_URL` - Browser websocket URL for direct realtime subscriptions (default: `ws://localhost:8765`)
 
 ## Authentication
@@ -172,16 +171,6 @@ Index subscriptions use the same websocket action with an `indexes` array:
 The realtime server preserves the typed IB contract for stock, option, and index subscriptions as soon as the websocket subscription arrives, so reconnect and cold-restore flows resubscribe `/regime` indexes as CBOE indices instead of rebuilding them as stocks.
 
 **Stale quote guard (`safeInitialState`):** When a new client subscribes to an option contract, the relay immediately sends back the most recently cached `PriceData` snapshot. If that snapshot is from a prior trading session (timestamp older than 8 hours), `bid`/`ask`/`bidSize`/`askSize` are nulled before the initial push so the chain displays `---` instead of stale prices from yesterday's session. Fresh frozen-data ticks from the new `reqMktData` call repopulate the quote within seconds.
-
-**Snapshot (one-time):**
-```bash
-curl -X POST http://localhost:3000/api/prices \
-  -H "Content-Type: application/json" \
-  -d '{"symbols": ["AAPL", "MSFT"]}'
-```
-
-`GET /api/prices` is intentionally deprecated (`405`) because real-time streaming now uses direct WebSocket subscriptions to the Node server.
-Node now owns the live stream directly; Next.js only provides one-time snapshot support.
 
 ### React Hook
 
@@ -251,7 +240,6 @@ function PriceDisplay() {
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/api/prices` | POST | One-time price snapshot (GET deprecated) |
 | `/api/previous-close` | POST | Previous-day closing prices (IB → UW → Yahoo fallback) |
 | `/api/regime` | GET, POST | CRI regime data. **Frontend always does one cached GET; polling uses adaptive intervals: 1min (OPEN), 5min (EXTENDED), paused (CLOSED).** |
 | `/api/internals` | GET, POST | Market internals and skew history. **Frontend always does one cached GET; polling uses adaptive intervals: 1min (OPEN), 5min (EXTENDED), paused (CLOSED).** |
@@ -285,7 +273,6 @@ function PriceDisplay() {
 |-------|--------|-------------|
 | `/api/regime/share` | POST | Generate regime PNG card |
 | `/api/menthorq/cta/share` | POST | Generate CTA PNG card |
-| `/api/internals/share` | POST | Generate internals PNG card |
 
 ## Tests
 

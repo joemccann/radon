@@ -43,9 +43,6 @@ function stubApis(page: import("@playwright/test").Page, overrideChain = CHAIN_D
   page.route("**/api/regime", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 10, cri: { score: 10 } }) }),
   );
-  page.route("**/api/ib-status", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
-  );
   page.route("**/api/blotter", (r) =>
     r.fulfill({
       status: 200, contentType: "application/json",
@@ -67,7 +64,6 @@ function stubApis(page: import("@playwright/test").Page, overrideChain = CHAIN_D
   page.route("**/api/options/chain*", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(overrideChain) }),
   );
-  page.route("**/api/prices", (r) => r.abort());
 }
 
 async function openChain(page: import("@playwright/test").Page) {

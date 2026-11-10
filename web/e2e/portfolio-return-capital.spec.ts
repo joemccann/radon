@@ -164,17 +164,11 @@ async function setupMocks(page: Page) {
     contentType: "application/json",
     body: JSON.stringify({ ok: true, days_until_expiry: 14 }),
   }));
-  await page.route("**/api/ib-status", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ connected: true }),
-  }));
   await page.route("**/api/blotter", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ as_of: PORTFOLIO_MOCK.last_sync, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
   }));
-  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test("portfolio renders isolated observed Return % and suppresses premium return", async ({ page }, testInfo) => {

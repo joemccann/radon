@@ -38,9 +38,6 @@ function stubApis(page: Page) {
   page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
-  page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
-  );
   page.route("**/api/blotter", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }) }),
   );
@@ -56,7 +53,6 @@ function stubApis(page: Page) {
   page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbol: "AAPL", expiry: "20260320", exchange: "SMART", strikes: [195, 200, 205, 210, 215], multiplier: "100" }) }),
   );
-  page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("Mobile Options Chain ladder", () => {

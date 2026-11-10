@@ -68,7 +68,6 @@ const TICKER_FIXTURE = {
 };
 
 const REGIME_FIXTURE = { score: 15, cri: { score: 15 } };
-const IB_STATUS_FIXTURE = { connected: true };
 const BLOTTER_EMPTY = {
   as_of: new Date().toISOString(),
   summary: { realized_pnl: 0 },
@@ -220,9 +219,6 @@ async function stubApis(page: import("@playwright/test").Page) {
   );
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(REGIME_FIXTURE) }),
-  );
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(IB_STATUS_FIXTURE) }),
   );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(BLOTTER_EMPTY) }),

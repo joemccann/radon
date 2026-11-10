@@ -144,9 +144,6 @@ async function setupSyncFallbackMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CRI_MOCK) }),
   );
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
-  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,

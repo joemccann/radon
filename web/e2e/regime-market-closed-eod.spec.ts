@@ -81,13 +81,6 @@ async function setupMocks(page: import("@playwright/test").Page) {
   // Abort WS prices — simulates post-close where prices feed may still deliver
   // stale last-values; we must NOT use them when market_open=false
   await page.route("**/api/prices", (route) => route.abort());
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ connected: false }),
-    }),
-  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,

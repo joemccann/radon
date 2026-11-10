@@ -125,12 +125,8 @@ async function setupBaseMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/portfolio", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_MOCK) }),
   );
-  await page.route("**/api/prices", (route) => route.abort());
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, level: "LOW", cri: { score: 15 } }) }),
-  );
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
   );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ as_of: new Date().toISOString(), summary: { realized_pnl: 3847.20 }, closed_trades: [], open_trades: [] }) }),

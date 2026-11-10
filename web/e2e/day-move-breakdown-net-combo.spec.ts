@@ -200,12 +200,10 @@ async function stubApis(page: import("@playwright/test").Page) {
   await page.route("**/api/orders", json(ORDERS_EMPTY));
   await page.route("**/api/regime", json({ score: 15, level: "LOW", cri: { score: 15 } }));
   await page.route("**/api/flex-token", json({ ok: true, days_until_expiry: 14 }));
-  await page.route("**/api/ib-status", json({ connected: true }));
   await page.route(
     "**/api/blotter",
     json({ as_of: TRADING_DAY_ISO, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
   );
-  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test("day move modal nets combo quotes, shows option %, and flags IB vs quote disagreement", async ({ page }) => {

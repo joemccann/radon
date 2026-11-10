@@ -468,10 +468,6 @@ async function stubOrdersShareApis(
       }),
     }),
   );
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
-  );
-  await page.route("**/api/prices", (route) => route.abort());
 }
 
 /** The share button on the closing group inside Today's Executed Orders. */

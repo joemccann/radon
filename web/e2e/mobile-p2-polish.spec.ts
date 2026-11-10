@@ -68,7 +68,6 @@ async function setupMocks(page: Page) {
   await page.route("**/api/flow-analysis", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(FLOW) }),
   );
-  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("Mobile P2 polish", () => {

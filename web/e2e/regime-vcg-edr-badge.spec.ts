@@ -108,10 +108,6 @@ async function setupMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_EMPTY) }),
   );
-  await page.route("**/api/prices", (route) => route.abort());
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
-  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,

@@ -183,7 +183,6 @@ async function stubApis(page: import("@playwright/test").Page) {
   await page.route("**/api/portfolio", (route) => route.fulfill(json(PORTFOLIO_EMPTY)));
   await page.route("**/api/orders", (route) => route.fulfill(json(ORDERS_EMPTY)));
   await page.route("**/api/regime", (route) => route.fulfill(json({ score: 15, cri: { score: 15 } })));
-  await page.route("**/api/ib-status", (route) => route.fulfill(json({ connected: true })));
   await page.route("**/api/blotter", (route) =>
     route.fulfill(
       json({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),

@@ -352,13 +352,9 @@ async function stubApis(page: import("@playwright/test").Page) {
       }),
     }),
   );
-  await page.route("**/api/ib-status", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
-  );
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
-  await page.route("**/api/prices", (route) => route.abort());
 }
 
 test.describe("Combo order modify flow", () => {
@@ -523,13 +519,9 @@ test.describe("Combo order modify flow", () => {
         }),
       }),
     );
-    await page.route("**/api/ib-status", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
-    );
     await page.route("**/api/regime", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
     );
-    await page.route("**/api/prices", (route) => route.abort());
 
     let modifyBody: Record<string, unknown> | null = null;
     await page.route("**/api/orders/modify", async (route) => {

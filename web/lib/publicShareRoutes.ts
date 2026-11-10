@@ -18,7 +18,6 @@
 // Edge-safe: pure module, no imports.
 export const PUBLIC_SHARE_API_ROUTES = [
   "/api/gex/share/content",
-  "/api/internals/share/content",
   "/api/menthorq/cta/share/content",
   "/api/regime/share/content",
   "/api/share/pnl",
@@ -31,7 +30,6 @@ export const PUBLIC_SHARE_API_ROUTES = [
 // was classified as either public-preview or authenticated-generator.
 export const AUTHENTICATED_SHARE_GENERATOR_ROUTES = [
   "/api/gex/share",
-  "/api/internals/share",
   "/api/menthorq/cta/share",
   "/api/newsfeed/share",
   "/api/regime/share",

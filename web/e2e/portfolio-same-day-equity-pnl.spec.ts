@@ -204,11 +204,9 @@ async function setupMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/portfolio", (route) => route.fulfill(json(PORTFOLIO_MOCK)));
   await page.route("**/api/orders", (route) => route.fulfill(json(ORDERS_EMPTY)));
   await page.route("**/api/flex-token", (route) => route.fulfill(json({ ok: true, days_until_expiry: 14 })));
-  await page.route("**/api/ib-status", (route) => route.fulfill(json({ connected: true })));
   await page.route("**/api/blotter", (route) =>
     route.fulfill(json({ as_of: `${TODAY}T17:57:05Z`, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] })),
   );
-  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("/portfolio same-day equity today pnl", () => {

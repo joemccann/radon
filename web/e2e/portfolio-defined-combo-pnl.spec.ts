@@ -67,11 +67,6 @@ async function setupMocks(page: Page, portfolio: unknown = PORTFOLIO_MOCK) {
     contentType: "application/json",
     body: JSON.stringify({ ok: true, days_until_expiry: 14 }),
   }));
-  await page.route("**/api/ib-status", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ connected: true }),
-  }));
   await page.route("**/api/blotter", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -87,7 +82,6 @@ async function setupMocks(page: Page, portfolio: unknown = PORTFOLIO_MOCK) {
     contentType: "application/json",
     body: JSON.stringify({}),
   }));
-  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test("ARM protected combo is defined risk and shows aggregate P&L", async ({ page }, testInfo) => {

@@ -69,7 +69,6 @@ async function stubApis(page: Page) {
   await page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbol: "AAPL", expiry: EXPIRY, exchange: "SMART", strikes: [100, 105, 110, 115, 120], multiplier: "100" }) }),
   );
-  await page.route("**/api/prices", (route) => route.abort());
 }
 
 async function installMockWebSocket(page: Page) {
