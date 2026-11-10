@@ -37,10 +37,6 @@ export function getNextTheme(theme: SiteTheme): SiteTheme {
   return theme === "dark" ? "light" : "dark";
 }
 
-export function toggleSiteTheme(theme: SiteTheme): SiteTheme {
-  return getNextTheme(theme);
-}
-
 export function siteThemeBootstrapScript(): string {
   return `
     (function () {
