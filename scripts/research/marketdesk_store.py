@@ -112,8 +112,9 @@ def claim(ref) -> bool:
     True when it should be processed now. A pending row whose attempts are spent becomes 'failed'.
     One /v2/pipeline POST (PERF-045). The lease UPDATE repeats the Python
     attempts cap in SQL so a later step cannot lease a spent row if an
-    earlier step errors. ``hrana_execute_many`` does not refuse developer
-    hosts; this write path keeps the same gate as ``hrana_execute``.
+    earlier step errors. ``hrana_execute_many`` refuses developer hosts
+    (R-749) the same way ``hrana_execute`` does; this call keeps the
+    explicit gate so a missed transport change still cannot write.
     """
     now = _now()
     _refuse_developer_host()

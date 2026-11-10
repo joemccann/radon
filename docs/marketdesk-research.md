@@ -131,7 +131,7 @@ fetched with a cookie-less opener that never follows redirects.
 
 ## Claim pipeline (PERF-045)
 
-`research.marketdesk_store.claim` sends insert, interrupted-lease accounting, attempt retirement, status read, and the new lease in one `/v2/pipeline` POST. The lease `UPDATE` repeats `attempts < MAX_ATTEMPTS` so a spent row cannot be leased if an earlier step errors. The write path still calls the developer-host refuse gate (`hrana_execute_many` is a read helper and does not). Budget: `scripts/tests/test_marketdesk_claim_pipeline_budget.py`.
+`research.marketdesk_store.claim` sends insert, interrupted-lease accounting, attempt retirement, status read, and the new lease in one `/v2/pipeline` POST. The lease `UPDATE` repeats `attempts < MAX_ATTEMPTS` so a spent row cannot be leased if an earlier step errors. `hrana_execute_many` refuses a non-Linux host before it opens a request (R-749 / REL-338), matching `hrana_execute`; `claim` still calls the same gate itself. Budget: `scripts/tests/test_marketdesk_claim_pipeline_budget.py`.
 
 ## Dropbox write HTTP keep-alive (PERF-047)
 
