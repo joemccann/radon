@@ -182,12 +182,6 @@ class ChannelResult:
 CHANNEL_NOT_APPLICABLE = ChannelResult(attempted=False)
 
 
-def _format_summary(outcome: CheckOutcome) -> str:
-    emoji = _EMOJI.get(outcome.severity or "", "")
-    sev = outcome.severity or ""
-    return f"{emoji} [{sev}] `{outcome.service}` — {outcome.message}"
-
-
 def _log_alert_event(outcome: CheckOutcome) -> None:
     """Emit a structured INFO line to journalctl/stderr so the alert
     event remains discoverable after we stopped recording it in
