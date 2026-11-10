@@ -12,7 +12,7 @@ export type ClearRouteCase = {
 const regimePages = [
   "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "credit-vix", "curve", "dispersion", "divyield", "exports", "gex", "grg", "high-low", "hhlev", "hyad", "iei-hyg",
-  "iv-spread", "ivrank", "record-high-breadth", "imbalance", "ma-ratio", "margin", "rsi-oversold", "short", "skew", "skew2d",
+  "iv-spread", "ivrank", "record-high-breadth", "imbalance", "ma-ratio", "margin", "msr", "rsi-oversold", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vix-pc", "vixcor", "vixts", "panic-index", "quant",
 ] as const;
 
@@ -23,7 +23,7 @@ const regimeLoaded: Record<string, string> = {
   gex: '[data-testid="gex-laplace-chart"]', grg: '[data-testid="grg-chart"]', hhlev: '[data-testid="hhlev-chart-section"]', hyad: '[data-testid="hyad-chart-section"]',
   "credit-vix": '[data-testid="credit-vix-chart-section"]',
   "iei-hyg": '[data-testid="iei-hyg-chart-section"]', "iv-spread": '[data-testid="iv-spread-chart-section"]', ivrank: '[data-testid="ivrank-chart-section"]',
-  llm: '[data-testid="ai-infrastructure-panel"]', "ma-ratio": '[data-testid="ma-ratio-chart-section"]', margin: '[data-testid="margin-debt-chart-section"]',
+  llm: '[data-testid="ai-infrastructure-panel"]', "ma-ratio": '[data-testid="ma-ratio-chart-section"]', margin: '[data-testid="margin-debt-chart-section"]', msr: '[data-testid="msr-chart-section"]',
   "rsi-oversold": '[data-testid="rsi-oversold-chart-section"]',
   short: '[data-testid="short-crowding-table"]', skew: '[data-testid="skew-chart-section"]', skew2d: '[data-testid="skew2d-chart-section"]',
   straddle: '[data-testid="straddle-chart-section"]', streaks: '[data-testid="streaks-chart-section"]', trin: '[data-testid="trin-chart-section"]',

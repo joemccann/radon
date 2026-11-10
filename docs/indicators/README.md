@@ -11,6 +11,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
+| msr | `/regime/msr` | `msr` | [msr.md](msr.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
