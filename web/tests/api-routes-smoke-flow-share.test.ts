@@ -278,24 +278,6 @@ describe("POST /api/internals", () => {
 // Share endpoints (POST /<surface>/share — proxies to FastAPI)
 // ---------------------------------------------------------------------------
 
-describe("POST /api/internals/share", () => {
-  it("returns 200 on FastAPI success", async () => {
-    mockRadonFetch.mockResolvedValueOnce({ ok: true, url: "/share/foo" });
-    const { POST } = await import("../app/api/internals/share/route");
-    const res = await POST();
-    expect(res.status).toBe(200);
-  });
-
-  it("returns 500 envelope on FastAPI failure", async () => {
-    mockRadonFetch.mockRejectedValueOnce(new Error("upstream down"));
-    const { POST } = await import("../app/api/internals/share/route");
-    const res = await POST();
-    expect(res.status).toBe(500);
-    const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.error).toBeDefined();
-  });
-});
-
 describe("POST /api/gex/share", () => {
   it("returns 200 on FastAPI success", async () => {
     mockRadonFetch.mockResolvedValueOnce({ ok: true, url: "/share/gex" });
@@ -421,28 +403,6 @@ describe("GET /api/vcg/share/content", () => {
     const next = await import("next/server");
     const nextReq = new next.NextRequest(
       "http://localhost/api/vcg/share/content?path=/etc/hosts",
-    );
-    const res = await GET(nextReq);
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("GET /api/internals/share/content", () => {
-  it("returns 400 when path is missing", async () => {
-    const { GET } = await import("../app/api/internals/share/content/route");
-    const next = await import("next/server");
-    const nextReq = new next.NextRequest(
-      "http://localhost/api/internals/share/content",
-    );
-    const res = await GET(nextReq);
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 403 when path is outside reports/", async () => {
-    const { GET } = await import("../app/api/internals/share/content/route");
-    const next = await import("next/server");
-    const nextReq = new next.NextRequest(
-      "http://localhost/api/internals/share/content?path=/root/secrets",
     );
     const res = await GET(nextReq);
     expect(res.status).toBe(403);

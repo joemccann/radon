@@ -46,10 +46,8 @@ describe("supplemental route remediations", () => {
 
   it("share previews proxy remote generator storage and internals emits its own type", async () => {
     const gex = await readFile(path.join(ROOT, "web/app/api/gex/share/content/route.ts"), "utf8");
-    const internals = await readFile(path.join(ROOT, "web/app/api/internals/share/content/route.ts"), "utf8");
     const server = await readFile(path.join(ROOT, "scripts/api/server.py"), "utf8");
     expect(gex).toContain("radonFetchText(`/share/content?type=gex");
-    expect(internals).toContain("radonFetchText(`/share/content?type=internals");
     expect(server).toContain('"--card-type", "internals"');
     expect(server).toContain('@app.get("/share/content"');
   });

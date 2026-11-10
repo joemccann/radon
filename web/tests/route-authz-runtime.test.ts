@@ -73,8 +73,6 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "internals" },
   { path: "journal" },
   { path: "journal/sync" },
-  { path: "knowledge/prior-evals" },
-  { path: "knowledge/search" },
   { path: "leap" },
   { path: "leap/scan" },
   { path: "menthorq/[command]/image", params: { command: "cta" }, ext: "tsx" },
@@ -118,7 +116,7 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
 ];
 
 const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "slo"] as const;
-const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "regime", "vcg"] as const;
+const SHARE_ROUTES = ["gex", "menthorq/cta", "regime", "vcg"] as const;
 
 /**
  * The destructive operator control plane. Restarting IB Gateway triggers a 2FA

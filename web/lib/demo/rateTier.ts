@@ -33,12 +33,11 @@ const AI_PATHS = new Set<string>([
 // 5/day budget it would share with paper orders).
 const EXPENSIVE_PATTERNS: RegExp[] = [
   /^\/api\/(breadth|discover|gamma-rotation|gex|internals|regime|scanner)$/,
-  /^\/api\/(gex|internals|regime|vcg|menthorq\/cta)\/share$/,
+  /^\/api\/(gex|regime|vcg|menthorq\/cta)\/share$/,
   /^\/api\/scanner\/(bounce|strength|theta|vol-skew-mr)\/scan$/,
   /^\/api\/(garch-convergence|leap)\/scan$/,
   /^\/api\/flow-analysis\/[^/]+$/,
   /^\/api\/options\/rv-ratio$/,
-  /^\/api\/knowledge\/search$/,
   /^\/api\/uw\/research$/,
 ];
 
@@ -100,10 +99,10 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "futures", "futures-quote", "gamma-rotation", "garch-convergence", "gex",
   "headlines", "hhlev", "high-low-line", "hyad", "ib", "iei-hyg", "imbalance", "index-options",
   "index-quote", "informed-flow", "internals", "iv-spread", "ivrank",
-  "journal", "knowledge", "leap", "llm-token-index", "ma-ratio", "rsi-oversold",
+  "journal", "leap", "llm-token-index", "ma-ratio", "rsi-oversold",
   "margin-debt", "menthorq", "models", "msr", "newsfeed", "options", "orders",
   "paper", "performance", "pi", "portfolio", "preferences", "previous-close",
-  "prices", "probe", "profile", "quant", "record-high-breadth", "regime", "research", "risk-free-rate", "scanner",
+  "probe", "profile", "quant", "record-high-breadth", "regime", "research", "risk-free-rate", "scanner",
   "service-health", "setup", "share", "short-availability", "skew", "skew2d",
   "straddle", "streaks", "ticker", "trin", "vcg", "version", "vix-model-spread", "vix-pc", "vixcor", "vixts", "panic-index",
   "uw", "vol-cone", "watchlist", "webhooks", "yield-curve",
