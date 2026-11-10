@@ -511,11 +511,6 @@ def _classify_status_payload(payload: dict) -> str:
     return "healthy" if state_healthy else "invalid"
 
 
-def _is_status_payload_healthy(payload: dict) -> bool:
-    """Backward-compatible boolean wrapper for callers and tests."""
-    return _classify_status_payload(payload) == "healthy"
-
-
 def classify_probes(ping: dict, status: dict) -> dict:
     """Combine the ping + status probe dicts into {ok, detail}.
 

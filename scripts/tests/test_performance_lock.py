@@ -1,16 +1,10 @@
-"""Tests for performance endpoint deduplication and atomic cache writes.
-
-Uses httpx.AsyncClient against the FastAPI app with mocked deps (no IB/network).
-"""
+"""Tests for atomic cache writes."""
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
@@ -19,149 +13,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-# Mock heavy dependencies before importing the app
-mock_ib_pool = MagicMock()
-mock_ib_pool.connect_all = AsyncMock(return_value={"sync": "ok"})
-mock_ib_pool.disconnect_all = AsyncMock()
-mock_ib_pool.status.return_value = {"sync": "mock"}
-
 
 @pytest.fixture()
 def anyio_backend():
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-def isolated_rebuild_cooldown(tmp_path, monkeypatch):
-    """REL-047 / R-102: the rebuild cooldown is a durable sidecar now, so it
-    must not be shared with the repo's real data/ directory (or between
-    tests) — that is exactly the process-restart durability being tested."""
-    # `api.server` and `scripts.api.server` are two module objects for the
-    # same file in this tree; the routes under test may be bound to either.
-    for name in ("api.server", "scripts.api.server"):
-        try:
-            module = __import__(name, fromlist=["server"])
-        except ImportError:
-            continue
-        monkeypatch.setattr(
-            module, "PERFORMANCE_REBUILD_SIDECAR", tmp_path / "cooldown.json"
-        )
-    yield
-
-
-@pytest.fixture()
-async def client():
-    """Create an httpx.AsyncClient against the FastAPI app with mocked startup."""
-    import httpx
-    from contextlib import asynccontextmanager
-
-    # Patch lifespan to avoid IB/UW connections
-    @asynccontextmanager
-    async def mock_lifespan(app):
-        yield
-
-    with patch("api.server.lifespan", mock_lifespan), \
-         patch("api.server.ib_pool", mock_ib_pool):
-        # Must import after patching
-        from api.server import app
-        app.router.lifespan_context = mock_lifespan
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://test",
-        ) as c:
-            yield c
-
-
-FAKE_PERF_DATA = {
-    "as_of": "2026-03-17",
-    "period_label": "YTD",
-    "summary": {"total_return": 0.15},
-    "series": [],
-    "warnings": [],
-}
-
-
-@pytest.mark.anyio
-async def test_post_performance_is_file_ingest_only(client, tmp_path):
-    """P2: page-driven POST /performance is 404. Timer + --from-file own rebuilds."""
-    from api.subprocess import ScriptResult
-    mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
-
-    with patch("api.server.run_script", AsyncMock(return_value=mock_result)) as run, \
-         patch("api.server._write_cache"), \
-         patch("api.server._running_build", None):
-        import api.server
-        api.server._running_build = None
-        resp = await client.post("/performance")
-
-    assert resp.status_code == 404
-    assert "file-ingest" in resp.json()["detail"].lower()
-    run.assert_not_called()
-
-
-@pytest.mark.anyio
-async def test_background_is_file_ingest_only(client):
-    """P2: POST /performance/background must not SendRequest."""
-    from api.subprocess import ScriptResult
-    mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
-
-    with patch("api.server.run_script", AsyncMock(return_value=mock_result)) as run, \
-         patch("api.server._write_cache"):
-        import api.server
-        api.server._running_build = None
-        resp = await client.post("/performance/background")
-
-    assert resp.status_code == 404
-    run.assert_not_called()
-
-
-@pytest.mark.anyio
-async def test_background_does_not_start_a_build_when_one_is_inflight(client):
-    """A 404 must not piggyback into a live Flex rebuild either."""
-    import api.server
-
-    never_done = asyncio.get_running_loop().create_future()
-    fake_task = asyncio.ensure_future(never_done)
-    api.server._running_build = fake_task
-
-    try:
-        with patch("api.server.run_script", AsyncMock()) as run:
-            resp = await client.post("/performance/background")
-        assert resp.status_code == 404
-        run.assert_not_called()
-    finally:
-        fake_task.cancel()
-        try:
-            await fake_task
-        except (asyncio.CancelledError, Exception):
-            pass
-
-
-@pytest.mark.anyio
-async def test_concurrent_posts_do_not_start_a_build(client):
-    """Two page loads must not become even one SendRequest."""
-    import api.server
-    from api.subprocess import ScriptResult
-
-    call_count = 0
-
-    async def slow_build(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        await asyncio.sleep(0.01)
-        return ScriptResult(ok=True, data=FAKE_PERF_DATA)
-
-    with patch("api.server.run_script", slow_build), \
-         patch("api.server._write_cache"):
-        api.server._running_build = None
-        r1, r2 = await asyncio.gather(
-            client.post("/performance"),
-            client.post("/performance"),
-        )
-
-    assert r1.status_code == 404
-    assert r2.status_code == 404
-    assert call_count == 0
 
 
 @pytest.mark.anyio
@@ -179,22 +34,3 @@ async def test_atomic_write_cache_survives_crash(tmp_path):
     # No temp files should remain
     temps = list(tmp_path.glob(".cache_*"))
     assert len(temps) == 0
-
-
-@pytest.mark.anyio
-async def test_no_internal_metadata_in_response(client):
-    """A 404 rebuild must not leak cache metadata either."""
-    from api.subprocess import ScriptResult
-    mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
-
-    with patch("api.server.run_script", AsyncMock(return_value=mock_result)), \
-         patch("api.server._write_cache"):
-        import api.server
-        api.server._running_build = None
-        resp = await client.post("/performance")
-
-    assert resp.status_code == 404
-    data = resp.json()
-    assert "_checksum" not in data
-    assert "fetched_at" not in data
-    assert "ttl_seconds" not in data

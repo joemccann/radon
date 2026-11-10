@@ -73,7 +73,6 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/ib/reset-backoff",
     "/ib/restart",
     "/journal/reconcile",
-    "/journal/rehydrate",
     "/model-gateway/{operation}",
     "/options/uw-chain",
     "/orders/cancel",
@@ -102,7 +101,6 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/uw/research/events",
     "/uw/research/refresh",
     "/uw/usage",
-    "/uw/usage/record",
 })
 
 # Routes the demo frontend genuinely proxies with this credential. They must

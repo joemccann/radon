@@ -61,13 +61,6 @@ API Hrana pooling applies only to proven SELECT pipelines. Writes, mixed SQL and
 - JSON extractors are defensive, but script discipline is the primary guarantee.
 - Failed subprocesses retain structured `status=error` data while `ok` stays false. Cancel/modify return coded 502 details with the broker fields and order identity intact (REL-021b / R-024).
 
-## Legacy order helpers (REL-021b / R-039)
-
-Production cancel/modify routes retain the original-client subprocess path.
-Do not import the unused pooled shortcut into the server. Legacy helpers
-must refuse unknown or mismatched client ownership before mutation; modify
-also respects trading halt, while owned cancellation remains available.
-
 ## Passive dependency health (R-028 / REL-316)
 
 Trusted `/health` and protected `/health/lite` include only coarse database/feed
