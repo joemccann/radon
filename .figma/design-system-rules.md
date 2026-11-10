@@ -11,7 +11,6 @@
 | File | Purpose |
 |------|---------|
 | `brand/radon-design-tokens.json` | Machine-readable tokens (colors, spacing, typography, radii) |
-| `brand/radon-tailwind-theme.ts` | Tailwind CSS theme extension |
 | `web/app/globals.css` | CSS custom properties (runtime theming) |
 
 ### Color Tokens — The Radon Spectrum (Dual Theme)
@@ -350,7 +349,6 @@ radon/
 │   └── next.config.mjs           # Next.js config
 ├── brand/                        # Design system assets
 │   ├── radon-design-tokens.json  # Machine-readable tokens
-│   ├── radon-tailwind-theme.ts   # Tailwind theme extension
 │   ├── radon-brand-system.md     # Full 9-section spec
 │   ├── radon-component-kit.html  # Live component reference
 │   ├── radon-terminal-mockup.html # Terminal layout mockup

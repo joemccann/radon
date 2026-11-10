@@ -12,7 +12,6 @@ This document is the enforced reference for all UI and asset work. The full bran
 |------|---------|
 | `brand/radon-brand-system.md` | Full technical specification (9 sections) |
 | `brand/radon-design-tokens.json` | Machine-readable design tokens |
-| `brand/radon-tailwind-theme.ts` | Tailwind CSS theme extension |
 | `brand/radon-component-kit.html` | Live component reference (panels, badges, tables, motifs) |
 | `web/components/kit/` | React component kit (viewable at `/kit` route) |
 | `brand/radon-terminal-mockup.html` | Full terminal layout mockup |

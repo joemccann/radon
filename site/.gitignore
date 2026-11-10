@@ -16,7 +16,6 @@
 # next.js
 /.next/
 /.next-build/
-/.next-dev-webpack/
 /.next-seo-audit/
 /out/
 
