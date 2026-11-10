@@ -52,7 +52,7 @@ export default function StatusPage() {
   return (
     <>
       <EditorialHeader />
-      <main className="bg-canvas text-ink">
+      <main className="bg-canvas">
         <nav aria-label="Breadcrumb" className="border-b border-hairline-soft">
           <div className="mx-auto flex max-w-[1140px] items-center gap-[10px] px-8 py-[13px] font-mono text-[11.5px] uppercase tracking-[0.14em] text-muted">
             <Link href="/" className={`transition-colors hover:text-signal-deep ${focusRing}`}>
@@ -65,7 +65,7 @@ export default function StatusPage() {
 
         <section className="mx-auto max-w-[720px] px-8 pb-24 pt-16">
           <EditorialEyebrow>Public surfaces</EditorialEyebrow>
-          <h1 className="mt-4 font-serif text-[clamp(2rem,4vw,2.75rem)] leading-[1.15] tracking-[-0.02em] text-ink">
+          <h1 className="mt-4 font-serif text-[clamp(2rem,4vw,2.75rem)] leading-[1.15] tracking-[-0.02em]">
             Where Radon runs in public
           </h1>
           <p className="mt-6 text-[17px] leading-[1.65] text-muted">
@@ -81,7 +81,7 @@ export default function StatusPage() {
                 className="border-b border-hairline-soft py-6"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <h2 className="font-serif text-[1.35rem] text-ink">
+                  <h2 className="font-serif text-[1.35rem]">
                     {surface.name}
                   </h2>
                   <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
