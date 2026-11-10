@@ -5,14 +5,6 @@ import { describe, it, expect } from "vitest";
 import { resolveSectionFromPath } from "@/lib/chat";
 import { isTickerRouteSegment } from "@/lib/tickerRoute";
 
-// ─── Route validation constants (mirrored from [ticker]/page.tsx) ────────────
-
-const RESERVED = new Set([
-  "api", "dashboard", "flow-analysis", "portfolio", "performance",
-  "orders", "scanner", "discover", "journal", "regime", "internals", "cta", "kit",
-  "_next", "favicon",
-]);
-
 const TICKER_RE = { test: isTickerRouteSegment };
 
 // ─── resolveSectionFromPath ──────────────────────────────────────────────────
@@ -97,79 +89,5 @@ describe("TICKER_RE — format validation", () => {
   it("rejects special characters", () => {
     expect(TICKER_RE.test("AA.L")).toBe(false);
     expect(TICKER_RE.test("BRK-B")).toBe(false);
-  });
-});
-
-// ─── RESERVED set ────────────────────────────────────────────────────────────
-
-describe("RESERVED — blocks reserved paths", () => {
-  it("blocks api", () => {
-    expect(RESERVED.has("api")).toBe(true);
-  });
-
-  it("blocks internals", () => {
-    expect(RESERVED.has("internals")).toBe(true);
-  });
-
-  it("blocks dashboard", () => {
-    expect(RESERVED.has("dashboard")).toBe(true);
-  });
-
-  it("blocks portfolio", () => {
-    expect(RESERVED.has("portfolio")).toBe(true);
-  });
-
-  it("blocks _next", () => {
-    expect(RESERVED.has("_next")).toBe(true);
-  });
-
-  it("does not block valid tickers", () => {
-    expect(RESERVED.has("aapl")).toBe(false);
-    expect(RESERVED.has("goog")).toBe(false);
-  });
-});
-
-// ─── Tab URL validation ──────────────────────────────────────────────────────
-
-describe("Tab URL sync logic", () => {
-  const VALID_TABS = new Set(["company", "book", "chain", "position", "order", "news", "ratings", "seasonality"]);
-
-  it("validates known tabs", () => {
-    expect(VALID_TABS.has("chain")).toBe(true);
-    expect(VALID_TABS.has("ratings")).toBe(true);
-  });
-
-  it("rejects unknown tabs — falls back to company", () => {
-    const rawTab = "invalid";
-    const activeTab = rawTab && VALID_TABS.has(rawTab) ? rawTab : "company";
-    expect(activeTab).toBe("company");
-  });
-
-  it("null tab falls back to company", () => {
-    const rawTab: string | null = null;
-    const activeTab = rawTab && VALID_TABS.has(rawTab) ? rawTab : "company";
-    expect(activeTab).toBe("company");
-  });
-
-  it("company tab produces no ?tab= param", () => {
-    const params = new URLSearchParams();
-    const tab = "company";
-    if (tab === "company") {
-      params.delete("tab");
-    } else {
-      params.set("tab", tab);
-    }
-    expect(params.toString()).toBe("");
-  });
-
-  it("chain tab produces ?tab=chain", () => {
-    const params = new URLSearchParams();
-    const tab = "chain";
-    if (tab === "company") {
-      params.delete("tab");
-    } else {
-      params.set("tab", tab);
-    }
-    expect(params.toString()).toBe("tab=chain");
   });
 });

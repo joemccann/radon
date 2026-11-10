@@ -175,40 +175,6 @@ describe("GET /api/short-availability/[ticker]", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Status derivation contract tests (pure logic, no DOM needed)
-// ---------------------------------------------------------------------------
-
-describe("Short availability status contract", () => {
-  it("missing:true should map to no-locate regardless of shortable", () => {
-    const data = makeShortData({ missing: true, shortable: true });
-    // Per contract: missing flag always means NO LOCATE
-    expect(data.missing).toBe(true);
-  });
-
-  it("shortable:false should map to no-locate", () => {
-    const data = makeShortData({ shortable: false, missing: false });
-    expect(data.shortable).toBe(false);
-  });
-
-  it("shortable:true should map to easy-to-borrow", () => {
-    const data = makeShortData({ shortable: true, difficulty: 3.0, missing: false });
-    expect(data.shortable).toBe(true);
-    expect(data.difficulty).toBeGreaterThan(2.5);
-  });
-
-  it("shortable:null should map to HTB (locate-only range)", () => {
-    const data = makeShortData({ shortable: null, difficulty: 2.0, missing: false });
-    expect(data.shortable).toBeNull();
-  });
-
-  it("source:none with missing:true surfaces no data from either IB or UW", () => {
-    const data = makeShortData({ source: "none", missing: true });
-    expect(data.source).toBe("none");
-    expect(data.missing).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // OrderRiskGate locate-chip enablement logic (pure function tests)
 // ---------------------------------------------------------------------------
 
@@ -252,27 +218,26 @@ describe("Locate chip enablement logic", () => {
     expect(resolveLocateChipEnabled(sellCall, null, null)).toBe(false);
   });
 
-  it("BUY leg never enables the chip", () => {
-    // Linear BUY order
-    const action = "BUY";
-    expect(action).toBe("BUY");
-    // The chip should not fire for BUY regardless of portfolio
+  it("an order with only BUY legs never enables the chip", () => {
+    const buyCall = {
+      ...sellCall,
+      chainLegs: [{ ...sellCall.chainLegs[0], action: "BUY" as const }],
+      netPremium: 1,
+      totalCost: 100,
+      description: "Long Call",
+    };
+    expect(resolveLocateChipEnabled(buyCall, portfolio, state("Uncovered short call"))).toBe(false);
   });
 
-  it("option order with all BUY legs does not enable the chip", () => {
-    const legs = [
-      { action: "BUY", right: "C", strike: 500, expiry: "2026-12-19", quantity: 1 },
-    ];
-    const hasSell = legs.some((l) => l.action === "SELL");
-    expect(hasSell).toBe(false);
-  });
-
-  it("option order with at least one SELL leg enables chip evaluation", () => {
-    const legs = [
-      { action: "BUY", right: "C", strike: 500, expiry: "2026-12-19", quantity: 1 },
-      { action: "SELL", right: "C", strike: 510, expiry: "2026-12-19", quantity: 1 },
-    ];
-    const hasSell = legs.some((l) => l.action === "SELL");
-    expect(hasSell).toBe(true);
+  it("a multi-leg order with one SELL leg is evaluated for the chip", () => {
+    const callSpread = {
+      ...sellCall,
+      chainLegs: [
+        { ...sellCall.chainLegs[0], action: "BUY" as const },
+        { ...sellCall.chainLegs[0], strike: 510 },
+      ],
+      description: "Bull Call Spread",
+    };
+    expect(resolveLocateChipEnabled(callSpread, portfolio, state("Uncovered short call"))).toBe(true);
   });
 });
