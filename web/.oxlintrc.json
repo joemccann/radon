@@ -101,9 +101,7 @@
               "@/lib/order/risk/internal/*",
               "**/lib/order/risk/internal/*",
               "@/lib/order/risk/__test_only__",
-              "**/lib/order/risk/__test_only__",
-              "@/lib/orderRisk",
-              "**/lib/orderRisk"
+              "**/lib/order/risk/__test_only__"
             ],
             "message": "Use useOrderRisk / OrderRiskGate from @/lib/order/risk. The raw math is module-private."
           }
@@ -124,9 +122,7 @@
                   "@/lib/order/risk/internal/*",
                   "**/lib/order/risk/internal/*",
                   "@/lib/order/risk/__test_only__",
-                  "**/lib/order/risk/__test_only__",
-                  "@/lib/orderRisk",
-                  "**/lib/orderRisk"
+                  "**/lib/order/risk/__test_only__"
                 ],
                 "message": "Use useOrderRisk / OrderRiskGate from @/lib/order/risk. The raw math is module-private."
               },

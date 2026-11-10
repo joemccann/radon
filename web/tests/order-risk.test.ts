@@ -1,5 +1,5 @@
 /**
- * Tests for web/lib/orderRisk.ts — the unified max-loss / max-gain calc that
+ * Tests for web/lib/order/risk/internal/computeOrderRisk.ts — the unified max-loss / max-gain calc that
  * backs the order builder, the per-position order tab, and the instrument
  * modal.
  *
@@ -16,7 +16,7 @@ import {
   augmentOrderLegsWithPortfolioCoverage,
   type OrderRiskLeg,
   type ChainOrderLeg,
-} from "../lib/orderRisk";
+} from "@/lib/order/risk/__test_only__";
 import type { PortfolioData } from "../lib/types";
 
 function leg(

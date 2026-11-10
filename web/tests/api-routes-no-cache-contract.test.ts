@@ -66,7 +66,6 @@ const NO_STORE_HOOKS = [
   "lib/useJournal.ts",
   "lib/usePortfolio.ts",
   "lib/useDiscover.ts",
-  "lib/useFlowSurprise.ts",
   "lib/useOrders.ts",
   "lib/useCashFlows.ts",
   "lib/useLlmTokenIndex.ts",

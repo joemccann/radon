@@ -34,8 +34,6 @@ export default defineConfig([
                 "**/lib/order/risk/internal/*",
                 "@/lib/order/risk/__test_only__",
                 "**/lib/order/risk/__test_only__",
-                "@/lib/orderRisk",
-                "**/lib/orderRisk",
               ],
               message:
                 "Use `useOrderRisk` / `<OrderRiskGate>` from `@/lib/order/risk` — the raw math is module-private so every surface goes through the portfolio-aware augmentation pipeline. See web/CLAUDE.md → Order-risk chokepoint.",

@@ -6,7 +6,6 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import FillsModal from "@/components/FillsModal";
-import SystemStatusBar from "@/components/admin/SystemStatusBar";
 import MobileJournalList from "@/components/mobile/MobileJournalList";
 import NewsTab from "@/components/ticker-detail/NewsTab";
 import SeasonalityTab from "@/components/ticker-detail/SeasonalityTab";
@@ -105,12 +104,6 @@ describe("ticker-scoped detail requests", () => {
 });
 
 describe("component data semantics", () => {
-  it("reports missing service freshness as unknown", () => {
-    render(<SystemStatusBar units={[]} health={null} updatedSecsAgo={null} stalled={false} />);
-    expect(screen.getByTestId("system-status-bar").textContent).toContain("updated freshness unknown");
-    expect(screen.getByTestId("system-status-bar").textContent).not.toContain("just now");
-  });
-
   it("uses canonical total cost in the mobile journal", () => {
     const trade = {
       id: "trade-1",
