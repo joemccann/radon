@@ -119,11 +119,17 @@ class TestStrayLaunchdAgent:
         monkeypatch.setenv("TURSO_AUTH_TOKEN", "synthetic-token")
         posted = MagicMock(side_effect=AssertionError("must not reach the wire"))
         monkeypatch.setattr(db_http, "_post_pipeline", posted)
+        monkeypatch.setattr(db_http, "_post_statements", posted)
         monkeypatch.setattr(db_http, "_open_request", posted)
         with pytest.raises(guard.ProductionWriterRefused):
             db_http.hrana_execute("UPDATE service_health SET state = 'error'")
         with pytest.raises(guard.ProductionWriterRefused):
             db_http.hrana_transaction([("UPDATE service_health SET state = 'error'", ())])
+        with pytest.raises(guard.ProductionWriterRefused):
+            # R-749 / REL-338: claim() now writes through execute_many.
+            db_http.hrana_execute_many(
+                [("UPDATE marketdesk_articles SET last_error=? WHERE article_id=?", ("attempt_in_progress", "x"))]
+            )
         posted.assert_not_called()
 
 
