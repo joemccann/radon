@@ -323,15 +323,19 @@ def hrana_execute_many(
     statements: Sequence[tuple[str, Sequence[Any]]],
     timeout: float = HRANA_TIMEOUT_S,
 ) -> list[list[tuple] | DbHttpError]:
-    """Run independent read statements in ONE /v2/pipeline round-trip.
+    """Run independent statements in ONE /v2/pipeline round-trip.
 
     Not a transaction: each statement succeeds or fails on its own, so the
     result list holds rows (as in :func:`hrana_execute`) or the
     :class:`DbHttpError` for that statement, in input order. Missing creds
     or a transport/protocol failure raise :class:`DbHttpError`.
+    REL-330 / R-741 / R-749: same developer-host refuse as
+    :func:`hrana_execute` and :func:`hrana_transaction` — claim() writes
+    through this path, so a missing gate is a production write.
     """
     if not statements or len(statements) > 100:
         raise ValueError("hrana_execute_many requires 1..100 statements")
+    _refuse_developer_host()
     db_url, token = read_env()
     http_origin = http_url_from_libsql(db_url)
     if not http_origin or not token:
