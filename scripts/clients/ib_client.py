@@ -76,10 +76,6 @@ class IBContractError(IBError):
 
 
 # ---------------------------------------------------------------------------
-# Constants — re-exported from ib_connection for backward compat
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Client ID Range Allocation
 # ---------------------------------------------------------------------------
 # IB allows client IDs 0-999. We partition the space into non-overlapping
