@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { dbBatch } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import {
   QUANT_MISSING,
@@ -93,34 +94,36 @@ function parseRun(row: Row | undefined): QuantRun | null {
   };
 }
 
+const RUN_SQL =
+  `SELECT run_at, since, until, n_sessions, n_rebalances, payload
+   FROM quant_runs WHERE strategy = ? ORDER BY run_at DESC LIMIT 1`;
+const TARGETS_WHERE =
+  `WHERE strategy = ? AND as_of = (SELECT MAX(as_of) FROM quant_targets WHERE strategy = ?)`;
+const TARGETS_SQL =
+  `SELECT as_of, symbol, weight, notional, recorded_at, close, rebalance_today
+   FROM quant_targets ${TARGETS_WHERE} ORDER BY symbol`;
+const TARGETS_LEGACY_SQL =
+  `SELECT as_of, symbol, weight, notional, recorded_at FROM quant_targets ${TARGETS_WHERE} ORDER BY symbol`;
+const ORDERS_SQL =
+  `SELECT as_of, symbol, action, quantity, limit_price, status, message, placed_at
+   FROM quant_orders
+   WHERE strategy = ? AND as_of = (SELECT MAX(as_of) FROM quant_orders WHERE strategy = ?)
+   ORDER BY placed_at DESC, symbol`;
+
 async function readTargets(db: ReturnType<typeof getDb>, strategy: string): Promise<Row[]> {
-  const where = `WHERE strategy = ? AND as_of = (SELECT MAX(as_of) FROM quant_targets WHERE strategy = ?)`;
   try {
-    const res = await db.execute({
-      sql: `SELECT as_of, symbol, weight, notional, recorded_at, close, rebalance_today
-            FROM quant_targets ${where} ORDER BY symbol`,
-      args: [strategy, strategy],
-    });
+    const res = await db.execute({ sql: TARGETS_SQL, args: [strategy, strategy] });
     return res.rows as unknown as Row[];
   } catch {
     // Pre-0109 schema: no close / rebalance_today columns yet.
-    const res = await db.execute({
-      sql: `SELECT as_of, symbol, weight, notional, recorded_at FROM quant_targets ${where} ORDER BY symbol`,
-      args: [strategy, strategy],
-    });
+    const res = await db.execute({ sql: TARGETS_LEGACY_SQL, args: [strategy, strategy] });
     return res.rows as unknown as Row[];
   }
 }
 
 async function readOrders(db: ReturnType<typeof getDb>, strategy: string): Promise<Row[]> {
   try {
-    const res = await db.execute({
-      sql: `SELECT as_of, symbol, action, quantity, limit_price, status, message, placed_at
-            FROM quant_orders
-            WHERE strategy = ? AND as_of = (SELECT MAX(as_of) FROM quant_orders WHERE strategy = ?)
-            ORDER BY placed_at DESC, symbol`,
-      args: [strategy, strategy],
-    });
+    const res = await db.execute({ sql: ORDERS_SQL, args: [strategy, strategy] });
     return res.rows as unknown as Row[];
   } catch {
     // The execution bridge's table lands with migration 0110; a run without it
@@ -129,16 +132,13 @@ async function readOrders(db: ReturnType<typeof getDb>, strategy: string): Promi
   }
 }
 
-async function readQuantFromDb(strategy: string): Promise<TimestampedRead<QuantData> | null> {
-  const db = getDb();
-  const runRes = await db.execute({
-    sql: `SELECT run_at, since, until, n_sessions, n_rebalances, payload
-          FROM quant_runs WHERE strategy = ? ORDER BY run_at DESC LIMIT 1`,
-    args: [strategy],
-  });
+function assembleQuant(
+  runRes: { rows: unknown[] },
+  targetRows: Row[],
+  orderRows: Row[],
+  strategy: string,
+): TimestampedRead<QuantData> | null {
   const run = parseRun(runRes.rows[0] as unknown as Row | undefined);
-  const targetRows = await readTargets(db, strategy);
-  const orderRows = await readOrders(db, strategy);
   if (!run && targetRows.length === 0 && orderRows.length === 0) return null;
 
   const targets = targetRows.length
@@ -174,6 +174,31 @@ async function readQuantFromDb(strategy: string): Promise<TimestampedRead<QuantD
     data: { strategy, label: quantLabel(strategy), missing: false, run, targets, orders },
     timestampMs: latestMs(run?.run_at ?? null, targets?.recorded_at ?? null, orders?.placed_at ?? null),
   };
+}
+
+async function readQuantFromDb(strategy: string): Promise<TimestampedRead<QuantData> | null> {
+  const runArgs = [strategy];
+  const pairArgs = [strategy, strategy];
+  try {
+    const [runRes, targetRes, orderRes] = await dbBatch(
+      [
+        { sql: RUN_SQL, args: runArgs },
+        { sql: TARGETS_SQL, args: pairArgs },
+        { sql: ORDERS_SQL, args: pairArgs },
+      ],
+      { label: `quant:${strategy}`, mode: "read" },
+    );
+    return assembleQuant(runRes, targetRes.rows as unknown as Row[], orderRes.rows as unknown as Row[], strategy);
+  } catch {
+    // Pre-0109 targets (no close / rebalance_today) or pre-0110 orders: the
+    // batched pipeline fails as a unit, then the sequential probes keep the
+    // existing column/table fallbacks. Current schema stays on one POST.
+    const db = getDb();
+    const runRes = await db.execute({ sql: RUN_SQL, args: runArgs });
+    const targetRows = await readTargets(db, strategy);
+    const orderRows = await readOrders(db, strategy);
+    return assembleQuant(runRes, targetRows, orderRows, strategy);
+  }
 }
 
 export async function GET(
