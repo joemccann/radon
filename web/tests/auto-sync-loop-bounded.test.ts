@@ -26,8 +26,21 @@ import {
   useAutoSyncOnStale,
 } from "../lib/useAutoSyncOnStale";
 import { useSnapshotStaleness } from "../lib/useSnapshotStaleness";
-import { deriveKpis } from "../lib/dashboardKpis";
-import type { PortfolioData } from "../lib/types";
+import { currentIbDailyPnl } from "../lib/ibDailyPnlSession";
+
+describe("the daily P&L gate reads the snapshot date, not the wall clock", () => {
+  const SATURDAY_PHANTOM = 13_951.76;
+
+  it("blanks a Saturday-captured daily P&L opened on Monday morning", () => {
+    const mondayMorning = new Date("2026-08-24T12:00:00Z");
+    expect(currentIbDailyPnl(SATURDAY_PHANTOM, mondayMorning, "2026-08-22T20:00:00Z")).toBeNull();
+  });
+
+  it("keeps a same-session daily P&L", () => {
+    const mondaySession = new Date("2026-08-24T15:00:00Z");
+    expect(currentIbDailyPnl(SATURDAY_PHANTOM, mondaySession, "2026-08-24T14:00:00Z")).toBe(SATURDAY_PHANTOM);
+  });
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -130,34 +143,5 @@ describe("useSnapshotStaleness does not tick when there is nothing to age", () =
       vi.advanceTimersByTime(90_000);
     });
     expect(result.current.tick).toBeGreaterThan(0);
-  });
-});
-
-describe("the daily P&L gate reads the snapshot date, not the wall clock", () => {
-  const portfolio = (lastSync: string): PortfolioData =>
-    ({
-      positions: [],
-      account_summary: { net_liquidation: 500_000, daily_pnl: 13_951.76 },
-      last_sync: lastSync,
-    }) as unknown as PortfolioData;
-
-  it("blanks a Saturday-captured daily P&L opened on Monday morning", () => {
-    const cells = deriveKpis(
-      portfolio("2026-08-22T20:00:00Z"),
-      0,
-      new Date("2026-08-24T12:00:00Z"),
-    );
-    const today = cells.find((c) => c.key === "todayPnl");
-    expect(today?.value).toBeNull();
-  });
-
-  it("keeps a same-session daily P&L", () => {
-    const cells = deriveKpis(
-      portfolio("2026-08-24T14:00:00Z"),
-      0,
-      new Date("2026-08-24T15:00:00Z"),
-    );
-    const today = cells.find((c) => c.key === "todayPnl");
-    expect(today?.value).toBe(13_951.76);
   });
 });

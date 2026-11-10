@@ -38,10 +38,6 @@ vi.mock("@/lib/useWatchlist", () => ({
   useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
 }));
 
-vi.mock("../components/PriceChart", () => ({
-  default: () => React.createElement("div", { "data-testid": "price-chart" }),
-}));
-
 vi.mock("@/components/ComboSkewPanel", () => ({ default: () => null }));
 
 import MobileOrderTicket from "@/components/mobile/MobileOrderTicket";

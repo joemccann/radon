@@ -102,11 +102,6 @@ vi.mock("@tools/schemas/ib-orders", () => ({
   OrdersData: {},
 }));
 
-// Mock @/lib/syncMutex (some routes may import it)
-vi.mock("@/lib/syncMutex", () => ({
-  createSyncMutex: (fn: () => Promise<unknown>) => fn,
-}));
-
 // Mock Clerk server auth — /api/previous-close calls `await auth()` to mint a
 // WS ticket. Without a Clerk middleware context auth() throws → 500. Return a
 // null token so the route connects without a ticket (the WS mock handles it).

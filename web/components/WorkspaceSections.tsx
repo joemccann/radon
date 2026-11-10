@@ -174,22 +174,6 @@ const RegimePanel = dynamic(() => import("./RegimePanel"), {
   loading: () => <InstrumentSkeleton testId="regime-panel-skeleton" />,
 });
 
-/* ─── Re-exports for backward compat ──────────────────── */
-
-export {
-  fmtUsd,
-  fmtPrice,
-  fmtPriceOrCalculated,
-  resolveMarketValue,
-  resolveEntryCost,
-  getAvgEntry,
-  getMultiplier,
-  getLastPriceIsCalculated,
-  legPriceKey,
-  getOptionDailyChg,
-  getLastPrice,
-} from "@/lib/positionUtils";
-
 /* ─── Share P&L helpers ────────────────────────────────── */
 
 /** Build a human-readable description from an ExecutedOrder.
