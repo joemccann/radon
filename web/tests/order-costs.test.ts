@@ -21,7 +21,7 @@ import {
   totalEntryCost,
   estimateRoundTripCost,
 } from "../lib/order/costs";
-import { computeOrderRisk, type OrderRiskLeg } from "../lib/orderRisk";
+import { computeOrderRisk, type OrderRiskLeg } from "@/lib/order/risk/__test_only__";
 
 function leg(
   action: "BUY" | "SELL",

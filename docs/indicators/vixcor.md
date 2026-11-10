@@ -1029,8 +1029,7 @@ export function useVixcor(): UseSyncReturn<VixcorData> {
 ### G.4 `web/components/VixCorChart.tsx` — the two-pane chart
 
 `CriHistoryChart` cannot express this: it is one plot with a two-element series
-tuple and no reference line or shading. Build a dedicated component modeled on
-`web/components/InternalsSkewChart.tsx`, which is the repo's precedent for two
+tuple and no reference line or shading. Build a dedicated component with two
 panes sharing one x-scale inside a single SVG.
 
 Wrap in `ChartPanel` with `family="analytical-time-series"`. The `d3-svg`

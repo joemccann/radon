@@ -22,7 +22,6 @@
   "dependencies": {
     "@clerk/nextjs": "^7.5.9",
     "@clerk/themes": "^2.4.63",
-    "@fontsource/ibm-plex-mono": "^5.2.7",
     "@libsql/client": "^0.17.3",
     "@sinclair/typebox": "0.34.48",
     "@stoqey/ib": "^1.5.5",
@@ -37,7 +36,6 @@
     "d3": "^7.9.0",
     "exceljs": "^4.4.0",
     "jspdf": "4.2.1",
-    "liveline": "^0.0.6",
     "lucide-react": "^0.544.0",
     "next": "^16.4.2",
     "pptxgenjs": "^4.0.1",
@@ -47,8 +45,7 @@
     "remark-gfm": "^4.0.0",
     "thinking-orbs": "^0.3.1",
     "undici": "^8.12.3",
-    "ws": "^8.21.3",
-    "zustand": "^5.0.11"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
@@ -61,7 +58,6 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9.21.0",
     "eslint-config-next": "^16.4.2",
-    "oxlint": "1.91.0",
     "fast-check": "^4.8.0",
     "oxlint": "1.91.0",
     "playwright": "^1.58.2",

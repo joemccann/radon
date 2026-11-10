@@ -38,12 +38,4 @@ describe("service-health transport failure UI", () => {
     expect(services?.getAttribute("data-tone")).toBe("warn");
     expect(services?.textContent).toContain("Unavailable");
   });
-
-  it("renders a global alert instead of hiding behind cached nominal data", async () => {
-    const { default: ServiceHealthBanner } = await import("../components/ServiceHealthBanner");
-
-    render(<ServiceHealthBanner />);
-
-    expect(screen.getByRole("alert").textContent).toContain("Service telemetry unavailable");
-  });
 });

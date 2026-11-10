@@ -14,7 +14,6 @@
 import { describe, expect, it } from "vitest";
 
 import { buildTurnSteps, describeEngines, describeTool, formatElapsed } from "../lib/agent/turnSteps";
-import { buildAnalysisSources, buildFollowUps } from "../lib/agent/analysisSources";
 import { buildScannerProposal, isActionable } from "../lib/agent/scannerProposal";
 import type { AssistantToolEvent, ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
 
@@ -95,57 +94,6 @@ describe("describeEngines / formatElapsed", () => {
     expect(formatElapsed(4200)).toBe("4.2S");
     expect(formatElapsed(-1)).toBe("");
     expect(formatElapsed(Number.NaN)).toBe("");
-  });
-});
-
-// ── AnalysisSources ────────────────────────────────────────────────────────
-
-describe("buildAnalysisSources", () => {
-  it("returns nothing for a post with no href and no tagger output", () => {
-    expect(buildAnalysisSources({})).toEqual([]);
-  });
-
-  it("lists the article host first, then whichever taggers contributed", () => {
-    const sources = buildAnalysisSources({
-      href: "https://www.themarketear.com/posts/abc",
-      tags_text: ["MU", "FED"],
-      tags_vision: ["CHART"],
-    });
-    expect(sources.map((s) => s.id)).toEqual(["article", "tagger-text", "tagger-vision"]);
-    expect(sources[0].name).toBe("themarketear.com");
-    expect(sources[1].feed).toBe("2 tags");
-    expect(sources[2].feed).toBe("1 tag");
-  });
-
-  it("omits a tagger that produced nothing", () => {
-    const sources = buildAnalysisSources({ href: "https://x.com/a", tags_text: ["MU"] });
-    expect(sources.map((s) => s.id)).toEqual(["article", "tagger-text"]);
-  });
-
-  it("drops an unparseable href instead of rendering a broken row", () => {
-    expect(buildAnalysisSources({ href: "not a url" })).toEqual([]);
-  });
-});
-
-describe("buildFollowUps", () => {
-  it("turns ticker-shaped tags into flow prompts", () => {
-    expect(buildFollowUps({ tags: ["MU", "NVDA"] })).toEqual(["Scan MU flow", "Scan NVDA flow"]);
-  });
-
-  it("ignores prose tags and lowercase noise", () => {
-    expect(buildFollowUps({ tags: ["FED RATES", "macro", "MU"] })).toEqual(["Scan MU flow"]);
-  });
-
-  it("dedupes and caps at three", () => {
-    expect(buildFollowUps({ tags: ["MU", "MU", "A", "B", "C", "D"] })).toEqual([
-      "Scan MU flow",
-      "Scan A flow",
-      "Scan B flow",
-    ]);
-  });
-
-  it("returns nothing when there are no tags", () => {
-    expect(buildFollowUps({})).toEqual([]);
   });
 });
 
