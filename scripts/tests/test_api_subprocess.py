@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -227,12 +228,17 @@ class TestRunModule:
 
     def test_module_timeout(self):
         """Module that hangs should be killed."""
+        started = time.monotonic()
         result = asyncio.run(
-            run_module("time", args=[], timeout=0.5)
+            run_module(
+                "timeit",
+                args=["-n", "1", "-r", "1", "import time; time.sleep(30)"],
+                timeout=0.5,
+            )
         )
-        # python3 -m time just runs and exits, so this might succeed or timeout
-        # The point is it doesn't hang forever
-        assert isinstance(result, ScriptResult)
+        assert not result.ok
+        assert result.error == "Module timed out after 0.5s"
+        assert time.monotonic() - started < 15
 
     def test_module_error_falls_back_to_stdout_when_stderr_is_empty(self):
         """When stderr is empty, error should be extracted from stdout."""

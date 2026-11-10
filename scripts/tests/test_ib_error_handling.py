@@ -224,17 +224,22 @@ class TestExistingErrorHandling:
 
     @patch("clients.ib_client.IB")
     def test_connectivity_codes_still_handled(self, MockIB):
-        """Connectivity codes (1100, 1101, 1102) should still be handled."""
+        """Connectivity codes (1100, 1101, 1102) are logged as connectivity
+        warnings and never recorded as an operation error."""
         mock_ib = MockIB.return_value
         mock_ib.isConnected.return_value = True
 
         client = IBClient()
         client.connect(client_id=1)
+        client.logger = MagicMock()
 
-        # Should not raise
         client._on_error(0, 1100, "Connectivity between IB and TWS has been lost")
         client._on_error(0, 1101, "Connectivity restored — data lost")
         client._on_error(0, 1102, "Connectivity restored — data maintained")
+
+        assert client._last_error is None
+        assert [call.args[1] for call in client.logger.warning.call_args_list] == [1100, 1101, 1102]
+        client.logger.error.assert_not_called()
 
     @patch("clients.ib_client.IB")
     def test_last_error_still_stored_for_unknown_codes(self, MockIB):

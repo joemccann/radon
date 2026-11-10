@@ -169,8 +169,8 @@ class TestKeyLevels:
     def test_second_magnet_differs_from_first(self):
         profile = bucket_profile(SAMPLE_STRIKES, 25, SPOT)
         levels = find_key_levels(profile, SPOT)
-        if levels["second_magnet"] is not None:
-            assert levels["second_magnet"]["strike"] != levels["max_magnet"]["strike"]
+        assert levels["second_magnet"] is not None
+        assert levels["second_magnet"]["strike"] != levels["max_magnet"]["strike"]
 
     def test_distance_from_spot(self):
         profile = bucket_profile(SAMPLE_STRIKES, 25, SPOT)
@@ -203,9 +203,9 @@ class TestTagProfile:
         levels = find_key_levels(profile, SPOT)
         flip = compute_gex_flip(profile, SPOT)
         tagged = tag_profile(profile, SPOT, flip, levels)
-        if flip is not None:
-            tags = [b["tag"] for b in tagged if b["tag"]]
-            assert "GEX FLIP" in tags
+        assert flip is not None
+        tags = [b["tag"] for b in tagged if b["tag"]]
+        assert "GEX FLIP" in tags
 
 
 # ── Expected Range ───────────────────────────────────────────────

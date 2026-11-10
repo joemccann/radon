@@ -283,7 +283,7 @@ class TestAForeignOrderIdStillReserves:
         assert "not modified" in capsys.readouterr().out
 
 
-class TestAModifyMeetsTheBankrollCap:
+class _AResizeMeetsTheBankrollCap:
     """DS-2026-10-25-02: a modify retransmits, so with the all-paths
     preference on it is held under the same 2.5% cap as a placement."""
 
@@ -345,6 +345,8 @@ class TestAModifyMeetsTheBankrollCap:
         assert self._modify(client, 2) == 0
         client.place_order.assert_called_once()
 
+
+class TestAModifyMeetsTheBankrollCap(_AResizeMeetsTheBankrollCap):
     def test_a_close_is_not_reserved_against_itself(self):
         client = self._client(self._working(10, "SELL"), self._working(5, "SELL"), held=10.0)
 
@@ -367,7 +369,7 @@ class TestAModifyMeetsTheBankrollCap:
         client.place_order.assert_called_once()
 
 
-class TestAComboModifyMeetsTheBankrollCap(TestAModifyMeetsTheBankrollCap):
+class TestAComboModifyMeetsTheBankrollCap(_AResizeMeetsTheBankrollCap):
     """DS-2026-10-25-02 residual: the combo branch skipped Gate 3 entirely."""
 
     LONG = SimpleNamespace(conId=31, symbol="SLV", secType="OPT", right="C", strike=26.0,
@@ -388,12 +390,6 @@ class TestAComboModifyMeetsTheBankrollCap(TestAModifyMeetsTheBankrollCap):
         client = super()._client(working, confirmed)
         client.qualify_contracts.return_value = [self.LONG, self.SHORT]
         return client
-
-    def test_a_close_is_not_reserved_against_itself(self):
-        pytest.skip("single-leg close covered by the parent class")
-
-    def test_a_partially_filled_close_is_priced_on_its_remainder(self):
-        pytest.skip("single-leg close covered by the parent class")
 
     def test_an_unresolvable_leg_is_unpriceable(self, capsys):
         client = self._client(self._working(1), self._working(2))

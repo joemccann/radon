@@ -214,8 +214,18 @@ class TestScanJournalGaps:
 
     def test_reuses_reconcile_gap_finder(self):
         """SLI detection must stay aligned with daily journal-reconcile."""
-        # smoke: _find_gaps is the shared primitive (import above proves linkage)
-        assert callable(_find_gaps)
+        from monitor_daemon.handlers import journal_gap_sli
+
+        assert journal_gap_sli._find_gaps is _find_gaps
+        reconcile_verdict = [{"exec_id": "FROM-RECONCILE"}]
+        db = _make_db([_exec_row("FILL-A")], [])
+        with patch.object(
+            journal_gap_sli, "_find_gaps", return_value=reconcile_verdict
+        ) as finder:
+            snap = scan_journal_gaps(db)
+        finder.assert_called_once()
+        assert snap["gaps"] == reconcile_verdict
+        assert snap["missing_exec_id_count"] == 1
 
 
 # ---------------------------------------------------------------------------

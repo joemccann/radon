@@ -62,10 +62,6 @@ _PARSED_TREES: list[tuple[Path, ast.Module | None]] = [
 ]
 
 
-def _python_files():
-    return _PYTHON_FILES
-
-
 def _parse(path: Path) -> ast.Module | None:
     """Return the cached AST for path, or None if it did not parse."""
     for p, tree in _PARSED_TREES:
