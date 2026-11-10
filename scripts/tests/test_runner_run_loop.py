@@ -1046,7 +1046,9 @@ def test_the_gh_guard_shim_routes_pr_api_issue_and_alias_to_the_guard(tmp_path):
 
 
 @pytest.mark.parametrize("loop,hour,minute,marker,audit_secs,keep", [
-    ("security", 0, 40, "SECURITY-NIGHTLY PHASE COMPLETE:", 7200, "node_modules web/node_modules"),
+    # 8h, like DeepSec: the monthly full-repository Claude Security refresh was
+    # killed at the old 2h cap (2026-11-09, ~95 min in, no terminal summary).
+    ("security", 0, 40, "SECURITY-NIGHTLY PHASE COMPLETE:", 28800, "node_modules web/node_modules"),
     ("security-deepsec", 0, 50, "SECURITY-DEEPSEC PHASE COMPLETE:", 28800, ".deepsec data/radon"),
 ])
 def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute, marker, audit_secs, keep):
