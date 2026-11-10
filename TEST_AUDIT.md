@@ -12329,3 +12329,41 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | credentials + health-stall xdist flakes then serial 40 passed; 21,000 passed / 12 skipped / 63 subtests (275.08s) | 11,853 passed / 21 skipped / 1,226 files (101.56s) | 58 failed / 4,004 passed / 23 skipped (1144.13s) | — |
 | 2 | credentials + cta-copy xdist flakes then serial 44 passed; 21,000 passed / 12 skipped / 63 subtests (168.83s) | 11,853 passed / 21 skipped / 1,226 files (109.72s) | 58 failed / 4,004 passed / 23 skipped (1053.41s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then isolated misses and file 11 passed; 21,001 passed / 12 skipped / 63 subtests (185.10s) | 11,853 passed / 21 skipped / 1,226 files (117.49s) | 58 failed / 4,004 passed / 23 skipped (1273.47s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-10
+
+Range `0b7a8141bc4b5bacea144e8ba0cd6a68288ae926..132f9ab02313217d0663c8cea498478f41d60f75`: 102 commits / 153 paths. Newest trusted checkpoint on issue #83 is `audited-through: 0b7a8141bc4b5bacea144e8ba0cd6a68288ae926` (collaborator, 2026-11-08). The 2026-11-09 run posted `exit=1` with no marker. The checkpoint carried no open verified finding. No open `testing/` pull request. Highest id T-586. Next id T-587.
+
+Codemap (`tools/codemap/codemap.json`) lists no node for `scripts/quant/data.py` (added in-range). `rg` confirmed `scripts/tests/test_quant_run.py` imports `align_closes` only; `quant_run.main` defaults to `load_price_matrix` (`scripts/quant_run.py:309`) and the CLI tests inject a fake loader (`test_quant_run.py:2-3`). Imbalance, quant execute, oi-changes, newsfeed PDF, options-chain rate, privileged writes, and CIP-028/029 each have executing tests.
+
+`ci.yml` grew the `scripts-npsz` glob to `test_[n-q]*.py` so `test_quant_*.py` is collected, and curated `e2e/imbalance-tab.spec.ts` plus `e2e/newsfeed-pdf-export.spec.ts`. Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. No new `skip` / `xfail`. `web/e2e/quant-tab.spec.ts` is held out with a dated REVIEWED stamp, same posture as `margin-debt-tab.spec.ts`. Re-triaged `TEST_LOG.md`: T-586 remains DONE.
+
+Standing sweeps on this Mac: root pytest 21,161 passed / 12 skipped / 63 subtests (154.31s). Vitest 11,932 passed / 21 skipped / 1,236 files (48.30s). cloud/tests 59 failed / 4,033 passed / 23 skipped (1001.18s). Versus the 2026-11-08 Darwin 58-list: +1 `test_refresh_control_plane.py::test_privileged_refresh_reads_the_root_store_not_checkout_objects` (loose object vs pack; 3/3 isolated red; file unchanged in the range). HEAD is `origin/main` for the cloud tree. Linux CI is the authority.
+
+Delta-touched files 3×: Python 701 passed; Vitest 538 passed / 20 files; cloud 757 passed.
+
+Not filed: quant e2e hold-out (dated review, sibling of margin-debt); `quant-registry-pin.test.ts` source grep (cross-language registry pin, regex miss would fail the equality).
+
+### T-587 — P1 — quant sleeve close ladder is untested, so Yahoo-first would not fail
+
+`scripts/quant/data.py:145` walks `("rh", "uw", "yahoo")` after `_fetch_ib_closes_batch` (`:136`). `scripts/quant_run.py:309` defaults `load_prices=load_price_matrix`; `scripts/tests/test_quant_run.py:2-3` injects a fake loader, so a Yahoo-first swap left those tests green. `_needs_backfill` (`data.py:75`) and `_ib_duration` (`:82`) had no executing check. Yahoo-first mutation: 3 failed / 10 passed (`calls == [ib, rh, uw, yahoo]` became `[ib, yahoo]`).
+
+Acceptance: IB hit skips later rungs and persists `source=ib`. Empty IB walks rh then uw then yahoo. RH hit skips uw and yahoo. Persist failure still returns the fetched closes. Thin Turso rows backfill; a full fresh series does not. Mutating the fallback tuple to lead with yahoo fails the call-order cases.
+
+Audited through: 132f9ab02313217d0663c8cea498478f41d60f75 on 2026-11-10 — 1 new finding
+
+## Remediation 2026-11-10
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-587 | DONE | Yahoo-first mutation: 3 failed / 10 passed (`/tmp/pytest-t587-red.log`). Restored `("rh", "uw", "yahoo")`. Green: 13 passed ×3. Quant cluster 92 passed. Product source unchanged. |
+
+### Closing gates 2026-11-10
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest rounds 1 and 3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed 11 serially each time. Round 2 EXIT 0. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 59 nodes as each other and as the standing HEAD run (0 added / 0 removed). HEAD is `origin/main` `132f9ab02` for the cloud tree, so the standing cloud run is the base. Versus the 2026-11-08 Darwin 58-list the extra 1 is `test_refresh_control_plane.py` (loose git object; file unchanged in range). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs standing / r1 |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 11 passed; 21,174 passed / 12 skipped / 63 subtests (140.79s) | 11,932 passed / 21 skipped / 1,236 files (94.75s) | 59 failed / 4,033 passed / 23 skipped (1129.38s) | 0 added / 0 removed |
+| 2 | 21,175 passed / 12 skipped / 63 subtests (163.86s) | 11,932 passed / 21 skipped / 1,236 files (96.48s) | 59 failed / 4,033 passed / 23 skipped (1014.15s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 11 passed; 21,174 passed / 12 skipped / 63 subtests (159.52s) | 11,932 passed / 21 skipped / 1,236 files (100.17s) | 59 failed / 4,033 passed / 23 skipped (1034.29s) | 0 added / 0 removed |
