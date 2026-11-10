@@ -68,7 +68,10 @@ def test_gateway_job_still_publishes_the_exact_sha_and_smokes() -> None:
     tags = build["with"]["tags"]
     assert f"{GATEWAY_REPO}:${{{{ github.sha }}}}" in tags
     assert f"{GATEWAY_REPO}:latest" in tags
-    assert build["with"]["load"] is True
+    # CIP-029: main pushes without load:true; PRs still load.
+    assert build["with"]["load"] == (
+        "${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}"
+    )
     assert build["with"]["push"] == (
         "${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}"
     )
