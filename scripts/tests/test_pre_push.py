@@ -24,6 +24,16 @@ ROOT = Path(__file__).resolve().parents[2]
 ZERO = "0" * 40
 
 
+@pytest.fixture(autouse=True)
+def _no_developer_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """pre_push drops every GIT_* variable before it runs git, so the suite's
+    GIT_CONFIG_GLOBAL does not reach it. A private HOME does."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 def _touch(root: Path, *paths: str) -> None:
     for rel in paths:
         target = root / rel

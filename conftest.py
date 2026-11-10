@@ -18,6 +18,14 @@ import pytest
 
 from ci.worker_budget import budgeted_workers
 
+# A developer's global core.hooksPath redirects every tmp repo's hooks
+# directory to a real one in their home, so a test that installs a hook
+# overwrites it (2026-11-10: ~/.git-hooks/pre-push). CI has no global git
+# config; give every local run the same blank slate before any test or
+# subprocess reads it.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_SYSTEM"] = os.devnull
+
 
 PUSHOVER_CREDENTIAL_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
