@@ -37,7 +37,7 @@ the 10-day outage from 2026-08-06.
 
 It still escalates, deliberately. A second 1018 ninety seconds after the first
 means something is making sustained requests rather than the once-a-day call
-this handler makes, and there is a known uncontrolled consumer in
+this handler makes, and there was a known uncontrolled consumer in the since-deleted
 `portfolio_performance.py` (up to two on-demand requests per page render, no
 breaker). Escalating in minutes surfaces that without hiding the data for a week.
 

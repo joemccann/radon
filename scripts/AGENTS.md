@@ -64,7 +64,6 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 - Scanner/discover use parallel workers and skip tickers on `UWRateLimitError`.
 - WS relay batches last-write-wins updates with 100ms flush.
 - Stale tick detection restarts Gateway only through the documented recovery path.
-- Performance page uses Phase A IB+cache and Phase B parallel UW/Yahoo fallback; preserve SWR behavior.
 
 ## Option close cache expiry (REL-021b / R-034)
 

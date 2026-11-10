@@ -52,11 +52,6 @@ def _assert_no_legacy_data_files(path: Path) -> None:
             allowed_ratings_cache = "analyst_ratings_cache.json" in text and path.name == "fetch_analyst_ratings.py"
             allowed_service_log = "exit_order_service.log" in text and path.name == "exit_order_service.py"
             allowed_strategy_config = "strategies.json" in text and path.name == "portfolio_attribution.py"
-            allowed_performance_cache = path.name == "portfolio_performance.py" and (
-                "IB_NAV_CACHE_PATH" in text
-                or "ib_twr_series.json" in text
-                or "NAV_HISTORY_PATH" in text
-            )
             # Operator-supplied Activity/Trade Confirmation XML, not trade_log.json.
             allowed_flex_from_file = path.name == "journal_rehydrate.py" and "from_file" in text
             assert (
@@ -67,7 +62,6 @@ def _assert_no_legacy_data_files(path: Path) -> None:
                 or allowed_ratings_cache
                 or allowed_service_log
                 or allowed_strategy_config
-                or allowed_performance_cache
                 or allowed_flex_from_file
             ), (
                 f"{path} must not read or write flat JSON source files"
@@ -97,7 +91,6 @@ def test_trade_portfolio_scripts_do_not_use_flat_json_source_truth() -> None:
         "scripts/fetch_x_watchlist.py",
         "scripts/fetch_x_xai.py",
         "scripts/portfolio_report.py",
-        "scripts/portfolio_performance.py",
         "scripts/ib_reconcile.py",
         "scripts/kelly_guard.py",
         "scripts/option_session_mark.py",

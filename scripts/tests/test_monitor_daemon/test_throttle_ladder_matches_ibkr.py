@@ -17,8 +17,8 @@ statement that was seconds from ready could put the sync to sleep for a day, and
 a few transient failures could walk it to a week.
 
 The corrected ladder still escalates -- a second 1018 sixty seconds after the
-first means something is making sustained requests, and this repo has a
-known uncontrolled consumer in portfolio_performance.py -- but it escalates in
+first means something is making sustained requests, and this repo had a
+known uncontrolled consumer in the since-deleted portfolio_performance.py -- but it escalates in
 minutes, and it is bounded by an hour rather than a week.
 """
 

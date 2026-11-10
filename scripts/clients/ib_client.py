@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from dotenv import load_dotenv
-from ib_insync import IB, FlexReport, Option
+from ib_insync import IB, Option
 from utils.outcome_metrics import count_operation
 
 # Load root .env so IB_GATEWAY_HOST/PORT are available before defaults are computed.
@@ -1261,36 +1261,6 @@ class IBClient:
         """Return full contract details (``ContractDetails`` list)."""
         self._require_connection()
         return self._ib.reqContractDetails(contract)
-
-    # -- Flex Query ---------------------------------------------------------
-
-    def run_flex_query(self, query_id: int, token: str) -> Any:
-        """Execute an IB Flex Query and return the ``FlexReport``.
-
-        Args:
-            query_id: The Flex Query ID from IB Account Management.
-            token: The Flex Web Service token.
-
-        Returns:
-            The ``FlexReport`` object.
-
-        Raises:
-            IBError: If the Flex query fails.
-        """
-        # ABOVE the try, deliberately. The guard and the 1025 embargo check it
-        # invokes are POLICY, not transport: wrapping them made a by-design
-        # block and a real token lockout indistinguishable from a Flex outage,
-        # and `portfolio_performance` then degraded to the stale blotter cache
-        # warning "Live IB Flex Query unavailable" for both. R-353.
-        from utils.flex_send import assert_sendrequest_permitted
-
-        assert_sendrequest_permitted(allowed=False)
-        try:
-            report = FlexReport(token=token, queryId=query_id)
-            self.logger.info("Flex query %d executed successfully", query_id)
-            return report
-        except Exception as exc:
-            raise IBError(f"Flex query {query_id} failed: {exc}") from exc
 
     # -- utility ------------------------------------------------------------
 
