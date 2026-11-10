@@ -64,6 +64,7 @@ async function stubAllApis(page: Page) {
   await page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbol: "AAPL", expiry: "20260320", exchange: "SMART", strikes: [195, 200, 205], multiplier: "100" }) }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 
   return portfolioGuard;
 }

@@ -33,6 +33,7 @@ async function stubApis(page: Page) {
   await page.route("**/api/portfolio", (r) => r.fulfill(json(PORTFOLIO)));
   await page.route("**/api/orders", (r) => r.fulfill(json(ORDERS)));
   await page.route("**/api/regime", (r) => r.fulfill(json({ score: 10, cri: { score: 10 } })));
+  await page.route("**/api/ib-status", (r) => r.fulfill(json({ connected: false })));
   await page.route("**/api/profile", (r) => r.fulfill(json({})));
   await page.route("**/api/blotter", (r) =>
     r.fulfill(json({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] })),
@@ -42,6 +43,7 @@ async function stubApis(page: Page) {
   );
   await page.route("**/api/options/expirations*", (r) => r.fulfill(json(EXPIRATIONS)));
   await page.route("**/api/options/chain*", (r) => r.fulfill(json(CHAIN)));
+  await page.route("**/api/prices", (r) => r.abort());
 }
 
 async function headerRow(page: Page): Promise<string[]> {

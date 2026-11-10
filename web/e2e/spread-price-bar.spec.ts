@@ -131,6 +131,9 @@ function stubApis(page: import("@playwright/test").Page) {
   page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
+  page.route("**/api/ib-status", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
+  );
   page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
@@ -150,6 +153,7 @@ function stubApis(page: import("@playwright/test").Page) {
       }),
     }),
   );
+  page.route("**/api/prices", (route) => route.abort());
 }
 
 test.describe("Spread PriceBar — net pricing from per-leg WS data", () => {

@@ -90,6 +90,7 @@ async function setupMocks(page: Page) {
   await page.route("**/api/cash-flows**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CASH_FLOWS_EMPTY) }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("Mobile Historical Trades blotter", () => {

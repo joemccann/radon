@@ -90,6 +90,10 @@ async function stubOrdersPage(page: Page, orders: unknown) {
   await page.route("**/api/cash-flows**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CASH_FLOWS_EMPTY) }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
+  );
 }
 
 test.describe("Mobile orders session window", () => {

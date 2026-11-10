@@ -84,10 +84,12 @@ test("unrealized modal total is the rows' sum and names IB's account figure", as
   );
   await page.route("**/api/regime", json({ score: 15, level: "LOW", cri: { score: 15 } }));
   await page.route("**/api/flex-token", json({ ok: true, days_until_expiry: 14 }));
+  await page.route("**/api/ib-status", json({ connected: true }));
   await page.route(
     "**/api/blotter",
     json({ as_of: TRADING_DAY_ISO, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 
   await page.goto("/portfolio");
 

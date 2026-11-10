@@ -212,11 +212,19 @@ async function setupMocks(page: import("@playwright/test").Page) {
       body: JSON.stringify(ORDERS_EMPTY),
     }),
   );
+  await page.route("**/api/prices", (route) => route.abort());
   await page.route("**/api/previous-close", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ closes: {} }),
+    }),
+  );
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ connected: true }),
     }),
   );
   await page.route("**/api/blotter", (route) =>

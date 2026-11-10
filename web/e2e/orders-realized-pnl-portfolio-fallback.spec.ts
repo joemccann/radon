@@ -131,6 +131,7 @@ async function setup(page: Page) {
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("Today's Executed Orders — buy-to-close P&L fallback", () => {

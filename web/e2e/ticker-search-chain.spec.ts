@@ -88,6 +88,9 @@ async function stubApis(page: import("@playwright/test").Page, priceOverrides: R
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
+  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
@@ -113,6 +116,7 @@ async function stubApis(page: import("@playwright/test").Page, priceOverrides: R
   await page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CHAIN_STRIKES) }),
   );
+  await page.route("**/api/prices", (route) => route.abort());
   await page.route("**/api/ib/ws-ticket", (route) => route.fulfill({ json: { ticket: "isolated-chain-test" } }));
   const fixtures: Record<string, ReturnType<typeof makePriceData>> = {
     AAPL: makePriceData("AAPL", 205.5, 205.4, 205.6),

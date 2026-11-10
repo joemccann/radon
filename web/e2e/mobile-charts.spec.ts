@@ -76,6 +76,7 @@ async function setupMocks(page: Page) {
   await page.route("**/api/flex-token", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, days_until_expiry: 14 }) }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("Mobile chart sizing", () => {

@@ -61,6 +61,7 @@ async function stubApis(page: Page) {
   await page.route("**/api/ticker/**", (r) => r.fulfill(json({ uw_info: { name: "Apple Inc.", sector: "Tech", description: "" }, stock_state: {}, profile: {}, stats: {} })));
   await page.route("**/api/options/expirations*", (r) => r.fulfill(json({ symbol: "AAPL", expirations: ["20260320", "20260417"] })));
   await page.route("**/api/options/chain*", (r) => r.fulfill(json({ symbol: "AAPL", expiry: "20260320", exchange: "SMART", strikes: [195, 200, 205, 210, 215], multiplier: "100" })));
+  await page.route("**/api/prices**", (r) => r.abort());
 }
 
 test("transmit after an expired session token refreshes and places the order once", async ({ page }, testInfo) => {

@@ -78,6 +78,7 @@ async function stubChainApis(page: Page) {
       }),
     }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 async function tapJs(locator: Locator) {

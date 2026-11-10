@@ -73,11 +73,19 @@ async function setupMocks(page: import("@playwright/test").Page) {
       body: JSON.stringify(ORDERS_EMPTY),
     }),
   );
+  await page.route("**/api/prices", (route) => route.abort());
   await page.route("**/api/regime", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ score: 15, level: "LOW", cri: { score: 15 } }),
+    }),
+  );
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ connected: false }),
     }),
   );
   await page.route("**/api/blotter", (route) =>

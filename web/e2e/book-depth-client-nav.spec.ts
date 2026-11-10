@@ -109,6 +109,7 @@ async function stubApis(page: Page) {
   }));
   await page.route("**/api/orders", json({ last_sync: now, open_orders: [], executed_orders: [] }));
   await page.route("**/api/regime", json({ score: 15, level: "LOW" }));
+  await page.route("**/api/ib-status", json({ connected: true }));
   await page.route("**/api/blotter", json({ as_of: now, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }));
   await page.route("**/api/cash-flows**", json({ rows: [], summary: {} }));
   await page.route("**/api/flex-token", json({ ok: true, days_until_expiry: 14 }));

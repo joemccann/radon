@@ -181,6 +181,9 @@ async function setupMocks(page: import("@playwright/test").Page) {
   await page.route("**/api/flex-token", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, days_until_expiry: 14 }) }),
   );
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
+  );
   await page.route("**/api/regime", (route) =>
     route.fulfill({
       status: 200,
@@ -214,6 +217,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
       body: JSON.stringify({ as_of: "2026-03-24T14:34:25Z", summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
     }),
   );
+  await page.route("**/api/prices**", (route) => route.abort());
 }
 
 test.describe("/portfolio same-day combo today pnl", () => {

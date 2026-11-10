@@ -104,6 +104,9 @@ async function setupBaseMocks(page: Page) {
   await page.route("**/api/regime", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
+  await page.route("**/api/ib-status", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
+  );
   await page.route("**/api/flow-analysis", (r) =>
     r.fulfill({
       status: 200,

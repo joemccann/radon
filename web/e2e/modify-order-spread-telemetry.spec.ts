@@ -176,6 +176,14 @@ function stubApis(page: import("@playwright/test").Page) {
     }),
   );
 
+  page.route("**/api/ib-status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ connected: false }),
+    }),
+  );
+
   page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
@@ -201,6 +209,8 @@ function stubApis(page: import("@playwright/test").Page) {
       }),
     }),
   );
+
+  page.route("**/api/prices", (route) => route.abort());
 }
 
 async function installMockWebSocket(page: import("@playwright/test").Page) {

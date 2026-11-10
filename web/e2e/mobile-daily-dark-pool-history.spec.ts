@@ -95,6 +95,9 @@ async function setupMocks(page: Page) {
   await page.route("**/api/regime", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
+  await page.route("**/api/ib-status", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
+  );
   await page.route("**/api/flow-analysis", (r) =>
     r.fulfill({
       status: 200,
@@ -119,6 +122,7 @@ async function setupMocks(page: Page) {
       body: JSON.stringify(pltrReport(new Date().toISOString())),
     }),
   );
+  await page.route("**/api/prices", (r) => r.abort());
 }
 
 async function openHistory(page: Page) {

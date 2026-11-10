@@ -54,6 +54,7 @@ async function setup(page: Page, theme: "dark" | "light") {
   await page.route("**/api/ib/ws-ticket", (route) => route.fulfill({ json: { ticket: "mock-ticket" } }));
   await page.route("**/api/orders", (route) => route.fulfill({ json: { last_sync: NOW, open_orders: [], executed_orders: [] } }));
   await page.route("**/api/blotter", (route) => route.fulfill({ json: { as_of: NOW, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] } }));
+  await page.route("**/api/ib-status", (route) => route.fulfill({ json: { connected: true } }));
   await page.route("**/api/profile", (route) => route.fulfill({ json: { username: "Operator", avatar_url: null, ui_preferences: null } }));
   await page.route("**/api/flex-token", (route) => route.fulfill({ json: { ok: true, days_until_expiry: 14 } }));
 }
