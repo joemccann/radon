@@ -17,7 +17,6 @@
   --color-negative: #b5453e;
   --color-dislocation: #C026A0;
   --color-extreme: #7C3AED;
-  --color-neutral: #62716d;
 
   --color-hairline-soft: #e4eae7;
   --color-figure-bg: #f6f8f8;
@@ -29,7 +28,6 @@
   --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --radius-panel: 8px;
-  --radius-badge: 999px;
 
   --ease-editorial: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -47,7 +45,6 @@ html[data-theme="dark"] {
   --color-primary: #edf4ef;
   --color-secondary: #b0c1b7;
   --color-muted: #96aa9e;
-  --color-neutral: #b0c1b7;
   --color-focus: #76d5a1;
   --color-accent: #76d5a1;
   --color-signal-strong: #91e2b5;
@@ -101,103 +98,6 @@ a {
   * {
     border-color: var(--color-grid);
     box-sizing: border-box;
-  }
-}
-
-.instrument-grid {
-  background-image: linear-gradient(var(--color-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
-  background-size: 32px 32px;
-}
-
-.projection-lines {
-  background-image: repeating-linear-gradient(
-    -32deg,
-    transparent 0 24px,
-    color-mix(in srgb, var(--color-grid) 35%, transparent) 24px 25px
-  );
-  mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
-}
-
-.scan-line {
-  position: relative;
-  overflow: hidden;
-}
-
-.scan-line::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--color-accent) 8%, transparent) 45%,
-    color-mix(in srgb, var(--color-accent) 18%, transparent) 50%,
-    color-mix(in srgb, var(--color-accent) 8%, transparent) 55%,
-    transparent 100%
-  );
-  transform: translateX(-100%);
-  animation: scan-line 8s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes scan-line {
-  to {
-    transform: translateX(100%);
-  }
-}
-
-.module-content-enter {
-  animation: module-fade-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes module-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.section-divider {
-  position: relative;
-}
-
-.section-divider::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(100%, 1200px);
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--color-grid) 20%,
-    var(--color-grid) 80%,
-    transparent 100%
-  );
-}
-
-.panel-hover {
-  transition: background-color 200ms ease, border-color 200ms ease;
-}
-
-.panel-hover:hover {
-  background-color: var(--color-panel-raised);
-  border-color: var(--color-accent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .scan-line::after {
-    animation: none;
-  }
-  .module-content-enter {
-    animation: none;
   }
 }
 
