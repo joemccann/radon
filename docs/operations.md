@@ -607,7 +607,7 @@ Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` s
 | 50–69 | Scanners |
 | 90–99 | CLI |
 
-As of 2026-05-20 monitor_daemon handlers (`fill_monitor`, `exit_orders`, `journal_sync`) use `client_id="auto"` too — the prior 70/71/72 hardcoded daemon range left them one CLOSE_WAIT socket away from "client id already in use" on every transient gateway hiccup. The auto-allocator rotates around in-use IDs.
+As of 2026-05-20 monitor_daemon handlers (`fill_monitor`, `journal_sync`) use `client_id="auto"` too — the prior 70/71/72 hardcoded daemon range left them one CLOSE_WAIT socket away from "client id already in use" on every transient gateway hiccup. The auto-allocator rotates around in-use IDs.
 
 **Troubleshooting.**
 
@@ -704,7 +704,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-relay` | always-on | IB realtime WebSocket relay on `:8765` |
 | `radon-nextjs` | always-on | Next.js terminal at `app.radon.run` |
 | `radon-newsfeed` | 120s loop | Headless Playwright scraper for The Market Ear |
-| `radon-monitor` | 30s loop | Fills, exit orders, journal sync, cash flow handler |
+| `radon-monitor` | 30s loop | Fills, journal sync, cash flow handler |
 | `radon-health` | always-on | **Isolated** stdlib health daemon on `:8330` (see Health monitoring below). NO dependency on `radon-ib-gateway`; a Gateway stop never touches it. |
 | `radon-aa-frontier-refresh.timer` | Daily 07:00 UTC, up to 5 min jitter | Refreshes the Artificial Analysis frontier basket atomically; failures retain the last-known-good cohort. |
 | `radon-ai-cycle-backfill.timer` | Daily 05:30 UTC, up to 5 min jitter | Resumes bounded publisher-floor history ingestion from its durable checkpoint; `ai-cycle-backfill` heartbeat has a 26h freshness budget. [Coverage limits](ai-infrastructure-operations.md#history-and-request-bounds). |
@@ -1237,7 +1237,7 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 **Database access pattern (post-2026-05-20):** production processes go direct-to-cloud. The code default since DUR-07 is replica opt-in only via `RADON_DB_USE_REPLICA=1`, with the `RADON_DB_NO_REPLICA=1` kill switch applied fleet-wide through the `radon-.service.d/common.conf` prefix drop-in. The libsql embedded-replica architecture (`data/replica.db`) was retired after multi-writer WAL contention and then single-writer frame conflicts between the replica owner and direct-cloud writers. Reads cost +30–60 ms per cloud round-trip, absorbed by SWR caching. The `replica_watchdog` handler still exists in `monitor_daemon` as a vestigial safety net (it sits idle in the no-replica world), but `data/replica.db` itself should not exist on any host. See `feedback_libsql_replica_one_writer.md`.
 
-**Market-hours gate.** Handlers tagged `requires_market_hours=True` (`fill_monitor`, `exit_orders`, `journal_sync`) only run during their session window: 09:30-16:00 ET by default, or 04:00-20:00 ET for `fill_monitor` (`session_window = "equity_ext"`, so outsideRth stock fills reach `/orders` after the cash close; the FastAPI orders-sync tick uses the same window). The daemon converts UTC to ET via `zoneinfo.ZoneInfo("America/New_York")` so DST is handled automatically; a fail-open UTC-5 fallback fires only if the host is missing `tzdata`. Never hardcode a fixed offset for ET — it silently shifts the window 1h every DST season.
+**Market-hours gate.** Handlers tagged `requires_market_hours=True` (`fill_monitor`, `journal_sync`) only run during their session window: 09:30-16:00 ET by default, or 04:00-20:00 ET for `fill_monitor` (`session_window = "equity_ext"`, so outsideRth stock fills reach `/orders` after the cash close; the FastAPI orders-sync tick uses the same window). The daemon converts UTC to ET via `zoneinfo.ZoneInfo("America/New_York")` so DST is handled automatically; a fail-open UTC-5 fallback fires only if the host is missing `tzdata`. Never hardcode a fixed offset for ET — it silently shifts the window 1h every DST season.
 
 ## Cash Flows
 

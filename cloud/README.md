@@ -149,7 +149,7 @@ curl https://your-domain.com/health
 | FastAPI | 8321 | `radon-api` | REST API, order management, scans |
 | Node relay | 8765 | `radon-relay` | Realtime price streaming (WebSocket) |
 | Next.js | 3000 | `radon-nextjs` | Web terminal UI |
-| Monitor | — | `radon-monitor` | Fill tracking, exit orders |
+| Monitor | — | `radon-monitor` | Fill tracking, journal sync |
 | Data refresh | — | `radon-refresh.timer` | CRI/VCG scans during market hours |
 
 ### Managing services
