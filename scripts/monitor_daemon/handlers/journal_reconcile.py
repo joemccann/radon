@@ -76,6 +76,12 @@ def _iso_date(dt_str: str) -> str:
         return ""
 
 
+def _compact_expiry(raw: Any) -> str:
+    """Expiry in compact IB form: ISO "2026-07-17" -> "20260717"; other values unchanged."""
+    expiry = str(raw or "")
+    return expiry.replace("-", "") if len(expiry) == 10 and "-" in expiry else expiry
+
+
 def _is_bag_combo_parent(payload: dict[str, Any]) -> bool:
     """True when the executed_orders payload represents a BAG (combo) parent
     execution rather than a real per-leg fill.
@@ -156,7 +162,7 @@ def _build_journal_coverage(
         ticker = _normalize_ticker(str(payload.get("ticker") or payload.get("symbol") or "").upper())
         strike = str(payload.get("strike") or "")
         right = str(payload.get("right") or "")
-        expiry = str(payload.get("expiry") or "")
+        expiry = _compact_expiry(payload.get("expiry"))
         date_str = _iso_date(filled_at) if filled_at else str(payload.get("date") or "")
 
         if ticker and date_str:
@@ -216,9 +222,7 @@ def _extract_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     # rights stay as delivered.
     if right == _UNSET_RIGHT and str(contract.get("secType") or "").upper() not in _RIGHTED_SEC_TYPES:
         right = ""
-    # expiry may be ISO or compact — normalise to compact YYYYMMDD for comparison
-    expiry_raw = str(contract.get("expiry") or contract.get("lastTradeDateOrContractMonth") or "")
-    expiry = expiry_raw.replace("-", "") if len(expiry_raw) == 10 and "-" in expiry_raw else expiry_raw
+    expiry = _compact_expiry(contract.get("expiry") or contract.get("lastTradeDateOrContractMonth"))
     return ticker, strike, right, expiry
 
 

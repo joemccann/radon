@@ -567,3 +567,34 @@ class TestHealOnRecovery:
 
     def test_noop_when_db_none(self):
         assert heal_journal_reconcile_if_recovered(None) is False
+
+
+class TestJournalIsoExpiryMatchesExecutedOrders:
+    """A journal row carrying an ISO expiry must still cover its fill.
+
+    executed_orders strips the dashes from its expiry; the journal side has to
+    normalise the same way or the per-contract-date fallback key never matches.
+    """
+
+    def test_iso_journal_expiry_is_stored_compact(self):
+        db = MagicMock()
+        cursor = MagicMock(spec=["fetchall"])
+        cursor.fetchall.return_value = [
+            _journal_row("EX-ISO", "EWY", strike=215.0, right="C", expiry="2026-07-17", filled_at="2026-06-08")
+        ]
+        db.execute.return_value = cursor
+        cov = _build_journal_coverage(db, "2026-06-01")
+        assert ("EWY", "215.0", "C", "20260717", "2026-06-08") in cov["contract_dates"]
+
+    def test_iso_journal_row_covers_compact_executed_order(self):
+        exec_row = _exec_row(
+            "EXEC-NOT-IN-JOURNAL", "EWY", strike=215.0, right="C", expiry="20260717",
+            fill_time="2026-06-08T15:00:00+00:00",
+        )
+        db = _make_db(
+            [exec_row],
+            [_journal_row("OTHER-EXEC", "EWY", strike=215.0, right="C", expiry="2026-07-17", filled_at="2026-06-08")],
+        )
+        coverage = _build_journal_coverage(db, "2026-06-01")
+        item = {"exec_id": exec_row[0], "fill_time": exec_row[3], "payload": json.loads(exec_row[2])}
+        assert _find_gaps([item], coverage) == []
