@@ -12,12 +12,9 @@ GDCDYN_ALLOW = {
     "perf_twr_builder.py",
     "trade_blotter/flex_query.py",
     "trade_blotter/blotter_service.py",
-    "portfolio_performance.py",
 }
 
-FLEXREPORT_ALLOW = {
-    "clients/ib_client.py",
-}
+FLEXREPORT_ALLOW: set[str] = set()
 
 
 def _py_files():

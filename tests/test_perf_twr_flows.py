@@ -146,7 +146,7 @@ def test_29_and_f7_only_flex_flows_defines_a_flow_type_predicate():
     flex_source = (REPO_ROOT / "scripts" / "lib" / "flex_flows.py").read_text()
     assert flex_source.count("EXTERNAL_FLOW_TYPES = frozenset") == 1
 
-    for rel in ("scripts/perf_twr_builder.py", "scripts/portfolio_performance.py"):
+    for rel in ("scripts/perf_twr_builder.py",):
         path = REPO_ROOT / rel
         if not path.exists():
             continue

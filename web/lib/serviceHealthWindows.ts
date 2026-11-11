@@ -141,8 +141,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "position-reconcile": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   // R-159: radon-perf-twr wrote no health row and was in neither catalog.
-  // The `performance` key below is a DIFFERENT, on-demand writer
-  // (portfolio_performance.py). Tue..Sat 07:30 ET; 26h open catches a missed
+  // The `performance` key below is a DIFFERENT, on-demand row (its writer,
+  // portfolio_performance.py, is deleted). Tue..Sat 07:30 ET; 26h open catches a missed
   // weekday run, 4d closed covers the Sat->Tue gap.
   "perf-twr": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   // radon-flex-pull.timer Tue..Sat 07:30/08:30 ET. Same gap as perf-twr.
