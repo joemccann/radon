@@ -115,7 +115,8 @@ disabled-login account `_radonmodelgw`, from a root-owned copy of
 `GATEWAY_FILES` and a hash-pinned `httpx` venv (`scripts/runner/gateway-requirements.txt`).
 It signs requests with the Mac's own subscription grants, kept in
 `/Library/Radon/model-gateway-local/home` (mode 700, that account only):
-Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`.
+Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`,
+Grok from `~/.grok/auth.json`.
 `_radonbot` reaches it only through the group socket
 `/Library/Radon/model-gateway-local/run/gateway.sock` and never reads a grant.
 It runs 6 concurrent calls per provider, so the two security loops do not
