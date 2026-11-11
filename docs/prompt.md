@@ -14,8 +14,8 @@ Autonomous options trading via convex, edge-driven bets sized by fractional Kell
 2. **Edge**: Institutional dark pool / OTC flow detection ONLY
 3. **Position Size**: Max 2.5% bankroll per position
 4. **Kelly**: Half Kelly (0.5) default; 0.25 optional stricter; full Kelly banned
-5. **Undefined Risk**: NEVER (no naked options — Gate 4 enforced at UI, API, and post-sync)
-6. **Naked Short Protection**: No naked short stock, calls, futures, or bonds. Short calls must be fully covered (1 contract = 100 shares). System auto-cancels violations.
+5. **Undefined Risk**: NEVER by policy. Gate 4 enforcement is disabled since 2026-04-30 (nothing blocks at UI, API or post-sync). Re-enable: `docs/naked-short-reenable.md`
+6. **Naked Short Protection**: No naked short stock, calls, futures, or bonds. Short calls must be fully covered (1 contract = 100 shares). Operator-side while Gate 4 is disabled; nothing auto-cancels.
 6. **Fresh Data**: Every data-fetching milestone MUST fetch live data at execution time. Scan results are leads, not evidence. Re-fetch during evaluation.
 
 ## Deliverables (per evaluation)
