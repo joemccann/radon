@@ -188,7 +188,7 @@ The project includes a comprehensive test suite (202 tests) validating all confi
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-test.txt
+pip install -r ../requirements-dev.txt
 ```
 
 ### Run tests

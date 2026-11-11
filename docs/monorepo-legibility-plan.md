@@ -260,7 +260,7 @@ Only if top-level `scripts/*.py` is still unreadable after L1g.
 
 - [x] L3a Skipped file grouping. `scripts/README.md` states new scripts stay top-level until a shim plan exists.
 - [x] L3b No shims. No `ExecStart` path changes.
-- [x] L3c Left `docker/caddy/` in place. `scripts/phase0_capture.sh` still dumps that path. Not proven unused.
+- [x] L3c Left `docker/caddy/` in place. `scripts/phase0_capture.sh` still dumps that path. Not proven unused. Later deleted (D14, 2026-11-11): `phase0_capture.sh` reads the host's legacy `radon-cloud` copy, never this repo file; the deployed Caddyfile is `cloud/caddy/Caddyfile`.
 
 ## Verification (every phase)
 

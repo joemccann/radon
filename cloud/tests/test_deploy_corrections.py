@@ -3770,7 +3770,7 @@ class TestCloudSecretScan:
             commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
             assert re.search(r"python\s+-m\s+pytest(?:\s|$)", commands)
         assert any(
-            "requirements-test.txt" in "\n".join(str(step.get("run", "")) for step in job["steps"])
+            "requirements-dev.txt" in "\n".join(str(step.get("run", "")) for step in job["steps"])
             for job in pytest_jobs
         )
 
