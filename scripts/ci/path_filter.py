@@ -165,10 +165,6 @@ CROSS_TREE_CONTRACTS = (
         tests=("scripts/tests/test_rel108_og_brand_tokens.py",),
     ),
     CrossTreeContract(
-        patterns=("web/app/api/menthorq/cta/image/route.tsx",),
-        tests=("scripts/tests/test_rel108_cta_image_sections.py",),
-    ),
-    CrossTreeContract(
         patterns=(
             "web/lib/*.js",
             "web/lib/*.jsx",
