@@ -12,6 +12,7 @@
  */
 
 import type { MarketState } from "./marketCalendar";
+import { isUsTradingDay } from "./marketCalendar";
 
 // The market calendar lives in lib/marketCalendar.ts; these names are
 // re-exported because many service-health callers import them from here.
