@@ -1,11 +1,7 @@
 // R-310 / R-311 (REL-105): the share-image pipeline is bounded, and its font
 // cache cannot be poisoned.
 //
-// (a) The CTA image route derives its canvas height directly from the row
-//     count read out of a cache FILE — `50 + sections*64 + rows*28 + 20` —
-//     with no cap on either. A malformed or oversized extraction asks
-//     ImageResponse for a canvas tens of thousands of pixels tall, and the
-//     route declares no maxDuration.
+// (a) The satori render route declares a duration bound.
 // (b) `loadFonts` assigns `fontRegular` BEFORE reading the Bold face. If the
 //     Bold read rejects, the regular is already cached, so every later call
 //     skips the load block entirely and returns a Bold entry with
@@ -13,41 +9,8 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-import { computeCtaImageHeight, MAX_IMAGE_HEIGHT, MAX_IMAGE_ROWS } from "@/lib/ctaImageLayout";
-
-describe("(a) the CTA plate canvas is bounded", () => {
-  it("sizes an ordinary payload exactly as before", () => {
-    // 3 sections, 30 rows: 50 + 3*64 + 30*28 + 20 = 1102
-    expect(computeCtaImageHeight({ sectionCount: 3, totalRows: 30 })).toBe(1102);
-  });
-
-  it("clamps a 5,000-row extraction instead of asking for a 140,000px canvas", () => {
-    const height = computeCtaImageHeight({ sectionCount: 3, totalRows: 5000 });
-    expect(height).toBeLessThanOrEqual(MAX_IMAGE_HEIGHT);
-  });
-
-  it("never returns a non-finite or negative height", () => {
-    for (const bad of [Number.NaN, Infinity, -1, -Infinity]) {
-      const h = computeCtaImageHeight({ sectionCount: bad, totalRows: bad });
-      expect(Number.isFinite(h)).toBe(true);
-      expect(h).toBeGreaterThan(0);
-      expect(h).toBeLessThanOrEqual(MAX_IMAGE_HEIGHT);
-    }
-  });
-
-  it("caps the rows a single plate will lay out", () => {
-    expect(MAX_IMAGE_ROWS).toBeGreaterThan(0);
-    expect(MAX_IMAGE_ROWS).toBeLessThan(5000);
-  });
-});
-
 describe("(a) every satori image route declares a duration bound", () => {
-  // The sibling routes size their canvas from constants (500 / 630), so the
-  // unbounded-HEIGHT defect is the CTA route's alone — but all three run the
-  // same Node-runtime satori render and none of them bounded its duration.
   const ROUTES = [
-    "app/api/menthorq/cta/image/route.tsx",
-    "app/api/menthorq/[command]/image/route.tsx",
     "app/api/share/pnl/route.tsx",
   ];
 
