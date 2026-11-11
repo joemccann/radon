@@ -11,9 +11,18 @@
  * services is normal so the closed-hour window is intentionally loose.
  */
 
-import staticHolidays from "../../scripts/config/market_holidays.json";
+import type { MarketState } from "./marketCalendar";
 
-export type MarketState = "open" | "extended" | "closed";
+// The market calendar lives in lib/marketCalendar.ts; these names are
+// re-exported because many service-health callers import them from here.
+export {
+  HOLIDAY_TABLE_YEARS,
+  getMarketPhaseFromDate,
+  getMarketStateFromDate,
+  isHolidayTableCovering,
+  isUsTradingDay,
+} from "./marketCalendar";
+export type { MarketPhase, MarketState } from "./marketCalendar";
 
 /**
  * How a writer is triggered.
@@ -770,96 +779,3 @@ const RTH_ONLY_SERVICES = new Set([
   "vcg-scan",
   "ib-realtime-relay",
 ]);
-
-/** ET calendar date ("YYYY-MM-DD") is a full-closure US market holiday per
- * the static table (scripts/config/market_holidays.json — the same SoT the
- * relay's marketCalendar.js consults). Early-close half-days are NOT here;
- * they only make afternoon windows conservatively tight, never noisy-wide.
- * Years missing from the table fall back to weekday-only (pre-2026-07-03
- * behavior) rather than guessing. */
-function isUsMarketHoliday(et: Date): boolean {
-  const isoDate = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, "0")}-${String(et.getDate()).padStart(2, "0")}`;
-  return isHolidayIso(isoDate);
-}
-
-/**
- * R-164: the static table is finite, and `isHolidayIso` returns false for any
- * year it does not cover — so once it runs out, `isUsTradingDay` silently
- * degrades to weekday-only and every full-closure holiday reads as a trading
- * day. Blanking a whole uncovered year would be far worse than being wrong on
- * ~9 days, so the runtime behaviour is unchanged and the coverage is instead
- * made explicit here and pinned by a contract test that fails CI a year
- * before the data runs out.
- */
-export const HOLIDAY_TABLE_YEARS: readonly string[] = Object.freeze(
-  Object.keys(staticHolidays as Record<string, string[]>).sort(),
-);
-
-export function isHolidayTableCovering(isoDate: string): boolean {
-  return HOLIDAY_TABLE_YEARS.includes(isoDate.slice(0, 4));
-}
-
-function isHolidayIso(isoDate: string): boolean {
-  const dates = (staticHolidays as Record<string, string[]>)[isoDate.slice(0, 4)];
-  return Array.isArray(dates) && dates.includes(isoDate);
-}
-
-/**
- * Date-only trading-day check against the same holiday SoT: a weekday that is
- * not a full-closure US market holiday. Pure on the ISO "YYYY-MM-DD" string —
- * the weekday is derived at UTC noon so the calendar date never shifts with
- * the host timezone.
- */
-export function isUsTradingDay(isoDate: string): boolean {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
-  if (weekday === 0 || weekday === 6) return false;
-  return !isHolidayIso(isoDate);
-}
-
-/**
- * Server-side market-state derivation, mirrored from
- * web/lib/useMarketHours.ts but pure (no React, no setInterval).
- *
- * Returns the current MarketState in America/New_York. Full-closure
- * holidays read as "closed" all day (an observed holiday that computed
- * as "open" applied the tight RTH windows to scan writers that correctly
- * did not run — 6-7 stale rows of footer noise on 2026-07-03).
- */
-export function getMarketStateFromDate(now: Date = new Date()): MarketState {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return "closed";
-  if (isUsMarketHoliday(et)) return "closed";
-
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
-  if (
-    (minutes >= 4 * 60 && minutes < 9 * 60 + 30) ||
-    (minutes > 16 * 60 && minutes <= 20 * 60)
-  ) {
-    return "extended";
-  }
-  return "closed";
-}
-
-export type MarketPhase = "pre" | "open" | "after" | "closed";
-
-/**
- * Finer-grained sibling of getMarketStateFromDate that splits "extended"
- * into "pre" (04:00-09:30 ET) and "after" (16:00-20:00 ET) so the Day P&L
- * card can name the correct session. Pure, no React, testable with a
- * pinned clock.
- */
-export function getMarketPhaseFromDate(now: Date = new Date()): MarketPhase {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return "closed";
-  if (isUsMarketHoliday(et)) return "closed";
-
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
-  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre";
-  if (minutes > 16 * 60 && minutes <= 20 * 60) return "after";
-  return "closed";
-}
