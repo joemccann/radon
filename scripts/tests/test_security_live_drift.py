@@ -28,13 +28,6 @@ def _live_policy() -> dict:
     return json.loads(json.dumps(sld.parse_hujson(text)).replace(sld.OPERATOR_PLACEHOLDER, LOGIN))
 
 
-def _expected_ruleset(repo: str, ruleset_id: int) -> dict:
-    for row in BASELINE["github"][repo]["rulesets"]:
-        if row["id"] == ruleset_id:
-            return copy.deepcopy(row)
-    raise KeyError(ruleset_id)
-
-
 def _github_world() -> dict:
     """gh api path -> payload, mirroring the committed baseline."""
     world: dict = {}

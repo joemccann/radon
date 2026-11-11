@@ -155,10 +155,6 @@ class TestGlobalDailyActionCap:
         responder.run_cycle(tmp_path, now=NOW, grok_runner=runner)
         assert len(invocations) == 1
 
-    def test_actions_since_counts_claimed_tickets(self):
-        """The cap must count grok INVOCATIONS, which is what a claim is."""
-        assert callable(pages_mod.actions_since)
-
 
 class TestUnitFilesystemSandbox:
     def test_unit_cannot_read_the_host_env(self):

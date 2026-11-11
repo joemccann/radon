@@ -116,19 +116,12 @@ def drawdown_nav() -> Dict[str, float]:
 FEB06_BEGIN_NAV = 246_713.50
 FEB06_END_NAV = 972_215.53
 FEB06_FLOW = 725_000.00
-# 972215.53 - 246713.50 = 725502.03  -> the INFERRED_FLOW_CANDIDATE amount
-FEB06_NAV_DELTA = 725_502.03
 FEB06_DATE = "2026-02-06"
 FEB06_PRIOR_DATE = "2026-02-05"
 
 
 def feb06_nav() -> Dict[str, float]:
     return {FEB06_PRIOR_DATE: FEB06_BEGIN_NAV, FEB06_DATE: FEB06_END_NAV}
-
-
-def withdrawal_nav() -> Dict[str, float]:
-    """E.1 #4 — B=100000, E=90000, C=-15000."""
-    return series(calendar_run(2), [100_000.0, 90_000.0])
 
 
 def same_day_both_ways_nav() -> Dict[str, float]:
@@ -195,7 +188,6 @@ GOLDEN_N_OBSERVATIONS = 61
 GOLDEN_SEED_NAV = 100_000.00
 GOLDEN_RETURN_PATTERN = (0.006, -0.004, 0.002, -0.008, 0.010, -0.001)
 GOLDEN_FLOWS: Dict[str, float] = {"2026-02-13": 100_000.00, "2026-03-06": -25_000.00}
-GOLDEN_RF_ANNUAL = 0.02
 
 # Spec-declared NAV checkpoints. The generator below must reproduce these; a
 # test asserts it, which is what makes the generated series trustworthy input.
@@ -296,7 +288,6 @@ LIVE_FLOWS: Dict[str, float] = {
 }
 
 LIVE_CONTAMINATED_CUM_RETURN = 9.5128  # what the live payload published
-LIVE_CONTAMINATED_ANNUALIZED = 32_889.5462  # +3,288,954.62% on screen
 
 
 def live_dates() -> List[str]:
@@ -399,10 +390,6 @@ REAL_LIVE_NAV: Dict[str, float] = {
     "2026-03-20": 1045949.48105117,
 }
 
-# The three sessions the production series cannot explain without a flow.
-REAL_UNEXPLAINED_DATES = ("2026-01-13", "2026-01-26", "2026-02-06")
-
-
 def real_live_nav() -> Dict[str, float]:
     """The production NAV series exactly as IB reported it."""
     return dict(REAL_LIVE_NAV)
@@ -415,9 +402,6 @@ def real_live_nav() -> Dict[str, float]:
 CLIFF_N_OBSERVATIONS = 263
 CLIFF_BEGIN_NAV = 259_879.31
 CLIFF_END_NAV = 985_485.30
-# 985_485.30 - 259_879.31
-CLIFF_MOVE = 725_605.99
-# Straddles 0.25 * CLIFF_MOVE = 181_401.4975 from either side.
 CLIFF_QUARANTINING_FLOW = 181_000.0
 CLIFF_ESCAPING_FLOW = 182_000.0
 

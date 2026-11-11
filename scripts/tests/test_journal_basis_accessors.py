@@ -68,15 +68,6 @@ def _dict_row(payload: dict, filled_at: str = "2026-01-01") -> dict:
     }
 
 
-def _attr_row(payload: dict, filled_at: str = "2026-01-01"):
-    """Attribute-access row (e.g. sqlite3.Row or SimpleNamespace)."""
-    return SimpleNamespace(
-        payload=json.dumps(payload),
-        filled_at=filled_at,
-        written_at=filled_at,
-    )
-
-
 class _FakeCursor:
     """Mirrors libsql_experimental 0.0.55: rows via fetchall(), no .rows."""
 

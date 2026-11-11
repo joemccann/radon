@@ -36,20 +36,6 @@ def ticker_data():
 
 
 @pytest.fixture
-def ticker_data_invalid():
-    """Milestone 1 — Ticker not found."""
-    return {
-        "ticker": "ZZZZZ",
-        "fetched_at": "2026-03-05T11:00:00",
-        "verified": False,
-        "company_name": None,
-        "sector": None,
-        "options_available": False,
-        "error": "Ticker 'ZZZZZ' not found",
-    }
-
-
-@pytest.fixture
 def flow_data_accumulation():
     """Milestone 2 — Strong accumulation signal."""
     return {
