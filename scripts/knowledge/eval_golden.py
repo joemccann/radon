@@ -619,14 +619,6 @@ def _load_query_embedder(db=None) -> _TrackingEmbedder | None:
     return _TrackingEmbedder(embed_one, requested)
 
 
-def _as_vector(value) -> list[float]:
-    """Accept a plain vector or a batch-of-one (list/generator of vectors)."""
-    values = list(value)
-    if len(values) == 1 and not isinstance(values[0], (int, float)):
-        values = list(values[0])
-    return [float(component) for component in values]
-
-
 def _print_table(summary: dict, *, file) -> None:
     per_question = summary["per_question"]
     primary = "hybrid" if "hybrid" in (summary.get("modes") or {}) else next(iter(summary.get("modes") or {"hybrid": {}}))

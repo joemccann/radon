@@ -187,10 +187,6 @@ def record_admission_block(article_id: str, status: str, reason_code: str) -> No
                   "WHERE article_id=? AND status='pending'", (status, reason_code, _now(), article_id))
 
 
-def post_exists(post_id: str) -> bool:
-    return post_source(post_id) is not None
-
-
 def _hex(fingerprint) -> str | None:
     return f"{int(fingerprint):016x}" if isinstance(fingerprint, int) and fingerprint else None
 
@@ -367,15 +363,6 @@ def requeue_with_note(work_key, note: str, *, feedback_id: str) -> bool:
         return False
     mark_feedback_handled(feedback_id)
     return True
-
-
-def requeued(limit: int = 10) -> list[RequeuedRef]:
-    """Pending articles carrying an operator note, oldest re-queue first (they may be off the latest listing)."""
-    rows = hrana_execute(
-        "SELECT article_id, article_url, published_at, title, note FROM marketdesk_articles "
-        "WHERE status='pending' AND note IS NOT NULL ORDER BY updated_at, article_id LIMIT ?", (int(limit),))
-    return [RequeuedRef(r[0], r[1], _utc(datetime.fromisoformat(str(r[2]).replace("Z", "+00:00"))), r[3] or "", r[4])
-            for r in rows]
 
 
 def note_for(article_id: str) -> dict:

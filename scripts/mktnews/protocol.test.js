@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FLASH_URL,
   DEFAULT_URL,
-  classifyMessage,
   parseFrame,
 } from "./protocol.js";
 
@@ -21,7 +20,6 @@ describe("mktnews protocol", () => {
     expect(msg.kind).toBe("time");
     expect(msg.type).toBe("time");
     expect(msg.data).toBe(1788035440035);
-    expect(classifyMessage(msg)).toBe("time");
   });
 
   it("classifies flash envelopes", () => {

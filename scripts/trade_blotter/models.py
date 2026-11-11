@@ -290,11 +290,6 @@ class Spread:
             return None
         return self.total_cash_flow
     
-    @property
-    def net_credit_or_debit(self) -> Decimal:
-        """Initial credit (positive) or debit (negative) to open spread."""
-        return self.total_cash_flow
-    
     def unrealized_pnl(self, leg_prices: Dict[str, Decimal]) -> Decimal:
         """
         Calculate unrealized P&L given current prices for each leg.
@@ -329,13 +324,6 @@ class TradeBlotter:
     @property
     def total_commissions(self) -> Decimal:
         return sum(t.total_commission for t in self.trades)
-    
-    def get_trade(self, contract_desc: str) -> Optional[Trade]:
-        """Find trade by contract description."""
-        for t in self.trades:
-            if t.contract_desc == contract_desc:
-                return t
-        return None
     
     def get_spreads(self) -> List[Spread]:
         """
@@ -398,24 +386,3 @@ class TradeBlotter:
                 standalone.extend(legs)
         
         return spreads
-    
-    def get_spread_summary(self) -> Dict[str, any]:
-        """Get summary of all spreads with combined P&L."""
-        spreads = self.get_spreads()
-        
-        return {
-            "spreads": [
-                {
-                    "name": s.name,
-                    "expiry": s.expiry,
-                    "is_closed": s.is_closed,
-                    "legs": len(s.legs),
-                    "total_commission": s.total_commission,
-                    "cash_flow": s.total_cash_flow,
-                    "realized_pnl": s.realized_pnl,
-                }
-                for s in spreads
-            ],
-            "total_spread_commissions": sum(s.total_commission for s in spreads),
-            "total_spread_cash_flow": sum(s.total_cash_flow for s in spreads),
-        }

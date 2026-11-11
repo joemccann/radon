@@ -251,7 +251,7 @@ class TestEmbedderWiring:
 class TestLoadQueryEmbedder:
     """The CLI wires get_embedder()'s BATCH callable (Sequence[str] ->
     list[list[float]]) into a single-query embedder. Passing the bare query
-    string would iterate it per-character (list("query")) and crash _as_vector."""
+    string would iterate it per-character (list("query"))."""
 
     def test_query_is_sent_as_a_batch_of_one_and_unwrapped(self, monkeypatch):
         received = []

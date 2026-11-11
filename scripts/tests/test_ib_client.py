@@ -121,23 +121,6 @@ def _make_fill(exec_id="exec1", symbol="AAPL", side="BOT", shares=10, price=150.
     return fill
 
 
-def _make_contract_details():
-    """Create a mock ContractDetails object."""
-    cd = MagicMock()
-    cd.contract = MagicMock()
-    cd.contract.symbol = "AAPL"
-    cd.contract.conId = 265598
-    cd.contract.secType = "STK"
-    cd.contract.exchange = "SMART"
-    cd.contract.primaryExchange = "NASDAQ"
-    cd.contract.currency = "USD"
-    cd.minTick = 0.01
-    cd.longName = "APPLE INC"
-    cd.industry = "Technology"
-    cd.category = "Computers"
-    return cd
-
-
 # ---------------------------------------------------------------------------
 # Import the client (will fail during RED phase, succeed during GREEN)
 # ---------------------------------------------------------------------------
@@ -504,7 +487,7 @@ class TestPortfolioOperations:
 # ===========================================================================
 
 class TestOrderOperations:
-    """Test place_order, cancel_order, modify_order, get_open_orders, get_order_status."""
+    """Test place_order, cancel_order, modify_order, get_open_orders."""
 
     @patch("clients.ib_client.IB")
     def test_place_order(self, MockIB):
@@ -534,33 +517,6 @@ class TestOrderOperations:
 
         with pytest.raises(IBOrderError):
             client.place_order(MagicMock(), MagicMock())
-
-    @patch("clients.ib_client.IB")
-    def test_place_bracket_order(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        parent = _make_trade(order_id=1, status="Submitted")
-        take_profit = _make_trade(order_id=2, status="PreSubmitted")
-        stop_loss = _make_trade(order_id=3, status="PreSubmitted")
-        mock_ib.bracketOrder.return_value = [parent.order, take_profit.order, stop_loss.order]
-        mock_ib.placeOrder.side_effect = [parent, take_profit, stop_loss]
-
-        client = IBClient()
-        client.connect(client_id=2)
-
-        contract = MagicMock()
-        trades = client.place_bracket_order(
-            contract=contract,
-            action="BUY",
-            quantity=10,
-            limit_price=150.0,
-            take_profit_price=160.0,
-            stop_loss_price=145.0,
-        )
-
-        assert mock_ib.bracketOrder.call_count == 1
-        assert mock_ib.placeOrder.call_count == 3
 
     @patch("clients.ib_client.IB")
     def test_cancel_order(self, MockIB):
@@ -641,57 +597,13 @@ class TestOrderOperations:
         mock_ib.reqAllOpenOrders.assert_called_once()
         assert len(orders) == 2
 
-    @patch("clients.ib_client.IB")
-    def test_get_order_status(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        trade = _make_trade(order_id=42, status="Filled", filled=10, avg_fill_price=150.5)
-        mock_ib.openTrades.return_value = [trade]
-        mock_ib.trades.return_value = [trade]
-
-        client = IBClient()
-        client.connect(client_id=0)
-        found_trade = client.get_order_status(order_id=42)
-
-        assert found_trade is not None
-        assert found_trade.orderStatus.status == "Filled"
-
-    @patch("clients.ib_client.IB")
-    def test_get_order_status_not_found(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-        mock_ib.trades.return_value = []
-
-        client = IBClient()
-        client.connect(client_id=0)
-        result = client.get_order_status(order_id=999)
-
-        assert result is None
-
-    @patch("clients.ib_client.IB")
-    def test_get_order_status_by_perm_id(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        trade = _make_trade(order_id=42, status="Submitted")
-        trade.order.permId = 99999
-        mock_ib.trades.return_value = [trade]
-
-        client = IBClient()
-        client.connect(client_id=0)
-        found_trade = client.get_order_status(perm_id=99999)
-
-        assert found_trade is not None
-        assert found_trade.order.permId == 99999
-
 
 # ===========================================================================
 # MARKET DATA
 # ===========================================================================
 
 class TestMarketData:
-    """Test get_quote, get_option_chain, get_option_price, qualify_contract."""
+    """Test get_quote, get_option_chain, qualify_contract."""
 
     @patch("clients.ib_client.IB")
     def test_get_quote(self, MockIB):
@@ -762,28 +674,6 @@ class TestMarketData:
         chains = client.get_option_chain("ZZZZZ")
 
         assert chains == []
-
-    @patch("clients.ib_client.IB")
-    def test_get_option_price(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-        mock_ib.qualifyContracts.return_value = [MagicMock()]
-
-        ticker = _make_ticker(bid=5.0, ask=5.50, last=5.25)
-        mock_ib.reqMktData.return_value = ticker
-
-        client = IBClient()
-        client.connect(client_id=1)
-        quote = client.get_option_price("AAPL", "20260417", 150.0, "C")
-
-        (option,) = mock_ib.qualifyContracts.call_args.args
-        assert (option.symbol, option.lastTradeDateOrContractMonth, option.strike, option.right) == (
-            "AAPL", "20260417", 150.0, "C",
-        )
-        mock_ib.reqMktData.assert_called_once_with(
-            mock_ib.qualifyContracts.return_value[0], "", False, False,
-        )
-        assert quote is ticker
 
     @patch("clients.ib_client.IB")
     def test_qualify_contract(self, MockIB):
@@ -862,7 +752,7 @@ class TestMarketData:
 # ===========================================================================
 
 class TestExecutionOperations:
-    """Test get_executions, get_fills, wait_for_fill."""
+    """Test get_executions, get_fills."""
 
     @patch("clients.ib_client.IB")
     def test_get_executions(self, MockIB):
@@ -911,66 +801,6 @@ class TestExecutionOperations:
         mock_ib.fills.assert_called_once()
         assert len(fills) == 1
         assert fills[0].execution.shares == 10
-
-    @patch("clients.ib_client.IB")
-    def test_wait_for_fill_success(self, MockIB):
-        """wait_for_fill returns when trade is filled within timeout."""
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        trade = _make_trade(order_id=1, status="Submitted")
-
-        call_count = [0]
-
-        def sleep_side_effect(secs):
-            call_count[0] += 1
-            if call_count[0] >= 2:
-                trade.orderStatus.status = "Filled"
-                trade.orderStatus.filled = 10
-                trade.orderStatus.avgFillPrice = 150.5
-
-        mock_ib.sleep.side_effect = sleep_side_effect
-
-        client = IBClient()
-        client.connect(client_id=1)
-        result = client.wait_for_fill(trade, timeout=10)
-
-        assert result.orderStatus.status == "Filled"
-
-    @patch("clients.ib_client.IB")
-    def test_wait_for_fill_timeout(self, MockIB):
-        """wait_for_fill raises IBTimeoutError when trade doesn't fill."""
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-        mock_ib.sleep.return_value = None
-
-        trade = _make_trade(order_id=1, status="Submitted")
-        # Trade never fills
-
-        client = IBClient()
-        client.connect(client_id=1)
-
-        with pytest.raises(IBTimeoutError):
-            client.wait_for_fill(trade, timeout=2)
-
-    @patch("clients.ib_client.IB")
-    def test_wait_for_fill_cancelled(self, MockIB):
-        """wait_for_fill raises IBOrderError when trade is cancelled."""
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        trade = _make_trade(order_id=1, status="Submitted")
-
-        def sleep_side_effect(secs):
-            trade.orderStatus.status = "Cancelled"
-
-        mock_ib.sleep.side_effect = sleep_side_effect
-
-        client = IBClient()
-        client.connect(client_id=1)
-
-        with pytest.raises(IBOrderError, match="[Cc]ancelled"):
-            client.wait_for_fill(trade, timeout=10)
 
 
 # ===========================================================================
@@ -1174,30 +1004,6 @@ class TestHistoricalData:
 
 
 # ===========================================================================
-# CONTRACT DETAILS
-# ===========================================================================
-
-class TestContractDetails:
-    """Test contract details retrieval."""
-
-    @patch("clients.ib_client.IB")
-    def test_get_contract_details(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        cd = _make_contract_details()
-        mock_ib.reqContractDetails.return_value = [cd]
-
-        client = IBClient()
-        client.connect(client_id=1)
-        contract = MagicMock()
-        details = client.get_contract_details(contract)
-
-        mock_ib.reqContractDetails.assert_called_once_with(contract)
-        assert len(details) == 1
-
-
-# ===========================================================================
 # SLEEP / UTILITY
 # ===========================================================================
 
@@ -1244,20 +1050,3 @@ class TestOpenTrades:
 
         mock_ib.openTrades.assert_called_once()
         assert len(trades) == 1
-
-    @patch("clients.ib_client.IB")
-    def test_get_trades(self, MockIB):
-        """Get all trades (open + completed) for the session."""
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-        mock_ib.trades.return_value = [
-            _make_trade(order_id=1, status="Filled"),
-            _make_trade(order_id=2, status="Submitted"),
-        ]
-
-        client = IBClient()
-        client.connect(client_id=0)
-        trades = client.get_trades()
-
-        mock_ib.trades.assert_called_once()
-        assert len(trades) == 2

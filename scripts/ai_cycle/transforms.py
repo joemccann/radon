@@ -150,34 +150,6 @@ def fixed_inference_basket(models, members, *, input_tokens, output_tokens, coho
     }
 
 
-def fiscal_quarters(ytd_facts):
-    """One selected vintage per cumulative end; only verified cash-flow facts."""
-    if not ytd_facts:
-        raise InsufficientEvidence("No fiscal facts")
-    facts = sorted(ytd_facts, key=lambda row: row["end"])
-    starts = {row["start"] for row in facts}
-    if len(starts) != 1 or any(not row.get("verified_statement") for row in facts):
-        raise InsufficientEvidence("Verified same-fiscal-year cumulative facts required")
-    start = date.fromisoformat(facts[0]["start"])
-    result, previous_value, previous_end = [], 0.0, start - timedelta(days=1)
-    for fact in facts:
-        end = date.fromisoformat(fact["end"])
-        days = (end - previous_end).days
-        if not 70 <= days <= 110:
-            raise InsufficientEvidence("Missing, duplicate or irregular fiscal quarter")
-        value = finite(fact["value"])
-        result.append(
-            {
-                "start": (previous_end + timedelta(days=1)).isoformat(),
-                "end": end.isoformat(),
-                "value": value - previous_value,
-                "days": days,
-            }
-        )
-        previous_value, previous_end = value, end
-    return result
-
-
 def trailing_four_quarters(quarters):
     if len(quarters) < 4:
         raise InsufficientEvidence("Four complete fiscal quarters required")
@@ -200,31 +172,3 @@ def cash_coverage(ocf, capex):
         "start": ocf["start"],
         "end": ocf["end"],
     }
-
-
-def aggregate_cash_coverage(issuers):
-    if not issuers or len({(row["start"], row["end"]) for row in issuers}) != 1:
-        raise InsufficientEvidence("Synchronized issuer periods required")
-    return ratio(sum(finite(row["ocf"]) for row in issuers), sum(finite(row["capex"]) for row in issuers))
-
-
-def working_capital_days(beginning, ending, quarter_flow, days):
-    if not 70 <= finite(days) <= 110 or min(finite(beginning), finite(ending)) < 0:
-        raise InsufficientEvidence("Quarter days and nonnegative balances required")
-    return ratio((beginning + ending) / 2, quarter_flow) * days
-
-
-def backlog_residual(beginning, orders, recognized_revenue, ending, *, definitions_match):
-    if not definitions_match:
-        raise InsufficientEvidence("Backlog definitions do not reconcile")
-    return finite(ending) - (finite(beginning) + finite(orders) - finite(recognized_revenue))
-
-
-def power_residual(
-    observed_mw, predicted_mw, *, history_days, weather_coverage, control_validated, interval_mwh_hours=1
-):
-    if history_days < 365 or weather_coverage < 0.95 or not control_validated:
-        raise InsufficientEvidence("Weather/calendar history and control validation required")
-    if interval_mwh_hours != 1:
-        raise InsufficientEvidence("Only one-hour MWh can be numerically interpreted as average MW")
-    return finite(observed_mw) - finite(predicted_mw)

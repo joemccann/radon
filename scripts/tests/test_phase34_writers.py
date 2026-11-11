@@ -71,25 +71,12 @@ def _now() -> str:
 # ── open_orders + executed_orders (Phase 3) ──────────────────────────
 
 class TestOpenOrders:
-    def test_upsert_inserts_new_row(self, writer, db_with_schema):
-        writer.upsert_open_order(9001, {"action": "BUY", "symbol": "AAPL"})
-        rows = db_with_schema.execute(
-            "SELECT perm_id, payload FROM open_orders"
-        ).fetchall()
-        assert rows[0][0] == 9001
-        assert json.loads(rows[0][1])["symbol"] == "AAPL"
-
-    def test_upsert_replaces_on_same_perm_id(self, writer, db_with_schema):
-        writer.upsert_open_order(9001, {"action": "BUY", "qty": 5})
-        writer.upsert_open_order(9001, {"action": "BUY", "qty": 10})
-        rows = db_with_schema.execute("SELECT payload FROM open_orders").fetchall()
-        assert len(rows) == 1
-        assert json.loads(rows[0][0])["qty"] == 10
-
     def test_replace_open_orders_for_session_clears_old(self, writer, db_with_schema):
-        writer.upsert_open_order(1, {"a": 1})
-        writer.upsert_open_order(2, {"a": 2})
-        writer.upsert_open_order(3, {"a": 3})
+        writer.replace_open_orders_for_session([
+            (1, {"a": 1}),
+            (2, {"a": 2}),
+            (3, {"a": 3}),
+        ])
         # Sync now returns only orders [4, 5]; old should be deleted.
         writer.replace_open_orders_for_session([
             (4, {"a": 4}),
@@ -101,7 +88,7 @@ class TestOpenOrders:
         assert perm_ids == [4, 5]
 
     def test_replace_open_orders_with_empty_clears_table(self, writer, db_with_schema):
-        writer.upsert_open_order(1, {"a": 1})
+        writer.replace_open_orders_for_session([(1, {"a": 1})])
         writer.replace_open_orders_for_session([])
         rows = db_with_schema.execute("SELECT * FROM open_orders").fetchall()
         assert rows == []
@@ -189,12 +176,12 @@ class TestDaemonState:
 # ── app_config (Phase 4) ─────────────────────────────────────────────
 
 class TestAppConfig:
-    def test_set_and_get(self, writer):
+    def test_set(self, writer, db_with_schema):
         writer.upsert_app_config("flex_token_expires", "2026-08-15")
-        assert writer.get_app_config("flex_token_expires") == "2026-08-15"
-
-    def test_get_missing_returns_none(self, writer):
-        assert writer.get_app_config("nonexistent") is None
+        rows = db_with_schema.execute(
+            "SELECT value FROM app_config WHERE key = ?", ("flex_token_expires",)
+        ).fetchall()
+        assert rows == [("2026-08-15",)]
 
     def test_replace_on_same_key(self, writer, db_with_schema):
         writer.upsert_app_config("k", "v1")

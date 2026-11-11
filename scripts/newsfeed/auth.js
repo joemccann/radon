@@ -216,9 +216,3 @@ async function tryPersistStorageState(persistStorageState) {
     console.warn(`[newsfeed] storage state persist failed: ${message}`);
   }
 }
-
-export const NEWSFEED_AUTH_DEFAULTS = {
-  url: NEWSFEED_URL,
-  homepage: HOMEPAGE_URL,
-  timeouts: DEFAULT_TIMEOUTS,
-};

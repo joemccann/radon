@@ -456,13 +456,6 @@ def test_every_rung_rejecting_the_copy_is_not_transient() -> None:
     assert info.value.transient is False
 
 
-def test_summary_problems() -> None:
-    assert mc.summary_problems("Gamma flips at 5800") == []
-    assert "forbidden_publisher" in mc.summary_problems("Per The Market Ear")
-    assert "url" in mc.summary_problems("see https://x.example")
-    assert any(p.startswith("banned_phrase") for p in mc.summary_problems("Time will tell"))
-
-
 def test_rejection_classified_even_when_the_message_is_long() -> None:
     tried = " ".join(f"provider{n}:unparseable" for n in range(12))
 

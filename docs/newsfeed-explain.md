@@ -88,12 +88,7 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (96, dateti
 
 `content_hash` is SHA-256 hex of `JSON.stringify([NEWSFEED_EXPLAIN_PROMPT_VERSION, title, content, imageUrls])` after sanitise. Version is currently `2`. Image URL order is preserved. A body, chart, or prompt-contract change misses the row.
 
-Python (`scripts/db/writer.py`):
-
-- `upsert_newsfeed_explanation(post_id, content_hash, explanation, *, model, provider, has_image, created_at=None)`
-- `get_newsfeed_explanation(post_id, content_hash) -> dict | None`
-
-JS live path (`web/lib/newsfeedExplainCache.ts`) uses `dbExecute`. Missing table: treat as cache miss, still return an explanation.
+The cache is read and written only by `web/lib/newsfeedExplainCache.ts`, through `dbExecute`. Missing table: treat as cache miss, still return an explanation.
 
 Single-flight: in-process `Map` keyed by `postId + ":" + content_hash`. Concurrent POSTs share one model call.
 
@@ -181,7 +176,6 @@ No new styling system. No glass, gradients, or raw hex.
 Backend:
 
 - `scripts/tests/test_migration_0096.py`
-- `scripts/tests/test_newsfeed_explain_writer.py`
 - `web/tests/newsfeed-explain.test.ts`
 - `web/tests/newsfeed-explain-api.test.ts`
 - `web/tests/newsfeed-explain-cache.test.ts`

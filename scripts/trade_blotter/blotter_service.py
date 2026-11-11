@@ -368,23 +368,6 @@ class BlotterService:
             trades=trades,
             as_of=datetime.now(),
         )
-    
-    def calculate_daily_pnl(self) -> Dict[str, Decimal]:
-        """
-        Calculate realized P&L for today's closed trades.
-        
-        Returns:
-            Dict with 'realized_pnl', 'commissions', 'net_pnl'
-        """
-        blotter = self.build_blotter()
-        
-        return {
-            "realized_pnl": blotter.total_realized_pnl,
-            "commissions": blotter.total_commissions,
-            "net_pnl": blotter.total_realized_pnl,  # Commissions already included in P&L
-            "closed_trades": len(blotter.closed_trades),
-            "open_trades": len(blotter.open_trades),
-        }
 
 
 def create_blotter_service(
