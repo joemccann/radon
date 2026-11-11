@@ -960,7 +960,7 @@ describe("getServiceCategory", () => {
  *
  * Verified against writer source code (scripts/vcg_scan.py,
  * scripts/cri_scan.py, scripts/ib_orders.py, scripts/ib_sync.py,
- * scripts/monitor_daemon/handlers/{fill_monitor,exit_orders,
+ * scripts/monitor_daemon/handlers/{fill_monitor,
  * journal_sync}.py). UW-only services (gex-scan, scanner, discover,
  * flow-analysis) are FALSE regardless of how they were initially
  * categorised — the alert grouping must reflect actual data-flow
@@ -1023,9 +1023,6 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "orders-sync",
       "portfolio-sync",
       "fill-monitor",
-      // `exit-orders` was here until R-141 — ExitOrdersHandler is no longer
-      // registered by create_daemon(), so it writes no heartbeat and is in
-      // neither catalog.
       "journal-sync",
       // Evening after-hours fill sweep (REL-012) — get_fills() from IB.
       "execution-sweep",
