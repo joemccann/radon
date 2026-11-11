@@ -51,8 +51,8 @@ class TestCacheOperations:
         cache_file = tmp_path / "ticker_cache.json"
         with patch("fetch_ticker.CACHE_FILE", cache_file):
             cache_ticker("aapl", "Apple Inc.")
-            result = get_cached_ticker("aapl")
-            assert result is not None
+            assert list(load_cache()["tickers"]) == ["AAPL"]
+            assert get_cached_ticker("aapl")["company_name"] == "Apple Inc."
 
 
 # ── Market calendar ─────────────────────────────────────────────────

@@ -27,11 +27,6 @@ class _Mem:
         self.db.commit()
 
 
-def test_writer_exports_explain_cache_helpers():
-    assert callable(writer.upsert_newsfeed_explanation)
-    assert callable(writer.get_newsfeed_explanation)
-
-
 def test_upsert_then_get_round_trip(monkeypatch):
     mem = _Mem()
     monkeypatch.setattr(writer, "get_db", lambda: mem)

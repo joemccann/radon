@@ -634,7 +634,7 @@ class TestMenthorQClientFutures:
             {"ticker": "ES", "price": 5740.0}
         ]):
             result = client.get_futures_list()
-        assert isinstance(result, list)
+        assert result == [{"ticker": "ES", "price": 5740.0}]
 
     def test_get_futures_detail_requires_ticker(self, client):
         """get_futures_detail() requires ticker param."""
@@ -677,7 +677,7 @@ class TestMenthorQClientForex:
         """get_forex_list() returns a list of dicts."""
         with patch.object(client, "_scrape_tables", return_value=[{"pair": "EURUSD"}]):
             result = client.get_forex_list()
-        assert isinstance(result, list)
+        assert result == [{"pair": "EURUSD"}]
 
     def test_get_forex_detail_requires_ticker(self, client):
         """get_forex_detail() requires ticker param."""
@@ -715,7 +715,7 @@ class TestMenthorQClientCrypto:
         """get_crypto_list() returns a list of dicts."""
         with patch.object(client, "_scrape_tables", return_value=[{"ticker": "BTC"}]):
             result = client.get_crypto_list()
-        assert isinstance(result, list)
+        assert result == [{"ticker": "BTC"}]
 
     def test_get_crypto_detail_requires_ticker(self, client):
         """get_crypto_detail() requires ticker param."""
@@ -843,7 +843,7 @@ class TestMenthorQClientScreenerValidation:
         """get_screener_category() accepts valid category+slug combinations."""
         with patch.object(client, "_scrape_tables", return_value=[{"ticker": "AAPL"}]):
             result = client.get_screener_category("gamma", "highest_gex_change")
-        assert isinstance(result, list)
+        assert result == [{"ticker": "AAPL"}]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1157,19 +1157,6 @@ class TestMenthorQForexConstants:
 
 
 class TestMenthorQStorageStatePersistence:
-    def test_persist_storage_state_is_public(self, mock_env_creds, mock_playwright, tmp_path):
-        """persist_storage_state() is a public method that callers can invoke."""
-        ss_path = tmp_path / "menthorq_storage_state.json"
-        c = MenthorQClient(storage_state_path=ss_path)
-
-        assert hasattr(c, "persist_storage_state"), (
-            "MenthorQClient must expose a public persist_storage_state() method "
-            "so external callers can refresh disk-side cookies after each "
-            "successful navigation."
-        )
-        # And it must be callable without error
-        c.persist_storage_state()
-
     def test_persist_storage_state_writes_to_disk(self, mock_env_creds, mock_playwright, tmp_path):
         """persist_storage_state() invokes BrowserContext.storage_state(path=...)."""
         ss_path = tmp_path / "menthorq_cache" / "menthorq_storage_state.json"

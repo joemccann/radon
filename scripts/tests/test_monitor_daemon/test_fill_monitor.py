@@ -55,10 +55,9 @@ class TestFillMonitorInit:
         assert handler.interval_seconds == 60
 
     def test_tracks_known_orders(self):
-        """Handler tracks known order states."""
+        """A new handler knows no orders: nothing is replayed as a fill."""
         handler = FillMonitorHandler()
-        assert hasattr(handler, 'known_orders')
-        assert isinstance(handler.known_orders, dict)
+        assert handler.known_orders == {}
 
 
 class TestFillMonitorExecute:

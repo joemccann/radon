@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import fetch_menthorq_cta as fetch_menthorq_cta_module
+from clients.vision_cascade import parse_json_rows
 from fetch_menthorq_cta import (
     CACHE_DIR,
     CTA_TABLES,
@@ -185,34 +186,14 @@ class TestFindByUnderlying:
 # ══════════════════════════════════════════════════════════════════
 
 class TestVisionParsing:
-    """Test that the EXTRACTION_PROMPT + cleaning logic works on simulated responses."""
+    """The vision ladder's row parser accepts the response shapes the CTA prompt yields."""
 
     def test_clean_json_response(self):
-        """Simulate a clean JSON response from Vision."""
-        raw = json.dumps(SAMPLE_MAIN_TABLE)
-        # This is what extract_via_vision's cleaning logic does
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-        parsed = json.loads(cleaned)
-        assert isinstance(parsed, list)
-        assert len(parsed) == 4
+        assert parse_json_rows(json.dumps(SAMPLE_MAIN_TABLE)) == SAMPLE_MAIN_TABLE
 
     def test_markdown_fenced_response(self):
-        """Simulate a markdown-fenced JSON response."""
         raw = "```json\n" + json.dumps(SAMPLE_MAIN_TABLE) + "\n```"
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-        parsed = json.loads(cleaned)
-        assert isinstance(parsed, list)
-        assert len(parsed) == 4
+        assert parse_json_rows(raw) == SAMPLE_MAIN_TABLE
 
     def test_extraction_prompt_format(self):
         """Verify extraction prompt mentions required fields."""
@@ -305,14 +286,6 @@ class TestCRIIntegration:
         required = ["position_today", "position_yesterday", "percentile_3m", "z_score_3m"]
         for field in required:
             assert field in spx, f"Missing field: {field}"
-
-    def test_position_values_are_numeric(self):
-        """All position/percentile/z-score values are numbers."""
-        for entry in SAMPLE_MAIN_TABLE:
-            assert isinstance(entry["position_today"], (int, float))
-            assert isinstance(entry["position_yesterday"], (int, float))
-            assert isinstance(entry["percentile_3m"], (int, float))
-            assert isinstance(entry["z_score_3m"], (int, float))
 
     def test_cache_structure_for_cri(self, tmp_path, monkeypatch):
         """Cache entry has the shape CRI scanner expects."""

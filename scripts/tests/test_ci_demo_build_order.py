@@ -32,15 +32,6 @@ def _index(steps, predicate, label):
     raise AssertionError(f"no step matching {label} in e2e-financial-smoke")
 
 
-def _demo_build_index(steps):
-    return _index(
-        steps,
-        lambda s: "run build" in str(s.get("run", ""))
-        and DEMO_SPEC not in str(s.get("run", "")),
-        "demo build (a `run build` step distinct from the demo spec step)",
-    )
-
-
 def _demo_spec_index(steps):
     return _index(
         steps, lambda s: DEMO_SPEC in str(s.get("run", "")), "demo spec"
