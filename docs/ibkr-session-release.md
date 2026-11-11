@@ -72,7 +72,7 @@ grok page responder stands down on IB / restart pages (`docs/grok-page-responder
 health daemon reads `/health/lite` only.
 
 ### 1c. Gateway socket clients (hold no IBKR session; generate noise / pages when Gateway is gone)
-App host: `radon-api` pool (clientIds 3/4/5 + `_ib_recovery_heartbeat_loop` 15s, `recover_stuck_pool` probe clientId 98), `radon-relay` (10), `radon-monitor` (fill/exit-order/journal handlers), IB timers (`radon-portfolio-sync`, `radon-refresh`, `radon-vcg-refresh`, `radon-signals-refresh`, `radon-leap`, `radon-cta-sync`, indicator timers that use IB such as `radon-ivrank`, `radon-dispersion`, `radon-straddle`, `radon-skew*`, `radon-vol-cone*`), and watchdog buckets (`radon-watchdog-*`) that page on IB outage.
+App host: `radon-api` pool (clientIds 3/4/5 + `_ib_recovery_heartbeat_loop` 15s, `recover_stuck_pool` probe clientId 98), `radon-relay` (10), `radon-monitor` (fill/journal handlers), IB timers (`radon-portfolio-sync`, `radon-refresh`, `radon-vcg-refresh`, `radon-signals-refresh`, `radon-leap`, `radon-cta-sync`, indicator timers that use IB such as `radon-ivrank`, `radon-dispersion`, `radon-straddle`, `radon-skew*`, `radon-vol-cone*`), and watchdog buckets (`radon-watchdog-*`) that page on IB outage.
 
 ---
 
