@@ -45,7 +45,8 @@ def _fake_tree(tmp_path: Path) -> Path:
     (tree / "scripts" / "runner" / "loops" / "security-deepsec.env").write_text(
         "PHASES=audit\n", encoding="utf-8"
     )
-    for name in ["runner/gateway_launch.py", "runner/gateway-requirements.txt", *_lib_files(), *_gateway_files()]:
+    for name in ["runner/gateway_launch.py", "runner/gateway-requirements.txt", "runner/install_antigravity.py",
+                 "runner/antigravity-darwin.json", *_lib_files(), *_gateway_files()]:
         target = tree / "scripts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("# fixture\n", encoding="utf-8")
