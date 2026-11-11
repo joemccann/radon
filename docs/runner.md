@@ -140,29 +140,63 @@ the disabled-login account `_radonmodelgw`, installs the service and starts
 `com.radon.model-gateway-local`
 ([service contract](model-gateway.md#mac-local-gateway-for-the-nightly-runners)).
 Grants live in `/Library/Radon/model-gateway-local/home`, readable by that
-account only. Provision them once, from your own tab, after `install.sh`:
+account only. Provision them once, from your own tab, after `install.sh`.
+Every command starts with `cd /`: the gateway account cannot read your working
+directory, and without it the shell prints `getcwd: Permission denied`.
 
-1. Claude. Generate a long-lived subscription token and store it as the gateway account (paste the token, then Ctrl-D):
+1. Claude. Generate a long-lived subscription token:
 
    ```bash
    /Library/Radon/model-clients/current/bin/claude setup-token
    ```
 
+   Store it as the gateway account. The command prints nothing and waits: paste
+   the token, press Enter, then Ctrl-D. `tr` drops the line breaks a narrow
+   terminal inserts when it wraps the token. Then clear the tab's scrollback
+   (Cmd-K), which still shows the token.
+
    ```bash
-   sudo -u _radonmodelgw /bin/sh -c 'umask 077; cat > /Library/Radon/model-gateway-local/home/claude-oauth-token'
+   cd / && sudo -u _radonmodelgw /bin/sh -c 'umask 077; tr -d "[:space:]" > /Library/Radon/model-gateway-local/home/claude-oauth-token'
+   ```
+
+   Check it was stored (about 108; 0 means nothing was saved):
+
+   ```bash
+   cd / && sudo -u _radonmodelgw /bin/sh -c 'wc -c < /Library/Radon/model-gateway-local/home/claude-oauth-token'
    ```
 
 2. Codex, stored as a file the gateway reads (device login prints a code to approve in your browser):
 
    ```bash
-   sudo -u _radonmodelgw /bin/sh -c 'umask 077; mkdir -p "$HOME/.codex" && printf "cli_auth_credentials_store = \"file\"\n" > "$HOME/.codex/config.toml"'
+   cd / && sudo -u _radonmodelgw /bin/sh -c 'umask 077; mkdir -p /Library/Radon/model-gateway-local/home/.codex && printf "cli_auth_credentials_store = \"file\"\n" > /Library/Radon/model-gateway-local/home/.codex/config.toml'
    ```
 
    ```bash
-   sudo -u _radonmodelgw -H env CODEX_HOME=/Library/Radon/model-gateway-local/home/.codex /Library/Radon/model-clients/current/bin/codex login --device-auth
+   cd / && sudo -u _radonmodelgw -H env CODEX_HOME=/Library/Radon/model-gateway-local/home/.codex /Library/Radon/model-clients/current/bin/codex login --device-auth
    ```
 
-3. Restart the gateway so it reads the new grants:
+3. Grok, the first rung of the documentation, testing, reliability, performance
+   and ci-performance loops (their `agy` and `fx` rungs run the Codex CLI, which
+   the gateway serves from Codex or Grok; NVIDIA and Cerebras are paused). The
+   grant lands in the gateway account's `~/.grok/auth.json`:
+
+   ```bash
+   cd / && sudo -u _radonmodelgw -H /Library/Radon/model-clients/current/bin/grok login --device-auth
+   ```
+
+4. Antigravity, the first rung of the model ladder (`json` and `chat`
+   requests from scripts the loops run), as on the VPS. `install.sh` installs
+   the pinned, Google-signed macOS build as `/usr/local/radon-runner/gateway/bin/agy`
+   (`scripts/runner/antigravity-darwin.json`, same version as the VPS image).
+   This prints a sign-in URL: open it, then paste the code back within 60
+   seconds. The grant lands in the gateway account's
+   `~/.gemini/antigravity-cli/antigravity-oauth-token`:
+
+   ```bash
+   cd / && sudo -u _radonmodelgw -H /usr/local/radon-runner/gateway/bin/agy -p ok
+   ```
+
+5. Restart the gateway so it reads the new grants:
 
    ```bash
    sudo launchctl kickstart -k system/com.radon.model-gateway-local
@@ -181,8 +215,8 @@ RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway-local/run/gateway.sock \
   python3.13 -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py status
 ```
 
-The result identifies wired providers and service capabilities; `anthropic`
-and `codex` must both be listed. A failed connection stops model work; it never
+The result identifies wired providers and service capabilities; `antigravity`,
+`anthropic`, `grok` and `codex` must be listed. A failed connection stops model work; it never
 creates local provider settings or credentials. Model execution does not use the bot-side
 NVIDIA/Cerebras env, native login files or fx proxy. Personal operator CLI
 logins remain untouched.

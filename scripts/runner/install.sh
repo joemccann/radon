@@ -30,7 +30,7 @@ LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly
 # paths kept. Runner sessions reach this gateway, signed with the Mac's own
 # subscription logins, instead of a tunnel to the VPS.
 GATEWAY_FILES="model_gateway/__init__.py model_gateway/client.py model_gateway/contracts.py model_gateway/credentials.py
-  model_gateway/engine.py model_gateway/lifecycle.py model_gateway/native.py model_gateway/provider_gate.py
+  model_gateway/engine.py model_gateway/lifecycle.py model_gateway/native.py model_gateway/chat.py model_gateway/provider_gate.py
   model_gateway/server.py model_gateway/specialized.py model_gateway/_forecast_backend.py model_gateway/_catalog_backend.py clients/__init__.py clients/prepaid_denylist.py clients/prepaid_denylist.json
   clients/provider_cooldown.py subscription_tokens.py subscription_vault.py utils/__init__.py utils/atomic_io.py utils/ipv4_first.py"
 GW_USER=_radonmodelgw
@@ -72,7 +72,8 @@ check_source() {
   # leaf-only check accepted a group-writable scripts/utils, and that is where
   # utils/atomic_io.py the root updater imports comes from.
   local dirs=("$tree" "$tree/scripts") seen=" scripts "
-  paths+=("$tree/scripts/runner/gateway_launch.py" "$tree/scripts/runner/gateway-requirements.txt")
+  paths+=("$tree/scripts/runner/gateway_launch.py" "$tree/scripts/runner/gateway-requirements.txt"
+    "$tree/scripts/runner/install_antigravity.py" "$tree/scripts/runner/antigravity-darwin.json")
   for file in $LIB_FILES $GATEWAY_FILES; do
     paths+=("$tree/scripts/$file")
     [[ "$file" == */* ]] || continue
@@ -176,6 +177,7 @@ print_gateway_plist() {
 <key>PATH</key><string>/Library/Radon/model-clients/current/bin:/usr/bin:/bin</string>
 <key>CLAUDE_CODE_OAUTH_TOKEN_FILE</key><string>$GW_HOME/claude-oauth-token</string>
 <key>CODEX_HOME</key><string>$GW_HOME/.codex</string>
+<key>ANTIGRAVITY_CLI</key><string>$PREFIX/gateway/bin/agy</string>
 <key>RADON_SUBSCRIPTION_STATE_DIR</key><string>$GW_HOME/state</string>
 <key>RADON_MODEL_CLIENT_UIDS</key><string>$GW_CLIENT_UID</string>
 <key>RADON_MODEL_TUNNEL_GID</key><string>$GW_GID</string>
@@ -346,6 +348,8 @@ install_gateway() {
     printf '%s\n' "$want" > "$stamp"
   fi
   chown -R root:wheel "$PREFIX/gateway/venv"
+  install -d -o root -g wheel -m 755 "$PREFIX/gateway/bin"
+  "$GUARD_PYTHON" -I "$SRC/install_antigravity.py" "$SRC/antigravity-darwin.json" "$PREFIX/gateway/bin/agy"
   chmod -R go-w "$PREFIX/gateway/venv"
   gateway_ids
   atomic_text /Library/LaunchDaemons/com.radon.model-gateway-local.plist 644 print_gateway_plist
