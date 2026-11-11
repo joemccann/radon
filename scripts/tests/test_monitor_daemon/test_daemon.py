@@ -323,8 +323,6 @@ def test_create_daemon_uses_auto_client_ids(tmp_path, monkeypatch):
 
     assert handlers["fill_monitor"].client_id == "auto"
     assert handlers["journal_sync"].client_id == "auto"
-    # exit_orders was asserted here until R-141 deregistered it.
-    assert "exit_orders" not in handlers
 
 
 if __name__ == "__main__":

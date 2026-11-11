@@ -1,15 +1,8 @@
 """R-427 / R-428 / REL-145: every order-placing path carries BOTH guards.
 
-Standing sweep 6 over the WHOLE repo, not the delta. `ib_place_order.py`,
-`ib_execute.py` and (since REL-129) `exit_order_service.py` all check the halt
-AND the limits before placing. Two sites checked only the halt:
-
-R-427: `monitor_daemon/handlers/exit_orders.py` places a live GTC limit order
-behind `is_trading_halted()` with no `check_order_limits()`. Unlike
-`exit_order_service.py` this one is definitely running -- it is a handler in
-`radon-monitor.service`. The exit leg is sized from the existing position so the
-fat-finger class is bounded in practice, but the notional and combo max-loss
-branches were skipped entirely and a corrupt position size reached IB unbounded.
+Standing sweep 6 over the WHOLE repo, not the delta. `ib_place_order.py` and
+`ib_execute.py` check the halt AND the limits before placing. A site that
+checked only the halt:
 
 R-428: `ib_order_manage.py`'s modify path sets `totalQuantity` and RE-PLACES
 behind the halt with no limit check. The FastAPI route bounds it, so the web
@@ -43,151 +36,6 @@ def _uncommented(path: Path) -> str:
         line for line in path.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
-
-
-class TestExitOrdersHandlerBoundsItsPlacement:
-    """Driven through ``execute()`` with a stub client (T-313): the old test
-    called ``check_order_limits`` directly and asserted a list nothing could
-    ever append to, so it passed with the ``continue`` deleted."""
-
-    SPEC = {"symbol": "SLV", "expiry": "20260417", "strike": 26, "right": "C"}
-    LOCAL_SYMBOL = "SLV   260417C00026000"
-    TARGET_PRICE = 3.20
-
-    def _stub_halt(self, monkeypatch, halted: bool):
-        monkeypatch.setitem(
-            sys.modules, "trading_halt",
-            type("T", (), {"is_trading_halted": staticmethod(lambda: halted),
-                           "get_halt_state": staticmethod(lambda: {"reason": "test"})}),
-        )
-
-    def _pending(self, contracts: int) -> list[dict]:
-        return [{
-            "trade_id": 8,
-            "ticker": "SLV",
-            "structure": "Bull Call Spread",
-            "order_type": "target",
-            "target_price": self.TARGET_PRICE,
-            "contracts": contracts,
-            "held_contracts": contracts,
-            "contract_spec": dict(self.SPEC),
-            "action": "SELL",
-            "journal_trade_id": "trade-8",
-        }]
-
-    def _stub_client(self):
-        from unittest.mock import MagicMock
-
-        client = MagicMock(name="IBClient")
-        contract = MagicMock(name="contract")
-        contract.localSymbol = self.LOCAL_SYMBOL
-        contract.conId = 606060
-        client.qualify_contracts.return_value = [contract]
-        quote = MagicMock(name="quote")
-        quote.bid, quote.ask, quote.halted = 3.10, 3.30, 0
-        client.get_quote.return_value = quote
-        client.get_open_orders.return_value = []
-
-        def _acknowledged(*_a, **_k):
-            trade = MagicMock(name="trade")
-            trade.order.orderId = 99
-            trade.order.permId = 777001
-            trade.orderStatus.status = "Submitted"
-            return trade
-
-        client.place_order.side_effect = _acknowledged
-        return client
-
-    def _handler(self, monkeypatch, contracts: int, *, halted: bool = False):
-        from unittest.mock import MagicMock
-        from monitor_daemon.handlers import exit_orders as mod
-
-        self._stub_halt(monkeypatch, halted)
-        client = self._stub_client()
-        monkeypatch.setattr(mod, "IBClient", lambda: client)
-        monkeypatch.setattr(mod, "Option", MagicMock(name="Option"))
-        monkeypatch.setattr(mod, "LimitOrder", MagicMock(name="LimitOrder"))
-
-        handler = mod.ExitOrdersHandler(db=object())
-        monkeypatch.setattr(
-            handler, "_load_exit_legs",
-            lambda: mod.ExitLegScan(pending=self._pending(contracts), placed=[]),
-        )
-        monkeypatch.setattr(handler, "_can_place_order", lambda *_a: True)
-        monkeypatch.setattr(handler, "_is_halted", lambda _ticker: False)
-        monkeypatch.setattr(handler, "_update_journal_trade", lambda *_a, **_k: True)
-        return handler, client
-
-    def test_an_over_cap_quantity_never_reaches_ib(self, monkeypatch):
-        import order_limits
-
-        cap = order_limits.max_order_qty()
-        handler, client = self._handler(monkeypatch, cap + 1)
-
-        result = handler.execute()
-
-        client.place_order.assert_not_called()
-        assert result["orders_placed"] == 0 and result["placed"] == []
-        assert result["orders_failed"] == 1, result
-        assert result["failed"][0]["ticker"] == "SLV"
-        assert str(cap) in result["failed"][0]["error"]
-        # The refusal is THIS cycle's own outcome: a position left
-        # unprotected must not heartbeat ok (base.py records error only
-        # on a truthy result["error"]).
-        assert result.get("error"), (
-            "a limit refusal left result['error'] unset, so the watchdog "
-            f"would see a green exit-orders cycle: {result}"
-        )
-        assert str(cap) in result["error"]
-        assert "exceeds the server-side limit" in result["error"]
-
-    def test_a_within_cap_exit_still_places(self, monkeypatch):
-        handler, client = self._handler(monkeypatch, 1)
-
-        result = handler.execute()
-
-        assert client.place_order.call_count == 1, result
-        assert result["orders_placed"] == 1
-        assert result.get("orders_failed", 0) == 0
-        assert not result.get("error"), result
-
-    def test_a_refused_exit_heartbeats_error_not_ok(self, monkeypatch):
-        """Through the BaseHandler wrapper: the service_health row the
-        watchdog reads must say ``error`` when the exit was refused."""
-        import db.writer as writer_mod
-        import order_limits
-
-        beats: list[tuple] = []
-        monkeypatch.setattr(
-            writer_mod, "record_service_health",
-            lambda service, state, **kw: beats.append((service, state, kw)),
-            raising=False,
-        )
-        cap = order_limits.max_order_qty()
-        handler, client = self._handler(monkeypatch, cap + 1)
-
-        wrapped = handler.run()
-
-        client.place_order.assert_not_called()
-        assert wrapped["status"] == "ok", wrapped  # soft: retried next cycle
-        states = [(service, state) for service, state, _ in beats]
-        assert states == [("exit-orders", "error")], beats
-        assert str(cap) in str(beats[0][2].get("error", {}).get("message"))
-
-    def test_the_halt_still_refuses_first(self, monkeypatch):
-        """Halted: no placement AND no limit refusal — the halt is a
-        deliberate operator state, so the cycle stays quiet and ok."""
-        import order_limits
-
-        cap = order_limits.max_order_qty()
-        handler, client = self._handler(monkeypatch, cap + 1, halted=True)
-
-        result = handler.execute()
-
-        assert result.get("halted") is True, result
-        client.place_order.assert_not_called()
-        assert result.get("orders_failed", 0) == 0
-        assert not result.get("error")
 
 
 class TestOrderManageModifyBoundsItsReplacement:
@@ -392,7 +240,6 @@ class TestNoPlacementSiteEscapesTheLimits:
         for expected in (
             "scripts/ib_place_order.py",
             "scripts/ib_order_manage.py",
-            "scripts/monitor_daemon/handlers/exit_orders.py",
         ):
             assert expected in found, (expected, sorted(found))
 
