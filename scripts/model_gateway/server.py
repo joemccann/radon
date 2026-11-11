@@ -34,6 +34,7 @@ from . import engine
 from .client import DEFAULT_SOCKET, DEFAULT_CONTROL_SOCKET, CONTROL_OPERATIONS, OPERATIONS, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, GatewayError
 from .contracts import ModelLadderExhausted, ModelResponseError, ClairicError
 from .lifecycle import RefreshManager
+from .provider_gate import ProviderGate, provider_concurrency
 
 log = logging.getLogger("model_gateway")
 PROVIDERS = frozenset(engine.MODEL_LADDER_ORDER) | {"slm-tagger"}
@@ -77,7 +78,8 @@ class Gateway:
         self.sessions = OrderedDict()
         self.session_lock = threading.Lock()
         self.slots = threading.BoundedSemaphore(8)
-        self.provider_locks = {name: threading.RLock() for name in PROVIDERS}
+        capacity = provider_concurrency(os.environ)
+        self.provider_locks = {name: ProviderGate(capacity) for name in PROVIDERS}
         self.refresh = RefreshManager(self.provider_locks)
         self.catalog_rows = []
 
