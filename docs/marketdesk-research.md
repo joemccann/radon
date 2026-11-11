@@ -173,9 +173,10 @@ fetched with a cookie-less opener that never follows redirects.
    ends the cycle. An item MarketDesk has not summarised yet is parked as
    `summary_pending` (no attempt spent, not a failure, not counted against
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
-   than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). That deadline spends an
-   attempt and writes the `marketdesk-research` error row, and the oneshot
-   exits 0. One other bad item never aborts the rest of the cycle. No new item
+   than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). A retry cannot change that
+   outcome, so the deadline retires the row to `failed` at once (every attempt
+   spent), writes one `marketdesk-research` error row, and the oneshot exits 0.
+   The next cycle is green again. One other bad item never aborts the rest of the cycle. No new item
    starts after 150 seconds of the cycle; the rest wait for the next one.
 7. Drain the outbox again when something was just published, held or dropped and write the
    `marketdesk-dropbox` row (the worse of the two outbox runs).
@@ -223,8 +224,11 @@ later cycle.
   and exits 0. The row is the P2 signal. Exit 1 made every 5-minute timer
   fire a new `InactiveEnterTimestamp` and a P1 page. A parked outage, a
   listing gap, a copy or transport failure, and any mix of those with
-  `no_summary` still exit 1. Do not `reset-failed` for the deadline. After
-  five attempts the row is `failed` and is not retried.
+  `no_summary` still exit 1. Do not `reset-failed` for the deadline. The
+  deadline retires the row to `failed` in that one cycle; an operator re-queue
+  revives it. Retrying spent four more red cycles on the same verdict
+  (`Z9DQGZqmzRy`, 2026-11-11: MarketDesk's summarizer answered "The document
+  content was not provided" instead of bullets).
   Managed cancellation bypasses provider exception handlers, so interrupted
   requests do not advance the model ladder; cleanup and the error heartbeat
   still run before exit 143.
@@ -394,10 +398,11 @@ journalctl -u radon-marketdesk.service -n 50
 - **Symptom:** `radon-marketdesk.service` is `Result=exit-code` and the
   `marketdesk-research` message is `N of N articles failed; last error: no_summary`.
   The provider still had no bullet summary after `MARKETDESK_SUMMARY_WAIT_HOURS`
-  (default 6). The ledger `last_error` is `no_summary` and one attempt is spent.
-  After this fix the oneshot exits 0 and the error row remains the signal.
-  Other article failures still exit 1. Do not `reset-failed` as the fix.
-  A summary that arrives while the row is still `pending` publishes on a later cycle.
+  (default 6). The ledger row is `failed` with `last_error` `no_summary`, all
+  attempts spent, so only that one cycle is red. The oneshot exits 0 and the
+  error row remains the signal. Other article failures still exit 1. Do not
+  `reset-failed` as the fix. A summary that arrives later needs an operator
+  re-queue to publish.
 - **Symptom:** `marketdesk-research` is `error` or stale.
   - Read `journalctl -u radon-marketdesk.service -n 100`. `MarketDeskAuthError`
     means the refresh token and the password fallback both failed: rerun the
