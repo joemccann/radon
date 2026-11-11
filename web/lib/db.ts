@@ -30,7 +30,6 @@
 
 import { createClient, type Client } from "@libsql/client";
 import { Agent, fetch as undiciFetch } from "undici";
-import path from "node:path";
 import { assertDemoDbIsolation } from "./demo/demoDbIsolation";
 import {
   createDbOperationIdentity,
@@ -366,15 +365,6 @@ function selfHealing(
   });
 }
 
-function projectRoot(): string {
-  // Resolve relative to the calling Next.js process. `process.cwd()` is
-  // the `web/` dir under `npm run dev`; in `app-radon-run` Docker it's
-  // `/app`. Either way, putting the replica next to `data/` matches the
-  // repo layout and keeps the file out of git. Replica mode is opt-in; keep
-  // its host path opaque so Turbopack does not package the entire data tree.
-  return path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "data");
-}
-
 export function getDb(): Client {
   // Demo-scoped callers must never get a prod-marked client. Checked on every
   // call, before the cache, because the principal scope varies per request
@@ -391,19 +381,9 @@ export function getDb(): Client {
     );
   }
 
-  const useReplica = isReplicaEnabled();
-
-  const raw = createClient(
-    useReplica
-      ? {
-          url: `file:${path.join(projectRoot(), "replica.db")}`,
-          syncUrl: toHttpTransportUrl(url),
-          authToken,
-          syncInterval: 60, // background pull every 60s; writes are pushed immediately
-          fetch: pooledDbFetch,
-        }
-      : { url: toHttpTransportUrl(url), authToken, fetch: pooledDbFetch },
-  );
+  // Always direct to cloud: the embedded replica was retired 2026-05-20 and
+  // no env var can reopen it.
+  const raw = createClient({ url: toHttpTransportUrl(url), authToken, fetch: pooledDbFetch });
 
   // Heal through resetDb (not a bare `cached = null`) so the wedged pool's
   // sockets are destroyed along with the client.
@@ -445,33 +425,15 @@ export function getDemoDb(): Client {
   return cachedDemo;
 }
 
-/** True only when an embedded replica is actually in use. The replica was
- * retired 2026-05-20 (direct-to-cloud, DUR-07); it needs an explicit opt-in
- * and the legacy kill switch always wins. */
-function isReplicaEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== "test" &&
-    process.env.RADON_DB_USE_REPLICA === "1" &&
-    process.env.RADON_DB_NO_REPLICA !== "1"
-  );
-}
-
-/** Pull cloud state into the embedded replica — a no-op without one.
+/** No-op: there is no embedded replica to pull into.
  *
- * Gated on the replica actually being ENABLED, never on the presence of a
- * `sync` method: @libsql/client's HTTP client DEFINES sync() and throws
- * `SYNC_NOT_SUPPORTED`, so the old `"sync" in db` feature-check passed and
- * threw on every call. readOrdersFromDb's catch then armed a pool teardown
- * on EVERY /orders read; two arms inside the cluster window escalated to a
+ * Never call the client's sync(): @libsql/client's HTTP client DEFINES it and
+ * throws `SYNC_NOT_SUPPORTED`. A `"sync" in db` feature-check once passed and
+ * threw on every call; readOrdersFromDb's catch then armed a pool teardown on
+ * EVERY /orders read, and two arms inside the cluster window escalated to a
  * real Agent.destroy() that aborted unrelated in-flight requests
  * (UND_ERR_DESTROYED → 503s on watchlist/profile/portfolio, 2026-08-06). */
-export async function syncDb(): Promise<void> {
-  if (!isReplicaEnabled()) return;
-  const db = getDb();
-  const sync = (db as { sync?: () => Promise<unknown> }).sync;
-  if (typeof sync !== "function") return;
-  await sync.call(db);
-}
+export async function syncDb(): Promise<void> {}
 
 // Test seam — drop the cached clients + pool between vitest tests.
 // Bypasses AND rearms both destroy gates so each test starts deterministic.

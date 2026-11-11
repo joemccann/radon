@@ -115,12 +115,12 @@ describe("production output trace audit", () => {
     );
   });
 
-  it("keeps the opt-in replica path runtime-correct but opaque to Turbopack", async () => {
+  it("keeps db.ts free of host data paths Turbopack could trace", async () => {
+    // The embedded-replica path (the only data/ reference) was removed with
+    // the replica opt-in, so nothing here can pull the data tree into a trace.
     const source = await readFile(resolve(__dirname, "../lib/db.ts"), "utf8");
 
-    expect(source).toContain(
-      'path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "data")',
-    );
-    expect(source).toContain('path.join(projectRoot(), "replica.db")');
+    expect(source).not.toContain("process.cwd()");
+    expect(source).not.toContain("replica.db");
   });
 });

@@ -3,22 +3,21 @@
 Mirror of `web/lib/db.ts`. Same Turso DB, same direct-to-cloud default.
 
 Usage:
-    from scripts.db.client import get_db, sync_db
+    from scripts.db.client import get_db
     db = get_db()
     db.execute("INSERT OR REPLACE INTO service_health(service, state, updated_at) "
                "VALUES (?, ?, datetime('now'))", ("cri-scan", "ok"))
     rows = db.execute("SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1").fetchall()
 
 Embedded replicas were retired on 2026-05-20 after WAL conflicts between
-multi-writer hosts (feedback_libsql_replica_one_writer.md). The safe
-default is a direct cloud connection; opening a replica requires an
-explicit `RADON_DB_USE_REPLICA=1` opt-in and logs a loud warning. The
-legacy `RADON_DB_NO_REPLICA=1` kill switch still forces the direct path.
+multi-writer hosts (feedback_libsql_replica_one_writer.md). Every
+connection is direct to cloud; no environment variable can open a
+replica (the old opt-in switch was removed).
 
 TIMEOUT REALITY (DUR-09, libsql_experimental 0.0.55 — the version pinned
 on prod): `libsql.connect()` exposes NO connect/execute/commit timeout
-(signature: database, isolation_level, check_same_thread, uri, sync_url,
-sync_interval, auth_token, encryption_key, autocommit), and the native
+(signature: database, isolation_level, check_same_thread, uri, the two
+replica sync arguments, auth_token, encryption_key, autocommit), and the native
 calls hold the GIL while blocked — so a thread-timeout wrapper around
 them is a lie (the "timed-out" call keeps starving the process). DO NOT
 add one.
@@ -72,9 +71,7 @@ test_no_sync_libsql_in_api.py lint).
 from __future__ import annotations
 
 import os
-import sys
 import threading
-from pathlib import Path
 from typing import Optional
 
 try:
@@ -85,9 +82,6 @@ except ImportError as exc:
         "Run `python3.13 -m pip install libsql-experimental` or add to requirements.txt."
     ) from exc
 
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_REPLICA_PATH = _PROJECT_ROOT / "data" / "replica.db"
 
 _lock = threading.Lock()
 _cached: Optional[object] = None  # libsql_experimental.Connection
@@ -104,35 +98,12 @@ def _read_env() -> tuple[str, str]:
     return url, token
 
 
-def _replica_opted_in() -> bool:
-    """The retired embedded replica is opt-in ONLY: explicit
-    RADON_DB_USE_REPLICA=1, not killed by the legacy RADON_DB_NO_REPLICA
-    switch, and never under pytest."""
-    return (
-        os.environ.get("RADON_DB_USE_REPLICA") == "1"
-        and not os.environ.get("RADON_DB_NO_REPLICA")
-        and not os.environ.get("PYTEST_CURRENT_TEST")
-    )
-
-
-def _warn_replica_opt_in() -> None:
-    print(
-        "[radon-db] WARNING: RADON_DB_USE_REPLICA=1 — opening the RETIRED "
-        f"libsql embedded replica at {_REPLICA_PATH}. Only one process per "
-        "host may hold it (WalConflict). Direct-to-cloud has been the "
-        "default since 2026-05-20; see feedback_libsql_replica_one_writer.md.",
-        file=sys.stderr,
-        flush=True,
-    )
-
-
 def get_db() -> object:
     """Return a process-wide singleton libSQL connection.
 
-    Connects direct-to-cloud unless the replica is explicitly opted in
-    via RADON_DB_USE_REPLICA=1 (see `_replica_opted_in`). Returns a
+    Always connects direct-to-cloud. Returns a
     `libsql_experimental.Connection` with `.execute(sql, params)`,
-    `.executemany`, `.commit()`, `.sync()`.
+    `.executemany`, `.commit()`.
 
     Test-pollution guard: if pytest is the caller (PYTEST_CURRENT_TEST is
     set) and the test hasn't explicitly opted in via RADON_DB_TEST_WRITE_OK,
@@ -173,32 +144,9 @@ def get_db() -> object:
         refuse_developer_host_in_cloud_mode()
 
         url, token = _read_env()
-
-        if _replica_opted_in():
-            _warn_replica_opt_in()
-            _REPLICA_PATH.parent.mkdir(parents=True, exist_ok=True)
-            conn = libsql.connect(
-                str(_REPLICA_PATH),
-                sync_url=url,
-                auth_token=token,
-            )
-            # Initial back-fill so the first read sees server state.
-            conn.sync()
-            _cached = conn
-        else:
-            _cached = libsql.connect(url, auth_token=token)
+        _cached = libsql.connect(url, auth_token=token)
 
     return _cached
-
-
-def sync_db() -> None:
-    """Force a sync from cloud → replica. Call at startup if you need
-    the freshest possible read; not required during steady-state since
-    libSQL syncs in the background.
-    """
-    db = get_db()
-    if hasattr(db, "sync"):
-        db.sync()  # type: ignore[attr-defined]
 
 
 def reset_for_tests() -> None:

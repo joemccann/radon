@@ -872,7 +872,7 @@ const GATEWAY_MODE = process.env.IB_GATEWAY_MODE || "docker";
 
 /* Best-effort relay health write. The relay must never stall ticks on a DB
  * hiccup, so the writer import + call are dynamic + try/catch'd. The writer
- * is direct-to-cloud by default (embedded replica is opt-in only). */
+ * is always direct-to-cloud (the embedded replica cannot be opened). */
 async function writeRelayHealth(state, error) {
   try {
     const { recordServiceHealth } = await import("./db/writer.js");
