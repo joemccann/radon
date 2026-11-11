@@ -35,8 +35,8 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
-    # Project-level .env first, then the IB-mode overlay, then web/.env which
-    # is where TURSO_DB_URL / TURSO_AUTH_TOKEN actually live on Hetzner.
+    # Project-level .env first, then web/.env, which is where
+    # TURSO_DB_URL / TURSO_AUTH_TOKEN actually live on Hetzner.
     load_dotenv(_PROJECT_DIR / ".env")
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
@@ -490,8 +490,8 @@ def _merge_covered_call_groups(groups: dict) -> dict:
     """
     from collections import defaultdict
     
-    stock_groups = {}  # ticker -> (key, legs)
-    short_call_groups = {}  # ticker -> [(key, legs), ...]
+    stock_groups = {}  # (account_id, symbol) -> stock group key
+    short_call_groups = {}  # (account_id, symbol) -> [short-call group key, ...]
     
     for key, legs in groups.items():
         account_id, symbol, _expiry = key
@@ -1264,7 +1264,7 @@ def wait_for_streaming_data(
 ) -> bool:
     """Wait until account PnL, quotes, and per-position PnL have a first tick.
 
-    Cap at ``timeout`` (the old combined sleep). Returns True if every
+    Cap at ``timeout``. Returns True if every
     requested stream is ready, False if the cap expired.
     """
 
@@ -2184,7 +2184,8 @@ def main():
 
         pnl_data = {}
         if pnl_obj:
-            # reqPnL subscription started in Phase 2 — has had 2.7s+ to arrive.
+            # reqPnL was requested before the positions fetch; with prices on,
+            # wait_for_streaming_data also waited up to 2.5s for its first tick.
             # No fallback sleep: if data isn't here by now, accept None for
             # account-level daily_pnl (per-position PnL is independent).
             daily = pnl_obj.dailyPnL

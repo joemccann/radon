@@ -36,8 +36,8 @@ sleep for a day and a few transient failures could walk it to a week. That is
 the 10-day outage from 2026-08-06.
 
 It still escalates, deliberately. A second 1018 ninety seconds after the first
-means something is making sustained requests rather than the once-a-day call
-this handler makes, and there was a known uncontrolled consumer in the since-deleted
+means something is making sustained requests rather than a once-a-day call,
+and there was a known uncontrolled consumer in the since-deleted
 `portfolio_performance.py` (up to two on-demand requests per page render, no
 breaker). Escalating in minutes surfaces that without hiding the data for a week.
 
@@ -124,12 +124,12 @@ def record_soft_failure(
     }
 
 
+log = logging.getLogger(__name__)
+
 # R-169: a deadline that will not parse is a breaker in an UNKNOWN state.
 # `blocked_until` returns this instead of None so a caller can tell "no
 # lockout was ever recorded" from "a lockout was recorded and the record is
 # corrupt" — the two used to be the same answer.
-log = logging.getLogger(__name__)
-
 CORRUPT_DEADLINE_SENTINEL = object()
 
 

@@ -55,22 +55,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 /**
- * Per-service freshness windows in ms. Values match the spec table:
- *
- *   newsfeed-scraper     5m always
- *   orders-sync          10m open, 3d closed   (writer: scripts/ib_orders.py)
- *   portfolio-sync       10m open, 3d closed   (writer: scripts/ib_sync.py)
- *   orders-read-compare  10m open, 3d closed   (writer: web/app/api/orders/route.ts)
- *   journal-sync         10m always
- *   cash-flow-sync       3d open, 4d closed   (sFTP ingest, Tue..Sat 07:30 ET)
- *   fill-monitor         5m open, 3d closed
- *   flex-token-check     25h (daily)
- *   flex-web-service     8d on-demand (1025 lockout heartbeat only)
- *   cri-scan             35m open, 1d closed
- *   gex-scan             35m open, 3d closed   (15-min driver; two missed fires)
- *   vcg-scan             15m open, 1d closed   (5-min cadence; 3 missed cycles)
- *   cta-sync             35m open, 1d closed
- *   replica-watchdog     24h while the replica file exists
+ * Per-service freshness windows in ms.
  *
  * Service names MUST match the canonical writer name (no ``ib-`` prefix
  * for orders/portfolio — the writers record under ``orders-sync`` /
@@ -261,28 +246,28 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
   "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
-  // calendar day, refreshing the chat picker's frontier model per LLM
-  // provider whose API key is present. Provider releases are not a market
-  // cadence, so weekend runs heartbeat like any other and a uniform 26h
-  // window applies. Provider HTTP only, no IB.
   "aa-frontier-basket": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle-backfill": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``liquidcompute``: radon-liquidcompute.timer fires daily 07:30 UTC.
   // Homepage-public GPU index ticker. Uniform 26h window. HTTP only, no IB.
   "liquidcompute": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
+  // calendar day, refreshing the chat picker's frontier model per LLM
+  // provider whose API key is present. Provider releases are not a market
+  // cadence, so weekend runs heartbeat like any other and a uniform 26h
+  // window applies. Provider HTTP only, no IB.
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``slm-tagger-monitor``: radon-slm-tagger-monitor.timer fires daily 07:10 UTC.
   // No-op when RADON_SLM_TAGGER_MODE is off or shadow. Uniform 26h window. No IB.
   // The llama-server sidecar has no service_health row (unit watchdog only).
   "slm-tagger-monitor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // Daily Cboe source sampling; tolerate one off-session missed heartbeat.
+  "vix-model-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
   // ``vix-pc`` — radon-vix-pc.timer fires daily 02:00 UTC every calendar day
   // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
   // matches its daily siblings. UW VIX options-volume only — no IB.
-  // Daily Cboe source sampling; tolerate one off-session missed heartbeat.
-  "vix-model-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
   "vix-pc": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
@@ -337,8 +322,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // paging on a single failed hour. Turso + Cerebras + local ONNX — no IB.
   "knowledge-ingest": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // cri-scan + vcg-scan run on Mon-Fri-only systemd timers (see CLAUDE.md
-  // autonomous timers table). Closed-hour window must cover the
+  // cri-scan + vcg-scan run on Mon-Fri-only systemd timers (radon-refresh.timer
+  // drives cri-scan, radon-vcg-refresh.timer drives vcg-scan; see Autonomous
+  // Timers in scripts/api/CLAUDE.md). Closed-hour window must cover the
   // Fri-end → Mon-open gap (~65h) or a quiet weekend flips the banner.
   // Surfaced 2026-05-16: both flipped stale on a Saturday with clean
   // Friday-evening finishes because the prior 1-day closed window was
@@ -383,12 +369,6 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``cta-sync`` above, so the same windows apply.
   "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
 
-  // Market-hours-only writers: triggered by the FastAPI scan endpoints
-  // during the trading day, dormant on nights and weekends. The
-  // ``closed`` window has to be wide enough to bridge a full weekend
-  // (Friday 16:00 ET → Monday 09:30 ET ≈ 65h) without flipping to
-  // stale. Per-service intraday cadence varies but ≤30 min during
-  // market hours catches genuine outages quickly.
   // scanner / discover / flow-analysis: radon-flow-refresh.timer hourly
   // ET RTH (plus SCAN). Wrapper skips closed session without a
   // heartbeat, so Monday mornings are a ~66-90h-old row — 4d windows
@@ -469,9 +449,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Mon morning) without flipping stale; the on-demand button can
   // bring it fresh in between.
   "leap-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
-  // ``garch-scan`` runs on-demand via the dashboard plus an optional
-  // scheduled timer (not yet shipped — when it lands, default to a
-  // mid-session cadence). UW-only data flow, no IB dependency.
+  // ``garch-scan`` runs on-demand via the dashboard and on radon-garch.timer
+  // (Mon-Fri 14:00 / 17:00 / 20:00 UTC). UW-only data flow, no IB dependency.
   "garch-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
 
   // Retain the watchdog's 24h window for installations that still have an
@@ -514,14 +493,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // we want.
   "ib-realtime-relay": { open: 5 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
+  "uw-stream": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
+  "uw-research": { open: 3 * HOUR, extended: 3 * HOUR, closed: 3 * HOUR, category: "scheduled", requires_ib: false },
   // R-459: the MKTNews headlines hub (radon-mktnews.service, scripts/mktnews/
   // hub.js) writes `ok` at most every 5 min while upstream frames flow (time
   // heartbeats count) and `error` after 3 consecutive failed dials or 5 min
   // of silence. The upstream is a 24/7 feed, so one uniform 15-min window
   // (three missed heartbeats) applies in every market state. No row until
   // the unit is installed: the watchdog reads no-row as dormant.
-  "uw-stream": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
-  "uw-research": { open: 3 * HOUR, extended: 3 * HOUR, closed: 3 * HOUR, category: "scheduled", requires_ib: false },
   "mktnews-hub": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by

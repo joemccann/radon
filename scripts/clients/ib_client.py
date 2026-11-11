@@ -78,8 +78,9 @@ class IBContractError(IBError):
 #   0-9     Pool (persistent connections held by FastAPI IBPool)
 #   10-19   WS relay (persistent, ib_realtime_server.js)
 #   20-49   Subprocess scripts (on-demand, auto-allocated with retry)
-#   50-69   Scanners (CRI/VCG ad-hoc pools)
-#   70-89   Daemons (fill monitor, exit service)
+#   50-69   Scanners (fixed ids per scanner; table in scripts/CLAUDE.md)
+#   70-89   Standalone daemon CLIs (ib_fill_monitor, exit_order_service);
+#           monitor_daemon handlers use client_id="auto" (20-49)
 #   90-99   Standalone CLI (manual runs)
 #
 POOL_ID_RANGE = (0, 9)
@@ -135,7 +136,7 @@ _CONNECTIVITY_CODES = frozenset({
     1102,  # Connectivity restored — data maintained
 })
 
-# IB error codes for pacing violations — retry with exponential backoff
+# IB error codes for pacing violations — counted and logged, never resent
 _PACING_CODES = frozenset({
     162,   # Historical market data pacing violation
     366,   # No historical data query found for ticker id
@@ -570,8 +571,7 @@ class IBClient:
         immediately but ``pos.avgCost`` lags by a tick or two while TWS
         recomputes the running VWAP server-side. ``ib.positions()`` alone
         returns the cache, so without the refresh the sync writes a
-        mismatched (size_new / avg_old) pair into the portfolio snapshot. See
-        feedback_ib_position_cache_stale_avgcost.md (forthcoming).
+        mismatched (size_new / avg_old) pair into the portfolio snapshot.
 
         Set ``refresh=False`` for tight read loops where you've already
         forced a refresh on a parent call and want to avoid the wait.
@@ -1056,7 +1056,8 @@ class IBClient:
 
         Raises:
             IBTimeoutError: If the trade does not fill within *timeout*.
-            IBOrderError: If the trade is cancelled or enters an error state.
+            IBOrderError: If the trade is cancelled (Cancelled / ApiCancelled).
+                An Inactive order is only logged; polling continues.
         """
         self._require_connection()
         elapsed = 0.0
