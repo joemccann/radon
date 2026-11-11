@@ -188,12 +188,15 @@ directory, and without it the shell prints `getcwd: Permission denied`.
    requests from scripts the loops run), as on the VPS. `install.sh` installs
    the pinned, Google-signed macOS build as `/usr/local/radon-runner/gateway/bin/agy`
    (`scripts/runner/antigravity-darwin.json`, same version as the VPS image).
-   This prints a sign-in URL: open it, then paste the code back within 60
-   seconds. The grant lands in the gateway account's
-   `~/.gemini/antigravity-cli/antigravity-oauth-token`:
+   macOS agy keeps its grant in a keychain, not a file, so `install.sh` gives it
+   its own home, `/Library/Radon/model-gateway-local/agy-home`, holding only an
+   empty-password, no-timeout keychain the gateway unlocks before each call. The
+   other grants stay out of agy's reach. Sign in there: it prints a URL, open it,
+   then paste the code back within 60 seconds. If macOS shows "Keychain Not
+   Found", choose Cancel (never Reset To Defaults) and rerun `install.sh`.
 
    ```bash
-   cd / && sudo -u _radonmodelgw -H /usr/local/radon-runner/gateway/bin/agy -p ok
+   cd / && sudo -u _radonmodelgw env HOME=/Library/Radon/model-gateway-local/agy-home /bin/sh -c '/usr/bin/security unlock-keychain -p "" "$HOME/Library/Keychains/radon-agy.keychain-db" && exec /usr/local/radon-runner/gateway/bin/agy -p ok'
    ```
 
 5. Restart the gateway so it reads the new grants:
