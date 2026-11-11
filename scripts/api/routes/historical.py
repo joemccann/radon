@@ -27,9 +27,7 @@ IB_OPERATION_TIMEOUT_SECS = 15.0
 MAX_QUALIFY_CONTRACTS = 50
 
 
-# ---------------------------------------------------------------------------
 # Request / response models
-# ---------------------------------------------------------------------------
 
 class ContractSpec(BaseModel):
     sec_type: str = "STK"
@@ -68,10 +66,6 @@ class BarResponse(BaseModel):
     close: float
     volume: int
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _get_pool(request: Request):
     """Retrieve ib_pool from app state (set during lifespan)."""
@@ -179,10 +173,6 @@ def _head_timestamp_to_iso(ts) -> str:
             pass
     return s
 
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 @router.post("/contract/qualify")
 async def qualify_contracts(req: QualifyRequest, request: Request):

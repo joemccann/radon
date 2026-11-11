@@ -156,9 +156,6 @@ def load_vcg_series(
     return points, underlying
 
 
-# --------------------------------------------------------------------------- #
-# Dark Pool Flow (Strategy 1) — sustained directional institutional flow       #
-# --------------------------------------------------------------------------- #
 def _latest_dark_pool_series(ticker: str) -> list[dict[str, Any]]:
     """Daily ``ticker_flow_history`` rows for ``ticker``, ascending by date.
 

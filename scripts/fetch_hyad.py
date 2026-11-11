@@ -37,7 +37,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# -- path setup ----------------------------------------------------
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -55,7 +54,6 @@ from utils.ipv4_first import prefer_ipv4
 
 prefer_ipv4()
 
-# -- constants -----------------------------------------------------
 SERVICE = "hy-ad"
 HYAD_JSON = _PROJECT_DIR / "data" / "hyad.json"
 
@@ -103,8 +101,6 @@ def _log(message: str) -> None:
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-
-# -- FINRA fetch ---------------------------------------------------
 
 def _request_body(bond_type: str, start_date: str, end_date: str, offset: int) -> dict[str, Any]:
     return {
@@ -355,8 +351,6 @@ def _is_unchanged(row: dict[str, Any], stored: Optional[dict[str, Any]]) -> bool
     return all(row[key] == stored[key] for key in COUNT_KEYS)
 
 
-# -- persistence ---------------------------------------------------
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     HYAD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = HYAD_JSON.with_suffix(".json.tmp")
@@ -380,8 +374,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
     _write_json_cache(payload)
 
-
-# -- daily orchestration -------------------------------------------
 
 def fetch_window(start_date: str, end_date: str) -> list[dict[str, Any]]:
     """One request per HY bondType over the window, merged per date."""
@@ -464,8 +456,6 @@ def run_backfill() -> int:
     )
     return 0
 
-
-# -- CLI -----------------------------------------------------------
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

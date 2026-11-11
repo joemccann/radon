@@ -19,13 +19,11 @@ export type OrdersShortcutAction =
   | { type: "modify" }
   | { type: "cancel" };
 
-/** Stable key for open-order display rows (single or combo). */
 export function openOrderRowKey(row: OpenOrderDisplayRow): string {
   if (row.kind === "combo") return row.id;
   return `${row.order.orderId}-${row.order.permId}`;
 }
 
-/** Flatten a display row to the underlying OpenOrder(s). */
 export function ordersFromDisplayRow(row: OpenOrderDisplayRow): OpenOrder[] {
   return row.kind === "combo" ? row.orders : [row.order];
 }
@@ -77,7 +75,6 @@ export function resolveOrdersShortcut(params: {
   return null;
 }
 
-/** Collect OpenOrders for all selected display rows (combos flattened). */
 export function flattenSelectedOpenOrders(
   rows: readonly OpenOrderDisplayRow[],
   selectedKeys: ReadonlySet<string>,

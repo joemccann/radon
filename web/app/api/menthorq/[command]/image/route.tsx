@@ -43,8 +43,6 @@ async function loadLatestCache(
   }
 }
 
-/* ─── Renderers ────────────────────────────────────────── */
-
 const WIDTH = 1200;
 const CHART_W = 1160;
 const CHART_H = 400;
@@ -397,8 +395,6 @@ function UnsupportedChart({ data }: { data: DashboardCache }) {
     </div>
   );
 }
-
-/* ─── Route ────────────────────────────────────────────── */
 
 const FAMILY_RENDERERS: Record<
   ChartFamily,

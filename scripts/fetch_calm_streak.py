@@ -48,8 +48,6 @@ FETCH_TIMEOUT_S = 30
 USER_AGENT = "radon/2.0"
 
 
-# ── pure transforms ───────────────────────────────────────────────
-
 def parse_cboe_history(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Cboe string rows -> float OHLC rows, ascending. open <= 0 -> None;
     rows with a non-positive or unparseable high/low/close are dropped."""
@@ -154,8 +152,6 @@ def build_output(rows: list[dict[str, Any]], *, scan_time: str,
     }
 
 
-# ── IO seams ──────────────────────────────────────────────────────
-
 def _fetch_source(if_modified_since: Optional[str]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """(payload, Last-Modified); payload None means HTTP 304."""
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -215,8 +211,6 @@ def _record_ok_heartbeat(scan_time: str) -> None:
     except Exception as exc:  # noqa: BLE001 - heartbeat is telemetry
         print(f"[calm-streak] service_health heartbeat failed: {exc}", file=sys.stderr)
 
-
-# ── persistence + orchestration ───────────────────────────────────
 
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]], *, use_db: bool = True) -> None:
     scan_time = payload["scan_time"]

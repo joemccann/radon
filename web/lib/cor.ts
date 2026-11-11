@@ -59,8 +59,6 @@ export const TENOR_OPTIONS: ReadonlyArray<{ key: CorTenorKey; label: string }> =
   { key: "cor1y", label: "1Y" },
 ];
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Index points, two decimals: "12.16"; "---" for null/non-finite. */
 export function formatCor(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -98,8 +96,6 @@ export function corRegimeColor(regime: CorRegime): string {
   return "var(--text-muted)";
 }
 
-/* ─── Derivations ────────────────────────────────────── */
-
 /** Term spread = cor1y minus cor1m; null when either leg is null. */
 export function termSpread(
   current: { cor1m: number | null; cor1y: number | null } | null | undefined,
@@ -129,8 +125,6 @@ export function latestSourceStamp(
   }
   return newest;
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface CorChartRow {
   date: string;

@@ -586,7 +586,6 @@ const tapeRequestIdToSymbol = new Map(); // tapeTickerId → key
 const symbolTapeStates = new Map();
 const clientTapeBuffers = new Map(); // client → Map<symbol, Trade[]>
 
-/* ─── Symbol Search Cache ─────────────────────────────────────────────── */
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
 const SEARCH_CACHE_MAX = 200;
 const searchCache = new Map(); // pattern → { results, ts }
@@ -770,7 +769,6 @@ function updateOptionSessionCache(data) {
 
 void loadSessionCache();
 
-/* ─── Keep-Alive State ──────────────────────────────────────────────────── */
 const clientLastPong = new Map(); // client → timestamp (ms)
 let pingIntervalTimer = null;
 
@@ -3010,7 +3008,6 @@ wss.on("connection", (client) => {
 ib.connect();
 startBatchFlush();
 
-/* ─── Keep-Alive Ping Interval ─────────────────────────────────────────── */
 pingIntervalTimer = setInterval(() => {
   const now = Date.now();
   for (const client of clients) {

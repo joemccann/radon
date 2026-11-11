@@ -24,7 +24,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -42,13 +41,10 @@ try:
 except ImportError:  # pragma: no cover — tests inject a FakeWriter
     writer = None  # type: ignore[assignment]
 
-# ── constants ─────────────────────────────────────────────────────
 SKEW2D_JSON = _PROJECT_DIR / "data" / "skew2d.json"
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
 _RATIO_KEYS = ("date", "expiry", "dte", "put_iv", "call_iv", "ratio")
 
-
-# ── pure transforms ───────────────────────────────────────────────
 
 def compute_change_2d_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Ascending by date; attaches change = ratio_t - ratio_{t-2} (None first two).
@@ -277,8 +273,6 @@ def _hold_for_parent_embargo(
     return payload
 
 
-# ── orchestration ─────────────────────────────────────────────────
-
 def run(*, now: Optional[datetime] = None) -> dict[str, Any]:
     """Load ratios → 2d series → dual-write (history only when fingerprint moves)."""
     now = now or datetime.now(timezone.utc)
@@ -322,8 +316,6 @@ def run(*, now: Optional[datetime] = None) -> dict[str, Any]:
     persist_json(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

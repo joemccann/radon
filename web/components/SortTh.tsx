@@ -5,8 +5,6 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import InfoTooltip from "./InfoTooltip";
 import type { SortDirection } from "@/lib/useSort";
 
-/* ─── Sortable header cell ─────────────────────────────── */
-
 function shouldIgnoreSortEvent(target: EventTarget | null, currentTarget: EventTarget | null): boolean {
   if (!(target instanceof Element) || !(currentTarget instanceof Element) || target === currentTarget) {
     return false;

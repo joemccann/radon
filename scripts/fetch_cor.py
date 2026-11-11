@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -43,14 +42,11 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 COR_JSON = _PROJECT_DIR / "data" / "cor.json"
 
 _TENORS = ("COR1M", "COR3M", "COR6M", "COR1Y")
 _TENOR_KEYS = tuple(symbol.lower() for symbol in _TENORS)
 
-
-# ── Cboe CSV parsing ──────────────────────────────────────────────
 
 def parse_index_csv(text: str) -> list[dict[str, Any]]:
     """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
@@ -69,8 +65,6 @@ def parse_index_csv(text: str) -> list[dict[str, Any]]:
     rows.sort(key=lambda r: r["date"])
     return rows
 
-
-# ── merge + stats ─────────────────────────────────────────────────
 
 def merge_series(by_tenor: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Per-tenor parsed rows → union-of-dates series, ascending.
@@ -136,8 +130,6 @@ def _build_current(series: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     return current
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_db_cache(
     payload: dict[str, Any], scan_time: str, *, rows_changed: bool
 ) -> None:
@@ -174,8 +166,6 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
     except (OSError, ValueError):
         return None
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Fetch all four Cboe tenors, compute, cache, and return the COR payload.
@@ -232,8 +222,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _write_json_cache(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

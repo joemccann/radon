@@ -65,8 +65,6 @@ export interface VolConeChartRow {
   put_10_iv: number | null;
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Decimal IV to one-decimal vol points: 0.3851 -> "38.5"; "---" null/non-finite. */
 export function formatIvPct(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -94,8 +92,6 @@ export function formatMonthlyExpiry(expiry: string | null | undefined): string {
   return `${month} ${Number(match[3])}`;
 }
 
-/* ─── Derivations ────────────────────────────────────── */
-
 export function isHit(regime: VolConeRegime): boolean {
   return regime === "CHEAP_WINGS" || regime === "CHEAP_ATM";
 }
@@ -113,8 +109,6 @@ export function volConeRegimeColor(regime: VolConeRegime): string {
   }
 }
 
-/* ─── Chart rows ─────────────────────────────────────── */
-
 export function buildVolConeChartRows(
   series: ReadonlyArray<VolConeSeriesPoint>,
 ): VolConeChartRow[] {
@@ -125,8 +119,6 @@ export function buildVolConeChartRows(
     put_10_iv: point.put_10_iv,
   }));
 }
-
-/* ─── Analysis + trade href ──────────────────────────── */
 
 export type VolConeTradeLeg = {
   action: "BUY";

@@ -41,7 +41,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -73,7 +72,6 @@ except Exception:  # pragma: no cover - DB layer optional in stripped envs
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
-# ── constants ─────────────────────────────────────────────────────
 _CACHE_PATH = _PROJECT_DIR / "data" / "breadth.json"
 
 DIVERGENCE_WINDOW_SESSIONS = 20
@@ -90,9 +88,7 @@ INTRADAY_BUCKET_MINUTES = 1
 _ET = zoneinfo.ZoneInfo("America/New_York")
 
 
-# ══════════════════════════════════════════════════════════════════
 # Data Fetching (IB only)
-# ══════════════════════════════════════════════════════════════════
 
 def _finite_value(value: Any) -> Optional[float]:
     """Return a finite float, else None. Breadth values are SIGNED —
@@ -276,9 +272,7 @@ def _fetch_live_snapshots() -> Tuple[Optional[float], Optional[float]]:
         ib.disconnect()
 
 
-# ══════════════════════════════════════════════════════════════════
 # StockCharts daily A/D (IB's AD-NYSE daily is gappy + lags a session or two)
-# ══════════════════════════════════════════════════════════════════
 
 # StockCharts' ACP quotebrain endpoints are public JSON (no auth). $NYAD carries
 # the COMPLETE daily NYSE net advance/decline series (advancers minus decliners)
@@ -357,10 +351,6 @@ def _fetch_stockcharts_quote(symbol: str) -> Optional[float]:
         print(f"  StockCharts: {symbol} quote fetch failed — {exc}", file=sys.stderr)
     return None
 
-
-# ══════════════════════════════════════════════════════════════════
-# Pure Computation
-# ══════════════════════════════════════════════════════════════════
 
 def build_daily_net_ad(bars: List[Any]) -> List[Tuple[str, float]]:
     """Daily net advance/decline series from AD-NYSE daily bars — each bar's
@@ -528,10 +518,6 @@ def build_output(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# Persistence
-# ══════════════════════════════════════════════════════════════════
-
 def persist_result(result: Dict[str, Any], cache_path: Optional[Path] = None) -> bool:
     """Cache to disk + mirror to Turso ONLY when the payload carries data —
     an empty overwrite would clobber the last good scan that the cache
@@ -676,10 +662,6 @@ def _load_cache_fallback(market_open: bool) -> Dict[str, Any]:
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# Console Summary
-# ══════════════════════════════════════════════════════════════════
-
 def print_summary(result: Dict[str, Any]) -> None:
     latest = result.get("latest") or {}
     print(f"\n{'='*60}", file=sys.stderr)
@@ -704,10 +686,6 @@ def print_summary(result: Dict[str, Any]) -> None:
     )
     print(f"{'='*60}\n", file=sys.stderr)
 
-
-# ══════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════
 
 def _iso_utc(raw: Any) -> str:
     if isinstance(raw, datetime):

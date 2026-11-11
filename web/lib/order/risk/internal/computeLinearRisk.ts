@@ -80,7 +80,6 @@ export function computeLinearRisk(input: LinearRiskInput): OrderRisk {
     };
   }
 
-  // Naked-excess for SELL against partial-LONG cover.
   let nakedQty = qty;
   if (input.action === "SELL" && heldLong > 0) {
     nakedQty = Math.max(0, qty - heldLong);
@@ -101,11 +100,9 @@ export function computeLinearRisk(input: LinearRiskInput): OrderRisk {
     };
   }
 
-  // Naked open — linear UNBOUNDED on the SELL side, bounded on the LONG side.
   const intrinsicCap = price * nakedQty * mult;
 
   if (input.action === "SELL") {
-    // SHORT: max-loss UNBOUNDED, max-gain capped at price-to-zero × nakedQty.
     return {
       maxLoss: null,
       maxGain: intrinsicCap,
@@ -116,7 +113,6 @@ export function computeLinearRisk(input: LinearRiskInput): OrderRisk {
     };
   }
 
-  // LONG: max-loss bounded at price-to-zero × nakedQty, max-gain UNBOUNDED.
   return {
     maxLoss: intrinsicCap,
     maxGain: null,

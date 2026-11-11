@@ -201,10 +201,6 @@ function methodologyFrom(raw: Record<string, unknown>): PerformanceData["methodo
   };
 }
 
-// ---------------------------------------------------------------------------
-// Series
-// ---------------------------------------------------------------------------
-
 function normalizeSeries(raw: unknown): PerformanceSeriesPoint[] {
   if (!Array.isArray(raw)) return [];
   let peak = -Infinity;
@@ -268,10 +264,6 @@ function lastNav(rawSeries: unknown): number | undefined {
   return finiteNumber((rawSeries[rawSeries.length - 1] as RawPoint | undefined)?.nav);
 }
 
-// ---------------------------------------------------------------------------
-// Warnings
-// ---------------------------------------------------------------------------
-
 function isWarningObject(value: unknown): value is PerformanceWarning {
   const record = asRecord(value);
   return typeof record.code === "string" && typeof record.message === "string";
@@ -293,10 +285,6 @@ export function performanceWarnings(data: PerformanceData | null | undefined): P
       : warning,
   );
 }
-
-// ---------------------------------------------------------------------------
-// normalizePerformanceData
-// ---------------------------------------------------------------------------
 
 function isV2Payload(data: Record<string, unknown>): boolean {
   return finiteNumber(data.schema_version) === 2;
@@ -514,9 +502,7 @@ export function normalizePerformanceData(raw: unknown): PerformanceData | null {
   return isV2Payload(data) ? normalizeV2(data) : normalizeV1(data);
 }
 
-// ---------------------------------------------------------------------------
 // Render view — the single decision layer both panels read
-// ---------------------------------------------------------------------------
 
 export type PerformanceRiskView = {
   volatility: GatedValue;

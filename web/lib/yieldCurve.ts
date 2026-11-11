@@ -43,8 +43,6 @@ export interface YieldCurveLiveData {
   source: string | null;
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 export function formatSpreadPct(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;

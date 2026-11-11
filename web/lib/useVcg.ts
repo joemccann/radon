@@ -60,16 +60,12 @@ export type VcgData = {
   history: VcgHistoryEntry[];
 };
 
-/* ─── Staleness check ────────────────────────────────────────── */
-
 // Delegate to the market-gated staleness lib so off-hours retries stop (the
 // bare scanDate-vs-today check used to re-arm a 5s GET retry every weekend).
 function needsVcgRetry(data: VcgData | null | undefined): boolean {
   if (!data) return true;
   return isVcgDataStale(data);
 }
-
-/* ─── Hook ───────────────────────────────────────────────────── */
 
 const VCG_SYNC_CONFIG = {
   endpoint: "/api/vcg",

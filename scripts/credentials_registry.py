@@ -64,7 +64,6 @@ class CredentialService:
 
 
 SERVICES: Tuple[CredentialService, ...] = (
-    # -- Market Data ---------------------------------------------------------
     CredentialService(
         id="unusual_whales",
         label="Unusual Whales",
@@ -122,7 +121,6 @@ SERVICES: Tuple[CredentialService, ...] = (
         fields=(CredentialField("FRED_API_KEY", "API key"),),
         validator="fred",
     ),
-    # -- AI Providers --------------------------------------------------------
     CredentialService(
         id="cerebras",
         label="Cerebras",
@@ -205,7 +203,6 @@ SERVICES: Tuple[CredentialService, ...] = (
         validator="sec",
         note="SEC requires an identifying application name and monitored email; no API key or payment.",
     ),
-    # -- Infrastructure ------------------------------------------------------
     CredentialService(
         id="mdw",
         label="MarketDataWorks",
@@ -279,7 +276,6 @@ SERVICES: Tuple[CredentialService, ...] = (
             "worth a new dependency. Verified by the archive service."
         ),
     ),
-    # -- Alerts & News -------------------------------------------------------
     CredentialService(
         id="pushover",
         label="Pushover",

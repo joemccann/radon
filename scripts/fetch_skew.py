@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -56,7 +55,6 @@ from utils.uw_embargo import (  # noqa: E402 — needs the sys.path insert
     retry_at,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
 
 _TICKER = "SPX"
@@ -133,8 +131,6 @@ def interpolate_iv_at_delta(
     return None
 
 
-# ── monthly expiry selection ──────────────────────────────────────
-
 def third_friday(year: int, month: int) -> date:
     """Third Friday of the month (standard monthly option expiration)."""
     first_friday_offset = (4 - date(year, month, 1).weekday()) % 7
@@ -180,8 +176,6 @@ def constant_maturity_leg(
     return iv_near + weight * (iv_far - iv_near)
 
 
-# ── change series + stats ─────────────────────────────────────────
-
 def compute_change_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Ascending by date; attaches change = ratio_t - ratio_{t-1} (None first)."""
     ordered = sorted(rows, key=lambda r: r["date"])
@@ -223,8 +217,6 @@ class _DefaultClient:
     def fetch_greeks(self, expiry: str, as_of: str) -> dict:
         return self._uw.get_greeks(_TICKER, expiry=expiry, date=as_of)
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _write_db_cache(
     payload: dict[str, Any], scan_time: str, *, rows_changed: bool
@@ -282,8 +274,6 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
     except (OSError, ValueError):
         return None
 
-
-# ── session fetching ──────────────────────────────────────────────
 
 def _fetch_expiry_wings(
     client: Any, expiry: date, session: str
@@ -428,8 +418,6 @@ def _build_payload(
     }
 
 
-# ── orchestration ─────────────────────────────────────────────────
-
 def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Gap-filling incremental: fetch every missing completed session since
     the last stored date (bounded to the most recent 10), recompute the
@@ -550,8 +538,6 @@ def _run_cycle(client: Any, now: datetime) -> dict[str, Any]:
     return payload
 
 
-# ── backfill ──────────────────────────────────────────────────────
-
 def _existing_dates() -> set[str]:
     """Dates already in Turso skew_history (JSON cache fallback)."""
     try:
@@ -637,8 +623,6 @@ def run_backfill(
     print(f"[skew] backfill done: {fetched} sessions fetched, {payload['count']} total", file=sys.stderr)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

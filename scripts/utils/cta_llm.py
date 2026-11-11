@@ -104,8 +104,6 @@ def model_name(env: Optional[dict] = None) -> str:
     return setting(env, MODEL_ENV) or DEFAULT_MODEL
 
 
-# ── Numeric firewall ──────────────────────────────────────────────────────────
-
 def _as_float(token: str) -> Optional[float]:
     try:
         return float(token.replace(",", ""))
@@ -182,8 +180,6 @@ def copy_problems(text: str, allowed: Sequence[float]) -> list:
 
     return problems
 
-
-# ── Model call ────────────────────────────────────────────────────────────────
 
 def build_prompt(facts: dict, draft: str) -> str:
     return (

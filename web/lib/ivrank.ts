@@ -82,8 +82,6 @@ export interface IvRankData {
   series: IvRankEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** One-decimal rank: "10.6"; "---" when unavailable. */
 export function formatRank(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -119,8 +117,6 @@ export function ivrankRegimeColor(regime: IvRankRegime | null | undefined): stri
   if (regime === "EXTREME") return "var(--dislocation)";
   return "var(--text-muted)";
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface IvRankChartRow {
   date: string;

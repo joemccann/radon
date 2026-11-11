@@ -40,8 +40,6 @@ def resolve_quote_contract(symbol: str):
     return Stock(upper, "SMART", "USD")
 
 
-# ── Futures ────────────────────────────────────────────────────────────
-
 # Map of underlying symbol → futures root + exchange (VIX on CFE;
 # SPX/NDX/RUT on CME).
 FUTURES_ROOTS: dict[str, dict[str, str]] = {
@@ -55,7 +53,6 @@ FUTURES_ROOTS: dict[str, dict[str, str]] = {
 
 
 def supports_futures(symbol: str) -> bool:
-    """True iff Radon knows how to resolve a futures contract for this symbol."""
     return symbol.upper() in FUTURES_ROOTS
 
 
@@ -87,8 +84,6 @@ def resolve_future_contract(symbol: str, expiry: str = ""):
     return contract
 
 
-# ── Options ────────────────────────────────────────────────────────────
-
 # Indices that have CBOE-traded options. Each entry pins the exchange
 # + tradingClass IB needs to disambiguate from weeklies (e.g. VIXW)
 # and other related products. Multiplier is informational; IB sets it.
@@ -102,7 +97,6 @@ INDEX_OPTION_ROOTS: dict[str, dict[str, str]] = {
 
 
 def supports_index_options(symbol: str) -> bool:
-    """True iff Radon knows how to resolve index options for this symbol."""
     return symbol.upper() in INDEX_OPTION_ROOTS
 
 
@@ -143,7 +137,6 @@ def resolve_option_contract(
             contract.multiplier = meta["multiplier"]
         return contract
 
-    # Equity option — legacy SMART routing
     return Option(
         symbol=upper,
         lastTradeDateOrContractMonth=expiry,

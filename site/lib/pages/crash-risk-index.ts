@@ -159,8 +159,6 @@ export const crashRiskIndexMetadata: Metadata = {
   },
 };
 
-// --- JSON-LD ---------------------------------------------------------------
-
 const radonOrganization = {
   "@type": "Organization",
   name: "Radon",

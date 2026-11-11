@@ -123,9 +123,6 @@ def fts_match_expression(query: str) -> str:
     return " OR ".join(f'"{token}"' for token in tokens)
 
 
-# ── hybrid search ────────────────────────────────────────────────────
-
-
 _VALID_LEGS = frozenset({"fts", "vector"})
 
 

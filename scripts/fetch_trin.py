@@ -50,7 +50,6 @@ from db import writer
 from utils.ib_preflight import IB_REQUEST_TIMEOUT_S, ib_auth_state as _ib_auth_state
 from utils.market_calendar import is_market_open_et, last_completed_session_date
 
-# ── constants ─────────────────────────────────────────────────────
 SERVICE = "trin"
 TRIN_JSON = _PROJECT_DIR / "data" / "trin.json"
 
@@ -78,8 +77,6 @@ DailyRow = tuple[str, float]
 def _log(message: str) -> None:
     print(f"[{SERVICE}] {message}", file=sys.stderr)
 
-
-# ── time helpers ──────────────────────────────────────────────────
 
 def _parse_utc(ts_iso: str) -> datetime:
     parsed = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
@@ -113,8 +110,6 @@ def _bucket_label(moment_et: datetime, minutes: int) -> str:
     start_min = _RTH_OPEN_MIN + ((minutes - _RTH_OPEN_MIN) // 60) * 60
     return f"{moment_et:%Y-%m-%d}T{start_min // 60:02d}:{start_min % 60:02d}"
 
-
-# ── pure computation ──────────────────────────────────────────────
 
 def bucket_hourly(samples: list[Sample]) -> list[dict[str, Any]]:
     """Last sample per RTH hour bucket, sorted by bucket; off-session samples dropped."""
@@ -522,8 +517,6 @@ def load_cached_daily() -> list[DailyRow]:
     return _json_daily()
 
 
-# ── merge ─────────────────────────────────────────────────────────
-
 def merge_samples(cached: list[Sample], fresh: Optional[Sample]) -> list[Sample]:
     by_ts = {s["ts"]: s for s in cached}
     if fresh is not None:
@@ -541,8 +534,6 @@ def diff_new_daily(cached: list[DailyRow], merged: list[DailyRow]) -> list[Daily
     cached_by_date = dict(cached)
     return [row for row in merged if cached_by_date.get(row[0]) != row[1]]
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     TRIN_JSON.parent.mkdir(parents=True, exist_ok=True)
@@ -620,8 +611,6 @@ def persist_result(
     _write_json_cache(payload)
 
 
-# ── orchestration ─────────────────────────────────────────────────
-
 def run() -> dict[str, Any]:
     cached_samples = load_cached_samples()
     cached_daily = load_cached_daily()
@@ -648,8 +637,6 @@ def run() -> dict[str, Any]:
     persist_result(payload, [sample] if sample else [], new_daily, health_error)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

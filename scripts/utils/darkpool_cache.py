@@ -213,7 +213,6 @@ def set_cached_darkpool(
 
 
 def _maybe_prune() -> None:
-    """Occasionally delete cache entries older than MAX_AGE_DAYS (never re-read)."""
     global _write_count
     _write_count += 1
     if _write_count % _PRUNE_EVERY != 1:
@@ -224,7 +223,6 @@ def _maybe_prune() -> None:
     except OSError:
         return
     for entry in entries:
-        # filename: TICKER_YYYY-MM-DD.json → trailing date segment
         stem = entry.stem  # drops .json
         date_part = stem.rsplit("_", 1)[-1]
         if len(date_part) == 10 and date_part < cutoff:

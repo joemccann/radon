@@ -23,8 +23,6 @@ export const Z_NORMAL_MAX = 1;
 /** z at or above Z_NORMAL_MAX and below this is ELEVATED; at or above is EXTREME. */
 export const Z_ELEVATED_MAX = 2;
 
-/* ─── Payload types (spec F.3) ───────────────────────── */
-
 export type IvSpreadStatus = "ok" | "stale_source" | "missing";
 export type IvSpreadRegime = "COMPRESSED" | "NORMAL" | "ELEVATED" | "EXTREME";
 
@@ -89,8 +87,6 @@ export interface IvSpreadData {
   series: IvSpreadEntry[];
 }
 
-/* ─── Formatting (spec G.2) ──────────────────────────── */
-
 /** Two-decimal vol points, sign only when negative: 5.481468 -> "5.48"; "---" unavailable. */
 export function formatSpread(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -133,8 +129,6 @@ export function ivSpreadRegimeColor(regime: IvSpreadRegime | null | undefined): 
   if (regime === "EXTREME") return "var(--dislocation)";
   return "var(--text-muted)";
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface IvSpreadChartRow {
   date: string;

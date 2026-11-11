@@ -119,7 +119,6 @@ def microstructure_metrics(
     snapshot: DepthSnapshot,
     top_n: int = DEFAULT_TOP_N,
 ) -> MicrostructureMetrics:
-    """Bundle imbalance + microprice + mid + micro premium for a snapshot."""
     imbalance = book_imbalance(snapshot.bid, snapshot.ask, top_n=top_n)
 
     best_bid = snapshot.bid[0].price if snapshot.bid else None

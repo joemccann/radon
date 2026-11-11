@@ -542,9 +542,6 @@ def clear_snapshot_for_tests() -> None:
     apply_env_overlay()
 
 
-# ── resolution ────────────────────────────────────────────────────────
-
-
 def _resolve_from(
     pref: Preference, row: Optional[Tuple[str, Optional[str], Optional[str]]]
 ) -> ResolvedPreference:
@@ -622,9 +619,6 @@ def get_bool(key: str) -> bool:
     return bool(resolve(key).value)
 
 
-# ── validation ────────────────────────────────────────────────────────
-
-
 def _coerce_bool(pref: Preference, raw: Any) -> bool:
     if isinstance(raw, bool):
         return raw
@@ -684,9 +678,6 @@ def coerce_value(key: str, raw: Any) -> PrefValue:
             allowed_max=pref.hard_max,
         )
     return value
-
-
-# ── writes ────────────────────────────────────────────────────────────
 
 
 def _normalized_operator(updated_by: Optional[str]) -> Optional[str]:

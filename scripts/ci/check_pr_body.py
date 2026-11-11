@@ -199,8 +199,6 @@ def failure_message(errors: list[str]) -> str:
     return "\n".join(lines)
 
 
-# --- Claude Code PreToolUse hook ---------------------------------------------
-
 _GH_PR = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 _HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?:\n|\)|$)", re.S)
 _BODY_FLAGS = ("--body", "-b")

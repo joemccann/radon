@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { VixPcData } from "./vixPc";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the 5-session VIX put/call series updates once per session
 // (radon-vix-pc.timer runs scripts/fetch_vix_pc.py directly), so there is no
 // manual-scan POST and an hourly poll is already generous. Types + pure

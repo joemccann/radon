@@ -28,7 +28,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -45,7 +44,6 @@ from utils.atomic_io import atomic_save
 from utils.ib_preflight import ib_auth_state as _ib_auth_state
 from utils.market_calendar import last_completed_session_date
 
-# ── constants ─────────────────────────────────────────────────────
 MSR_JSON = _PROJECT_DIR / "data" / "msr.json"
 HEALTH_SERVICE = "msr"
 
@@ -69,8 +67,6 @@ IB_INCREMENTAL_DURATION = "1 Y"
 YAHOO_DEEP_YEARS = 18
 YAHOO_INCREMENTAL_YEARS = 2
 
-
-# ── Cboe CSV parsing ──────────────────────────────────────────────
 
 def parse_close_csv(text: str, column: str) -> dict[str, float]:
     """Cboe daily-prices CSV → {"YYYY-MM-DD": close}.
@@ -96,8 +92,6 @@ def _parse_csv_row(raw: dict[str, Any], column: str) -> Optional[tuple[str, floa
         return None
     return session.isoformat(), value
 
-
-# ── MSR math ──────────────────────────────────────────────────────
 
 def compute_msr_rows(
     closes: dict[str, float], vols: dict[str, float], start: str = START_DATE
@@ -402,8 +396,6 @@ def _fetch_yahoo_daily(symbol: str, years: int) -> dict[str, float]:
     return fetch_yahoo_chart(symbol, years)
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_db_cache(
     payload: dict[str, Any],
     rows_by_index: dict[str, list[dict[str, Any]]],
@@ -461,8 +453,6 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
     cached.pop("_checksum", None)
     return cached
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _scan_time(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -555,8 +545,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _persist(payload, rows_by_index, scan_time)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     print(f"\nMSR — scan {payload['scan_time']}", file=sys.stderr)

@@ -84,8 +84,6 @@ export interface VixPcData {
   series: VixPcEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Three-decimal ratio: "0.319"; "---" when unavailable. */
 export function formatRatio(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -120,8 +118,6 @@ export function vixPcRegimeColor(regime: VixPcRegime | null | undefined): string
   if (regime === "COMPLACENT") return "var(--dislocation)";
   return "var(--text-muted)";
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface VixPcChartRow {
   date: string;

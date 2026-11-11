@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { YieldCurveLiveData } from "./yieldCurve";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // Intraday 10Y-3M spread estimate (Yahoo ^TNX minus ^IRX). The route holds a
 // 60s in-process cache, so a 5-minute poll while the tab is open keeps the
 // cell current without hammering the upstream.

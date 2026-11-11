@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -50,7 +49,6 @@ from utils.market_calendar import last_completed_session_date
 from db import writer
 from utils.atomic_io import atomic_save
 
-# ── constants ─────────────────────────────────────────────────────
 SCHEMA_VERSION = 1
 SERVICE = "ma-ratio"
 MA_RATIO_JSON = _PROJECT_DIR / "data" / "ma_ratio.json"
@@ -84,8 +82,6 @@ def _log(message: str) -> None:
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-
-# ── pure computation ──────────────────────────────────────────────
 
 def sma_flags_series(
     closes_by_date: dict[str, float],
@@ -241,8 +237,6 @@ def _missing_payload(reason: str, scan_time: str) -> dict[str, Any]:
     }
 
 
-# ── constituents ──────────────────────────────────────────────────
-
 def resolve_spx_constituents() -> tuple[list[str], str]:
     """Current SPX members via the shared cache/seed chain (never fails)."""
     tickers, source = resolve_constituents(
@@ -277,8 +271,6 @@ def fetch_spx_overlay_closes(
     merged.update({d: c for d, c in series.items() if d <= last_complete})
     return merged, ("ib+yahoo" if yahoo_fallback else "ib")
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _record_ok_heartbeat(finished_at: str) -> None:
     """Best-effort ok heartbeat.
@@ -321,8 +313,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 def _data_dir() -> Path:
     return Path(os.environ.get("MA_RATIO_DATA_DIR", str(_PROJECT_DIR / "data")))
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
     scan_time = _now_iso()
@@ -392,8 +382,6 @@ def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
     )
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(

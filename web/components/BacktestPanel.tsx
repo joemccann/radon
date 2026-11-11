@@ -44,8 +44,6 @@ interface BacktestResult {
   metrics?: BacktestMetrics | null;
 }
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function fmtRatio(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return v.toFixed(2);
@@ -66,8 +64,6 @@ function buildEquityPoints(result: BacktestResult): SignalAreaPoint[] {
   }));
 }
 
-/* ─── Metric Card ─────────────────────────────────────── */
-
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="backtest-metric-card">
@@ -76,8 +72,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
-/* ─── Panel ───────────────────────────────────────────── */
 
 const STRATEGY = "cri";
 

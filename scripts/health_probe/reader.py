@@ -52,7 +52,6 @@ def _parse_iso(value: str) -> datetime:
 
 
 def age_seconds(checked_at: str, now: datetime | None = None) -> float:
-    """Seconds between checked_at and now (UTC). Negative clamped to 0."""
     reference = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
     delta = (reference - _parse_iso(checked_at)).total_seconds()
     return delta if delta > 0 else 0.0

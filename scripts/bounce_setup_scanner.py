@@ -98,9 +98,6 @@ VERDICTS = ("BOUNCE_SETUP", "WATCH", "STRETCHED")
 _VERDICT_RANK = {verdict: idx for idx, verdict in enumerate(VERDICTS)}
 
 
-# ── pure functions ──────────────────────────────────────────────────
-
-
 def occ_symbol(ticker: str, expiry: str, right: str, strike: float) -> str:
     exp = date.fromisoformat(expiry)
     return f"{ticker.upper()}{exp:%y%m%d}{right.upper()}{int(round(strike * 1000)):08d}"
@@ -252,9 +249,6 @@ def flow_for(ticker: str, flow_payload: Optional[Mapping[str, Any]]) -> Optional
             direction = str(row.get("direction") or "UNKNOWN").upper()
             return {"signal": direction, "score": _to_float(row.get("score"))}
     return None
-
-
-# ── IO seams ────────────────────────────────────────────────────────
 
 
 def completed_cutoff(now: Optional[datetime] = None) -> str:

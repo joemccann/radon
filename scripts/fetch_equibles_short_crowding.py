@@ -45,7 +45,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -58,7 +57,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 
 SERVICE = "equibles-short-crowding"
 SHORT_CROWDING_JSON = _PROJECT_DIR / "data" / "equibles_short_crowding.json"
@@ -107,8 +105,6 @@ ON CONFLICT(ticker) DO UPDATE SET
 """
 
 
-# ── defensive field access ────────────────────────────────────────
-
 def _rows_of(payload: Any) -> list[dict[str, Any]]:
     """Rows from a documented ``{data: [...]}`` envelope or a bare list."""
     if isinstance(payload, list):
@@ -151,8 +147,6 @@ def _day(value: Optional[str]) -> Optional[str]:
     """ISO date, tolerating a full timestamp."""
     return value[:10] if value else None
 
-
-# ── normalization ─────────────────────────────────────────────────
 
 def normalize_short_interest_rows(payload: Any) -> list[dict[str, Any]]:
     """Settlement rows newest-first; rows without a settlement date are dropped."""
@@ -283,8 +277,6 @@ def normalize_board_rows(payload: Any, *, limit: int = BOARD_ROW_LIMIT) -> list[
     return board
 
 
-# ── crowding readings ─────────────────────────────────────────────
-
 _TIER_THRESHOLDS = (("extreme", 5.0), ("crowded", 3.0), ("moderate", 1.5))
 
 
@@ -389,8 +381,6 @@ def rank_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(entries, key=sort_key)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def build_payload(
     *,
     entries: list[dict[str, Any]],
@@ -433,11 +423,6 @@ def has_sufficient_coverage(covered: int, requested: int) -> bool:
     return covered / requested >= MIN_COVERAGE_RATIO
 
 
-
-
-
-# ── universe ──────────────────────────────────────────────────────
-
 def _watchlist_tickers() -> list[str]:
     try:
         watchlist = json.loads(WATCHLIST_JSON.read_text())
@@ -468,8 +453,6 @@ def resolve_universe(tickers: Optional[Iterable[str]] = None) -> list[str]:
             break
     return universe
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def expand_values_clause(single_row_sql: str, row_count: int) -> str:
     """Repeat a single-row upsert's VALUES tuple so one statement writes many rows.
@@ -577,8 +560,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     SHORT_CROWDING_JSON.parent.mkdir(parents=True, exist_ok=True)
     SHORT_CROWDING_JSON.write_text(json.dumps(payload, indent=2))
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _fetch_entry(client: Any, ticker: str, today: date) -> Optional[dict[str, Any]]:
     """One ticker's scoreboard row. A single failure must not abort the cycle.
@@ -720,8 +701,6 @@ def run(
     )
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     print(

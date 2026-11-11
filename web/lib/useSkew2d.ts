@@ -4,8 +4,6 @@ import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { Skew2dData } from "./skew2d";
 import { MarketState } from "./useMarketHours";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the centralized writer owns the 2d transform. Series is daily, so
 // poll hourly during RTH; paused when closed.
 const SKEW2D_SYNC_CONFIG = {

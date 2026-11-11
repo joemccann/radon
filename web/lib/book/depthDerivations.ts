@@ -36,7 +36,6 @@ export function montageFill(level: DepthLevel, maxSize: number): number {
   return level.size / maxSize;
 }
 
-/** A live ladder row carries a real depth level and its derived bar geometry. */
 export type LadderLevelRow = {
   level: DepthLevel;
   cum: number;
@@ -115,13 +114,11 @@ export function buildLadderRows(
     placeholder: false,
   });
 
-  // Asks: best -> worst becomes worst -> best after reverse, then pad the top.
   const askLevelRows = asks
     .map((level, index) => toRow(level, index, askCum[index]))
     .reverse();
   const askRows = padTop(askLevelRows, rows);
 
-  // Bids: best -> worst as emitted, then pad the bottom.
   const bidLevelRows = bids.map((level, index) =>
     toRow(level, index, bidCum[index]),
   );
@@ -209,7 +206,6 @@ function bestAskPrice(rows: DepthLevel[]): number | null {
   return Math.min(...rows.map((row) => row.price));
 }
 
-/** True when both sides form a tradeable market (ask at or above bid, positive). */
 export function isValidMarket(bid: number | null, ask: number | null): boolean {
   return bid != null && ask != null && bid > 0 && ask > 0 && ask >= bid;
 }
@@ -307,10 +303,6 @@ export function deriveBookHeader(
   return { bid, ask, last, lastLabel: last != null ? l1.lastLabel : "MID" };
 }
 
-/**
- * Running cumulative size from the inside out. Returned array is parallel to the
- * input: entry i is the sum of sizes 0..i.
- */
 function runningCumulative(rows: DepthLevel[]): number[] {
   let sum = 0;
   return rows.map((row) => {

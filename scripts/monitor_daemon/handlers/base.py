@@ -115,8 +115,6 @@ _SOFT_FAILURE_STATUS = "error"
 
 
 class BaseHandler(ABC):
-    """Abstract base class for monitor daemon handlers."""
-
     # Subclasses override these
     name: str = "base"
     interval_seconds: int = 60
@@ -172,7 +170,6 @@ class BaseHandler(ABC):
         self._enabled = value
     
     def is_due(self) -> bool:
-        """Check if this handler should run based on its interval."""
         if not self._enabled:
             return False
         
@@ -369,22 +366,9 @@ class BaseHandler(ABC):
     
     @abstractmethod
     def execute(self) -> Dict[str, Any]:
-        """
-        Perform the handler's monitoring task.
-        
-        Subclasses must implement this method.
-        
-        Returns:
-            Dict with handler-specific results
-        """
         pass
     
     def get_state(self) -> Dict[str, Any]:
-        """
-        Get serializable state for persistence.
-        
-        Override in subclasses to include additional state.
-        """
         state: Dict[str, Any] = {
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "enabled": self._enabled,
@@ -394,11 +378,6 @@ class BaseHandler(ABC):
         return state
     
     def set_state(self, state: Dict[str, Any]) -> None:
-        """
-        Restore handler state from persisted data.
-        
-        Override in subclasses to restore additional state.
-        """
         self._last_run_monotonic = None
         self._scheduled_last_run = None
         last_run = state.get("last_run")

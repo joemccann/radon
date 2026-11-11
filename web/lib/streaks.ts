@@ -48,8 +48,6 @@ export interface StreaksData {
   series: StreakEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 export function formatStreakDays(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "---";
   return `${n} ${n === 1 ? "DAY" : "DAYS"}`;

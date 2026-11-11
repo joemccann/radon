@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { DivYieldData } from "./divyield";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the div-yield refresh timer writes one row per session, so there
 // is no manual-scan POST and an hourly poll is plenty for the series.
 // Types + pure helpers live in lib/divyield.ts.

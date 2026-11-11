@@ -53,9 +53,7 @@ export interface OrderRiskGateProps {
    * "instrument-modal", etc.
    */
   surface: string;
-  /** Pass-through to `<OrderConfirmSummary>`. */
   variant?: "info" | "neutral";
-  /** Custom class on the rendered summary. */
   className?: string;
   /**
    * Optional callback fired with the resolved risk state. Lets the parent
@@ -233,7 +231,6 @@ export function resolveCorrelationOrderContext(
 
 function inputHasSellLeg(input: OrderRiskInput): boolean {
   if (input.type === "linear") return input.action === "SELL";
-  // Option order: any leg with action SELL
   const opt = input as { chainLegs: { action: string }[] };
   return opt.chainLegs.some((l) => l.action === "SELL");
 }

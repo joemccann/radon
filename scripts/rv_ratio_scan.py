@@ -26,7 +26,6 @@ from typing import Any
 
 import numpy as np
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -46,7 +45,6 @@ from utils.index_symbols import is_index_symbol
 from utils.market_calendar import last_completed_session_date
 from utils.realized_vol import compute_realized_vol_series
 
-# ── constants (plan section 4) ────────────────────────────────────
 RV_WINDOW = 252                                    # returns per RV point; needs 253 closes
 RATIO_SESSIONS_TARGET = 2520                       # ~10 years of ratio points
 CLOSES_TARGET = RATIO_SESSIONS_TARGET + RV_WINDOW  # 2772 aligned closes
@@ -79,8 +77,6 @@ RV_DECIMALS = 2
 
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
-
-# ── scan math ─────────────────────────────────────────────────────
 
 def align_sessions(
     asset: dict[str, float], bench: dict[str, float]
@@ -199,8 +195,6 @@ def build_payload(
         "missing": False,
     }
 
-
-# ── history layer (plan section 5.2) ──────────────────────────────
 
 def ensure_history(symbol: str) -> tuple[dict[str, float], list[str]]:
     """Durable close series for ``symbol``, trailing CLOSES_TARGET sessions.
@@ -366,7 +360,6 @@ def _rebackfill_after_splice(symbol: str, stored: dict[str, float], sources: lis
 
 
 def _reset_lineage(symbol: str, fresh: dict[str, float], sources: list[str]) -> dict[str, float]:
-    """Delete the symbol's rows and store ``fresh`` as the new lineage."""
     from db.writer import delete_price_history
 
     delete_price_history(symbol)
@@ -532,14 +525,11 @@ def _fetch_uw_daily(symbol: str) -> dict[str, float]:
     return bars
 
 
-# ── CLI (plan step 5) ─────────────────────────────────────────────
-
 class BenchmarkHistoryError(RuntimeError):
     """Raised when the SPY benchmark has no usable close history."""
 
 
 def run_scan(symbol: str) -> dict[str, Any]:
-    """Full scan pipeline: history, alignment, payload, persistence."""
     print(f"RV RATIO SCAN: {symbol} vs {BENCHMARK}", file=sys.stderr)
     asset_closes, asset_sources = ensure_history(symbol)
     bench_closes, bench_sources = ensure_history(BENCHMARK)

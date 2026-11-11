@@ -307,7 +307,6 @@ class Controller:
         self._status_cache: tuple[float, list[dict]] = (0.0, [])
         self._uid = os.getuid()
 
-    # --- entry point -----------------------------------------------------
     def handle(self, request: dict, peer_uid: Optional[int]) -> dict:
         op = request.get("op") if isinstance(request, dict) else None
         actor = sanitize_actor(request.get("actor")) if isinstance(request, dict) else "unknown"
@@ -351,7 +350,6 @@ class Controller:
             )
         return self._unit(request)
 
-    # --- ops ---------------------------------------------------------------
     def _status(self) -> dict:
         now = time.monotonic()
         with self._status_lock:
@@ -457,8 +455,6 @@ class Controller:
 def _refuse(reason: str) -> dict:
     return {"ok": False, "refused": True, "error": reason, "detail": reason, "returncode": -1}
 
-
-# --- socket server -----------------------------------------------------------
 
 def peer_uid(sock: socket.socket) -> Optional[int]:
     """The connecting process's uid via SO_PEERCRED (Linux). None if unknown."""

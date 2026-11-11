@@ -37,7 +37,6 @@ from urllib.request import Request, urlopen
 
 import numpy as np
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -49,7 +48,6 @@ except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
-# ── constants ─────────────────────────────────────────────────────
 OLS_WINDOW = 21        # Rolling regression window (business days)
 Z_WINDOW = 63          # Standardisation lookback (business days)
 MIN_BARS = OLS_WINDOW + Z_WINDOW + 10   # Minimum price history needed
@@ -101,10 +99,6 @@ def _publish_canonical_snapshot(proxy: str, payload: Dict[str, Any]) -> bool:
     mirror_scan_snapshot("vcg-scan", payload)
     return True
 
-
-# ══════════════════════════════════════════════════════════════════
-# Data Fetching
-# ══════════════════════════════════════════════════════════════════
 
 def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
     """Fetch 1Y daily bars from IB.  Returns {ticker: [(date_str, close), ...]}."""
@@ -288,10 +282,6 @@ def fetch_all(tickers: List[str]) -> Dict[str, np.ndarray]:
     print(f"  Aligned: {len(common_dates)} common trading days", file=sys.stderr)
     return aligned, common_dates
 
-
-# ══════════════════════════════════════════════════════════════════
-# VCG Computation
-# ══════════════════════════════════════════════════════════════════
 
 def log_returns(prices: np.ndarray) -> np.ndarray:
     """Compute log returns: ln(P_t / P_{t-1})."""
@@ -587,10 +577,6 @@ def backtest_signals(
     return results
 
 
-# ══════════════════════════════════════════════════════════════════
-# Output
-# ══════════════════════════════════════════════════════════════════
-
 def print_summary(
     signal: Dict[str, Any],
     model: Dict[str, np.ndarray],
@@ -759,10 +745,6 @@ def build_json_output(
 
     return result
 
-
-# ══════════════════════════════════════════════════════════════════
-# HTML Report
-# ══════════════════════════════════════════════════════════════════
 
 def generate_html_report(
     signal: Dict[str, Any],
@@ -1064,10 +1046,6 @@ def generate_html_report(
     return html
 
 
-# ══════════════════════════════════════════════════════════════════
-# Market Hours Check
-# ══════════════════════════════════════════════════════════════════
-
 def is_market_open() -> bool:
     """Check if US equity markets are currently open."""
     from datetime import timezone as tz
@@ -1087,10 +1065,6 @@ def is_market_open() -> bool:
     minutes = now_et.hour * 60 + now_et.minute
     return 9 * 60 + 30 <= minutes <= 16 * 60
 
-
-# ══════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(

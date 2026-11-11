@@ -33,10 +33,6 @@ class InsufficientStrikesError(ValueError):
     """Raised when a slice has too few usable strikes to calibrate SVI."""
 
 
-# ---------------------------------------------------------------------------
-# Closed-form total variance
-# ---------------------------------------------------------------------------
-
 def svi_total_variance(
     k: np.ndarray,
     a: float,
@@ -61,9 +57,7 @@ def _butterfly_bound(b: float, rho: float) -> bool:
     return b * denom <= (4.0 / denom) + 1e-9
 
 
-# ---------------------------------------------------------------------------
 # Fitted parameters for one expiry
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SVIParams:
@@ -107,10 +101,6 @@ class SVIParams:
             f"m={self.m:+.5f}, sigma={self.sigma:.5f}, T={self.t:.4f})"
         )
 
-
-# ---------------------------------------------------------------------------
-# Per-slice calibration
-# ---------------------------------------------------------------------------
 
 def _initial_guess(k: np.ndarray, w: np.ndarray) -> np.ndarray:
     a0 = max(float(np.min(w)), 1e-6)
@@ -187,10 +177,6 @@ def _project_butterfly(a: float, b: float, rho: float, sigma: float, t: float) -
         return b
     return cap
 
-
-# ---------------------------------------------------------------------------
-# Multi-expiry surface
-# ---------------------------------------------------------------------------
 
 @dataclass
 class VolSurface:
@@ -288,9 +274,7 @@ def _enforce_calendar_monotonicity(fitted: Dict[float, SVIParams]) -> Dict[float
     return adjusted
 
 
-# ---------------------------------------------------------------------------
 # Convenience: build a surface from a (strike, iv, dte) chain table
-# ---------------------------------------------------------------------------
 
 def surface_from_contracts(
     contracts: Iterable[dict],

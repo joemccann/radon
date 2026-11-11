@@ -414,8 +414,6 @@ class ExpirySweepHandler(BaseHandler):
         self.record_cycle_health("ok", error=counts)
         return result
 
-    # -- helpers -----------------------------------------------------------
-
     @staticmethod
     def _open_db() -> Any:
         try:

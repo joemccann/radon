@@ -67,7 +67,6 @@ const SCAN_SNAPSHOTS: DemoMethodPolicy = { mode: "demo-db", tables: ["scan_snaps
 const YAHOO = "query1.finance.yahoo.com";
 
 export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
-  // ── operator administration ─────────────────────────────────────────────
   "/api/admin/demo-users": {
     GET: { mode: "blocked", via: "demoAdmin" },
     POST: { mode: "blocked", via: "demoAdmin" },
@@ -168,7 +167,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   },
   "/api/watchlist/[symbol]": { DELETE: { mode: "demo-db", writes: ["user_watchlist"] } },
 
-  // ── LLM ──────────────────────────────────────────────────────────────────
   "/api/assistant": {
     POST: {
       mode: "fixture",
@@ -273,7 +271,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/vol-cone": { GET: SCAN_SNAPSHOTS },
   "/api/yield-curve": { GET: SCAN_SNAPSHOTS },
 
-  // ── demo VM FastAPI ──────────────────────────────────────────────────────
   "/api/attribution": { GET: { mode: "backend", endpoints: ["/attribution"] } },
   "/api/backtest/[strategy]": { GET: { mode: "backend", endpoints: ["/backtest/"] } },
   "/api/quant/[strategy]": {
@@ -312,7 +309,6 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
   "/api/ticker/news": { GET: { mode: "external", sources: ["unusualwhales.com", YAHOO] } },
   "/api/yield-curve/live": { GET: { mode: "external", sources: [YAHOO] } },
 
-  // ── signed-out surfaces ──────────────────────────────────────────────────
   "/api/gex/share/content": {
     GET: { mode: "public", endpoints: ["/share/content"], note: "Share-card preview proxied from the backend." },
   },
@@ -345,14 +341,12 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
     POST: { mode: "public", writes: ["tv_alert_events"], note: "Path-token webhook." },
   },
 
-  // ── infrastructure ───────────────────────────────────────────────────────
   "/api/flex-token": { GET: { mode: "infra", note: "Disk token metadata; absent on Vercel." } },
   "/api/models": {
     GET: { mode: "backend", endpoints: ["/model-gateway/models"], note: "Service-owned model catalog; no local provider grants or fallback." },
   },
   "/api/version": { GET: { mode: "infra", note: "Release metadata from env." } },
 
-  // ── known gaps ───────────────────────────────────────────────────────────
   "/api/menthorq/[command]/image": {
     GET: { mode: "unavailable", note: "Reads data/menthorq_cache from disk only; 404 on Vercel." },
   },

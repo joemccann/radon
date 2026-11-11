@@ -143,9 +143,6 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
     useImperativeHandle(ref, () => inputRef.current!, []);
 
-    /* ------------------------------------------------------------------ */
-    /*  WebSocket lifecycle                                                */
-    /* ------------------------------------------------------------------ */
     const connectWs = useCallback(() => {
       if (demoMode) return;
       if (!mountedRef.current) return;
@@ -282,9 +279,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
       };
     }, [connectWs]);
 
-    /* ------------------------------------------------------------------ */
     /*  Search dispatch (debounced)                                        */
-    /* ------------------------------------------------------------------ */
     const dispatchSearch = useCallback(
       (pattern: string) => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -331,9 +326,6 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
       [connectWs, demoMode, onSearchUnavailable],
     );
 
-    /* ------------------------------------------------------------------ */
-    /*  Selection                                                          */
-    /* ------------------------------------------------------------------ */
     const handleSelect = useCallback(
       (symbol: string) => {
         setQuery(symbol);
@@ -345,9 +337,6 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
       [onSelect],
     );
 
-    /* ------------------------------------------------------------------ */
-    /*  Keyboard navigation                                                */
-    /* ------------------------------------------------------------------ */
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (!isOpen || results.length === 0) {
@@ -386,27 +375,20 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
       [isOpen, results, activeIndex, handleSelect],
     );
 
-    /* ------------------------------------------------------------------ */
     /*  Click outside / Escape                                             */
-    /* ------------------------------------------------------------------ */
     const dismissDropdown = useCallback(() => {
       setIsOpen(false);
       setActiveIndex(-1);
     }, []);
     useDismissablePopover(containerRef, dismissDropdown);
 
-    /* ------------------------------------------------------------------ */
     /*  Scroll active item into view                                       */
-    /* ------------------------------------------------------------------ */
     useEffect(() => {
       if (activeIndex < 0 || !dropdownRef.current) return;
       const items = dropdownRef.current.querySelectorAll("[data-ticker-item]");
       items[activeIndex]?.scrollIntoView({ block: "nearest" });
     }, [activeIndex]);
 
-    /* ------------------------------------------------------------------ */
-    /*  Render                                                             */
-    /* ------------------------------------------------------------------ */
     const showDropdown = isOpen && query.trim().length > 0;
 
     return (

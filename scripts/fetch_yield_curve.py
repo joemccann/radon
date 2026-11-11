@@ -31,7 +31,6 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -45,7 +44,6 @@ except Exception:
 
 from db import writer
 
-# ── constants ─────────────────────────────────────────────────────
 YIELD_CURVE_JSON = _PROJECT_DIR / "data" / "yield_curve.json"
 
 FIRST_YEAR = 1990
@@ -59,8 +57,6 @@ TREASURY_CSV_URL = (
 _TENOR_COLUMNS = {"3 Mo": "y3m", "2 Yr": "y2", "10 Yr": "y10"}
 _SPX_PERIOD1 = int(datetime(FIRST_YEAR, 1, 1, tzinfo=timezone.utc).timestamp())
 
-
-# ── Treasury CSV ──────────────────────────────────────────────────
 
 def fetch_year_csv(year: int, session: Optional[Any] = None) -> str:
     import requests
@@ -145,8 +141,6 @@ def fetch_spx_daily_closes() -> Optional[dict[str, float]]:
     return by_date
 
 
-# ── series assembly ───────────────────────────────────────────────
-
 def build_series(
     rows: list[dict[str, Any]], spx_closes: Optional[dict[str, float]]
 ) -> list[dict[str, Any]]:
@@ -207,8 +201,6 @@ def build_output(
     }
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     YIELD_CURVE_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = YIELD_CURVE_JSON.with_suffix(".json.tmp")
@@ -238,8 +230,6 @@ def persist_result(
     writer.record_service_health("yield-curve", "ok", finished_at=scan_time)
     _write_json_cache(payload)
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _read_cached_series() -> list[dict[str, Any]]:
     try:
@@ -275,8 +265,6 @@ def run(backfill: bool = False) -> dict[str, Any]:
     persist_result(payload, new_rows)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

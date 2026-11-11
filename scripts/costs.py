@@ -36,7 +36,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-# --- Plan parameters (see module docstring for provenance) -------------------
 
 #: IBKR US-options per-contract commission (USD). Default, not a contract.
 COMMISSION_PER_CONTRACT: float = 0.65

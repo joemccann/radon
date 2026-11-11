@@ -50,7 +50,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -63,7 +62,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 
 SERVICE = "equibles-13f"
 CACHE_DIR = _PROJECT_DIR / "data" / "equibles_13f"
@@ -129,9 +127,6 @@ def _holder_upsert_sql(row_count: int) -> str:
 HOLDER_UPSERT_SQL = _holder_upsert_sql(1)
 
 
-# ── defensive field access ────────────────────────────────────────
-
-
 def _rows(payload: Any) -> list[dict[str, Any]]:
     """Row list from an Equibles envelope, a bare list, or nothing."""
     if isinstance(payload, list):
@@ -194,9 +189,6 @@ def _now_iso(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-# ── disclosure vintage ────────────────────────────────────────────
-
-
 def _quarter_label(report_date: str) -> str:
     quarter = (int(report_date[5:7]) - 1) // 3 + 1
     return f"Q{quarter} {report_date[:4]}"
@@ -242,9 +234,6 @@ def build_disclosure(
         "context_only": True,
         "gate_note": GATE_NOTE,
     }
-
-
-# ── normalization ─────────────────────────────────────────────────
 
 
 def _institution_name(row: dict[str, Any]) -> str:
@@ -549,9 +538,6 @@ def build_market_context(ticker: str, market: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# ── payload assembly ──────────────────────────────────────────────
-
-
 def _resolve_report_date(
     holders: list[dict[str, Any]],
     ownership: list[dict[str, Any]],
@@ -679,9 +665,6 @@ def _empty_payload(ticker: str, now: datetime) -> dict[str, Any]:
     }
 
 
-# ── persistence ───────────────────────────────────────────────────
-
-
 def _holder_params(
     ticker: str, report_date: str, chunk: list[dict[str, Any]], recorded_at: str
 ) -> list[Any]:
@@ -801,9 +784,6 @@ def _persist(payload: dict[str, Any]) -> None:
     _write_json_cache(payload)
 
 
-# ── orchestration ─────────────────────────────────────────────────
-
-
 def _run_ticker(
     ticker: str,
     *,
@@ -880,9 +860,6 @@ def run_many(
         raise
     _record_health("ok")
     return payloads
-
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 
 def _print_summary(payload: dict[str, Any]) -> None:

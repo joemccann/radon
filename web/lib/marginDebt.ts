@@ -51,8 +51,6 @@ export interface MarginDebtData {
   series: MarginDebtEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** $ millions -> "$1,415.6bn". */
 export function formatLevelBn(levelMm: number | null | undefined): string {
   if (levelMm == null || !Number.isFinite(levelMm)) return "---";
@@ -104,8 +102,6 @@ export function formatMonthTick(d: Date): string {
   return `${MONTH_LABELS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-/* ─── Smoothing ──────────────────────────────────────── */
-
 /**
  * Trailing 3-month moving average: mean of the non-null values in the
  * [i-2, i] window. Null months stay null (a seam gap must not invent data);
@@ -120,8 +116,6 @@ export function movingAverage3(values: ReadonlyArray<number | null>): Array<numb
     return window.reduce((sum, x) => sum + x, 0) / window.length;
   });
 }
-
-/* ─── Right-series views ─────────────────────────────── */
 
 export type MarginRightView = "yoy" | "level" | "net" | "gdp" | "real";
 
@@ -199,8 +193,6 @@ export function marginViewSpec(slug: MarginRightView): MarginRightViewSpec {
   if (!spec) throw new Error(`Unknown margin right view: ${slug}`);
   return spec;
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface MarginChartRow {
   date: string;

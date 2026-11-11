@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 for _path in (_PROJECT_DIR, _SCRIPT_DIR):
@@ -61,8 +60,6 @@ HISTORY_READ_PAGE_ROWS = 2000
 STATUS_OK = "ok"
 STATUS_STALE_SOURCE = "stale_source"
 
-
-# ── pure math ─────────────────────────────────────────────────────
 
 def daily_ratio(put: float, call: float) -> Optional[float]:
     """Single-session put/call; None if call <= 0 (never divide)."""
@@ -222,8 +219,6 @@ def compute_stats(values: list[float]) -> Optional[dict[str, Any]]:
     }
 
 
-# ── fetch ─────────────────────────────────────────────────────────
-
 def _real_uw_fetch() -> dict[str, Any]:
     """UW VIX options-volume JSON (limit=500). Honest UA radon/2.0 via UWClient."""
     from clients.uw_client import UWClient
@@ -244,8 +239,6 @@ def _real_uw_fetch() -> dict[str, Any]:
             )
         raise
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _history_from_json() -> list[dict[str, Any]]:
     """data/vix-pc.json fallback series, ascending."""
@@ -353,8 +346,6 @@ def _write_db(
         print(f"[vix-pc] db cache non-fatal: {exc}", file=sys.stderr)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def _market_status(now: datetime) -> str:
     try:
         from utils.market_calendar import market_state
@@ -400,8 +391,6 @@ def build_payload(
         "series": series,
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _rows_changed(stored: list[dict[str, Any]], merged: list[dict[str, Any]]) -> bool:
     """Any date added or any put/call volume changed vs the loaded history."""
@@ -480,8 +469,6 @@ def run(
     persist_json(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

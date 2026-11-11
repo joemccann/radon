@@ -150,11 +150,6 @@ _DISTRIBUTION_KEYS = (
 )
 
 
-# ---------------------------------------------------------------------------
-# small helpers
-# ---------------------------------------------------------------------------
-
-
 def _optional_float(value: Any) -> Optional[float]:
     """A Flex numeric attribute, or None when it is absent or unreadable.
 
@@ -239,9 +234,7 @@ def sessions_behind(nav_as_of: Optional[str], through: Optional[_date] = None) -
     return count
 
 
-# ---------------------------------------------------------------------------
 # Flex / disk / Turso ingest
-# ---------------------------------------------------------------------------
 
 
 FLEX_READ_TIMEOUT_SECONDS = 120.0
@@ -898,11 +891,6 @@ def load_benchmark_closes(start: str, end: str, symbol: str = DEFAULT_BENCHMARK_
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] {symbol} fetch failed: {exc}", file=_sys.stderr)
         return {}
-
-
-# ---------------------------------------------------------------------------
-# payload assembly
-# ---------------------------------------------------------------------------
 
 
 def _methodology(
@@ -1637,11 +1625,6 @@ def _xirr_for(
     return xirr(
         build_cashflow_vector(observations, flows), chain.calendar_days, chain.n_returns
     )
-
-
-# ---------------------------------------------------------------------------
-# persistence + CLI
-# ---------------------------------------------------------------------------
 
 
 def _published_nav_as_of() -> Optional[str]:

@@ -137,7 +137,6 @@ export const privacySections: LegalSection[] = [
   },
 ];
 
-// --- Metadata ---------------------------------------------------------------
 // Next metadata merge is shallow: defining openGraph here replaces the layout
 // object, so the shared social image must be re-included from lib/seo.ts.
 
@@ -171,7 +170,6 @@ export const privacyMetadata: Metadata = {
   },
 };
 
-// --- JSON-LD ----------------------------------------------------------------
 // BreadcrumbList only: legal pages are not articles and carry no TechArticle
 // or FAQPage entities.
 

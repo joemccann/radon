@@ -87,9 +87,6 @@ def _post(url: str, headers: Dict[str, str], payload: dict, vendor: str) -> Vali
     return _verdict_from_status_code(response.status_code, vendor)
 
 
-# -- HTTP validators ---------------------------------------------------------
-
-
 def _validate_unusual_whales(values: Dict[str, str]) -> ValidationResult:
     # A key validity check shares account admission but deliberately makes
     # one uncached read. REST acceptance is not a websocket entitlement.
@@ -270,9 +267,6 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
         },
         "Turso",
     )
-
-
-# -- Slow browser-login validators -------------------------------------------
 
 
 # DS-2026-10-28-05 (recurrence of DS-2026-09-20-06): the diagnostic was sliced

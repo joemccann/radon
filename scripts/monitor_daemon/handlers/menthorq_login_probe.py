@@ -90,9 +90,7 @@ class MenthorQLoginProbe(BaseHandler):
         self._transient_attempt_date: Optional[str] = None
         self._retry_after: Optional[datetime] = None
 
-    # ------------------------------------------------------------------
     # Cadence — daily interval plus the transient-retry embargo.
-    # ------------------------------------------------------------------
     def is_due(self) -> bool:
         if not super().is_due():
             return False
@@ -123,9 +121,6 @@ class MenthorQLoginProbe(BaseHandler):
             f"probe got HTTP {response.status_code}: {detail}", started_at
         )
 
-    # ------------------------------------------------------------------
-    # Verdicts
-    # ------------------------------------------------------------------
     def _broken_login(self, detail: str, started_at: str) -> Dict[str, Any]:
         message = (
             "menthorq credential re-login chain is broken: "
@@ -165,9 +160,7 @@ class MenthorQLoginProbe(BaseHandler):
         self._transient_attempt_date = None
         self._retry_after = None
 
-    # ------------------------------------------------------------------
     # Response parsing — never let a weird body add a new failure mode.
-    # ------------------------------------------------------------------
     @staticmethod
     def _payload_of(response: Any) -> Any:
         try:
@@ -185,9 +178,7 @@ class MenthorQLoginProbe(BaseHandler):
         except Exception:  # noqa: BLE001
             return "<unparseable body>"
 
-    # ------------------------------------------------------------------
     # State persistence — embargo + budget survive daemon restarts.
-    # ------------------------------------------------------------------
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["transient_attempts"] = self._transient_attempts

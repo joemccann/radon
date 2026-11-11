@@ -40,7 +40,6 @@ LARGE_CAP_UNIVERSE_NAME = "largecaps"
 
 @dataclass
 class Preset:
-    """A strategy-agnostic ticker preset."""
     name: str
     description: str
     tickers: List[str]
@@ -169,14 +168,10 @@ def load_preset(name: str) -> Preset:
               `indexes` (ndx100 + sp500 + r2k) and `largecaps` (ndx100 +
               sp500) are virtual unions of the file presets.
 
-    Returns:
-        Preset dataclass instance.
-
     Raises:
         FileNotFoundError: If preset doesn't exist or the name is not a bare slug.
         ValueError: If preset file is malformed.
     """
-    # Strip .json if provided
     name = name.replace(".json", "")
 
     filepath = _resolve_preset_path(name)

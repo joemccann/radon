@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -58,7 +57,6 @@ from lib.panic_index_math import (  # noqa: E402
     strip_compute_fields,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 PANIC_INDEX_JSON = _PROJECT_DIR / "data" / "panic_index.json"
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
 
@@ -113,8 +111,6 @@ def _load_skew25d_from_json() -> list[dict[str, Any]]:
             continue
     return out
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _read_json_cache() -> Optional[dict[str, Any]]:
     try:
@@ -189,8 +185,6 @@ def _record_startup_failure(scan_time: str, exc: Exception) -> None:
         print(f"[panic-index] startup health write non-fatal: {inner}", file=sys.stderr)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def build_payload(
     series: list[dict[str, Any]],
     *,
@@ -217,8 +211,6 @@ def build_payload(
         "series": series,
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _fetch_all(client: Any, cached_stamps: dict[str, Any]) -> tuple[dict, dict]:
     texts: dict[str, Optional[str]] = {}
@@ -420,8 +412,6 @@ def _record_cycle_failure(scan_time: str, exc: Exception) -> None:
     except Exception as inner:  # noqa: BLE001
         print(f"[panic-index] cycle health write non-fatal: {inner}", file=sys.stderr)
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

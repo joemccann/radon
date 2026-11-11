@@ -41,7 +41,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -54,7 +53,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 
 SERVICE = "equibles-cot-positioning"
 COT_JSON = _PROJECT_DIR / "data" / "equibles_cot_positioning.json"
@@ -251,9 +249,6 @@ def normalize_position_row(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
     }
 
 
-# ── crowding statistics ───────────────────────────────────────────
-
-
 def percentile_rank(values: Sequence[float], value: float) -> Optional[float]:
     """Share of the window at or below `value`, 0-100. None on an empty window."""
     if not values:
@@ -285,9 +280,6 @@ def classify_crowding(percentile: Optional[float]) -> str:
 def contrarian_bias(crowding: str) -> str:
     """Positioning extremes fade: crowded long reads bearish, and vice versa."""
     return _CONTRARIAN_BIAS.get(crowding, BIAS_NEUTRAL)
-
-
-# ── per-contract assembly ─────────────────────────────────────────
 
 
 def _normalized_series(raw_rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -383,9 +375,6 @@ def build_payload(
     }
 
 
-# ── roster resolution ─────────────────────────────────────────────
-
-
 def resolve_market_code(
     roster: Iterable[dict[str, Any]], alias: str
 ) -> Optional[dict[str, Any]]:
@@ -433,9 +422,6 @@ def _contract_identity(flat: dict[str, Any]) -> Optional[dict[str, Any]]:
         "name": _field(flat, "contract_name"),
         "category": _field(flat, "category"),
     }
-
-
-# ── fetch ─────────────────────────────────────────────────────────
 
 
 def _fetch_roster(client: Any) -> list[dict[str, Any]]:
@@ -489,9 +475,6 @@ def collect_contracts(client: Any, start_date: str) -> list[dict[str, Any]]:
             continue
         collected.append(positioning)
     return collected
-
-
-# ── persistence ───────────────────────────────────────────────────
 
 
 def cot_rows_for_db(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -572,9 +555,6 @@ def _record_failure(error: Exception, scan_time: str) -> None:
         pass
 
 
-# ── orchestration ─────────────────────────────────────────────────
-
-
 def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Fetch the focus basket, rank this week against its history, cache it."""
     now = now or datetime.now(timezone.utc)
@@ -596,9 +576,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _write_db_cache(payload, scan_time)
     _write_json_cache(payload)
     return payload
-
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 
 def _print_summary(payload: dict[str, Any]) -> None:

@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# ── paths ──────────────────────────────────────────────────────────────
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPTS_DIR.parent
 _DATA_DIR = _PROJECT_DIR / "data"

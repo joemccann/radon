@@ -58,7 +58,6 @@ from utils.ib_preflight import (
     ib_auth_state as _ib_auth_state,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 SERVICE = "iei-hyg"
 IEI_HYG_JSON = _PROJECT_DIR / "data" / "iei_hyg.json"
 NO_SOURCE = "none"
@@ -90,8 +89,6 @@ def _log(message: str) -> None:
     print(f"[{SERVICE}] {message}", file=sys.stderr)
 
 
-# ── Yahoo ─────────────────────────────────────────────────────────
-
 def fetch_yahoo_closes(tickers: list[str], session: Optional[Any] = None) -> dict[str, Closes]:
     """Last-resort Yahoo chart closes. ``tickers`` are IEI/HYG/DXY, not Yahoo symbols."""
     import requests
@@ -110,8 +107,6 @@ def fetch_yahoo_closes(tickers: list[str], session: Optional[Any] = None) -> dic
             _log(f"Yahoo: {ticker} {len(parsed)} bars")
     return out
 
-
-# ── Interactive Brokers ───────────────────────────────────────────
 
 def _ib_contract_candidates(ticker: str) -> list[Any]:
     from ib_insync import Index, Stock
@@ -209,8 +204,6 @@ def fetch_ib_closes(tickers: list[str]) -> dict[str, Closes]:
     return results
 
 
-# ── Unusual Whales ────────────────────────────────────────────────
-
 def uw_regular_closes(rows: list[dict[str, Any]]) -> Closes:
     """date -> close for regular-session rows only (UW 1d returns pr/r/po per date)."""
     return {
@@ -253,8 +246,6 @@ def fetch_uw_closes(tickers: list[str]) -> dict[str, Closes]:
         _log(f"UW connection failed: {exc}")
     return results
 
-
-# ── cascade ───────────────────────────────────────────────────────
 
 def _take(
     fetch: FetchCloses,
@@ -326,8 +317,6 @@ def fetch_closes(
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
     return closes, combine_source(sources) or NO_SOURCE, dict(sources)
 
-
-# ── series assembly ───────────────────────────────────────────────
 
 def _row(date: str, iei_close: float, hyg_close: float, dxy_close: Optional[float]) -> dict[str, Any]:
     return {
@@ -442,8 +431,6 @@ def diff_new_rows(cached: list[dict[str, Any]], series: list[dict[str, Any]]) ->
     ]
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     IEI_HYG_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = IEI_HYG_JSON.with_suffix(".json.tmp")
@@ -509,8 +496,6 @@ def persist_result(
     )
     _write_json_cache(payload)
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _turso_series() -> list[dict[str, Any]]:
     """The durable series from `iei_hyg_history` (Turso-first read, R-123)."""
@@ -606,8 +591,6 @@ def run() -> dict[str, Any]:
         raise
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

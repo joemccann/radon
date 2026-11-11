@@ -37,7 +37,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 for _path in (_PROJECT_DIR, _SCRIPT_DIR):
@@ -112,8 +111,6 @@ def _iso(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-# ── sweep result ──────────────────────────────────────────────────
-
 class SweepCloses(dict):
     """{symbol: {date: close}} plus the rung that served each symbol."""
 
@@ -130,8 +127,6 @@ class SweepCloses(dict):
     def missing(self, symbols: list[str]) -> list[str]:
         return [s for s in symbols if s not in self]
 
-
-# ── IB rung ───────────────────────────────────────────────────────
 
 def _ib_gateway_unavailable() -> bool:
     from utils.ib_preflight import ib_auth_state
@@ -228,8 +223,6 @@ def _fetch_ib_closes(symbols: list[str], duration: str, deadline: float) -> dict
     finally:
         client.disconnect()
 
-
-# ── Yahoo rung ────────────────────────────────────────────────────
 
 def _yahoo_symbol(symbol: str) -> str:
     return "^VIX" if symbol == VIX_SYMBOL else symbol
@@ -362,8 +355,6 @@ def _fetch_yahoo_closes(
     return _fetch_yahoo_incremental(symbols, deadline, YAHOO_RANGES[duration])
 
 
-# ── ladder ────────────────────────────────────────────────────────
-
 def fetch_closes_ladder(symbols: list[str], backfill: bool, duration: Optional[str] = None) -> SweepCloses:
     """IB for every symbol inside IB_SWEEP_BUDGET_S, then Yahoo for whatever IB
     left empty with its own YAHOO_SWEEP_BUDGET_S. One shared deadline handed
@@ -438,8 +429,6 @@ def _ib_rung_warning(fetch: dict[str, Any]) -> Optional[dict[str, Any]]:
     }
 
 
-# ── universe ──────────────────────────────────────────────────────
-
 def _resolve_universe() -> dict[str, list[str]]:
     from clients.index_constituents import resolve_constituents
 
@@ -455,8 +444,6 @@ def _describe_universe(universe: dict[str, list[str]]) -> dict[str, Any]:
         "sectors": list(universe["sectors"]),
     }
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _read_stored_rows() -> list[dict[str, Any]]:
     """Turso dispersion_history, keyset-paged on date (Hrana I/O bounding)."""
@@ -574,8 +561,6 @@ def _heartbeat(state: str, scan_time: str, error: Optional[dict[str, Any]]) -> N
 def _record_cycle_failure(scan_time: str, exc: Exception) -> None:
     _heartbeat("error", scan_time, {"message": f"dispersion cycle failed: {exc}", "class": "cycle_failed"})
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _no_fetch_report() -> dict[str, Any]:
     return {"ib_ok": 0, "yahoo_ok": 0, "failed": 0, "failed_symbols": []}
@@ -769,8 +754,6 @@ def run(
         _record_cycle_failure(scan_time, exc)
         raise
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

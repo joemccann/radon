@@ -168,8 +168,6 @@ export function dedupJournalRows(rows: RealizedJournalRow[]): {
   return { rows: kept, droppedFillDupes };
 }
 
-/* ── Inventory matcher: dated per-close events ─────────────────────────── */
-
 type MatchExec = {
   side: "BUY" | "SELL";
   qty: number;
@@ -436,7 +434,6 @@ export function synthesizeWorthlessExpiry(
 ): CloseEvent | null {
   if (!worthlessProven) return null;
   if (Math.abs(state.residualQty) < 1e-9) return null;
-  // Options only — stocks have no expiry.
   const isOption =
     rep.contracts != null
     || rep.right != null

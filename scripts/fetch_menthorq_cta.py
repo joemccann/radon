@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 CACHE_DIR = _PROJECT_DIR / "data" / "menthorq_cache"
@@ -44,7 +43,6 @@ from utils.cta_sync_health import fill_missing_cta_tables
 load_env_file(_PROJECT_DIR / ".env")
 STORAGE_STATE_PATH = _PROJECT_DIR / "data" / "menthorq_cache" / "menthorq_storage_state.json"
 
-# ── MenthorQ CTA table slugs ─────────────────────────────────────
 CTA_TABLES = {
     "main": "cta_table",
     "index": "cta_index",
@@ -112,7 +110,6 @@ def resolve_menthorq_creds() -> tuple[Optional[str], Optional[str]]:
     return (user or None, passwd or None)
 
 
-# ── Vision extraction prompt ─────────────────────────────────────
 EXTRACTION_PROMPT = """Extract CTA positioning data from this table image.
 Return ONLY a JSON array of objects with these exact fields:
 [{"underlying":"E-Mini S&P 500 Index","position_today":0.45,"position_yesterday":0.21,"position_1m_ago":1.06,"percentile_1m":38,"percentile_3m":13,"percentile_1y":38,"z_score_3m":-1.56},...]
@@ -128,10 +125,6 @@ Rules:
 - Include ALL rows from the table
 - Return ONLY the JSON array, no markdown, no explanation"""
 
-
-# ══════════════════════════════════════════════════════════════════
-# Cache
-# ══════════════════════════════════════════════════════════════════
 
 def cache_path(date_str: str) -> Path:
     return CACHE_DIR / f"cta_{date_str}.json"
@@ -162,10 +155,6 @@ def write_cache(date_str: str, tables: Dict[str, List[Dict]]) -> Path:
     atomic_save(str(p), entry)
     return p
 
-
-# ══════════════════════════════════════════════════════════════════
-# Main Fetch Pipeline
-# ══════════════════════════════════════════════════════════════════
 
 def fetch_menthorq_cta(
     date_str: Optional[str] = None,
@@ -283,9 +272,7 @@ def fetch_menthorq_cta(
     return read_cache(date_str)
 
 
-# ══════════════════════════════════════════════════════════════════
 # Helper: Find asset in MenthorQ tables
-# ══════════════════════════════════════════════════════════════════
 
 # Above this share of rows nulled, the vision extraction did not merely lose a
 # row or two — it mis-scaled the percentile column, and the payload's apparent
@@ -355,10 +342,6 @@ def load_menthorq_cache(date_str: Optional[str] = None) -> Optional[Dict[str, An
     return read_cache(yesterday)
 
 
-# ══════════════════════════════════════════════════════════════════
-# Console Summary
-# ══════════════════════════════════════════════════════════════════
-
 def print_summary(data: Dict[str, Any]) -> None:
     """Print human-readable summary of MenthorQ CTA data."""
     print(f"\n{'='*60}", file=sys.stderr)
@@ -402,10 +385,6 @@ def print_summary(data: Dict[str, Any]) -> None:
 
     print(f"\n{'='*60}\n", file=sys.stderr)
 
-
-# ══════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(

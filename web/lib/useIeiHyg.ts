@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { IeiHygData } from "./ieiHyg";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the series updates once per calendar day (radon-iei-hyg timer
 // runs the fetcher directly), so there is no manual-scan POST and an hourly
 // poll is already generous. Types + pure helpers live in lib/ieiHyg.ts.

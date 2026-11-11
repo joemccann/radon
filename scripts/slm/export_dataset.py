@@ -73,8 +73,6 @@ KNOWLEDGE_SQL = (
 )
 
 
-# ── helpers ────────────────────────────────────────────────────────────────
-
 def _paginate(db: Any, sql: str, first_cursor: Any) -> list[tuple]:
     cursor = first_cursor
     out: list[tuple] = []
@@ -123,8 +121,6 @@ def read_taxonomy(db: Any) -> list[str]:
     rows = db.execute("SELECT tag FROM tag_taxonomy ORDER BY tag COLLATE NOCASE").fetchall()
     return normalise_tags([r[0] for r in rows])
 
-
-# ── tagger ─────────────────────────────────────────────────────────────────
 
 def _tagger_label(images: Any, tags: Any, tags_text: Any) -> list[str] | None:
     raw = _json_list(tags_text)
@@ -227,8 +223,6 @@ def export_tagger(db: Any, out_dir: Path, *, extract_at: datetime | None = None)
     return manifest
 
 
-# ── distill ────────────────────────────────────────────────────────────────
-
 def _doc_bucket(source: str, doc_key: str) -> str:
     digest = hashlib.sha256(f"{source}:{doc_key}".encode()).digest()
     frac = int.from_bytes(digest[:4], "big") / 2**32
@@ -263,8 +257,6 @@ def export_distill(db: Any, out_dir: Path) -> dict:
     _write_manifest(out_dir, manifest)
     return manifest
 
-
-# ── io ─────────────────────────────────────────────────────────────────────
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

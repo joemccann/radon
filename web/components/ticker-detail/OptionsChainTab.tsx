@@ -61,8 +61,6 @@ import { canonicalPayloadKey, useArmedConfirm } from "@/lib/orders/useArmedConfi
 import { useChainAnchor } from "@/lib/useChainAnchor";
 import ChainSpotBar from "@/components/ChainSpotBar";
 
-/* ─── Types ─── */
-
 type OptionsChainTabProps = {
   ticker: string;
   prices: Record<string, PriceData>;
@@ -110,8 +108,6 @@ function prefillLabelForSource(src: string | null | undefined): string {
       return "PREFILLED FROM LINK";
   }
 }
-
-/* ─── Chain Strike Row ─── */
 
 const StrikeRow = memo(function StrikeRow({
   ticker,
@@ -317,8 +313,6 @@ function ChainColgroup({ callCount, putCount, sideFilter }: { callCount: number;
     </colgroup>
   );
 }
-
-/* ─── Order Builder Panel ─── */
 
 export function chainOrderSubmitPermitted(
   isValidPrice: boolean,
@@ -1082,8 +1076,6 @@ function OrderBuilder({
     </div>
   );
 }
-
-/* ─── Main OptionsChainTab ─── */
 
 export default function OptionsChainTab({
   ticker,

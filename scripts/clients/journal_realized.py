@@ -257,9 +257,6 @@ def apply_journal_realized_pnl(
             fill["realizedPNLSource"] = "ib"
 
 
-# ---------------------------------------------------------------------------
-
-
 def _option_fill_ticker(fill: dict[str, Any]) -> str:
     contract = fill.get("contract") or {}
     if str(contract.get("secType") or "").upper() != "OPT":

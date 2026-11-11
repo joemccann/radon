@@ -130,7 +130,6 @@ export async function withDbBounds(label, run) {
   recordOperationFailure(label, lastErr);
   throw lastErr;
 }
-// ---------------------------------------------------------------------------
 
 // posts.json stores relative `/media/<file>.png` paths because the local dev
 // dashboard serves them out of web/public/media/. The Turso row is shared

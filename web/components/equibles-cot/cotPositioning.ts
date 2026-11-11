@@ -65,8 +65,6 @@ export interface CotPositioningData {
   market: CotBoardRow[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 function isNumber(v: number | null | undefined): v is number {
   return v != null && Number.isFinite(v);
 }
@@ -129,8 +127,6 @@ export function formatReportFreshness(raw: string | null | undefined, now: Date)
   return `${formatReportDate(raw)} · ${age <= 0 ? "today" : `${age}d old`}`;
 }
 
-/* ─── Tones ──────────────────────────────────────────── */
-
 const CROWDING_COLORS: Record<CotCrowding, string> = {
   "CROWDED LONG": "var(--warning)",
   "CROWDED SHORT": "var(--warning)",
@@ -148,8 +144,6 @@ export const CONTRARIAN_TONE: Record<CotBias, string> = {
   BULLISH: "var(--positive)",
   NEUTRAL: "var(--text-muted)",
 };
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface CotChartRow {
   date: string;
@@ -189,8 +183,6 @@ export function cotPresetRange(slug: CotRangeSlug, total: number): [number, numb
   const weeks = Math.min(preset?.weeks ?? Number.POSITIVE_INFINITY, total);
   return [Math.max(0, total - weeks), total - 1];
 }
-
-/* ─── Selection ──────────────────────────────────────── */
 
 /** The requested contract, else the first one; never a stranded empty panel. */
 export function selectContract(

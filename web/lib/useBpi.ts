@@ -10,8 +10,6 @@ export interface UseBpiResult {
   refresh: () => void;
 }
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only (useMarginDebt mold): the scan runs on the Mon-Fri 21:30 UTC
 // radon-bpi timer and POST /bpi/scan is a FastAPI operator surface, so
 // there is no client-side scan trigger and an hourly poll is generous

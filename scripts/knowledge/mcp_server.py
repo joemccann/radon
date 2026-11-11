@@ -262,8 +262,6 @@ def _build_query_embedder() -> QueryEmbedder | None:
     return embed_one
 
 
-# ── MCP tool registrations ───────────────────────────────────────────
-
 mcp = FastMCP(
     "radon-kb",
     instructions=(

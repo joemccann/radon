@@ -62,11 +62,6 @@ function staleResult<T>(
   throw error;
 }
 
-/**
- * Read `key` through the cache. Returns the cached value while fresh; otherwise
- * runs `fetcher` (single-flighted across concurrent callers), caches the result
- * for `ttlMs`, and returns it.
- */
 export async function cachedRead<T>(
   key: string,
   ttlMs: number,
@@ -131,7 +126,6 @@ export async function cachedReadResult<T>(
   }
 }
 
-/** Drop one cache key (e.g. after a write that invalidates it). */
 export function invalidateCache(key: string): void {
   store.delete(key);
   generations.set(key, (generations.get(key) ?? 0) + 1);

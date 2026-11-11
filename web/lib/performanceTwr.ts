@@ -75,9 +75,7 @@ export type GateReason =
   | "invalid_total_return"
   | "nav_unavailable";
 
-// ---------------------------------------------------------------------------
 // Gate predicates — one per metric family, all reading the table
-// ---------------------------------------------------------------------------
 
 /** volatility, drawdowns, VaR, CVaR, hit rate, best/worst day. */
 export function isDispersionGated(nReturns: number): boolean {
@@ -139,9 +137,7 @@ export function isImplausibleCumReturn(cumReturn: number, calendarDays: number):
   return isImplausibleAnnualized((1 + cumReturn) ** (1 / years) - 1);
 }
 
-// ---------------------------------------------------------------------------
 // gateCopy — the ONLY producer of unavailable-metric copy
-// ---------------------------------------------------------------------------
 
 /** True coverage: aligned sessions over portfolio sessions. `min_n` is the
  *  MIN_N_BENCHMARK floor, so n / min_n reads 125% at 50 of 60 aligned. */

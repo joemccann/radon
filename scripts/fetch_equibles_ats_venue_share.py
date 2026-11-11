@@ -67,7 +67,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -80,7 +79,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 SERVICE = "equibles-ats-venue-share"
 ATS_VENUE_SHARE_JSON = _PROJECT_DIR / "data" / "equibles_ats_venue_share.json"
 
@@ -176,8 +174,6 @@ _ROW_COLUMNS = (
 )
 
 
-# ── field access ──────────────────────────────────────────────────
-
 def _first_present(row: dict[str, Any], keys: Iterable[str]) -> Any:
     for key in keys:
         if row.get(key) is not None:
@@ -200,8 +196,6 @@ def _ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional
         return None
     return numerator / denominator
 
-
-# ── week bucketing ────────────────────────────────────────────────
 
 def week_start(day: Optional[str]) -> Optional[str]:
     """The Monday of the ISO week containing `day`; None if unparseable."""
@@ -247,8 +241,6 @@ def weekly_short_volume(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
         bucket["short_volume_pct"] = share * 100.0 if share is not None else None
     return buckets
 
-
-# ── per-week derived metrics ──────────────────────────────────────
 
 def weekly_consolidated_volume(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Daily /prices bars folded into weekly consolidated-tape totals.
@@ -331,8 +323,6 @@ def derive_week_metrics(
     }
 
 
-# ── trailing z-scores ─────────────────────────────────────────────
-
 def _trailing_zscore(history: list[float], value: Optional[float]) -> Optional[float]:
     if value is None or len(history) < MIN_HISTORY_WEEKS:
         return None
@@ -362,8 +352,6 @@ def attach_zscores(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return scored
 
 
-# ── classification ────────────────────────────────────────────────
-
 def classify(
     ats_share_z: Optional[float],
     avg_ats_print_size_z: Optional[float],
@@ -391,8 +379,6 @@ def classify(
         return CLASSIFICATION_DISTRIBUTION, None
     return CLASSIFICATION_NEUTRAL, None
 
-
-# ── series assembly ───────────────────────────────────────────────
 
 def build_ticker_series(
     off_exchange_rows: list[dict[str, Any]],
@@ -559,8 +545,6 @@ def has_sufficient_coverage(covered: int, requested: int) -> bool:
     return covered / requested >= MIN_COVERAGE_RATIO
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def ats_venue_share_upsert(
     rows: list[dict[str, Any]], recorded_at: str
 ) -> tuple[str, tuple[Any, ...]]:
@@ -690,8 +674,6 @@ def _read_prior_payload() -> Optional[dict[str, Any]]:
     except Exception:  # noqa: BLE001 — absent/corrupt prior is just "no prior"
         return None
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 UNIVERSE_TIERS = ("portfolio", "watchlist", "ndx100", "r2k", "sp500")
 
@@ -1174,8 +1156,6 @@ def run(
         )
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     week = payload.get("week_start_date") or "n/a"

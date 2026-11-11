@@ -62,8 +62,6 @@ def clean_underlying_name(underlying: str) -> str:
     return name.strip()
 
 
-# ── Loading ───────────────────────────────────────────────────────────────────
-
 def _load_history_from_db(current_date: str, limit: int) -> list[dict]:
     try:
         from db.client import get_db  # lazy: disk fallback must work without libsql
@@ -137,8 +135,6 @@ def load_prior_payloads(
 
     return [by_date[d] for d in sorted(by_date, reverse=True)][:limit]
 
-
-# ── Derivation ────────────────────────────────────────────────────────────────
 
 def _rows(payload: dict) -> Iterable[dict]:
     tables = (payload or {}).get("tables") or {}

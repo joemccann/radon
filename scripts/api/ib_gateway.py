@@ -48,9 +48,6 @@ logger = logging.getLogger("radon.ib_gateway")
 IB_GATEWAY_LOCK_HOLDER = "scripts.api.ib_gateway.restart_ib_gateway"
 IB_GATEWAY_ENSURE_LOCK_HOLDER = "scripts.api.ib_gateway.ensure_ib_gateway"
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 
 IB_HOST = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
 IB_PORT = int(os.environ.get("IB_GATEWAY_PORT", "4001"))
@@ -447,10 +444,6 @@ def _acquire_gateway_push_lease(holder: str, *, reason: str) -> Optional[Dict]:
         ),
     }
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
 
 def _port_listening(host: str = IB_HOST, port: int = IB_PORT, timeout: float = 2.0) -> bool:
     """Check if IB Gateway port is accepting connections."""
@@ -503,11 +496,6 @@ async def _poll_port(wait_secs: int = RESTART_WAIT_SECS) -> tuple:
             return True, elapsed
         logger.info("Waiting for IB Gateway... (%d/%ds)", elapsed, wait_secs)
     return False, elapsed
-
-
-# ---------------------------------------------------------------------------
-# LaunchD mode
-# ---------------------------------------------------------------------------
 
 
 def _has_close_wait(port: int = IB_PORT) -> bool:
@@ -686,11 +674,6 @@ async def _restart_launchd() -> Dict:
         "wait_seconds": elapsed,
         "gateway_mode": "launchd",
     }
-
-
-# ---------------------------------------------------------------------------
-# Docker mode
-# ---------------------------------------------------------------------------
 
 
 def host_role() -> str:
@@ -944,9 +927,7 @@ async def _restart_docker() -> Dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Cloud mode — remote Gateway, no local lifecycle management
-# ---------------------------------------------------------------------------
 
 
 async def _check_cloud() -> Dict:
@@ -984,9 +965,7 @@ async def _ensure_cloud() -> Dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Public API — dispatches by GATEWAY_MODE
-# ---------------------------------------------------------------------------
 
 
 class GatewayMode(str, Enum):

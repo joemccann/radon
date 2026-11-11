@@ -26,8 +26,6 @@ export const WINDOW = 60;
 /** Start of the z-score base sample. */
 export const ZSCORE_BASE_START = "2017-01-01";
 
-/* ─── Payload types ──────────────────────────────────── */
-
 export type DispersionRegime = "BROAD STRESS" | "BELOW THE SURFACE" | "COMPRESSED" | "NORMAL";
 
 export type DispersionSourceKind = "ib" | "yahoo" | "mixed" | "stored" | "none";
@@ -117,8 +115,6 @@ export const MISSING_DISPERSION: DispersionData = Object.freeze({
   stats: null,
   series: [] as DispersionPoint[],
 });
-
-/* ─── Display helpers ────────────────────────────────── */
 
 /**
  * BROAD STRESS tones as index-level stress; BELOW THE SURFACE is the warning

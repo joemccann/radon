@@ -20,8 +20,6 @@ import {
   priorSessionEstSellingBn,
 } from "@/lib/ctaVolTarget";
 
-/* ─── Helpers ────────────────────────────────────────── */
-
 function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return v.toFixed(decimals);
@@ -61,8 +59,6 @@ function pctile(value: number | null | undefined): number | null {
   return normalizeCtaPercentile(value);
 }
 
-/* ─── CtaPage ────────────────────────────────────────── */
-
 export default function CtaPage() {
   const { data } = useRegime(false);
   const { data: ctaData, loading, error } = useMenthorqCta();
@@ -87,7 +83,6 @@ export default function CtaPage() {
 
   const order = ["main", "index", "commodity", "currency"] as const;
 
-  /* ─── Per-section callouts ─────────────────────────── */
   function buildCallout(key: typeof order[number], tables: NonNullable<typeof ctaData>["tables"]): CtaSectionCallout | undefined {
     if (!tables) return undefined;
     const rows = tables[key];
@@ -228,7 +223,6 @@ export default function CtaPage() {
     <>
     <div data-testid="cta-page" style={{ width: "100%", display: "flex", flexDirection: "column", gap: "0" }}>
 
-      {/* ── Vol-Targeting Model Panel ─────────────────── */}
       <div data-testid="vol-targeting-model" style={{ padding: "16px", borderBottom: "1px solid var(--border)" }}>
         <div
           style={{
@@ -336,7 +330,6 @@ export default function CtaPage() {
         )}
       </div>
 
-      {/* ── MenthorQ CTA Positioning ──────────────────── */}
       <div style={{ width: "100%" }}>
         <div
           style={{

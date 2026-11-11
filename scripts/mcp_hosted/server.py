@@ -257,8 +257,6 @@ def _operator_read_impl(
     return _upstream_json(result)
 
 
-# ── MCP registration ─────────────────────────────────────────────────
-
 # Keep the SDK's DNS-rebinding protection ON, but name the real fronting
 # hosts: Caddy forwards the original Host header (app.radon.run or
 # mcp.radon.run), which the loopback-only default would 421.
@@ -482,9 +480,6 @@ async def operator_uw_research(ticker: str, ctx: Context) -> dict:
     return await _gated_off_loop(
         lambda p: _operator_read_impl(p, f"/api/uw/research?ticker={symbol}"), ctx
     )
-
-
-# ── ASGI app ─────────────────────────────────────────────────────────
 
 
 class RequestBodyLimit:

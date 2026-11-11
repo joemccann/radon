@@ -56,8 +56,6 @@ body { font-family: 'Inter', sans-serif; background: #0a0f14; color: #e2e8f0; wi
 """
 
 
-# ── Data loading ──────────────────────────────────────────────────
-
 def _load_cri_from_db(target_date: Optional[str] = None) -> Optional[dict]:
     """Latest cri_snapshots row from Turso, the same source the CRI page reads."""
     try:
@@ -114,8 +112,6 @@ def load_cri(target_date: Optional[str] = None) -> dict:
     return max(candidates, key=lambda d: d.get("scan_time") or "")
 
 
-# ── Helpers ───────────────────────────────────────────────────────
-
 def pctile_label(p) -> str:
     """Ordinal label, or `---` when there is no percentile.
 
@@ -146,8 +142,6 @@ def level_bg(level: str) -> str:
         "CRITICAL": "rgba(232,93,108,0.15)",
     }.get(level, "rgba(100,116,139,0.1)")
 
-
-# ── Card wrappers ─────────────────────────────────────────────────
 
 def card_wrap(title: str, body: str, card_n: int, total: int, ds: str) -> str:
     d = datetime.strptime(ds, "%Y-%m-%d")
@@ -440,8 +434,6 @@ def card4_cta_squeeze(data: dict, ds: str) -> str:
     return card_wrap("CTA Squeeze State", body, 4, 4, ds)
 
 
-# ── Tweet text ────────────────────────────────────────────────────
-
 def build_tweet(data: dict, ds: str) -> str:
     cri = data.get("cri", {})
     score = cri.get("score", 0)
@@ -480,8 +472,6 @@ def build_tweet(data: dict, ds: str) -> str:
         p = spx_row["percentile_3m"]
         z = spx_row.get("z_score_3m", 0)
         spx_line = f"\n> SPX CTA position at {pctile_label(p)} percentile (3M) · z-score {z:.2f}"
-
-    # ── Narrative by regime state ──
 
     spy = data.get("spy", 0)
     spx_dist = data.get("spx_distance_pct", 0) or 0
@@ -581,8 +571,6 @@ def build_tweet(data: dict, ds: str) -> str:
             f"no forced selling in the pipeline."
         )
 
-    # ── Assemble ──
-
     trigger_line = ""
     if conditions_met > 0:
         checks = []
@@ -605,8 +593,6 @@ def build_tweet(data: dict, ds: str) -> str:
 
 Analyzed by Radon · radon.run"""
 
-
-# ── Preview HTML ──────────────────────────────────────────────────
 
 def build_preview(cards_b64: list, tweet_text: str, ds: str, card_type: str = "regime") -> str:
     labels = [

@@ -210,8 +210,6 @@ export default function ExposureBreakdownModal({ metric, exposure, bankroll, net
   );
 }
 
-/* ─── Delta-adjusted leverage block ─────────────────────── */
-
 function LeverageBlock({
   dollarDelta,
   netLiquidation,

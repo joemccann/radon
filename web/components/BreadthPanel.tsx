@@ -33,8 +33,6 @@ type BreadthPanelProps = {
   marketState?: MarketState;
 };
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function fmtSigned(v: number | null | undefined, decimals = 0): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return `${v >= 0 ? "+" : ""}${(v === 0 ? 0 : v).toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
@@ -280,8 +278,6 @@ function SessionNetAdChart({ intraday }: { intraday: BreadthIntradayPoint[] }) {
   );
 }
 
-/* ─── Main component ─────────────────────────────────── */
-
 export default function BreadthPanel({ marketState }: BreadthPanelProps) {
   const { data, loading, syncing, lastSync } = useBreadth(marketState ?? null);
   const { isMobile, hasMounted } = useViewport();
@@ -361,7 +357,6 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
 
   return (
     <>
-      {/* ── Summary strip ─────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">

@@ -40,7 +40,6 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -53,7 +52,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 CATALYSTS_JSON = _PROJECT_DIR / "data" / "catalysts.json"
 
 TYPE_EARNINGS = "earnings"
@@ -85,8 +83,6 @@ CREATE TABLE IF NOT EXISTS catalysts (
 )
 """
 
-
-# ── normalization ─────────────────────────────────────────────────
 
 def _et_today(now: datetime) -> date:
     """The calendar day in ET for the given instant."""
@@ -505,8 +501,6 @@ def fetch_catalysts(
     return rows
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_db_cache(rows: list[dict[str, Any]], scan_time: str) -> None:
     """Persist the catalyst snapshot to Turso. Best-effort: a DB failure must
     not crash the scan since data/catalysts.json is the authoritative fallback."""
@@ -560,8 +554,6 @@ def run(
     _write_json_cache(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     print(f"\nCATALYSTS — {payload['count']} upcoming events", file=sys.stderr)

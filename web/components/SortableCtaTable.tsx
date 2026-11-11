@@ -11,8 +11,6 @@ import SortTh from "./SortTh";
 import MetricCell from "./mobile/MetricCell";
 import { ChevronRight, ChevronDown } from "lucide-react";
 
-/* ─── Props ──────────────────────────────────────────── */
-
 export type CtaSectionCallout = {
   headline: string;
   body: string;
@@ -24,8 +22,6 @@ type SortableCtaTableProps = {
   rows: CtaRow[];
   callout?: CtaSectionCallout;
 };
-
-/* ─── Helpers ────────────────────────────────────────── */
 
 function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -71,8 +67,6 @@ function zOpacity(z: number): number {
   return 0.55;
 }
 
-/* ─── Constants ──────────────────────────────────────── */
-
 const SECTION_LABELS: Record<string, string> = {
   main: "MAIN INDICES",
   index: "INDEX FUTURES",
@@ -92,8 +86,6 @@ type CtaSortKey =
 function ctaSortValue(row: CtaRow, key: CtaSortKey): number {
   return row[key] as number;
 }
-
-/* ─── Flag helpers ───────────────────────────────────── */
 
 function flagForRow(r: CtaRow): { kind: "short" | "long"; tooltip: string } | null {
   const p = normalizeCtaPercentile(r.percentile_3m);
@@ -151,8 +143,6 @@ function flagDotColor(kind: "short" | "long"): string {
 function flagLabel(kind: "short" | "long"): string {
   return kind === "short" ? "HEAVY SHORT" : "CROWDED LONG";
 }
-
-/* ─── Mobile section ─────────────────────────────────── */
 
 const MOBILE_TOP_N = 5;
 
@@ -283,8 +273,6 @@ function MobileCtaSection({ sectionKey, rows, callout }: SortableCtaTableProps) 
     </div>
   );
 }
-
-/* ─── Component ──────────────────────────────────────── */
 
 export default function SortableCtaTable({ sectionKey, rows, callout }: SortableCtaTableProps) {
   const { sorted, sort, toggle } = useSort<CtaRow, CtaSortKey>(rows, ctaSortValue);

@@ -22,7 +22,6 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 
-# ── Catalyst keywords that indicate material events ──────────────────────
 CATALYST_KEYWORDS = {
     # Corporate actions
     "buyback": "BUYBACK",
@@ -84,7 +83,6 @@ CATALYST_KEYWORDS = {
     "rate hike": "RATE_HIKE",
 }
 
-# Sentiment keywords
 BULLISH_KEYWORDS = [
     "buyback", "repurchase", "beat", "raised", "upgrade", "approval",
     "partnership", "record revenue", "all-time high", "strong demand",
@@ -113,7 +111,6 @@ def classify_headline(headline: str) -> Dict[str, Any]:
     """
     lower = headline.lower()
 
-    # Find catalysts
     catalysts = []
     seen_types = set()
     for keyword, cat_type in CATALYST_KEYWORDS.items():
@@ -121,7 +118,6 @@ def classify_headline(headline: str) -> Dict[str, Any]:
             catalysts.append(cat_type)
             seen_types.add(cat_type)
 
-    # Score sentiment
     bull_count = sum(1 for kw in BULLISH_KEYWORDS if kw in lower)
     bear_count = sum(1 for kw in BEARISH_KEYWORDS if kw in lower)
     total = bull_count + bear_count
@@ -170,7 +166,6 @@ def fetch_news(
     headlines: List[Dict] = []
     source = "none"
 
-    # ── Source 1: Unusual Whales ─────────────────────────────────────
     try:
         from clients.uw_client import UWClient
         with UWClient() as uw:
@@ -197,7 +192,6 @@ def fetch_news(
     except Exception:
         pass
 
-    # ── Source 2: Yahoo Finance (last resort) ────────────────────────
     if not headlines:
         try:
             import requests
@@ -227,7 +221,6 @@ def fetch_news(
         except Exception:
             pass
 
-    # ── Filter to recent N days ──────────────────────────────────────
     cutoff = datetime.now() - timedelta(days=days)
     recent = []
     for h in headlines:
@@ -236,7 +229,6 @@ def fetch_news(
             if "T" in date_str:
                 dt = datetime.fromisoformat(date_str.replace("Z", "+00:00").split("+")[0])
             else:
-                # Try common formats
                 for fmt in ["%a, %d %b %Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
                     try:
                         dt = datetime.strptime(date_str.split(" +")[0].split(" -")[0], fmt)
@@ -250,19 +242,16 @@ def fetch_news(
         except Exception:
             recent.append(h)  # Can't parse date — include anyway
 
-    # ── Build summary ────────────────────────────────────────────────
     bullish = sum(1 for h in recent if h["sentiment"] == "BULLISH")
     bearish = sum(1 for h in recent if h["sentiment"] == "BEARISH")
     neutral = sum(1 for h in recent if h["sentiment"] == "NEUTRAL")
     material = [h for h in recent if h["is_material"]]
 
-    # Aggregate catalyst types
     all_catalysts = {}
     for h in recent:
         for cat in h.get("catalysts", []):
             all_catalysts[cat] = all_catalysts.get(cat, 0) + 1
 
-    # Overall sentiment bias
     if bullish > bearish * 2:
         sentiment_bias = "BULLISH"
     elif bearish > bullish * 2:
@@ -298,7 +287,6 @@ def fetch_news(
     }
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Fetch news headlines for a ticker")
     parser.add_argument("ticker", help="Ticker symbol")

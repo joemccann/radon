@@ -9,9 +9,6 @@ import json
 from datetime import datetime
 import math
 
-# ============================================================
-# LOAD DATA
-# ============================================================
 
 with open('/tmp/scenario_analysis.json') as f:
     data = json.load(f)
@@ -28,9 +25,7 @@ baseline_iv = data.get('baseline_iv', {})
 with open('.pi/skills/html-report/template.html') as f:
     template = f.read()
 
-# ============================================================
 # NARRATIVE ENGINE — Per-position explanations
-# ============================================================
 
 NARRATIVES = {
     'AAOI': {
@@ -244,10 +239,6 @@ NARRATIVES = {
 }
 
 
-# ============================================================
-# HELPERS
-# ============================================================
-
 def fmt_dollars(v):
     if v >= 0:
         return f"+${v:,.0f}"
@@ -265,10 +256,6 @@ def pnl_class(v):
 def escape_html(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
 
-
-# ============================================================
-# BUILD REPORT BODY
-# ============================================================
 
 body = '''
 <header class="header">
@@ -294,9 +281,6 @@ body = '''
 </div>
 '''
 
-# ============================================================
-# SUMMARY METRICS
-# ============================================================
 
 body += f'''
 <div class="metrics">
@@ -333,9 +317,6 @@ body += f'''
 </div>
 '''
 
-# ============================================================
-# BIGGEST WINNERS & LOSERS
-# ============================================================
 
 base_sorted = sorted(results['base'], key=lambda x: x['pnl'])
 worst_5 = base_sorted[:5]
@@ -350,9 +331,6 @@ for r in best_5:
     body += f'    <p><strong>{r["ticker"]}</strong> {r["structure_type"]}: <span class="text-positive">{fmt_dollars(r["pnl"])}</span> ({fmt_pct(r["pnl_pct"])})</p>\n'
 body += '  </div>\n</div>\n'
 
-# ============================================================
-# NATURAL HEDGES
-# ============================================================
 
 winners_sum = sum(r['pnl'] for r in results['base'] if r['pnl'] > 0)
 losers_sum = abs(sum(r['pnl'] for r in results['base'] if r['pnl'] < 0))
@@ -368,9 +346,7 @@ body += f'''
 </div>
 '''
 
-# ============================================================
 # FULL SCENARIO TABLE WITH EXPANDABLE DETAIL ROWS
-# ============================================================
 
 body += '''
 <div class="panel">
@@ -559,9 +535,6 @@ body += '''    </tbody>
 </div>
 '''
 
-# ============================================================
-# FACTOR ATTRIBUTION
-# ============================================================
 
 body += '''
 <div class="section-header">Factor Attribution — What's Driving P&L</div>
@@ -599,9 +572,6 @@ for scenario_name, scenario_label, border_color in [
 
 body += '</div>'
 
-# ============================================================
-# WATERFALL
-# ============================================================
 
 body += '''
 <div class="section-header">Base Case P&L Waterfall</div>
@@ -633,9 +603,6 @@ for r in sorted(results['base'], key=lambda x: x['pnl']):
 
 body += '  </div>\n</div>\n'
 
-# ============================================================
-# KEY TAKEAWAYS
-# ============================================================
 
 body += '''
 <div class="callout warning">
@@ -650,9 +617,6 @@ body += '''
 </div>
 '''
 
-# ============================================================
-# METHODOLOGY
-# ============================================================
 
 body += '''
 <div class="panel">
@@ -686,9 +650,6 @@ body += '''
 </div>
 '''
 
-# ============================================================
-# ASSEMBLE HTML
-# ============================================================
 
 # Add custom CSS for expandable rows
 custom_css = '''

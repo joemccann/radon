@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { StraddleData } from "./straddle";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the series updates once per session (radon-straddle timer runs
 // the fetcher directly), so there is no manual-scan POST and an hourly poll
 // is already generous. Types + pure helpers live in lib/straddle.ts.

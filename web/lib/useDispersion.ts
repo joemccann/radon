@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { DispersionData } from "./dispersion";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: radon-dispersion.timer re-emits the whole z-scored series on its
 // own schedule, so there is no manual-scan POST and an hourly poll of a daily
 // series is plenty. Types + pure helpers live in lib/dispersion.ts.

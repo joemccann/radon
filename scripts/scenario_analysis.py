@@ -25,9 +25,6 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-# ============================================================
-# MARKET PARAMETERS
-# ============================================================
 
 # Current approximate prices (Friday March 7, 2026 close estimates)
 CURRENT_PRICES = {
@@ -185,9 +182,6 @@ SCENARIO_VIX = 40.0
 SCENARIO_SPX_MOVE = -0.03
 SCENARIO_OIL_MOVE = 0.25
 
-# ============================================================
-# OPTIONS PRICING MODEL
-# ============================================================
 
 def norm_cdf(x):
     """Cumulative normal distribution function."""
@@ -348,7 +342,6 @@ def analyze_position(pos, scenario='base'):
         'contracts': contracts,
     }
     
-    # ======== STOCK POSITIONS ========
     if structure == 'Stock':
         shares = contracts
         scenario_value = shares * scenario_price
@@ -360,7 +353,6 @@ def analyze_position(pos, scenario='base'):
         result['max_loss'] = None
         return result
     
-    # ======== OPTIONS POSITIONS ========
     legs = pos.get('legs', [])
     
     # Get SINGLE IV for this ticker at this DTE (both current and scenario)
@@ -438,7 +430,6 @@ def analyze_position(pos, scenario='base'):
     # = scenario_net_value - current_net_value
     pnl = scenario_net_value - current_net_value
     
-    # ---- ENFORCE DEFINED RISK BOUNDS ----
     if structure in ('Bull Call Spread', 'Bear Put Spread'):
         # Max loss = net debit paid
         max_loss = -abs(entry_cost)

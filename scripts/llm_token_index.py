@@ -66,8 +66,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-# ─── Constants ───────────────────────────────────────────────────────
-
 AA_BASE = "https://artificialanalysis.ai/api/v2/language/models/free"
 AA_TIMEOUT_S = 10.0
 METHODOLOGY_VERSION = 1
@@ -89,14 +87,8 @@ DEFAULT_BASKET = (
 DEFAULT_INPUT_WEIGHT = 0.7  # 70/30 input/output blend
 
 
-# ─── Errors ─────────────────────────────────────────────────────────
-
-
 class ArtificialAnalysisError(RuntimeError):
     """Any failure pulling or parsing the AA response."""
-
-
-# ─── Index result ───────────────────────────────────────────────────
 
 
 @dataclass
@@ -111,9 +103,6 @@ class IndexResult:
 
     raw_avg_usd: float
     components: dict[str, dict[str, float]] = field(default_factory=dict)
-
-
-# ─── HTTP ───────────────────────────────────────────────────────────
 
 
 def _catalog_pages():
@@ -183,9 +172,6 @@ def fetch_aa_models(api_key: str, *, timeout: float = AA_TIMEOUT_S) -> dict[str,
         if nxt is None:
             return {"status": 200, "data": rows}
         page = nxt
-
-
-# ─── Math ───────────────────────────────────────────────────────────
 
 
 def _blend_per_model(input_per_mtok: float, output_per_mtok: float, *, input_weight: float) -> float:
@@ -270,9 +256,6 @@ def _extract_model_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-# ─── Normalisation ──────────────────────────────────────────────────
-
-
 def normalize_against_base(raw_avg_usd: float, base_raw: Optional[float]) -> float:
     """Project today's raw onto the historical base (first persisted day).
 
@@ -282,9 +265,6 @@ def normalize_against_base(raw_avg_usd: float, base_raw: Optional[float]) -> flo
     if base_raw is None or base_raw == 0:
         return 1.0
     return raw_avg_usd / base_raw
-
-
-# ─── CLI entry ──────────────────────────────────────────────────────
 
 
 def main(argv: Optional[list[str]] = None) -> int:

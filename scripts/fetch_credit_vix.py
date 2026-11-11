@@ -55,7 +55,6 @@ from utils.ib_preflight import (
     ib_auth_state as _ib_auth_state,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 SERVICE = "credit-vix"
 CREDIT_VIX_JSON = _PROJECT_DIR / "data" / "credit_vix.json"
 NO_SOURCE = "none"
@@ -109,8 +108,6 @@ def _is_persist_transport(exc: BaseException) -> bool:
     return any(body in lowered for body in _PERSIST_TRANSPORT_BODIES)
 
 
-# ── math ──────────────────────────────────────────────────────────
-
 def pct_rank(value: float, low: float, high: float) -> float:
     """A1: range position. 0.0 when high == low (brief; iei-hyg now returns None)."""
     ranked = iei_pct_rank(value, low, high)
@@ -140,8 +137,6 @@ def z_score(value: float, window: list[float]) -> float:
 def z_gap(spread: float, vix: float, spreads: list[float], vixes: list[float]) -> float:
     return z_score(spread, spreads) - z_score(vix, vixes)
 
-
-# ── VIX ladder (never the equity cascade) ─────────────────────────
 
 def _ib_gateway_unavailable() -> bool:
     auth_state = _ib_auth_state()
@@ -285,8 +280,6 @@ def fetch_equity_closes(
     )
 
 
-# ── series assembly ───────────────────────────────────────────────
-
 def _row(date: str, shy_close: float, hyg_close: float, vix_close: float) -> dict[str, Any]:
     return {
         "date": date,
@@ -399,8 +392,6 @@ def diff_new_rows(cached: list[dict[str, Any]], series: list[dict[str, Any]]) ->
     ]
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     CREDIT_VIX_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = CREDIT_VIX_JSON.with_suffix(".json.tmp")
@@ -447,8 +438,6 @@ def persist_result(
     )
     _write_json_cache(payload)
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _turso_series() -> list[dict[str, Any]]:
     from db.client import get_db
@@ -565,8 +554,6 @@ def run(
         raise
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

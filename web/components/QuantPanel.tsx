@@ -172,7 +172,6 @@ function QuantStrategyView({ strategy }: { strategy: QuantStrategyKey }) {
 
   return (
     <>
-      {/* ── Summary strip ─────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -236,7 +235,6 @@ function QuantStrategyView({ strategy }: { strategy: QuantStrategyKey }) {
         />
       </div>
 
-      {/* ── Equity curve ──────────────────────────────────── */}
       <div className="breadth-history-block" data-testid="quant-chart-section">
         <nav className="history-range-chips" aria-label="Quant equity range" data-testid="quant-range-chips">
           {QUANT_RANGE_PRESETS.filter((p) => p.sessions <= total || p.slug === "all").map((preset) => (
@@ -274,7 +272,6 @@ function QuantStrategyView({ strategy }: { strategy: QuantStrategyKey }) {
         )}
       </div>
 
-      {/* ── Targets ───────────────────────────────────────── */}
       <div className="section" data-testid="quant-targets-section">
         <div className="section-header">
           <div className="section-title">
@@ -317,7 +314,6 @@ function QuantStrategyView({ strategy }: { strategy: QuantStrategyKey }) {
         )}
       </div>
 
-      {/* ── Last execution plan ───────────────────────────── */}
       {orders && orderRows.length > 0 ? (
         <div className="section" data-testid="quant-orders-section">
           <div className="section-header">

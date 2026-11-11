@@ -82,7 +82,6 @@ from clients.journal_basis import (  # noqa: E402
 )
 from utils.exec_ids import exec_id_root  # noqa: E402
 
-# ── env load ──────────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
 
@@ -92,7 +91,6 @@ try:
 except ImportError:
     pass
 
-# ── logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s  %(levelname)-7s  %(message)s",
     datefmt="%H:%M:%S",
@@ -100,11 +98,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("backfill_journal")
 
-# ── constants ─────────────────────────────────────────────────────────────────
 RECONCILE_WINDOW_DAYS = 7
 
-
-# ── pytest guard ──────────────────────────────────────────────────────────────
 
 def _assert_not_under_pytest() -> None:
     """Refuse to run live DB writes from inside a pytest session.
@@ -121,8 +116,6 @@ def _assert_not_under_pytest() -> None:
             "(feedback_test_pollution_to_production)"
         )
 
-
-# ── journal exec-id coverage ──────────────────────────────────────────────────
 
 class JournalCoverage:
     """What the journal already accounts for, across BOTH id conventions.
@@ -368,8 +361,6 @@ def _exec_id_in_journal(db: Any, exec_id: str) -> bool:
     return _journal_coverage(db).covers_exec_id(exec_id)
 
 
-# ── executed_orders scan ──────────────────────────────────────────────────────
-
 def _fetch_executed_orders(
     db: Any,
     *,
@@ -409,9 +400,6 @@ def _fetch_executed_orders(
             continue
         result.append({"exec_id": exec_id, "payload": payload, "fill_time": fill_time})
     return result
-
-
-# ── journal row construction ───────────────────────────────────────────────────
 
 
 class _EOFillShim:
@@ -518,8 +506,6 @@ def _build_journal_row_from_executed_order(
     filled_at = entry.get("filled_at") or entry.get("date")
     return trade_id, entry, filled_at
 
-
-# ── core logic ────────────────────────────────────────────────────────────────
 
 def backfill(
     db: Any,
@@ -748,8 +734,6 @@ def _update_prior_state_for_eo_row(
         delta = 0.0
     prior_state[key] = prior_state.get(key, 0.0) + delta
 
-
-# ── entry point ───────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

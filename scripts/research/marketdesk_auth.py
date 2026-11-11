@@ -97,8 +97,6 @@ def _atomic_private_write(path: Path, data: bytes) -> None:
             os.unlink(temporary)
 
 
-# ---- Firebase REST -------------------------------------------------------------------------
-
 def _default_post(url: str, body: bytes, headers: dict) -> tuple[int, bytes]:
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
@@ -156,8 +154,6 @@ def password_id_token(email: str, password: str, *, post=None) -> str:
         raise MarketDeskAuthError(f"password sign-in disabled ({code})")
     raise MarketDeskAuthError(f"password sign-in failed ({code or f'HTTP {status}'})")
 
-
-# ---- refresh-token storage -----------------------------------------------------------------
 
 def _token_file(env) -> Path:
     return session_dir(env) / "firebase.json"
@@ -219,8 +215,6 @@ def obtain_id_token(env=os.environ, *, post=None) -> str:
         raise MarketDeskAuthError("no MarketDesk credentials configured")
     raise MarketDeskAuthError("MarketDesk sign-in failed: " + "; ".join(failures))
 
-
-# ---- cookie session ------------------------------------------------------------------------
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """A redirect surfaces as HTTPError: on marketdesk.ai a 302 means the session is gone."""
