@@ -2,49 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const TAXONOMY = ["BTC", "VOL", "POSITIONING", "EQUITIES"];
 const MEDIA_DIR = "/fake/public/media";
-describe("__extractFirstJsonObject (balanced-brace extractor)", () => {
-  it("extracts a single flat object", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    expect(__extractFirstJsonObject('{"tags":["A","B","C"]}')).toBe('{"tags":["A","B","C"]}');
-  });
-
-  it("returns only the FIRST object when two are concatenated", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    const text = '{"tags":["A","B","C"]}\n{"tags":["X","Y","Z"]}';
-    expect(__extractFirstJsonObject(text)).toBe('{"tags":["A","B","C"]}');
-  });
-
-  it("ignores braces that appear inside string literals", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    const text = '{"tags":["A","B with } brace","C"]}';
-    expect(__extractFirstJsonObject(text)).toBe(text);
-  });
-
-  it("handles escaped quotes inside string literals", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    const text = '{"note":"he said \\"hi\\"","tags":["A","B","C"]}';
-    expect(__extractFirstJsonObject(text)).toBe(text);
-  });
-
-  it("handles nested objects (returns outermost balanced)", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    const text = '{"meta":{"src":"x"},"tags":["A","B","C"]}';
-    expect(__extractFirstJsonObject(text)).toBe(text);
-  });
-
-  it("returns null when no balanced object exists", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    expect(__extractFirstJsonObject("just prose with no JSON")).toBeNull();
-    expect(__extractFirstJsonObject('{"unclosed":')).toBeNull();
-  });
-
-  it("skips leading prose before finding the object", async () => {
-    const { __extractFirstJsonObject } = await import("../../scripts/newsfeed/vision_tagger.js");
-    const text = 'Here is the answer:\n{"tags":["A","B","C"]}';
-    expect(__extractFirstJsonObject(text)).toBe('{"tags":["A","B","C"]}');
-  });
-});
-
 describe("__resolveImageAbsolutePath / __detectMediaType", () => {
   it("resolves absolute, leading-slash and bare relative paths into mediaDir", async () => {
     const { __resolveImageAbsolutePath } = await import("../../scripts/newsfeed/vision_tagger.js");

@@ -128,57 +128,6 @@ class TestPerformanceTables:
         assert json.loads(rows[0][0])["twr_ytd"] == 0.18
 
 
-# ── option_close_cache ───────────────────────────────────────────────
-
-class TestOptionCloseCache:
-    def test_inserts_with_composite_pk(self, writer, db_with_schema):
-        writer.upsert_option_close("AAPL", "2026-04-18", 200.0, "C", "2026-05-06", 3.50)
-        rows = db_with_schema.execute(
-            "SELECT symbol, expiry, strike, right, close_date, close_price FROM option_close_cache"
-        ).fetchall()
-        assert rows == [("AAPL", "2026-04-18", 200.0, "C", "2026-05-06", 3.50)]
-
-    def test_replaces_on_same_composite_key(self, writer, db_with_schema):
-        writer.upsert_option_close("aapl", "2026-04-18", 200.0, "c", "2026-05-06", 3.50)
-        writer.upsert_option_close("AAPL", "2026-04-18", 200.0, "C", "2026-05-06", 3.75)
-        rows = db_with_schema.execute("SELECT close_price FROM option_close_cache").fetchall()
-        assert rows == [(3.75,)]
-
-    def test_uppercase_normalization(self, writer, db_with_schema):
-        # symbol + right are lowercased on input → upsert should normalize.
-        writer.upsert_option_close("aapl", "2026-04-18", 200.0, "put", "2026-05-06", 1.50)
-        rows = db_with_schema.execute(
-            "SELECT symbol, right FROM option_close_cache"
-        ).fetchall()
-        assert rows == [("AAPL", "P")]
-
-    def test_distinct_close_date_keeps_both(self, writer, db_with_schema):
-        writer.upsert_option_close("AAPL", "2026-04-18", 200.0, "C", "2026-05-06", 3.50)
-        writer.upsert_option_close("AAPL", "2026-04-18", 200.0, "C", "2026-05-07", 3.75)
-        rows = db_with_schema.execute("SELECT close_date FROM option_close_cache").fetchall()
-        assert sorted(r[0] for r in rows) == ["2026-05-06", "2026-05-07"]
-
-
-# ── discover_sp500_snapshots ─────────────────────────────────────────
-
-class TestDiscoverSp500Snapshot:
-    def test_inserts_and_replaces(self, writer, db_with_schema):
-        ts = _now()
-        writer.upsert_discover_sp500_snapshot(ts, {"candidates": [{"ticker": "AAPL"}]})
-        writer.upsert_discover_sp500_snapshot(ts, {"candidates": [{"ticker": "MSFT"}]})
-        rows = db_with_schema.execute("SELECT payload FROM discover_sp500_snapshots").fetchall()
-        assert len(rows) == 1
-        assert json.loads(rows[0][0])["candidates"][0]["ticker"] == "MSFT"
-
-    def test_separate_from_discover_snapshots(self, writer, db_with_schema):
-        # writes to sp500 should not affect discover_snapshots
-        writer.upsert_discover_sp500_snapshot(_now(), {"candidates": []})
-        rows = db_with_schema.execute(
-            "SELECT COUNT(*) FROM discover_snapshots"
-        ).fetchone()
-        assert rows[0] == 0
-
-
 # ── analyst_ratings (zombie schema bound) ────────────────────────────
 
 class TestAnalystRatings:

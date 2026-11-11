@@ -50,7 +50,6 @@ _QUOTA_MARKERS = (
 _lock = threading.Lock()
 _until: dict[str, float] = {}
 _quota_streak: dict[str, int] = {}
-_process_reason: dict[str, str] = {}
 
 
 def _now() -> float:
@@ -62,7 +61,6 @@ def clear_process_state() -> None:
     with _lock:
         _until.clear()
         _quota_streak.clear()
-        _process_reason.clear()
 
 
 def state_path(env: Mapping[str, str]) -> Path:
@@ -71,14 +69,6 @@ def state_path(env: Mapping[str, str]) -> Path:
         return Path(raw)
     home = (env.get("HOME") or "").strip() or str(Path.home())
     return Path(home) / ".radon" / "provider-cooldown.json"
-
-
-def skip_process(provider: str, reason: str) -> None:
-    _process_reason[provider] = reason
-
-
-def process_reason(provider: str) -> str:
-    return _process_reason.get(provider, "")
 
 
 def note(provider: str, seconds: float, env: Mapping[str, str]) -> float:

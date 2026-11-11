@@ -61,64 +61,6 @@ function buildUserPrompt(post) {
   return `Title: ${title}\nBody: ${content}`;
 }
 
-// Walks the text and returns the first balanced {...} block. Tracks string
-// literals so braces inside JSON strings don't confuse the depth counter.
-// Used because Claude occasionally appends a second JSON object or trailing
-// prose after the answer — a greedy /\{[\s\S]*\}/ would glue them together.
-function extractFirstJsonObject(text) {
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escape = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escape) escape = false;
-      else if (ch === "\\") escape = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
-      if (depth < 0) return null;
-    }
-  }
-  return null;
-}
-
-function parseTagsFromText(text) {
-  // Fast path: response is already pure JSON.
-  try {
-    return JSON.parse(text);
-  } catch {
-    /* fall through to extraction */
-  }
-  // Extract balanced blocks one at a time and return the first one with a
-  // tags array — handles "JSON + prose", "JSON + JSON", and code-fence wrapping.
-  let cursor = 0;
-  while (cursor < text.length) {
-    const slice = text.slice(cursor);
-    const block = extractFirstJsonObject(slice);
-    if (!block) return null;
-    try {
-      const obj = JSON.parse(block);
-      if (obj && Array.isArray(obj.tags)) return obj;
-    } catch {
-      /* try next block */
-    }
-    cursor += slice.indexOf(block) + block.length;
-  }
-  return null;
-}
-
 export function createVisionTagger({
   mediaDir, getTaxonomySnapshot,
   readImage = p => fs.promises.readFile(p),
@@ -235,7 +177,4 @@ export async function hydrateTagsDual(
 // Test seam.
 export const __resolveImageAbsolutePath = resolveImageAbsolutePath;
 export const __detectMediaType = detectMediaType;
-export const __buildUserPrompt = buildUserPrompt;
-export const __extractFirstJsonObject = extractFirstJsonObject;
-export const __parseTagsFromText = parseTagsFromText;
 export const __unionTags = unionTags;

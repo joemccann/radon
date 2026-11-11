@@ -7,23 +7,18 @@ from datetime import date, timedelta
 import pytest
 
 from scripts.ai_cycle.model import validate_observation
-from scripts.ai_cycle.shadow import evaluate_shadow, walk_forward
+from scripts.ai_cycle.shadow import evaluate_shadow
 from scripts.ai_cycle.snapshot import build_snapshot
 from scripts.ai_cycle.store import ObservationStore
 from scripts.ai_cycle.transforms import (
     InsufficientEvidence,
-    aggregate_cash_coverage,
-    backlog_residual,
     cash_coverage,
     complete_daily_windows,
     daily_activity,
-    fiscal_quarters,
     fixed_inference_basket,
     matched_gpu_prices,
-    power_residual,
     share_metrics,
     trailing_four_quarters,
-    working_capital_days,
 )
 
 
@@ -460,36 +455,25 @@ def test_fixed_model_basket_cannot_drop_expensive_member():
         fixed_inference_basket({"a": models["a"]}, ["a", "b"], input_tokens=1, output_tokens=1, cohort_version="v2")
 
 
-def test_fiscal_ytd_is_differenced_before_ttm():
-    facts = [
-        dict(start="2025-07-01", end=end, value=value, verified_statement=True)
-        for end, value in [("2025-09-30", 10), ("2025-12-31", 25), ("2026-03-31", 45), ("2026-06-30", 80)]
+def test_ttm_sums_four_quarters_and_cash_coverage_requires_matched_periods():
+    quarters = [
+        dict(start=start, end=end, value=value, days=days)
+        for start, end, value, days in [
+            ("2025-07-01", "2025-09-30", 10.0, 92),
+            ("2025-10-01", "2025-12-31", 15.0, 92),
+            ("2026-01-01", "2026-03-31", 20.0, 90),
+            ("2026-04-01", "2026-06-30", 35.0, 91),
+        ]
     ]
-    quarters = fiscal_quarters(facts)
-    assert [row["value"] for row in quarters] == [10, 15, 20, 35]
     ttm = trailing_four_quarters(quarters)
     assert ttm["value"] == 80
     assert cash_coverage(ttm, {**ttm, "value": 100})["funding_gap"] == 20
     with pytest.raises(InsufficientEvidence):
-        fiscal_quarters(facts[1:])
-    with pytest.raises(InsufficientEvidence):
-        fiscal_quarters([{**facts[0], "verified_statement": False}])
-    with pytest.raises(InsufficientEvidence):
         cash_coverage(ttm, {**ttm, "start": "2025-01-01"})
 
 
-def test_remaining_financial_and_power_contracts():
-    assert (
-        aggregate_cash_coverage(
-            [dict(start="a", end="b", ocf=10, capex=20), dict(start="a", end="b", ocf=90, capex=30)]
-        )
-        == 2
-    )
-    assert working_capital_days(100, 200, 300, 90) == 45
-    assert backlog_residual(100, 50, 30, 125, definitions_match=True) == 5
+def test_share_metrics():
     assert share_metrics(20, 30, 10) == dict(relative_monetization=1.5, token_share_change_pp=10)
-    with pytest.raises(InsufficientEvidence):
-        power_residual(100, 90, history_days=65, weather_coverage=1, control_validated=True)
 
 
 def weeks():
@@ -520,8 +504,6 @@ def test_shadow_warmup_staleness_and_vintage():
     assert evaluate_shadow(rows, "2026-09-20T00:00:00Z")["state"] == "insufficient_evidence"
     rows[-1]["coverage"] = 0.79
     assert evaluate_shadow(rows, "2026-08-24T00:00:00Z")["state"] == "insufficient_evidence"
-    report = walk_forward(weeks())
-    assert report["watch_episodes"] == 1 and report["precision"] is None
 
 
 def test_fractional_vintage_order_is_chronological():

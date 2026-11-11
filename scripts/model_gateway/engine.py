@@ -542,12 +542,6 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
     return None
 
 
-def _key_for(name: str, env: Mapping[str, str]) -> str:
-    """Back-compat: token string only. Prefer ``_auth_for`` for kind/mechanism."""
-    auth = _auth_for(name, env)
-    return auth.token if auth is not None else ""
-
-
 def _model_for(
     name: str, env: Mapping[str, str], *, kind: str = "vision", auth_kind: str = "api_key"
 ) -> str:

@@ -23,7 +23,6 @@ from __future__ import annotations
 import base64
 import io
 import os
-import random
 import re
 import threading
 import time
@@ -545,17 +544,6 @@ def _adapter(model: str) -> str:
     return "v1"
 
 
-class _CapturingPost:
-    def __init__(self, post):
-        self._post = post
-        self.headers: dict = {}
-
-    def __call__(self, url, **kwargs):
-        response = self._post(url, **kwargs)
-        self.headers = dict(getattr(response, "headers", {}) or {})
-        return response
-
-
 def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline):
     """Native transport/retries live in the gateway; local extraction gates remain here."""
     image = None
@@ -571,31 +559,6 @@ def _post_with_retries(model, body, *, post, sleep, monotonic, jitter, deadline)
             "timeout_seconds": min(remaining, 270)}, timeout_seconds=min(remaining + 10, 280))["payload"]
     except Exception as exc:
         raise PageParseError("gateway_unavailable") from exc
-
-
-def _retryable(reason: str) -> bool:
-    return reason in {"degraded", "empty", "length", "timeout", "network"} or reason == "http_429" or reason.startswith("http_5")
-
-
-def _failure_reason(model, status, text, payload, classify) -> str | None:
-    if status == 429:
-        return "http_429"
-    if status == 400 and "degraded" in text.lower():
-        return "degraded"
-    if status != 200 or not isinstance(payload, dict):
-        return "degraded" if "degraded" in text.lower() else classify(status, text)
-    finish = _finish_reason(payload)
-    if finish == "length":
-        return "length"
-    if _adapter(model) == "v2":
-        content = _openai_text(payload)
-        if _meaningful(content):
-            return None
-        return "empty"
-    if _v1_blocks(payload) is None:
-        content = _openai_text(payload)
-        return "malformed" if _meaningful(content) else "empty"
-    return None
 
 
 def _finish_reason(payload) -> str | None:
@@ -817,33 +780,8 @@ def _page_png(page) -> bytes:
     return buffer.getvalue()
 
 
-def _retry_after(headers: dict):
-    for key, value in (headers or {}).items():
-        if str(key).lower() == "retry-after":
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
-    return None
-
-
 def _clock(monotonic):
     return monotonic() if monotonic is not None else time.monotonic()
-
-
-def _jitter(jitter):
-    if jitter is not None:
-        return float(jitter())
-    return random.uniform(0, 0.25)
-
-
-def _sleep(seconds: float, sleep):
-    if seconds <= 0:
-        return
-    if sleep is not None:
-        sleep(seconds)
-    else:
-        time.sleep(seconds)
 
 
 def _int_env(name: str, default: int, low: int, high: int) -> int:

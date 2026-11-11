@@ -18,7 +18,6 @@ from typing import Any, Callable, Sequence
 import uuid
 
 from clients.model_ladder import (
-    MODEL_LADDER_ORDER,
     ModelLadderExhausted,
     ModelResponseError,
     complete_multimodal_json,
@@ -119,10 +118,6 @@ CAPTION_MAX = 180
 # timeout cools that provider down for the rest of this process, so one slow
 # grok-4.6 image call (153s or the 120s cap on 2026-10-27) is not repeated for
 # every article in the 270s cycle.
-# grok-4.6 took 153s or hit the 120s read timeout on every image copy call (2026-10-27), which spends most of
-# the cycle's 270s budget before codex answers. It still answers text-only calls (the humanizer) in 30-45s.
-# Antigravity's CLI accepts text only; retain every image for a capable rung.
-IMAGE_PROVIDERS = tuple(name for name in MODEL_LADDER_ORDER if name not in {"grok", "antigravity"})
 TAGS_MAX = 10
 BODY_MAX = 12000
 _TAG_RE = re.compile(r"^[A-Z0-9][A-Z0-9&-]{0,63}$")
@@ -398,17 +393,6 @@ def build_instruction(
     lines.append("Every number in the title, content and captions must appear verbatim in SUMMARY_BULLETS or "
                  "ARTICLE_TEXT. Never take a number from an image alone.")
     return "\n".join(lines)
-
-
-def summary_problems(text: str) -> list[str]:
-    """Reasons a scraped MarketDesk summary bullet must not be shown in the feed (it skips the model)."""
-    problems: list[str] = []
-    if FORBIDDEN_PUBLISHERS.search(text):
-        problems.append("forbidden_publisher")
-    if _URL_RE.search(text) or re.search(r"\b[\w.+-]+@[\w-]+\.[\w.]+\b", text):
-        problems.append("url")
-    problems.extend(f"banned_phrase:{m.group(0).lower()}" for m in _BANNED_RE.finditer(text))
-    return problems
 
 
 def copy_problems(obj: dict, *, source_text: str, image_ids: list[str]) -> list[str]:

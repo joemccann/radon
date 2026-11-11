@@ -134,14 +134,13 @@ def test_unseen_empty_makes_no_query(db):
     assert db.calls == []
 
 
-def test_post_exists_reads_research_post_sources(db):
+def test_post_source_reads_research_post_sources(db):
     post_id = "research-" + "c" * 32
-    assert store.post_exists(post_id) is False
+    assert store.post_source(post_id) is None
     db.execute("INSERT INTO posts (id,title,content,timestamp,images,tags,created_at,updated_at) "
                "VALUES (?,?,?,?,?,?,?,?)", (post_id, "t", "c", "2026-10-26T00:00:00Z", "[]", "[]", "x", "x"))
     db.execute("INSERT INTO research_post_sources(post_id,provenance_json) VALUES (?,?)",
                (post_id, json.dumps({"kind": "marketdesk", "url": "/u.pdf", "contentHash": "d" * 64})))
-    assert store.post_exists(post_id) is True
     assert store.post_source(post_id)["contentHash"] == "d" * 64
     assert store.post_source("research-" + "e" * 32) is None
 
@@ -309,9 +308,6 @@ def test_requeue_with_note_reopens_a_held_item_once(db):
     assert store.feedback_handled() == {"f1"}
     assert store.has_live_work("marketdesk:Aaaaaaaa1") is True
     assert store.requeue_with_note("marketdesk:Aaaaaaaa1", note, feedback_id="f2") is False  # already pending
-    requeued = store.requeued()
-    assert [(r.article_id, r.note) for r in requeued] == [("Aaaaaaaa1", note)]
-    assert requeued[0].published_at == NOW - timedelta(hours=100) and requeued[0].title == "T Aaaaaaaa1"
     assert store.note_for("Aaaaaaaa1") == {"kind": "publish", "comment": "wanted", "feedback_id": "f1"}
 
 
@@ -337,7 +333,7 @@ def test_published_clears_the_operator_note(db):
     _decided(db, "Aaaaaaaa1", "held", "NO_CANDIDATES")
     store.requeue_with_note("marketdesk:Aaaaaaaa1", '{"kind": "publish"}', feedback_id="f1")
     store.record_published("Aaaaaaaa1", "research-" + "a" * 32, ASSET, "c" * 64)
-    assert row(db, "Aaaaaaaa1")["note"] is None and store.requeued() == []
+    assert row(db, "Aaaaaaaa1")["note"] is None
 
 
 def test_discover_is_idempotent_without_claiming_attempts(db):

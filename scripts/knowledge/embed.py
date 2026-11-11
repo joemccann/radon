@@ -116,12 +116,6 @@ _coverage_lock = threading.Lock()
 _coverage_cache: dict = {"at": None, "ready": None}
 
 
-def reset_v2_coverage_cache() -> None:
-    with _coverage_lock:
-        _coverage_cache["at"] = None
-        _coverage_cache["ready"] = None
-
-
 def v2_coverage_ready(db, *, now=None) -> bool:
     """False while any knowledge.embedding_v2 is NULL.
 

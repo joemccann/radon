@@ -59,22 +59,6 @@ class Preset:
     def pair_count(self) -> int:
         return len(self.pairs)
 
-    def group_names(self) -> List[str]:
-        """Return list of group keys (for sp500 master preset)."""
-        return list(self.groups.keys())
-
-    def group_tickers(self, group_key: str) -> List[str]:
-        """Return tickers for a specific group."""
-        if group_key in self.groups:
-            return self.groups[group_key].get("tickers", [])
-        return []
-
-    def group_pairs(self, group_key: str) -> List[List[str]]:
-        """Return pairs for a specific group."""
-        if group_key in self.groups:
-            return self.groups[group_key].get("pairs", [])
-        return []
-
 
 def _unique_tickers(*groups: List[str]) -> List[str]:
     """Order-preserving unique ticker union."""
@@ -221,16 +205,6 @@ def load_preset(name: str) -> Preset:
         source=data.get("source", ""),
         groups=data.get("groups", {}),
     )
-
-
-def get_preset_tickers(name: str) -> List[str]:
-    """Convenience: load preset and return just tickers."""
-    return load_preset(name).tickers
-
-
-def get_preset_pairs(name: str) -> List[List[str]]:
-    """Convenience: load preset and return just pairs."""
-    return load_preset(name).pairs
 
 
 if __name__ == "__main__":

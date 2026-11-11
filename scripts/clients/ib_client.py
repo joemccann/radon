@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from dotenv import load_dotenv
-from ib_insync import IB, Option
+from ib_insync import IB
 from utils.outcome_metrics import count_operation
 
 # Load root .env so IB_GATEWAY_HOST/PORT are available before defaults are computed.
@@ -807,49 +807,6 @@ class IBClient:
         except Exception as exc:
             raise IBOrderError(f"Failed what-if margin preview: {exc}") from exc
 
-    def place_bracket_order(
-        self,
-        contract: Any,
-        action: str,
-        quantity: float,
-        limit_price: float,
-        take_profit_price: float,
-        stop_loss_price: float,
-    ) -> list:
-        """Place a bracket order (parent + take-profit + stop-loss).
-
-        Returns:
-            List of ``Trade`` objects ``[parent, take_profit, stop_loss]``.
-        """
-        self._require_connection()
-        # REL-186 (R-479): the bracket funnel carries the same guards as
-        # place_order. Halt first — three resting legs placed during a halt
-        # are exactly what the kill switch exists to refuse.
-        from trading_halt import get_halt_state, is_trading_halted  # noqa: PLC0415
-
-        if is_trading_halted():
-            reason = get_halt_state().get("reason", "manual halt")
-            raise IBOrderError(f"TRADING HALTED — bracket not placed ({reason})")
-        try:
-            bracket = self._ib.bracketOrder(
-                action, quantity, limit_price, take_profit_price, stop_loss_price,
-            )
-            trades = []
-            for order in bracket:
-                # Each leg routes through place_order, so the server-side
-                # limits (quantity, notional, price sanity) apply per leg and
-                # a new guard added there covers brackets automatically.
-                trade = self.place_order(contract, order)
-                trades.append(trade)
-            self.logger.info(
-                "Placed bracket order: %s %s %s limit=%.2f TP=%.2f SL=%.2f",
-                action, quantity, contract.symbol if hasattr(contract, "symbol") else contract,
-                limit_price, take_profit_price, stop_loss_price,
-            )
-            return trades
-        except Exception as exc:
-            raise IBOrderError(f"Failed to place bracket order: {exc}") from exc
-
     def cancel_order(self, order: Any) -> Any:
         """Cancel an open order.
 
@@ -989,36 +946,6 @@ class IBClient:
         self._require_connection()
         return self._ib.openTrades()
 
-    def get_trades(self) -> list:
-        """Return all trades (open + completed) for this session."""
-        self._require_connection()
-        return self._ib.trades()
-
-    def get_order_status(
-        self, order_id: Optional[int] = None, perm_id: Optional[int] = None,
-    ) -> Optional[Any]:
-        """Look up a trade by order ID or permanent ID.
-
-        Returns:
-            The matching ``Trade`` or ``None`` if not found.
-        """
-        self._require_connection()
-        trades = self._ib.trades()
-
-        # Prefer perm_id (globally unique)
-        if perm_id is not None:
-            for trade in trades:
-                if trade.order.permId == perm_id:
-                    return trade
-
-        # Fallback to order_id
-        if order_id is not None:
-            for trade in trades:
-                if trade.order.orderId == order_id:
-                    return trade
-
-        return None
-
     # -- market data --------------------------------------------------------
 
     def get_quote(self, contract: Any, snapshot: bool = False, generic_ticks: str = "") -> Any:
@@ -1063,32 +990,6 @@ class IBClient:
         # IB needs underlying conId — qualify first if needed
         return self._ib.reqSecDefOptParams(symbol, exchange, sec_type, 0)
 
-    def get_option_price(
-        self, symbol: str, expiry: str, strike: float, right: str,
-        exchange: str = "SMART", currency: str = "USD",
-    ) -> Any:
-        """Get a quote for a specific option contract.
-
-        Creates, qualifies, and requests market data for the option.
-        """
-        self._require_connection()
-        contract = Option(
-            symbol=symbol,
-            lastTradeDateOrContractMonth=expiry,
-            strike=strike,
-            right=right,
-            exchange=exchange,
-            currency=currency,
-        )
-        qualified = self._ib.qualifyContracts(contract)
-        if not qualified:
-            raise IBContractError(
-                f"Could not qualify option: {symbol} {expiry} ${strike} {right}"
-            )
-        ticker = self._ib.reqMktData(qualified[0], "", False, False)
-        self.wait_until(lambda: ticker_has_quote(ticker), timeout=2.0)
-        return ticker
-
     def qualify_contract(self, contract: Any) -> Any:
         """Qualify a single contract, filling in IB-assigned fields.
 
@@ -1121,53 +1022,6 @@ class IBClient:
         """Return recent fills for this session."""
         self._require_connection()
         return self._ib.fills()
-
-    def wait_for_fill(self, trade: Any, timeout: int = 60, poll_interval: float = 1.0) -> Any:
-        """Wait for a trade to fill, polling at ``poll_interval``.
-
-        Args:
-            trade: The ``Trade`` object to monitor.
-            timeout: Maximum seconds to wait.
-            poll_interval: Seconds between status checks.
-
-        Returns:
-            The ``Trade`` object once filled.
-
-        Raises:
-            IBTimeoutError: If the trade does not fill within *timeout*.
-            IBOrderError: If the trade is cancelled or enters an error state.
-        """
-        self._require_connection()
-        elapsed = 0.0
-        while elapsed < timeout:
-            self._ib.sleep(poll_interval)
-            elapsed += poll_interval
-
-            status = trade.orderStatus.status
-            if status == "Filled":
-                self.logger.info(
-                    "Order filled: orderId=%s avg=%.2f qty=%s",
-                    trade.order.orderId,
-                    trade.orderStatus.avgFillPrice,
-                    trade.orderStatus.filled,
-                )
-                return trade
-
-            if status in ("Cancelled", "ApiCancelled"):
-                raise IBOrderError(
-                    f"Order cancelled (orderId={trade.order.orderId}): {status}"
-                )
-
-            if status == "Inactive":
-                self.logger.warning(
-                    "Order inactive: orderId=%s — may be rejected",
-                    trade.order.orderId,
-                )
-
-        raise IBTimeoutError(
-            f"Order not filled within {timeout}s (orderId={trade.order.orderId}, "
-            f"status={trade.orderStatus.status})"
-        )
 
     # -- historical data ----------------------------------------------------
 
@@ -1254,13 +1108,6 @@ class IBClient:
             useRTH=use_rth,
             formatDate=2,
         )
-
-    # -- contract details ---------------------------------------------------
-
-    def get_contract_details(self, contract: Any) -> list:
-        """Return full contract details (``ContractDetails`` list)."""
-        self._require_connection()
-        return self._ib.reqContractDetails(contract)
 
     # -- utility ------------------------------------------------------------
 

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from research import book, marketdesk_filter, triage
-from test_marketdesk_filter import decide, Select, WORDS
+from test_marketdesk_filter import decide, WORDS
 
 
 @pytest.mark.parametrize('title', [
@@ -19,10 +19,8 @@ from test_marketdesk_filter import decide, Select, WORDS
     'Inovance (300124) Earnings update',
 ])
 def test_off_book_subject_never_reaches_copy(title):
-    selector = Select()
-    result = decide(selector, title=title, pages={1: title + '\nRevenue increased 10%.'}, book={'HOOD', 'MU'})
+    result = decide(title=title, pages={1: title + '\nRevenue increased 10%.'}, book={'HOOD', 'MU'})
     assert (result.outcome, result.reason_code) == ('dropped', 'EQUITY_RESEARCH_NOT_IN_BOOK')
-    assert not selector.prompts
 
 
 def test_incidental_in_book_body_reference_does_not_admit_primary_issuer():
@@ -51,7 +49,7 @@ def test_broad_research_preserved_without_book_io(title):
         raise AssertionError('broad strategy must not need book')
     result = marketdesk_filter.decide(article_id='a', title=title, folders=['2026','October','Oct 26','Goldman Sachs'],
         folder_date='2026-10-26',pages={1:title+'\n'+WORDS},created=None,summary=[WORDS],root='/none',
-        select=forbidden,book_tickers=forbidden,recent=[],index={})
+        book_tickers=forbidden,index={})
     assert result.outcome == 'publish'
 
 

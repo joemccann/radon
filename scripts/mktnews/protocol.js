@@ -20,18 +20,6 @@ function isFlashItem(value) {
   return "content" in inner || "title" in inner;
 }
 
-export function classifyMessage(msg) {
-  if (!msg || typeof msg !== "object") return "raw";
-  if (msg.kind) return msg.kind;
-  const value = msg.data ?? msg;
-  if (value && typeof value === "object" && value.type === "time" && typeof value.data === "number") {
-    return "time";
-  }
-  if (typeof msg.type === "string") return msg.type;
-  if (isFlashItem(value)) return "flash";
-  return "unknown";
-}
-
 export function parseFrame(raw) {
   const text = decodeFrame(raw);
   let value;
