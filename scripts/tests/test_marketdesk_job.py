@@ -91,13 +91,9 @@ class World:
     published: list = field(default_factory=list)
     dests: list = field(default_factory=list)
     sessions: list = field(default_factory=list)
-    selections: dict = field(default_factory=dict)       # article title -> SELECT reply
-    select_outage: set = field(default_factory=set)
     pages: dict = field(default_factory=dict)            # article id -> {page: text}
-    prompts: list = field(default_factory=list)
     outcomes: list = field(default_factory=list)
     feedback: list = field(default_factory=list)
-    recent: list = field(default_factory=list)
     root: Path | None = None
 
 
@@ -232,17 +228,6 @@ def build_deps(world: World):
         article_id = data[len(b"%PDF-1.7 "):].decode()
         return world.pages.get(article_id, {1: "PDF text: EBITDA $13.80B, curve up 12bp."}), None
 
-    def select(prompt):
-        world.prompts.append(prompt)
-        title = next((t for t in world.selections if json.dumps(t + ".pdf") in prompt), None)
-        if any(json.dumps(t + ".pdf") in prompt for t in world.select_outage):
-            from research.marketdesk_filter import SelectUnavailable
-            raise SelectUnavailable("Model ladder exhausted. tried=codex:http_529")
-        if title is not None:
-            return world.selections[title]
-        return {"candidates": [{"title": "Finding", "content": "Two cuts priced.", "claim_key": "k", "pages": [1],
-                                "figure_ids": [], "captions": {}, "tags": ["RATES"], "text_only": True}]}
-
     def record_outcome(work, review):
         world.outcomes.append((work, review))
         return publish.record_outcome(work, review)
@@ -251,8 +236,8 @@ def build_deps(world: World):
         store=store, publish=real_publish, store_asset=store_asset, read_asset=read_asset,
         expire_stale_held=expire, open_session=open_session, list_latest=list_latest, fetch_article=fetch_article,
         download_images=download_images, write_copy=write_copy,
-        certify=certify, writer_from_env=writer_from_env, select=select,
-        book_tickers=lambda: None, recent_titles=lambda: list(world.recent), record_outcome=record_outcome,
+        certify=certify, writer_from_env=writer_from_env,
+        book_tickers=lambda: None, record_outcome=record_outcome,
         feedback_rows=lambda: list(world.feedback), research_root=lambda: world.root or world.tmp / "research",
         marketdesk_path=marketdesk_path, service_cycle=service_cycle, record_health=record_health,
         clock=clock,
@@ -743,10 +728,9 @@ def test_default_deps_wire_real_modules():
     assert deps.store is store and deps.publish is publish.publish
     assert deps.open_session is marketdesk_auth.open_session
     assert deps.fetch_article is marketdesk_scrape.fetch_article
-    from research import book, marketdesk_filter, marketdesk_pdf_store
+    from research import book, marketdesk_pdf_store
     assert not hasattr(deps, "pdf_pages") and not hasattr(deps, "download_pdf")
     assert deps.enqueue_pdf is marketdesk_pdf_store.enqueue
-    assert deps.select is marketdesk_filter.ladder_select
     assert deps.book_tickers is book.current_tickers and deps.record_outcome is publish.record_outcome
     assert deps.list_latest is marketdesk_scrape.list_latest
     assert deps.write_copy is marketdesk_copy.write_copy
@@ -1070,7 +1054,6 @@ def test_copy_is_grounded_in_the_source_summary_without_pdf_claims(world, db):
     run(world)
     assert not [c for c in world.calls if c[0] in ("pdf_pages", "download_pdf")]
     assert ("copy_body", "Credit curve update\nEBITDA $13.80B, curve up 12bp.") in world.calls
-    assert world.prompts == []  # no preliminary relevance model; full source goes to copy
 
 
 def test_copy_sees_the_figure_images(world, db):
@@ -1248,14 +1231,14 @@ def test_fx_report_enters_grounded_copy_without_relevance_selection(world, db):
     world.summary = ['# EURUSD: Range trade into the ECB']
     counts = run(world)
     assert counts['published'] == 1 and counts['dropped'] == 0
-    assert world.prompts == [] and ('copy_finding', None) in world.calls
+    assert ('copy_finding', None) in world.calls
     assert ledger(db, 'Drop000001')['status'] == 'published'
 
 def test_unknown_publisher_is_held(world, db):
     world.refs = [make_ref("Unkn000001", title="Anon note")]
     world.folders = ["2026", "October", "Oct 26"]
     counts = run(world)
-    assert counts["held"] == 1 and world.prompts == []
+    assert counts["held"] == 1
     assert ledger(db, "Unkn000001")["reason_code"] == "PUBLISHER_UNKNOWN"
 
 
@@ -1271,10 +1254,9 @@ def test_duplicate_of_a_published_article_is_dropped(world, db):
 
 def test_full_source_reaches_copy_without_model_filter_and_published_outcome_is_recorded(world, db):
     world.refs = [make_ref("Pub0000001", title="Vol digest")]
-    world.selections = {"Vol digest": {"candidates": [{"title": "Tech vol premium", "content": "Spread widened."}]}}
     counts = run(world)
     assert counts["published"] == 1
-    assert ("copy_finding", None) in world.calls and world.prompts == []
+    assert ("copy_finding", None) in world.calls
     calls = [c[0] for c in world.calls]
     assert "pdf_pages" not in calls and "download_pdf" not in calls
     assert calls.index("fetch_article") < calls.index("download_images") < calls.index("write_copy")
@@ -1283,17 +1265,6 @@ def test_full_source_reaches_copy_without_model_filter_and_published_outcome_is_
     saved = ledger(db, "Pub0000001")
     assert saved["status"] == "published" and json.loads(saved["folders_json"])[-1] == "Acme Research"
 
-
-def test_recent_titles_do_not_trigger_a_preliminary_relevance_model(world, db):
-    world.refs = [make_ref('Rcnt000001', title='Vol digest')]
-    world.recent = [{'title': "Yesterday's CTA post", 'timestamp': '2026-10-25T10:00:00+00:00'}]
-    assert run(world)['published'] == 1 and world.prompts == []
-
-def test_unused_relevance_model_outage_cannot_block_article_generation(world, db):
-    world.refs = [make_ref('Outg000001', title='Vol digest')]
-    world.select_outage = {'Vol digest'}
-    assert run(world)['published'] == 1
-    assert ledger(db, 'Outg000001')['status'] == 'published' and world.prompts == []
 
 def test_filtered_articles_count_against_the_per_cycle_cap(world, db):
     world.refs = [make_ref(f"Capd00000{n}", title=f"Recap {n}", hours_ago=n) for n in range(1, 5)]
@@ -1316,15 +1287,12 @@ def test_should_have_published_vote_requeues_with_the_operator_note(world, db):
     world.refs = []
     world.feedback = [held_vote("Vote000001")]
     world.folders = ["2026", "October", "Oct 26", "Acme Research"]
-    world.prompts.clear()
     counts = run(world)
     assert counts["requeued"] == 1 and counts["published"] == 1
-    assert world.prompts == []
     assert world.outcomes[-1][1]["operator_note"]["comment"] == "should be in the feed"
     assert ledger(db, "Vote000001")["status"] == "published" and ledger(db, "Vote000001")["note"] is None
     assert store.feedback_handled() == {"v1"}
-    world.prompts.clear()
-    assert run(world)["requeued"] == 0 and world.prompts == []  # handled once
+    assert run(world)["requeued"] == 0  # handled once
     assert old.article_id == "Vote000001"
 
 
@@ -1338,7 +1306,7 @@ def test_feedback_sync_preserves_examples_without_relevance_veto(world, db, tmp_
     run(world)
     from research import learn
     assert "too routine" in (world.root / learn.EXAMPLES).read_text()
-    assert world.prompts == [] and len(world.published) == 1
+    assert len(world.published) == 1
 
 
 def test_feedback_fetch_failure_never_fails_the_cycle(world, db):
@@ -1418,7 +1386,6 @@ def test_off_book_single_name_stops_before_images_copy_and_certification(world, 
         raise AssertionError('Ineligible issuer must stop before image or model work')
     deps.download_images = forbidden
     deps.write_copy = forbidden
-    deps.select = forbidden
     counts = job.run_cycle(env=dict(ENV), deps=deps)
     assert counts['published'] == 0
     saved = ledger(db, 'Offbook001')

@@ -40,11 +40,6 @@ def resolve_quote_contract(symbol: str):
     return Stock(upper, "SMART", "USD")
 
 
-def is_tradeable(symbol: str) -> bool:
-    """False for index symbols (you can only trade futures/options on them)."""
-    return not is_index_symbol(symbol)
-
-
 # Map of underlying symbol → futures root + exchange (VIX on CFE;
 # SPX/NDX/RUT on CME).
 FUTURES_ROOTS: dict[str, dict[str, str]] = {

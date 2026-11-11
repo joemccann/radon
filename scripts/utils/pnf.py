@@ -127,9 +127,3 @@ def signal_state_series(dates: list[date], closes: list[float]) -> list[str | No
 
     _ = ladder  # ladder cached; retained for readability of the walk above
     return states
-
-
-def current_signal(dates: list[date], closes: list[float]) -> str | None:
-    """Latest resolved signal state for a member, or None."""
-    series = signal_state_series(dates, closes)
-    return series[-1] if series else None

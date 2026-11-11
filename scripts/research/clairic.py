@@ -43,16 +43,6 @@ def _enabled(name, env):
     return (env.get(name) or "").strip() == "1"
 
 
-def dates_enabled(env=None):
-    import os
-    return _enabled("CLAIRIC_DATES_ENABLED", os.environ if env is None else env)
-
-
-def sanity_enabled(env=None):
-    import os
-    return _enabled("CLAIRIC_DATE_SANITY_ENABLED", os.environ if env is None else env)
-
-
 def today_et():
     return datetime.now(ZoneInfo("America/New_York")).date()
 
@@ -119,23 +109,6 @@ def fetch_report_date(pages, folder_date, env=None, opener=None):
             raise MissingCredentials() from exc
         raise ClairicError(exc.code) from exc
     return reply.get("date"), reply.get("confidence")
-
-
-def _report_date(payload):
-    if not isinstance(payload, dict):
-        raise ClairicError("bad_response")
-    if payload.get("success") is False:
-        raise ClairicError("api_error")
-    result = payload.get("result", payload)
-    if not isinstance(result, dict):
-        raise ClairicError("bad_response")
-    answers = result.get("answers")
-    if not isinstance(answers, dict):
-        raise ClairicError("bad_response")
-    report = answers.get("report_date") or {}
-    if not isinstance(report, dict):
-        raise ClairicError("bad_response")
-    return report.get("value"), report.get("confidence")
 
 
 def sanity_failure(iso, folder_date, today):

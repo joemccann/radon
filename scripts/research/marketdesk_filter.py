@@ -20,33 +20,6 @@ PIPELINE = "marketdesk"
 _PATH_ROOT = "/joe mccann/current"
 
 
-class SelectionError(RuntimeError):
-    """The SELECT reply had no candidates list (counts as a failed attempt, like intake's EvidenceError)."""
-
-
-class SelectUnavailable(RuntimeError):
-    """Every ladder rung was unavailable: the article parks without spending an attempt."""
-    transient = True
-
-
-def ladder_select(prompt: str, *, complete: Callable[..., Any] | None = None) -> dict:
-    """Legacy extraction helper; never called by all-suitable MarketDesk admission."""
-    from clients.model_ladder import ModelLadderExhausted, ModelResponseError, complete_text_json, safe_error_message
-    complete = complete or complete_text_json
-
-    def accept(obj) -> bool:
-        return isinstance(obj, dict) and isinstance(obj.get("candidates"), list)
-
-    try:
-        result = complete(prompt, max_tokens=4000, read_timeout=120.0, require_end_turn=True, accept=accept,
-                          log_prefix="marketdesk-select")
-    except ModelLadderExhausted as exc:
-        raise SelectUnavailable(safe_error_message(exc)) from None
-    except ModelResponseError as exc:
-        raise SelectionError(safe_error_message(exc)) from None
-    return result.data
-
-
 @dataclass
 class Decision:
     outcome: str                 # publish | held | dropped
@@ -87,8 +60,8 @@ def fingerprint_index(root, ledger_rows) -> dict:
 
 
 def decide(*, article_id: str, title: str, folders: list[str], folder_date: str, pages: dict, created,
-           summary: list[str], root, select: Callable[[str], Any], book_tickers: Callable[[], Any],
-           recent: list[dict], index: dict, note: dict | None = None, evidence_kind: str = "pdf") -> Decision:
+           summary: list[str], root, book_tickers: Callable[[], Any], index: dict,
+           note: dict | None = None) -> Decision:
     root = Path(root)
     note = note if isinstance(note, dict) else {}
     metadata = _metadata(article_id, title, folders)

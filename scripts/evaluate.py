@@ -612,11 +612,6 @@ def run_evaluations(
     return results
 
 
-def _run_single_eval(ticker: str, bankroll: float, price_history: List[Dict], flow_days: int = 5) -> EvaluationResult:
-    """Run evaluation for a single ticker with pre-fetched price data."""
-    return run_evaluation(ticker, bankroll=bankroll, price_history=price_history, flow_days=flow_days)
-
-
 def evaluate_ticker(
     ticker: str,
     bankroll: float = 1_200_000,

@@ -291,35 +291,6 @@ def _is_blank_actual(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def _canonical_print_number(value: Any) -> Optional[float]:
-    """Normalize a print figure so 209000, 209k, and 4.1% compare equal."""
-    if value is None or value == "" or value == ".":
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        if value != value or value in (float("inf"), float("-inf")):
-            return None
-        return float(value)
-    text = str(value).strip().replace(",", "").replace("%", "")
-    if not text:
-        return None
-    multiplier = 1.0
-    if text[-1] in ("K", "k"):
-        multiplier = 1_000.0
-        text = text[:-1]
-    elif text[-1] in ("M", "m"):
-        multiplier = 1_000_000.0
-        text = text[:-1]
-    try:
-        parsed = float(text)
-    except ValueError:
-        return None
-    if parsed != parsed or parsed in (float("inf"), float("-inf")):
-        return None
-    return parsed * multiplier
-
-
 def _coerce_numeric(value: Any) -> Any:
     if value is None or value == "" or value == ".":
         return None
