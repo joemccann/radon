@@ -1166,7 +1166,9 @@ def _source_tree(tmp_path):
     """A private copy of the tree install.sh copies from: scripts/runner plus the lib helpers."""
     root = tmp_path / "clone"
     shutil.copytree(REPO / "scripts" / "runner", root / "scripts" / "runner")
-    for name in _LIB:
+    src = (REPO / "scripts" / "runner" / "install.sh").read_text(encoding="utf-8")
+    body = src[src.index('GATEWAY_FILES="') + len('GATEWAY_FILES="'):]
+    for name in (*_LIB, *body[:body.index('"')].split()):
         (root / "scripts" / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "scripts" / name, root / "scripts" / name)
     for path in [root, *root.rglob("*")]:

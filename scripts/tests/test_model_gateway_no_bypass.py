@@ -17,6 +17,7 @@ NON_APP = {
     "scripts/nvidia_rate_limit.py": "gateway-only quota primitive; all external imports and proxy CLI calls are forbidden",
     "scripts/subscription_tokens.py": "dedicated provider credential keeper behind the gateway",
     "scripts/subscription_vault.py": "dedicated credential broker behind the gateway",
+    "scripts/runner/install.sh": "root installer that copies the Mac-local gateway's own source (GATEWAY_FILES); runners reach it only by socket",
 }
 
 
