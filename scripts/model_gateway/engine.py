@@ -193,7 +193,9 @@ _ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
 # VPS, where the Linux token-file path above applies.
 _ANTIGRAVITY_KEYCHAIN_HOME_ENV = "RADON_ANTIGRAVITY_KEYCHAIN_HOME"
 _ANTIGRAVITY_KEYCHAIN = Path("Library") / "Keychains" / "radon-agy.keychain-db"
-_ANTIGRAVITY_KEYCHAIN_SERVICE = "antigravity"
+# macOS agy 1.3.1 writes service "gemini", account "antigravity" (dump-keychain).
+_ANTIGRAVITY_KEYCHAIN_SERVICE = "gemini"
+_ANTIGRAVITY_KEYCHAIN_ACCOUNT = "antigravity"
 _SECURITY_BIN = "/usr/bin/security"
 # Mirrors subscription_tokens.CLI_ENV_ALLOWLIST: everything a third-party
 # agent CLI may inherit, and nothing else. PATH is added because agy invokes
@@ -509,7 +511,8 @@ def _antigravity_keychain_grant(home: Path) -> bool:
     if keychain is None:
         return False
     try:
-        found = subprocess.run([_SECURITY_BIN, "find-generic-password", "-s", _ANTIGRAVITY_KEYCHAIN_SERVICE, str(keychain)],
+        found = subprocess.run([_SECURITY_BIN, "find-generic-password", "-s", _ANTIGRAVITY_KEYCHAIN_SERVICE,
+                                "-a", _ANTIGRAVITY_KEYCHAIN_ACCOUNT, str(keychain)],
                                env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
                                capture_output=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
