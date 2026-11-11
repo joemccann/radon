@@ -97,10 +97,6 @@ Problems:
 | NAV history tracking | `scripts/ib_sync.py` → `data/nav_history.jsonl` | Appends daily NAV on each portfolio sync |
 | IB NAV cache | `data/nav_history_ib.json` | Cached Flex EquitySummaryInBase data |
 | IB TWR cache | `data/ib_twr_series.json` | Scraped TWR from portal (58 points) |
-| Performance script | `scripts/portfolio_performance.py` | NAV-based primary path + reconstruction fallback |
-| Parse option ID | `portfolio_performance.py:parse_option_id()` | OCC option ID parser |
-| Fill mark seeding | `portfolio_performance.py:extract_fill_marks()` | Execution prices as mark fallback |
-| Portfolio reconciliation | `portfolio_performance.py:_build_portfolio_positions()` | Synthetic trades for pre-blotter positions |
 
 ## Recommended Future Approach
 

@@ -205,7 +205,6 @@ Understanding where time goes when Gateway is unreachable:
 
 Scripts that need longer timeouts pass them explicitly:
 - `ib_place_order.py`: `timeout=10` (order placement must be reliable)
-- `portfolio_performance.py`: `timeout=5`
 - `evaluate.py`: `timeout=8`
 
 ---
