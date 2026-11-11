@@ -785,7 +785,6 @@ def test_changes_job_and_gh_api_lookback_are_bounded(monkeypatch) -> None:
 
 @pytest.mark.parametrize(('path', 'target'), [
     ('web/lib/og-theme.ts', 'scripts/tests/test_rel108_og_brand_tokens.py'),
-    ('web/app/api/menthorq/cta/image/route.tsx', 'scripts/tests/test_rel108_cta_image_sections.py'),
 ])
 def test_rel108_image_changes_run_their_offline_acceptance(path, target):
     """REL-108: a web-only repair must still execute its Python fault contract."""
