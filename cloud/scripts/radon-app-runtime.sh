@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|stage-model-clients <sha>|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -424,6 +424,25 @@ cmd_install_model_clients() {
   tag="$(image_tag)" || return $?
   image="$(model_gateway_image)" || return $?
   "$PYTHON" -I /usr/local/lib/radon/model_clients.py "$DOCKER" "$image" "$tag"
+}
+
+# Deploy calls this after the exact-SHA pull while the current release still
+# serves. It prepares the target's clients without selecting them, so the
+# export (~90s on a changed gateway payload) is not spent inside the
+# stop-clean -> restart-managed outage. install-model-clients then only
+# selects a staged tree whose receipt names this exact local image id.
+cmd_stage_model_clients() {
+  local target="$1" image
+  [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "radon-app-runtime: stage-model-clients takes a 40-hex release SHA" >&2
+    exit 64
+  }
+  image="ghcr.io/joemccann/radon-model-gateway:${target}"
+  if ! image_in_local_store "$image"; then
+    echo "radon-app-runtime: exact gateway image ${image} is not local" >&2
+    return 69
+  fi
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py stage "$DOCKER" "$image" "$target"
 }
 
 cmd_recover_model_clients() {
@@ -1573,6 +1592,10 @@ case "$1" in
   install-model-clients)
     [[ $# -eq 1 ]] || usage
     cmd_install_model_clients
+    ;;
+  stage-model-clients)
+    [[ $# -eq 2 ]] || usage
+    cmd_stage_model_clients "$2"
     ;;
   recover-model-clients)
     [[ $# -eq 1 ]] || usage
