@@ -456,7 +456,7 @@ class CashFlowSyncHandler(BaseHandler):
         self._record_failure(self._utc_now_iso(), message)
 
     def _classify_failure(self, message: str, exc: Optional[BaseException]) -> str:
-        """throttle | permanent | config | lockout | soft.
+        """throttle | permanent | config | lockout | preflight_embargo | soft.
 
         Prefers the typed exception carrying the subprocess's exit code.
         The stderr substring match is retained ONLY as a fallback for a
@@ -465,7 +465,7 @@ class CashFlowSyncHandler(BaseHandler):
         if isinstance(exc, FlexThrottleError):
             return "throttle"
         flex_class = getattr(exc, "flex_class", None)
-        if flex_class in ("throttle", "permanent", "config", "lockout"):
+        if flex_class in ("throttle", "permanent", "config", "lockout", "preflight_embargo"):
             return flex_class
         if flex_class is not None:
             return "soft"

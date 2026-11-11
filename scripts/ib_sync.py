@@ -525,7 +525,6 @@ def _merge_covered_call_groups(groups: dict) -> dict:
                 # Use the option expiry as the group key (more informative than N/A)
                 merged[sc_key] = combined
                 del merged[stk_key]
-                total_shares -= shares_needed
                 break  # Only merge one short call group per stock group
     
     return merged

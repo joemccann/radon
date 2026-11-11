@@ -917,15 +917,6 @@ class IBClient:
         self._require_connection()
         self._ib.reqMarketDataType(data_type)
 
-    def get_option_chain(self, symbol: str, exchange: str = "", sec_type: str = "STK") -> list:
-        """Return option chain parameters for an underlying.
-
-        Returns a list of ``OptionChain`` objects with expirations, strikes, etc.
-        """
-        self._require_connection()
-        # IB needs underlying conId — qualify first if needed
-        return self._ib.reqSecDefOptParams(symbol, exchange, sec_type, 0)
-
     def qualify_contract(self, contract: Any) -> Any:
         """Qualify a single contract, filling in IB-assigned fields.
 
