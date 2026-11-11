@@ -174,8 +174,6 @@ const RegimePanel = dynamic(() => import("./RegimePanel"), {
   loading: () => <InstrumentSkeleton testId="regime-panel-skeleton" />,
 });
 
-/* ─── Share P&L helpers ────────────────────────────────── */
-
 /** Build a human-readable description from an ExecutedOrder.
  *  e.g. "Long AAOI 2026-04-17 Call $45.00" */
 /** Build a human-readable description from an ExecutedOrder.
@@ -600,7 +598,6 @@ export function groupExecutedOrders(
   const cancelled = fills.filter((f) => f.side === "CANCELLED");
   const real = fills.filter((f) => f.side !== "CANCELLED");
 
-  // ── Close detection ────────────────────────────────────────────────────
   // IB's commission report (which carries realizedPNL) arrives async,
   // sometimes seconds after the execution event. When it hasn't landed yet
   // realizedPNL is null on the fill, and the naive "realizedPNL > 0" check
@@ -965,8 +962,6 @@ function blotterShareData(t: BlotterTrade): SharePnlData {
     time: lastExec?.time ? new Date(lastExec.time).toLocaleString() : "",
   };
 }
-
-/* ─── Flow tables ───────────────────────────────────────── */
 
 type FlowPosKey = "ticker" | "position" | "flow_label" | "strength" | "note";
 
@@ -1344,8 +1339,6 @@ function FlowSectionsBody() {
     </>
   );
 }
-
-/* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
 
@@ -2085,8 +2078,6 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   );
 }
 
-/* ─── Non-table sections ────────────────────────────────── */
-
 type DiscoverSortKey = "ticker" | "score" | "dp_direction" | "dp_strength" | "dp_buy_ratio" | "options_bias" | "alerts" | "total_premium" | "sweeps" | "sector";
 
 const discoverExtract = (item: DiscoverCandidate, key: DiscoverSortKey): string | number | null => {
@@ -2748,8 +2739,6 @@ function JournalSections() {
     </>
   );
 }
-
-/* ─── Orders tables ────────────────────────────────────── */
 
 type OpenOrderKey =
   | "symbol"
@@ -4432,8 +4421,6 @@ export function HistoricalTradesSection({
     </div>
   );
 }
-
-/* ─── Root switch ───────────────────────────────────────── */
 
 type WorkspaceSectionsProps = {
   section: WorkspaceSection;

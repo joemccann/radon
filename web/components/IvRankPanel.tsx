@@ -158,7 +158,6 @@ export default function IvRankPanel() {
 
   return (
     <>
-      {/* ── Summary strip ─────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">

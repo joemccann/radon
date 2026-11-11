@@ -124,8 +124,6 @@ def fetch_health() -> dict:
     return {"auth_state": "unknown"}
 
 
-# ── helpers ────────────────────────────────────────────────────────
-
 def _ib_dependent(outcome: CheckOutcome) -> bool:
     return services_mod.requires_ib(outcome.service)
 
@@ -297,8 +295,6 @@ def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
         return f"{head} Approve on phone or POST /ib/reset-backoff."
     return f"{head} Gateway is down. Recover with radon restart."
 
-
-# ── public entry point ────────────────────────────────────────────
 
 def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -> DispatchSummary:
     """Replacement for the per-outcome dispatch loop in __main__.

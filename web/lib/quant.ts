@@ -8,8 +8,6 @@
 
 import { presetRange, RANGE_PRESETS, type RangePreset, type RangePresetSlug } from "./historyRange";
 
-/* ─── Registry mirror ───────────────────────────────────── */
-
 /**
  * One row per `QuantStrategy` in scripts/quant/strategies.py, same order.
  * Pinned by tests/quant-registry-pin.test.ts, which parses the Python file.
@@ -34,8 +32,6 @@ export function isQuantStrategyKey(key: string): key is QuantStrategyKey {
 export function quantLabel(key: string): string {
   return QUANT_STRATEGIES.find((s) => s.key === key)?.label ?? key;
 }
-
-/* ─── Payload types ─────────────────────────────────────── */
 
 export interface QuantMetrics {
   sharpe: number | null;
@@ -113,8 +109,6 @@ export function QUANT_MISSING(strategy: string): QuantData {
   return { strategy, missing: true, run: null, targets: null, orders: null };
 }
 
-/* ─── Formatting ────────────────────────────────────────── */
-
 function finite(x: number | null | undefined): x is number {
   return x != null && Number.isFinite(x);
 }
@@ -153,8 +147,6 @@ export function formatPrice(x: number | null | undefined): string {
   return x.toFixed(2);
 }
 
-/* ─── Chart rows ────────────────────────────────────────── */
-
 export interface QuantEquityRow {
   date: string;
   equity: number;
@@ -178,8 +170,6 @@ export function buildEquityRows(run: Pick<QuantRun, "dates" | "equity"> | null |
   return rows;
 }
 
-/* ─── Range presets ─────────────────────────────────────── */
-
 export type QuantRangeSlug = Extract<RangePresetSlug, "1y" | "3y" | "5y" | "all">;
 
 export const QUANT_RANGE_PRESETS: ReadonlyArray<RangePreset> = RANGE_PRESETS.filter((p) =>
@@ -189,8 +179,6 @@ export const QUANT_RANGE_PRESETS: ReadonlyArray<RangePreset> = RANGE_PRESETS.fil
 export function quantPresetRange(slug: QuantRangeSlug, total: number): [number, number] {
   return presetRange(slug, total);
 }
-
-/* ─── Targets ───────────────────────────────────────────── */
 
 /** sign(weight) x floor(|notional| / close); null without a notional or a usable close. */
 export function estimatedShares(row: Pick<QuantTargetRow, "weight" | "notional" | "close">): number | null {

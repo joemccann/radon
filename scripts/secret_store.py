@@ -154,8 +154,6 @@ class SecretStore:
         self._key_fingerprint = hashlib.sha256(key).hexdigest()
         self._aesgcm = AESGCM(key)
 
-    # -- key material ------------------------------------------------------
-
     def _load_or_create_key(self) -> bytes:
         cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
         if cred_dir:
@@ -244,8 +242,6 @@ class SecretStore:
                 "delete the DB — refusing to mint a new key over them"
             )
 
-    # -- connection --------------------------------------------------------
-
     def _connect(self) -> sqlite3.Connection:
         existed = self._db_path.is_file()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -310,8 +306,6 @@ class SecretStore:
             (self._key_fingerprint,),
         )
 
-    # -- validation --------------------------------------------------------
-
     @staticmethod
     def _check_name(name: Any) -> str:
         if not isinstance(name, str) or not _NAME_RE.match(name):
@@ -337,8 +331,6 @@ class SecretStore:
         if not isinstance(actor, str) or not actor.strip():
             raise SecretValidationError("actor must be a non-empty string")
         return actor.strip()[:_ACTOR_MAX_LEN]
-
-    # -- CRUD ----------------------------------------------------------------
 
     def set_secret(self, name: str, value: str, actor: str) -> None:
         self.set_secrets({name: value}, actor)

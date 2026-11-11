@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 for _path in (_PROJECT_DIR, _SCRIPT_DIR):
@@ -291,8 +290,6 @@ def build_current(
     }
 
 
-# ── gateway gate ──────────────────────────────────────────────────
-
 def gateway_auth_state() -> Optional[str]:
     """FastAPI /health ib_gateway.auth_state, or None when unreachable."""
     from utils.ib_preflight import ib_auth_state
@@ -334,8 +331,6 @@ def _real_ib_fetch(duration: str) -> dict[str, list[dict[str, Any]]]:
         client.disconnect()
     return legs
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _history_from_json() -> list[dict[str, Any]]:
     """data/iv_spread.json fallback series as [{date, spx_iv, ndx_iv}], ascending."""
@@ -498,8 +493,6 @@ def _write_db(
         print(f"[iv-spread] heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def _market_status(now: datetime) -> str:
     try:
         from utils.market_calendar import market_state
@@ -549,8 +542,6 @@ def build_payload(
         ],
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _validate_legs(raw: Any) -> dict[str, list[dict[str, Any]]]:
     """Coerce a fetcher result to {"SPX": [{date, iv}], "NDX": [...]}; a leg
@@ -681,8 +672,6 @@ def run(
     persist_json(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

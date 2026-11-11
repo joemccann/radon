@@ -53,8 +53,6 @@ type OrderTabProps = {
   tickerPriceData?: PriceData | null;
 };
 
-/* ─── Convert PortfolioData to NakedShortPortfolio ─── */
-
 function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): NakedShortPortfolio {
   if (!portfolio) return { positions: [] };
   return {
@@ -274,8 +272,6 @@ export function buildSingleLegOrderPayload(params: {
     ...priceFields,
   };
 }
-
-/* ─── New order form ─── */
 
 type OrderAction = "BUY" | "SELL";
 
@@ -1121,8 +1117,6 @@ function ComboOrderForm({
     </div>
   );
 }
-
-/* ─── Main OrderTab ─── */
 
 export default function OrderTab({ ticker, position, portfolio, prices, openOrders = [], tickerPriceData }: OrderTabProps) {
   const isCombo = position != null && position.legs.length > 1 && position.structure_type !== "Stock";

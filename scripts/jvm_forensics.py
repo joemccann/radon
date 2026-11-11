@@ -106,8 +106,6 @@ class _Capture:
         self.deadline = _Deadline(budget_secs, clock)
         self.result = CaptureResult()
 
-    # -- bounded primitives ---------------------------------------------------
-
     def _run(self, step: str, cmd: list[str]) -> Optional[str]:
         """Run one bounded subprocess. Returns stdout, or None on any failure
         (recorded in the manifest, never raised)."""
@@ -139,8 +137,6 @@ class _Capture:
             self._write_private(self.result.capture_dir / filename, content)
         except OSError as exc:
             self.result.steps[step] = f"error:write:{exc}"
-
-    # -- steps ----------------------------------------------------------------
 
     def _make_capture_dir(self) -> bool:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -218,8 +214,6 @@ class _Capture:
                 shutil.rmtree(stale, ignore_errors=True)
         except OSError as exc:
             LOG.warning("forensics prune failed: %s", exc)
-
-    # -- orchestration ----------------------------------------------------------
 
     def run(self) -> CaptureResult:
         if not self._make_capture_dir():

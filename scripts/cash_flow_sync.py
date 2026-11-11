@@ -113,7 +113,6 @@ _SEND_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStateme
 _GET_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
 
 
-# ── Exit codes ─────────────────────────────────────────────────────────
 # One code per failure CLASS. The daemon handler branches on these; the
 # previous contract was a substring search over the last three lines of
 # stderr, which silently routed permanent errors into the retry lane.
@@ -882,7 +881,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
 
-    # ── Acquire the statement ──────────────────────────────────────────
     try:
         if args.from_file:
             xml_text = _read_statement_file(args.from_file)
@@ -932,7 +930,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY
 
-    # ── Parse ──────────────────────────────────────────────────────────
     try:
         rows = parse_cash_transactions(xml_text)
         shape = describe_statement_shape(xml_text)
@@ -975,7 +972,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return EXIT_OK
 
-    # ── Write ──────────────────────────────────────────────────────────
     # A write failure must NEVER be laundered into another Flex request:
     # the fetch already succeeded, so the retry replays the statement.
     try:

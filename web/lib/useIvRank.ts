@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { IvRankData } from "./ivrank";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the SPY 1M IV series updates once per session
 // (radon-ivrank.timer runs scripts/fetch_ivrank.py directly), so there is no
 // manual-scan POST and an hourly poll is already generous. Types + pure

@@ -44,7 +44,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -57,7 +56,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 DATA_DIR = _PROJECT_DIR / "data"
 
 SIDE_BUY = "BUY"
@@ -79,8 +77,6 @@ CREATE TABLE IF NOT EXISTS informed_flow (
 _CONGRESS_BUY_TOKENS = ("purchase", "buy", "exchange")
 _CONGRESS_SELL_TOKENS = ("sale", "sell")
 
-
-# ── normalization ─────────────────────────────────────────────────
 
 def _et_today(now: datetime) -> date:
     """The calendar day in ET for the given instant."""
@@ -288,8 +284,6 @@ def has_informed_activity(payload: dict[str, Any]) -> bool:
     return False
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _cache_path(ticker: str) -> Path:
     return DATA_DIR / "informed_flow" / f"{ticker.upper()}.json"
 
@@ -350,8 +344,6 @@ def run(
         )
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     ticker = payload["ticker"]

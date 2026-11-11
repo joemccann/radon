@@ -59,10 +59,6 @@ from requests.exceptions import ConnectionError as ReqConnectionError, Timeout a
 
 logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════════════════════════════
-# Exception Hierarchy
-# ══════════════════════════════════════════════════════════════════════
-
 
 class EquiblesAPIError(Exception):
     """Base exception for all Equibles API errors."""
@@ -198,11 +194,6 @@ def _to_percent(value: Any) -> Any:
     return value * 100
 
 
-# ══════════════════════════════════════════════════════════════════════
-# Client
-# ══════════════════════════════════════════════════════════════════════
-
-
 class EquiblesClient:
     """Typed Equibles REST client with bounded retry and billed-request accounting."""
 
@@ -256,8 +247,6 @@ class EquiblesClient:
 
     def __exit__(self, *exc) -> None:
         self.close()
-
-    # ── internal request layer ─────────────────────────────────────
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> dict:
         """Authenticated GET with bounded retry, error mapping, and normalization."""
@@ -338,8 +327,6 @@ class EquiblesClient:
         """Query params with every None-valued key dropped."""
         return {k: v for k, v in kwargs.items() if v is not None}
 
-    # ── pagination ─────────────────────────────────────────────────
-
     def paginate(
         self,
         fetcher: Callable[..., dict],
@@ -376,9 +363,7 @@ class EquiblesClient:
             has_more=has_more,
         )
 
-    # ══════════════════════════════════════════════════════════════════
     # F1 — ATS / OFF-EXCHANGE VENUE SHARE
-    # ══════════════════════════════════════════════════════════════════
 
     def get_prices(
         self,
@@ -450,9 +435,7 @@ class EquiblesClient:
         )
         return self._get("short-volume/largest", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # F2 — SHORT CROWDING / SQUEEZE
-    # ══════════════════════════════════════════════════════════════════
 
     def get_short_interest(
         self,
@@ -503,9 +486,7 @@ class EquiblesClient:
         )
         return self._get("short-squeeze-scores", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # F3 — 13F SMART MONEY
-    # ══════════════════════════════════════════════════════════════════
 
     def get_institutional_holders(
         self,
@@ -620,9 +601,7 @@ class EquiblesClient:
         )
         return self._get("consensus-holdings", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # F4 — CFTC COT POSITIONING
-    # ══════════════════════════════════════════════════════════════════
 
     def get_cftc_contracts(
         self, *, query: Optional[str] = None, alias: Optional[str] = None
@@ -651,9 +630,7 @@ class EquiblesClient:
         params = self._build_params(category=category)
         return self._get("cftc/positions/latest", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # F5 — FILING FORENSICS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_proposed_sales(
         self,
@@ -701,11 +678,6 @@ class EquiblesClient:
     def get_stock_screener(self, **filters: Any) -> dict:
         """GET /screener/stocks - market-wide screen; filters pass through in camelCase."""
         return self._get("screener/stocks", params=self._build_params(**filters))
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Helpers
-# ══════════════════════════════════════════════════════════════════════
 
 
 def _extract_rows(payload: dict) -> List[dict]:

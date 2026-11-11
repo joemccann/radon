@@ -25,9 +25,6 @@ ROOT = Path(__file__).resolve().parent.parent
 STRATEGIES_PATH = ROOT / "data" / "strategies.json"
 
 
-# ── Strategy Classification ─────────────────────────────────────────────
-
-
 STRATEGY_IDS = [
     "dark-pool-flow",
     "leap-iv-mispricing",
@@ -99,9 +96,6 @@ def classify_trade(trade: Dict[str, Any]) -> str:
     return "unclassified"
 
 
-# ── Edge Type Classification ─────────────────────────────────────────────
-
-
 def classify_edge_type(trade: Dict[str, Any]) -> str:
     """Classify the edge source of a trade."""
     edge = trade.get("edge_analysis") or {}
@@ -134,9 +128,6 @@ def classify_edge_type(trade: Dict[str, Any]) -> str:
             return "other_edge"
 
     return "none"
-
-
-# ── Attribution Data Structures ──────────────────────────────────────────
 
 
 @dataclass
@@ -185,9 +176,6 @@ class RiskAttribution:
     win_rate: Optional[float] = None
     winners: int = 0
     losers: int = 0
-
-
-# ── Core Attribution Logic ───────────────────────────────────────────────
 
 
 def _is_closed(trade: Dict[str, Any]) -> bool:
@@ -254,7 +242,6 @@ def build_attribution(
     # Add 'unclassified' to names
     all_names = {**strategy_names, "unclassified": "Unclassified"}
 
-    # ── Classify all trades ──
     classified: List[Dict[str, Any]] = []
     for trade in trades:
         classified.append({
@@ -385,7 +372,6 @@ def build_attribution(
         if ra.closed_count > 0:
             ra.win_rate = ra.winners / ra.closed_count
 
-    # ── Assemble payload ──
     total_realized = sum(t["_pnl"] for t in classified if t["_is_closed"])
     total_trades = len(classified)
     closed_trades = sum(1 for t in classified if t["_is_closed"])

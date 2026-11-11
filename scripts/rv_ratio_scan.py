@@ -26,7 +26,6 @@ from typing import Any
 
 import numpy as np
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -79,8 +78,6 @@ RV_DECIMALS = 2
 
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 
-
-# ── scan math ─────────────────────────────────────────────────────
 
 def align_sessions(
     asset: dict[str, float], bench: dict[str, float]

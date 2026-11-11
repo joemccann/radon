@@ -568,9 +568,7 @@ async def verify_clerk_bearer(request: Request) -> dict:
     return payload
 
 
-# ---------------------------------------------------------------------------
 # API key auth — scoped to read-only historical/contract endpoints
-# ---------------------------------------------------------------------------
 
 API_KEY_ALLOWED_PATHS = frozenset({
     "/contract/qualify",

@@ -28,13 +28,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-# ── constants ─────────────────────────────────────────────────────
 INDEX_TICKERS = {"SPX", "NDX"}
 BUCKET_SIZE_INDEX = 25      # $25 buckets for SPX/NDX
 BUCKET_SIZE_ETF = 5         # $5 buckets for SPY/QQQ
@@ -87,10 +85,6 @@ def _bucket_size_for(ticker: str, spot: float) -> int:
         return BUCKET_SIZE_ETF
     return max(1, round(spot * 0.005))
 
-
-# ══════════════════════════════════════════════════════════════════
-# Data Fetching
-# ══════════════════════════════════════════════════════════════════
 
 def _get_uw_client():
     from clients.uw_client import UWClient
@@ -193,10 +187,6 @@ def fetch_vol_pc(client, ticker: str) -> Optional[float]:
         print(f"  Vol P/C fetch failed: {exc}", file=sys.stderr)
         return None
 
-
-# ══════════════════════════════════════════════════════════════════
-# MenthorQ Integration
-# ══════════════════════════════════════════════════════════════════
 
 # Map UW tickers to MenthorQ dashboard slugs
 _MQ_TICKER_MAP: Dict[str, str] = {
@@ -390,10 +380,6 @@ def fetch_spot_price(client, ticker: str) -> Optional[float]:
 
     return None
 
-
-# ══════════════════════════════════════════════════════════════════
-# GEX Computation
-# ══════════════════════════════════════════════════════════════════
 
 def bucket_profile(
     strike_data: List[Dict[str, Any]],
@@ -631,10 +617,6 @@ def compute_days_above_flip(
     return count
 
 
-# ══════════════════════════════════════════════════════════════════
-# History Building
-# ══════════════════════════════════════════════════════════════════
-
 def build_history_from_cache(cache_path: Path) -> List[Dict[str, Any]]:
     """Load prior history from cache file for flip migration and day counting."""
     if not cache_path.exists():
@@ -659,10 +641,6 @@ def merge_history(
     return sorted_entries[-max_days:]
 
 
-# ══════════════════════════════════════════════════════════════════
-# Market Hours
-# ══════════════════════════════════════════════════════════════════
-
 def is_market_open() -> bool:
     """Check if US equity markets are currently open."""
     import zoneinfo
@@ -681,10 +659,6 @@ def is_market_open() -> bool:
     minutes = now_et.hour * 60 + now_et.minute
     return 9 * 60 + 30 <= minutes <= 16 * 60
 
-
-# ══════════════════════════════════════════════════════════════════
-# Main Build
-# ══════════════════════════════════════════════════════════════════
 
 def build_gex_output(
     ticker: str,
@@ -820,9 +794,7 @@ def build_gex_output(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
 # Persist-then-Enrich pipeline
-# ══════════════════════════════════════════════════════════════════
 #
 # Old order: fetch UW → fetch MQ (≤60s Playwright) → persist.
 # New order: fetch UW → persist (UW-only) → fetch MQ → re-persist if MQ
@@ -882,10 +854,6 @@ def run_persist_then_enrich(
     persist_snapshot(ticker, enriched, cache_path)
     return enriched
 
-
-# ══════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(

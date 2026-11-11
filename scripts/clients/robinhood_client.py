@@ -525,8 +525,6 @@ class RobinhoodTokenStore:
             return None
         return self.access_token
 
-    # ── persistence ──────────────────────────────────────────────
-
     def _tmp_path(self) -> Path:
         return self._path.with_name(self._path.name + ".tmp")
 
@@ -871,8 +869,6 @@ class RobinhoodClient:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    # ── transport ────────────────────────────────────────────────
-
     def _secrets(self) -> List[str]:
         secrets = [self._explicit_token] if self._explicit_token else []
         if self._store is not None:
@@ -1023,8 +1019,6 @@ class RobinhoodClient:
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self._initialized = True
 
-    # ── tools ────────────────────────────────────────────────────
-
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         """Call one documented READ tool. Anything else is refused here,
         before any network I/O — Radon never places, cancels, or modifies
@@ -1051,8 +1045,6 @@ class RobinhoodClient:
             except ValueError:
                 return text
         return result
-
-    # ── convenience reads ────────────────────────────────────────
 
     def get_equity_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:
         """Batched quotes, chunked at the documented 20-symbol ceiling."""

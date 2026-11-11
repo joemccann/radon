@@ -25,7 +25,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 for _path in (_PROJECT_DIR, _SCRIPT_DIR):
@@ -70,7 +69,6 @@ STATUS_OK = "ok"
 STATUS_DEGRADED_UW = "degraded_uw"
 STATUS_STALE_SOURCE = "stale_source"
 
-# ── pure math ─────────────────────────────────────────────────────
 
 def rank_window(values: list[float]) -> Optional[float]:
     """IV rank of the last value within its window; None on a degenerate window."""
@@ -226,8 +224,6 @@ def map_uw_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-# ── gateway gate ──────────────────────────────────────────────────
-
 def gateway_auth_state() -> Optional[str]:
     """FastAPI /health ib_gateway.auth_state, or None when unreachable."""
     from utils.ib_preflight import ib_auth_state
@@ -348,8 +344,6 @@ def _real_uw_check() -> Optional[dict[str, Any]]:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     return {"date": data["date"], "iv_rank": float(data["iv_rank"])}
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _history_from_json() -> list[dict[str, Any]]:
     """data/ivrank.json fallback series, ascending."""
@@ -475,8 +469,6 @@ def _write_db(
         print(f"[ivrank] db cache non-fatal: {exc}", file=sys.stderr)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def _market_status(now: datetime) -> str:
     try:
         from utils.market_calendar import market_state
@@ -582,8 +574,6 @@ def build_payload(
         ],
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _fetch_rows(
     ib_fetch: Optional[Callable[[str], list[dict[str, Any]]]],
@@ -730,8 +720,6 @@ def run(
     finally:
         close_uw_session()
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

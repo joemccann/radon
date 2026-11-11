@@ -29,8 +29,6 @@ export const BREAKDOWN_EXIT = 0.3;
 /** Band edge between LOOSENING and COUPLED. */
 export const LOOSENING_FLOOR = 0.5;
 
-/* ─── Payload types ──────────────────────────────────── */
-
 export type VixcorStatus = "ok" | "holding" | "stale_parent" | "missing";
 export type VixcorRegime = "DECOUPLED" | "LOOSENING" | "COUPLED";
 
@@ -137,8 +135,6 @@ export interface VixcorData {
   series: VixcorEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Signed two-decimal correlation: "+0.01", "-0.53"; "---" when unavailable. */
 export function formatCorr(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -164,8 +160,6 @@ export function formatDrawup(v: number | null | undefined): string {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
 
-/* ─── Regime bands ───────────────────────────────────── */
-
 /**
  * Strict inequalities throughout: exactly BREAKDOWN_TRIGGER is not a trigger
  * and exactly LOOSENING_FLOOR is already coupled.
@@ -186,8 +180,6 @@ export function vixcorRegimeColor(regime: VixcorRegime | null | undefined): stri
   if (regime === "LOOSENING") return "var(--warning)";
   return "var(--text-muted)";
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface VixcorChartRow {
   date: string;
@@ -215,8 +207,6 @@ export function buildVixcorChartRows(
     episode: entry.episode,
   }));
 }
-
-/* ─── Episode helpers ────────────────────────────────── */
 
 /** The live unresolved episode, or null when the last one has recovered. */
 export function openEpisode(

@@ -4,8 +4,6 @@ import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { SkewData } from "./skew";
 import { MarketState } from "./useMarketHours";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the centralized writer owns UW calls. Browsers read the shared
 // snapshot every minute during RTH without amplifying provider traffic.
 const SKEW_SYNC_CONFIG = {

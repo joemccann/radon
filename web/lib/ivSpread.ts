@@ -134,8 +134,6 @@ export function ivSpreadRegimeColor(regime: IvSpreadRegime | null | undefined): 
   return "var(--text-muted)";
 }
 
-/* ─── Chart rows ─────────────────────────────────────── */
-
 export interface IvSpreadChartRow {
   date: string;
   spx_iv: number;

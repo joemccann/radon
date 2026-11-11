@@ -29,8 +29,6 @@ type VcgPanelProps = {
   marketState?: MarketState;
 };
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function fmtZ(v: number | null): string {
   if (v == null) return "---";
   return v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
@@ -132,8 +130,6 @@ function vvixSeverityDesc(sev: string): string {
   }
 }
 
-/* ─── Sortable history ───────────────────────────────── */
-
 type VcgSortCol = "date" | "vcg" | "vcg_adj" | "residual" | "beta1" | "beta2" | "vix" | "vvix" | "credit";
 type SortDir = "asc" | "desc";
 
@@ -157,8 +153,6 @@ function sortHistory(
   });
   return sorted;
 }
-
-/* ─── Main component ─────────────────────────────────── */
 
 export default function VcgPanel({ marketState }: VcgPanelProps) {
   const { data, loading, error, lastSync } = useVcg(marketState ?? null);
@@ -279,7 +273,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
   return (
     <>
       {error && <RequestError error={error} retainedData />}
-      {/* ── Signal strip ──────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -374,7 +367,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
         </div>
       </div>
 
-      {/* ── Signal Detail + Attribution ───────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">

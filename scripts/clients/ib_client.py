@@ -42,10 +42,6 @@ from utils.outcome_metrics import count_operation
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
-# ---------------------------------------------------------------------------
-# Exception hierarchy
-# ---------------------------------------------------------------------------
-
 
 class IBError(Exception):
     """Base exception for all IB client errors."""
@@ -75,9 +71,7 @@ class IBContractError(IBError):
     """Raised when contract qualification or lookup fails."""
 
 
-# ---------------------------------------------------------------------------
 # Client ID Range Allocation
-# ---------------------------------------------------------------------------
 # IB allows client IDs 0-999. We partition the space into non-overlapping
 # zones so persistent services and on-demand scripts never collide.
 #
@@ -270,11 +264,6 @@ def bind_event(event: Any, handler: Callable) -> Callable[[], None]:
     return unbind
 
 
-# ---------------------------------------------------------------------------
-# IBClient
-# ---------------------------------------------------------------------------
-
-
 class IBClient:
     """High-level Interactive Brokers API client.
 
@@ -310,8 +299,6 @@ class IBClient:
         # Wire up error callback
         self._ib.errorEvent += self._on_error
 
-    # -- properties ---------------------------------------------------------
-
     @property
     def ib(self) -> IB:
         """Return the underlying ``ib_insync.IB`` instance."""
@@ -321,8 +308,6 @@ class IBClient:
     def failed_contracts(self) -> Set[Any]:
         """Return the set of contracts that returned invalid from IB."""
         return self._failed_contracts
-
-    # -- connection lifecycle -----------------------------------------------
 
     def connect(
         self,
@@ -476,15 +461,11 @@ class IBClient:
         """Return ``True`` if connected to IB."""
         return self._ib.isConnected()
 
-    # -- context manager ----------------------------------------------------
-
     def __enter__(self) -> "IBClient":
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.disconnect()
-
-    # -- connection guard ---------------------------------------------------
 
     def _require_connection(self) -> None:
         """Raise if not connected."""
@@ -529,8 +510,6 @@ class IBClient:
                 )
                 return False
         return bool(predicate())
-
-    # -- error handling -----------------------------------------------------
 
     def _on_error(self, reqId: Any, errorCode: Any, errorString: str, contract: Any = None) -> None:
         """Handle IB error/warning callbacks.
@@ -584,7 +563,6 @@ class IBClient:
         self._last_error = (code, errorString)
         self.logger.error("IB error %d: %s", code, errorString)
 
-    # -- subscription management --------------------------------------------
     #
     # NOTE (REL-014): IBClient deliberately has NO auto-reconnect handler on
     # disconnectedEvent. Recovery is owned by higher layers: FastAPI pool
@@ -596,8 +574,6 @@ class IBClient:
         """Clear all tracked subscriptions."""
         self._subscriptions.clear()
         self.logger.debug("Cleared all tracked subscriptions")
-
-    # -- portfolio operations -----------------------------------------------
 
     def get_positions(self, refresh: bool = True) -> list:
         """Return current positions.
@@ -705,8 +681,6 @@ class IBClient:
             self._ib.cancelPnLSingle(account, "", con_id)
         except Exception:
             pass  # ignore cancel errors
-
-    # -- order operations ---------------------------------------------------
 
     def place_order(self, contract: Any, order: Any) -> Any:
         """Place an order and return the ``Trade`` object.
@@ -1019,8 +993,6 @@ class IBClient:
 
         return None
 
-    # -- market data --------------------------------------------------------
-
     def get_quote(self, contract: Any, snapshot: bool = False, generic_ticks: str = "") -> Any:
         """Request market data for a contract and return the ``Ticker``.
 
@@ -1169,8 +1141,6 @@ class IBClient:
             f"status={trade.orderStatus.status})"
         )
 
-    # -- historical data ----------------------------------------------------
-
     def get_historical_data(
         self,
         contract: Any,
@@ -1255,14 +1225,10 @@ class IBClient:
             formatDate=2,
         )
 
-    # -- contract details ---------------------------------------------------
-
     def get_contract_details(self, contract: Any) -> list:
         """Return full contract details (``ContractDetails`` list)."""
         self._require_connection()
         return self._ib.reqContractDetails(contract)
-
-    # -- utility ------------------------------------------------------------
 
     def sleep(self, seconds: float) -> None:
         """Sleep while processing IB events (``ib.sleep()``)."""

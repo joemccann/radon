@@ -48,8 +48,6 @@ export interface StraddleData {
   series: StraddleEntry[];
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Signed two-decimal ratio: "+3.78", "-4.97"; "---" for null/non-finite. */
 export function formatRatio(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -92,8 +90,6 @@ export function formatSourceDate(raw: string | null | undefined): string {
     timeZone: "UTC",
   });
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface StraddleChartRow {
   date: string;

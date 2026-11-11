@@ -16,7 +16,6 @@ from __future__ import annotations
 import statistics
 from typing import Any, Optional
 
-# ── regime bands ──────────────────────────────────────────────────
 # Boundaries are inclusive lower edges (see classify_regime). Frequencies
 # over the full 2009-09-18.. history: backwardation ~7.6% of sessions, the
 # 0.95 flat zone ~12%, and the sub-0.80 extreme under 2%.
@@ -24,7 +23,6 @@ BACKWARDATION_THRESHOLD = 1.00   # ratio >= this: front-month bid over 3-month
 FLAT_THRESHOLD = 0.95            # [0.95, 1.00): curve flattening toward the flip
 STEEP_CONTANGO_THRESHOLD = 0.80  # ratio < this: rare complacency extreme
 
-# ── plausibility bounds ───────────────────────────────────────────
 # There is no fallback data rung for this indicator, so these are the only
 # protection against a silently truncated or corrupt Cboe file.
 MIN_SERIES_ROWS = 2000   # plausibility floor; the real join is ~4,250 rows

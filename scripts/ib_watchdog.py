@@ -88,8 +88,6 @@ logging.basicConfig(
 )
 
 
-# --- Configuration -----------------------------------------------------------
-
 DEFAULT_HEALTH_URL = "http://127.0.0.1:8321/health"
 DEFAULT_HEALTH_TIMEOUT_SECS = 5.0
 DEFAULT_STATE_PATH = Path("/var/lib/radon/ib-watchdog-state.json")
@@ -163,8 +161,6 @@ except (TypeError, ValueError):
     _scheduled_grace = 300
 SCHEDULED_RESTART_GRACE_SECS = max(0, min(900, _scheduled_grace))
 
-
-# --- Bounded sub-step execution ---------------------------------------------
 
 _T = TypeVar("_T")
 
@@ -477,9 +473,6 @@ def data_plane_window_active(now: Optional[datetime] = None) -> bool:
         return True
 
 
-# --- Degradation classification ---------------------------------------------
-
-
 def is_api_hang(state: GatewayState) -> bool:
     """The specific failure mode this watchdog exists to catch.
 
@@ -543,9 +536,6 @@ def is_stuck_awaiting_2fa(state: GatewayState) -> bool:
     if state.next_attempt_in_secs > 0:
         return False  # FastAPI has a scheduled retry queued
     return True
-
-
-# --- State persistence ------------------------------------------------------
 
 
 @dataclass
@@ -768,9 +758,6 @@ def save_state(path: Path, state: WatchdogState) -> None:
     os.replace(tmp, path)
 
 
-# --- Restart action ---------------------------------------------------------
-
-
 def trigger_restart(
     unit: str, dry_run: bool = False, *, lease_acquired_at: Optional[float] = None
 ) -> bool:
@@ -856,9 +843,6 @@ def _release_watchdog_lease(state: "WatchdogState") -> None:
         LOG.warning("watchdog lease release deferred: %s", exc)
         return
     state.lease_acquired_at = 0.0
-
-
-# --- service_health write ---------------------------------------------------
 
 
 # REL-178 (R-496): set by run_cycle from /health's remote.cert_days_left;
@@ -1317,8 +1301,6 @@ def _handle_primary_sensor_down(
     return state
 
 
-# --- IBKR login throttle ------------------------------------------------------
-
 # 2026-09-26: IBKR answered every Gateway login with "Too many failed login
 # attempts. Please wait N seconds" BEFORE the 2FA step, so no IBKR Mobile push
 # was ever sent. IBC then sits on that dialog forever (it never retries), with
@@ -1491,8 +1473,6 @@ def _handle_login_throttled(
     )
     return state
 
-
-# --- Api-hang ladder ----------------------------------------------------------
 
 # Bounded remediation for the api-hang restart (2026-07-05 storm): the ladder
 # resets degraded_count to 0 on every restart, so 3 fresh 60s cycles re-armed
@@ -1749,9 +1729,6 @@ def _reconnect_pool_after_recovery(
         ),
     )
     return state
-
-
-# --- Main cycle -------------------------------------------------------------
 
 
 def run_cycle(

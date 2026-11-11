@@ -93,8 +93,6 @@ function cachedScanDetail(ageLabel: string | null): string {
   return "Cached report on screen. Figures update when the scan lands.";
 }
 
-/* ── Mobile ticker flow report ── */
-
 type MobileFlowSection = "overview" | "dark-pool" | "options" | "history";
 
 function flowVerdictTone(direction: FlowDirection | null): "pos" | "neg" | "warn" | "mut" {

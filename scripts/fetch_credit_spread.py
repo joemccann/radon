@@ -31,7 +31,6 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 from urllib.parse import quote
 
-# ── path setup ────────────────────────────────────────────────────
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -54,7 +53,6 @@ from utils.ib_preflight import (
     ib_auth_state as _ib_auth_state,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 CREDIT_SPREAD_JSON = _PROJECT_DIR / "data" / "credit_spread.json"
 SERVICE = "credit-spread"
 NO_SOURCE = "none"
@@ -72,8 +70,6 @@ CREDIT_IB_HISTORY_CLIENT_IDS = (56, 69)
 _PERIOD1 = int(datetime(2007, 4, 11, tzinfo=timezone.utc).timestamp())
 FetchCloses = Callable[[list[str]], dict[str, dict[str, float]]]
 
-
-# ── Yahoo chart ───────────────────────────────────────────────────
 
 def fetch_yahoo_chart(symbol: str, session: Optional[Any] = None) -> str:
     """Yahoo v8 chart JSON for ``symbol``. Raises on non-200 or empty body.
@@ -380,8 +376,6 @@ def combine_source(sources: dict[str, str]) -> str:
     return "+".join(sorted(set(sources.values())))
 
 
-# ── series assembly ───────────────────────────────────────────────
-
 def align_series(hyg: dict[str, float], spx: dict[str, float]) -> list[dict[str, Any]]:
     """Inner-join on date, ascending {date, hyg_close, spx_close}."""
     return [
@@ -516,8 +510,6 @@ def build_output(
     }
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     CREDIT_SPREAD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = CREDIT_SPREAD_JSON.with_suffix(".json.tmp")
@@ -584,8 +576,6 @@ def persist_result(
     )
     _write_json_cache(payload)
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _turso_series() -> list[dict[str, Any]]:
     """The durable series from `credit_spread_history` (Turso-first read).
@@ -687,8 +677,6 @@ def run() -> dict[str, Any]:
         raise
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

@@ -314,8 +314,6 @@ def shared_limiter(env: Mapping[str, str] | None = None) -> RateLimiter:
         return _SHARED[path]
 
 
-# --- proxy for fx ----------------------------------------------------------------
-
 class _Proxy(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True

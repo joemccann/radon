@@ -149,9 +149,7 @@ class EveningExecutionSweepHandler(BaseHandler):
         self.client_id = client_id
         self._backoff_state: Dict[str, Any] = _throttle_backoff.initial_state()
 
-    # ------------------------------------------------------------------
     # State persistence — embargo state survives daemon restarts.
-    # ------------------------------------------------------------------
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["backoff_state"] = dict(self._backoff_state)
@@ -171,9 +169,7 @@ class EveningExecutionSweepHandler(BaseHandler):
         else:
             self._backoff_state = _throttle_backoff.initial_state()
 
-    # ------------------------------------------------------------------
     # Cadence — 20:30 ET, then 23:45 ET, once each per trading day.
-    # ------------------------------------------------------------------
     def is_due(self) -> bool:
         if not self._enabled:
             return False
@@ -210,9 +206,6 @@ class EveningExecutionSweepHandler(BaseHandler):
             return None
         return _fire_slot(last)
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
     def execute(self) -> Dict[str, Any]:
         """Sweep the evening session's executions into journal + executed_orders.
 
@@ -319,9 +312,7 @@ class EveningExecutionSweepHandler(BaseHandler):
             mirrored += 1
         return mirrored
 
-    # ------------------------------------------------------------------
     # Failure bookkeeping — 5-min embargo, capped per ET day.
-    # ------------------------------------------------------------------
     def _record_failure(self, started_at: str, message: str) -> None:
         now_utc = _now_utc()
         today = _et_date(now_utc)

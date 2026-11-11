@@ -45,8 +45,6 @@ def is_tradeable(symbol: str) -> bool:
     return not is_index_symbol(symbol)
 
 
-# ── Futures ────────────────────────────────────────────────────────────
-
 # Map of underlying symbol → futures root + exchange (VIX on CFE;
 # SPX/NDX/RUT on CME).
 FUTURES_ROOTS: dict[str, dict[str, str]] = {
@@ -91,8 +89,6 @@ def resolve_future_contract(symbol: str, expiry: str = ""):
         contract.multiplier = meta["multiplier"]
     return contract
 
-
-# ── Options ────────────────────────────────────────────────────────────
 
 # Indices that have CBOE-traded options. Each entry pins the exchange
 # + tradingClass IB needs to disambiguate from weeklies (e.g. VIXW)

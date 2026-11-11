@@ -349,8 +349,6 @@ def _session_date_at_boundary(now: datetime, boundary_minutes: int) -> str:
     return now_et.strftime("%Y-%m-%d")
 
 
-# ── internal helpers ──────────────────────────────────────────────────
-
 def _is_trading_day(dt: datetime) -> bool:
     """Check if *dt* falls on a trading day (weekday + not holiday)."""
     if dt.weekday() >= 5:

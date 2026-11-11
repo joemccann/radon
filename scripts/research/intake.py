@@ -182,7 +182,6 @@ class Pipeline:
         if self._deadline - self.clock() < REVIEWER_CALL_TIMEOUT_SECS:
             raise DocumentDeadlineExceeded(f'document review deadline exhausted before {stage}')
 
-    # -- whole-document duplicate index --------------------------------------
     def _index(self):
         try:
             stored = json.loads((self.root / FINGERPRINTS).read_text())

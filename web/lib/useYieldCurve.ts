@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { YieldCurveData } from "./yieldCurve";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the series updates once per business day (radon-yield-curve timer
 // runs the fetcher directly), so there is no manual-scan POST and an hourly
 // poll is already generous. Types + pure helpers live in lib/yieldCurve.ts.

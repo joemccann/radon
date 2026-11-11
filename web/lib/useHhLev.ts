@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { HhLevData } from "./hhlev";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the hhlev timer re-upserts the quarterly Z.1 series on its own
 // schedule, so there is no manual-scan POST and an hourly poll is plenty.
 // Types + pure helpers live in lib/hhlev.ts.

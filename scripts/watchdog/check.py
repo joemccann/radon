@@ -25,8 +25,6 @@ from . import services as services_mod
 _bucket_health_snapshot: Optional[dict[str, dict]] = None
 
 
-# ── outcomes ────────────────────────────────────────────────────────
-
 @dataclass
 class CheckOutcome:
     service: str
@@ -57,8 +55,6 @@ class BucketReport:
 class SnapshotUnavailable(RuntimeError):
     """service_health snapshot could not be fetched or was degraded."""
 
-
-# ── helpers ─────────────────────────────────────────────────────────
 
 def _get_db():
     from db.client import get_db
@@ -105,8 +101,6 @@ def _format_age(seconds: int) -> str:
     return f"{seconds // 86400}d"
 
 
-# ── severity policy ─────────────────────────────────────────────────
-
 def _resolve_severity(*, service: str, kind: str, market_state: str) -> str:
     """Severity rules from the spec:
 
@@ -120,8 +114,6 @@ def _resolve_severity(*, service: str, kind: str, market_state: str) -> str:
         return "P1"
     return "P3"
 
-
-# ── market gate ─────────────────────────────────────────────────────
 
 def _market_state_for(now: datetime) -> str:
     """Mirror of getMarketStateFromDate() in web/lib/serviceHealthWindows.ts.
@@ -181,8 +173,6 @@ def _seconds_since_open(now: datetime) -> int:
     open_et = et.replace(hour=9, minute=30, second=0, microsecond=0)
     return max(0, int((et - open_et).total_seconds()))
 
-
-# ── core check ──────────────────────────────────────────────────────
 
 def check_service(*, service: str, kind: str, now: datetime, market_state: str) -> CheckOutcome:
     """Run a single check.
@@ -408,8 +398,6 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
         last_error=last_error,
     )
 
-
-# ── bucket runner ───────────────────────────────────────────────────
 
 def check_bucket(*, bucket: str, now: Optional[datetime] = None) -> BucketReport:
     """Run every check for a bucket. Intraday is no-op outside ET

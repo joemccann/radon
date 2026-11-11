@@ -92,8 +92,6 @@ PUSHOVER_EMERGENCY_RETRY_SECS = 300
 PUSHOVER_EMERGENCY_EXPIRE_SECS = 3600
 
 
-# ── env-driven channel registry ─────────────────────────────────────
-
 PUSHOVER_ENV_VARS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
 
@@ -144,8 +142,6 @@ def _http_post(url: str, payload: dict, headers: Optional[dict] = None) -> tuple
     except urllib_error.HTTPError as exc:
         return exc.code, exc.read() if hasattr(exc, "read") else b""
 
-
-# ── per-channel emitters ────────────────────────────────────────────
 
 _EMOJI = {"P1": "🚨", "P2": "❌", "P3": "⚠️"}
 
@@ -546,8 +542,6 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
         log.info("daily digest dispatched (%d entries)", len(pending))
         return None
 
-
-# ── public entry point ─────────────────────────────────────────────
 
 def _mark_notified_best_effort(
     *, service: str, severity: str, now, kind: Optional[str] = None

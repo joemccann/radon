@@ -56,8 +56,6 @@ export type ImpliedValueOpts = {
   riskFreeRate?: number;
 };
 
-/* ─── time-to-expiry ─────────────────────────────────── */
-
 function parseExpiryToUtcMs(expiry: string): number | null {
   const compact = expiry.replace(/-/g, "");
   if (compact.length !== 8) return null;
@@ -75,8 +73,6 @@ export function yearsToExpiry(expiry: string, now: Date): number | null {
   if (!Number.isFinite(diffMs)) return null;
   return Math.max(0, diffMs / MS_PER_DAY / DAYS_PER_YEAR);
 }
-
-/* ─── spot resolution ────────────────────────────────── */
 
 function isPositive(n: number | null | undefined): n is number {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
@@ -143,8 +139,6 @@ export function resolveUnderlyingSpot(
   return null;
 }
 
-/* ─── sigma resolution ───────────────────────────────── */
-
 type SigmaResolution = { sigma: number; source: "stream" | "backsolve" } | null;
 
 /**
@@ -183,8 +177,6 @@ function resolveSigma(
   if (sigma == null || !isPositive(sigma)) return null;
   return { sigma, source: "backsolve" };
 }
-
-/* ─── leg-level ──────────────────────────────────────── */
 
 const NULL_RESULT: ImpliedValueResult = { perContract: null, notional: null, inputs: null };
 

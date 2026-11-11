@@ -121,8 +121,6 @@ export function useOrderDialogMachine(): {
   return { state, send, nextRequestId };
 }
 
-/* ── Identity ─────────────────────────────────────────── */
-
 export function orderRefOf(order: Pick<OpenOrder, "permId" | "orderId">): OrderRef {
   return { permId: order.permId, orderId: order.orderId };
 }

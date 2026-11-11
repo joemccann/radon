@@ -22,8 +22,6 @@ type GexPanelProps = {
   marketState?: MarketState;
 };
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function fmtNum(v: number | null | undefined, decimals = 2): string {
   if (v == null) return "---";
   return v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -73,8 +71,6 @@ function levelColor(gamma: number | undefined): string {
   return gamma >= 0 ? "var(--signal-core)" : "var(--fault)";
 }
 
-/* ─── Metrics Card ────────────────────────────────────── */
-
 function SourceBadge({ source }: { source: "uw" | "mq" | "both" }) {
   const styles: Record<string, React.CSSProperties> = {
     uw:   { background: "color-mix(in srgb, var(--signal-core) 18%, transparent)",  color: "var(--signal-core-text)",  border: "1px solid color-mix(in srgb, var(--signal-core) 40%, transparent)" },
@@ -116,8 +112,6 @@ function MetricCard({ label, value, sub, color, badge, tooltip }: {
   );
 }
 
-/* ─── Level Card ──────────────────────────────────────── */
-
 function LevelCard({ label, level, labelColor }: {
   label: string;
   level: GexLevel;
@@ -148,8 +142,6 @@ function LevelCard({ label, level, labelColor }: {
 export function getDisplayProfile(profile: GexBucket[]): GexBucket[] {
   return [...profile].sort((a, b) => b.strike - a.strike);
 }
-
-/* ─── Expected Range Bar ─────────────────────────────── */
 
 function ExpectedRangeBar({ data }: { data: GexData }) {
   const { expected_range, levels, spot } = data;
@@ -230,8 +222,6 @@ function ExpectedRangeBar({ data }: { data: GexData }) {
   );
 }
 
-/* ─── History Table ──────────────────────────────────── */
-
 type GexSortCol = "date" | "net_gex" | "net_dex" | "gex_flip" | "spot" | "atm_iv" | "vol_pc" | "bias";
 
 function gexHistoryExtract(row: GexHistoryEntry, key: GexSortCol): string | number | null {
@@ -247,8 +237,6 @@ function gexHistoryExtract(row: GexHistoryEntry, key: GexSortCol): string | numb
     default: return null;
   }
 }
-
-/* ─── MenthorQ Levels Panel ─────────────────────────── */
 
 function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceDelta | null }) {
   const [expanded, setExpanded] = useState(false);
@@ -441,8 +429,6 @@ function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
   );
 }
 
-/* ─── Main component ─────────────────────────────────── */
-
 export default function GexPanel({ marketState }: GexPanelProps) {
   const { data, loading, error, lastSync, syncing } = useGex(marketState ?? null);
 
@@ -513,7 +499,6 @@ export default function GexPanel({ marketState }: GexPanelProps) {
   return (
     <div className="section gex-panel regime-relationship-panel">
       {error && <RequestError error={error} retainedData />}
-      {/* ── Header ── */}
       <div className="regime-relationship-panel-head">
         <div className="regime-panel-title">
           <Activity size={14} />
@@ -562,7 +547,6 @@ export default function GexPanel({ marketState }: GexPanelProps) {
       <FreshnessRail schedule={GEX_REFRESH} asOf={data.data_date ?? null} testId="gex-freshness-rail" />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {/* ── Metrics Row ── */}
         <div className="gex-metrics-row">
           <MetricCard
             label="SPOT"
@@ -620,7 +604,6 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           <LevelCard label="PUT WALL" level={levels.put_wall} labelColor="var(--fault)" />
         </div>
 
-        {/* ── MenthorQ Levels + Delta ── */}
         {data.mq && (
           <MqLevelsPanel mq={data.mq as MqLevels} sourceDelta={data.source_delta as SourceDelta | null} />
         )}
@@ -673,7 +656,6 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
 
-        {/* ── History Table ── */}
         <GexHistoryTable history={data.history} />
       </div>
     </div>

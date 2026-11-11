@@ -199,9 +199,6 @@ def apply_demo_migrations(db) -> None:
         db.commit()
 
 
-# ── synthetic dataset ────────────────────────────────────────────────────
-
-
 def _leg(direction, type_, strike, entry_per_contract, last_per_contract, contracts):
     """One option leg with reconciling MV / initial-value math.
 

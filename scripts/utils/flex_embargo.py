@@ -458,7 +458,6 @@ def _heartbeat(until: str, code: str) -> bool:
     return True
 
 
-# --- CLI entry point ---------------------------------------------------------
 #
 # Without this CLI `clear()` had no caller,
 # so the only manual escape from a bad embargo was deleting the sidecar — which

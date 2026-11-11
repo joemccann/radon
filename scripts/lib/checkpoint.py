@@ -94,8 +94,6 @@ class CheckpointedJob:
         self._findings_fh = None
         self._load()
 
-    # -- lifecycle ---------------------------------------------------------
-
     def _load(self) -> None:
         state_path = self.dir / STATE_FILE
         resumed = state_path.exists()
@@ -211,16 +209,12 @@ class CheckpointedJob:
             self._findings_fh.close()
             self._findings_fh = None
 
-    # -- queries -----------------------------------------------------------
-
     def is_done(self, item_key: str) -> bool:
         return item_hash(item_key) in self.state["completed"]
 
     @property
     def cursor(self):
         return self.state["cursor"]
-
-    # -- commands ----------------------------------------------------------
 
     def record_finding(self, item_key: str, payload: dict) -> None:
         reserved = {"_hash", "_key", "_at"}.intersection(payload)
@@ -255,8 +249,6 @@ class CheckpointedJob:
         self.state["updated_at"] = _now()
         _atomic_write(self.dir / STATE_FILE, json.dumps(self.state, indent=2))
         _atomic_write(self.dir / SUMMARY_FILE, self._render_summary())
-
-    # -- internals ---------------------------------------------------------
 
     def _append_finding(self, record: dict) -> None:
         if self._findings_fh is None:

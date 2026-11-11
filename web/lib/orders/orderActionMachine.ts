@@ -103,8 +103,6 @@ export function nextRequest(state: OrderActionState, now: number): "refresh" | "
   return now >= state.refresh.nextAt ? "refresh" : "read";
 }
 
-/* ── Observation ─────────────────────────────────────────────────────── */
-
 type Observation =
   | { kind: "working"; live: OpenOrder }
   | { kind: "gone"; fills: "none" | "full" | "unsized" }
@@ -179,8 +177,6 @@ function isPending<T extends { kind: string }>(value: T | { outcome: string }): 
   return !("outcome" in value);
 }
 
-/* ── Transition ──────────────────────────────────────────────────────── */
-
 export function transition(state: OrderActionState, event: OrderActionEvent): Transition {
   switch (event.type) {
     case "cancelRequested": {
@@ -250,8 +246,6 @@ export function transition(state: OrderActionState, event: OrderActionEvent): Tr
     }
   }
 }
-
-/* ── Presentation ────────────────────────────────────────────────────── */
 
 export type ResolutionNotice = {
   type: "error" | "warning" | "success";

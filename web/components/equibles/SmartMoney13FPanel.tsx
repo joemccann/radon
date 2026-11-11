@@ -155,7 +155,6 @@ export default function SmartMoney13FPanel({ ticker }: { ticker: string }) {
         </div>
       </div>
 
-      {/* ── Headline metrics ──────────────────────────────── */}
       <div className="section">
         <RegimeStrip>
           <RegimeStripCell
@@ -201,7 +200,6 @@ export default function SmartMoney13FPanel({ ticker }: { ticker: string }) {
         </RegimeStrip>
       </div>
 
-      {/* ── Top holders by value ──────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">Top Holders by Value</div>
@@ -212,7 +210,6 @@ export default function SmartMoney13FPanel({ ticker }: { ticker: string }) {
         ))}
       </div>
 
-      {/* ── Named super investors ─────────────────────────── */}
       {superInvestors.length > 0 && (
         <div className="section">
           <div className="section-header">

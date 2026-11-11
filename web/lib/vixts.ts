@@ -24,8 +24,6 @@ export const STEEP_CONTANGO_THRESHOLD = 0.8;
 
 export const SOURCE_FOOTNOTE = "Source: CBOE";
 
-/* ─── Payload types ──────────────────────────────────── */
-
 export type VixTsRegime = "BACKWARDATION" | "FLAT" | "CONTANGO" | "STEEP CONTANGO";
 
 /** Per-file Last-Modified stamps, lowercase keys, one per Cboe CSV. */
@@ -85,8 +83,6 @@ export const MISSING_VIXTS: VixTsData = Object.freeze({
   stats: null,
   series: [] as VixTsPoint[],
 });
-
-/* ─── Display helpers ────────────────────────────────── */
 
 /**
  * Half-open bands from the spec threshold table; a boundary belongs to the

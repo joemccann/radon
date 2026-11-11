@@ -35,7 +35,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -48,7 +47,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 CACHE_DIR = _PROJECT_DIR / "data" / "earnings_dates"
 
 REPORT_TIME_PREMARKET = "premarket"
@@ -77,8 +75,6 @@ _POSTMARKET_TOKENS = (
     "after close",
 )
 
-
-# ── calendar helpers ──────────────────────────────────────────────
 
 def _et_today(now: datetime) -> date:
     """The calendar day in ET for the given instant."""
@@ -137,8 +133,6 @@ def _has_actual_eps(raw: dict[str, Any]) -> bool:
         return False
     return True
 
-
-# ── normalization ─────────────────────────────────────────────────
 
 def normalize_report_time(raw: Any) -> str:
     """Map UW report_time variants to premarket | postmarket | unknown."""
@@ -234,8 +228,6 @@ def next_earnings(
     }
 
 
-# ── annotate ──────────────────────────────────────────────────────
-
 def annotate(
     client: Any,
     ticker: str,
@@ -302,8 +294,6 @@ def batch_annotate(
     return results
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _cache_path(ticker: str) -> Path:
     return CACHE_DIR / f"{ticker.upper()}.json"
 
@@ -317,8 +307,6 @@ def _write_json_cache(ticker: str, payload: dict[str, Any]) -> None:
     except Exception as exc:  # noqa: BLE001 — best-effort
         print(f"[earnings-dates] cache write non-fatal: {exc}", file=sys.stderr)
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_human(payloads: list[dict[str, Any]]) -> None:
     for p in payloads:

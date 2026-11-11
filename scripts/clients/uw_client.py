@@ -49,9 +49,6 @@ from utils import uw_governor
 
 logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════════════════════════════
-# Exception Hierarchy
-# ══════════════════════════════════════════════════════════════════════
 
 class UWAPIError(Exception):
     """Base exception for all UW API errors."""
@@ -126,10 +123,6 @@ _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_BACKOFF_FACTOR = 1.0  # seconds; exponential backoff multiplier
 
 
-# ══════════════════════════════════════════════════════════════════════
-# Client
-# ══════════════════════════════════════════════════════════════════════
-
 class UWClient:
     """Comprehensive Unusual Whales REST API client.
 
@@ -189,8 +182,6 @@ class UWClient:
 
     def __exit__(self, *exc) -> None:
         self.close()
-
-    # ── internal request layer ─────────────────────────────────────
 
     def _cache_key(self, endpoint, params):
         """Separate credential scopes without writing tokens to cache paths."""
@@ -328,7 +319,6 @@ class UWClient:
                     set_disk_cached(cache_key, endpoint, data)
                 return data
 
-            # ── classify error ──
             msg = str(body.get("message", "") or resp.reason or f"HTTP {status}")
             msg = msg.replace(self._token, "[redacted]")[:512]
             body = {"message": msg}
@@ -396,9 +386,7 @@ class UWClient:
         """Build query params dict, excluding any keys whose value is None."""
         return {k: v for k, v in kwargs.items() if v is not None}
 
-    # ══════════════════════════════════════════════════════════════════
     # DARK POOL ENDPOINTS  (Primary edge signal)
-    # ══════════════════════════════════════════════════════════════════
 
     def get_darkpool_flow(
         self,
@@ -446,10 +434,6 @@ class UWClient:
         """GET /api/darkpool/recent - Latest dark pool trades across all tickers."""
         params = self._build_params(limit=limit)
         return self._get("darkpool/recent", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # OPTIONS FLOW ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_flow_alerts(
         self,
@@ -552,10 +536,6 @@ class UWClient:
         params = self._build_params(**kwargs)
         return self._get(f"stock/{ticker.upper()}/net-prem-ticks", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
-    # STOCK INFORMATION ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_stock_info(self, ticker: str) -> dict:
         """GET /api/stock/{ticker}/info - Company info, sector, market cap."""
         return self._get(f"stock/{ticker.upper()}/info")
@@ -572,10 +552,6 @@ class UWClient:
         """GET /api/stock/{ticker}/ohlc/{candle_size} - OHLC price data."""
         params = self._build_params(**kwargs)
         return self._get(f"stock/{ticker.upper()}/ohlc/{candle_size}", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # OPTIONS CHAIN ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_option_contracts(
         self,
@@ -614,9 +590,7 @@ class UWClient:
         params = self._build_params(expiry=expiry, **kwargs)
         return self._get(f"stock/{ticker.upper()}/greeks", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # GREEK EXPOSURE (GEX) ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_greek_exposure(self, ticker: str, **kwargs) -> dict:
         """GET /api/stock/{ticker}/greek-exposure - Total greek exposure over time."""
@@ -638,10 +612,6 @@ class UWClient:
         params = self._build_params(**kwargs)
         return self._get(f"stock/{ticker.upper()}/greek-flow", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
-    # VOLATILITY ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_realized_volatility(self, ticker: str, **kwargs) -> dict:
         """GET /api/stock/{ticker}/volatility/realized - IV vs realized volatility."""
         params = self._build_params(**kwargs)
@@ -661,10 +631,6 @@ class UWClient:
         """GET /api/stock/{ticker}/iv-rank - IV rank data over time."""
         params = self._build_params(**kwargs)
         return self._get(f"stock/{ticker.upper()}/iv-rank", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # ANALYST RATINGS ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_analyst_ratings(
         self,
@@ -687,10 +653,6 @@ class UWClient:
         """Convenience: analyst ratings filtered to a single ticker."""
         return self.get_analyst_ratings(ticker=ticker, **kwargs)
 
-    # ══════════════════════════════════════════════════════════════════
-    # SEASONALITY ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_monthly_seasonality(self, ticker: str) -> dict:
         """GET /api/seasonality/{ticker}/monthly - Average return by month."""
         return self._get(f"seasonality/{ticker.upper()}/monthly")
@@ -707,10 +669,6 @@ class UWClient:
         """GET /api/seasonality/{month}/performers - Best/worst performers for a month."""
         return self._get(f"seasonality/{month}/performers")
 
-    # ══════════════════════════════════════════════════════════════════
-    # SHORT INTEREST ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_short_interest(self, ticker: str) -> dict:
         """GET /api/shorts/{ticker}/interest-float/v2 - Short interest and float data."""
         return self._get(f"shorts/{ticker.upper()}/interest-float/v2")
@@ -722,10 +680,6 @@ class UWClient:
     def get_short_volume_ratio(self, ticker: str) -> dict:
         """GET /api/shorts/{ticker}/volume-and-ratio - Short volume and ratio."""
         return self._get(f"shorts/{ticker.upper()}/volume-and-ratio")
-
-    # ══════════════════════════════════════════════════════════════════
-    # INSTITUTIONAL DATA ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_institutional_ownership(self, ticker: str) -> dict:
         """GET /api/institution/{ticker}/ownership - Institutional ownership."""
@@ -740,10 +694,6 @@ class UWClient:
         """GET /api/institutions - List of institutions."""
         params = self._build_params(**kwargs)
         return self._get("institutions", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # INSIDER TRADING ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_insider_transactions(
         self,
@@ -768,10 +718,6 @@ class UWClient:
         """GET /api/insider/{ticker}/ticker-flow - Aggregated insider flow."""
         return self._get(f"insider/{ticker.upper()}/ticker-flow")
 
-    # ══════════════════════════════════════════════════════════════════
-    # CONGRESS TRADING ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_congress_recent_trades(
         self,
         *,
@@ -792,10 +738,6 @@ class UWClient:
         params = self._build_params(name=name, **kwargs)
         return self._get("congress/congress-trader", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
-    # ETF ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_etf_info(self, ticker: str) -> dict:
         """GET /api/etfs/{ticker}/info - ETF information."""
         return self._get(f"etfs/{ticker.upper()}/info")
@@ -807,10 +749,6 @@ class UWClient:
     def get_etf_exposure(self, ticker: str) -> dict:
         """GET /api/etfs/{ticker}/exposure - ETFs containing a ticker."""
         return self._get(f"etfs/{ticker.upper()}/exposure")
-
-    # ══════════════════════════════════════════════════════════════════
-    # MARKET OVERVIEW ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_market_tide(self) -> dict:
         """GET /api/market/market-tide - Market-wide options sentiment."""
@@ -857,10 +795,6 @@ class UWClient:
         )
         return self._get("market/fda-calendar", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
-    # EARNINGS ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_earnings_premarket(
         self,
         *,
@@ -887,10 +821,6 @@ class UWClient:
         """GET /api/earnings/{ticker} - Historical earnings for ticker."""
         return self._get(f"earnings/{ticker.upper()}")
 
-    # ══════════════════════════════════════════════════════════════════
-    # SCREENER ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_stock_screener(self, **kwargs) -> dict:
         """GET /api/screener/stocks - Stock screener with many filters."""
         params = self._build_params(**kwargs)
@@ -905,10 +835,6 @@ class UWClient:
         """GET /api/short_screener - Screen for high short interest."""
         params = self._build_params(**kwargs)
         return self._get("short_screener", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # NEWS ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_news_headlines(
         self,
@@ -925,9 +851,7 @@ class UWClient:
         )
         return self._get("news/headlines", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
     # MAX PAIN / OI CHANGE
-    # ══════════════════════════════════════════════════════════════════
 
     def get_max_pain(self, ticker: str, **kwargs) -> dict:
         """GET /api/stock/{ticker}/max-pain - Max pain by expiry."""
@@ -939,10 +863,6 @@ class UWClient:
         params = self._build_params(**kwargs)
         return self._get(f"stock/{ticker.upper()}/oi-change", params=params)
 
-    # ══════════════════════════════════════════════════════════════════
-    # LIT FLOW ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
-
     def get_lit_flow_recent(self, **kwargs) -> dict:
         """GET /api/lit-flow/recent - Recent lit (exchange) trades."""
         params = self._build_params(**kwargs)
@@ -952,10 +872,6 @@ class UWClient:
         """GET /api/lit-flow/{ticker} - Lit trades for a ticker."""
         params = self._build_params(**kwargs)
         return self._get(f"lit-flow/{ticker.upper()}", params=params)
-
-    # ══════════════════════════════════════════════════════════════════
-    # ADDITIONAL STOCK ENDPOINTS
-    # ══════════════════════════════════════════════════════════════════
 
     def get_spot_exposures(self, ticker: str, **kwargs) -> dict:
         """GET /api/stock/{ticker}/spot-exposures"""

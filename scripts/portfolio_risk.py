@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from db.readers import read_latest_portfolio_snapshot, read_price_history_closes
 
-# ── Constants ────────────────────────────────────────────────────────────────
 
 # Per-position hard cap (Gate 3). The cluster budget defaults to this: a cluster
 # of correlated names should not, in aggregate, carry more risk than a single
@@ -98,9 +97,6 @@ IB_HISTORY_DURATION = "1 Y"
 IB_HISTORY_TIMEOUT_S = 20
 
 
-# ── Position → underlying mapping ────────────────────────────────────────────
-
-
 def position_underlying(position: dict) -> Optional[str]:
     """Return the underlying ticker for a position (options map to the underlying).
 
@@ -108,9 +104,6 @@ def position_underlying(position: dict) -> Optional[str]:
     ``symbol``.
     """
     return position.get("ticker") or position.get("symbol")
-
-
-# ── Correlation matrix ───────────────────────────────────────────────────────
 
 
 def _aligned_returns(
@@ -182,9 +175,6 @@ def build_correlation_matrix(
     return matrix
 
 
-# ── Position weights ─────────────────────────────────────────────────────────
-
-
 def _position_weight_dollars(position: dict) -> float:
     """Dollar exposure used as the position's risk weight.
 
@@ -212,9 +202,6 @@ def _weights_by_underlying(portfolio: dict) -> Dict[str, float]:
             continue
         weights[ticker] = weights.get(ticker, 0.0) + _position_weight_dollars(position)
     return weights
-
-
-# ── Clustering ───────────────────────────────────────────────────────────────
 
 
 def _correlated_clusters(
@@ -245,9 +232,6 @@ def _correlated_clusters(
         groups.setdefault(find(t), []).append(t)
 
     return [sorted(members) for members in groups.values() if len(members) > 1]
-
-
-# ── Report ───────────────────────────────────────────────────────────────────
 
 
 def build_risk_budget_report(
@@ -669,9 +653,6 @@ def _persist_closes(symbol: str, closes: Dict[str, float], source: str) -> None:
     ]
     if rows:
         upsert_price_history_rows(symbol, rows)
-
-
-# ── Backfill throttle ────────────────────────────────────────────────────────
 
 
 def _due_for_backfill(symbols: Sequence[str]) -> List[str]:

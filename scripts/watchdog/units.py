@@ -113,8 +113,6 @@ GRACEFUL_EXIT_MARKER_DWELL_SECS = 15 * 60
 TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 
 
-# ── systemctl seam ───────────────────────────────────────────────────
-
 def _run_systemctl_show() -> str:
     """Read-only probe. Verified invocation on the VPS 2026-06-12:
     ``systemctl show 'radon-*' -p Id,...`` expands the glob over loaded
@@ -129,8 +127,6 @@ def _run_systemctl_show() -> str:
     )
     return result.stdout
 
-
-# ── parsing ──────────────────────────────────────────────────────────
 
 def parse_show_output(text: str) -> list[dict]:
     """Blank-line-separated ``Key=Value`` blocks → list of unit dicts.
@@ -171,8 +167,6 @@ def _is_graceful_sigterm_exit(unit: dict) -> bool:
         return False
     return unit.get("ExecMainStatus") == GRACEFUL_SIGTERM_EXIT_STATUS
 
-
-# ── deploy-collateral evidence ───────────────────────────────────────
 
 def _parse_systemd_timestamp(value: str) -> Optional[datetime]:
     """``systemctl show`` timestamp ("Wed 2026-08-05 21:40:24 UTC") →
@@ -281,8 +275,6 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     return age <= DEPLOY_COLLATERAL_WINDOW_SECS
 
 
-# ── state persistence ────────────────────────────────────────────────
-
 def _load_state(path: Path) -> dict:
     """Previous-cycle snapshot keyed by unit id; {} when missing or
     corrupt. Writes are atomic (temp + replace + checksum), so corrupt means
@@ -315,8 +307,6 @@ def _save_state(path: Path, current: list[dict], now: datetime) -> None:
     payload = {"cycle_at": now.isoformat().replace("+00:00", "Z"), "units": snapshot}
     atomic_save(str(path), payload)
 
-
-# ── evaluation ───────────────────────────────────────────────────────
 
 def _outcome_for(*, unit_id: str, severity: str, message: str, now: datetime) -> CheckOutcome:
     return CheckOutcome(
@@ -462,8 +452,6 @@ def evaluate(
             outcomes.append(alert)
     return outcomes
 
-
-# ── public entry point ───────────────────────────────────────────────
 
 def check_units(
     *,

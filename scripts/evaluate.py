@@ -36,9 +36,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
 # Ensure scripts/ is on sys.path for sibling imports
-# ---------------------------------------------------------------------------
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
@@ -52,10 +50,6 @@ from fetch_analyst_ratings import fetch_analyst_ratings
 from fetch_news import fetch_news
 from kelly import kelly_ticket
 
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 @dataclass
 class MilestoneResult:
@@ -83,9 +77,7 @@ class EvaluationResult:
     news: Optional[Dict] = None
 
 
-# ---------------------------------------------------------------------------
 # Helpers: Seasonality
-# ---------------------------------------------------------------------------
 
 def rate_seasonality(win_rate: float, avg_return: float) -> str:
     """Rate a seasonality window.
@@ -146,9 +138,7 @@ def fetch_seasonality(ticker: str) -> Dict:
                 "note": f"Fetch error: {e}"}
 
 
-# ---------------------------------------------------------------------------
 # Helpers: Price history
-# ---------------------------------------------------------------------------
 
 def fetch_price_history(ticker: str, days: int = 10) -> Any:
     """Fetch recent price bars from IB.
@@ -198,9 +188,7 @@ def fetch_price_history(ticker: str, days: int = 10) -> Any:
         return {"error": f"price history fetch failed: {exc}"}
 
 
-# ---------------------------------------------------------------------------
 # Helpers: OI categorisation
-# ---------------------------------------------------------------------------
 
 def categorize_oi_signals(oi_changes: List[Dict]) -> Dict:
     """Summarise OI changes by signal tier."""
@@ -244,9 +232,7 @@ def categorize_oi_signals(oi_changes: List[Dict]) -> Dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Core: compute_sustained_days
-# ---------------------------------------------------------------------------
 
 def compute_sustained_days(daily: List[Dict], direction: str = "ACCUMULATION") -> int:
     """Count consecutive days matching *direction* from the most recent day.
@@ -262,9 +248,7 @@ def compute_sustained_days(daily: List[Dict], direction: str = "ACCUMULATION") -
     return streak
 
 
-# ---------------------------------------------------------------------------
 # Core: determine_edge (Gate 2)
-# ---------------------------------------------------------------------------
 
 def determine_edge(
     flow: Dict,
@@ -423,10 +407,6 @@ def determine_edge(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Parallel data fetching
-# ---------------------------------------------------------------------------
-
 def _run_parallel_milestones(
     ticker: str,
     bankroll: float,
@@ -514,13 +494,7 @@ def _run_parallel_milestones(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Main orchestrator
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Batch price fetching (IB connection pooling)
-# ---------------------------------------------------------------------------
 
 def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict]]:
     """Fetch price history for multiple tickers using a single IB connection.
@@ -903,10 +877,6 @@ def run_evaluation(
     return eval_result
 
 
-# ---------------------------------------------------------------------------
-# Output formatting
-# ---------------------------------------------------------------------------
-
 def format_report(result: EvaluationResult) -> str:
     """Produce a human-readable evaluation report."""
     lines: list[str] = []
@@ -1059,10 +1029,6 @@ def format_report(result: EvaluationResult) -> str:
 
     return "\n".join(lines)
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 def _decision_exit_code(results: List[EvaluationResult]) -> int:
     if any(result.decision == "TRADE" for result in results):

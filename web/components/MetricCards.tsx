@@ -56,8 +56,6 @@ function computeTodayUnrealizedPnl(
   return { pnl: total, positionsWithData: rows.length, totalPositions: portfolio.positions.length };
 }
 
-/* ─── Metric card helper ─────────────────────────────────── */
-
 type CardDef = {
   label: string;
   value: string;
@@ -96,8 +94,6 @@ function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) 
     </div>
   );
 }
-
-/* ─── Collapsible section header ─────────────────────────── */
 
 function SectionHeader({ label, collapsed, onToggle }: { label: string; collapsed: boolean; onToggle: () => void }) {
   return (
@@ -606,8 +602,6 @@ function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
   );
 }
 
-/* ─── Main component ─────────────────────────────────────── */
-
 /** The breakdown modal MetricCards has open, if any. */
 type MetricModal = "fills" | "unrealized" | "dayMove" | "total" | "netLiq" | "dayPnl" | "dividends" | "buyingPower" | "margin" | "excessLiq" | "settledCash" | "ewl" | "prevEwl" | "regT" | "sma" | "cash" | "availFunds" | "initMargin" | "grossPos";
 
@@ -787,8 +781,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onRealizedClick={() => setOpenModal("fills")}
         onTotalClick={() => setOpenModal("total")}
       />
-
-      {/* ── Modals ── */}
 
       {/* Exposure breakdown */}
       {exposure && (

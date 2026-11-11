@@ -330,10 +330,6 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
   const socketUrl = resolveRealtimeWebSocketUrl();
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -550,14 +546,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     lastSentDepthKeysRef.current = desiredKeys;
   }, []);
 
-  // ---------------------------------------------------------------------------
   // scheduleReconnect — ref-based to break circular dep with connect
-  // ---------------------------------------------------------------------------
   const scheduleReconnectRef = useRef<() => void>(() => {});
 
-  // ---------------------------------------------------------------------------
   // connect — idempotent, state-machine-guarded
-  // ---------------------------------------------------------------------------
   const connect = useCallback(() => {
     if (!enabled) return;
     const { symbols: syms, contracts: cts, indexes: idxs } = desiredRef.current;
@@ -863,9 +855,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     };
   }, []);
 
-  // ---------------------------------------------------------------------------
   // getSnapshot — isolated WS, unchanged
-  // ---------------------------------------------------------------------------
   const getSnapshot = useCallback(
     async (snapshotSymbols: string[]): Promise<Record<string, PriceData>> => {
       const symbolsToRequest = normalizeSymbolList(snapshotSymbols);
@@ -948,9 +938,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     [socketUrl],
   );
 
-  // ---------------------------------------------------------------------------
   // Main lifecycle effect — connect/disconnect based on enabled + subscriptions
-  // ---------------------------------------------------------------------------
   useEffect(() => {
     mountedRef.current = true;
 
@@ -992,9 +980,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     };
   }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, dispatchFeed]);
 
-  // ---------------------------------------------------------------------------
   // Subscription sync effect — sends diffs over open connection
-  // ---------------------------------------------------------------------------
   useEffect(() => {
     const ws = wsRef.current;
     if (ws && feedRef.current.phase === "open") {
@@ -1007,11 +993,9 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     // If still connecting, onopen will flush via syncSubscriptions
   }, [symbolHash, contractHash, indexHash, syncSubscriptions]);
 
-  // ---------------------------------------------------------------------------
   // Focused-depth sync effect — diffs the single depth symbol over the open
   // connection. Deliberately does NOT influence `hasSubscriptions`/connect:
   // the focused symbol is already streaming L1, so depth never forces a socket.
-  // ---------------------------------------------------------------------------
   useEffect(() => {
     const ws = wsRef.current;
     if (ws && feedRef.current.phase === "open") {

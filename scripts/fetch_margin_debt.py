@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Any, Optional
 from xml.etree import ElementTree
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -53,7 +52,6 @@ except Exception:
 
 from backfill_margin_debt_legacy import load_legacy_csv
 
-# ── constants ─────────────────────────────────────────────────────
 MARGIN_DEBT_JSON = _PROJECT_DIR / "data" / "margin_debt.json"
 
 SOURCE_FINRA = "finra"
@@ -71,8 +69,6 @@ FRED_GDP_SERIES = "GDP"
 _SHEET_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 _MONTH_KEY_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
-
-# ── FINRA XLSX parsing ────────────────────────────────────────────
 
 _XLSX_COLUMNS = {"A": "date", "B": "level", "C": "free_credit_cash", "D": "free_credit_margin"}
 
@@ -124,8 +120,6 @@ def parse_margin_xlsx(data: bytes) -> list[dict[str, Any]]:
     rows.sort(key=lambda r: r["date"])
     return rows
 
-
-# ── merge + transforms ────────────────────────────────────────────
 
 def merge_series(
     legacy_rows: list[dict[str, Any]], finra_rows: list[dict[str, Any]]
@@ -306,8 +300,6 @@ def _load_normalization_inputs() -> tuple[dict[str, float], dict[str, float], bo
         return {}, {}, False
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_db_cache(
     payload: dict[str, Any], scan_time: str, *, rows_changed: bool
 ) -> None:
@@ -337,8 +329,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     MARGIN_DEBT_JSON.parent.mkdir(parents=True, exist_ok=True)
     MARGIN_DEBT_JSON.write_text(json.dumps(payload, indent=2))
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def build_series(finra_xlsx: bytes) -> tuple[list[dict[str, Any]], bool]:
     """Full pipeline: parse, splice, YoY, display, normalization views."""
@@ -417,8 +407,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _write_json_cache(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

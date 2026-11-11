@@ -11,8 +11,6 @@ function axisFontFamily(): string {
   return OG.chart.axisFontFamily;
 }
 
-/* ─── Scale Utilities ────────────────────────────────── */
-
 export function linearScale(
   domain: [number, number],
   range: [number, number]
@@ -40,8 +38,6 @@ export function bandScale(
     bandwidth,
   };
 }
-
-/* ─── Chart Types ────────────────────────────────────── */
 
 type Point = { x: number; y: number };
 

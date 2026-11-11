@@ -231,8 +231,6 @@ def validate_constituents(
             )
 
 
-# ─── Fetchers ────────────────────────────────────────────────
-
 def _read_bounded(request: Request, index: str) -> str:
     """Cap third-party reads so one runaway response cannot exhaust the daemon."""
     content = urlopen(request, timeout=30).read(_MAX_RESPONSE_BYTES + 1)
@@ -448,8 +446,6 @@ def fetch_r2k() -> List[Dict]:
     return unique
 
 
-# ─── Diff Logic ──────────────────────────────────────────────
-
 def diff_tickers(
     current_preset: List[str], fresh_list: List[str]
 ) -> Tuple[Set[str], Set[str]]:
@@ -459,8 +455,6 @@ def diff_tickers(
     return fresh - current, current - fresh
 
 
-# ─── Preset Update Logic ────────────────────────────────────
-
 def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: Set[str]) -> int:
     """Update SP500 master and sub-presets. Returns number of files written."""
     master_path = PRESETS_DIR / "sp500.json"
@@ -469,7 +463,6 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
 
     files_written = 0
 
-    # ─── Handle removals ───
     for ticker in removed:
         # Remove from master tickers
         if ticker in master["tickers"]:
@@ -495,7 +488,6 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
                     # Pair with first ticker in group
                     group["pairs"].append([unpaired[0], group["tickers"][0]])
 
-    # ─── Handle additions ───
     fresh_by_ticker = {c["ticker"]: c for c in fresh_companies}
     for ticker in added:
         info = fresh_by_ticker.get(ticker, {})
@@ -534,11 +526,9 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
                 if ticker not in ci.get("tickers", []):
                     ci.setdefault("tickers", []).append(ticker)
 
-    # ─── Write master ───
     _write_json_atomic(master_path, master)
     files_written += 1
 
-    # ─── Regenerate sub-presets ───
     for gkey, group in master["groups"].items():
         key = _safe_preset_key(gkey)
         preset = {
@@ -555,7 +545,6 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
         _write_json_atomic(sub_path, preset)
         files_written += 1
 
-    # ─── Regenerate sector rollups ───
     sector_groups = {}
     for c in fresh_companies:
         s = c["sector"]
@@ -742,8 +731,6 @@ def update_r2k_presets(fresh_companies: List[Dict], added: Set[str], removed: Se
     return files_written
 
 
-# ─── Changelog ───────────────────────────────────────────────
-
 def log_changes(index: str, added: Set[str], removed: Set[str]):
     """Append to changelog.json."""
     changelog = []
@@ -769,8 +756,6 @@ def log_changes(index: str, added: Set[str], removed: Set[str]):
 
     _write_json_atomic(CHANGELOG_PATH, changelog)
 
-
-# ─── Main Handler ────────────────────────────────────────────
 
 def execute() -> dict:
     """
@@ -858,8 +843,6 @@ def execute() -> dict:
 
     return results
 
-
-# ─── CLI ─────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse

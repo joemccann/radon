@@ -181,11 +181,9 @@ export function formatUptime(secs: number): string {
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
-// ---------------------------------------------------------------------------
 // Service verdict + kind (redesign): turn raw systemd active/sub state into a
 // single glanceable verdict so the operator never has to mentally translate
 // "inactive (dead) rc=0" into "this is fine".
-// ---------------------------------------------------------------------------
 
 /**
  * The long-lived daemons of the radon-* stack. A STOPPED daemon reports no
@@ -264,13 +262,11 @@ export function unitVerdict(unit: UnitStatus): UnitVerdict {
   return { label: "Unknown", tone: "neutral" };
 }
 
-// ---------------------------------------------------------------------------
 // Gateway power state: the dedicated Stop/Start control inside the IB Gateway
 // controls card. Drive the button primarily off the gateway unit's
 // active_state (the authoritative systemd verdict), with port_listening as a
 // secondary hint — port_listening can linger true for a moment after a stop
 // (socket lingering) or read true while awaiting_2fa (port up, not authed).
-// ---------------------------------------------------------------------------
 
 export type GatewayPowerState = "running" | "stopped" | "transitional" | "unknown";
 
@@ -329,12 +325,10 @@ export function serviceControlDisabledReason(opts: {
   return null;
 }
 
-// ---------------------------------------------------------------------------
 // Detail humanization: some service_health writers persist structured JSON in
 // their detail/last_error field (e.g. replica-watchdog heartbeat blobs). The UI
 // must NEVER render a raw JSON string — turn it into a readable "key: value"
 // summary, and pass genuine human text through unchanged.
-// ---------------------------------------------------------------------------
 
 function humanizeKey(key: string): string {
   return key.replace(/_/g, " ").trim();

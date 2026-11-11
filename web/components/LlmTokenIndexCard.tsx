@@ -12,8 +12,6 @@ import {
   type LlmTokenIndexRow,
 } from "@/lib/useLlmTokenIndex";
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function formatIndex(value: number): string {
   return value.toFixed(2);
 }
@@ -41,8 +39,6 @@ export function legacyIndexHistory(rows: LlmTokenIndexRow[]): AiHistoryPoint[][]
     source_id: "radon-llm-token-index",
   })));
 }
-
-/* ─── Component ───────────────────────────────────────── */
 
 const HISTORY_DAYS = 180;
 

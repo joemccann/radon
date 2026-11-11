@@ -46,8 +46,6 @@ export function scoreMomentum(spxDistancePct: number): number {
   return clamp((Math.abs(spxDistancePct) / 10) * 25, 0, 25);
 }
 
-/* ─── Level classification ───────────────────────────── */
-
 export type CriLevel = "LOW" | "ELEVATED" | "HIGH" | "CRITICAL";
 
 export function criLevel(score: number): CriLevel {
@@ -56,8 +54,6 @@ export function criLevel(score: number): CriLevel {
   if (score < 75) return "HIGH";
   return "CRITICAL";
 }
-
-/* ─── Composite CRI ──────────────────────────────────── */
 
 export type CriComponents = {
   vix: number;

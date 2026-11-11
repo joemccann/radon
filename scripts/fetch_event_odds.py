@@ -42,7 +42,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -58,7 +57,6 @@ except Exception:
 from clients.polymarket_client import midpoint_to_probability
 from fetch_options import fetch_options
 
-# ── constants ─────────────────────────────────────────────────────
 DATA_DIR = _PROJECT_DIR / "data"
 
 _MARKET_LIMIT = 500
@@ -96,8 +94,6 @@ _BIAS_BASE_PROB: dict[str, float] = {
 }
 
 
-# ── mapping ────────────────────────────────────────────────────────
-
 def map_market_to_ticker(question: Any) -> Optional[str]:
     """Map a Polymarket market question to a Radon ticker, or None.
 
@@ -112,8 +108,6 @@ def map_market_to_ticker(question: Any) -> Optional[str]:
             return ticker
     return None
 
-
-# ── options-skew implied probability ───────────────────────────────
 
 def _clamp_unit(value: float) -> float:
     if value < 0.0:
@@ -153,8 +147,6 @@ def options_skew_probability(options: Any) -> Optional[float]:
     return _clamp_unit(base + skew_adjust)
 
 
-# ── divergence ─────────────────────────────────────────────────────
-
 def compute_divergence(
     polymarket_prob: Optional[float],
     options_prob: Optional[float],
@@ -168,8 +160,6 @@ def compute_divergence(
         return None
     return polymarket_prob - options_prob
 
-
-# ── overlay assembly ───────────────────────────────────────────────
 
 def _yes_token_id(market: dict[str, Any]) -> Optional[str]:
     tokens = market.get("clobTokenIds") or market.get("clob_token_ids")
@@ -256,8 +246,6 @@ def has_overlay_activity(payload: dict[str, Any]) -> bool:
     return bool(payload.get("overlays"))
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _cache_path(ticker: str) -> Path:
     return DATA_DIR / "event_odds" / f"{ticker.upper()}.json"
 
@@ -316,8 +304,6 @@ def run(
         print(f"[event-odds] {ticker.upper()}: no mapped markets — not caching", file=sys.stderr)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     ticker = payload["ticker"]

@@ -330,8 +330,6 @@ class JournalReconcileHandler(BaseHandler):
             return
         super()._ensure_cycle_heartbeat(result, started_at=started_at)
 
-    # -- helpers -----------------------------------------------------------
-
     @staticmethod
     def _open_db() -> Any:
         try:

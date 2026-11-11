@@ -163,11 +163,6 @@ def _is_not_found(exc: BaseException) -> bool:
     return code in {"404", "NoSuchKey", "NotFound"}
 
 
-# ---------------------------------------------------------------------------
-# Local scan
-# ---------------------------------------------------------------------------
-
-
 def _settled_status(root: Path) -> dict[str, str]:
     path = root / "state.sqlite"
     if not path.is_file():
@@ -217,11 +212,6 @@ def _digest(local: LocalFile) -> LocalFile:
             sha.update(block)
     return LocalFile(local.path, local.rel, local.size, local.mtime_ns,
                      base64.b64encode(md5.digest()).decode(), sha.hexdigest())
-
-
-# ---------------------------------------------------------------------------
-# Upload + verify
-# ---------------------------------------------------------------------------
 
 
 def _verify_object(client, bucket: str, key: str, local: LocalFile) -> bool:
@@ -290,11 +280,6 @@ def _prune(directory: Path, verified: list[LocalFile]) -> bool:
         except OSError:
             pass
     return not directory.exists()
-
-
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
 
 
 def run_archive(root: Path, cfg: dict, *, client, now: datetime | None = None, dry_run: bool = False,

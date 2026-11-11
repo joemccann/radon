@@ -250,7 +250,6 @@ def fetch_news(
         except Exception:
             recent.append(h)  # Can't parse date — include anyway
 
-    # ── Build summary ────────────────────────────────────────────────
     bullish = sum(1 for h in recent if h["sentiment"] == "BULLISH")
     bearish = sum(1 for h in recent if h["sentiment"] == "BEARISH")
     neutral = sum(1 for h in recent if h["sentiment"] == "NEUTRAL")
@@ -298,7 +297,6 @@ def fetch_news(
     }
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Fetch news headlines for a ticker")
     parser.add_argument("ticker", help="Ticker symbol")

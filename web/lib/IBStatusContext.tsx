@@ -17,8 +17,6 @@ import {
   REALTIME_OPEN_TIMEOUT_MS,
 } from "./realtimeDeadline";
 
-/* ─── Types ───────────────────────────────────────────── */
-
 export type ConnectionState = "connected" | "ib_offline" | "relay_offline";
 
 /** Authoritative IB auth state from FastAPI /health.ib_gateway.auth_state.
@@ -143,8 +141,6 @@ type PingMessage = {
   type: "ping";
 };
 
-/* ─── Context ─────────────────────────────────────────── */
-
 const IBStatusContext = createContext<IBStatusState>({
   wsConnected: false,
   ibConnected: false,
@@ -155,8 +151,6 @@ const IBStatusContext = createContext<IBStatusState>({
   upstreamDead: null,
   displayStatus: "relay_offline",
 });
-
-/* ─── Staleness constants ─────────────────────────────── */
 
 const STALENESS_CHECK_INTERVAL_MS = 15_000;
 const STALENESS_THRESHOLD_MS = 60_000;
@@ -277,8 +271,6 @@ export function parseIbHealth(
   }
   return null;
 }
-
-/* ─── Provider ────────────────────────────────────────── */
 
 export function IBStatusProvider({
   children,

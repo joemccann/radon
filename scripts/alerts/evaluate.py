@@ -55,8 +55,6 @@ class RuleMatch:
     value: float
 
 
-# ── pure predicate ──────────────────────────────────────────────────
-
 def rule_matches(rule: AlertRule, value: Optional[float]) -> bool:
     """True when ``value op rule.threshold`` holds. Guard clauses keep an
     unknown operator or a missing value from ever firing."""
@@ -67,8 +65,6 @@ def rule_matches(rule: AlertRule, value: Optional[float]) -> bool:
         return False
     return bool(comparator(value, rule.threshold))
 
-
-# ── throttle ────────────────────────────────────────────────────────
 
 def _parse_iso(value: str) -> Optional[datetime]:
     try:
@@ -92,8 +88,6 @@ def _within_throttle(rule: AlertRule, now: datetime) -> bool:
     return (now - last).total_seconds() < DEFAULT_THROTTLE_SECONDS
 
 
-# ── metric resolution ───────────────────────────────────────────────
-
 def _metric_value(scan_row: dict[str, Any], metric: str) -> Optional[float]:
     raw = scan_row.get(metric)
     if raw is None:
@@ -108,8 +102,6 @@ def _row_ticker(scan_row: dict[str, Any]) -> Optional[str]:
     ticker = scan_row.get("ticker") or scan_row.get("symbol")
     return str(ticker).strip().upper() if ticker else None
 
-
-# ── evaluation ──────────────────────────────────────────────────────
 
 def evaluate_rules(
     scan_row: dict[str, Any],
@@ -133,8 +125,6 @@ def evaluate_rules(
             matches.append(RuleMatch(rule=rule, value=float(value)))
     return matches
 
-
-# ── dispatch ────────────────────────────────────────────────────────
 
 def _build_outcome(match: RuleMatch, now: datetime) -> CheckOutcome:
     rule = match.rule

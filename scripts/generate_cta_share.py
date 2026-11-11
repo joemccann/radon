@@ -54,8 +54,6 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
 
-# ── Data loading ─────────────────────────────────────────────────────────────
-
 def _load_cta_from_db() -> Optional[dict]:
     """Latest menthorq_cta row from Turso — the same source the CTA page reads."""
     try:
@@ -205,8 +203,6 @@ def est_selling_bn(data: dict):
     v = model.get("est_selling_bn")
     return v if isinstance(v, (int, float)) else None
 
-
-# ── Card HTML generators ──────────────────────────────────────────────────────
 
 FONTS = '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">'
 
@@ -564,10 +560,6 @@ def card4_bonds(data: dict, ds: str) -> str:
     return card_html("Bond Short Extreme", body, 4, 4, ds)
 
 
-
-
-# ── Preview HTML ──────────────────────────────────────────────────────────────
-
 def build_preview(
     cards_b64: list,
     tweet_text: str,
@@ -661,8 +653,6 @@ function copyImg(id,btn){{
 </script>
 </body></html>"""
 
-
-# ── Tweet text ────────────────────────────────────────────────────────────────
 
 def change_sentences(context: dict) -> list:
     """One line per fact that separates THIS session from the last one.
@@ -978,8 +968,6 @@ def compose_share_copy(
         build_llm_facts(data, ds, priors), template, env=env, caller=caller
     )
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Generate CTA X share report")

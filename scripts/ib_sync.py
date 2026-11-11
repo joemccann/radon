@@ -217,7 +217,6 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
     if not opt_legs:
         return "Mixed", "unknown"
     
-    # ── Covered Call Detection ──
     # Long stock + short call(s) in same ticker = covered call (defined risk)
     # Requires: stock shares >= short call contracts * 100
     if stk_legs and opt_legs:

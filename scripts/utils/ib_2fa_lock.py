@@ -570,7 +570,6 @@ def remaining_lock_secs(
     return max(0, int(lock.expires_at - now))
 
 
-# --- CLI entry point ---------------------------------------------------------
 #
 # Shell control planes that cannot import this module (the radon operator
 # CLI in cloud/scripts/operator-radon.sh) consult the lock via

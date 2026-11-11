@@ -242,11 +242,6 @@ class FlowPlacement:
     before_period_start: Tuple[str, ...]
 
 
-# ---------------------------------------------------------------------------
-# primitives
-# ---------------------------------------------------------------------------
-
-
 def _is_finite(value: object) -> bool:
     try:
         return math.isfinite(float(value))  # type: ignore[arg-type]
@@ -450,11 +445,6 @@ def _suspect_indices(drafts: Sequence[_DraftSubperiod]) -> set[int]:
     return {i for i, draft in enumerate(drafts) if _is_unexplained(draft, bar)}
 
 
-# ---------------------------------------------------------------------------
-# chain construction
-# ---------------------------------------------------------------------------
-
-
 def _sorted_observations(nav: Sequence[NavObservation]) -> List[NavObservation]:
     seen: Dict[str, float] = {}
     for observation in nav:
@@ -609,11 +599,6 @@ def _as_date_map(series: object) -> Dict[str, float]:
     if hasattr(series, "items"):
         return {d: float(v) for d, v in series.items()}  # type: ignore[union-attr]
     return {o.date: float(o.nav) for o in series}  # type: ignore[union-attr]
-
-
-# ---------------------------------------------------------------------------
-# return statistics
-# ---------------------------------------------------------------------------
 
 
 def _gate(n: int, min_n: int) -> Optional[str]:
@@ -781,11 +766,6 @@ def return_distribution(
     }
 
 
-# ---------------------------------------------------------------------------
-# drawdowns
-# ---------------------------------------------------------------------------
-
-
 def drawdown_path(index_values: Sequence[float]) -> List[float]:
     path: List[float] = []
     peak = float("-inf")
@@ -838,11 +818,6 @@ def drawdowns(chain: SubperiodChain, *, min_n: Optional[int] = None) -> Drawdown
         recovery_days=episode_end - episode_peak,
         ongoing=recovery is None and max_drawdown < 0,
     )
-
-
-# ---------------------------------------------------------------------------
-# benchmark
-# ---------------------------------------------------------------------------
 
 
 def align_series(
@@ -930,11 +905,6 @@ def build_benchmark_block(
         ),
         None,
     )
-
-
-# ---------------------------------------------------------------------------
-# money-weighted return
-# ---------------------------------------------------------------------------
 
 
 def build_cashflow_vector(

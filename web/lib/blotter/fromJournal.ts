@@ -592,8 +592,6 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
   return out;
 }
 
-/* ─── Journal-vs-journal exec-id dedupe ────────────────────────────────── */
-
 /**
  * Normalized exec-id "parts" for a journal row: the raw ib_exec_id split on
  * '+' (journal_rehydrate's multi-fill composite join — see
@@ -712,8 +710,6 @@ export function dedupeJournalRows(rows: JournalRow[]): JournalRow[] {
 
   return rows.filter((_, i) => keepIdx.has(i));
 }
-
-/* ─── Shared journal action labels ─────────────────────────────────────── */
 
 // Legacy labels still in history that mean SELL_TO_OPEN: old ib_reconcile
 // wrote SHORT for a stock short sale. Rows are never rewritten.

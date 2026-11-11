@@ -81,8 +81,6 @@ function isMissing(v: number | null | undefined): v is null | undefined {
   return v == null || !Number.isFinite(v);
 }
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Three-decimal ratio: "0.262"; "---" for null/non-finite. */
 export function formatMsr(v: number | null | undefined): string {
   if (isMissing(v)) return MISSING;
@@ -130,8 +128,6 @@ export function formatSourceDate(raw: string | null | undefined): string {
     timeZone: "UTC",
   });
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export interface MsrChartRow {
   date: string;

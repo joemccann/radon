@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -43,7 +42,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 STRADDLE_JSON = _PROJECT_DIR / "data" / "straddle.json"
 
 # Brenner-Subrahmanyam ATM-straddle approximation: straddle ≈ 0.8 σ√T of spot.
@@ -54,8 +52,6 @@ _SPX_SYMBOL = "SPX"
 _VIX1D_SYMBOL = "VIX1D"
 _SYMBOLS = (_SPX_SYMBOL, _VIX1D_SYMBOL)
 
-
-# ── Cboe CSV parsing ──────────────────────────────────────────────
 
 def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
     """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
@@ -74,8 +70,6 @@ def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
     rows.sort(key=lambda r: r["date"])
     return rows
 
-
-# ── straddle math ─────────────────────────────────────────────────
 
 def implied_straddle_pct(vix1d: float) -> float:
     """Implied 1-day ATM straddle as % of spot, from an annualized VIX1D close."""
@@ -147,8 +141,6 @@ def _build_current(series: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     }
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_db_cache(
     payload: dict[str, Any], scan_time: str, *, rows_changed: bool
 ) -> None:
@@ -185,8 +177,6 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
     except (OSError, ValueError):
         return None
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict[str, Any]:
     """Fetch both Cboe legs, compute, cache, and return the straddle payload.
@@ -244,8 +234,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _write_json_cache(payload)
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

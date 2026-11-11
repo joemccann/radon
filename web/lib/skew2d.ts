@@ -51,8 +51,6 @@ export interface Skew2dData {
 
 export const SKEW2D_LIVE_MAX_AGE_MS = 3 * 60_000;
 
-/* ─── Formatting ─────────────────────────────────────── */
-
 /** Signed two-decimal daily change: "-0.12", "+0.05"; "---" null/non-finite. */
 export function formatSkew2dChange(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -77,8 +75,6 @@ export function formatZ(v: number | null | undefined): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
 }
 
-/* ─── Derivations ────────────────────────────────────── */
-
 /** change / stddev; null when either input is missing or stddev <= 0. */
 export function zScore(
   change: number | null | undefined,
@@ -102,8 +98,6 @@ export function skew2dChangeColor(
   if (stddev == null || !Number.isFinite(stddev) || stddev <= 0) return "var(--text-muted)";
   return Math.abs(change) > 2 * stddev ? "var(--warning)" : "var(--text-muted)";
 }
-
-/* ─── Chart rows ─────────────────────────────────────── */
 
 export type Skew2dChartView = "change" | "level";
 

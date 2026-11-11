@@ -77,9 +77,7 @@ DEFAULT_ARCHIVE_DIR = Path(
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-# ---------------------------------------------------------------------------
 # Pure helpers (unit-tested in scripts/tests/test_archive_portfolio_snapshots.py)
-# ---------------------------------------------------------------------------
 def compute_cutoff_iso(now: datetime, retention_days: int) -> str:
     """ISO timestamp ``retention_days`` before ``now``, in the ``taken_at``
     format (``YYYY-MM-DDTHH:MM:SS.ffffffZ``) so the string compare against the
@@ -206,9 +204,7 @@ def s3_config_from_env(env: dict[str, str] | None = None) -> dict[str, str] | No
     return required
 
 
-# ---------------------------------------------------------------------------
 # Side-effecting layer (DB / disk / S3) — integration-tested with mocks
-# ---------------------------------------------------------------------------
 def fetch_archivable_rows(db, cutoff: str, batch_size: int) -> Iterator[tuple[str, str]]:
     """Yield ``(taken_at, payload)`` for rows with ``taken_at < cutoff`` in
     bounded, keyset-paginated pages (no OFFSET drift, no fat fetchall)."""
@@ -263,9 +259,7 @@ def upload_partition(path: Path, key: str, cfg: dict[str, str]) -> None:
     client.upload_file(str(path), cfg["bucket"], key)
 
 
-# ---------------------------------------------------------------------------
 # service_health heartbeat — bounded stdlib libSQL HTTP pipeline (no libsql)
-# ---------------------------------------------------------------------------
 _UPSERT_SQL = (
     "INSERT INTO service_health (service, state, last_attempt_started_at, "
     "last_attempt_finished_at, last_error, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
@@ -330,9 +324,6 @@ def write_service_health(state: str, detail: dict | None, started_at: str) -> No
         print(f"  service_health heartbeat failed: {exc}", file=sys.stderr)
 
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
 def _require_delete_safety(
     s3_cfg: dict[str, str] | None,
     allow_delete_without_upload: bool,

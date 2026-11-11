@@ -258,9 +258,7 @@ class CashFlowSyncHandler(BaseHandler):
         self._run_generation = 0
         self._retired_generation = 0
 
-    # ------------------------------------------------------------------
     # State persistence — circuit breaker survives daemon restarts.
-    # ------------------------------------------------------------------
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["backoff_state"] = dict(self._backoff_state)
@@ -315,9 +313,7 @@ class CashFlowSyncHandler(BaseHandler):
             "service_health (next attempt %s)", next_attempt
         )
 
-    # ------------------------------------------------------------------
     # Cadence override — daily window + circuit breaker.
-    # ------------------------------------------------------------------
     def _shared_embargo_until(self) -> Optional[str]:
         """The token-wide deadline any Flex caller may have armed.
 
@@ -374,9 +370,7 @@ class CashFlowSyncHandler(BaseHandler):
         # otherwise skip the day entirely.
         return True
 
-    # ------------------------------------------------------------------
     # Execution — one shot, no internal retries on throttle codes.
-    # ------------------------------------------------------------------
     def execute(self) -> Dict[str, Any]:
         """Wrap inner logic with service_health heartbeat (success+error).
 
@@ -440,9 +434,6 @@ class CashFlowSyncHandler(BaseHandler):
 
         return result
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     def retire_current_run(self) -> None:
         """Disown the in-flight run after the daemon's deadline killed it.
 

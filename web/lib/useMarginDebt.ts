@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { MarginDebtData } from "./marginDebt";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the series updates monthly (radon-margin-debt-refresh timer runs
 // the fetcher directly), so there is no manual-scan POST and an hourly poll
 // is already generous. Types + pure helpers live in lib/marginDebt.ts.

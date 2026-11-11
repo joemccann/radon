@@ -60,9 +60,6 @@ def _token(value: str) -> str:
     return "-".join((value or "").split()) or "unnamed"
 
 
-# --- verdict line ------------------------------------------------------------
-
-
 def ready_line(loop: str, urls: list[str]) -> str:
     clean = [u.strip() for u in urls if u and u.strip()]
     line = f"{READY_PREFIX} loop={_loop(loop)} prs={len(clean)}"
@@ -111,9 +108,6 @@ def notify_status(line: str) -> str:
                 check = tok[6:]
         return f"INCOMPLETE: {check}"
     return NO_VERDICT_STATUS
-
-
-# --- CI watch ----------------------------------------------------------------
 
 
 _JOB_HEADER = re.compile(r"^  ([a-z0-9-]+):\s*$")
@@ -373,9 +367,6 @@ def exit_code_for(state: str) -> int:
     return _EXIT_FOR_STATE.get(state, 3)
 
 
-# --- resume record -----------------------------------------------------------
-
-
 def _root(root: Path | str | None) -> Path:
     if root is not None:
         return Path(root)
@@ -469,9 +460,6 @@ def status_from_record(loop: str, *, root: Path | str | None = None) -> str:
             f"resume {record.get('branch') or 'the dated branch'})"
         )
     return f"INCOMPLETE: {record.get('check') or 'unnamed check'}"
-
-
-# --- CLI ---------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:

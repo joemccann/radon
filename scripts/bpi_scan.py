@@ -30,7 +30,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -134,8 +133,6 @@ def _yahoo_get_json(url: str) -> Any:
     resp.raise_for_status()
     return resp.json()
 
-
-# ── scan math ─────────────────────────────────────────────────────
 
 def member_signal_series(closes_by_date: dict[str, float]) -> tuple[list[str], list[Optional[str]]]:
     """Per-date P&F signal states for one member's date-indexed closes."""
@@ -645,8 +642,6 @@ def _drop_cached_db_connection() -> None:
         pass
 
 
-# ── scan + persistence ────────────────────────────────────────────
-
 def scan_index(
     index_symbol: str,
     *,
@@ -828,8 +823,6 @@ def _smoke_member_cap() -> int:
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(

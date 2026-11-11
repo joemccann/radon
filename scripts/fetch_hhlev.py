@@ -35,7 +35,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# -- path setup ----------------------------------------------------
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -53,7 +52,6 @@ from utils.ipv4_first import prefer_ipv4
 
 prefer_ipv4()
 
-# -- constants -----------------------------------------------------
 SERVICE = "hhlev"
 HHLEV_JSON = _PROJECT_DIR / "data" / "hhlev.json"
 
@@ -94,8 +92,6 @@ def _log(message: str) -> None:
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-
-# -- HTTP transport ------------------------------------------------
 
 def _http_get(url: str) -> str:
     from urllib.request import Request, urlopen
@@ -238,8 +234,6 @@ def build_output(
     }
 
 
-# -- keyed FRED API fallback ---------------------------------------
-
 def _fred_api_key() -> str:
     key = os.environ.get("FRED_API_KEY") or os.environ.get("FRED_KEY")
     if not key:
@@ -296,8 +290,6 @@ def fetch_rows() -> tuple[list[dict[str, Any]], Optional[str]]:
     return rows, source_last_modified
 
 
-# -- persistence ---------------------------------------------------
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     HHLEV_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = HHLEV_JSON.with_suffix(".json.tmp")
@@ -318,8 +310,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     _write_json_cache(payload)
 
 
-# -- daily orchestration -------------------------------------------
-
 def run() -> dict[str, Any]:
     rows, source_last_modified = fetch_rows()
     _log(f"fetched {len(rows)} populated quarters")
@@ -333,8 +323,6 @@ def run() -> dict[str, Any]:
     persist_result(payload, rows)
     return payload
 
-
-# -- CLI -----------------------------------------------------------
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

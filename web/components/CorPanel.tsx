@@ -137,7 +137,6 @@ export default function CorPanel() {
 
   return (
     <>
-      {/* ── Summary strip ─────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -228,7 +227,6 @@ export default function CorPanel() {
         />
       </div>
 
-      {/* ── Implied correlation chart ─────────────────────── */}
       <div className="breadth-history-block" data-testid="cor-chart-section">
         <div data-testid="cor-chart-controls" style={CONTROL_ROW}>
           <div style={CONTROL_GROUP}>
