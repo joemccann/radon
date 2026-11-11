@@ -61,5 +61,4 @@ Do not invent a second copy of the scan logic here.
 
 New scripts stay at this top level unless a shim plan is explicit.
 Go-forward grouping (`scripts/fetch/`, `scripts/scan/`, `scripts/ib/`)
-is Phase 3 of [`docs/monorepo-legibility-plan.md`](../docs/monorepo-legibility-plan.md)
-and is not in force.
+is not in force.

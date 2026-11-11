@@ -1,6 +1,6 @@
 -- 0028_knowledge.sql — Radon knowledge base (Phase 0): one shared table for
 -- every connector's distilled exhaust (journal, eval reports, newsfeed, docs,
--- incidents), per tasks/knowledge-base-plan.md.
+-- incidents), per tasks/archive/knowledge-base-plan.md.
 --
 -- One row per document chunk, keyed by (source, doc_key, chunk_ix).
 -- content is the raw text consumers quote; summary is the distilled retrieval

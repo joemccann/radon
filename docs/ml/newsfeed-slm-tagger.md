@@ -58,7 +58,7 @@ Additional input folded in 2026-09-19 (Joe via CoS): a QLoRA practitioner guide 
 
 ### The job
 
-`scripts/newsfeed/tagger.js` labels every Market Ear post with exactly 3 UPPERCASE kebab tags. It runs on every post (text tagger always; vision tagger additionally when the post has an image; see `hydrateTagsDual` in `scripts/newsfeed/vision_tagger.js`). Volume is roughly 20 to 25 posts per day (3,474 posts over about five months as of 2026-07-20, `tasks/knowledge-base-plan.md`). Each post costs one walk of the shared model ladder.
+`scripts/newsfeed/tagger.js` labels every Market Ear post with exactly 3 UPPERCASE kebab tags. It runs on every post (text tagger always; vision tagger additionally when the post has an image; see `hydrateTagsDual` in `scripts/newsfeed/vision_tagger.js`). Volume is roughly 20 to 25 posts per day (3,474 posts over about five months as of 2026-07-20, `tasks/archive/knowledge-base-plan.md`). Each post costs one walk of the shared model ladder.
 
 ### Why do this at all, in honest order
 
@@ -743,7 +743,7 @@ No new API keys, no prepaid spend, no cloud GPU are required by the default prop
 - `web/public/data/posts.json`: absent (runtime file, gitignored). No historical version in git.
 - `data/tag_taxonomy.json`: absent; untracked at `f88b413a` (2026-07-15). Last tracked version: 212 tags, 67 multi-word, 62 ticker-shaped.
 - Test fixtures containing `tags_text`: `web/tests/newsfeed-db-dual-write.test.ts`, `newsfeed-posts-api.test.ts`, `newsfeed-vision-tagger.test.ts`, `newsfeed-tag-hierarchy.test.ts`, `scripts/lib/demoMirrorReliability.test.js`; all synthetic, 1 to 3 posts each. Not usable as a corpus.
-- Turso credentials: none in the VM environment. Corpus size must be counted on a credentialed host; last verified figure is 3,474 posts (2026-07-20, `tasks/knowledge-base-plan.md`).
+- Turso credentials: none in the VM environment. Corpus size must be counted on a credentialed host; last verified figure is 3,474 posts (2026-07-20, `tasks/archive/knowledge-base-plan.md`).
 - Hetzner host size: not recorded anywhere current in the repo; the deployment guide's CPX11 figure predates the present unit set.
 - `research_post_sources` (migration 0071) exists, so the research-post exclusion in C.2 is required, not hypothetical.
 - Ports in use per `cloud/services/*.service` and Caddy config: 8321, 8330, 8334, 8340, 8765. 8331 is free on paper.

@@ -2,7 +2,7 @@
 
 The live default is nvidia/nemotron-3-embed-1b (2048d, column embedding_v2).
 On 2026-09-25 Joe McCann reversed the local-only decision in
-tasks/knowledge-base-plan.md: every knowledge source, including journal,
+tasks/archive/knowledge-base-plan.md: every knowledge source, including journal,
 positions, and P&L, is sent to NVIDIA's hosted embeddings API.
 RADON_KB_EMBED_BACKEND=local forces BAAI/bge-small-en-v1.5 (384d).
 

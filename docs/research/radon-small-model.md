@@ -11,7 +11,7 @@ Partly, and not in the way the statement imagines. "AI constantly studying my po
 
 ### What is verified in Radon
 
-- Knowledge base shipped 2026-07-20: `tasks/knowledge-base-plan.md` records 4,933 docs from five connectors (819 journal rows, 3,474 newsfeed posts, 183 eval/report files, 86 scan snapshots, 31 docs), golden-set hit@5 0.917 against a 0.8 gate, hourly ingest on the VPS, local bge-small-en-v1.5 embeddings (journal text never leaves the box), Cerebras `gpt-oss-120b` distillation of summaries.
+- Knowledge base shipped 2026-07-20: `tasks/archive/knowledge-base-plan.md` records 4,933 docs from five connectors (819 journal rows, 3,474 newsfeed posts, 183 eval/report files, 86 scan snapshots, 31 docs), golden-set hit@5 0.917 against a 0.8 gate, hourly ingest on the VPS, local bge-small-en-v1.5 embeddings (journal text never leaves the box), Cerebras `gpt-oss-120b` distillation of summaries.
 - Query surfaces: `scripts/knowledge/retrieve.py` (BM25 + cosine + recency, RRF fusion), FastAPI `/knowledge/search`, assistant tools `search_knowledge` and `find_prior_evals`, MCP server `scripts/knowledge/mcp_server.py`.
 - The assistant loop (`web/lib/assistant/loop.ts`) is an Anthropic tool loop; `web/lib/llm/provider.ts` already abstracts OpenAI-compatible bases including Ollama, so a local model can be plugged in without new plumbing.
 - Classic-ML infrastructure exists: `forecast_snapshots` / `forecast_calibration` (Chronos-2 walk-forward, migrations 0015/0016) and `backtest_runs` (0018) with Sharpe, Sortino, Calmar, hit rate, expectancy per run.
@@ -179,7 +179,7 @@ Flow-surprise residuals, regime bands and the vol cone belong to Chronos-2 / gra
 
 ## Sources
 
-Radon repository (verified, read-only): `CLAUDE.md`, `scripts/CLAUDE.md`, `docs/evaluation.md`, `docs/reports.md`, `scripts/newsfeed/CLAUDE.md`, `scripts/db/migrations/0001_init.sql`, `0015_forecast_snapshots.sql`, `0016_forecast_calibration.sql`, `0018_backtest_runs.sql`, `0028_knowledge.sql`, `0030_assistant_turns.sql`, `0065_assistant_turns_provenance.sql`, `scripts/knowledge/{ingest,distill,embed,eval_golden,golden_set.json}`, `scripts/knowledge/sources/{journal,evals,newsfeed}.py`, `tasks/knowledge-base-plan.md`, `tasks/timeseries-model-backlog.md`, `web/lib/llm/provider.ts`, `docs/cloud-services.md` (backup drill: 37 tables / 80,171 rows, 2026-06-12).
+Radon repository (verified, read-only): `CLAUDE.md`, `scripts/CLAUDE.md`, `docs/evaluation.md`, `docs/reports.md`, `scripts/newsfeed/CLAUDE.md`, `scripts/db/migrations/0001_init.sql`, `0015_forecast_snapshots.sql`, `0016_forecast_calibration.sql`, `0018_backtest_runs.sql`, `0028_knowledge.sql`, `0030_assistant_turns.sql`, `0065_assistant_turns_provenance.sql`, `scripts/knowledge/{ingest,distill,embed,eval_golden,golden_set.json}`, `scripts/knowledge/sources/{journal,evals,newsfeed}.py`, `tasks/archive/knowledge-base-plan.md`, `tasks/timeseries-model-backlog.md`, `web/lib/llm/provider.ts`, `docs/cloud-services.md` (backup drill: 37 tables / 80,171 rows, 2026-06-12).
 
 External:
 - Ovadia et al., Fine-Tuning or Retrieval? Comparing Knowledge Injection in LLMs: https://arxiv.org/abs/2312.05934
