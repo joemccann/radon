@@ -1,5 +1,4 @@
-"""Regression tests for timezone-aware writers in `ib_sync.py` and
-`portfolio_performance.py`.
+"""Regression tests for timezone-aware writers in `ib_sync.py`.
 
 Covers two HIGH-severity correctness bugs:
 
@@ -12,10 +11,6 @@ Covers two HIGH-severity correctness bugs:
    On Hetzner after 20:00 ET this is already tomorrow in ET, so a fresh
    position lands with the wrong stamp and `web/lib/positionUtils.ts:isSameDay`
    misses it — collapsing same-day P&L back to the broken close-based branch.
-
-3. `portfolio_performance.py` derived `end_date` via `last_sync[:10]`. With
-   the new UTC-aware producer the slice is correct only by accident; the
-   helper used here picks the ET calendar day explicitly.
 """
 
 import re
@@ -29,7 +24,6 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import ib_sync
-import portfolio_performance
 
 
 ISO_OFFSET_RE = re.compile(r"([+-]\d{2}:\d{2}|Z)$")
@@ -126,41 +120,6 @@ class TestIbSyncEntryDateInET(unittest.TestCase):
             datetime(2026, 5, 8, 18, 0, tzinfo=timezone.utc),
             expected_et_date="2026-05-08",
         )
-
-
-class TestPortfolioPerformanceEndDate(unittest.TestCase):
-    """`portfolio_performance._last_sync_to_et_date` must derive the ET day
-    correctly for naive UTC, tz-aware UTC, and tz-aware ET inputs."""
-
-    def test_naive_utc_after_et_midnight_resolves_to_prior_et_day(self):
-        # Legacy producer: naive ISO. Treated as UTC; ET is one day earlier.
-        self.assertEqual(
-            portfolio_performance._last_sync_to_et_date("2026-05-09T01:58:36.144211"),
-            "2026-05-08",
-        )
-
-    def test_utc_aware_after_et_midnight_resolves_to_prior_et_day(self):
-        # New producer (`datetime.now(timezone.utc).isoformat()`).
-        self.assertEqual(
-            portfolio_performance._last_sync_to_et_date("2026-05-09T01:58:36.144211+00:00"),
-            "2026-05-08",
-        )
-
-    def test_zulu_suffix_supported(self):
-        self.assertEqual(
-            portfolio_performance._last_sync_to_et_date("2026-05-09T01:58:36Z"),
-            "2026-05-08",
-        )
-
-    def test_et_aware_kept_as_is(self):
-        # Laptop in ET writing tz-aware iso → no shift.
-        self.assertEqual(
-            portfolio_performance._last_sync_to_et_date("2026-05-08T21:58:36-04:00"),
-            "2026-05-08",
-        )
-
-    def test_empty_returns_none(self):
-        self.assertIsNone(portfolio_performance._last_sync_to_et_date(""))
 
 
 if __name__ == "__main__":

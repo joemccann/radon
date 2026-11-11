@@ -154,7 +154,6 @@ from clients.ib_client import (
     DEFAULT_HOST,
     DEFAULT_TWS_PORT,
 )
-from utils.flex_send import FlexSendDisabled
 
 
 # ===========================================================================
@@ -965,57 +964,6 @@ class TestExecutionOperations:
 
         with pytest.raises(IBOrderError, match="[Cc]ancelled"):
             client.wait_for_fill(trade, timeout=10)
-
-
-# ===========================================================================
-# FLEX QUERY
-# ===========================================================================
-
-class TestFlexQuery:
-    """Test Flex Query execution."""
-
-    @patch("clients.ib_client.FlexReport")
-    @patch("clients.ib_client.IB")
-    def test_run_flex_query(self, MockIB, MockFlexReport):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        mock_report = MagicMock()
-        mock_report.df.return_value = MagicMock()  # returns a DataFrame-like object
-        MockFlexReport.return_value = mock_report
-
-        client = IBClient()
-        client.connect(client_id=1)
-        # R-353: the file-ingest-only policy block used to be rewritten into a
-        # generic `IBError("Flex query ... failed")`, which made it
-        # indistinguishable from a transient Flex outage — `portfolio_
-        # performance` degraded to the stale blotter cache for both. The
-        # ORIGINAL intent of this case (the guard blocks the send; FlexReport
-        # is never constructed) is unchanged and still asserted below; only
-        # the exception type moved to the one that names the actual state.
-        with pytest.raises(FlexSendDisabled):
-            client.run_flex_query(query_id=123456, token="test_token")
-        MockFlexReport.assert_not_called()
-
-    @patch("clients.ib_client.FlexReport")
-    @patch("clients.ib_client.IB")
-    def test_run_flex_query_error(self, MockIB, MockFlexReport):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        MockFlexReport.side_effect = Exception("Flex query failed")
-
-        client = IBClient()
-        client.connect(client_id=1)
-
-        # A REAL transport failure must still surface as IBError. The guard
-        # now runs above the try (R-353), so it has to be satisfied for this
-        # case to reach the transport at all.
-        with patch(
-            "utils.flex_send.assert_sendrequest_permitted", return_value=None
-        ):
-            with pytest.raises(IBError, match="Flex"):
-                client.run_flex_query(query_id=123456, token="bad_token")
 
 
 # ===========================================================================

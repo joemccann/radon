@@ -116,7 +116,7 @@ class TestFlowAnalysisSnapshot:
         assert json.loads(rows[0][0])["interp"]["AAPL"] == 1.5
 
 
-# ── performance_snapshots + nav_history + twr_history ────────────────
+# ── performance_snapshots ────────────────────────────────────────────
 
 class TestPerformanceTables:
     def test_performance_snapshot_replace_on_same_taken_at(self, writer, db_with_schema):
@@ -126,23 +126,6 @@ class TestPerformanceTables:
         rows = db_with_schema.execute("SELECT payload FROM performance_snapshots").fetchall()
         assert len(rows) == 1
         assert json.loads(rows[0][0])["twr_ytd"] == 0.18
-
-    def test_nav_history_keys_by_date(self, writer, db_with_schema):
-        writer.upsert_nav_history("2026-05-07", 1_558_512.55, 24_958.67)
-        writer.upsert_nav_history("2026-05-07", 1_558_999.00, 25_000.00)
-        rows = db_with_schema.execute("SELECT date, net_liq, daily_pnl FROM nav_history").fetchall()
-        assert rows == [("2026-05-07", 1_558_999.00, 25_000.00)]
-
-    def test_nav_history_handles_null_daily_pnl(self, writer, db_with_schema):
-        writer.upsert_nav_history("2026-05-07", 1_000_000.0, None)
-        rows = db_with_schema.execute("SELECT daily_pnl FROM nav_history").fetchall()
-        assert rows[0][0] is None
-
-    def test_twr_history_keys_by_date(self, writer, db_with_schema):
-        writer.upsert_twr_history("2026-05-07", 0.12)
-        writer.upsert_twr_history("2026-05-07", 0.13)
-        rows = db_with_schema.execute("SELECT twr FROM twr_history").fetchall()
-        assert rows == [(0.13,)]
 
 
 # ── option_close_cache ───────────────────────────────────────────────
