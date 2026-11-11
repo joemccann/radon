@@ -145,7 +145,7 @@ class MonitorDaemon:
         Uses zoneinfo for proper DST handling. The previous implementation
         hardcoded a UTC-5 offset which silently shifted the market window
         by one hour every DST season — market-hours handlers (fill_monitor,
-        journal_sync, exit_orders) would skip the first hour of EDT trading
+        journal_sync) would skip the first hour of EDT trading
         and run for an extra hour after the real close.
         """
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
