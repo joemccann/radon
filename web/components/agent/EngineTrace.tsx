@@ -7,7 +7,7 @@ import ThinkingWait from "@/components/fx/ThinkingWait";
  * Markov, Laplace). Adopted from beautifului.dev "Thinking", re-skinned to the
  * instrument grammar: square status dots, mono telemetry, per-step timing,
  * a one-line declarative reasoning summary. Drop-in replacement for the
- * typing-dots indicator once the backend emits step events.
+ * typing-dots indicator.
  */
 
 export type TraceStepState = "done" | "running" | "waiting";
@@ -28,7 +28,7 @@ type EngineTraceProps = {
   elapsed?: string;
   /** Declarative one-line summary once available. */
   reasoning?: string;
-  /** Collapsed shows only the header row. Default expanded while running. */
+  /** Collapsed shows only the header row. Default expanded. */
   collapsed?: boolean;
   onToggle?: () => void;
 };

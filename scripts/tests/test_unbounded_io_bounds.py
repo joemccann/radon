@@ -212,6 +212,14 @@ class TestIncidentRetention:
         self._incident(tmp_path, "undated", "resolved", None)
         assert prune_resolved(tmp_path, now=datetime(2030, 1, 1, tzinfo=timezone.utc)) == 0
 
-    def test_the_sweep_runs_from_the_watchdog_cycle(self):
-        src = (REPO / "scripts" / "incident_watchdog" / "store.py").read_text()
-        assert "prune_resolved" in src.split("def reconcile")[1] if "def reconcile" in src else True
+    def test_the_sweep_runs_from_the_watchdog_cycle(self, tmp_path):
+        from datetime import datetime, timezone
+        from incident_watchdog.store import record_cycle
+
+        self._incident(tmp_path, "old", "resolved", "2020-01-01T00:00:00+00:00")
+        self._incident(tmp_path, "new", "resolved", "2026-08-22T00:00:00+00:00")
+
+        record_cycle([], tmp_path, datetime(2026, 8, 23, tzinfo=timezone.utc))
+
+        names = sorted(p.name for p in tmp_path.glob("incident-*.json"))
+        assert names == ["incident-new.json"]

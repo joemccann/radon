@@ -1,13 +1,11 @@
-"""SPX-03 — RED/GREEN tests for GET /short-availability/{ticker}.
+"""SPX-03: GET /short-availability/{ticker} and its pure helpers.
 
-Tests the short availability route contract without importing api.server
-directly (which pulls in api/auth.py with Python 3.10+ str|None syntax).
-Pure logic helpers are replicated here and tested; route integration
-tests mock via subprocess-level helpers.
+Every test calls the real code in ``api.server``: the helpers directly, the
+route through ``TestClient`` with only the two I/O edges (IB tick probe, UW
+short-data fetch) replaced.
 
 Contract verified:
   - Always 200, never 4xx (missing:true semantics)
-  - IB tick 46 (difficulty) + tick 89 (shortable shares) probe via streaming
   - Shortability derivation thresholds (easy >= 2.5 / locate 1.5-2.5 / no < 1.5)
   - UW fallback for fee/rebate when IB returns nothing
   - Stale UW row rejection (SPCX recycled-ticker guard, max 3 days)
@@ -18,110 +16,29 @@ Contract verified:
 from __future__ import annotations
 
 import sys
-import math
-from datetime import datetime, timezone, timedelta, date
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional, Any
-from unittest.mock import MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
 
 _SCRIPTS = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-
-# ---------------------------------------------------------------------------
-# Replicated pure helpers (matching server.py implementations exactly)
-# These are tested in isolation so that no Python 3.10 type-annotation
-# files are pulled in via the server.py import chain.
-# ---------------------------------------------------------------------------
-
-_SHORTABLE_EASY_THRESHOLD = 2.5
-_SHORTABLE_NO_THRESHOLD = 1.5
-_UW_SHORT_DATA_MAX_AGE_DAYS = 3
+from api import auth, server  # noqa: E402
+from api.server import (  # noqa: E402
+    _derive_shortability,
+    _extract_uw_fee_rebate,
+    _read_generic_tick,
+    _safe_float,
+)
 
 
-def _derive_shortability(
-    difficulty: Optional[float],
-    shortable_shares: Optional[float] = None,
-) -> Optional[bool]:
-    if difficulty is not None:
-        if difficulty >= _SHORTABLE_EASY_THRESHOLD:
-            return True
-        if difficulty < _SHORTABLE_NO_THRESHOLD:
-            return False
-        return None  # locate-only
-    if shortable_shares is not None and shortable_shares > 0:
-        return True
-    return None
-
-
-_NAMED_TICK_ATTRS = {
-    46: ("shortable",),
-    89: ("shortableShares",),
-}
-
-
-def _read_generic_tick(ticker_obj: Any, tick_id: int) -> Optional[float]:
-    for attr in _NAMED_TICK_ATTRS.get(tick_id, ()):
-        val = getattr(ticker_obj, attr, None)
-        if val is not None and val == val:  # exclude NaN
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                pass
-    for tick in getattr(ticker_obj, "ticks", []):
-        if getattr(tick, "tickType", None) == tick_id:
-            val = getattr(tick, "value", None)
-            if val is not None:
-                try:
-                    return float(val)
-                except (TypeError, ValueError):
-                    pass
-    return None
-
-
-def _uw_short_data_is_fresh(raw: dict, ticker: str = "AAPL") -> bool:
-    data_rows = raw.get("data") or []
-    if not data_rows:
-        return False
-    latest = data_rows[0] if isinstance(data_rows, list) else None
-    if not isinstance(latest, dict):
-        return False
-    as_of_str = latest.get("date") or latest.get("as_of") or ""
-    if not as_of_str:
-        return False
-    try:
-        as_of = date.fromisoformat(str(as_of_str)[:10])
-        age_days = (datetime.now(timezone.utc).date() - as_of).days
-        return age_days <= _UW_SHORT_DATA_MAX_AGE_DAYS
-    except Exception:
-        return False
-
-
-def _safe_float(val: Any) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        return None if f != f else f
-    except (TypeError, ValueError):
-        return None
-
-
-def _extract_uw_fee_rebate(raw: dict) -> tuple:
-    data_rows = raw.get("data") or []
-    if not data_rows or not isinstance(data_rows, list):
-        return None, None, None
-    latest = data_rows[0] if data_rows else None
-    if not isinstance(latest, dict):
-        return None, None, None
-    fee_rate = _safe_float(latest.get("fee_rate") or latest.get("borrowRate"))
-    rebate_rate = _safe_float(latest.get("rebate_rate") or latest.get("rebateRate"))
-    as_of = latest.get("date") or latest.get("as_of")
-    return fee_rate, rebate_rate, str(as_of) if as_of else None
+def _uw_short_data_is_fresh(raw: dict) -> bool:
+    return server._uw_short_data_is_fresh(raw, "AAPL")
 
 
 # ---------------------------------------------------------------------------
@@ -329,11 +246,17 @@ class TestSafeFloat:
 
 
 # ---------------------------------------------------------------------------
-# Integration: full route logic simulation (no server.py import)
+# Route: GET /short-availability/{ticker} over the real handler
 # ---------------------------------------------------------------------------
 
 class TestShortAvailabilityLogic:
-    """Simulate the full route decision tree without importing server.py."""
+    """The real route's decision tree, with only the IB probe and UW fetch faked."""
+
+    @pytest.fixture(autouse=True)
+    def _trusted_local(self, monkeypatch):
+        self.monkeypatch = monkeypatch
+        monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+        monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
 
     def _run(
         self,
@@ -342,41 +265,21 @@ class TestShortAvailabilityLogic:
         uw_available=False,
         ib_connected=True,
     ):
-        """Simulate the short_availability route logic.
+        @asynccontextmanager
+        async def acquire(role):
+            yield "bounded-client"
 
-        Returns dict matching the route contract shape.
-        """
-        difficulty: Optional[float] = None
-        shortable_shares: Optional[float] = None
-        fee_rate: Optional[float] = None
-        rebate_rate: Optional[float] = None
-        source = "none"
-        as_of = datetime.now(timezone.utc).isoformat()
-
-        if ib_connected and ib_result is not None:
-            difficulty = ib_result.get("difficulty")
-            shortable_shares = ib_result.get("shortable_shares")
-            if difficulty is not None or shortable_shares is not None:
-                source = "ib"
-
-        if uw_available and uw_raw is not None:
-            if _uw_short_data_is_fresh(uw_raw):
-                uw_fee, uw_rebate, uw_as_of = _extract_uw_fee_rebate(uw_raw)
-                fee_rate = uw_fee
-                rebate_rate = uw_rebate
-                if source == "none":
-                    source = "uw"
-                    as_of = uw_as_of or as_of
-
-        return {
-            "shortable": _derive_shortability(difficulty, shortable_shares),
-            "difficulty": difficulty,
-            "shortable_shares": shortable_shares,
-            "fee_rate": fee_rate,
-            "rebate_rate": rebate_rate,
-            "source": source,
-            "missing": source == "none",
-        }
+        pool = SimpleNamespace(is_connected=lambda role: ib_connected, acquire=acquire)
+        self.monkeypatch.setattr(server, "ib_pool", pool)
+        self.monkeypatch.setattr(server, "uw_available", uw_available)
+        self.monkeypatch.setattr(
+            server, "_probe_short_ticks_in_thread", lambda client, ticker: ib_result
+        )
+        self.monkeypatch.setattr(server, "_fetch_uw_short_data", lambda ticker: uw_raw)
+        # Do not enter TestClient's context: that would run the live service lifespan.
+        response = TestClient(server.app).get("/short-availability/AAPL")
+        assert response.status_code == 200, response.text
+        return response.json()
 
     def test_ib_easy_borrow(self):
         r = self._run(ib_result={"difficulty": 3.0, "shortable_shares": 1_000_000.0})
@@ -457,54 +360,34 @@ class TestShortAvailabilityLogic:
     # SPX-03 fix: AAPL live repro — shortable_shares > 0 without difficulty
     # ------------------------------------------------------------------
 
-    def _run_with_shares(self, ib_result=None):
-        """Simulate the fixed route logic (difficulty + shares → shortable)."""
-        difficulty: Optional[float] = None
-        shortable_shares: Optional[float] = None
-        source = "none"
-
-        if ib_result is not None:
-            difficulty = ib_result.get("difficulty")
-            shortable_shares = ib_result.get("shortable_shares")
-            if difficulty is not None or shortable_shares is not None:
-                source = "ib"
-
-        return {
-            "shortable": _derive_shortability(difficulty, shortable_shares),
-            "difficulty": difficulty,
-            "shortable_shares": shortable_shares,
-            "source": source,
-            "missing": source == "none",
-        }
-
     def test_aapl_repro_no_difficulty_with_shares_returns_true(self):
         """AAPL live case: difficulty=None + 190M shares → shortable MUST be True."""
-        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": 190_797_965})
+        r = self._run(ib_result={"difficulty": None, "shortable_shares": 190_797_965})
         assert r["shortable"] is True
         assert r["source"] == "ib"
         assert r["missing"] is False
 
     def test_difficulty_present_easy_unchanged(self):
         """When difficulty IS present (>=2.5), derivation is unchanged."""
-        r = self._run_with_shares(ib_result={"difficulty": 3.0, "shortable_shares": 1_000_000})
+        r = self._run(ib_result={"difficulty": 3.0, "shortable_shares": 1_000_000})
         assert r["shortable"] is True
 
     def test_difficulty_present_no_borrow_unchanged(self):
         """When difficulty IS present (<1.5), derivation is unchanged regardless of shares."""
-        r = self._run_with_shares(ib_result={"difficulty": 1.0, "shortable_shares": 500_000})
+        r = self._run(ib_result={"difficulty": 1.0, "shortable_shares": 500_000})
         assert r["shortable"] is False
 
     def test_difficulty_present_locate_unchanged(self):
         """When difficulty IS present (1.5-2.5), locate-only regardless of shares."""
-        r = self._run_with_shares(ib_result={"difficulty": 2.0, "shortable_shares": 100_000})
+        r = self._run(ib_result={"difficulty": 2.0, "shortable_shares": 100_000})
         assert r["shortable"] is None
 
     def test_both_absent_stays_none(self):
         """Both difficulty and shortable_shares absent → shortable stays None."""
-        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": None})
+        r = self._run(ib_result={"difficulty": None, "shortable_shares": None})
         assert r["shortable"] is None
 
     def test_shares_zero_with_no_difficulty_stays_none(self):
         """shares=0 + no difficulty → None (no evidence of availability)."""
-        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": 0.0})
+        r = self._run(ib_result={"difficulty": None, "shortable_shares": 0.0})
         assert r["shortable"] is None

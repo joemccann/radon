@@ -10,6 +10,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from ib_insync import Index, Stock
+
+from clients.contract_resolver import resolve_quote_contract
 from utils.index_symbols import INDEX_SYMBOLS, index_exchange_for, is_index_symbol
 
 
@@ -77,11 +80,6 @@ class TestIndexSymbolsTableShape:
 class TestContractResolver:
     def test_resolves_index_to_Index_contract(self):
         """VIX should construct an ib_insync Index, not a Stock."""
-        try:
-            from clients.contract_resolver import resolve_quote_contract
-            from ib_insync import Index, Stock
-        except ImportError:
-            pytest.skip("ib_insync not installed in this env")
         c = resolve_quote_contract("VIX")
         assert isinstance(c, Index), f"VIX must resolve to Index, got {type(c).__name__}"
         assert c.symbol == "VIX"
@@ -89,32 +87,18 @@ class TestContractResolver:
         assert c.currency == "USD"
 
     def test_resolves_equity_to_Stock_contract(self):
-        try:
-            from clients.contract_resolver import resolve_quote_contract
-            from ib_insync import Stock
-        except ImportError:
-            pytest.skip("ib_insync not installed in this env")
         c = resolve_quote_contract("AAPL")
         assert isinstance(c, Stock)
         assert c.symbol == "AAPL"
         assert c.exchange == "SMART"
 
     def test_empty_symbol_raises(self):
-        try:
-            from clients.contract_resolver import resolve_quote_contract
-        except ImportError:
-            pytest.skip("ib_insync not installed in this env")
         with pytest.raises(ValueError):
             resolve_quote_contract("")
         with pytest.raises(ValueError):
             resolve_quote_contract("   ")
 
     def test_lowercase_symbol_normalised(self):
-        try:
-            from clients.contract_resolver import resolve_quote_contract
-            from ib_insync import Index
-        except ImportError:
-            pytest.skip("ib_insync not installed in this env")
         c = resolve_quote_contract("vix")
         assert isinstance(c, Index)
         assert c.symbol == "VIX"

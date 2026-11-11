@@ -6,8 +6,8 @@ import type { DepthBook, DepthLevel } from "@/lib/pricesProtocol";
  * the live Book tab and a Python backtest agree on the numbers. Edit one, edit
  * the other.
  *
- * Two signals, both off RESTING depth only — the trade-direction tape is still
- * Phase 3 / empty, so VPIN / order-flow toxicity is deliberately out of scope:
+ * Two signals, both off RESTING depth only — VPIN / order-flow toxicity needs
+ * the trade-direction tape and is deliberately out of scope:
  *
  *  - imbalance: net resting pressure in [-1, 1] over the top-N levels.
  *      (sumBidSize - sumAskSize) / (sumBidSize + sumAskSize)

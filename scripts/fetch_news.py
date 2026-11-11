@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch recent news headlines for a ticker.
 
-Data source priority: UW → Exa (web search) → Yahoo (last resort).
+Data source priority: UW → Yahoo (last resort).
 
 Usage:
     python3 scripts/fetch_news.py AAPL
@@ -138,7 +138,6 @@ def classify_headline(headline: str) -> Dict[str, Any]:
         sentiment = "NEUTRAL"
         score = 0.0
 
-    # Material = contains at least one non-analyst, non-macro catalyst
     material_types = {
         "BUYBACK", "DIVIDEND", "STOCK_SPLIT", "M&A", "SPINOFF",
         "EARNINGS", "EARNINGS_BEAT", "EARNINGS_MISS",
@@ -163,8 +162,9 @@ def fetch_news(
     """Fetch recent news and classify for catalysts and sentiment.
 
     Returns dict with:
-      ticker, fetched_at, source, headlines (list),
-      summary: {total, bullish, bearish, neutral, material_catalysts, sentiment_bias}
+      ticker, fetched_at, source, lookback_days, headlines (list),
+      summary: {total, bullish, bearish, neutral, material_count,
+                material_catalysts, sentiment_bias, avg_sentiment_score}
     """
     ticker = ticker.upper()
     headlines: List[Dict] = []

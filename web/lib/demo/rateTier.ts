@@ -3,7 +3,8 @@
 // Pure mapping consumed by the middleware demo rate-limiter. Tiers + budgets
 // are defined in rateLimit.ts (A reads 100/hr, B expensive 10/hr, C mutations
 // 5/day, D AI 5/day, E/F WS reconnects, G/H headline polling, I/J shell
-// polling). Keeping the classifier pure makes the policy a unit test instead
+// polling, K/L daily ceilings over A/B, M/N batch reads). Keeping the
+// classifier pure makes the policy a unit test instead
 // of a thing you discover in production.
 
 import type { DemoRateTier } from "./rateLimit";

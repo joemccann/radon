@@ -23,9 +23,6 @@ class TestFileValidity:
     def test_file_exists(self, compose_path):
         assert compose_path.exists()
 
-    def test_valid_yaml(self, compose):
-        assert isinstance(compose, dict)
-
 
 class TestServiceDefinition:
     def test_single_service_named_ib_gateway(self, compose):

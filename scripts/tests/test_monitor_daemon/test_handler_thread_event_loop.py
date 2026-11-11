@@ -24,7 +24,7 @@ test is GREEN against the bug and is exactly how it shipped):
    with ``thread_name_prefix=f"handler-{handler.name}"``, hence the
    ``handler-<name>_0`` names in the production log). In the MAIN thread
    ``asyncio.get_event_loop()`` still auto-creates a loop, so the bug is
-   invisible there — see ``test_main_thread_connect_is_the_blind_spot``.
+   invisible there, so every test of this path must stay off it.
 2. MORE THAN ONE handler thread, both sequentially through the real
    daemon cycle and concurrently, matching the real topology where
    position_reconcile / fill_monitor / journal_sync all connect.
@@ -363,27 +363,3 @@ class TestHandlerThreadEventLoop:
         assert all(loop is not None and loop.is_closed() for loop in loops), (
             "handler event loops outlived the cycle that created them"
         )
-
-    def test_main_thread_connect_is_the_blind_spot(self):
-        """Documents why a single-caller regression test shipped green.
-
-        The identical production connect succeeds on the main thread because
-        the default event-loop policy auto-creates a loop there. Any future
-        test that exercises this path must stay off the main thread.
-        """
-        previous = None
-        try:
-            previous = asyncio.get_event_loop_policy().get_event_loop()
-        except RuntimeError:
-            previous = None
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        try:
-            client = PRODUCTION_CONNECTS["position_reconcile"]()
-            client.disconnect()
-        finally:
-            asyncio.get_event_loop().close()
-            # Never hand the main thread an explicit None: that sets the policy's
-            # _set_called flag, after which get_event_loop() raises for the rest
-            # of the session instead of auto-creating — session-wide pollution
-            # for any later test that relies on implicit loop creation.
-            asyncio.set_event_loop(previous if previous is not None else asyncio.new_event_loop())

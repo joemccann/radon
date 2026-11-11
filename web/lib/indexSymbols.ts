@@ -9,7 +9,7 @@
  *    `indexes` instead of `symbols` when the ticker is a known index.
  *  - `OrderTab` / `BookTab` to hide trading affordances since indices
  *    themselves are not tradeable (only futures / options on the index).
- *  - `lib/indexSymbols.test.ts` keeps the list in sync with the Python
+ *  - `tests/index-symbols.test.ts` keeps the list in sync with the Python
  *    counterpart at `scripts/utils/index_symbols.py`.
  *
  * IMPORTANT: this is the set of indices Radon currently knows about.
@@ -72,11 +72,6 @@ export function hasFuturesSupport(symbol: string | null | undefined): boolean {
 }
 
 /**
- * Symbols where Radon supports trading options on the underlying index.
- * Keep in sync with scripts/clients/contract_resolver.py
- * INDEX_OPTION_ROOTS.
- */
-/**
  * Indices whose options are priced off a tradeable FUTURE (the forward), not
  * the cash spot. Black-Scholes must use the front-month future as the
  * underlying S for these — the cash index is neither tradeable nor hedgeable,
@@ -92,6 +87,11 @@ export function isForwardPricedIndex(symbol: string | null | undefined): boolean
   return FORWARD_PRICED_INDICES.has(symbol.toUpperCase());
 }
 
+/**
+ * Symbols where Radon supports trading options on the underlying index.
+ * Keep in sync with scripts/clients/contract_resolver.py
+ * INDEX_OPTION_ROOTS.
+ */
 const INDEX_OPTIONS_SUPPORTED_SYMBOLS = new Set(["VIX", "SPX", "NDX", "RUT", "XSP"]);
 
 export function hasIndexOptionsSupport(symbol: string | null | undefined): boolean {

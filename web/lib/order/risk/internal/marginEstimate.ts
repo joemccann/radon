@@ -4,8 +4,8 @@
  * Every order surface routes through `useOrderRisk`, so this estimator runs in
  * ONE place and every surface inherits an "impact to available margin"
  * read-out. Phase 1 is an INSTANT client-side estimate; Phase 2 (an IB
- * `whatIf` backend round-trip, source `'ib-whatif'`) is a separate follow-up
- * and is NOT built here.
+ * `whatIf` backend round-trip, source `'ib-whatif'`) lives in
+ * `mergeWhatIfMargin` and is NOT built here.
  *
  * Why this exists separately from `maxLoss`
  * ----------------------------------------

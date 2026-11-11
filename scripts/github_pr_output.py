@@ -78,7 +78,7 @@ def _calendar_date(value: str) -> str:
 
 
 def format_pr_title(*, loop: str, date: str, issue: str) -> str:
-    """`Reliability 2026-09-01: the handshake froze Gateway`.
+    """`<Loop> <date>: <first line of the issue>`.
 
     Security and DeepSec titles stay date-only (`Security 2026-09-01`); the
     issue lives only in the body.

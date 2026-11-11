@@ -1,12 +1,12 @@
 // libSQL client for the Radon Turso DB.
 //
-// All Next.js API routes and FastAPI Python schedulers read/write through
+// All Next.js API routes read/write through
 // this client. Embedded replicas were retired on 2026-05-20 after WAL
 // conflicts between local Node readers and Python/direct-cloud writers.
 // The safe default is direct-to-cloud; a replica requires explicit opt-in.
 //
-// One singleton per process. The schema is compiled to a no-op when
-// TURSO_DB_URL is unset (tests can mock the module).
+// One singleton per process. getDb() throws when TURSO_DB_URL is unset
+// (tests can mock the module).
 //
 // ── Why reads wedge in bursts, and the self-heal (2026-06-28) ────────────
 // In the Node runtime `@libsql/client` (v0.17.x) resolves BOTH `libsql://` and
@@ -102,6 +102,14 @@ function getPoolAgent(): Agent {
   return cachedAgent;
 }
 
+function describeTrigger(trigger?: DbOperationIdentity): string {
+  if (!trigger) return "trigger=bare";
+  return (
+    `trigger=${trigger.label ?? "unlabelled"} op=${trigger.id} ` +
+    `opGen=${trigger.poolGeneration ?? "null"} activeGen=${activePoolGeneration ?? "null"}`
+  );
+}
+
 /** Abort every socket in the bounded pool. Fire-and-forget: the next request
  * lazily builds a fresh Agent. Shared by the primary and demo clients — a
  * reset on either aborts both origins' sockets, which is acceptable (the
@@ -114,14 +122,6 @@ function getPoolAgent(): Agent {
  *      destroys — an isolated failure is Turso tail latency, not a wedge.
  *   2. Cooldown: destroying again within the window is the storm.
  * `force` is the test seam. */
-function describeTrigger(trigger?: DbOperationIdentity): string {
-  if (!trigger) return "trigger=bare";
-  return (
-    `trigger=${trigger.label ?? "unlabelled"} op=${trigger.id} ` +
-    `opGen=${trigger.poolGeneration ?? "null"} activeGen=${activePoolGeneration ?? "null"}`
-  );
-}
-
 function destroyPoolAgent(force = false, trigger?: DbOperationIdentity): void {
   const now = Date.now();
   if (!force) {
@@ -247,8 +247,8 @@ export async function pooledDbFetch(
 // A stalled HTTP request still has to settle before its pooled socket frees up.
 // If a call has not resolved within this ceiling we proactively drop the cached
 // client so the NEXT caller rebuilds a fresh pool rather than queueing behind
-// the stalled one. Larger than every caller-side read timeout (hot reads use
-// 3000ms) so it only fires on a genuine stall.
+// the stalled one. Equal to the hard transport deadline, so it only fires on
+// a genuine stall.
 const STALL_CEILING_MS = DB_TRANSPORT_TIMEOUT_MS;
 
 /** Rewrite a Turso URL onto the stateless HTTP transport.
@@ -275,14 +275,6 @@ export function getPoolStats(): Record<string, unknown> | null {
   return JSON.parse(JSON.stringify(stats));
 }
 
-/** Drop the cached primary client AND destroy the bounded undici pool so the
- * next getDb() opens fresh sockets.
- *
- * Public so the bounded helpers can recover promptly from a read timeout
- * instead of waiting for the in-flight request to hit the transport ceiling.
- * Destroying the Agent is the load-bearing half: without it a wedged pool's
- * sockets survive the client swap and keep pinning Turso's per-IP limit.
- * Idempotent. */
 function isCurrentFailure(identity: DbOperationIdentity): boolean {
   if (observedFailures.has(identity)) return false;
   observedFailures.add(identity);
@@ -293,6 +285,14 @@ function isCurrentFailure(identity: DbOperationIdentity): boolean {
   );
 }
 
+/** Drop the cached primary client AND destroy the bounded undici pool so the
+ * next getDb() opens fresh sockets.
+ *
+ * Public so the bounded helpers can recover promptly from a read timeout
+ * instead of waiting for the in-flight request to hit the transport ceiling.
+ * Destroying the Agent is the load-bearing half: without it a wedged pool's
+ * sockets survive the client swap and keep pinning Turso's per-IP limit.
+ * Idempotent. */
 export function resetDb(identity?: DbOperationIdentity): void {
   if (identity && !isCurrentFailure(identity)) return;
   cached = null;
@@ -445,7 +445,6 @@ export function getDemoDb(): Client {
   return cachedDemo;
 }
 
-// Legacy convenience for explicit replica opt-in callers.
 /** True only when an embedded replica is actually in use. The replica was
  * retired 2026-05-20 (direct-to-cloud, DUR-07); it needs an explicit opt-in
  * and the legacy kill switch always wins. */

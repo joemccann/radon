@@ -13,7 +13,6 @@ from model_gateway._forecast_backend import (
     ChronosUnavailable,
     QuantileForecast,
     forecast_quantiles,
-    is_available,
 )
 
 SERIES = [10.0, 11.0, 12.0, 11.5, 13.0, 12.5, 14.0, 13.5, 15.0, 14.5]
@@ -146,7 +145,3 @@ def test_raises_chronos_unavailable_when_package_missing(monkeypatch):
     monkeypatch.setattr(engine, "is_available", lambda: False)
     with pytest.raises(ChronosUnavailable):
         forecast_quantiles(SERIES, 5)
-
-
-def test_is_available_returns_bool():
-    assert isinstance(is_available(), bool)

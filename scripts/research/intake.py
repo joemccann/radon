@@ -1,4 +1,4 @@
-"""Research intake v2: code settles identity, figures, duplicates and numbers; the model is asked twice.
+"""Research intake v2: code settles identity, figures, duplicates and numbers; the model selects, matches figures and verifies.
 
 Per document: extract -> identify -> triage -> duplicate check -> figure
 catalogue -> SELECT (one text-only call) -> validate -> GROUND (numbers on

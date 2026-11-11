@@ -12,6 +12,7 @@ The loop must:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -109,20 +110,23 @@ async def test_orders_sync_tick_runs_sync_during_market_hours():
 
 
 @pytest.mark.asyncio
-async def test_orders_sync_tick_logs_warning_on_failure():
+async def test_orders_sync_tick_logs_warning_on_failure(caplog):
     """tick() logs a warning but does NOT raise when the subprocess fails."""
     fail_result = ScriptResult(ok=False, error="ECONNREFUSED")
 
-    with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
-            with patch.object(srv, "_pool_has_any_connection", return_value=True):
-                with patch.object(
-                    srv,
-                    "_run_ib_script_with_recovery",
-                    new=AsyncMock(return_value=fail_result),
-                ):
-                    # Must not raise
-                    await srv._orders_sync_tick()
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        with patch.object(srv, "test_mode", False):
+            with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+                with patch.object(srv, "_pool_has_any_connection", return_value=True):
+                    with patch.object(
+                        srv,
+                        "_run_ib_script_with_recovery",
+                        new=AsyncMock(return_value=fail_result),
+                    ):
+                        await srv._orders_sync_tick()
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert "orders-sync loop: sync failed: ECONNREFUSED" in warnings
 
 
 def _shed_outcome() -> srv._IBSyncOutcome:

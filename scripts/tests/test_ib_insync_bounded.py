@@ -85,21 +85,6 @@ def _python_sources() -> List[Path]:
     return out
 
 
-def _attr_name(node: ast.AST) -> str:
-    """Return the trailing attribute name or local id for a node.
-
-    Examples:
-        ``ib.qualifyContractsAsync`` → ``qualifyContractsAsync``
-        ``self.ib.connectAsync``     → ``connectAsync``
-        ``client.ib.reqMktDataAsync`` → ``reqMktDataAsync``
-    """
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    if isinstance(node, ast.Name):
-        return node.id
-    return ""
-
-
 def _receiver_root(node: ast.AST) -> str:
     """Return the root identifier of an attribute chain.
 
