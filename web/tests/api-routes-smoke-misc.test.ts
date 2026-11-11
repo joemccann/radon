@@ -507,12 +507,10 @@ describe("GET /api/ticker/info", () => {
 // ---------------------------------------------------------------------------
 // TODO smoke tests — routes that don't fit the smoke-test pattern.
 //
-// next/og ImageResponse routes can't be reasonably exercised in unit tests
+// The next/og ImageResponse route can't be reasonably exercised in unit tests
 // without a full headless browser:
 //
 //   - GET /api/share/pnl                         (next/og)
-//   - GET /api/menthorq/cta/image                (next/og)
-//   - GET /api/menthorq/[command]/image          (next/og)
 //
 // These are integration-tested via the share PnL E2E (web/e2e/share-pnl.spec.ts)
 // or visual diff against reports/ artifacts.
