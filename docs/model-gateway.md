@@ -22,7 +22,7 @@ Each ladder rung gets a slice of the request deadline. A rung may spend the whol
 
 A spent quota, at any status, also records that cooldown (`engine._note_provider_cooldown`). The body must name a quota, usage limit, credit balance, billing or payment required; overload and capacity errors do not count. The cooldown lasts until the reset the provider names: Codex `resets_at` epoch seconds, Antigravity `Resets in 24h34m35s`, a `Retry-After` header or an ISO time. With no reset it backs off 5 minutes and doubles on each further quota failure, up to 6 hours (`provider_cooldown.QUOTA_BACKOFF_BASE_S` and `QUOTA_BACKOFF_CAP_S`). The rung's other models are not tried, because they share the account. A cooling rung sends no request and holds no provider lock. The skip is recorded in `tried=`, so a ladder where every rung is cooling reads as an outage, not a content rejection. The first win clears the cooldown and the backoff step. The expiry is persisted and survives a restart; the doubling step is in-process.
 
-Each provider takes one in-flight call at a time. The first pass probes its lock for 1 second and fails over when another request holds it. A busy provider then gets a second pass after the other rungs, still ahead of the Cerebras last resort, and waits up to 60 seconds of its slice for the lock. Busy is contention, not an outage, so a busy rung stays available to a continuation.
+Each provider admits `RADON_MODEL_PROVIDER_CONCURRENCY` in-flight calls at a time (`provider_gate.ProviderGate`; default 1, the VPS setting; 1 to 16, anything else refuses to start). Credential renewal takes the provider exclusively: it waits for in-flight calls to drain and holds new ones back while it waits. The first pass probes for a slot for 1 second and fails over when every slot is held. A busy provider then gets a second pass after the other rungs, still ahead of the Cerebras last resort, and waits up to 60 seconds of its slice for the lock. Busy is contention, not an outage, so a busy rung stays available to a continuation.
 
 NVIDIA and Cerebras are paused in every environment by `engine.PAUSED_BY_DEFAULT` (operator, 2026-11-01). A paused rung reads as unkeyed, so no request is sent, and its stored key is kept. `RADON_LADDER_PAUSED_PROVIDERS` in the gateway env adds more rungs and cannot unpause these two. Cerebras returns 402 for every model. NVIDIA won 4 of about 1,550 requests over 3 days, and its research figure match is unsafe in either model order (pilot results, PR #1382). To unpause, remove the name from the set.
 
@@ -106,6 +106,23 @@ deployment remains mandatory after trusted control-plane sync; an available
 checker refusing capacity returns78 and cannot become a fallback build.
 
 
+
+## Mac-local gateway for the nightly runners
+
+The nightly runners do not use the VPS gateway. `scripts/runner/install.sh`
+runs this same service on the Mac as `com.radon.model-gateway-local`, under the
+disabled-login account `_radonmodelgw`, from a root-owned copy of
+`GATEWAY_FILES` and a hash-pinned `httpx` venv (`scripts/runner/gateway-requirements.txt`).
+It signs requests with the Mac's own subscription grants, kept in
+`/Library/Radon/model-gateway-local/home` (mode 700, that account only):
+Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`.
+`_radonbot` reaches it only through the group socket
+`/Library/Radon/model-gateway-local/run/gateway.sock` and never reads a grant.
+It runs 6 concurrent calls per provider, so the two security loops do not
+queue behind each other or behind production traffic. An expired Codex grant
+is renewed on demand, non-interactively, for that provider only; renewal state
+lives in `RADON_SUBSCRIPTION_STATE_DIR`. There is no renewal timer: the
+interactive all-provider pass would page for providers this Mac never set up. Provisioning steps: [runner.md](runner.md#5-model-gateway-operator).
 
 ## One-time Mac transport installation
 

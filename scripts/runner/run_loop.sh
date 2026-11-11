@@ -30,7 +30,7 @@ CURL_BIN="${RADON_RUNNER_CURL:-/usr/bin/curl}"
 MODEL_CLIENTS_ROOT="${RADON_MODEL_CLIENTS_ROOT:-/Library/Radon/model-clients/current}"
 MODEL_CLIENT_HELPER="$MODEL_CLIENTS_ROOT/lib/model_gateway/cli.py"
 AGENT_PATH_PREFIX="$RUNNER_DIR/model-bin:$MODEL_CLIENTS_ROOT/bin:$HOME/.bun/bin"
-export RADON_MODEL_GATEWAY_SOCKET="${RADON_MODEL_GATEWAY_SOCKET:-/Library/Radon/model-gateway/gateway.sock}"
+export RADON_MODEL_GATEWAY_SOCKET="${RADON_MODEL_GATEWAY_SOCKET:-/Library/Radon/model-gateway-local/run/gateway.sock}"
 # Every git the runner, its hooks and the agent run reads the root-owned
 # config install.sh writes, never the bot-writable ~/.gitconfig.
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="${RADON_RUNNER_GITCONFIG:-$RUNNER_DIR/gitconfig}"
