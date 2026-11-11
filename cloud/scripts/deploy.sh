@@ -1497,6 +1497,10 @@ payload_paths_changed() {
       scripts/tests/*|cloud/tests/*|web/tests/*|web/e2e/*|site/*)
         continue
         ;;
+      # The always-on Mac's agent-loop runner; no VPS unit executes it.
+      scripts/runner/*)
+        continue
+        ;;
       web/*|lib/*|scripts/*|cloud/services/*|cloud/scripts/*|cloud/config/*| \
       requirements*|pyproject.toml|bun.lock|package.json|*.service)
         return 0

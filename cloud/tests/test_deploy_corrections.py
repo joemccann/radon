@@ -2320,6 +2320,47 @@ raise SystemExit(2)
         )
         assert result.returncode == 1, result.stdout + result.stderr
 
+    @staticmethod
+    def _payload_changed_for(tmp_path: Path, paths: list[str]) -> int:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        listing = "\n".join(paths)
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1] == "-C":
+    sys.argv = sys.argv[3:]
+if sys.argv[:2] == ["diff", "--name-only"]:
+    print({listing!r})
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; payload_paths_changed a b"],
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode
+
+    def test_payload_paths_changed_ignores_mac_runner(self, tmp_path: Path) -> None:
+        # scripts/runner is the always-on Mac's agent-loop runner; no VPS
+        # unit runs it, so its churn must not cycle the production fleet.
+        assert self._payload_changed_for(tmp_path, [
+            "scripts/runner/toolchain/package-lock.json",
+            "scripts/runner/install.sh",
+        ]) == 1
+
+    def test_payload_paths_changed_restarts_when_runner_rides_with_runtime(
+        self, tmp_path: Path
+    ) -> None:
+        assert self._payload_changed_for(tmp_path, [
+            "scripts/runner/install.sh",
+            "scripts/api/server.py",
+        ]) == 0
+
     def test_payload_paths_changed_detects_web_runtime(self, tmp_path: Path) -> None:
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
