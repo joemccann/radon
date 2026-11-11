@@ -215,7 +215,7 @@ reports/{ticker}-evaluation-{date}.html
 2. Generate HTML report using template
 3. Present to user for confirmation
 4. On "execute" → use `ib_execute.py` (auto-monitors and logs)
-5. Place exit orders (stop loss + target)
+5. Place exit orders by hand (stop loss + target)
 
 **Reference:** `reports/goog-evaluation-2026-03-04.html`
 
@@ -291,11 +291,11 @@ python3.13 scripts/ib_execute.py --type option --symbol GOOG --expiry 20260417 -
 
 ### Exit Orders
 
-After entry fill, place exit orders:
+Exits are placed by hand. Radon places no automated exit orders. After entry fill, place:
 1. **Stop Loss** — Stop-limit order at stop price
 2. **Target Profit** — Limit sell order at target
 
-**Note:** IB rejects limit orders >40% from current price. Use the monitor daemon's `exit_orders` handler for automated placement once the order becomes valid.
+**Note:** IB rejects limit orders >40% from current price. Place the order once it is within that range.
 
 ---
 
@@ -305,7 +305,7 @@ The monitor daemon is the active background service for post-entry workflows.
 
 Installed behavior:
 - `radon-monitor.service` on radon-app runs the daemon loop (60 s cadence)
-- `fill_monitor` and `exit_orders` enforce market hours
+- `fill_monitor` enforces market hours
 - `preset_rebalance` and `flex_token_check` are allowed to run off-hours
 
 **Status:**
@@ -328,8 +328,6 @@ python3.13 -m monitor_daemon.run --list-handlers
 ```bash
 ssh root@radon-app journalctl -u radon-monitor.service -f
 ```
-
-**Legacy note:** `scripts/exit_order_service.py` is an older standalone path and is not the primary scheduled service.
 
 ---
 

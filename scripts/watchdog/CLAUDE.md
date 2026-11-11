@@ -9,7 +9,7 @@ Service-health monitor + alert dispatcher. Loaded when cwd is under `scripts/wat
 Monitors every `scheduled` service in `web/lib/serviceHealthWindows.ts`, notifies via Pushover (P1 only) + always-on `service_health` row.
 
 - **`intraday`**: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync` — 5 min cadence, Mon–Fri 13:00–21:00 UTC.
-- **`continuous`**: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, `ib-watchdog`, `journal-gap-sli`, plus `replica-watchdog` only while `data/replica.db` exists — 5 min, 24/7.
+- **`continuous`**: `newsfeed-scraper`, `fill-monitor`, `journal-sync`, `ib-watchdog`, `journal-gap-sli`, plus `replica-watchdog` only while `data/replica.db` exists — 5 min, 24/7.
 - **`daily`**: every once-a-day writer (`cash-flow-sync`, `flex-token-check`, `cta-sync`, the indicator timers such as `ivrank` and `iv-spread`, backups, retention, and the rest; the membership is `BUCKETS["daily"]` in `services.py`, not this line) — hourly, 24/7.
 - **`error`**: every scheduled service except `watchdog-alerts` itself (recursive-alert prevention) — 5 min, 24/7.
 
