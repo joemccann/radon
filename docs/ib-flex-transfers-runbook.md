@@ -134,8 +134,7 @@ Recorded here only in case §1 is overridden and a second query id is created:
 - **File:** `/etc/radon/env` on Hetzner, mode `0640`, owner `root:radon`. `/home/radon/radon-cloud/.env` is retired. Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
 - **Values containing `$` must be single-quoted** (repo rule; bash `set -a` expands `$VAR` under `set -u` and aborts silently from systemd). A numeric query id has no `$`, so this is a non-issue for this variable specifically.
 - **Who reads it:**
-  - `radon-perf-twr.service` loads `EnvironmentFile=/etc/radon/env` (`cloud/services/radon-perf-twr.service`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Tue..Sat 07:30 America/New_York, `RandomizedDelaySec=300`). systemd re-reads `EnvironmentFile` at every `ExecStart`, so the next timer firing picks up a new value. No unit restart is required for that file.
-  - `radon-api` — `POST /performance/background` shells the builder via `run_script("perf_twr_builder.py", ["--json"])` (`scripts/api/server.py:3951`), and that subprocess inherits radon-api's process environment, which was captured at radon-api start. This one **does** need `radon unit restart radon-api`.
+  - `radon-perf-twr.service` loads `EnvironmentFile=/etc/radon/env` (`cloud/services/radon-perf-twr.service`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Tue..Sat 07:30 America/New_York, `RandomizedDelaySec=300`). systemd re-reads `EnvironmentFile` at every `ExecStart`, so the next timer firing picks up a new value. No unit restart is required for that file. FastAPI `POST /performance` returns 404 (file-ingest only); it does not spawn the builder.
 - **Never `radon restart`** — it cycles the IB Gateway and fires a 2FA push. App-tier-only work uses `radon unit restart <unit>` (`docs/incident-runbook.md:17-18`).
 - Mirror the variable into root `.env`, `.env.example` and `cloud/.env.example` so local runs and the next operator match production.
 
