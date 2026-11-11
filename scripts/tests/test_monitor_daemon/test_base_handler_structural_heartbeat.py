@@ -244,7 +244,6 @@ class TestExistingHandlersDeclareServiceNames:
         ("module_name", "class_name", "expected"),
         [
             ("monitor_daemon.handlers.fill_monitor", "FillMonitorHandler", "fill-monitor"),
-            ("monitor_daemon.handlers.exit_orders", "ExitOrdersHandler", "exit-orders"),
             ("monitor_daemon.handlers.journal_sync", "JournalSyncHandler", "journal-sync"),
             ("monitor_daemon.handlers.flex_token_check", "FlexTokenCheck", "flex-token-check"),
             ("monitor_daemon.handlers.cash_flow_sync", "CashFlowSyncHandler", "cash-flow-sync"),

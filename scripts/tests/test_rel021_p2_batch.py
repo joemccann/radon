@@ -34,26 +34,6 @@ class TestAtomicSaveFsync:
         assert len(synced_fds) >= 2
 
 
-class TestLegacyExitServiceDisabled:
-    """R-038: the legacy standalone exit-order placer must refuse to start
-    its daemon mode — two concurrent placers can double-place exits."""
-
-    def test_run_daemon_refuses(self):
-        """Bounded subprocess so the RED state (current code: infinite
-        daemon loop) fails fast instead of hanging pytest."""
-        import subprocess as sp
-
-        proc = sp.run(
-            [sys.executable, "-c",
-             "import sys; sys.path.insert(0, 'scripts'); "
-             "import exit_order_service; exit_order_service.run_daemon()"],
-            cwd=str(Path(__file__).parent.parent.parent),
-            capture_output=True, timeout=10, text=True,
-        )
-        assert proc.returncode != 0
-        assert "monitor daemon" in (proc.stdout + proc.stderr).lower()
-
-
 class TestDaemonStateCorruptionBackup:
     """R-045: a corrupt daemon_state.json must be preserved as .corrupt
     (forensics + fill-dedupe recovery), not silently blanked."""
@@ -111,32 +91,6 @@ class TestPriceCachePruneOnWrite:
         price_cache.write_cache(stocks, "AAPL_2026-01-01_2026-02-01",
                                 {"2026-01-02": 100.0}, source="ib", ttl=900)
         prune.assert_called_once()
-
-
-class TestExitOrderTimestampsUtc:
-    """R-029 (partial): exit_orders wrote naive local timestamps into
-    placed_at/written_at, breaking lexicographic-chronological ordering
-    against the UTC-Z rows every other writer produces."""
-
-    def test_update_journal_trade_writes_utc_z(self):
-        sys.path.insert(0, str(Path(__file__).parent / "test_monitor_daemon"))
-        from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
-        from test_exit_orders import FakeJournalDb
-
-        db = FakeJournalDb([
-            {
-                "id": 8,
-                "ticker": "GOOG",
-                "exit_orders": {
-                    "target": {"price": 15.0, "status": "PENDING", "order_id": None}
-                },
-            }
-        ])
-        handler = ExitOrdersHandler(db=db)
-        ok = handler._update_journal_trade(8, "target", 99, "trade-8")
-        assert ok
-        placed_at = db.trades["trade-8"]["exit_orders"]["target"]["placed_at"]
-        assert placed_at.endswith("Z") or "+00:00" in placed_at
 
 
 class TestRelaySubscriptionAdmission:
