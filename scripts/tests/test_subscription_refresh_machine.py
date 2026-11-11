@@ -17,6 +17,7 @@ import subscription_tokens as tokens
 from model_gateway import engine as model_ladder
 from model_gateway.engine import complete_multimodal_json
 from model_gateway.lifecycle import RefreshManager
+from model_gateway.provider_gate import ProviderGate
 
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
@@ -25,7 +26,7 @@ ALL = list(tokens.PROVIDERS)
 
 def manager():
     names = ("anthropic", "grok", "codex", "antigravity", "nvidia", "cerebras")
-    return RefreshManager({name: threading.RLock() for name in names})
+    return RefreshManager({name: ProviderGate() for name in names})
 
 
 def wait_complete(m, job_id, timeout=3.0):
