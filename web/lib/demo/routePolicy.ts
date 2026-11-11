@@ -346,11 +346,4 @@ export const DEMO_ROUTE_POLICY: Readonly<Record<string, DemoRoutePolicy>> = {
     GET: { mode: "backend", endpoints: ["/model-gateway/models"], note: "Service-owned model catalog; no local provider grants or fallback." },
   },
   "/api/version": { GET: { mode: "infra", note: "Release metadata from env." } },
-
-  "/api/menthorq/[command]/image": {
-    GET: { mode: "unavailable", note: "Reads data/menthorq_cache from disk only; 404 on Vercel." },
-  },
-  "/api/menthorq/cta/image": {
-    GET: { mode: "unavailable", note: "Reads data/menthorq_cache from disk only, not menthorq_cta; 404 on Vercel." },
-  },
 };
