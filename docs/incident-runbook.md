@@ -13,7 +13,8 @@ each artifact's `case_id` anchors into this file. Triage them with the
 - An anonymous 401/404 on a protected route is the auth perimeter, not an outage.
   Liveness curls use the public `/sign-in` route only.
 - A bounded-probe timeout is `unknown`, never `down`. Off-hours quiet is normal
-  for RTH writers.
+  for RTH writers. "Off-hours" includes exchange holidays and the afternoon of
+  a half day: the classifier asks `utils/market_calendar.is_market_open_et`.
 - `radon restart` cycles the IB Gateway (a 2FA push). App-tier-only work uses
   `radon unit restart <unit>`. The wrapper takes the full unit name with its
   `.service` or `.timer` suffix and exits 2 on a bare name

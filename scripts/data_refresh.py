@@ -48,8 +48,8 @@ def _log(msg: str) -> None:
 
 def _is_trading_day() -> bool:
     try:
-        from utils.market_calendar import _is_trading_day as _check
-        return _check(datetime.now())
+        from utils.market_calendar import is_trading_day_et
+        return is_trading_day_et()
     except Exception:
         return True  # fail-open: run the scan if calendar unavailable
 

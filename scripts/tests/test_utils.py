@@ -39,52 +39,52 @@ class TestLoadHolidays:
 
 class TestIsMarketOpen:
     def test_weekday_during_hours(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # Tuesday 2026-03-03 at 10:00 AM ET
         dt = datetime(2026, 3, 3, 10, 0)
         assert is_market_open(dt) is True
 
     def test_weekend_closed(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # Saturday
         dt = datetime(2026, 3, 7, 12, 0)
         assert is_market_open(dt) is False
 
     def test_sunday_closed(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         dt = datetime(2026, 3, 8, 12, 0)
         assert is_market_open(dt) is False
 
     def test_holiday_closed(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # MLK Day 2026
         dt = datetime(2026, 1, 19, 12, 0)
         assert is_market_open(dt) is False
 
     def test_before_930_closed(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # Weekday at 9:00 AM
         dt = datetime(2026, 3, 3, 9, 0)
         assert is_market_open(dt) is False
 
     def test_after_4pm_closed(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # Weekday at 4:01 PM
         dt = datetime(2026, 3, 3, 16, 1)
         assert is_market_open(dt) is False
 
     def test_exactly_930_open(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         dt = datetime(2026, 3, 3, 9, 30)
         assert is_market_open(dt) is True
 
     def test_exactly_4pm_open(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         dt = datetime(2026, 3, 3, 16, 0)
         assert is_market_open(dt) is True
 
     def test_defaults_to_now(self):
-        from utils.market_calendar import is_market_open
+        from utils.market_calendar import is_market_open_et as is_market_open
         # Should not raise, returns a bool
         result = is_market_open()
         assert isinstance(result, bool)

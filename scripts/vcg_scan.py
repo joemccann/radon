@@ -1047,23 +1047,8 @@ def generate_html_report(
 
 
 def is_market_open() -> bool:
-    """Check if US equity markets are currently open."""
-    from datetime import timezone as tz
-    import zoneinfo
-    try:
-        et = zoneinfo.ZoneInfo("America/New_York")
-    except Exception:
-        # Fallback: estimate ET from UTC
-        now_utc = datetime.now(tz.utc)
-        et_offset = timedelta(hours=-5)  # EST (approximate)
-        now_et = now_utc + et_offset
-        return now_et.weekday() < 5 and 9 * 60 + 30 <= now_et.hour * 60 + now_et.minute <= 16 * 60
-
-    now_et = datetime.now(et)
-    if now_et.weekday() >= 5:
-        return False
-    minutes = now_et.hour * 60 + now_et.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+    from utils.market_calendar import is_market_open_et
+    return is_market_open_et()
 
 
 def main():

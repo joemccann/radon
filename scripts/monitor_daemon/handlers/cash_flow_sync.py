@@ -223,17 +223,8 @@ def _et_date(now_utc: datetime) -> str:
 
 
 def _is_trading_day_et(now_utc: datetime) -> bool:
-    et_dt = now_utc.astimezone(ET)
-    if et_dt.weekday() >= 5:
-        return False
-    # Lazy import — keeps the handler importable in environments without
-    # the holiday config in place.
-    try:
-        from utils.market_calendar import load_holidays
-    except Exception:
-        return True
-    holidays = load_holidays(et_dt.year)
-    return et_dt.strftime("%Y-%m-%d") not in holidays
+    from utils.market_calendar import is_trading_day_et
+    return is_trading_day_et(now_utc)
 
 
 class CashFlowSyncHandler(BaseHandler):
