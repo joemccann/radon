@@ -57,11 +57,6 @@ def is_market_hours() -> bool:
     return 570 <= t < 960  # 9:30 (570) to 16:00 (960)
 
 
-def _resolve_ttl(source: str) -> int:
-    """Return TTL based on market hours."""
-    return TTL_MARKET_HOURS if is_market_hours() else TTL_AFTER_CLOSE
-
-
 def _cache_path(subdir: Path, key: str) -> Path:
     return subdir / _filename(key)
 

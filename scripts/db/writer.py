@@ -2309,59 +2309,6 @@ def upsert_vol_cone_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
-def upsert_option_close(
-    symbol: str,
-    expiry: str,
-    strike: float,
-    right: str,
-    close_date: str,
-    close_price: float,
-) -> None:
-    """Phase 2.5 — end-of-day option closing prices.
-
-    Sources: ib_realtime_server.js Node-side path. This Python helper
-    exists for symmetry / test setup; the production writer is the JS
-    file using @libsql/client directly.
-    """
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO option_close_cache
-          (symbol, expiry, strike, right, close_date, close_price, recorded_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (symbol.upper(), expiry, float(strike), right.upper()[:1], close_date, float(close_price), _now_iso()),
-    )
-    db.commit()
-
-
-def upsert_discover_sp500_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
-    """Phase 2.4 — sp500-scoped discover.py output (separate table to avoid
-    ALTER TABLE partial-migration risk)."""
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO discover_sp500_snapshots (scan_time, payload)
-        VALUES (?, ?)
-        """,
-        (scan_time, json.dumps(payload)),
-    )
-    db.commit()
-
-
-def upsert_open_order(perm_id: int, payload: dict[str, Any]) -> None:
-    """Phase 3 — open_orders table. permId is IB's stable identifier."""
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO open_orders (perm_id, payload, updated_at)
-        VALUES (?, ?, ?)
-        """,
-        (int(perm_id), json.dumps(payload), _now_iso()),
-    )
-    db.commit()
-
-
 # The execution-identity contract: exactly these normalized fields define a
 # fill's lifecycle identity, and the stored payload_sha256 is computed over
 # them. This is PINNED on purpose (test_position_return_capital.py asserts the
@@ -2958,13 +2905,6 @@ def upsert_app_config(key: str, value: str) -> None:
     db.commit()
 
 
-def get_app_config(key: str) -> Optional[str]:
-    """Phase 4 — read a single app_config value."""
-    db = get_db()
-    rows = db.execute("SELECT value FROM app_config WHERE key = ?", (key,)).fetchall()
-    return rows[0][0] if rows else None
-
-
 def upsert_watchlist_ticker(
     ticker: str,
     *,
@@ -3304,24 +3244,6 @@ def upsert_backtest_run(
     db.commit()
 
 
-def get_latest_backtest_run(strategy: str) -> Optional[dict[str, Any]]:
-    """F12 — most recent backtest run payload for a strategy, or None."""
-    db = get_db()
-    cursor = db.execute(
-        """
-        SELECT payload FROM backtest_runs
-        WHERE strategy = ?
-        ORDER BY run_at DESC
-        LIMIT 1
-        """,
-        (strategy,),
-    )
-    row = cursor.fetchone()
-    if not row:
-        return None
-    return json.loads(row[0])
-
-
 # ── Performance TWR (plan §4.2) ─────────────────────────────────────────────
 # Daily NAV snapshots from Flex EquitySummaryInBase, external flows from
 # CashTransactions+Transfers, and chained TWR subperiods derived from (B,E,C).
@@ -3390,66 +3312,6 @@ def _ensure_perf_twr_tables_if_missing(exc: BaseException) -> bool:
     return "no such table" in msg and ("nav_snapshots" in msg or "external_flows" in msg or "twr_subperiods" in msg)
 
 
-NAV_SNAPSHOT_UPSERT_SQL = """
-INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, cash, stock, options, accrued_fees)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(account_id, report_date) DO UPDATE SET
-  total_net_liq = excluded.total_net_liq,
-  cash          = excluded.cash,
-  stock         = excluded.stock,
-  options       = excluded.options,
-  accrued_fees  = excluded.accrued_fees
-"""
-
-EXTERNAL_FLOW_UPSERT_SQL = """
-INSERT INTO external_flows (account_id, report_date, amount, flow_type, note)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(account_id, report_date, flow_type) DO UPDATE SET
-  amount = excluded.amount,
-  note   = excluded.note
-"""
-
-TWR_SUBPERIOD_UPSERT_SQL = """
-INSERT INTO twr_subperiods (account_id, report_date, b, e, c, r, cum_r)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(account_id, report_date) DO UPDATE SET
-  b     = excluded.b,
-  e     = excluded.e,
-  c     = excluded.c,
-  r     = excluded.r,
-  cum_r = excluded.cum_r
-"""
-
-
-def upsert_nav_snapshot(
-    account_id: str,
-    report_date: str,
-    total_net_liq: float,
-    *,
-    cash: Optional[float] = None,
-    stock: Optional[float] = None,
-    options: Optional[float] = None,
-    accrued_fees: Optional[float] = None,
-) -> None:
-    """Upsert one daily NAV snapshot (Flex EquitySummaryInBase)."""
-    db = get_db()
-    try:
-        db.execute(
-            NAV_SNAPSHOT_UPSERT_SQL,
-            (account_id, report_date, float(total_net_liq), cash, stock, options, accrued_fees),
-        )
-    except Exception as exc:  # noqa: BLE001 — first-build ensure (plan §4.2)
-        if _ensure_perf_twr_tables_if_missing(exc):
-            ensure_perf_twr_tables()
-            db.execute(
-                NAV_SNAPSHOT_UPSERT_SQL,
-                (account_id, report_date, float(total_net_liq), cash, stock, options, accrued_fees),
-            )
-        else:
-            raise
-    db.commit()
-
-
 def upsert_nav_snapshot_rows(rows: list[dict[str, Any]]) -> None:
     """Batch upsert of NAV snapshots (chunked multi-row INSERTs per Hrana I/O bounding).
 
@@ -3499,32 +3361,6 @@ def upsert_nav_snapshot_rows(rows: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def upsert_external_flow(
-    account_id: str,
-    report_date: str,
-    amount: float,
-    flow_type: str,
-    note: Optional[str] = None,
-) -> None:
-    """Upsert one external flow (deposit|withdrawal|acats|internal) per account/day/type."""
-    db = get_db()
-    try:
-        db.execute(
-            EXTERNAL_FLOW_UPSERT_SQL,
-            (account_id, report_date, float(amount), flow_type, note),
-        )
-    except Exception as exc:  # noqa: BLE001 — first-build ensure
-        if _ensure_perf_twr_tables_if_missing(exc):
-            ensure_perf_twr_tables()
-            db.execute(
-                EXTERNAL_FLOW_UPSERT_SQL,
-                (account_id, report_date, float(amount), flow_type, note),
-            )
-        else:
-            raise
-    db.commit()
-
-
 def upsert_external_flow_rows(rows: list[dict[str, Any]]) -> None:
     """Batch upsert of external flows (chunked multi-row INSERTs).
 
@@ -3567,34 +3403,6 @@ def upsert_external_flow_rows(rows: list[dict[str, Any]]) -> None:
                 )
             else:
                 raise
-    db.commit()
-
-
-def upsert_twr_subperiod(
-    account_id: str,
-    report_date: str,
-    b: float,
-    e: float,
-    c: float,
-    r: float,
-    cum_r: float,
-) -> None:
-    """Upsert one TWR subperiod derived from nav_snapshots + external_flows."""
-    db = get_db()
-    try:
-        db.execute(
-            TWR_SUBPERIOD_UPSERT_SQL,
-            (account_id, report_date, float(b), float(e), float(c), float(r), float(cum_r)),
-        )
-    except Exception as exc:  # noqa: BLE001 — first-build ensure
-        if _ensure_perf_twr_tables_if_missing(exc):
-            ensure_perf_twr_tables()
-            db.execute(
-                TWR_SUBPERIOD_UPSERT_SQL,
-                (account_id, report_date, float(b), float(e), float(c), float(r), float(cum_r)),
-            )
-        else:
-            raise
     db.commit()
 
 
@@ -3704,68 +3512,6 @@ def upsert_imbalance_rows(rows: list[dict[str, Any]], recorded_at: Optional[str]
             tuple(params),
         )
     db.commit()
-
-
-def upsert_newsfeed_explanation(
-    post_id: str,
-    content_hash: str,
-    explanation: str,
-    *,
-    model: str,
-    provider: str,
-    has_image: bool,
-    created_at: Optional[str] = None,
-) -> None:
-    """Cache one newsfeed explanation keyed by post_id + content_hash."""
-    if not str(explanation or "").strip():
-        raise ValueError("explanation is blank")
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO newsfeed_explanations
-          (post_id, content_hash, explanation, model, provider, has_image, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            post_id,
-            content_hash,
-            explanation,
-            model,
-            provider,
-            1 if has_image else 0,
-            created_at or _now_iso(),
-        ),
-    )
-    db.commit()
-
-
-def get_newsfeed_explanation(post_id: str, content_hash: str) -> Optional[dict[str, Any]]:
-    """Return the cached explanation row, or None."""
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT post_id, content_hash, explanation, model, provider, has_image, created_at
-        FROM newsfeed_explanations
-        WHERE post_id = ? AND content_hash = ?
-        """,
-        (post_id, content_hash),
-    ).fetchone()
-    if row is None:
-        return None
-    if isinstance(row, dict):
-        return row
-    keys = getattr(row, "keys", None)
-    if callable(keys):
-        return {key: row[key] for key in keys()}
-    return {
-        "post_id": row[0],
-        "content_hash": row[1],
-        "explanation": row[2],
-        "model": row[3],
-        "provider": row[4],
-        "has_image": row[5],
-        "created_at": row[6],
-    }
 
 
 

@@ -219,14 +219,6 @@ def _ensure_inbox(inbox: Path) -> None:
     os.chmod(inbox, 0o700)
 
 
-def _write_gpg(dest: Path, data: bytes) -> None:
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
-    tmp.write_bytes(data)
-    os.chmod(tmp, 0o600)
-    tmp.replace(dest)
-    os.chmod(dest, 0o600)
-
-
 def _is_transient_sftp(stderr: str) -> bool:
     low = (stderr or "").lower()
     return any(marker in low for marker in _TRANSIENT_SFTP_MARKERS)

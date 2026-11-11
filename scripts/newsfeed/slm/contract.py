@@ -107,8 +107,6 @@ SLM_RESPONSE_FORMAT: dict[str, Any] = {
 
 SOURCES = ["turso.posts"]
 
-SLM_MODES = ("off", "shadow", "prefer", "primary")
-
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # Scheme-agnostic URL stripper. The dataset module must not mention http(s)
 # URLs as data sources; this pattern is PII redaction only.

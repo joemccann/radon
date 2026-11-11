@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from .model import available_at, canonical, digest, utc
+from .model import available_at, utc
 
 
 def evaluate_shadow(weeks, as_of=None):
@@ -63,24 +63,3 @@ def evaluate_shadow(weeks, as_of=None):
             reason="Four fresh recovery evaluations satisfy the declared reset rule; no predictive validity established.",
         )
     return result
-
-
-def walk_forward(weeks):
-    """Replay only actually available vintages, preserving insufficient states."""
-    times = sorted({available_at(row) for row in weeks})
-    evaluations = [evaluate_shadow(weeks, time) for time in times]
-    events = sum(
-        row["state"] == "watch" and (i == 0 or evaluations[i - 1]["state"] != "watch")
-        for i, row in enumerate(evaluations)
-    )
-    return {
-        "version": 1,
-        "input_hash": digest(canonical(weeks).encode()),
-        "evaluations": evaluations,
-        "watch_episodes": events,
-        "precision": None,
-        "false_alerts": None,
-        "lead_time": None,
-        "predictive_validity": "unestablished",
-        "reason": "Outcome labels and executable returns are not available; performance statistics are not estimable.",
-    }

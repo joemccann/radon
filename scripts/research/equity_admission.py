@@ -157,15 +157,6 @@ _NAMED_ISSUER_FORWARD = re.compile(r'\b(?P<entity>' + _ENTITY_NAME + r")\b(?:'s)
     _COMPANY_FINANCIAL_OBJECT + r'\b|'
     r'(?:expects?|projects?|guides?|forecasts?)\b[^\n.!?]{0,45}\b' +
     _COMPANY_FINANCIAL_OBJECT + r'\b|[^\n.!?]{0,45}\b(?:valuation|P/E|P/B)\b))')
-_NAMED_ISSUER_IDEA = re.compile(r'\b(?P<entity>' + _ENTITY_NAME + r')\b.{0,80}'
-    r'(?i:\b(?:(?:our|the)\s+)?(?:preferred stock|top pick|top investment idea|'
-    r'attractive risk.reward|compelling risk.reward|durable competitive advantage|attractive upside)\b)')
-_NAMED_ISSUER_VALUATION = re.compile(r'\b(?P<entity>' + _ENTITY_NAME + r')\b.{0,100}'
-    r'(?i:\b(?:is|looks?|remains?|seems?)\s+(?:attractively valued|undervalued|overvalued|'
-    r'cheap|expensive|mispriced)|\b(?:offers?|has|provides?)\s+(?:significant\s+)?'
-    r'(?:rerating|re.rating)\s+upside|\b(?:shares?|stock|equity)\s+(?:are|is|look|trade)\s+'
-    r'cheap(?:\s+(?:relative to|versus|vs\.?)\s+peers?)?|\b(?:downside|risk)\s+as\s+'
-    r'(?:its|the)\s+valuation\s+premium\s+compresses?)')
 # These are equity investment claims even without earnings, ratings or a PT.
 # Both standalone scope and every secondary-subject passage use this predicate.
 _EQUITY_THESIS = re.compile(r'\b(?:valuation|price.to.book|undervalued|overvalued|mispriced|expensive|attractively valued|'

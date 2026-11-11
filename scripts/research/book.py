@@ -1,9 +1,6 @@
-"""Watchlist and portfolio underlyings for legacy triage and strict admission.
+"""Watchlist and portfolio underlyings for strict admission.
 
-`current_tickers()` requires complete, fresh canonical DB evidence. The legacy
-`tickers()` helper reads Turso and returns None only when neither source is
-readable; it is not sufficient evidence for the hard equity-research admission
-gate.
+`current_tickers()` requires complete, fresh canonical DB evidence.
 """
 from __future__ import annotations
 import re
@@ -27,30 +24,6 @@ def _positions_tickers(positions):
         positions = []
     return _clean(_underlying(p.get('ticker') or p.get('symbol'))
                   for p in positions if isinstance(p, dict) and (p.get('ticker') or p.get('symbol')))
-
-
-def _watchlist():
-    try:
-        from db.readers import read_watchlist_tickers
-        return _clean(read_watchlist_tickers())
-    except Exception:
-        return None
-
-
-def _portfolio():
-    try:
-        from db.readers import read_portfolio_positions
-        return _positions_tickers(read_portfolio_positions())
-    except Exception:
-        return None
-
-
-def tickers():
-    """frozenset of book tickers, or None when no source is readable."""
-    watch, port = _watchlist(), _portfolio()
-    if watch is None and port is None:
-        return None
-    return frozenset((watch or set()) | (port or set()))
 
 
 # A stale portfolio is not evidence that an issuer is still held. IB's normal
