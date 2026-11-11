@@ -9,6 +9,9 @@ All six strategies are wired (FU5). A wired strategy whose snapshot table has
 no replayable daily series returns ``status: "insufficient_data"`` with zero
 trades rather than a fabricated result; only ``ok`` runs are persisted.
 
+Every trade is charged the real round-trip cost from ``scripts/costs.py`` by
+default; ``--cost-fraction`` replaces it with one fraction for every trade.
+
 Usage:
     python3 scripts/backtest_run.py --strategy cri --horizon 1 --persist
 """
@@ -42,13 +45,14 @@ def run_and_maybe_persist(
     strategy: str,
     *,
     horizon: int = 1,
-    cost_fraction: float = 0.0,
+    cost_fraction: Optional[float] = None,
     persist: bool = False,
 ) -> dict:
     """Run a strategy backtest; on ``persist`` write the run to DB + disk.
 
     A stubbed (registered-but-unwired) strategy returns a ``not_wired`` status
     payload rather than raising, so the CLI/API surface stays uniform.
+    ``cost_fraction`` None charges the real costs.py round trip per trade.
     """
     from backtest.strategies import STRATEGIES, run_strategy
 
@@ -103,7 +107,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--strategy", default="cri")
     parser.add_argument("--horizon", type=int, default=1)
-    parser.add_argument("--cost-fraction", type=float, default=0.0)
+    parser.add_argument(
+        "--cost-fraction",
+        type=float,
+        default=None,
+        help=(
+            "Override: one round-trip cost fraction for every trade. Omitted, "
+            "each trade is charged the real scripts/costs.py round trip."
+        ),
+    )
     parser.add_argument("--persist", action="store_true")
     args = parser.parse_args(argv)
 

@@ -103,9 +103,9 @@ def test_round_trip_cost_fraction_uses_costs_module():
     # round trip = 2 * (1.00 + 2.50) = 7.00 dollars.
     # premium notional = 3.50 (per share) * 100 = 350.0 dollars.
     # fraction = 7.00 / 350.0 = 0.02
-    fraction = round_trip_cost_fraction(contracts=1, num_legs=1, premium_per_share=3.50)
+    fraction = round_trip_cost_fraction(contracts=1, num_legs=1, notional_per_share=3.50)
     assert fraction == pytest.approx(7.0 / 350.0)
 
 
 def test_round_trip_cost_fraction_zero_premium_is_zero():
-    assert round_trip_cost_fraction(contracts=1, num_legs=1, premium_per_share=0.0) == 0.0
+    assert round_trip_cost_fraction(contracts=1, num_legs=1, notional_per_share=0.0) == 0.0
