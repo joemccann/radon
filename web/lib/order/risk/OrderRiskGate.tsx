@@ -119,8 +119,9 @@ export function OrderRiskGate({
       (state?.summary.undefinedRiskReason != null && state.summary.undefinedRiskReason.length > 0),
   );
 
-  // LOCATE/FEE chip: shown when a SELL/SHORT order has no held position in
-  // the underlying. Applicable to both option SELL legs and linear SELL orders.
+  // LOCATE/FEE chip: shown when coverage has resolved and a SELL/SHORT order
+  // still carries an uncovered obligation. Applicable to both option SELL legs
+  // and linear SELL orders.
   const locateEnabled = resolveLocateChipEnabled(input, portfolio, state);
   const locateTicker = locateEnabled ? (input?.ticker ?? null) : null;
   const { status: locateStatus, data: locateData } = useShortAvailability(
@@ -180,9 +181,9 @@ export function OrderRiskGate({
  * Rules:
  *   - For option orders: at least one leg must be SELL action.
  *   - For linear orders: action must be SELL.
- *   - The portfolio (when loaded) must have NO position in the underlying.
- *     When portfolio is still loading (undefined), we do NOT fetch yet so we
- *     avoid a stale/wrong chip showing before coverage is known.
+ *   - Coverage must be resolved and the projected order must still carry an
+ *     undefined-risk reason. While the portfolio is loading we do NOT fetch,
+ *     so no stale/wrong chip shows before coverage is known.
  */
 export function resolveLocateChipEnabled(
   input: OrderRiskInput | null,

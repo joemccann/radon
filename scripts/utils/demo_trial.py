@@ -10,7 +10,7 @@ trading day: a Wednesday signup expires at 16:00 ET on Thursday (Wed=1,
 Thu=2). A weekend/holiday signup rolls forward to the next trading day as
 day 1. Expiry is always 16:00 ET (market close) of the Nth trading day.
 
-Phase 2 will call ``trial_expiry_handler`` from a small FastAPI route (the
+The FastAPI ``/demo/trial-expiry`` route calls ``trial_expiry_handler`` (the
 calendar logic is Python-only, so the Next.js webhook delegates the
 computation). This module deliberately registers NO route.
 """
@@ -102,10 +102,10 @@ def is_trial_active(expires_at_iso: str, now: datetime | None = None) -> bool:
 def trial_expiry_handler(
     start_iso_et: str, trading_days: int = DEFAULT_TRADING_DAYS
 ) -> dict:
-    """FastAPI-shaped helper (NOT registered as a route — Phase 2).
+    """FastAPI-shaped helper (the route lives in ``scripts/api/server.py``).
 
     Returns the start, computed expiry, and current active state so the
-    Phase-2 webhook can persist both timestamps to Clerk metadata + the
+    webhook can persist both timestamps to Clerk metadata + the
     demo_users row in one call.
     """
     expires_at = compute_trial_expiry(start_iso_et, trading_days)

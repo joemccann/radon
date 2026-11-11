@@ -27,15 +27,14 @@ exponential circuit breaker (90s -> 5m -> 15m -> 1h capped) via
 ``_throttle_backoff``. IBKR's published 1018 limit is one request per
 second and ten per minute, per token, so the ladder is measured in
 minutes; it used to run 24h -> 168h, three orders of magnitude harsher
-than the constraint it modelled. The breaker composes with thedaily window: an embargo that outlives the window still defers to
-tomorrow rather than re-probing later the same day.
+than the constraint it modelled. The breaker composes with the daily
+window: an embargo that outlives the window still defers to tomorrow
+rather than re-probing later the same day.
 
 1001 and 1019 are NOT rate limits and never reach the breaker. 1019 is
 "statement generation in progress" and 1001 is a transient generation
 failure; both take the soft lane, bounded by
 ``MAX_SOFT_ATTEMPTS_PER_ET_DAY``.
-
-Wired into monitor_daemon via scripts/monitor_daemon/run.py:create_daemon().
 """
 from __future__ import annotations
 
@@ -284,7 +283,7 @@ class CashFlowSyncHandler(BaseHandler):
         """Rebuild the embargo when `daemon_state.json` could not be read.
 
         The state file is checksummed and shared by every handler, so one
-        bad write starts this handler blank and forgets a live 24-168h
+        bad write starts this handler blank and forgets a live
         Flex embargo. Re-probing a token IBKR still considers hot extends
         the sliding window instead of clearing it, which is how a one-day
         problem becomes a week-long one.
@@ -469,7 +468,7 @@ class CashFlowSyncHandler(BaseHandler):
         self._record_failure(self._utc_now_iso(), message)
 
     def _classify_failure(self, message: str, exc: Optional[BaseException]) -> str:
-        """throttle | permanent | config | soft.
+        """throttle | permanent | config | lockout | soft.
 
         Prefers the typed exception carrying the subprocess's exit code.
         The stderr substring match is retained ONLY as a fallback for a
@@ -617,7 +616,7 @@ class CashFlowSyncHandler(BaseHandler):
 
     @staticmethod
     def _next_daily_window_after(now_utc: datetime) -> datetime:
-        """Next fire-window open on a trading day strictly later than today."""
+        """Next fire-window open strictly after now, on a trading day."""
         et_now = now_utc.astimezone(ET)
         from datetime import timedelta as _td
         candidate = et_now.replace(hour=FIRE_HOUR_ET, minute=0, second=0, microsecond=0)
@@ -639,7 +638,7 @@ class CashFlowSyncHandler(BaseHandler):
         24h. Raising routes failures through the contract's
         ``HandlerSoftFailure`` lane so the next 30s daemon cycle re-evaluates
         ``is_due`` (gated by the 5-min embargo from ``record_soft_failure``
-        or the 24h+ embargo from ``record_throttle``).
+        or the breaker embargo from ``record_throttle``).
         """
         if not os.environ.get("IB_FLEX_TOKEN") or not os.environ.get("IB_FLEX_NAV_QUERY_ID"):
             raise SyncFailure(

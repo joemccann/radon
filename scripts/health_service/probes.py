@@ -166,13 +166,6 @@ UNIT_STATE_MAX_AGE_SECS = 30.0
 PROBE_STATE_MAX_AGE_SECS = 30.0
 STATUS_SCHEMA_VERSION = 3
 
-# Non-edge components: reported in /status, but a failure here must not
-# collapse the public edge aggregate to "down". Off-box pages P1 on
-# aggregate_down; these units already have their own on-box alarms.
-# ib-gateway: broker dependency (2026-08-09 weekend clean-exit false P1).
-# newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
-# "down" or "starting" and were paging edge-unhealthy (2026-08-29 pages
-# 0b7726f8 / 344f0592).
 # How long a dependency may sit non-`up` before its failure stops being a flap.
 # `degraded` converts off-box to an explicit non-page, so with no dwell bound a
 # permanently dead radon-monitor (the fill / order / journal daemon) was edge
@@ -181,6 +174,13 @@ STATUS_SCHEMA_VERSION = 3
 # R-382.
 DEPENDENCY_DWELL_LIMIT_SECS = 900.0
 
+# Non-edge components: reported in /status, but a failure here must not
+# collapse the public edge aggregate to "down". Off-box pages P1 on
+# aggregate_down; these units already have their own on-box alarms.
+# ib-gateway: broker dependency (2026-08-09 weekend clean-exit false P1).
+# newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
+# "down" or "starting" and were paging edge-unhealthy (2026-08-29 pages
+# 0b7726f8 / 344f0592).
 DEPENDENCY_PROBES = frozenset({"ib-gateway", "radon-mcp"})
 DEPENDENCY_UNITS = frozenset({
     "radon-ib-gateway.service",

@@ -235,7 +235,7 @@ async function readDb<T>(
     )) ?? null;
   } catch (err) {
     // A DB timeout is the stale-pool wedge: drop the cached client so the NEXT
-    // request rebuilds a fresh pool instead of waiting for the 12s stall ceiling.
+    // request rebuilds a fresh pool instead of waiting for the stall ceiling.
     // Memory still serves this request.
     resetDb(identity);
     warnWithLabel(label, `DB read failed: ${describeDbError(err)}`);

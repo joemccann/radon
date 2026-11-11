@@ -35,7 +35,7 @@ import { userErrorMessage } from "./userError";
  * Beyond JSON safety, the readable form also avoids developer-flavoured
  * phrasing in the dashboard. ``ERR: cash flow fetch failed: Flex
  * SendRequest failed (code 1001): Statement could not be generated...``
- * becomes ``Flex Web Service rate-limited; retry in 1d`` — same
+ * becomes ``Flex Web Service rate limit hit retry in 1d`` — same
  * information, no stack-trace tone.
  */
 

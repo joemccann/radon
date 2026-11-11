@@ -117,7 +117,7 @@ _SOFT_FAILURE_STATUS = "error"
 class BaseHandler(ABC):
     """Abstract base class for monitor daemon handlers."""
 
-    # Subclasses must define these
+    # Subclasses override these
     name: str = "base"
     interval_seconds: int = 60
     requires_market_hours: bool = True

@@ -58,7 +58,9 @@ def _parse_iso(s: str) -> datetime:
 
 
 def _get_db():
-    """Lazy import keeps ``import watchdog`` cheap and lets the test
+    """Local watchdog state DB; under pytest, ``db.client.get_db``.
+
+    Lazy import keeps ``import watchdog`` cheap and lets the test
     fixture monkeypatch ``db.client.get_db`` before this is called.
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):

@@ -147,7 +147,7 @@ const MULTIPLIER = 100;
  *
  * Premium convention
  * ------------------
- * `legPremium` is the per-contract dollar price paid (for BUY legs) or
+ * `legPremium` is the per-share dollar price paid (for BUY legs) or
  * received (for SELL legs). It is always a positive magnitude here —
  * sign is encoded by the leg's action.
  *
@@ -221,36 +221,6 @@ export function legRisk(
 }
 
 /**
- * Classify a combo into "fully defined" vs "undefined risk", and pin down
- * the dollar max-loss when expressible.
- *
- * Defined structures the formula handles correctly:
- *   - Bull / Bear vertical spreads (call or put)
- *   - Long straddle / long strangle
- *   - Long butterfly (3+ legs roll up via leg sum)
- *   - Iron condor (long wings cap each side)
- *
- * Undefined structures the formula surfaces correctly:
- *   - Risk reversal (short put + long call) → bounded only at stock-to-zero
- *   - Short straddle / short strangle → unbounded via the short call leg
- *   - Jade lizard (short put + short call spread) → unbounded via short put
- *     unless the short call wing is fully covered; bounded if the call
- *     side is a spread but flagged because of the naked put
- *
- * Net-premium semantics
- * ---------------------
- * `netPremium` is the per-combo net price as displayed in the order builder:
- * positive for a net debit, negative for a net credit. We use it for total
- * cost; per-leg losses fold in their own premiums so signs cancel correctly
- * when summed.
- *
- * Why we sum per-leg losses instead of leaning on netPremium alone:
- * a Risk Reversal's net might be a small debit ($1) but the short-put leg
- * carries $strike × contracts × 100 of exposure. Summing per-leg
- * (max-loss-of-long-call + max-loss-of-short-put) correctly produces
- * the assignment bound plus the small debit.
- */
-/**
  * Optional transaction-cost adjustment. `roundTripCost` is the total dollar
  * cost of getting in AND out (commission + slippage + combo penalty for both
  * the entry and the exit). Compute it with `estimateRoundTripCost` from
@@ -265,6 +235,29 @@ export interface OrderCostAdjustment {
   roundTripCost: number;
 }
 
+/**
+ * Classify a combo into "fully defined" vs "undefined risk", and pin down
+ * the dollar max-loss when expressible.
+ *
+ * Defined structures the formula handles correctly:
+ *   - Bull / Bear vertical spreads (call or put)
+ *   - Long straddle / long strangle
+ *   - Long butterfly
+ *   - Iron condor (long wings cap each side)
+ *
+ * Undefined structures the formula surfaces correctly:
+ *   - Risk reversal (short put + long call) → bounded only at stock-to-zero
+ *   - Short straddle / short strangle → unbounded via the short call leg
+ *   - Jade lizard (short put + short call spread) → unbounded via short put
+ *     unless the short call wing is fully covered; bounded if the call
+ *     side is a spread but flagged because of the naked put
+ *
+ * Net-premium semantics
+ * ---------------------
+ * `netPremium` is the per-combo net price as displayed in the order builder:
+ * positive for a net debit, negative for a net credit. Multi-leg dollars are
+ * the intrinsic payoff extrema at the strike kinks, net of `netPremium`.
+ */
 export function computeOrderRisk(
   legs: OrderRiskLeg[],
   netPremium: number,
@@ -312,7 +305,7 @@ function computeGrossOrderRisk(
     };
   }
 
-  // Single leg path: defer to legRisk with per-contract premium = abs(netPremium).
+  // Single leg path: defer to legRisk with per-share premium = abs(netPremium).
   // For single legs `netPremium` represents the per-share price of that leg.
   if (legs.length === 1) {
     const leg = legs[0];
@@ -347,13 +340,8 @@ function computeGrossOrderRisk(
 
   // Multi-leg: net out call coverage and put coverage so a long-call leg
   // can offset a short-call leg in the same combo (vertical / butterfly).
-  // We use NET coverage at strike granularity — for any short leg, look for
-  // a long leg of the same right at a more-protective strike.
-  //
-  // The minimum-loss-by-summing-leg-losses heuristic over-counts coverage:
-  // a bull call spread has both a long and a short call, but the structure
-  // is bounded by the strike width, not by long-premium + short-strike.
-  // We handle that by walking legs and matching them.
+  // `legsAreBounded` matches shorts to longs of the same right by ratio and
+  // expiry; the dollars come from the payoff at every strike kink below.
 
   const callLegs = legs.filter((l) => l.right === "C");
   const putLegs = legs.filter((l) => l.right === "P");
@@ -446,8 +434,9 @@ function computeGrossOrderRisk(
  *
  * Call side: long calls (any strike) cap the upside. Short calls without
  * a long call cap are UNBOUNDED. We use total ratio, not per-strike — any
- * long call protects against an arbitrarily large move, the question is
- * how big the dollar loss is, not whether it's unbounded.
+ * long call expiring on or after the short protects against an arbitrarily
+ * large move, the question is how big the dollar loss is, not whether it's
+ * unbounded.
  *
  * Put side: long puts cap the assignment risk. Short puts without a long
  * put cap drive max loss to strike-at-zero. That's a finite number, but
@@ -492,7 +481,6 @@ function legsAreBounded(sameRightLegs: OrderRiskLeg[]): {
   };
 }
 
-/** Exact same-expiry intrinsic extrema at every payoff kink. */
 /**
  * Signed expiry P&L range in dollars: best and worst outcome across every
  * settlement, NOT clamped at zero. A combo whose credit exceeds its width
@@ -512,6 +500,7 @@ export function signedPayoffRange(
   };
 }
 
+/** Exact same-expiry intrinsic extrema at every payoff kink. */
 function intrinsicPayoffExtrema(legs: OrderRiskLeg[]): { min: number; max: number } {
   const points = [0, ...legs.map((leg) => leg.strike)].filter(
     (value, index, all) => Number.isFinite(value) && value >= 0 && all.indexOf(value) === index,
@@ -906,7 +895,8 @@ function comboUnitFromQuantities(quantities: number[]): number {
  * @param portfolio  Live portfolio snapshot or null. When null, the helper still
  *                   normalises chain leg quantities to per-combo ratios so the
  *                   single-leg quantity² bug stays fixed even without coverage.
- * @returns          `{ riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment }`.
+ * @returns          `{ riskLegs, comboQuantity, coveringLegs, netPremiumAdjustment,
+ *                   heldOptionBasisAdjustment }`.
  */
 export function augmentOrderLegsWithPortfolioCoverage(
   chainLegs: ChainOrderLeg[],
@@ -1105,8 +1095,8 @@ export function augmentOrderLegsWithPortfolioCoverage(
   //     is true of the held shares but not of THIS order's structure).
   //   - inject a virtual `BUY C strike=0` leg whose ratio = shares / (100 ×
   //     comboQuantity). Strike=0 is mathematically equivalent to long stock
-  //     (intrinsic = max(0, S - 0) = S), and `sideMaxLoss` / `sideMaxGain`
-  //     handle it correctly after the index-based first-iteration fix.
+  //     (intrinsic = max(0, S - 0) = S), and `intrinsicPayoffExtrema`
+  //     evaluates it like any other leg.
   //   - fold the stock's per-share cost basis into `netPremiumAdjustment`
   //     so the synthetic combo's net debit reflects sunk basis. Without
   //     this, the model would say "long stock at $0 + short call" → max
