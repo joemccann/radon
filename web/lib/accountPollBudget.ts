@@ -10,7 +10,6 @@
  */
 export const MARKET_HOURS_ACCOUNT_POLL_MS = 2_000;
 export const OFF_HOURS_ACCOUNT_POLL_MS = 30_000;
-export const SHARED_ACCOUNT_TABS = 3;
 
 /** Current per-user portfolio admission policy, preserving main #1081. */
 export const PORTFOLIO_GET_LIMIT = 2_000;

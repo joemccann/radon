@@ -1160,10 +1160,6 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
 
 const TOOL_BY_NAME = new Map<string, AssistantTool>(ASSISTANT_TOOLS.map((tool) => [tool.name, tool]));
 
-export function getTool(name: string): AssistantTool | undefined {
-  return TOOL_BY_NAME.get(name);
-}
-
 export function isDestructiveTool(name: string): boolean {
   return Boolean(TOOL_BY_NAME.get(name)?.destructive);
 }

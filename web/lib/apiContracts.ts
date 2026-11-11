@@ -39,11 +39,6 @@ export type ApiErrorPayload = {
   requestId: string;
 };
 
-export type ApiOptions = {
-  requestId?: string;
-  cacheState?: CacheState;
-};
-
 export function getRequestId(): string {
   // Web Crypto API — available on globalThis.crypto in Node 19+, Next.js
   // Edge runtime, and every modern browser. Previously we imported

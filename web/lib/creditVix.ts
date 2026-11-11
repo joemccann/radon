@@ -4,7 +4,6 @@
  */
 
 export const WINDOW_SESSIONS = 252;
-export const GAP_THRESHOLD = 0.5;
 
 export type CreditVixState = "CREDIT WIDE" | "VIX WIDE" | "ALIGNED";
 
@@ -38,9 +37,6 @@ export interface CreditVixData {
   current: CreditVixCurrent | null;
   series: CreditVixPoint[];
 }
-
-export type CreditVixPayload = CreditVixData;
-export type CreditVixRow = CreditVixPoint;
 
 export const MISSING_CREDIT_VIX: CreditVixData = Object.freeze({
   missing: true,

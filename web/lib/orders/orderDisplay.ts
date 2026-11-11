@@ -355,20 +355,3 @@ export function formatDistanceDelta(delta: number): string {
 export function statusTextClass(tone: OrderStatusTone): string {
   return `order-status-text order-status-text--${tone}`;
 }
-
-export function statusPillClass(tone: OrderStatusTone): string {
-  switch (tone) {
-    case "partial":
-      return "order-status-pill order-status-pill--partial";
-    case "pending":
-      return "order-status-pill order-status-pill--pending";
-    case "working":
-      return "order-status-pill order-status-pill--working";
-    case "inactive":
-      return "order-status-pill order-status-pill--inactive";
-    case "done":
-      return "order-status-pill order-status-pill--done";
-    default:
-      return "order-status-pill order-status-pill--neutral";
-  }
-}

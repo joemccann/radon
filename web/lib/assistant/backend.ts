@@ -1,7 +1,5 @@
 import { authorize, normalizePath } from "@/lib/assistant/catalog";
 
-export type BackendMethod = "GET" | "POST";
-
 export function normalizeBackendPath(raw: string): string {
   return normalizePath(raw);
 }

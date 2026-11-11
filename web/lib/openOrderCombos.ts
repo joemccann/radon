@@ -100,17 +100,6 @@ export function resolveSignedComboPrice(
   };
 }
 
-export type OpenOrderRowSortKey =
-  | "symbol"
-  | "action"
-  | "orderType"
-  | "totalQuantity"
-  | "limitPrice"
-  | "lastPrice"
-  | "status"
-  | "tif"
-  | "actions";
-
 function normalizeAction(action: string): NormalizedAction | null {
   if (action === "BUY") return "BUY";
   if (action === "SELL") return "SELL";

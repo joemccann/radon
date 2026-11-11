@@ -1058,14 +1058,3 @@ export function formatVolume(volume: number | null | undefined): string {
   }
   return volume.toLocaleString();
 }
-
-/**
- * Calculate price change percentage
- */
-export function calcChangePercent(
-  current: number | null,
-  previous: number | null,
-): number | null {
-  if (current == null || previous == null || previous === 0) return null;
-  return ((current - previous) / previous) * 100;
-}
