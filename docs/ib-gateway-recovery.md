@@ -59,10 +59,9 @@ owns stale thresholds and retry bounds. A silent subject on an otherwise live
 plane is resubscribed; a stale whole plane enters bounded resubscribe/socket
 reconnect recovery before escalation.
 
-`shouldRequestGatewayRestart` permits the [relay](../scripts/ib_realtime_server.js)
-to request `POST /ib/restart` after escalation in `docker` and `cloud` modes;
-`launchd` stays alert-only. The request delegates to FastAPI's push lease and
-backoff gates rather than restarting Docker directly. An operator hold
+After escalation the [relay](../scripts/ib_realtime_server.js) requests
+`POST /ib/restart`. FastAPI delegates to the Gateway owner's helper, which
+holds the push lease, rather than restarting Docker directly. An operator hold
 suppresses recovery and a hold refusal makes the relay stand down.
 
 **Blast radius and safe diagnosis:** a Gateway restart can interrupt all IB
@@ -118,12 +117,13 @@ operator when the installed configuration or journal retention cannot be confirm
 Every restart path that fires a push acquires the lock first. While held, restart requests REJECTED with `reason="2fa_push_in_flight"`.
 
 Required participants:
-- FastAPI's `restart_ib_gateway` in `scripts/api/ib_gateway.py`
 - The production `/usr/local/bin/radon-ib-gateway-control` helper installed from `cloud/`
 - `radon-ib-watchdog`, which acquires the lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter exactly once
 - Boot, operator, admin-panel, and laptop cloud starts, all of which delegate to the production helper instead of acquiring independently
 
-This is what defends against stacked-push rejection.
+This is what defends against stacked-push rejection. FastAPI never takes the
+lease: `restart_ib_gateway` in `scripts/api/ib_gateway.py` refuses, and
+`POST /ib/restart` delegates to the helper.
 
 **Two release rules keep the lease from outliving the push it guards** (2026-08-25: an
 admin stop landed 14s after a restart, the stop path left the lease held, and every
@@ -141,22 +141,16 @@ stayed refused for the remaining 590s with no container on the host):
   the lease exists a beat before the port binds. The probe runs only for a lease past its
   grace, so `/health` polling never opens a socket.
 
-### 2. In-memory backoff ladder
+### 2. No restart ladder in FastAPI
 
-Per-process. `restart_ib_gateway()` runs a `managedAccounts()` probe post-restart:
-- Non-empty result → reset backoff to baseline.
-- Empty result → advance backoff: **1m → 2m → 5m → 15m → 30m → 60m capped**.
-
-Backoff applies to the next restart attempt by THIS process. Cross-process backoff is the push lock above.
-
-**Not applicable in cloud mode (production).** `restart_ib_gateway()` returns before this gate when `IB_GATEWAY_MODE=cloud`: the cloud helper owns the lease and the Gateway cycle, so the ladder never advances. `/health` reports `restart_backoff.applicable: false` with `gateway_mode: "cloud"` and omits the ladder fields (`attempt_count`, `next_attempt_in_secs`, `next_attempt_after`, `last_attempt_at`, `last_outcome`); `push_lock` is still reported. The ladder runs only on the legacy `docker` / `launchd` harness, where `applicable: true`.
+FastAPI has one Gateway mode, cloud: it probes the Gateway and never cycles it. The per-process backoff ladder and the `docker` / `launchd` lifecycles it served were removed. `/health` reports `restart_backoff.applicable: false` with `gateway_mode: "cloud"` and no ladder fields (`attempt_count`, `next_attempt_in_secs`, `next_attempt_after`, `last_attempt_at`, `last_outcome`); `push_lock` is still reported. The helper's own lease and transition state are the only restart gates.
 
 ### 3. Watchdog stuck-2FA self-heal (2026-05-20)
 
 `is_stuck_awaiting_2fa()` fires when ALL of:
 - `auth_state == "awaiting_2fa"`
 - `push_lock_active == false`
-- `next_attempt_in_secs <= 0` (absent in cloud mode, where the ladder is not applicable, so this term never defers)
+- `next_attempt_in_secs <= 0` (always absent now that FastAPI has no ladder, so this term never defers)
 
 After **3 consecutive stuck cycles (~3 min)**, the watchdog acquires the push lock and starts `radon-ib-gateway-preheld-restart.service`. That fixed adapter verifies the exact watchdog holder, consumes that lease fingerprint once, and delegates the Docker cycle to the production helper without acquiring a second lease.
 
@@ -235,7 +229,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 ## Operator Escape Hatches
 
-`POST /ib/reset-backoff` clears BOTH in-memory backoff (attempt count, window and last outcome) AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
+`POST /ib/reset-backoff` releases the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
 
 `/usr/local/bin/radon restart` and the admin Gateway controls delegate to `/usr/local/bin/radon-ib-gateway-control`. A healthy start is a no-op with no lease; a stopped/missing start or any restart atomically acquires the lease before touching Docker.
 
@@ -360,7 +354,7 @@ Then install the new compose body at `/etc/radon/ib-gateway-compose.yml` by hand
 
 ## Code References
 
-- `scripts/api/ib_gateway.py:restart_ib_gateway`
+- `scripts/api/ib_gateway.py:check_ib_gateway`
 - `scripts/api/ib_gateway.py:recover_stuck_pool` + `_probe_authenticated` (Gate 5, pool self-heal)
 - `scripts/api/server.py:_recover_stuck_pool_guarded` + `_ib_recovery_heartbeat_tick` (the 15s driver)
 - `scripts/ib_watchdog.py:run_cycle`

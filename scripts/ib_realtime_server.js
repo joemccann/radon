@@ -48,7 +48,6 @@ import {
   nextFarmStateCode,
   summarizeSubscriptionFreshness,
   marketDataIsDegraded,
-  shouldRequestGatewayRestart,
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
@@ -868,8 +867,6 @@ function isUSMarketHours() {
   return isMarketOpen();
 }
 
-const GATEWAY_MODE = process.env.IB_GATEWAY_MODE || "docker";
-
 /* Best-effort relay health write. The relay must never stall ticks on a DB
  * hiccup, so the writer import + call are dynamic + try/catch'd. The writer
  * is direct-to-cloud by default (embedded replica is opt-in only). */
@@ -885,9 +882,9 @@ async function writeRelayHealth(state, error) {
 // Hand off to FastAPI's lock-holding Gateway restart. The market-data farm is
 // dead while the IB API stays responsive (upstream alive), so the api-hang
 // watchdog never sees this — the relay is the only detector. POST /ib/restart
-// owns the 2FA push lock + restart backoff, so if a push is already in flight
-// (e.g. a concurrent watchdog restart) or we're inside the backoff window the
-// call no-ops rather than stacking a second 2FA push. Best-effort: never throw
+// delegates to the Gateway owner's helper, which holds the 2FA push lock, so if
+// a push is already in flight (e.g. a concurrent watchdog restart) the call
+// no-ops rather than stacking a second 2FA push. Best-effort: never throw
 // into the stale-check timer; fire-and-forget so the relay doesn't block.
 async function requestGatewayRestart() {
   try {
@@ -941,25 +938,19 @@ function resubscribeStaleSubjects(symbols) {
 // Bounce the IB socket; the connected handler restores fresh subscriptions.
 function reconnectIBSocket() {
   staleReconnectCycles += 1;
-  if (GATEWAY_MODE === "cloud" || GATEWAY_MODE === "docker") {
-    console.log(`[stale-data] ${GATEWAY_MODE} mode — disconnecting and scheduling reconnect (cycle ${staleReconnectCycles})`);
-  } else {
-    // Local launchd mode — do NOT restart IBC from the relay. Repeated local
-    // restarts thrash the auth session and can trigger more 2FA prompts.
-    console.log(`[stale-data] launchd mode — reconnecting IB socket only (cycle ${staleReconnectCycles}); manual IBC restart required if Gateway stays down`);
-  }
+  console.log(`[stale-data] disconnecting and scheduling reconnect (cycle ${staleReconnectCycles})`);
   try { ib.disconnect(); } catch { /* ignore */ }
   scheduleReconnect();
 }
 
 // K reconnect cycles failed during RTH: the market-data farm is dead while the
 // IB API stays responsive. Write the relay's service_health error row (so the
-// outage is finally VISIBLE on the status surface) AND, for container-owned
-// gateways, hand off to the lock-holding /ib/restart — the only path that can
-// re-establish a dead farm, and the only actor that detects this case at all
-// (the api-hang watchdog sees the API as healthy here). escalation is
-// rate-limited to once per ESCALATION_COOLDOWN_MS and the restart endpoint
-// self-gates on the 2FA lock + backoff, so this never stacks a push.
+// outage is finally VISIBLE on the status surface) AND hand off to the
+// lock-holding /ib/restart — the only path that can re-establish a dead farm,
+// and the only actor that detects this case at all (the api-hang watchdog sees
+// the API as healthy here). escalation is rate-limited to once per
+// ESCALATION_COOLDOWN_MS and the Gateway owner's helper self-gates on the 2FA
+// lock, so this never stacks a push.
 function escalateStaleData(elapsedMs, activeSubscriptions) {
   if (ibGatewayRestarting) return;
   ibGatewayRestarting = true;
@@ -970,9 +961,7 @@ function escalateStaleData(elapsedMs, activeSubscriptions) {
     message: `No ticks for ${Math.round(elapsedMs / 1000)}s with ${activeSubscriptions} active subscriptions after ${staleReconnectCycles} reconnect cycles during market hours`,
     farm_state: lastFarmStateCode,
   });
-  if (shouldRequestGatewayRestart(GATEWAY_MODE)) {
-    void requestGatewayRestart();
-  }
+  void requestGatewayRestart();
   // Allow another reconnect ladder after the cooldown; the escalation itself
   // is independently rate-limited by lastEscalationAt in the decision core.
   setTimeout(() => { ibGatewayRestarting = false; }, 120_000);

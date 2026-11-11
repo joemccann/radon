@@ -13,7 +13,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - **`web/CLAUDE.md`** — Next.js frontend: calculations, components cheat sheet, theme system, cache contract, combo / BAG order guardrails, IB error rendering, build constraint, mobile shell.
 - **`site/CLAUDE.md`** — radon.run marketing site (Next 16 + Tailwind v4, atomic design): the "Editorial Quant Research" direction, the product-plate screenshot methodology (chrome-cdp capture + `radon-user` anonymization + theme-aware light/dark + cookie-gated newsfeed image-wait + the portfolio recreation), the ⛔ PII rule (plates still show real account FIGURES), and Vercel auto-deploy on push to main.
 - **`scripts/CLAUDE.md`** — Python conventions: client ID ranges, IB request bounding, high-throughput patterns, journal lot-matched basis, entry-date resolution.
-- **`scripts/api/CLAUDE.md`** — FastAPI: IB Gateway 3 modes, 2FA-aware restart summary, authentication, subprocess pattern, autonomous timers, service health dual-write.
+- **`scripts/api/CLAUDE.md`** — FastAPI: IB Gateway (one mode, cloud), 2FA-aware restart summary, authentication, subprocess pattern, autonomous timers, service health dual-write.
 - **`scripts/monitor_daemon/CLAUDE.md`** — Real-time fill / order / journal handlers: market-hours gate, heartbeat convention, journal_sync labelling.
 - **`scripts/watchdog/CLAUDE.md`** — Service-health buckets, anti-flood, writer-state semantics, IB-outage grouping.
 - **`scripts/newsfeed/CLAUDE.md`** — Headless Playwright, tagging pipeline (vision + text), cookie-gated images, taxonomy.

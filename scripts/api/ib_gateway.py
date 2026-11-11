@@ -1,11 +1,10 @@
-"""IB Gateway health check and lifecycle management.
+"""IB Gateway health check and lifecycle surface for FastAPI.
 
-Supports three modes controlled by IB_GATEWAY_MODE env var:
-  - "cloud"   — remote Gateway (e.g. Hetzner via Tailscale). No local restart.
-  - "docker"  — manages Gateway via Docker Compose
-  - "launchd" — manages Gateway via IBC launchd service (legacy)
-
-Default: "docker".
+The Gateway always runs on a remote host (the broker, reached over
+Tailscale). Its lifecycle is owned by ``radon-ib-gateway-control`` on that
+host; this module only probes it. ``ensure_ib_gateway`` reports
+reachability and ``restart_ib_gateway`` refuses, so nothing in this process
+can cycle a Gateway or fire an IBKR Mobile 2FA push.
 """
 
 from __future__ import annotations
@@ -14,13 +13,10 @@ import asyncio
 import json
 import logging
 import os
-import signal
 import socket
 import struct
-import subprocess
 import sys
 import time
-from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -41,40 +37,15 @@ from db.service_health_sql import (  # noqa: E402
 
 logger = logging.getLogger("radon.ib_gateway")
 
-# Identifier used when this module takes the shared 2FA push lock. Other
-# restart paths (ib_watchdog.py, ib_orderly_restart.py, …) use distinct
-# holder strings so a glance at /var/lib/radon/ib-lease/ib-2fa-push-lock.json tells
-# the operator which component is mid-2FA-cycle.
-IB_GATEWAY_LOCK_HOLDER = "scripts.api.ib_gateway.restart_ib_gateway"
+# A startup holder older processes took on the shared 2FA push lock. The
+# authentication edge in ``handle_auth_state_transition`` still clears it so a
+# lease left behind by one of them never outlives the login it was guarding.
 IB_GATEWAY_ENSURE_LOCK_HOLDER = "scripts.api.ib_gateway.ensure_ib_gateway"
 
 
 IB_HOST = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
 IB_PORT = int(os.environ.get("IB_GATEWAY_PORT", "4001"))
-GATEWAY_MODE = os.environ.get("IB_GATEWAY_MODE", "docker")  # "docker", "cloud", or "launchd"
 
-# LaunchD paths
-IBC_HOME = Path.home() / "ibc" / "bin"
-STATUS_SCRIPT = IBC_HOME / "status-secure-ibc-service.sh"
-START_SCRIPT = IBC_HOME / "start-secure-ibc-service.sh"
-RESTART_SCRIPT = IBC_HOME / "restart-secure-ibc-service.sh"
-
-# Docker paths (legacy laptop branch, unreachable in production where
-# IB_GATEWAY_MODE=cloud; retained as the 2FA-lock / backoff test harness).
-# Production never runs compose from FastAPI: the broker Gateway is
-# /etc/radon/ib-gateway-compose.yml via radon-ib-gateway-control.
-# IB_GATEWAY_COMPOSE_DIR overrides the default.
-COMPOSE_DIR = Path(
-    os.environ.get(
-        "IB_GATEWAY_COMPOSE_DIR",
-        str(Path(__file__).parent.parent.parent / "docker" / "ib-gateway"),
-    )
-)
-
-# Timing
-RESTART_WAIT_SECS = 45
-PORT_POLL_INTERVAL = 3
-PROCESS_TERM_GRACE_S = 1.0
 # ``/health/lite`` has a 0.5s total budget. Keep this raw protocol probe short
 # enough to fail closed without consuming that endpoint's worker budget.
 CLOUD_PROTOCOL_PROBE_TIMEOUT_SECS = 0.25
@@ -85,15 +56,6 @@ CLOUD_PROTOCOL_PROBE_TIMEOUT_SECS = 0.25
 # accept the host port while the Gateway's inner Java listener is absent.
 _IB_API_SIGNATURE = b"API\x00"
 _IB_API_VERSION_RANGE = b"v100..187"
-
-# Prevent concurrent restart races
-_restart_lock = asyncio.Lock()
-
-# Restart backoff state — only reset when a probe confirms login (managedAccounts non-empty).
-# Each restart sends a fresh IBKR Mobile 2FA push; tight retry loops spam the user
-# AND can flag the account as suspicious, so we widen the gap between attempts
-# until login completes.
-BACKOFF_LADDER_SECS: List[int] = [60, 120, 300, 900, 1800, 3600]  # 1m,2m,5m,15m,30m,60m
 
 # The lease guard is held across _write_lock_file's two fsyncs, so an
 # unbounded flock hangs the FastAPI handler that reads it — with no timeout and
@@ -118,44 +80,6 @@ def _check_2fa_push_lock_bounded(now: float):
             acquired_at=now,
             expires_at=now + ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
             reason=f"lease guard busy: {exc}",
-        )
-
-
-def _remaining_lock_secs_bounded(now: float) -> int:
-    try:
-        return ib_2fa_lock.remaining_lock_secs(
-            now=now, guard_timeout_secs=LOCK_OP_TIMEOUT_SECS
-        )
-    except ib_2fa_lock.GuardLockTimeout as exc:
-        logger.warning("2FA lock read abandoned (%s); reporting unknown", exc)
-        return -1
-
-
-def _acquire_2fa_push_lock_bounded(holder: str, *, reason: str, now: float):
-    """Bounded ``acquire_2fa_push_lock``. On timeout report a synthetic held
-    lease so the caller DEFERS: a guard we could not read may be covering a
-    push already in flight, and cycling the Gateway blind stacks a second one.
-
-    This is the WRITE path — it holds the exclusive guard across
-    ``_write_lock_file``'s two fsyncs, so it is the call most able to hang.
-    """
-    try:
-        return ib_2fa_lock.acquire_2fa_push_lock(
-            holder,
-            reason=reason,
-            now=now,
-            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
-        )
-    except ib_2fa_lock.GuardLockTimeout as exc:
-        logger.warning("2FA lock acquire abandoned (%s); deferring the cycle", exc)
-        return (
-            False,
-            ib_2fa_lock.PushLock(
-                holder="guard-timeout",
-                acquired_at=now,
-                expires_at=now + ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
-                reason=f"lease guard busy: {exc}",
-            ),
         )
 
 
@@ -189,14 +113,6 @@ class AuthState(str, Enum):
     UNKNOWN = "unknown"              # no pool status to judge from
     REMOTE = "remote"                # cloud TCP-only answer, no pool here
 
-
-_restart_state: Dict = {
-    "attempt_count": 0,            # consecutive unconfirmed attempts
-    "next_attempt_after": 0.0,     # epoch seconds; restart() refuses before this
-    "last_attempt_at": 0.0,        # epoch seconds; last actual restart attempt
-    "last_outcome": None,          # "authenticated" | "awaiting_2fa" | "unreachable" | None
-    "last_accounts": [],           # most recent managedAccounts() probe result
-}
 
 # Auth-state transition tracking — drives auto-reconnect when IBKR 2FA resolves
 # (awaiting_2fa → authenticated) while the FastAPI pool clients are still stuck
@@ -253,11 +169,8 @@ GATEWAY_COOLDOWN_SKIP_ERROR = "IB Gateway connection recently failed. Retrying s
 GATEWAY_NOT_RESPONDING_CLOUD_ERROR = (
     "IB Gateway is not responding (cloud mode). Check remote host and Tailscale."
 )
-GATEWAY_NOT_RESPONDING_MANAGED_ERROR = (
-    "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
-    "approve any existing IBKR Mobile 2FA prompt."
-)
-GATEWAY_RESTART_FAILED_PREFIX = "IB Gateway is down and restart failed."
+# "down and restart failed" is no longer produced; it stays so a service_health
+# row latched by an older process still classifies as gateway-down.
 _GATEWAY_DOWN_VERDICT_MARKERS: tuple[str, ...] = (
     "ib gateway is not responding",
     "ib gateway is not accepting connections",
@@ -278,20 +191,12 @@ def classify_ib_failure(text: object) -> IBFailure:
     return IBFailure.NONE
 
 
-def _next_backoff_delay(attempt_count: int) -> int:
-    """Return delay in seconds for the Nth consecutive failed attempt (1-indexed)."""
-    if attempt_count <= 0:
-        return BACKOFF_LADDER_SECS[0]
-    idx = min(attempt_count - 1, len(BACKOFF_LADDER_SECS) - 1)
-    return BACKOFF_LADDER_SECS[idx]
-
-
 def restart_backoff_state() -> Dict:
-    """Snapshot of restart backoff state for /health and operator visibility.
+    """The shared 2FA push lock for /health and operator visibility.
 
-    Includes ``push_lock`` so operators inspecting /health can tell at a
-    glance whether a fresh restart would be blocked by an in-flight 2FA
-    push from another holder.
+    No per-process restart ladder exists: this process never cycles the
+    Gateway. ``applicable`` stays False so readers do not mistake the absent
+    ladder for "no retry pending".
 
     BLOCKING. The ``push_lock`` read reaches ``_is_orphaned``, which runs
     ORPHAN_CONFIRM_PROBES socket connects with sleeps between them whenever a
@@ -311,32 +216,10 @@ def restart_backoff_state() -> Dict:
             "reason": lock.reason,
         }
     return {
-        "attempt_count": _restart_state["attempt_count"],
-        "last_attempt_at": _restart_state["last_attempt_at"],
-        "next_attempt_after": _restart_state["next_attempt_after"],
-        "next_attempt_in_secs": max(0, int(_restart_state["next_attempt_after"] - now)),
-        "last_outcome": _restart_state["last_outcome"],
         "push_lock": push_lock,
-        "applicable": True,
-        "gateway_mode": gateway_mode().value,
+        "applicable": False,
+        "gateway_mode": "cloud",
     }
-
-
-# The Gate 1 ladder fields. restart_ib_gateway returns before Gate 1 in cloud
-# mode, so these describe nothing there and are withheld (absent reads as
-# null to every tolerant reader) rather than reported as a live zero.
-_LADDER_FIELDS = (
-    "attempt_count", "last_attempt_at", "next_attempt_after",
-    "next_attempt_in_secs", "last_outcome",
-)
-
-
-def _mark_ladder_not_applicable(backoff: Dict) -> Dict:
-    for key in _LADDER_FIELDS:
-        backoff.pop(key, None)
-    backoff["applicable"] = False
-    backoff["gateway_mode"] = GatewayMode.CLOUD.value
-    return backoff
 
 
 # Synthetic hold while the broker reports a pending container transition: a
@@ -401,47 +284,15 @@ async def _overlay_broker_push_lock(backoff: Dict) -> None:
 
 
 def reset_restart_backoff() -> Dict:
-    """Manually clear backoff. Operator path: 'I just approved 2FA, try again now'.
+    """Release the shared 2FA push lock. Operator path: 'I just approved 2FA'.
 
-    Also releases the shared 2FA push lock so any other restart path
-    (ib_watchdog, operator CLI) can proceed immediately. The two pieces
-    of state move in lockstep: the operator just told us the in-flight
-    push is approved, so neither the backoff window NOR the lock should
-    delay the next legitimate restart attempt.
+    The operator just told us the in-flight push is approved, so the lease
+    should not delay the next legitimate restart from the Gateway's owner.
     """
-    previous = {k: _restart_state[k] for k in ("attempt_count", "next_attempt_after", "last_outcome")}
-    _restart_state["attempt_count"] = 0
-    _restart_state["next_attempt_after"] = 0.0
-    _restart_state["last_outcome"] = None
     released = _release_2fa_push_lock_bounded()
     return {
         "reset": True,
-        "previous": previous,
         "lock_released": released.to_dict() if released else None,
-    }
-
-
-def _acquire_gateway_push_lease(holder: str, *, reason: str) -> Optional[Dict]:
-    """Acquire the cross-process lease or return a structured refusal."""
-    now = time.time()
-    acquired, current = _acquire_2fa_push_lock_bounded(
-        holder, reason=reason, now=now
-    )
-    if acquired:
-        return None
-    assert current is not None
-    wait_secs = max(0, int(current.expires_at - now))
-    return {
-        "restarted": False,
-        "deferred": True,
-        "reason": "2fa_push_in_flight",
-        "lock_holder": current.holder,
-        "lock_expires_in_secs": wait_secs,
-        "lock_acquired_at": current.acquired_at,
-        "error": (
-            f"Skipping Gateway cycle — a 2FA push from {current.holder!r} is "
-            f"already in flight ({wait_secs}s remaining)."
-        ),
     }
 
 
@@ -485,448 +336,6 @@ def _cloud_protocol_responding(
                 pass
 
 
-async def _poll_port(wait_secs: int = RESTART_WAIT_SECS) -> tuple:
-    """Poll port until listening or timeout. Returns (port_ok, elapsed)."""
-    elapsed = 0
-    while elapsed < wait_secs:
-        await asyncio.sleep(PORT_POLL_INTERVAL)
-        elapsed += PORT_POLL_INTERVAL
-        if await asyncio.to_thread(_port_listening):
-            logger.info("IB Gateway accepting connections after %ds", elapsed)
-            return True, elapsed
-        logger.info("Waiting for IB Gateway... (%d/%ds)", elapsed, wait_secs)
-    return False, elapsed
-
-
-def _has_close_wait(port: int = IB_PORT) -> bool:
-    """Detect CLOSE_WAIT sockets on IB Gateway port.
-
-    CLOSE_WAIT means the Gateway process is alive but the upstream IB
-    session has dropped. Only relevant in launchd mode where we see
-    the host-level TCP state directly.
-    """
-    try:
-        out = subprocess.check_output(
-            ["lsof", "-i", f":{port}", "-n", "-P"],
-            timeout=5,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        return "CLOSE_WAIT" in out
-    except (subprocess.SubprocessError, OSError):
-        return False
-
-
-async def _run_shell(script: Path, timeout: float = 10.0) -> tuple:
-    """Run a shell script, return (stdout, stderr, returncode)."""
-    if not script.exists():
-        return ("", f"Script not found: {script}", 1)
-
-    proc = await asyncio.create_subprocess_exec(
-        "bash", str(script),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            proc.returncode,
-        )
-    except asyncio.CancelledError:
-        await _kill_and_reap(proc)
-        raise
-    except asyncio.TimeoutError:
-        await _kill_and_reap(proc)
-        return ("", "Script timed out", -1)
-
-
-async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
-    """TERM, then KILL and reap a subprocess plus its owned descendants."""
-    pid = getattr(proc, "pid", None)
-    if pid is not None:
-        try:
-            os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    elif proc.returncode is None:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=PROCESS_TERM_GRACE_S)
-    except (asyncio.TimeoutError, ProcessLookupError):
-        pass
-
-    if pid is not None:
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    elif proc.returncode is None:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-    try:
-        await proc.wait()
-    except ProcessLookupError:
-        pass
-
-
-async def _check_launchd() -> Dict:
-    """Check Gateway health via launchd service state."""
-    port_ok = await asyncio.to_thread(_port_listening)
-    close_wait = await asyncio.to_thread(_has_close_wait) if port_ok else False
-
-    service_state = "unknown"
-    if STATUS_SCRIPT.exists():
-        stdout, _, rc = await _run_shell(STATUS_SCRIPT)
-        if rc == 0:
-            for line in stdout.split("\n"):
-                line = line.strip()
-                if line.startswith("state ="):
-                    service_state = line.split("=", 1)[1].strip()
-                    break
-
-    return {
-        "port_listening": port_ok,
-        "upstream_dead": close_wait,
-        "service_state": service_state,
-        "host": IB_HOST,
-        "port": IB_PORT,
-        "gateway_mode": "launchd",
-    }
-
-
-async def _ensure_launchd() -> Dict:
-    """Ensure Gateway is running via launchd. Handles CLOSE_WAIT detection."""
-    port_ok = await asyncio.to_thread(_port_listening)
-
-    if port_ok:
-        close_wait = await asyncio.to_thread(_has_close_wait)
-        if close_wait:
-            logger.warning(
-                "IB Gateway on %s:%d has CLOSE_WAIT (upstream dead) — restarting",
-                IB_HOST, IB_PORT,
-            )
-            refusal = _acquire_gateway_push_lease(
-                IB_GATEWAY_ENSURE_LOCK_HOLDER,
-                reason="ensure_ib_gateway launchd CLOSE_WAIT recovery",
-            )
-            return refusal or await _restart_launchd()
-        return {"status": "already_running", "port_listening": True, "gateway_mode": "launchd"}
-
-    logger.warning("IB Gateway not listening on %s:%d — attempting start", IB_HOST, IB_PORT)
-    refusal = _acquire_gateway_push_lease(
-        IB_GATEWAY_ENSURE_LOCK_HOLDER,
-        reason="ensure_ib_gateway launchd start",
-    )
-    return refusal or await _restart_launchd()
-
-
-async def _restart_launchd() -> Dict:
-    """Restart Gateway via IBC launchd service scripts."""
-    if not RESTART_SCRIPT.exists():
-        return {
-            "restarted": False,
-            "error": f"IBC restart script not found at {RESTART_SCRIPT}",
-            "port_listening": False,
-            "gateway_mode": "launchd",
-        }
-
-    logger.info("Running IBC restart script...")
-    stdout, stderr, rc = await _run_shell(RESTART_SCRIPT, timeout=60.0)
-
-    if rc != 0:
-        logger.warning("Restart script failed (rc=%d), trying start script...", rc)
-        if START_SCRIPT.exists():
-            stdout, stderr, rc = await _run_shell(START_SCRIPT, timeout=60.0)
-        if rc != 0:
-            return {
-                "restarted": False,
-                "error": f"Both restart and start scripts failed. stderr: {stderr[:200]}",
-                "port_listening": False,
-                "gateway_mode": "launchd",
-            }
-
-    logger.info("IBC script finished, waiting for Gateway (up to %ds)...", RESTART_WAIT_SECS)
-    port_ok, elapsed = await _poll_port()
-
-    if not port_ok:
-        return {
-            "restarted": True,
-            "port_listening": False,
-            "gateway_mode": "launchd",
-            "error": (
-                f"IBC service started but Gateway not accepting connections after {RESTART_WAIT_SECS}s. "
-                "Check IBKR Mobile for 2FA approval."
-            ),
-        }
-
-    return {
-        "restarted": True,
-        "port_listening": True,
-        "wait_seconds": elapsed,
-        "gateway_mode": "launchd",
-    }
-
-
-def host_role() -> str:
-    """RADON_HOST_ROLE for this process (same rule as ``api.services``)."""
-    from api import services  # lazy: keeps this module importable standalone
-
-    return services.host_role()
-
-
-def _app_role_refusal(action: str) -> Optional[Dict]:
-    """REL-169 (R-472): the app host never owns a Gateway session at runtime.
-
-    ``check-env.py`` only checks role/mode consistency at deploy time; an app
-    host whose env drifts off ``cloud`` mode would otherwise take the combined
-    path to a local ``docker compose`` and fire a 2FA push at the broker's
-    login. Returns the structured refusal, or None when this host may proceed.
-    """
-    if host_role() != "app":
-        return None
-    logger.error("REFUSING %s: RADON_HOST_ROLE=app (broker owns the Gateway session)", action)
-    return {
-        "restarted": False,
-        "reason": "app_role",
-        "gateway_mode": GATEWAY_MODE,
-        "error": (
-            f"REFUSING {action}: RADON_HOST_ROLE=app (broker owns the Gateway "
-            "session). Use the broker's remote-control daemon."
-        ),
-    }
-
-
-async def _docker_compose(*args: str, timeout: float = 30.0) -> tuple:
-    """Run docker compose command in the ib-gateway directory."""
-    if host_role() == "app":
-        # Chokepoint belt: every local Gateway mutation funnels through here.
-        return ("", "REFUSING docker compose: RADON_HOST_ROLE=app (broker owns the Gateway session)", 1)
-    compose_file = COMPOSE_DIR / "docker-compose.yml"
-    env_file = COMPOSE_DIR / ".env"
-
-    if not compose_file.exists():
-        return ("", f"Docker compose file not found at {compose_file}", 1)
-
-    cmd = ["docker", "compose", "-f", str(compose_file)]
-    if env_file.exists():
-        cmd.extend(["--env-file", str(env_file)])
-    cmd.extend(args)
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
-            proc.returncode,
-        )
-    except asyncio.CancelledError:
-        await _kill_and_reap(proc)
-        raise
-    except asyncio.TimeoutError:
-        await _kill_and_reap(proc)
-        return ("", "Docker compose command timed out", -1)
-
-
-async def _docker_container_state() -> tuple:
-    """Get Docker container state and health.
-
-    Returns (state, health) tuple, e.g. ("running", "healthy"), ("exited", "").
-    """
-    stdout, _, rc = await _docker_compose("ps", "--format", "json", timeout=10.0)
-    if rc != 0 or not stdout:
-        return "not_found", ""
-
-    try:
-        for line in stdout.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            entry = json.loads(line)
-            if entry.get("Service") == "ib-gateway" or "ib-gateway" in entry.get("Name", ""):
-                state = entry.get("State", "unknown").lower()
-                health = entry.get("Health", "").lower()
-                return state, health
-    except (json.JSONDecodeError, KeyError):
-        pass
-
-    return "not_found", ""
-
-
-async def _check_docker() -> Dict:
-    """Check Gateway health via Docker container status."""
-    port_ok = await asyncio.to_thread(_port_listening)
-    container_state, container_health = await _docker_container_state()
-
-    # Map container health status
-    service_state = "unknown"
-    if container_state == "running":
-        if container_health == "healthy":
-            service_state = "healthy"
-        elif container_health == "unhealthy":
-            service_state = "unhealthy"
-        else:
-            service_state = "starting" if not port_ok else "healthy"
-    elif container_state == "restarting":
-        service_state = "restarting"
-    elif container_state in ("exited", "not_found"):
-        service_state = "stopped"
-
-    # In Docker mode, upstream_dead means the container is running but IB API
-    # inside is not responsive (unhealthy healthcheck). Docker's port proxy
-    # may still accept TCP connections even when the IB API is down.
-    upstream_dead = container_state == "running" and container_health == "unhealthy"
-
-    return {
-        "port_listening": port_ok,
-        "upstream_dead": upstream_dead,
-        "service_state": service_state,
-        "container_state": container_state,
-        "container_health": container_health,
-        "host": IB_HOST,
-        "port": IB_PORT,
-        "gateway_mode": "docker",
-    }
-
-
-async def _ensure_docker_container(*, lease_preheld: bool = False) -> Dict:
-    """Ensure Docker container is running. Start if stopped, wait if restarting.
-
-    Docker automatic restart is disabled because it cannot acquire the shared
-    2FA lease. This function starts stopped/missing containers under that lease,
-    waits for an explicit restart already in progress, and leaves a running but
-    unhealthy container to the auth-aware watchdog recovery ladder.
-    """
-    port_ok = await asyncio.to_thread(_port_listening)
-
-    if port_ok:
-        return {"status": "already_running", "port_listening": True, "gateway_mode": "docker"}
-
-    container_state, container_health = await _docker_container_state()
-
-    if container_state == "restarting":
-        logger.info("Docker container is restarting, waiting for port...")
-        port_ok, elapsed = await _poll_port()
-        return {
-            "status": "waited_for_restart",
-            "port_listening": port_ok,
-            "wait_seconds": elapsed,
-            "gateway_mode": "docker",
-        }
-
-    if container_state in ("exited", "not_found"):
-        if not lease_preheld:
-            refusal = _acquire_gateway_push_lease(
-                IB_GATEWAY_ENSURE_LOCK_HOLDER,
-                reason=f"ensure_ib_gateway docker start ({container_state})",
-            )
-            if refusal is not None:
-                return refusal
-        logger.warning("Docker container %s — starting with docker compose up -d", container_state)
-        _, stderr, rc = await _docker_compose("up", "-d", timeout=60.0)
-        if rc != 0:
-            return {
-                "restarted": False,
-                "error": f"docker compose up failed: {stderr[:200]}",
-                "port_listening": False,
-                "gateway_mode": "docker",
-            }
-    elif container_state == "running" and container_health == "unhealthy":
-        # Container is running but IB API is unresponsive (e.g. 2FA expired).
-        # This startup path cannot distinguish a JVM wedge from an in-flight 2FA
-        # prompt, so it must not cycle blindly. The watchdog has both auth state
-        # and the independent protocol probe and owns recovery.
-        logger.warning("Docker container running but unhealthy — deferring to lock-aware watchdog")
-        return {
-            "restarted": False,
-            "port_listening": False,
-            "gateway_mode": "docker",
-            "error": "IB Gateway container is unhealthy (IB API not responding). Lock-aware watchdog recovery is pending; check IBKR Mobile for 2FA.",
-        }
-
-    # Container running but port not yet ready — wait
-    logger.info("Waiting for Gateway port (up to %ds)...", RESTART_WAIT_SECS)
-    port_ok, elapsed = await _poll_port()
-
-    if not port_ok:
-        return {
-            "restarted": True,
-            "port_listening": False,
-            "gateway_mode": "docker",
-            "error": (
-                f"Container started but Gateway not accepting connections after {RESTART_WAIT_SECS}s. "
-                "Check 2FA approval or the Gateway container logs (radon-docker-gw logs on the broker)"
-            ),
-        }
-
-    return {
-        "restarted": True,
-        "port_listening": True,
-        "wait_seconds": elapsed,
-        "gateway_mode": "docker",
-    }
-
-
-async def _restart_docker() -> Dict:
-    """Restart Gateway via Docker Compose.
-
-    For running containers, issue docker compose restart. The caller owns the
-    shared 2FA lease; Docker automatic restart is deliberately disabled.
-    """
-    container_state, _ = await _docker_container_state()
-
-    if container_state in ("exited", "not_found"):
-        # restart_ib_gateway already owns the cross-process lease. Re-entering
-        # the ensure path must not acquire a second holder and reject itself.
-        return await _ensure_docker_container(lease_preheld=True)
-
-    logger.info("Restarting Docker ib-gateway container...")
-    _, stderr, rc = await _docker_compose("restart", "ib-gateway", timeout=60.0)
-
-    if rc != 0:
-        return {
-            "restarted": False,
-            "error": f"docker compose restart failed: {stderr[:200]}",
-            "port_listening": False,
-            "gateway_mode": "docker",
-        }
-
-    logger.info("Docker restart issued, waiting for Gateway (up to %ds)...", RESTART_WAIT_SECS)
-    port_ok, elapsed = await _poll_port()
-
-    if not port_ok:
-        return {
-            "restarted": True,
-            "port_listening": False,
-            "gateway_mode": "docker",
-            "error": (
-                f"Container restarted but Gateway not accepting connections after {RESTART_WAIT_SECS}s. "
-                "Check 2FA or container logs."
-            ),
-        }
-
-    return {
-        "restarted": True,
-        "port_listening": True,
-        "wait_seconds": elapsed,
-        "gateway_mode": "docker",
-    }
-
-
 # Cloud mode — remote Gateway, no local lifecycle management
 
 
@@ -963,48 +372,6 @@ async def _ensure_cloud() -> Dict:
         "gateway_mode": "cloud",
         "error": f"Cloud IB Gateway at {IB_HOST}:{IB_PORT} is not reachable. Check remote host and Tailscale.",
     }
-
-
-# Public API — dispatches by GATEWAY_MODE
-
-
-class GatewayMode(str, Enum):
-    CLOUD = "cloud"
-    DOCKER = "docker"
-    LAUNCHD = "launchd"
-    # Anything else in IB_GATEWAY_MODE: a config typo. Never a lifecycle.
-    UNKNOWN = "unknown"
-
-
-def gateway_mode() -> GatewayMode:
-    """The configured mode. An unrecognized value is UNKNOWN, never a default."""
-    try:
-        mode = GatewayMode(GATEWAY_MODE)
-    except ValueError:
-        return GatewayMode.UNKNOWN
-    return mode
-
-
-def _unknown_mode_error(action: str) -> str:
-    return (
-        f"Refusing {action}: IB_GATEWAY_MODE={GATEWAY_MODE!r} is not one of "
-        "cloud, docker, launchd."
-    )
-
-
-def is_cloud_mode() -> bool:
-    """Return True if Gateway runs on a remote host (no local lifecycle)."""
-    return gateway_mode() is GatewayMode.CLOUD
-
-
-def is_docker_mode() -> bool:
-    """Return True if Gateway is managed by Docker."""
-    return gateway_mode() is GatewayMode.DOCKER
-
-
-def is_launchd_mode() -> bool:
-    """Return True if Gateway is managed by the local launchd/IBC service."""
-    return gateway_mode() is GatewayMode.LAUNCHD
 
 
 async def _probe_authenticated(timeout: float = 8.0) -> tuple[bool, List[str]]:
@@ -1471,269 +838,58 @@ async def check_ib_gateway(
 
     Pass `pool_status` (typically `IBPool.status()`) so the response can
     distinguish "logged in" from "port listening but awaiting 2FA". Without
-    it, auth_state is "remote" (cloud mode) or "unknown" (no pool to probe).
+    it, auth_state is "remote".
 
     Pass `pool` (the IBPool instance itself) to enable autonomous recovery on
     the awaiting_2fa → authenticated transition. The /health endpoint already
     has both — passing them through keeps recovery on the same cadence as the
     auth-state probe and avoids a second scheduler.
     """
-    if is_cloud_mode():
-        result = await _check_cloud()
-        # The admin panel uses this state to prevent duplicate IBKR pushes.
-        # It is local control-plane state and must be present regardless of
-        # where the Gateway itself runs.
-        # Only the push lock is live here; the Gate 1 ladder never runs in
-        # cloud mode, so it is reported not applicable.
-        result["restart_backoff"] = _mark_ladder_not_applicable(
-            await asyncio.to_thread(restart_backoff_state)
-        )
-        # REL-172 (R-475): on the app host the lease lives on the BROKER; the
-        # local lock file is never held by its helper. Proxy the broker's
-        # lease / transition so Force 2FA and Start disarm during a push.
-        await _overlay_broker_push_lock(result["restart_backoff"])
-        result["operator_hold"] = await _operator_hold()
-        if not result.get("port_listening") or result.get("upstream_dead"):
-            result["auth_state"] = AuthState.UNREACHABLE.value
-        elif pool_status:
-            # Pool gives us visibility into managed_accounts on the remote
-            # Gateway via this process's own client connections — that's the
-            # authoritative auth signal even in cloud mode.
-            result["auth_state"] = _derive_auth_state(result, pool_status)
-        else:
-            # No pool to probe (cold start, or this process doesn't run a
-            # pool). The TCP probe alone can't distinguish authenticated from
-            # awaiting_2fa, so report "remote" and defer to the host that
-            # actually owns the Gateway.
-            result["auth_state"] = AuthState.REMOTE.value
-            remote_summary = _remote_cert_summary()
-            if remote_summary is not None:
-                result["remote"] = remote_summary
-        if pool is not None and result["auth_state"] != AuthState.REMOTE.value:
-            await handle_auth_state_transition(result["auth_state"], pool)
-        return result
-
-    if is_docker_mode():
-        result = await _check_docker()
-    else:
-        result = await _check_launchd()
-
-    result["auth_state"] = _derive_auth_state(result, pool_status)
+    result = await _check_cloud()
+    # The admin panel uses this state to prevent duplicate IBKR pushes.
+    # It is local control-plane state and must be present regardless of
+    # where the Gateway itself runs.
     result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
+    # REL-172 (R-475): on the app host the lease lives on the BROKER; the
+    # local lock file is never held by its helper. Proxy the broker's
+    # lease / transition so Force 2FA and Start disarm during a push.
+    await _overlay_broker_push_lock(result["restart_backoff"])
     result["operator_hold"] = await _operator_hold()
-
-    if pool is not None:
+    if not result.get("port_listening") or result.get("upstream_dead"):
+        result["auth_state"] = AuthState.UNREACHABLE.value
+    elif pool_status:
+        # Pool gives us visibility into managed_accounts on the remote
+        # Gateway via this process's own client connections — that's the
+        # authoritative auth signal.
+        result["auth_state"] = _derive_auth_state(result, pool_status)
+    else:
+        # No pool to probe (cold start, or this process doesn't run a
+        # pool). The TCP probe alone can't distinguish authenticated from
+        # awaiting_2fa, so report "remote" and defer to the host that
+        # actually owns the Gateway.
+        result["auth_state"] = AuthState.REMOTE.value
+        remote_summary = _remote_cert_summary()
+        if remote_summary is not None:
+            result["remote"] = remote_summary
+    if pool is not None and result["auth_state"] != AuthState.REMOTE.value:
         await handle_auth_state_transition(result["auth_state"], pool)
-
     return result
 
 
 async def ensure_ib_gateway() -> Dict:
-    """Ensure IB Gateway is running. Called at FastAPI startup."""
-    async with _restart_lock:
-        if is_cloud_mode():
-            return await _ensure_cloud()
-        if gateway_mode() is GatewayMode.UNKNOWN:
-            logger.error(_unknown_mode_error("ensure_ib_gateway"))
-            return {
-                "status": "refused",
-                "gateway_mode": GatewayMode.UNKNOWN.value,
-                "error": _unknown_mode_error("ensure_ib_gateway"),
-            }
-        refusal = _app_role_refusal("ensure_ib_gateway")
-        if refusal is not None:
-            return refusal
-        if is_docker_mode():
-            return await _ensure_docker_container()
-        return await _ensure_launchd()
+    """Report whether the remote Gateway is reachable. Called at FastAPI startup."""
+    return await _ensure_cloud()
 
 
 async def restart_ib_gateway(pool=None) -> Dict:
-    """Restart IB Gateway. Honors the cross-process 2FA push lock AND the
-    in-memory exponential backoff if 2FA stays unapproved.
+    """Refuse: this process cannot cycle the remote Gateway.
 
-    Gating order on entry (both gates must pass before issuing a restart):
-
-      1. **In-memory backoff window** (per-process). Refuses fresh
-         restart attempts inside an exponentially growing window
-         (1m, 2m, 5m, 15m, 30m, 60m capped at 60m). Reset only when an
-         authenticated probe confirms login. This check runs first so a
-         deferred call cannot acquire or extend the shared lease.
-      2. **2FA push lock** (cross-process, disk-backed). Any restart path
-         that fires a fresh IBKR Mobile push — this function, the
-         ``ib_watchdog`` oneshot, the operator CLI — must acquire the
-         lock. While any active lease exists, including one with the same
-         component holder, we refuse with
-         ``reason="2fa_push_in_flight"``. Holder names identify components,
-         not individual restart operations. The lock guards against the
-         stacked-push failure
-         documented in feedback_2fa_push_stacking.md: IBKR's backend
-         cannot reconcile multiple pending push tokens for the same
-         session — the user gets "unsuccessful" on every approval when
-         pushes pile up.
-
-    After an attempt we probe ``managedAccounts()`` and only treat the
-    restart as a success when accounts are returned — a "port listening"
-    success is NOT enough; Gateway sits with the API socket open while
-    waiting for the IBKR Mobile 2FA push.
-
-    On authenticated success: lock is RELEASED + backoff RESET so the
-    next legitimate restart (potentially hours later) is not blocked.
-    On awaiting_2fa or unreachable failure: lock REMAINS HELD until its
-    TTL expires (or the operator hits ``POST /ib/reset-backoff``).
-
-    Optional ``pool``: when provided, drives the auth-state transition
-    handler on a successful authenticated probe. This autonomously fixes
-    the documented "pool stuck after 2FA" failure mode
-    (feedback_ib_pool_stuck_after_2fa.md).
+    Returns before touching the 2FA push lease, so a killed request cannot
+    block the broker's helper without ever sending a push. ``pool`` is
+    accepted for the caller's signature and unused.
     """
-    async with _restart_lock:
-        if is_cloud_mode():
-            # This process cannot cycle the remote Gateway. Return before
-            # backoff or lease acquisition so a killed request cannot block
-            # the real production helper without ever sending a push.
-            return {
-                "restarted": False,
-                "gateway_mode": "cloud",
-                "error": f"Cannot restart remote Gateway at {IB_HOST}:{IB_PORT}. Manage it on the remote host.",
-            }
-        if gateway_mode() is GatewayMode.UNKNOWN:
-            # Fail safe before backoff or lease: a typo must not reach the
-            # launchd lifecycle the old fall-through picked.
-            logger.error(_unknown_mode_error("restart_ib_gateway"))
-            return {
-                "restarted": False,
-                "gateway_mode": GatewayMode.UNKNOWN.value,
-                "error": _unknown_mode_error("restart_ib_gateway"),
-            }
-
-        refusal = _app_role_refusal("restart_ib_gateway")
-        if refusal is not None:
-            return refusal
-
-        now = time.time()
-
-        # --- Gate 1: per-process exponential backoff -----------------------
-        # Check this before touching the cross-process lease. A deferred call
-        # must not create or extend a lease for a restart it will not perform.
-        if _restart_state["next_attempt_after"] > now:
-            wait_secs = int(_restart_state["next_attempt_after"] - now)
-            last_iso = (
-                datetime.fromtimestamp(_restart_state["last_attempt_at"]).isoformat()
-                if _restart_state["last_attempt_at"]
-                else "never"
-            )
-            return {
-                "restarted": False,
-                "deferred": True,
-                "reason": "awaiting_backoff",
-                "attempt_count": _restart_state["attempt_count"],
-                "next_attempt_in_secs": wait_secs,
-                "next_attempt_after": _restart_state["next_attempt_after"],
-                "last_attempt_at": last_iso,
-                "last_outcome": _restart_state["last_outcome"],
-                "error": (
-                    f"Skipping restart — last attempt at {last_iso} did not complete login "
-                    f"({_restart_state['attempt_count']} consecutive). Backoff window "
-                    f"of {wait_secs}s remaining. Approve IBKR Mobile 2FA, then call "
-                    f"POST /ib/reset-backoff to retry immediately."
-                ),
-            }
-
-        # --- Gate 2: cross-process 2FA push lock ---------------------------
-        # Refuse whenever any restart operation already fired a push. Holder
-        # names identify components, not logical operations, so same-holder
-        # reentry is still a second Gateway cycle and remains blocked.
-        acquired, current_lock = _acquire_2fa_push_lock_bounded(
-            IB_GATEWAY_LOCK_HOLDER,
-            reason="restart_ib_gateway",
-            now=now,
-        )
-        if not acquired:
-            assert current_lock is not None  # acquire returns (False, lock)
-            wait_secs = max(0, int(current_lock.expires_at - now))
-            logger.warning(
-                "IB Gateway restart refused — 2FA push lock held by %r "
-                "(expires in %ds)",
-                current_lock.holder, wait_secs,
-            )
-            return {
-                "restarted": False,
-                "deferred": True,
-                "reason": "2fa_push_in_flight",
-                "lock_holder": current_lock.holder,
-                "lock_expires_in_secs": wait_secs,
-                "lock_acquired_at": current_lock.acquired_at,
-                "error": (
-                    f"Skipping restart — a 2FA push from {current_lock.holder!r} is "
-                    f"already in flight ({wait_secs}s remaining). Stacking another "
-                    "push causes IBKR to reject every approval. Approve the existing "
-                    "push on your phone (or wait for the lock to expire), then call "
-                    "POST /ib/reset-backoff to retry immediately."
-                ),
-            }
-
-        result = await (_restart_docker() if is_docker_mode() else _restart_launchd())
-        _restart_state["last_attempt_at"] = now
-
-        if result.get("port_listening"):
-            authenticated, accounts = await _probe_authenticated()
-            result["managed_accounts"] = accounts
-            if authenticated:
-                _restart_state["attempt_count"] = 0
-                _restart_state["next_attempt_after"] = 0.0
-                _restart_state["last_outcome"] = AuthState.AUTHENTICATED.value
-                _restart_state["last_accounts"] = accounts
-                result["authenticated"] = True
-                result["auth_state"] = AuthState.AUTHENTICATED.value
-                # Release the lock — login completed, other restart paths
-                # can proceed when they need to (e.g. a future bounce).
-                _release_2fa_push_lock_bounded(expected_holder=IB_GATEWAY_LOCK_HOLDER)
-                logger.info("IB Gateway restart verified — accounts: %s", accounts)
-                # Drive the same auth-transition handler the periodic probe
-                # uses, so a successful restart that lands the system back at
-                # `authenticated` while the pool is still stale auto-recovers
-                # the pool without a separate operator step.
-                await handle_auth_state_transition(AuthState.AUTHENTICATED.value, pool)
-            else:
-                _restart_state["attempt_count"] += 1
-                delay = _next_backoff_delay(_restart_state["attempt_count"])
-                _restart_state["next_attempt_after"] = now + delay
-                _restart_state["last_outcome"] = AuthState.AWAITING_2FA.value
-                result["authenticated"] = False
-                result["auth_state"] = AuthState.AWAITING_2FA.value
-                result["next_attempt_in_secs"] = delay
-                result["attempt_count"] = _restart_state["attempt_count"]
-                logger.warning(
-                    "IB Gateway restart: port up but managedAccounts empty — "
-                    "treating as awaiting_2fa, next attempt allowed in %ds (attempt #%d). "
-                    "2FA push lock held for %ds.",
-                    delay, _restart_state["attempt_count"],
-                    _remaining_lock_secs_bounded(now),
-                )
-                # Record the awaiting_2fa observation through the transition
-                # entrypoint so the next "authenticated" sighting fires the
-                # recovery edge.
-                await handle_auth_state_transition(AuthState.AWAITING_2FA.value, pool)
-                # Lock stays HELD — the user is approving the push we
-                # just fired, no other path should fire another.
-        else:
-            _restart_state["attempt_count"] += 1
-            delay = _next_backoff_delay(_restart_state["attempt_count"])
-            _restart_state["next_attempt_after"] = now + delay
-            _restart_state["last_outcome"] = AuthState.UNREACHABLE.value
-            result["auth_state"] = AuthState.UNREACHABLE.value
-            result["next_attempt_in_secs"] = delay
-            result["attempt_count"] = _restart_state["attempt_count"]
-            logger.warning(
-                "IB Gateway restart: port did not come up — next attempt allowed in %ds (attempt #%d). "
-                "2FA push lock held for %ds.",
-                delay, _restart_state["attempt_count"],
-                _remaining_lock_secs_bounded(now),
-            )
-            await handle_auth_state_transition(AuthState.UNREACHABLE.value, pool)
-            # Lock stays HELD — even on a fully-down restart, IBC may
-            # have started firing pushes before crashing; better to
-            # block the next attempt than to stack on a phantom push.
-
-        return result
+    return {
+        "restarted": False,
+        "gateway_mode": "cloud",
+        "error": f"Cannot restart remote Gateway at {IB_HOST}:{IB_PORT}. Manage it on the remote host.",
+    }

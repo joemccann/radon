@@ -35,7 +35,6 @@ def _wire(monkeypatch, *, results, gateway):
     monkeypatch.setattr(server, "_pool_has_any_connection", lambda: True)
     monkeypatch.setattr(server, "_ib_last_failure", 0.0)
     monkeypatch.setattr(server, "ib_pool", None)
-    monkeypatch.setattr(server, "is_cloud_mode", lambda: True)
     return calls
 
 
@@ -89,8 +88,7 @@ class TestCooldownArming:
         assert calls == []
 
 
-@pytest.mark.parametrize("mode", ["cloud", "managed"])
-def test_indeterminate_text_survives_recovery_rewrite_as_504(monkeypatch, mode):
+def test_indeterminate_text_survives_recovery_rewrite_as_504(monkeypatch):
     calls = _wire(
         monkeypatch,
         results=[ScriptResult(
@@ -99,7 +97,6 @@ def test_indeterminate_text_survives_recovery_rewrite_as_504(monkeypatch, mode):
         )],
         gateway=_DOWN,
     )
-    monkeypatch.setattr(server, "is_cloud_mode", lambda: mode == "cloud")
     monkeypatch.setattr(server, "record_order_event", AsyncMock())
     body = {"type": "stock", "symbol": "AAPL", "action": "BUY", "quantity": 1,
             "limitPrice": 1.0, "orderRef": "radon-test-ref"}

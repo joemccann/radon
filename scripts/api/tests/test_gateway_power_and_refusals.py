@@ -154,7 +154,6 @@ class TestTypedRefusals:
 
         monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
         monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: True)
         monkeypatch.setattr(server.admin_services, "control_unit", AsyncMock(
             return_value=admin_services.ActionResult(
@@ -249,7 +248,6 @@ def test_ib_restart_423_names_an_unknown_hold(monkeypatch):
 
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
     monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: True)
     monkeypatch.setattr(server.admin_services, "operator_hold_state", AsyncMock(return_value=None))
     monkeypatch.setattr(server.admin_services, "control_unit", AsyncMock(

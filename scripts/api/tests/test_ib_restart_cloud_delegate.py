@@ -110,7 +110,6 @@ def app_host(monkeypatch, tmp_path):
     monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
     monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
     monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
-    monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
     # The real broker /status always carries a hold; confirm it clear so the
     # unknown-hold refusal is not what these wire tests observe.
     monkeypatch.setattr(admin_services, "operator_hold_state", AsyncMock(return_value={"held": False}))
@@ -155,7 +154,6 @@ def _failed_stack_result(returncode: int = 1):
 
 class TestCloudDelegate:
     def test_delegates_to_gateway_unit_on_gateway_host(self, client, monkeypatch):
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: True)
         with patch.object(
             admin_services, "control_unit", new=AsyncMock(return_value=_ok_result())
@@ -169,7 +167,6 @@ class TestCloudDelegate:
         assert "approve" in body["note"].lower()
 
     def test_lease_held_maps_to_503_with_reason(self, client, monkeypatch):
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: True)
         with patch.object(
             admin_services, "control_unit", new=AsyncMock(return_value=_lease_held_result())
@@ -181,7 +178,6 @@ class TestCloudDelegate:
         assert detail["reason"] == "2fa_push_in_flight"
 
     def test_laptop_keeps_remote_refusal(self, client, monkeypatch):
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: False)
         resp = client.post("/ib/restart", headers=_auth_headers())
         assert resp.status_code == 503
@@ -250,7 +246,6 @@ class TestCloudDelegate:
     ):
         monkeypatch.setenv("RADON_HOST_ROLE", "app")
         monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         log = tmp_path / "gateway-helper.log"
         helper = tmp_path / "radon-ib-gateway-control"
         helper.write_text(
@@ -436,84 +431,54 @@ class TestAppRoleGateAtTheWire:
         remote.assert_not_awaited()
 
 
-# Captured before any fixture replaces it with a mock.
-_REAL_DOCKER_COMPOSE = server.ib_gateway._docker_compose
-
-
 class TestAppRoleRuntimeGate:
-    """REL-169 (R-472b): the app host must never take the combined path to a
-    local ``docker compose`` even when its env drifts off ``cloud`` mode. The
-    deploy-time check-env.py is not a runtime gate."""
+    """REL-169 (R-472b): the app host must never run a local Gateway
+    lifecycle, whatever its env says. FastAPI has no local lifecycle at all,
+    so ensure/restart cannot spawn a process or take the push lease even if
+    IB_GATEWAY_MODE drifts (the deploy-time check-env.py is not a runtime
+    gate)."""
 
     @pytest.fixture(autouse=True)
-    def _app_role_docker_mode(self, monkeypatch):
+    def _app_role_drifted_env(self, monkeypatch, tmp_path):
         import asyncio
 
         monkeypatch.setenv("RADON_HOST_ROLE", "app")
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "docker")
+        monkeypatch.setenv("IB_GATEWAY_MODE", "docker")
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "lock.json"))
         monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
+        self.spawn = AsyncMock(side_effect=AssertionError("FastAPI must not spawn a Gateway process"))
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", self.spawn)
         monkeypatch.setattr(
-            server.ib_gateway,
-            "_docker_container_state",
-            AsyncMock(return_value=("exited", None)),
+            server.ib_gateway.ib_2fa_lock, "acquire_2fa_push_lock",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("FastAPI must not take the push lease")),
         )
-        monkeypatch.setattr(server.ib_gateway, "_acquire_gateway_push_lease", lambda *a, **k: None)
-        monkeypatch.setattr(server.ib_gateway, "_poll_port", AsyncMock(return_value=(False, 0)))
-        monkeypatch.setattr(
-            server.ib_gateway, "_acquire_2fa_push_lock_bounded", lambda *a, **k: (True, None)
-        )
-        monkeypatch.setattr(server.ib_gateway, "_release_2fa_push_lock_bounded", lambda *a, **k: None)
-        server.ib_gateway.reset_restart_backoff()
-        self.compose = AsyncMock(return_value=("", "", 0))
-        monkeypatch.setattr(server.ib_gateway, "_docker_compose", self.compose)
-        self.restart_docker = AsyncMock(return_value={"restarted": True, "port_listening": False})
-        monkeypatch.setattr(server.ib_gateway, "_restart_docker", self.restart_docker)
         self.run = asyncio.run
 
-    def test_ensure_ib_gateway_refuses_without_compose(self):
+    def test_ensure_ib_gateway_only_reports(self):
         result = self.run(server.ib_gateway.ensure_ib_gateway())
-        assert result.get("restarted") is not True
-        assert result.get("reason") == "app_role"
-        assert "RADON_HOST_ROLE=app" in result["error"]
-        self.compose.assert_not_awaited()
+        assert result["status"] == "unreachable"
+        assert result["gateway_mode"] == "cloud"
+        self.spawn.assert_not_awaited()
 
-    def test_restart_ib_gateway_refuses_without_compose(self):
+    def test_restart_ib_gateway_refuses(self):
         result = self.run(server.ib_gateway.restart_ib_gateway())
         assert result["restarted"] is False
-        assert result.get("reason") == "app_role"
-        self.restart_docker.assert_not_awaited()
-        self.compose.assert_not_awaited()
+        assert result["gateway_mode"] == "cloud"
+        self.spawn.assert_not_awaited()
 
-    def test_post_ib_restart_is_503_app_role(self, client, monkeypatch):
+    def test_post_ib_restart_is_503_without_a_controllable_unit(self, client, monkeypatch):
         # The Clerk carve-out for app-role Gateway POSTs is the primary gate;
-        # this case hollows it out on purpose so the runtime gate under it is
-        # what refuses (the finding's defence-in-depth claim).
+        # this case hollows it out on purpose so the runtime refusal under it
+        # is what answers (the finding's defence-in-depth claim).
         monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
         monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: False)
         resp = client.post("/ib/restart", headers=_auth_headers())
         assert resp.status_code == 503, resp.text
         detail = resp.json()["detail"]
         assert isinstance(detail, dict), detail
-        assert detail["reason"] == "app_role"
-        self.compose.assert_not_awaited()
-        self.restart_docker.assert_not_awaited()
-
-    def test_docker_compose_chokepoint_refuses(self, monkeypatch):
-        import asyncio
-
-        monkeypatch.setattr(
-            asyncio, "create_subprocess_exec",
-            AsyncMock(side_effect=AssertionError("compose must not spawn on the app role")),
-        )
-        out, err, rc = self.run(_REAL_DOCKER_COMPOSE("up", "-d"))
-        assert rc != 0
-        assert "RADON_HOST_ROLE=app" in err
-
-    def test_combined_role_still_reaches_compose(self, monkeypatch):
-        monkeypatch.setenv("RADON_HOST_ROLE", "combined")
-        result = self.run(server.ib_gateway.ensure_ib_gateway())
-        assert result.get("reason") != "app_role"
-        self.compose.assert_awaited()
+        assert detail["restarted"] is False
+        assert detail["gateway_mode"] == "cloud"
+        self.spawn.assert_not_awaited()
 
 
 class TestSplit2faContract:
@@ -531,7 +496,6 @@ class TestSplit2faContract:
         monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
         monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
-        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
         monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
         monkeypatch.setattr(admin_services, "is_systemd_available", lambda: False)
         admin_services._reset_remote_status_cache()
