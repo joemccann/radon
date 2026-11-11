@@ -6,7 +6,7 @@ import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { isUsTradingDay } from "@/lib/serviceHealthWindows";
+import { lastCompletedSessionDate } from "@/lib/marketCalendar";
 import { reconcileCtaTables } from "@/lib/ctaPercentiles";
 
 export const runtime = "nodejs";
@@ -46,52 +46,6 @@ type CtaSyncHealth = {
 };
 
 let bgSyncInFlight = false;
-
-/**
- * Extract ET date/time parts directly using Intl — avoids the
- * double-conversion bug where new Date(localeString) is parsed in
- * the system timezone instead of ET.
- */
-function etDateParts(now: Date): { year: number; month: number; day: number; hour: number; minute: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
-  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
-}
-
-function formatYMD(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-function latestClosedTradingDay(now = new Date()): string {
-  const { year, month, day, hour, minute } = etDateParts(now);
-  const minutesOfDay = hour * 60 + minute;
-  const candidate = new Date(year, month - 1, day);
-
-  if (!isTradingDay(candidate) || minutesOfDay < 16 * 60) {
-    candidate.setDate(candidate.getDate() - 1);
-  }
-
-  while (!isTradingDay(candidate)) {
-    candidate.setDate(candidate.getDate() - 1);
-  }
-
-  return formatYMD(candidate);
-}
-
-function isTradingDay(value: Date): boolean {
-  return isUsTradingDay(formatYMD(value));
-}
 
 function emptySyncHealth(targetDate: string): CtaSyncHealth {
   return {
@@ -281,7 +235,7 @@ export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const expectedDate = latestClosedTradingDay();
+  const expectedDate = lastCompletedSessionDate();
   const latest = await readLatestCta();
   const syncHealth = await readSyncHealth(expectedDate);
   const latestAvailableDate = latest?.data.date ?? null;

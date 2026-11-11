@@ -657,14 +657,14 @@ a `why` field. Adding a case means adding it once, for both stacks.
 
 **Both sides read the same holiday table.** Python takes holidays from
 `scripts/utils/market_calendar.load_holidays`; the TypeScript mirror takes them from
-`serviceHealthWindows.isUsTradingDay`, which reads the identical
+`marketCalendar.isUsTradingDay` (re-exported by `serviceHealthWindows`), which reads the identical
 `scripts/config/market_holidays.json`. Neither may fall back to a weekday-only walk. A
 weekday-only TS mirror is not a rounding difference — it disagreed with Python by **four**
 sessions across a summer window (`2026-03-20 -> 2026-08-14` read 105 instead of 101), and the
 parity table is the only thing that catches it, because a holiday-free case window cannot. For
 the same reason the TS side derives its boundary with `performanceData.lastCompletedSession`,
-which walks `marketSession.lastCompletedSessionDate` (weekday-only by design, for the
-scan-storm checks it was written for) back off a holiday that never opened.
+which delegates to the holiday-aware `marketCalendar.lastCompletedSessionDate`, so a holiday
+that never opened is never counted as a session that closed.
 
 #### C.2.2 Staleness is enforced at READ time (DECISION 5)
 

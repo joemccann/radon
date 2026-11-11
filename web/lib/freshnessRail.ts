@@ -11,7 +11,6 @@
  */
 
 import { lastCompletedSessionDate } from "./marketSession";
-import { isUsTradingDay } from "./serviceHealthWindows";
 import {
   firesWeekly,
   nextRefreshUtc,
@@ -19,7 +18,6 @@ import {
   type RefreshSchedule,
 } from "./refreshSchedule";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * How "behind" is judged.
@@ -70,32 +68,6 @@ export type FreshnessRail = {
  * slot; this only holds back the ALARM colour.
  */
 export const WRITER_GRACE_MS = 60 * 60 * 1000;
-
-const MAX_SESSION_LOOKBACK_DAYS = 10;
-
-/**
- * The last session the exchange actually printed, at `at`.
- *
- * `lastCompletedSessionDate` models a session as any weekday, so on a holiday
- * evening it names a date that will never carry a print and every EOD panel in
- * the app goes amber waiting for it. Walk back to a real trading day using the
- * holiday source of truth the app already ships. R-305.
- *
- * The EARLY-CLOSE half of R-305 is deliberately not implemented here: the
- * client has only the full-closure table (`scripts/config/market_holidays.json`),
- * and early closes are derived server-side from IBKR liquid hours
- * (`scripts/utils/market_calendar.py`). Closing that needs an early-close table
- * on the client; it is not something this function can infer.
- */
-function lastPrintedSessionDate(at: Date): string {
-  let candidate = lastCompletedSessionDate(at);
-  for (let i = 0; i < MAX_SESSION_LOOKBACK_DAYS; i += 1) {
-    if (isUsTradingDay(candidate)) return candidate;
-    const ms = Date.parse(`${candidate}T12:00:00Z`) - DAY_MS;
-    candidate = new Date(ms).toISOString().slice(0, 10);
-  }
-  return candidate;
-}
 
 /**
  * The instant of the first scheduled run that should have carried a reading
@@ -170,14 +142,14 @@ export function computeFreshnessRail(
     };
   }
 
-  const latestSession = lastPrintedSessionDate(now);
+  const latestSession = lastCompletedSessionDate(now);
   const behind = !unknown && asOf! < latestSession;
 
   // The last run is late only if the session it was meant to carry had already
   // closed when it fired. Asking the ET-aware helper what was complete AT that
   // instant is the same question, without a second copy of the clock math.
   const ranAfterSessionClosed =
-    behind && lastPrintedSessionDate(lastSampleAt) >= latestSession;
+    behind && lastCompletedSessionDate(lastSampleAt) >= latestSession;
   const overdue = ranAfterSessionClosed && pastGrace;
   // Same run, grace not yet spent. On 2026-10-23 the RSI OVERSOLD rail read
   // "Awaiting 2026-10-23" beside a 23h 55m countdown one minute after its

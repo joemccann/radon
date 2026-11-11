@@ -19,6 +19,7 @@ import {
   toLongRangeSkewPoints,
   type LongRangeSkewHistoryPayload,
 } from "@/lib/internalsSkewSeries";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
@@ -37,17 +38,6 @@ const MENTHORQ_SKEW_HISTORY_ROWS = 400;
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
 function todayET(): string {
   return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
-}
-
-/** Real-time market open check: Mon-Fri, 9:30-16:00 ET */
-function isMarketOpenNow(): boolean {
-  const now = new Date();
-  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const et = new Date(etStr);
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
 }
 
 const EMPTY_CRI = {
@@ -491,7 +481,7 @@ async function readLatestMenthorqCache(): Promise<Record<string, unknown> | null
 /** Check if the latest snapshot is stale (market-hours aware). */
 function isCacheStale(takenAtMs: number | null, data: Record<string, unknown>): boolean {
   if (takenAtMs === null) return true;
-  return isCriDataStale(data, takenAtMs, todayET(), isMarketOpenNow());
+  return isCriDataStale(data, takenAtMs, todayET(), isMarketOpenAt());
 }
 
 /** Fire-and-forget: run CRI scan via FastAPI and save results */
@@ -525,7 +515,7 @@ export async function GET(): Promise<Response> {
     readInternalsSkewHistory(),
   ]);
   const data = normalizeCriPayload(result?.data ?? EMPTY_CRI, menthorqCache, menthorqSkewHistory);
-  const currentMarketOpen = isMarketOpenNow();
+  const currentMarketOpen = isMarketOpenAt();
 
   // Keep market_open aligned with the current session state for every request.
   (data as Record<string, unknown>).market_open = currentMarketOpen;
