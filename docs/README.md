@@ -55,6 +55,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_%28VCG%29.md) |
 | GARCH convergence | [`docs/strategy-garch-convergence.md`](strategy-garch-convergence.md) |
 | Options structures | [`docs/options-structures.md`](options-structures.md) |
+| Gate 4 (no naked shorts) re-enable runbook; gate disabled since 2026-04-30 | [`docs/naked-short-reenable.md`](naked-short-reenable.md) |
 | Evaluation pipeline | [`docs/evaluation.md`](evaluation.md) |
 | Kelly / Fortune's Formula | [`docs/risk/kelly-fortunes-formula.md`](risk/kelly-fortunes-formula.md) |
 | Unusual Whales API | [`docs/unusual_whales_api.md`](unusual_whales_api.md) |
