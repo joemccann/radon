@@ -187,6 +187,14 @@ _CODEX_SUBSCRIPTION_MODEL = "gpt-6.1-sol"
 # no HTTP path. ~/.gemini/antigravity-cli is Google's fixed on-disk location.
 _ANTIGRAVITY_TOKEN_RELPATH = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 _ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
+# macOS agy stores its grant with /usr/bin/security, which follows $HOME, not a
+# token file. The Mac runner gateway gives agy a dedicated home holding only an
+# empty-password, no-timeout keychain (scripts/runner/install.sh). Unset on the
+# VPS, where the Linux token-file path above applies.
+_ANTIGRAVITY_KEYCHAIN_HOME_ENV = "RADON_ANTIGRAVITY_KEYCHAIN_HOME"
+_ANTIGRAVITY_KEYCHAIN = Path("Library") / "Keychains" / "radon-agy.keychain-db"
+_ANTIGRAVITY_KEYCHAIN_SERVICE = "antigravity"
+_SECURITY_BIN = "/usr/bin/security"
 # Mirrors subscription_tokens.CLI_ENV_ALLOWLIST: everything a third-party
 # agent CLI may inherit, and nothing else. PATH is added because agy invokes
 # helpers; secrets from /etc/radon/env must never cross this boundary.
@@ -477,13 +485,49 @@ def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     return None  # an api_key in auth.json is a prepaid key: never read
 
 
+def _antigravity_keychain_home(env: Mapping[str, str]) -> Path | None:
+    raw = (env.get(_ANTIGRAVITY_KEYCHAIN_HOME_ENV) or "").strip()
+    return Path(raw) if raw and Path(raw).is_absolute() else None
+
+
+def _unlock_antigravity_keychain(home: Path) -> Path | None:
+    """Unlock agy's dedicated keychain; None when it does not exist or will not open."""
+    keychain = home / _ANTIGRAVITY_KEYCHAIN
+    if not keychain.is_file():
+        return None
+    try:
+        unlocked = subprocess.run([_SECURITY_BIN, "unlock-keychain", "-p", "", str(keychain)],
+                                  env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+                                  capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return keychain if unlocked.returncode == 0 else None
+
+
+def _antigravity_keychain_grant(home: Path) -> bool:
+    keychain = _unlock_antigravity_keychain(home)
+    if keychain is None:
+        return False
+    try:
+        found = subprocess.run([_SECURITY_BIN, "find-generic-password", "-s", _ANTIGRAVITY_KEYCHAIN_SERVICE, str(keychain)],
+                               env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+                               capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return found.returncode == 0
+
+
 def _antigravity_cli(env: Mapping[str, str]) -> str:
     """Path of the Antigravity CLI when it and its grant are present, else ""."""
     if _auth_files_disabled(env):
         return ""
-    home = _home_dir(env)
-    if not (home / _ANTIGRAVITY_TOKEN_RELPATH).is_file():
+    keychain_home = _antigravity_keychain_home(env)
+    if keychain_home is not None:
+        if not _antigravity_keychain_grant(keychain_home):
+            return ""
+    elif not (_home_dir(env) / _ANTIGRAVITY_TOKEN_RELPATH).is_file():
         return ""
+    home = _home_dir(env)
     explicit = (env.get("ANTIGRAVITY_CLI") or "").strip()
     candidates = [explicit] if explicit else [str(home / ".local" / "bin" / "agy")]
     for candidate in candidates:
@@ -1068,7 +1112,22 @@ def _antigravity_complete(
     try:
         with ExitStack() as session:
             execution = {}
-            if os.environ.get("RADON_ANTIGRAVITY_ISOLATED") == "1":
+            keychain_home = _antigravity_keychain_home(os.environ)
+            if os.environ.get("RADON_ANTIGRAVITY_ISOLATED") == "1" and keychain_home is not None:
+                # macOS: agy's own home holds only its keychain grant; scratch
+                # state goes to a throwaway directory, as on the Linux path.
+                if _unlock_antigravity_keychain(keychain_home) is None:
+                    raise OSError("Antigravity keychain is unavailable")
+                private = Path(session.enter_context(tempfile.TemporaryDirectory(prefix="radon-agy-")))
+                child_env["HOME"] = str(keychain_home)
+                for key, relative in (("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"),
+                                      ("XDG_CACHE_HOME", ".cache"), ("XDG_RUNTIME_DIR", ".run"), ("TMPDIR", "tmp")):
+                    directory = private / relative
+                    directory.mkdir(parents=True, mode=0o700)
+                    child_env[key] = str(directory)
+                argv += ["--mode", "plan", "--sandbox", "--disable-slash-commands"]
+                execution["cwd"] = str(private)
+            elif os.environ.get("RADON_ANTIGRAVITY_ISOLATED") == "1":
                 # Third-party article workers receive a read-only host seed.
                 # Copy only that grant, never host projects/config or other grants.
                 private = Path(session.enter_context(tempfile.TemporaryDirectory(prefix="radon-agy-")))

@@ -115,7 +115,13 @@ disabled-login account `_radonmodelgw`, from a root-owned copy of
 `GATEWAY_FILES` and a hash-pinned `httpx` venv (`scripts/runner/gateway-requirements.txt`).
 It signs requests with the Mac's own subscription grants, kept in
 `/Library/Radon/model-gateway-local/home` (mode 700, that account only):
-Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`.
+Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`,
+Grok from `~/.grok/auth.json`, Antigravity from a dedicated keychain (macOS
+agy has no token file; `RADON_ANTIGRAVITY_KEYCHAIN_HOME` holds only that
+empty-password keychain, unlocked per call) through a pinned, Google-signed macOS `agy`
+(`scripts/runner/antigravity-darwin.json`, `install_antigravity.py`: SHA-512,
+Developer ID team and arm64 checked before install). The `json` and `chat`
+ladder runs here in the VPS order. Embeddings, OCR and forecasting stay on the VPS.
 `_radonbot` reaches it only through the group socket
 `/Library/Radon/model-gateway-local/run/gateway.sock` and never reads a grant.
 It runs 6 concurrent calls per provider, so the two security loops do not

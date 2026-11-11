@@ -70,6 +70,8 @@ def test_gateway_daemon_runs_the_root_installed_copy_as_its_own_account():
     assert env["RADON_MODEL_TUNNEL_GID"] == "401"
     assert env["RADON_MODEL_PROVIDER_CONCURRENCY"] == "6"
     assert env["PATH"].split(":")[0] == "/Library/Radon/model-clients/current/bin"
+    assert env["ANTIGRAVITY_CLI"] == "/usr/local/radon-runner/gateway/bin/agy"
+    assert env["RADON_ANTIGRAVITY_KEYCHAIN_HOME"] == "/Library/Radon/model-gateway-local/agy-home"
     # No provider credential value is ever written into a plist.
     assert not {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} & set(env)
 
@@ -152,6 +154,11 @@ def test_installed_file_list_is_enough_to_serve(tmp_path):
                 "request": {"model": "claude-sonnet-5", "max_tokens": 5,
                             "messages": [{"role": "user", "content": "hi"}]}})
             assert status == 503 and body["error"]["attempted"] == ["anthropic:no_key."]
+            # The model ladder (json, chat) runs here too, Antigravity first, as on the VPS.
+            status, body = _post(str(sock), "/v1/json", {"instruction": "Reply {}", "read_timeout": 5})
+            assert status == 503 and body["error"]["attempted"][0].startswith("antigravity:"), body
+            status, body = _post(str(sock), "/v1/chat", {"messages": [{"role": "user", "content": "hi"}], "timeoutMs": 5000})
+            assert status == 503, body
         finally:
             proc.terminate()
             proc.wait(10)
@@ -164,3 +171,11 @@ def test_launcher_rejects_unknown_commands(argv):
     result = subprocess.run([sys.executable, "-I", str(RUNNER / "gateway_launch.py"), *argv],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 64
+
+
+def test_mac_antigravity_pin_matches_the_vps_version():
+    mac = json.loads((RUNNER / "antigravity-darwin.json").read_text(encoding="utf-8"))
+    vps = json.loads((REPO / "docker" / "app" / "vendor-clis" / "antigravity.json").read_text(encoding="utf-8"))
+    assert mac["version"] == vps["version"]
+    assert mac["url"].startswith("https://storage.googleapis.com/antigravity-public/antigravity-cli/" + mac["version"] + "-")
+    assert re.fullmatch(r"[0-9a-f]{128}", mac["sha512"]) and mac["team_id"] == "EQHXZ8M8AV"
