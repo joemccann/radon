@@ -23,8 +23,6 @@ const ALLOWLIST: Record<string, string> = {
     "data/futures_chain_<SYMBOL>.json is FastAPI's IB contract-list cache; no Turso table holds the chain.",
   "informed-flow/[ticker]/route.ts":
     "data/informed_flow/<TICKER>.json is FastAPI's per-ticker cache; no Turso table holds the surface.",
-  "menthorq/[command]/image/route.tsx":
-    "data/menthorq_cache/<command>_*.json: only the cta command has a Turso table (menthorq_cta).",
   "ticker/info/route.ts":
     "data/company_info_cache is this route's own read-through vendor cache, not snapshot state.",
   "ticker/seasonality/route.ts":
