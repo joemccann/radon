@@ -506,6 +506,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "equibles-13f": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-ats-venue-share": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
     "equibles-cot-positioning": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
+    # market-calendar — radon-market-calendar.timer, weekly Sun 22:00 UTC,
+    # IBKR SPY liquidHours into data/market_calendar.json. 8-day window =
+    # weekly cadence + one day of drift. IB is the only source.
+    "market-calendar": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": True},
     # event-odds is request-driven (GET /event-odds/{ticker}), with no VPS timer.
     # Its retained health row is on-demand in the web catalog.
     # subscription-tokens — agent-CLI subscription credential vault + refresh
@@ -786,6 +790,9 @@ BUCKETS: dict[str, list[str]] = {
         "equibles-13f",
         "equibles-ats-venue-share",
         "equibles-cot-positioning",
+        # Weekly IBKR market calendar (Sun 22:00 UTC) — hourly check
+        # surfaces a missed week within 1h of the 8-day window expiring.
+        "market-calendar",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

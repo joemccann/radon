@@ -37,10 +37,6 @@ GW_USER=_radonmodelgw
 GW_GROUP=_radonmodel
 GW_ROOT=/Library/Radon/model-gateway-local
 GW_HOME="$GW_ROOT/home"
-# macOS agy keeps its grant in a keychain under $HOME; this home holds only that
-# keychain (empty password, no timeout), so agy never sees the other grants.
-GW_AGY_HOME="$GW_ROOT/agy-home"
-GW_AGY_KEYCHAIN="$GW_AGY_HOME/Library/Keychains/radon-agy.keychain-db"
 GW_SOCKET="$GW_ROOT/run/gateway.sock"
 GW_CONTROL="$GW_ROOT/control/control.sock"
 # Concurrent calls per provider. Two security loops share one Claude login.
@@ -182,7 +178,6 @@ print_gateway_plist() {
 <key>CLAUDE_CODE_OAUTH_TOKEN_FILE</key><string>$GW_HOME/claude-oauth-token</string>
 <key>CODEX_HOME</key><string>$GW_HOME/.codex</string>
 <key>ANTIGRAVITY_CLI</key><string>$PREFIX/gateway/bin/agy</string>
-<key>RADON_ANTIGRAVITY_KEYCHAIN_HOME</key><string>$GW_AGY_HOME</string>
 <key>RADON_SUBSCRIPTION_STATE_DIR</key><string>$GW_HOME/state</string>
 <key>RADON_MODEL_CLIENT_UIDS</key><string>$GW_CLIENT_UID</string>
 <key>RADON_MODEL_TUNNEL_GID</key><string>$GW_GID</string>
@@ -336,19 +331,6 @@ stage_gateway() {
   atomic_install "$@" -m 644 "$SRC/gateway_launch.py" "$dest/gateway_launch.py"
 }
 
-# As the gateway account with agy's home; from / because root's cwd is the
-# operator's, which that account cannot read.
-as_agy_home() { (cd / && sudo -u "$GW_USER" env HOME="$GW_AGY_HOME" PATH=/usr/bin:/bin "$@"); }
-
-ensure_agy_keychain() {
-  install -d -o "$GW_USER" -g "$GW_GROUP" -m 700 "$GW_AGY_HOME"
-  as_agy_home /bin/mkdir -p -m 700 "$GW_AGY_HOME/Library/Keychains" "$GW_AGY_HOME/Library/Preferences"
-  as_agy_home /bin/test -f "$GW_AGY_KEYCHAIN" || as_agy_home /usr/bin/security create-keychain -p '' "$GW_AGY_KEYCHAIN"
-  as_agy_home /usr/bin/security set-keychain-settings "$GW_AGY_KEYCHAIN"
-  as_agy_home /usr/bin/security default-keychain -d user -s "$GW_AGY_KEYCHAIN"
-  as_agy_home /usr/bin/security list-keychains -d user -s "$GW_AGY_KEYCHAIN"
-}
-
 # Root owns the tree and its root (group traversal only), so the gateway
 # account cannot swap a directory root later writes or chowns.
 install_gateway() {
@@ -368,7 +350,6 @@ install_gateway() {
   chown -R root:wheel "$PREFIX/gateway/venv"
   install -d -o root -g wheel -m 755 "$PREFIX/gateway/bin"
   "$GUARD_PYTHON" -I "$SRC/install_antigravity.py" "$SRC/antigravity-darwin.json" "$PREFIX/gateway/bin/agy"
-  ensure_agy_keychain
   chmod -R go-w "$PREFIX/gateway/venv"
   gateway_ids
   atomic_text /Library/LaunchDaemons/com.radon.model-gateway-local.plist 644 print_gateway_plist

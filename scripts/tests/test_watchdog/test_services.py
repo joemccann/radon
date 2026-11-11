@@ -140,6 +140,10 @@ class TestServiceCatalogContract:
             # Quant sleeve execution bridge: scripts/quant_execute.py places
             # every order through ib_place_order.place_order (IBClient).
             "quant-execute",
+            # Weekly market calendar: scripts/fetch_market_calendar.py
+            # fetch_liquid_hours connects via ib_insync IB() for SPY
+            # contractDetails.liquidHours; no other source.
+            "market-calendar",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"

@@ -893,6 +893,17 @@ describe("unregistered-writer regression — equibles + event-odds", () => {
     expect(requiresIb(service)).toBe(false);
   });
 
+  it("market-calendar is scheduled weekly 8d and requires IB", () => {
+    expect(getServiceCategory("market-calendar")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("market-calendar", state)).toBe(8 * DAY);
+    }
+    expect(requiresIb("market-calendar")).toBe(true);
+    const NOW = Date.parse("2026-11-16T12:00:00Z");
+    expect(isStale("market-calendar", new Date(NOW - 7 * DAY).toISOString(), "open", NOW)).toBe(false);
+    expect(isStale("market-calendar", new Date(NOW - 9 * DAY).toISOString(), "open", NOW)).toBe(true);
+  });
+
   it("daily equibles: a 20h-old ok row stays fresh", () => {
     const NOW = Date.parse("2026-08-13T18:00:00Z");
     const recent = new Date(NOW - 20 * HOUR).toISOString();
@@ -1029,6 +1040,9 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       // radon-quant-execute.timer places the quant sleeve's stock orders through
       // scripts/quant_execute.py -> ib_place_order.py (IBClient.place_order).
       "quant-execute",
+      // radon-market-calendar.timer reads SPY contractDetails.liquidHours from
+      // IB only (scripts/fetch_market_calendar.py).
+      "market-calendar",
     ]);
     expect(ibTrue).toEqual(expected);
   });

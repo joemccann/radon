@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "market_holidays.json"
-# IBKR-sourced rolling calendar written daily by scripts/fetch_market_calendar.py.
+# IBKR-sourced rolling calendar written weekly by scripts/fetch_market_calendar.py.
 # This is the authoritative layer (ad-hoc closures + half-days the static table
 # can't carry); a missing/empty file degrades to the static holiday table.
 _IBKR_CACHE_PATH = Path(__file__).parent.parent.parent / "data" / "market_calendar.json"

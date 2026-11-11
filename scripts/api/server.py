@@ -4688,8 +4688,9 @@ async def market_calendar_refresh():
 
     fetch_market_calendar.py merges the rolling window into
     data/market_calendar.json (the SoT the relay + market_state() resolver read)
-    and emits the summary JSON we return. The daily radon-market-calendar timer
-    targets this route.
+    and emits the summary JSON we return. The weekly radon-market-calendar timer
+    (Sunday 22:00 UTC) runs the same script directly; this route is the
+    on-demand path.
     """
     result = await run_script("fetch_market_calendar.py", [], timeout=60)
     if not result.ok:

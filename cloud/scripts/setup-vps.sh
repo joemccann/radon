@@ -162,6 +162,8 @@ readonly SERVICE_FILES=(
   radon-demo-mirror.timer
   radon-margin-debt.service
   radon-margin-debt.timer
+  radon-market-calendar.service
+  radon-market-calendar.timer
   radon-mktnews.service
   radon-model-catalog.service
   radon-model-catalog.timer
