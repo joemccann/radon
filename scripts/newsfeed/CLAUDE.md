@@ -37,7 +37,6 @@ themarketear inserts `assets/images/generic.png` as JSON-LD `schema.image` for i
 Fixes:
 - `scripts/newsfeed/extract.js` no longer reads `schema.image` unconditionally.
 - `scripts/newsfeed/media.js:hydrateLocalImages` clears stale images on empty re-scrape.
-- One-shot scrub at `scripts/newsfeed/scrub_generic_image_attributions.js`.
 
 Commit b405267.
 
