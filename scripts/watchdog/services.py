@@ -137,11 +137,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # backstop; it fires only on ActiveState=failed. Same class as the
     # nextjs-db-read registration above (REL-033). R-236.
     "breadth-scan":     {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
-    "cta-sync":         {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
+    # cta-sync — radon-cta-sync.timer, Mon..Fri 18:15/19:00/20:10/21:30 UTC.
+    # Aged on trading days only (TRADING_DAY_AGE_SERVICES): 25h is one trading
+    # day of cadence plus slack.
+    "cta-sync":         {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Extraction-quality row written by the same radon-cta-sync.timer firings
     # (R-297): `error` when more than half the rows lost their percentile to
     # the z-score check. Same cadence as cta-sync, so the same windows.
-    "menthorq-cta":     {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
+    "menthorq-cta":     {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Daily-cadence writers (mirror web/lib/serviceHealthWindows.ts):
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls
     #    Artificial Analysis only, no IB. Has not fired on weekends in
@@ -335,8 +338,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # web/lib/serviceHealthWindows.ts. Turso + Cerebras + local ONNX — no IB.
     "knowledge-ingest": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # More daily-cadence writers:
-    #  * leap-scan       — radon-leap.timer, once daily 14:00 UTC + on-demand;
-    #    UW-only. 26h open covers one missed run, 3d closed the weekend.
+    #  * leap-scan       — radon-leap.timer, Mon..Fri 10:00 ET + on-demand;
+    #    UW-only. Aged on trading days only (TRADING_DAY_AGE_SERVICES), so a
+    #    uniform 26h is one trading day of cadence plus timer jitter.
     #  * garch-scan      — radon-garch.timer 3x/RTH day + on-demand dashboard;
     #    UW-only. Same daily windows as leap-scan.
     #  * oi-changes      — radon-oi-changes.timer 3x/RTH day (14/17/20 UTC
@@ -345,7 +349,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #  * catalysts      — radon-catalysts.timer at 06:30, 10:00, and 16:00 ET;
     #    heartbeats ok on holiday skips (run_catalysts.sh). Seven hours spans
     #    the active-day schedule; four days bridges a long weekend. UW-only.
-    "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
+    "leap-scan":        {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "catalysts":        {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
@@ -541,6 +545,17 @@ OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
     "strength-confirmation",
     # Same shape: hourly, RTH-only, on the daily check cadence.
     "flow-refresh",
+})
+
+# Writers fired by a Mon..Fri timer. check.py ages them on US trading days
+# only, so a Friday run stays fresh across the weekend (and a full-closure
+# holiday) until the first run of the next trading day, while a missed
+# weekday run still trips the one-trading-day window. Mirrors
+# TRADING_DAY_AGE_SERVICES in web/lib/serviceHealthWindows.ts.
+TRADING_DAY_AGE_SERVICES: frozenset[str] = frozenset({
+    "cta-sync",
+    "menthorq-cta",
+    "leap-scan",
 })
 
 

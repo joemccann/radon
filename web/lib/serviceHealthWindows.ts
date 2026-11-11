@@ -357,17 +357,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // covers the weekend gap (see cri-scan note above).
   "vcg-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``cta-sync`` has an autonomous Mon-Fri schedule on the VPS
-  // (radon-cta-sync.timer fires 18:15, 19:00, 21:30 UTC). Stale > 25h
-  // means the VPS timer failed; 25h tolerates a long
-  // weekend (Friday 21:30 UTC → Monday 18:15 UTC ≈ 69h) plus any
-  // single missed firing.
+  // (radon-cta-sync.timer fires 18:15, 19:00, 20:10, 21:30 UTC). Its age
+  // is counted on trading days only (TRADING_DAY_AGE_SERVICES), so 25h is
+  // one trading day of cadence (21:30 UTC to the next 18:15 UTC) plus
+  // slack, and the weekend and Monday before the first run stay fresh.
   // MenthorQ source via Playwright — no IB dependency.
-  "cta-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
+  "cta-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // ``menthorq-cta`` is the EXTRACTION-quality row written by the same
   // radon-cta-sync.timer firings (R-297): `error` when more than half the
   // rows lost their percentile to the z-score check. Same cadence as
   // ``cta-sync`` above, so the same windows apply.
-  "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
+  "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
 
   // scanner / discover / flow-analysis: radon-flow-refresh.timer hourly
   // ET RTH (plus SCAN). Wrapper skips closed session without a
@@ -444,11 +444,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // runs still heartbeat (incremental no-op), so the gap never widens past
   // the weekend. Yahoo + Turso only — no IB.
   "bpi-scan": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
-  // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
-  // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
-  // Mon morning) without flipping stale; the on-demand button can
-  // bring it fresh in between.
-  "leap-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // ``leap-scan`` runs Mon-Fri 10:00 ET (radon-leap.timer) and via the
+  // on-demand dashboard refresh. Its age is counted on trading days only
+  // (TRADING_DAY_AGE_SERVICES), so 26h is one trading day of cadence plus
+  // timer jitter and a Friday run stays fresh until Monday's run.
+  "leap-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``garch-scan`` runs on-demand via the dashboard and on radon-garch.timer
   // (Mon-Fri 14:00 / 17:00 / 20:00 UTC). UW-only data flow, no IB dependency.
   "garch-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
@@ -751,7 +751,59 @@ export function isStale(
     const todayOpenEt = nowMs - elapsedOpenMs;
     if (ts < todayOpenEt) return elapsedOpenMs > window;
   }
+  if (TRADING_DAY_AGE_SERVICES.has(service)) return tradingDayAgeExceeds(ts, nowMs, window);
   return nowMs - ts > window;
+}
+
+/**
+ * Writers fired by a Mon..Fri timer. Their age skips weekends and full-closure
+ * holidays, so the window states one trading day of cadence and a Friday run
+ * stays fresh until the first run of the next trading day. Mirrored by
+ * TRADING_DAY_AGE_SERVICES in scripts/watchdog/services.py.
+ */
+const TRADING_DAY_AGE_SERVICES = new Set([
+  // radon-cta-sync.timer: Mon..Fri 18:15, 19:00, 20:10, 21:30 UTC.
+  "cta-sync",
+  "menthorq-cta",
+  // radon-leap.timer: Mon..Fri 10:00 ET.
+  "leap-scan",
+]);
+
+const ET_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+function etWallClock(ms: number): { isoDate: string; msSinceMidnight: number } {
+  const parts = ET_PARTS.formatToParts(ms);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "0";
+  const msSinceMidnight =
+    (Number(part("hour")) * 60 + Number(part("minute"))) * MIN + Number(part("second")) * 1000 + (ms % 1000);
+  return { isoDate: `${part("year")}-${part("month")}-${part("day")}`, msSinceMidnight };
+}
+
+/** Instant of the ET midnight that starts the calendar day after ``ms``. */
+function nextEtMidnightMs(ms: number): number {
+  const guess = ms - etWallClock(ms).msSinceMidnight + DAY;
+  const drift = etWallClock(guess).msSinceMidnight;
+  return drift < 12 * HOUR ? guess - drift : guess + (DAY - drift);
+}
+
+/** True once the time between ``fromMs`` and ``toMs`` spent on US trading days (ET) passes ``windowMs``. */
+function tradingDayAgeExceeds(fromMs: number, toMs: number, windowMs: number): boolean {
+  let ageMs = 0;
+  for (let cursor = fromMs; cursor < toMs && ageMs <= windowMs; ) {
+    const dayEnd = Math.min(nextEtMidnightMs(cursor), toMs);
+    if (isUsTradingDay(etWallClock(cursor).isoDate)) ageMs += dayEnd - cursor;
+    cursor = dayEnd;
+  }
+  return ageMs > windowMs;
 }
 
 const RTH_ONLY_SERVICES = new Set([
