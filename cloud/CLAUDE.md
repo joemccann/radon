@@ -536,7 +536,9 @@ promote-in-place` instead of `stop-clean` / `restart-managed`. That verb
 clears the previous release's commit receipt and exports model clients for
 the new SHA without stopping anything. Do not write the receipt by hand.
 `cloud/tests/test_deploy_inplace_promotion.py` pins the sudoers grant and
-the no-restart path.
+the no-restart path. `scripts/runner/*` (the Mac agent-loop runner, never run
+on the VPS) is non-runtime alongside docs and tests; a diff that also touches a
+runtime path still restarts.
 
 ## Post-deploy hooks
 
