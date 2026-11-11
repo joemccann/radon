@@ -920,6 +920,13 @@ enabled watcher, stop a hand-started one, never fatal) in place of the old
 `start_optional_research`; the unit file stays installed. Spec:
 [`docs/marketdesk-research.md`](../docs/marketdesk-research.md).
 
+`setup-vps.sh` inventories `radon-market-calendar.{service,timer}` and
+`enable_services` enables the timer; existing hosts get it from the deploy's
+`install-units` (new timer, `enable --now`). Weekly `Sun 22:00 UTC`, oneshot
+`scripts/fetch_market_calendar.py` (IBKR SPY liquidHours into
+`data/market_calendar.json`, the same script `POST /market-calendar/refresh`
+runs). Heartbeat `market-calendar` (8d, requires IB).
+
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 16:40 ET, twenty minutes
 after `radon-ma-ratio`. Oneshot `scripts/rsi_oversold_scan.py`,

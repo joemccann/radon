@@ -1087,6 +1087,19 @@ feed: an IB outage re-serves the cached payload as `stale_source` with an
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iv-spread.md`](indicators/iv-spread.md).
 
+### Market calendar (`radon-market-calendar.timer`)
+
+Weekly `Sun 22:00 UTC` (`RandomizedDelaySec=120`, `Persistent=true`),
+oneshot `scripts/fetch_market_calendar.py`, the same script
+`POST /market-calendar/refresh` runs. Pulls SPY `liquidHours` from IB (about
+six days ahead) and merges it into `data/market_calendar.json`, the cache
+the relay and `market_state()` read, so the coming week's holidays and
+early closes land before Monday. IB is the only source; an unauthenticated
+Gateway exits 1 and the cache keeps its last days. Heartbeat
+`market-calendar` (8-day window, `requires_ib`), written by the route path
+too. Installed and enabled by the
+deploy's `install-units` verb from `installed-units.sha256`.
+
 ### Flex sFTP pull (`radon-flex-pull.timer`)
 
 Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:

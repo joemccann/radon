@@ -13,7 +13,7 @@ _CONFIG_PATH = Path(__file__).parent.parent / "config" / "market_holidays.json"
 # Static NYSE half days ({date: "HH:MM" ET close}), the fallback when the IBKR
 # cache has no row for the date. Shared with web/lib/serviceHealthWindows.ts.
 _EARLY_CLOSES_PATH = Path(__file__).parent.parent / "config" / "market_early_closes.json"
-# IBKR-sourced rolling calendar written daily by scripts/fetch_market_calendar.py.
+# IBKR-sourced rolling calendar written weekly by scripts/fetch_market_calendar.py.
 # This is the authoritative layer (ad-hoc closures + half-days the static table
 # can't carry); a missing/empty file degrades to the static holiday table.
 _IBKR_CACHE_PATH = Path(__file__).parent.parent.parent / "data" / "market_calendar.json"

@@ -672,6 +672,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "equibles-13f": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-ats-venue-share": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-cot-positioning": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+  // ``market-calendar`` — radon-market-calendar.timer, weekly Sun 22:00 UTC,
+  // IBKR SPY liquidHours only. 8-day window = weekly cadence + one day.
+  "market-calendar": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: true },
 
   // Event odds refreshes when GET /event-odds/{ticker} is requested. There is
   // no VPS timer; retained observations become dormant between requests.
