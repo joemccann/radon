@@ -776,7 +776,14 @@ class TestMarketData:
         client.connect(client_id=1)
         quote = client.get_option_price("AAPL", "20260417", 150.0, "C")
 
-        assert quote is not None
+        (option,) = mock_ib.qualifyContracts.call_args.args
+        assert (option.symbol, option.lastTradeDateOrContractMonth, option.strike, option.right) == (
+            "AAPL", "20260417", 150.0, "C",
+        )
+        mock_ib.reqMktData.assert_called_once_with(
+            mock_ib.qualifyContracts.return_value[0], "", False, False,
+        )
+        assert quote is ticker
 
     @patch("clients.ib_client.IB")
     def test_qualify_contract(self, MockIB):
@@ -974,55 +981,64 @@ class TestErrorHandling:
     """Test handling of known IB error codes."""
 
     @patch("clients.ib_client.IB")
-    def test_error_10358_reuters_inactive(self, MockIB):
-        """IB error 10358 (Reuters subscription inactive) should be logged but not raise."""
+    def test_error_10358_reuters_inactive(self, MockIB, caplog):
+        """IB error 10358 (Reuters subscription inactive) is ignored: debug log only, no stored error."""
         mock_ib = MockIB.return_value
         mock_ib.isConnected.return_value = True
 
         client = IBClient()
         client.connect(client_id=1)
 
-        # Simulate error callback
-        client._on_error(10358, "10358", "Reuters Fundamentals subscription inactive")
-        # Should not raise, just log
+        with caplog.at_level(logging.DEBUG, logger="ib_client"):
+            client._on_error(10358, "10358", "Reuters Fundamentals subscription inactive")
+
+        assert client._last_error is None
+        assert [r.levelno for r in caplog.records if "10358" in r.getMessage()] == [logging.DEBUG]
 
     @patch("clients.ib_client.IB")
     def test_error_103_duplicate_order(self, MockIB):
-        """IB error 103 (duplicate order id) should be raised as IBOrderError."""
+        """IB error 103 (duplicate order id) is stored for the next operation to check."""
         mock_ib = MockIB.return_value
         mock_ib.isConnected.return_value = True
 
         client = IBClient()
         client.connect(client_id=1)
 
-        # The error handler should store the error for the next operation to check
         client._on_error(103, "103", "Duplicate order id")
 
+        assert client._last_error == (103, "Duplicate order id")
+
     @patch("clients.ib_client.IB")
-    def test_error_connection_lost(self, MockIB):
-        """IB connection lost error should update connection state."""
+    def test_error_connection_lost(self, MockIB, caplog):
+        """IB connection lost (1100) is a connectivity warning, not an operation error."""
         mock_ib = MockIB.return_value
         mock_ib.isConnected.return_value = True
 
         client = IBClient()
         client.connect(client_id=1)
 
-        # Simulate disconnect error
-        client._on_error(1100, "1100", "Connectivity between IB and TWS has been lost")
-        # Should log the error
+        with caplog.at_level(logging.DEBUG, logger="ib_client"):
+            client._on_error(1100, "1100", "Connectivity between IB and TWS has been lost")
+
+        assert client._last_error is None
+        assert [r.levelno for r in caplog.records if "1100" in r.getMessage()] == [logging.WARNING]
 
     @patch("clients.ib_client.IB")
-    def test_non_critical_errors_logged(self, MockIB):
-        """Non-critical errors should be logged but not interrupt execution."""
+    def test_non_critical_errors_logged(self, MockIB, caplog):
+        """Farm-status codes are logged at INFO and never stored as an operation error."""
         mock_ib = MockIB.return_value
         mock_ib.isConnected.return_value = True
 
         client = IBClient()
         client.connect(client_id=1)
 
-        # These should be handled gracefully
-        client._on_error(2104, "2104", "Market data farm connection is OK")
-        client._on_error(2106, "2106", "HMDS data farm connection is OK")
+        with caplog.at_level(logging.DEBUG, logger="ib_client"):
+            client._on_error(2104, "2104", "Market data farm connection is OK")
+            client._on_error(2106, "2106", "HMDS data farm connection is OK")
+
+        assert client._last_error is None
+        farm = [r.levelno for r in caplog.records if "farm connection is OK" in r.getMessage()]
+        assert farm == [logging.INFO, logging.INFO]
 
 
 # ===========================================================================
@@ -1097,12 +1113,6 @@ class TestRetryLogic:
 
 class TestLogging:
     """Test that structured logging is present."""
-
-    @patch("clients.ib_client.IB")
-    def test_logger_exists(self, MockIB):
-        client = IBClient()
-        assert client.logger is not None
-        assert isinstance(client.logger, logging.Logger)
 
     @patch("clients.ib_client.IB")
     def test_connect_logs(self, MockIB, caplog):
