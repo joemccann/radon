@@ -43,7 +43,6 @@ IB_SENTINEL = 1.7976931348623157e308
 
 
 def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
-    """Connect to TWS/IB Gateway, return an IBClient."""
     client = IBClient()
     try:
         client.connect(host=host, port=port, client_id=client_id)
@@ -98,7 +97,6 @@ def serialize_contract(contract, resolved_legs: dict = None) -> dict:
         "expiry": expiry or None,
     }
 
-    # Include resolved combo leg details for BAG orders
     combo_legs = getattr(contract, "comboLegs", None)
     if contract.secType == "BAG" and combo_legs and resolved_legs:
         legs = []
@@ -129,7 +127,6 @@ def serialize_contract(contract, resolved_legs: dict = None) -> dict:
 
 
 def safe_float(value) -> Optional[float]:
-    """Convert IB value to float, filtering sentinel values"""
     if value is None:
         return None
     try:
@@ -150,7 +147,6 @@ def fetch_open_orders(client: IBClient) -> list:
     """
     trades = client.get_open_orders()
 
-    # Collect all unique combo leg conIds that need resolving
     combo_con_ids: set = set()
     for trade in trades:
         contract = trade.contract
@@ -159,7 +155,6 @@ def fetch_open_orders(client: IBClient) -> list:
             for cl in combo_legs:
                 combo_con_ids.add(cl.conId)
 
-    # Batch-resolve combo leg contracts
     resolved_legs: dict = {}
     if combo_con_ids:
         from ib_insync import Contract as IBContract
@@ -207,7 +202,6 @@ def fetch_open_orders(client: IBClient) -> list:
 
 
 def fetch_executed_orders(client: IBClient) -> list:
-    """Fetch executed fills via fills()"""
     fills = client.get_fills()
     executed = []
 
@@ -240,7 +234,6 @@ def fetch_executed_orders(client: IBClient) -> list:
             "exchange": execution.exchange,
         })
 
-    # Sort by time descending (most recent first)
     executed.sort(key=lambda x: x["time"], reverse=True)
     return executed
 
@@ -316,7 +309,6 @@ def _write_execution_facts(executions: list[dict], upsert_facts) -> None:
 
 
 def _dual_write_orders_to_db(data: dict, heartbeat: bool = True) -> None:
-    """Persist an IB order snapshot into open_orders + executed_orders."""
     try:
         from db.service_cycle import service_cycle
         from db.writer import (
@@ -378,7 +370,6 @@ def _dual_write_orders_to_db(data: dict, heartbeat: bool = True) -> None:
 
 
 def display_orders(open_orders: list, executed_orders: list):
-    """Pretty print orders"""
     print(f"\n{'='*60}")
     print("OPEN ORDERS")
     print(f"{'='*60}")

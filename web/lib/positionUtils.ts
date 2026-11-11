@@ -5,8 +5,6 @@ import type {
 import type { PriceData } from "@/lib/pricesProtocol";
 import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 
-/* ─── Formatters ──────────────────────────────────────────── */
-
 function normalizeRoundedZero(n: number, fractionDigits: number): number {
   const threshold = 0.5 / (10 ** fractionDigits);
   return Math.abs(n) < threshold ? 0 : n;
@@ -105,8 +103,6 @@ export function resolveRealtimePrice(
 
   return { price: null, isCalculated: false, isPreviousClose: false };
 }
-
-/* ─── Position math ───────────────────────────────────────── */
 
 export function resolveMarketValue(pos: PortfolioPosition): number | null {
   // For multi-leg positions, always recompute sign-aware from legs
@@ -521,8 +517,6 @@ export function getLastPriceIsCalculated(pos: PortfolioPosition): boolean {
   return pos.legs.some((leg) => Boolean(leg.market_price_is_calculated));
 }
 
-/* ─── Price key resolution ────────────────────────────────── */
-
 /**
  * Build a composite price key for a leg within a position.
  * Returns null for Stock legs or missing data.
@@ -569,8 +563,6 @@ export function positionPricesUnchanged(
   }
   return true;
 }
-
-/* ─── Spread net price resolution ─────────────────────────── */
 
 function integerGcd(a: number, b: number): number {
   while (b !== 0) [a, b] = [b, a % b];
@@ -692,8 +684,6 @@ export function resolveSpreadPriceData(
   };
 }
 
-/* ─── Same-day position detection ─────────────────────────── */
-
 /** Return today's date in ET (YYYY-MM-DD). */
 function todayInET(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -787,8 +777,6 @@ export function resolveRealtimeMarketValue(
     : computeRtMv(pos, prices);
 }
 
-/* ─── Option daily change ─────────────────────────────────── */
-
 export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock" || !prices) return null;
 
@@ -822,8 +810,6 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   const effectivePnl = getTodayPnlDollars(pos, prices);
   return effectivePnl == null ? null : (effectivePnl / Math.abs(closeValue)) * 100;
 }
-
-/* ─── Stock daily change ──────────────────────────────────── */
 
 /**
  * Day Chg % for an equity position.

@@ -171,7 +171,6 @@ export default function EquiblesCotPanel() {
 
   return (
     <>
-      {/* ── Summary strip ─────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -231,7 +230,6 @@ export default function EquiblesCotPanel() {
         )}
       </div>
 
-      {/* ── Speculators vs hedgers chart ───────────────────── */}
       <div className="breadth-history-block" data-testid="cot-chart-section">
         <nav className="history-range-chips" aria-label="COT contract" data-testid="cot-contract-chips">
           {contracts.map((entry) => (
@@ -298,7 +296,6 @@ export default function EquiblesCotPanel() {
         </div>
       </div>
 
-      {/* ── Cross-asset latest-week board ─────────────────── */}
       {data.market.length > 0 && (
         <div className="section" data-testid="cot-board">
           <div className="section-header">

@@ -22,7 +22,6 @@
  *     a stock-to-zero stress, not a defined-risk cap)
  */
 
-// Relative path: web/lib/order/risk/internal/ → web/lib/types.ts (three levels up).
 // Direct imports of this module from outside the `internal/` folder are
 // banned by ESLint (`no-restricted-imports`) — every caller must go through
 // the public `useOrderRisk` / `<OrderRiskGate>` surface.
@@ -193,7 +192,6 @@ export function legRisk(
     };
   }
 
-  // SELL leg
   if (leg.right === "C") {
     // Naked short call: gain capped at premium, loss UNBOUNDED.
     return {
@@ -404,8 +402,6 @@ function computeGrossOrderRisk(
     (-extrema.min + netPremium) * comboQuantity * MULTIPLIER,
   );
 
-  // Max gain (when bounded): same model symmetrically. If unbounded on
-  // the call side we surface null.
   const maxGainDollars = maxGainUnbounded
     ? null
     : Math.max(

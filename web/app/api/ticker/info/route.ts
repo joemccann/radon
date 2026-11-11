@@ -16,8 +16,6 @@ import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 export const runtime = "nodejs";
 
-/* ─── Types ─── */
-
 type CacheEntry = {
   ticker: string;
   profile_expires: string | null; // null = never expires
@@ -47,8 +45,6 @@ function floatRecheckDue(entry: CacheEntry): boolean {
   if (!entry.short_float_checked_at) return true;
   return Date.now() - new Date(entry.short_float_checked_at).getTime() >= FLOAT_RECHECK_MS;
 }
-
-/* ─── Cache helpers ─── */
 
 function cacheDir(): string {
   return path.resolve(process.cwd(), "..", "data", "company_info_cache");
@@ -88,9 +84,6 @@ function hasProfile(entry: CacheEntry): boolean {
   return Object.keys(entry.exa_profile).length > 0;
 }
 
-
-/* ─── Exa parsing ─── */
-
 function parseExaText(text: string): { profile: Record<string, unknown>; stats: Record<string, unknown> } {
   const profile: Record<string, unknown> = {};
   const stats: Record<string, unknown> = {};
@@ -129,8 +122,6 @@ function parseExaText(text: string): { profile: Record<string, unknown>; stats: 
 
   return { profile, stats };
 }
-
-/* ─── UW API helpers ─── */
 
 async function fetchUWStockInfo(ticker: string): Promise<Record<string, unknown>> {
   try {
@@ -179,8 +170,6 @@ async function fetchUWStockState(ticker: string): Promise<Record<string, unknown
     return {};
   }
 }
-
-/* ─── Exa API ─── */
 
 async function fetchExaData(ticker: string): Promise<{ profile: Record<string, unknown>; stats: Record<string, unknown> }> {
   const apiKey = process.env.EXA_API_KEY;
@@ -237,8 +226,6 @@ async function fetchYahooStats(ticker: string): Promise<Record<string, unknown>>
 }
 
 const CACHE_TTL_SECONDS = 20;
-
-/* ─── Route handler ─── */
 
 export const radonCapability = "read";
 

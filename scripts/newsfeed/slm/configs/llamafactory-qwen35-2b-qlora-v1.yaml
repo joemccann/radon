@@ -6,7 +6,6 @@
 ### HR-4: eval_dataset is the time-split valid.jsonl. Never a random holdout.
 ### HR-5: train_on_prompt false = loss on assistant JSON only (mask_prompt).
 
-### model
 model_name_or_path: Qwen/Qwen3.5-2B
 # HF main, created 2026-02-28, lastModified 2026-03-02. Post-trained chat
 # checkpoint (the non-Base repo). Apache-2.0. auto_map is absent, so
@@ -17,7 +16,6 @@ quantization_method: bnb
 # Native architecture. Do not run hub-supplied code.
 trust_remote_code: false
 
-### method
 stage: sft
 do_train: true
 finetuning_type: lora
@@ -35,7 +33,6 @@ freeze_vision_tower: true
 freeze_multi_modal_projector: true
 train_on_prompt: false
 
-### dataset
 dataset_dir: data/slm/tagger/v1
 dataset: radon_slm_tagger
 eval_dataset: radon_slm_tagger_valid
@@ -53,7 +50,6 @@ cutoff_len: 1024
 preprocessing_num_workers: 4
 dataloader_num_workers: 2
 
-### output
 # Separate from models/slm-tagger/v1/adapter so this run cannot clobber the baseline.
 output_dir: models/slm-tagger/qwen35-2b-eval/adapter
 logging_steps: 10
@@ -65,7 +61,6 @@ overwrite_output_dir: true
 save_only_model: false
 report_to: none
 
-### train
 per_device_train_batch_size: 8
 gradient_accumulation_steps: 1
 # Unchanged. LLaMA-Factory's Qwen3.5 LoRA example uses 1e-4. The 1e-5 figure

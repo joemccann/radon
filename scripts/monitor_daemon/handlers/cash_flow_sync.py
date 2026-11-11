@@ -223,7 +223,6 @@ def _et_date(now_utc: datetime) -> str:
 
 
 def _is_trading_day_et(now_utc: datetime) -> bool:
-    """True iff the ET calendar day is a US equity trading day."""
     et_dt = now_utc.astimezone(ET)
     if et_dt.weekday() >= 5:
         return False
@@ -258,9 +257,7 @@ class CashFlowSyncHandler(BaseHandler):
         self._run_generation = 0
         self._retired_generation = 0
 
-    # ------------------------------------------------------------------
     # State persistence — circuit breaker survives daemon restarts.
-    # ------------------------------------------------------------------
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["backoff_state"] = dict(self._backoff_state)
@@ -315,9 +312,7 @@ class CashFlowSyncHandler(BaseHandler):
             "service_health (next attempt %s)", next_attempt
         )
 
-    # ------------------------------------------------------------------
     # Cadence override — daily window + circuit breaker.
-    # ------------------------------------------------------------------
     def _shared_embargo_until(self) -> Optional[str]:
         """The token-wide deadline any Flex caller may have armed.
 
@@ -361,8 +356,6 @@ class CashFlowSyncHandler(BaseHandler):
         if et_now.hour < FIRE_HOUR_ET:
             return False
 
-        # Past the start of the window. If the daemon already fired today
-        # in ET, we're done — never double-fire same ET trading day.
         if self.last_run is not None:
             last_run_et_date = self.last_run.astimezone(ET).strftime("%Y-%m-%d")
             today_et_date = et_now.strftime("%Y-%m-%d")
@@ -374,9 +367,7 @@ class CashFlowSyncHandler(BaseHandler):
         # otherwise skip the day entirely.
         return True
 
-    # ------------------------------------------------------------------
     # Execution — one shot, no internal retries on throttle codes.
-    # ------------------------------------------------------------------
     def execute(self) -> Dict[str, Any]:
         """Wrap inner logic with service_health heartbeat (success+error).
 
@@ -440,9 +431,6 @@ class CashFlowSyncHandler(BaseHandler):
 
         return result
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     def retire_current_run(self) -> None:
         """Disown the in-flight run after the daemon's deadline killed it.
 
@@ -501,7 +489,6 @@ class CashFlowSyncHandler(BaseHandler):
         *,
         exc: Optional[BaseException] = None,
     ) -> None:
-        """Persist failure heartbeat with next_attempt_at metadata."""
         failure_class = self._classify_failure(message, exc)
         now_utc = _now_utc()
 
@@ -602,11 +589,9 @@ class CashFlowSyncHandler(BaseHandler):
         return int(state.get("soft_attempts") or 0) >= MAX_SOFT_ATTEMPTS_PER_ET_DAY
 
     def _mark_success(self) -> None:
-        """Reset the circuit breaker after a successful sync."""
         self._backoff_state = _throttle_backoff.record_success(self._backoff_state)
 
     def _next_attempt_iso(self, now_utc: datetime) -> Optional[str]:
-        """ISO timestamp of the next eligible fire window."""
         embargo_until = _throttle_backoff.blocked_until(self._backoff_state)
         next_window = self._next_daily_window_after(now_utc)
         candidates = [c for c in (embargo_until, next_window) if c is not None]
@@ -622,7 +607,6 @@ class CashFlowSyncHandler(BaseHandler):
         candidate = et_now.replace(hour=FIRE_HOUR_ET, minute=0, second=0, microsecond=0)
         if candidate <= et_now:
             candidate = candidate + _td(days=1)
-        # Walk forward to a trading day.
         for _ in range(8):
             probe_utc = candidate.astimezone(timezone.utc)
             if _is_trading_day_et(probe_utc):

@@ -145,9 +145,7 @@ def get_cached_rating(ticker: str, allow_stale: bool = False) -> Optional[dict]:
     return None
 
 
-# =============================================================================
 # IB Data Source (Primary)
-# =============================================================================
 
 def connect_ib(port: int = IB_PORT) -> Tuple[any, bool]:
     """Try to connect to IB. Returns (client_instance, success)."""
@@ -285,9 +283,7 @@ def fetch_from_ib(client: IBClient, ticker: str) -> Optional[dict]:
         return None
 
 
-# =============================================================================
 # Unusual Whales Data Source (Priority 2)
-# =============================================================================
 
 def fetch_from_uw(ticker: str) -> Optional[dict]:
     """
@@ -390,7 +386,6 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
         else:
             result["recommendation"] = "hold"
 
-    # --- Target prices ---
     if targets:
         # Try to get current price from entries or estimate
         result["target_price"] = {
@@ -401,7 +396,6 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
             "count": len(targets),
         }
 
-    # --- Analyst count ---
     result["analyst_count"] = total
 
     # --- Build upgrade/downgrade history (most recent 10) ---
@@ -417,7 +411,6 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
         if action in ("upgraded", "downgraded", "initiated"):
             result["has_recent_changes"] = True
 
-    # --- Detect recent changes ---
     recent_actions = [e.get("action", "").lower() for e in entries[:10]]
     upgrades = sum(1 for a in recent_actions if a in ("upgraded",))
     downgrades = sum(1 for a in recent_actions if a in ("downgraded",))
@@ -431,9 +424,7 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
     return result
 
 
-# =============================================================================
 # Main Fetch Function with Priority
-# =============================================================================
 
 def fetch_analyst_ratings(
     ticker: str,
@@ -512,10 +503,6 @@ def _unavailable_message(last_error: Optional[str]) -> str:
     return "Analyst ratings unavailable from IB / Unusual Whales right now."
 
 
-# =============================================================================
-# Signal Calculation
-# =============================================================================
-
 def calculate_rating_signal(ratings_data: dict) -> dict:
     """Calculate a trading signal based on analyst ratings."""
     signal = {
@@ -590,10 +577,6 @@ def calculate_rating_signal(ratings_data: dict) -> dict:
     
     return signal
 
-
-# =============================================================================
-# Output Formatting
-# =============================================================================
 
 def format_ratings_table(results: list, changes_only: bool = False) -> str:
     """Format results as a readable table."""

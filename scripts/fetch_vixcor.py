@@ -26,7 +26,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 for _path in (_PROJECT_DIR, _SCRIPT_DIR):
@@ -72,7 +71,6 @@ from scripts.lib.vixcor_math import (  # noqa: E402,F401
     join_series,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 VIXCOR_JSON = _PROJECT_DIR / "data" / "vixcor.json"
 COR_JSON = _PROJECT_DIR / "data" / "cor.json"
 
@@ -92,7 +90,6 @@ STATUS_OK = "ok"
 STATUS_HOLDING = "holding"
 STATUS_STALE_PARENT = "stale_parent"
 
-# ── parsing ───────────────────────────────────────────────────────
 
 def parse_index_csv(text: str) -> list[dict[str, Any]]:
     """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
@@ -176,8 +173,6 @@ def latest_stored_vix_date() -> Optional[str]:
     return row[0] if row and row[0] else None
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def load_prior_payload() -> Optional[dict[str, Any]]:
     """Last dual-written payload from data/vixcor.json, if present."""
     try:
@@ -247,8 +242,6 @@ def _write_db(
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[vixcor] db cache non-fatal: {exc}", file=sys.stderr)
 
-
-# ── degradation ───────────────────────────────────────────────────
 
 def _market_status(now: datetime) -> str:
     try:
@@ -387,8 +380,6 @@ def _cached_health_error(
     )
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def build_payload(
     joined: list[dict[str, Any]],
     *,
@@ -426,8 +417,6 @@ def build_payload(
         "series": [{**row, "episode": row["date"] in shaded} for row in series],
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _record_error_health(message: str, error_class: str) -> None:
     """Error heartbeat for the paths that never reach `_write_db`.
@@ -540,8 +529,6 @@ def run(
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

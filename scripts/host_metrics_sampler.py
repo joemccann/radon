@@ -239,8 +239,6 @@ def read_loop_lag() -> float | None:
         return None
 
 
-# --- bounded writes + fallback ------------------------------------------------
-
 def append_fallback(row: dict) -> None:
     """Append one JSONL line, trimming oldest-first past FALLBACK_MAX_LINES."""
     FALLBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -304,8 +302,6 @@ def heartbeat(
     except HranaHttpError as exc:
         sys.stderr.write(f"[host-metrics] heartbeat failed: {exc}\n")
 
-
-# --- orchestration -------------------------------------------------------------
 
 def collect_row(now: datetime) -> dict:
     mem_used_mb, mem_avail_mb, swap_used_mb = mem_metrics(

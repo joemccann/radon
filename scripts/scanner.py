@@ -65,7 +65,6 @@ def get_open_positions():
 
 
 def get_watchlist_items() -> list[dict]:
-    """Get watchlist rows from Turso."""
     return read_watchlist_items()
 
 def fetch_flow_data(
@@ -75,7 +74,6 @@ def fetch_flow_data(
     fetch_missing_history: bool = False,
     retry_transient: bool = False,
 ) -> dict:
-    """Fetch flow data for a single ticker via the shared wrapper seam."""
     try:
         return fetch_flow_module(
             ticker,
@@ -93,7 +91,6 @@ def fetch_flow_data(
 fetch_flow = fetch_flow_data
 
 def analyze_signal(flow_data: dict) -> dict:
-    """Extract key metrics from flow data."""
     if "error" in flow_data:
         return {"score": -1, "signal": "ERROR", "error": flow_data["error"]}
 
@@ -116,25 +113,20 @@ def analyze_signal(flow_data: dict) -> dict:
             else:
                 break
 
-    # Check most recent day's direction and strength
     recent_dir = daily[0].get("flow_direction") if daily else "UNKNOWN"
     recent_strength = daily[0].get("flow_strength", 0) if daily else 0
 
     # Score: higher = more actionable
-    # Base score from aggregate strength
     score = strength
 
-    # Bonus for sustained direction
     if sustained >= 2:
         score += 20
     if sustained >= 4:
         score += 20
 
-    # Bonus if recent day confirms aggregate
     if recent_dir == direction and recent_strength > 50:
         score += 15
 
-    # Penalty if recent day contradicts aggregate
     if recent_dir != direction and recent_dir in ("ACCUMULATION", "DISTRIBUTION"):
         score -= 30
 
@@ -158,7 +150,6 @@ def analyze_signal(flow_data: dict) -> dict:
             options_conflict = True
             score -= 25  # Penalty for conflict
 
-    # Determine signal quality
     if score >= 60 and direction in ("ACCUMULATION", "DISTRIBUTION"):
         signal = "STRONG"
     elif score >= 40 and direction in ("ACCUMULATION", "DISTRIBUTION"):
@@ -193,10 +184,6 @@ def _process_ticker(
 
     Returns a result dict or None on error.
     Designed to run inside a ThreadPoolExecutor worker.
-    
-    Args:
-        item: Watchlist item with 'ticker' key
-        client: Unused.
     """
     ticker = item["ticker"]
     try:
@@ -253,12 +240,7 @@ def scan(
 ):
     """Scan all watchlist tickers and rank by signal strength.
 
-    Uses ThreadPoolExecutor to process tickers concurrently.
-
     Args:
-        top_n: Number of top signals to return.
-        min_score: Minimum score threshold.
-        max_workers: Maximum concurrent workers.
         fetch_missing_history: Live-backfill prior closed days when the
             dark-pool disk cache is cold. Disabled by default for interactive
             scan speed and UW quota protection.
@@ -271,7 +253,6 @@ def scan(
     open_positions = get_open_positions()
     tickers = get_watchlist_items()
 
-    # Filter out open positions before dispatching to workers
     items_to_scan = [
         item for item in tickers
         if item["ticker"] not in open_positions
@@ -309,10 +290,8 @@ def scan(
                 print(f"  [{done}/{len(items_to_scan)}] {ticker}... {result['signal']} ({result['score']})", file=sys.stderr)
                 results.append(result)
 
-    # Sort by score descending
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    # Filter by min_score and take top_n
     filtered = [r for r in results if r["score"] >= min_score][:top_n]
 
     output = {

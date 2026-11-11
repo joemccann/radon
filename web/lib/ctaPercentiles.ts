@@ -20,8 +20,6 @@ export function formatCtaPercentileLabel(value: number | null | undefined): stri
   return `${rounded}${suffix}`;
 }
 
-// ── Percentile / z-score reconciliation ──────────────────────────────────────
-//
 // MenthorQ renders the percentile columns as 0-1 fractions on some cards and as
 // 0-100 integers on others, and the vision extractor is told to report integers.
 // When it obeys on a fractional card it rounds 0.43 to 0 and 0.98 to 1, so a

@@ -34,8 +34,6 @@ from requests.exceptions import ConnectionError as ReqConnectionError, Timeout a
 logger = logging.getLogger(__name__)
 
 
-# ── exception hierarchy ────────────────────────────────────────────
-
 class PolymarketAPIError(Exception):
     """Base exception for all Polymarket API errors."""
 
@@ -67,8 +65,6 @@ _DEFAULT_MAX_RETRIES = 2
 _DEFAULT_BACKOFF_FACTOR = 1.0
 
 
-# ── pure conversions ───────────────────────────────────────────────
-
 def midpoint_to_probability(midpoint: Any) -> Optional[float]:
     """Convert a Polymarket binary-market midpoint to an implied probability.
 
@@ -88,8 +84,6 @@ def midpoint_to_probability(midpoint: Any) -> Optional[float]:
         return 1.0
     return value
 
-
-# ── client ─────────────────────────────────────────────────────────
 
 class PolymarketClient:
     """Public Polymarket REST client (Gamma metadata + CLOB pricing)."""
@@ -122,8 +116,6 @@ class PolymarketClient:
 
     def __exit__(self, *exc) -> None:
         self.close()
-
-    # ── internal request layer ─────────────────────────────────────
 
     def _get(self, url: str, params: Optional[dict] = None) -> Any:
         """Authenticated-free GET with retry + error mapping. Returns parsed JSON."""
@@ -186,8 +178,6 @@ class PolymarketClient:
             if isinstance(data, list):
                 return data
         return []
-
-    # ── endpoints ───────────────────────────────────────────────────
 
     def get_markets(
         self,

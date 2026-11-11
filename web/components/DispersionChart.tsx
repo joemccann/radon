@@ -26,8 +26,6 @@ import {
 
 export const DISPERSION_CHART_TITLE = "VOLATILITY DISPERSION - Z-SCORE SINCE 2017";
 
-/* ─── Layout ─────────────────────────────────────────── */
-
 const HEIGHT = 440;
 const MARGIN = { top: 16, right: 40, bottom: 28, left: 48 };
 const INNER_HEIGHT = HEIGHT - MARGIN.top - MARGIN.bottom;
@@ -39,8 +37,6 @@ const DOMAIN_PAD = 0.06;
 const REFERENCE_LEVELS = [-1, 0, 1, 2] as const;
 /** Domains wider than this get month-year ticks; shorter ones keep the day. */
 const MONTH_TICK_SPAN_MS = 180 * 24 * 60 * 60_000;
-
-/* ─── Tokens ─────────────────────────────────────────── */
 
 const CHART_GRID = "var(--chart-grid, var(--border-dim))";
 const CHART_AXIS = "var(--chart-axis, var(--border-dim))";

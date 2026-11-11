@@ -301,7 +301,6 @@ export default function StreaksChart({
                 ))}
               </g>
 
-              {/* ── Shared hover ─────────────────────────── */}
               {hover && (
                 <line
                   x1={hover.x}

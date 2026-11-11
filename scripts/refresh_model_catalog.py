@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
-# -- path setup ----------------------------------------------------
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -26,7 +25,6 @@ from utils.ipv4_first import prefer_ipv4
 
 prefer_ipv4()
 
-# -- constants -----------------------------------------------------
 SERVICE = "model-catalog"
 LLM_MODELS_JSON = _PROJECT_DIR / "data" / "llm_models.json"
 
@@ -59,31 +57,7 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-# -- environment ---------------------------------------------------
-
-
-
 _LADDER_PROVIDER = {"anthropic": "anthropic", "openai": "codex", "xai": "grok"}
-
-
-
-
-
-
-
-
-
-
-
-
-# -- HTTP transport ------------------------------------------------
-
-
-
-
-
-
-
 
 
 # -- frontier selection (pure) -------------------------------------
@@ -218,8 +192,6 @@ SELECTORS: dict[str, Callable[[list[dict[str, Any]]], Optional[dict[str, Any]]]]
 }
 
 
-# -- payload -------------------------------------------------------
-
 def label_for(model_id: str) -> str:
     """Terminal-cased picker label derived from the wire id."""
     return model_id.replace("-", " ").upper()
@@ -279,8 +251,6 @@ def load_previous() -> dict[str, dict[str, Any]]:
             previous[row["provider"]] = dict(row)
     return previous
 
-
-# -- persistence ---------------------------------------------------
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     LLM_MODELS_JSON.parent.mkdir(parents=True, exist_ok=True)
@@ -344,8 +314,6 @@ def _record_cycle_failure(scan_time: str, exc: BaseException) -> None:
         _log(f"error heartbeat non-fatal: {health_exc}")
 
 
-# -- daily orchestration -------------------------------------------
-
 # Lambdas, not direct references: the indirection resolves the module
 # global at call time, so the tests can monkeypatch a single fetcher.
 FETCHERS: dict[str, Callable[[str], list[dict[str, Any]]]] = {
@@ -373,8 +341,6 @@ def run(scan_time: Optional[str] = None) -> dict[str, Any]:
     persist_result(payload, rows, failed)
     return payload
 
-
-# -- CLI -----------------------------------------------------------
 
 def _print_summary(payload: dict[str, Any]) -> None:
     print(f"\nModel catalog - {len(payload['models'])} provider(s)", file=sys.stderr)

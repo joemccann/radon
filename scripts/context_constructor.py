@@ -86,8 +86,6 @@ def log_transaction(operation: str, path_str: str, agent_id: str = "radon"):
         f.write(json.dumps(tx) + "\n")
 
 
-# ─── Constructor ────────────────────────────────────────────
-
 def construct_context(token_budget: int = 8000) -> dict:
     """
     Build context payload from persistent memory.
@@ -314,8 +312,6 @@ def save_episode(summary: str, session_id: str | None = None):
     
     return entry
 
-
-# ─── CLI ────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Context Constructor — build session context from persistent memory")

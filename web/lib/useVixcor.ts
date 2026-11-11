@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { VixcorData } from "./vixcor";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the joined VIX x COR3M series updates once per session
 // (radon-vixcor.timer runs scripts/fetch_vixcor.py directly), so there is no
 // manual-scan POST and an hourly poll is already generous. Types + pure

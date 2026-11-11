@@ -71,8 +71,6 @@ function ActionCell({ row }: { row: BounceSetupRow }) {
   );
 }
 
-/* ─── Detail chart ─── */
-
 const W = 640;
 const H = 220;
 const PAD = { l: 44, r: 44, t: 12, b: 24 };

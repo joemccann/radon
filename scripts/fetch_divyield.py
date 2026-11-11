@@ -43,7 +43,6 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -66,7 +65,6 @@ from utils.ipv4_first import prefer_ipv4
 
 prefer_ipv4()
 
-# ── constants ─────────────────────────────────────────────────────
 SERVICE = "div-yield"
 DIVYIELD_JSON = _PROJECT_DIR / "data" / "divyield.json"
 
@@ -205,8 +203,6 @@ def fetch_constituents() -> tuple[list[str], str]:
     return tickers, f"index-constituents-{source}"
 
 
-# ── Yahoo quotes ──────────────────────────────────────────────────
-
 def fetch_ticker_chart(ticker: str) -> dict[str, Any]:
     """Yahoo v8 chart with TTM dividend events for one ticker."""
     url = f"{YAHOO_CHART_URL.format(ticker=ticker)}?range=1y&interval=1d&events=div"
@@ -295,8 +291,6 @@ def sweep_yields(tickers: list[str]) -> tuple[dict[str, float], int, Optional[st
         pool.shutdown(wait=True, cancel_futures=True)
     return yields, errors, data_date
 
-
-# ── pure computation ──────────────────────────────────────────────
 
 def compute_pct_above(yields: list[float], y10: float) -> dict[str, Any]:
     """Share of yields STRICTLY above y10 — the boundary does not count."""
@@ -472,8 +466,6 @@ def first_exact_date(series: list[dict[str, Any]]) -> Optional[str]:
     )
 
 
-# ── persistence ───────────────────────────────────────────────────
-
 def _write_json_cache(payload: dict[str, Any]) -> None:
     DIVYIELD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = DIVYIELD_JSON.with_suffix(".json.tmp")
@@ -496,8 +488,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
     _write_json_cache(payload)
 
-
-# ── daily orchestration ───────────────────────────────────────────
 
 def run() -> dict[str, Any]:
     tickers, constituents_source = fetch_constituents()
@@ -660,8 +650,6 @@ def run_backfill() -> int:
          f"({rows[0]['date']} .. {rows[-1]['date']})")
     return 0
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload["current"]

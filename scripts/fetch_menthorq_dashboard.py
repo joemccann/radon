@@ -35,9 +35,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "menthorq_cache"
 
-# ══════════════════════════════════════════════════════════════════════
 # Vision extraction prompts per dashboard type
-# ══════════════════════════════════════════════════════════════════════
 
 EXTRACTION_PROMPTS: dict[str, str] = {
     "vol": """Extract volatility model data from this chart image.

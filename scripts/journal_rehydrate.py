@@ -74,11 +74,6 @@ log = logging.getLogger(__name__)
 AGGREGATE_NOTIONAL_TOLERANCE = 0.01
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _decimal_to_float(value: Optional[Decimal]) -> float:
     """Cast a ``Decimal`` (or None) to a JSON-friendly float."""
     if value is None:
@@ -111,11 +106,6 @@ def _expiry_to_iso(expiry: Optional[str]) -> Optional[str]:
     if len(expiry) == 8 and expiry.isdigit():
         return f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}"
     return expiry
-
-
-# ---------------------------------------------------------------------------
-# Grouping
-# ---------------------------------------------------------------------------
 
 
 def _group_key(exec_obj: Any) -> str:
@@ -474,11 +464,6 @@ def _bucket_to_entry(
     return entry
 
 
-# ---------------------------------------------------------------------------
-# Existing-trade index
-# ---------------------------------------------------------------------------
-
-
 def _existing_exec_ids(trades: List[Dict[str, Any]]) -> set[str]:
     """Collect every ib_exec_id (and split-composite parts) we already have."""
     ids: set[str] = set()
@@ -567,11 +552,6 @@ def _is_duplicate(
 
     legacy_key = (entry["ticker"], entry["date"], entry.get("structure", ""))
     return legacy_key in legacy_keys
-
-
-# ---------------------------------------------------------------------------
-# Public entry points
-# ---------------------------------------------------------------------------
 
 
 def _is_individual_fill_row(trade: Dict[str, Any]) -> bool:
@@ -939,11 +919,6 @@ def rehydrate(
         "latest_date": latest_date,
         "executions_seen": len(executions),
     }
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def main() -> int:

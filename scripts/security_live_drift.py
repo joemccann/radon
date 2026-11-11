@@ -84,8 +84,6 @@ class GhError(Exception):
         self.message = message
 
 
-# ------------------------------------------------------------------ HuJSON --
-
 def strip_hujson(text: str) -> str:
     """HuJSON -> JSON: drop // and /* */ comments and trailing commas."""
     out: list[str] = []
@@ -163,8 +161,6 @@ def _substitute(value, placeholder: str, replacement: str):
         return replacement
     return value
 
-
-# ---------------------------------------------------------------- fetchers --
 
 def _read_private_file(path_text: str, name: str) -> str:
     path = Path(path_text)
@@ -297,8 +293,6 @@ class FixtureFetchers:
             return json.loads(payload.read_text())
         raise GhError(404, "Not Found")
 
-
-# ------------------------------------------------------------------ checks --
 
 def _row(check, status, counts=None, detail=None, action=None):
     return {"check": check, "status": status, "counts": counts or {}, "detail_private": list(detail or []),
@@ -579,8 +573,6 @@ def run_checks(repo_root: Path, baseline: dict, fetchers, checks=ALL_CHECKS) -> 
             rows.extend(check_github_repo(repo, expected, fetchers))
     return rows
 
-
-# ------------------------------------------------------------------ output --
 
 def _tally(rows) -> dict:
     tally = {"ok": 0, "drift": 0, "operator_required": 0, "error": 0}

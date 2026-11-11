@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -54,7 +53,6 @@ from lib.vixts_math import (  # noqa: E402
     join_series,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 VIXTS_JSON = _PROJECT_DIR / "data" / "vixts.json"
 
 SERVICE = "vixts"
@@ -74,8 +72,6 @@ TIMER_HOUR_UTC = 2
 TIMER_MINUTE_UTC = 45
 
 
-# ── Cboe CSV parsing ──────────────────────────────────────────────
-
 def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
     """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
 
@@ -93,8 +89,6 @@ def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
     rows.sort(key=lambda r: r["date"])
     return rows
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _read_json_cache() -> Optional[dict[str, Any]]:
     """Last dual-written payload from data/vixts.json, if present."""
@@ -182,8 +176,6 @@ def _record_startup_failure(scan_time: str, exc: Exception) -> None:
         print(f"[vixts] startup health write non-fatal: {inner}", file=sys.stderr)
 
 
-# ── payload ───────────────────────────────────────────────────────
-
 def build_payload(
     series: list[dict[str, Any]],
     *,
@@ -201,8 +193,6 @@ def build_payload(
         "series": series,
     }
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _fetch_all(client: Any, cached_stamps: dict[str, Any]) -> tuple[dict, dict]:
     """One conditional GET per symbol, keyed by the cached per-file stamp."""
@@ -380,8 +370,6 @@ def _record_cycle_failure(scan_time: str, exc: Exception) -> None:
     except Exception as inner:  # noqa: BLE001 — best-effort mirror
         print(f"[vixts] cycle health write non-fatal: {inner}", file=sys.stderr)
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
     current = payload.get("current") or {}

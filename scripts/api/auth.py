@@ -109,7 +109,6 @@ def is_local_or_tailnet(host: str | None) -> bool:
 
 
 def is_private_net_peer(host: str | None) -> bool:
-    """True when the TCP peer is on the Hetzner private network."""
     if not host:
         return False
     try:
@@ -127,7 +126,6 @@ _FORWARDING_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded
 
 
 def _arrived_via_proxy(request) -> bool:
-    """True if the request carries reverse-proxy forwarding headers."""
     headers = getattr(request, "headers", None) or {}
     present = {key.lower() for key in headers.keys()}
     return any(name in present for name in _FORWARDING_HEADERS)
@@ -435,7 +433,6 @@ async def _bounded_signing_key_lookup(token: str, kid: str):
 
 
 def _get_allowed_users() -> set[str]:
-    """Parse comma-separated ALLOWED_USER_IDS env var."""
     raw = os.environ.get("ALLOWED_USER_IDS", "")
     return {uid.strip() for uid in raw.split(",") if uid.strip()}
 
@@ -465,7 +462,6 @@ def _get_authorized_parties() -> set[str]:
 
 
 def _get_issuer() -> str:
-    """Get Clerk issuer URL from env."""
     return os.environ.get("CLERK_ISSUER", "")
 
 
@@ -568,9 +564,7 @@ async def verify_clerk_bearer(request: Request) -> dict:
     return payload
 
 
-# ---------------------------------------------------------------------------
 # API key auth — scoped to read-only historical/contract endpoints
-# ---------------------------------------------------------------------------
 
 API_KEY_ALLOWED_PATHS = frozenset({
     "/contract/qualify",

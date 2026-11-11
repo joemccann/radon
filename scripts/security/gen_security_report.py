@@ -21,7 +21,6 @@ SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "false-
 SEV_COLOR = {"critical": "#b3001b", "high": "#d7263d", "medium": "#e08a00",
              "low": "#3a7ca5", "info": "#5a6570", "false-positive": "#5a6570"}
 
-# ── secret redaction ──────────────────────────────────────────────────────
 #
 # An audit report must never embed the literal credential it is reporting.
 # 2026-07-18 did exactly that: a finding quoted the live TWS value, the rendered

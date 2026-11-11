@@ -57,9 +57,7 @@ class ReplicaWatchdogHandler(BaseHandler):
         super().__init__()
         self._last_heal_at: Optional[datetime] = None
 
-    # ------------------------------------------------------------------
     # State persistence — survive daemon restarts so throttle is durable.
-    # ------------------------------------------------------------------
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["last_heal_at"] = (
@@ -78,9 +76,7 @@ class ReplicaWatchdogHandler(BaseHandler):
         else:
             self._last_heal_at = None
 
-    # ------------------------------------------------------------------
     # Entry point.
-    # ------------------------------------------------------------------
     def execute(self) -> Dict[str, Any]:
         if not REPLICA_PATH.is_file():
             return {"status": "disabled", "reason": "replica_absent"}
@@ -131,9 +127,7 @@ class ReplicaWatchdogHandler(BaseHandler):
         except Exception as exc:  # noqa: BLE001 — best-effort telemetry
             logger.warning("record_service_health(heartbeat) failed: %s", exc)
 
-    # ------------------------------------------------------------------
     # Helpers — single responsibility per method.
-    # ------------------------------------------------------------------
     def _count_recent_wal_conflicts(self) -> int:
         try:
             result = subprocess.run(

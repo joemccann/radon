@@ -25,8 +25,6 @@ import { MicrostructureStrip } from "@/components/ticker-detail/MicrostructureSt
 import { buildSyntheticComboDepth } from "@/lib/book/syntheticComboDepth";
 import { buildL1BboDepth } from "@/lib/book/l1BboDepth";
 
-/* ─── Types ─── */
-
 type BookTabProps = {
   ticker: string;
   position: PortfolioPosition | null;
@@ -170,8 +168,6 @@ function L1OrderBook({
   );
 }
 
-/* ─── Position Summary ─── */
-
 function PositionSummary({ position }: { position: PortfolioPosition }) {
   return (
     <div style={{ marginTop: "16px" }}>
@@ -211,8 +207,6 @@ function PositionSummary({ position }: { position: PortfolioPosition }) {
     </div>
   );
 }
-
-/* ─── Open Orders List ─── */
 
 function OpenOrdersList({ orders }: { orders: OpenOrder[] }) {
   return (
@@ -264,8 +258,6 @@ function OpenOrdersList({ orders }: { orders: OpenOrder[] }) {
     </div>
   );
 }
-
-/* ─── Stock Order Form ─── */
 
 /** Held LONG / SHORT shares + per-share cost basis for `ticker`, used to detect
  *  a stock close-out (sell-against-long / buy-against-short) and surface its
@@ -462,8 +454,6 @@ function StockOrderForm({
     />
   );
 }
-
-/* ─── Main BookTab ─── */
 
 export default function BookTab({
   ticker,

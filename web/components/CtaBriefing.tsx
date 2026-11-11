@@ -3,8 +3,6 @@
 import type { CtaRow } from "@/lib/useMenthorqCta";
 import { formatCtaPercentileLabel, normalizeCtaPercentile } from "@/lib/ctaPercentiles";
 
-/* ─── Types ──────────────────────────────────────────── */
-
 type CtaTables = {
   main: CtaRow[];
   index: CtaRow[];
@@ -20,8 +18,6 @@ type CtaBriefingProps = {
   /** Latest cache date when the CTA cache is stale; dates the posture instead of a verdict pill. */
   staleAsOf?: string | null;
 };
-
-/* ─── Helpers ────────────────────────────────────────── */
 
 function fmt(v: number | null | undefined, decimals = 2): string {
   if (v == null || !Number.isFinite(v)) return "---";
@@ -299,8 +295,6 @@ function buildNarrative(
   return parts.join(" ") || "Positioning data available. No extreme concentration detected.";
 }
 
-/* ─── Component ──────────────────────────────────────── */
-
 export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null, staleAsOf = null }: CtaBriefingProps) {
   const main = tables.main ?? [];
   const commodity = tables.commodity ?? [];
@@ -333,7 +327,6 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null, 
         padding: "12px 16px 14px",
       }}
     >
-      {/* ── Header row ── */}
       <div className="cta-briefing-header">
         {staleAsOf ? (
           <span className="cta-briefing-stale-posture" data-testid="cta-stale-posture">
@@ -357,7 +350,6 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null, 
         )}
       </div>
 
-      {/* ── Metric cards ── */}
       <div className="cta-briefing-metrics">
         <div className="cta-briefing-metric">
           <div className="cta-briefing-metric-label">SPX 3M PCTILE</div>
@@ -405,10 +397,8 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null, 
         )}
       </div>
 
-      {/* ── Narrative ── */}
       <p className="cta-briefing-narrative">{narrative}</p>
 
-      {/* ── Signal tags ── */}
       {tags.length > 0 && (
         <div className="cta-briefing-tags">
           {tags.map((t) => (

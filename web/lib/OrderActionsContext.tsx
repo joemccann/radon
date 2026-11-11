@@ -297,8 +297,6 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     }
   }, [pushNotification, startModifyPoll, pushOrdersData]);
 
-  /* ── Shared infrastructure ──────────────────────────── */
-
   const drainNotifications = useCallback((): Notification[] => {
     if (notificationsRef.current.length === 0) return [];
     const batch = notificationsRef.current;

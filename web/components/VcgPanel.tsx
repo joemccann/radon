@@ -29,8 +29,6 @@ type VcgPanelProps = {
   marketState?: MarketState;
 };
 
-/* ─── Helpers ─────────────────────────────────────────── */
-
 function fmtZ(v: number | null): string {
   if (v == null) return "---";
   return v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
@@ -132,8 +130,6 @@ function vvixSeverityDesc(sev: string): string {
   }
 }
 
-/* ─── Sortable history ───────────────────────────────── */
-
 type VcgSortCol = "date" | "vcg" | "vcg_adj" | "residual" | "beta1" | "beta2" | "vix" | "vvix" | "credit";
 type SortDir = "asc" | "desc";
 
@@ -157,8 +153,6 @@ function sortHistory(
   });
   return sorted;
 }
-
-/* ─── Main component ─────────────────────────────────── */
 
 export default function VcgPanel({ marketState }: VcgPanelProps) {
   const { data, loading, error, lastSync } = useVcg(marketState ?? null);
@@ -279,7 +273,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
   return (
     <>
       {error && <RequestError error={error} retainedData />}
-      {/* ── Signal strip ──────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -288,26 +281,22 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             <InfoTooltip text="Volatility-Credit Gap: detects divergence between the vol complex (VIX/VVIX) and credit markets (HYG). Signals: RISK_OFF (tier 1–2), EDR (early divergence), BOUNCE (counter-signal), NORMAL." />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-            {/* RISK-OFF */}
             {sig.ro === 1 && (
               <span className="pill pill--solid" style={{ background: "var(--fault)" }}>
                 <AlertTriangle size={10} style={{ marginRight: "3px" }} />
                 RISK-OFF
               </span>
             )}
-            {/* EDR (only when not already RISK-OFF) */}
             {sig.edr === 1 && sig.ro !== 1 && (
               <span className="pill pill--solid" style={{ background: "var(--warning)", fontWeight: 700 }}>
                 EDR
               </span>
             )}
-            {/* Tier badge */}
             {sig.tier != null && (
               <span className="pill pill--solid" style={{ background: tierColor(sig.tier) }}>
                 T{sig.tier}
               </span>
             )}
-            {/* Bounce */}
             {sig.bounce === 1 && (
               <span className="pill pill--solid" style={{ background: "var(--signal-core)", fontWeight: 700 }}>
                 <TrendingUp size={10} style={{ marginRight: "3px" }} />
@@ -374,7 +363,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
         </div>
       </div>
 
-      {/* ── Signal Detail + Attribution ───────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -385,9 +373,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
         </div>
 
         <div className="metrics-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          {/* Left: Tier + VVIX severity */}
           <div className="metric-card" style={{ padding: "12px 16px" }}>
-            {/* Severity tier row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "8px", borderBottom: "1px solid var(--line-grid)" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
                 Severity Tier
@@ -407,7 +393,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
                 {tierLabel(sig.tier)}
               </span>
             </div>
-            {/* VVIX severity row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--line-grid)" }}>
               <div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
@@ -431,7 +416,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
                 {sig.vvix_severity}
               </span>
             </div>
-            {/* EDR / Bounce rows */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>EDR</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", fontWeight: 700, color: sig.edr === 1 ? "var(--warning)" : "var(--text-muted)" }}>
@@ -446,7 +430,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             </div>
           </div>
 
-          {/* Right: Attribution bars */}
           <div className="metric-card" style={{ padding: "12px 16px" }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-muted)", marginBottom: "8px" }}>
               Attribution
@@ -473,7 +456,6 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
                 <span style={{ color: "var(--warn-text)", marginLeft: "8px" }}>SIGN REVERSED</span>
               )}
             </div>
-            {/* VVIX level */}
             <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", marginTop: "6px" }}>
               VVIX {fmtNum(sig.vvix)} · VIX {fmtNum(sig.vix)}
             </div>

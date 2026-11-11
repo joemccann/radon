@@ -43,7 +43,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -64,7 +63,6 @@ from utils.ib_preflight import (
     ib_auth_state as _ib_auth_state,
 )
 
-# ── constants ─────────────────────────────────────────────────────
 ALL_TICKERS = ["VIX", "VVIX", "SPY", "COR1M"]
 
 MA_WINDOW = 100        # SPX moving average window
@@ -89,10 +87,6 @@ CBOE_VIX_HISTORY_CSV_URL = "https://cdn.cboe.com/api/global/us_indices/daily_pri
 CBOE_VVIX_HISTORY_CSV_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VVIX_History.csv"
 CBOE_POST_CLOSE_VERIFICATION_MINUTES = 20
 
-
-# ══════════════════════════════════════════════════════════════════
-# Data Fetching
-# ══════════════════════════════════════════════════════════════════
 
 def _valid_quote_value(value: Any) -> Optional[float]:
     """Return a positive finite quote value, else None."""
@@ -763,9 +757,7 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
     return aligned, common_dates
 
 
-# ══════════════════════════════════════════════════════════════════
 # COR1M Implied Correlation
-# ══════════════════════════════════════════════════════════════════
 
 def cor1m_level_and_change(
     cor1m_values: np.ndarray,
@@ -794,16 +786,12 @@ def cor1m_level_and_change(
     return current, change
 
 
-# ══════════════════════════════════════════════════════════════════
 # Realized Volatility (shared implementation, see utils/realized_vol.py)
-# ══════════════════════════════════════════════════════════════════
 
 from utils.realized_vol import compute_realized_vol  # noqa: E402
 
 
-# ══════════════════════════════════════════════════════════════════
 # CRI Component Scoring (each 0-25)
-# ══════════════════════════════════════════════════════════════════
 
 def score_vix_component(vix: float, vix_5d_roc: float) -> float:
     """Score VIX component (0-25).
@@ -880,10 +868,6 @@ def score_momentum_component(spx_distance_pct: float) -> float:
     return float(np.clip(abs(spx_distance_pct) / 10.0 * 25.0, 0.0, 25.0))
 
 
-# ══════════════════════════════════════════════════════════════════
-# Composite CRI
-# ══════════════════════════════════════════════════════════════════
-
 def cri_level(score: float) -> str:
     """Classify CRI score into signal level."""
     if score < 25:
@@ -923,10 +907,6 @@ def compute_cri(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# CTA Exposure Model
-# ══════════════════════════════════════════════════════════════════
-
 def cta_exposure_model(
     realized_vol: float,
     vol_target: float = CTA_VOL_TARGET,
@@ -957,10 +937,6 @@ def cta_exposure_model(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# Crash Trigger
-# ══════════════════════════════════════════════════════════════════
-
 def crash_trigger(
     spx_below_ma: bool,
     realized_vol: float,
@@ -990,10 +966,6 @@ def crash_trigger(
         },
     }
 
-
-# ══════════════════════════════════════════════════════════════════
-# Full Analysis
-# ══════════════════════════════════════════════════════════════════
 
 def run_analysis(
     aligned: Dict[str, np.ndarray],
@@ -1149,10 +1121,6 @@ def run_analysis(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# Console Summary
-# ══════════════════════════════════════════════════════════════════
-
 def print_summary(result: Dict[str, Any], market_open: bool) -> None:
     """Print human-readable CRI summary to stderr."""
     market_note = "" if market_open else "  [Market closed — using last available data]"
@@ -1220,10 +1188,6 @@ def print_summary(result: Dict[str, Any], market_open: bool) -> None:
     print(f"\n{'='*60}\n", file=sys.stderr)
 
 
-# ══════════════════════════════════════════════════════════════════
-# HTML Report
-# ══════════════════════════════════════════════════════════════════
-
 def _pctile_tone_class(p: Optional[int]) -> str:
     """Tone for a 3M percentile cell; neutral when there is no percentile."""
     if p is None:
@@ -1263,7 +1227,6 @@ def generate_html_report(
 
     body_parts = []
 
-    # ── Header ──
     body_parts.append(f"""
 <header class="header">
   <div>
@@ -1277,7 +1240,6 @@ def generate_html_report(
   </div>
 </header>""")
 
-    # ── CRI Score Bar ──
     score = cri["score"]
     bar_color = "var(--positive)" if score < 25 else "var(--warning)" if score < 75 else "var(--negative)"
     body_parts.append(f"""
@@ -1334,7 +1296,6 @@ def generate_html_report(
   </div>
 </div>""")
 
-    # ── CRI Component Breakdown ──
     body_parts.append("""<div class="section-header">CRI Component Breakdown</div>""")
     components = cri["components"]
     body_parts.append("""<div class="panel"><div class="panel-body">""")
@@ -1352,7 +1313,6 @@ def generate_html_report(
   </div>""")
     body_parts.append("""</div></div>""")
 
-    # ── CTA Exposure Model ──
     body_parts.append("""<div class="section-header">CTA Exposure Model</div>""")
     body_parts.append(f"""
 <div class="grid-2">
@@ -1388,7 +1348,6 @@ def generate_html_report(
   </div>
 </div>""")
 
-    # ── MenthorQ CTA Positioning ──
     menthorq = result.get("menthorq_cta")
     if menthorq and menthorq.get("tables"):
         body_parts.append(f"""<div class="section-header">MenthorQ CTA Positioning <span style="font-size:10px;color:var(--text-muted);font-weight:400">(institutional data — {_esc(menthorq.get('date', '---'))})</span></div>""")
@@ -1511,7 +1470,6 @@ def generate_html_report(
   </div>
 </div>""")
 
-    # ── Crash Trigger Conditions ──
     body_parts.append("""<div class="section-header">Crash Trigger Conditions (All Must Fire)</div>""")
     conds = trigger["conditions"]
     body_parts.append("""<div class="panel"><table>
@@ -1530,7 +1488,6 @@ def generate_html_report(
         )
     body_parts.append("</tbody></table></div>")
 
-    # ── Interpretation Callout ──
     if trigger["triggered"]:
         body_parts.append(f"""
 <div class="callout negative">
@@ -1586,7 +1543,6 @@ def generate_html_report(
 
     body_parts.append("</tbody></table></div>")
 
-    # ── Footer ──
     body_parts.append(f"""
 <div class="footer">
   <strong>CRI Scanner — Crash Risk Index</strong><br>
@@ -1604,10 +1560,6 @@ def generate_html_report(
     html = html.replace("{{BODY}}", body)
     return html
 
-
-# ══════════════════════════════════════════════════════════════════
-# Market Hours Check
-# ══════════════════════════════════════════════════════════════════
 
 def _now_et(now: Optional[datetime] = None) -> datetime:
     import zoneinfo
@@ -1640,10 +1592,6 @@ def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
     minutes = now_et.hour * 60 + now_et.minute
     return minutes >= (16 * 60 + CBOE_POST_CLOSE_VERIFICATION_MINUTES)
 
-
-# ══════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════
 
 # One in-flight cri_scan per host. The timer runs this script on the HOST
 # (radon-refresh.service) while /regime/scan runs it INSIDE the app container,

@@ -1,8 +1,6 @@
 import type { PriceData } from "@/lib/pricesProtocol";
 import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 
-/* ─── Types ─── */
-
 export type OrderLeg = {
   id: string;
   action: "BUY" | "SELL";
@@ -13,8 +11,6 @@ export type OrderLeg = {
   limitPrice: number | null;
   priceManuallySet?: boolean;
 };
-
-/* ─── Expiry formatting ─── */
 
 export function formatExpiry(expiry: string): string {
   if (expiry.length !== 8) return expiry;
@@ -34,8 +30,6 @@ export function daysToExpiry(expiry: string): number {
   now.setHours(0, 0, 0, 0);
   return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
-
-/* ─── Structure detection ─── */
 
 export function detectStructure(legs: OrderLeg[]): string {
   if (legs.length === 0) return "";
@@ -196,8 +190,6 @@ export function normalizeComboOrder(legs: OrderLeg[]): NormalizedComboOrder {
   };
 }
 
-/* ─── Net price calculation ─── */
-
 export function computeNetPrice(legs: OrderLeg[], prices: Record<string, PriceData>): number | null {
   let net = 0;
   for (const leg of legs) {
@@ -300,8 +292,6 @@ export function computeNetOptionQuote(
   return { bid, ask, mid, asOf: oldestQuoteTimestamp(quoteAges) };
 }
 
-/* ─── ATM strike finder ─── */
-
 export function findAtmStrike(strikes: number[], currentPrice: number): number | null {
   if (strikes.length === 0) return null;
   let closest = strikes[0];
@@ -315,8 +305,6 @@ export function findAtmStrike(strikes: number[], currentPrice: number): number |
   }
   return closest;
 }
-
-/* ─── Visible strikes around ATM ─── */
 
 /** Sentinel value for strikesPerSide meaning "show every strike in the chain".
  * Pass to getVisibleStrikes to bypass the ATM-centered window entirely.

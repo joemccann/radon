@@ -54,8 +54,6 @@ body { font-family: 'Inter', sans-serif; background: #0a0f14; color: #e2e8f0; wi
 """
 
 
-# ── Data loading ──────────────────────────────────────────────────
-
 def load_gex() -> dict:
     """Load GEX data from cache."""
     if CACHE_PATH.exists():
@@ -67,8 +65,6 @@ def load_gex() -> dict:
           file=sys.stderr)
     sys.exit(1)
 
-
-# ── Helpers ───────────────────────────────────────────────────────
 
 def fmt_price(v) -> str:
     if v is None:
@@ -111,8 +107,6 @@ def regime_label(direction: str) -> str:
 def gex_color(net_gex) -> str:
     return "#05AD98" if (net_gex or 0) >= 0 else "#E85D6C"
 
-
-# ── Card wrapper ─────────────────────────────────────────────────
 
 def card_wrap(title: str, body: str, card_n: int, total: int, ds: str) -> str:
     try:
@@ -509,8 +503,6 @@ def card4_profile(data: dict, ds: str) -> str:
     return card_wrap("GEX Profile", body, 4, 4, ds)
 
 
-# ── Tweet text ────────────────────────────────────────────────────
-
 def build_tweet(data: dict, ds: str) -> str:
     ticker  = data.get("ticker", "SPY")
     spot    = data.get("spot", 0)
@@ -549,8 +541,6 @@ def build_tweet(data: dict, ds: str) -> str:
     ]
     return "\n".join(lines)
 
-
-# ── Preview HTML ──────────────────────────────────────────────────
 
 def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
     card_labels = [
@@ -646,10 +636,6 @@ function copyImg(id,btn){{
 </script>
 </body></html>"""
 
-
-
-
-# ── Main ──────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Generate GEX X share report")

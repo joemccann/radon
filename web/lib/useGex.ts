@@ -121,14 +121,10 @@ export type GexData = {
   source_delta: SourceDelta | null;
 };
 
-/* ─── Staleness check ────────────────────────────────────────── */
-
 export function needsGexRetry(data: GexData | null | undefined): boolean {
   if (!data) return true;
   return isGexDataStale(data);
 }
-
-/* ─── Hook ───────────────────────────────────────────────────── */
 
 const GEX_SYNC_CONFIG = {
   endpoint: "/api/gex",

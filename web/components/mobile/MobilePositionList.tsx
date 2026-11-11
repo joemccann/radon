@@ -220,7 +220,6 @@ const PositionCard = memo(function PositionCard({ pos, prices, showExpiry, riskF
         ariaLabel={`${pos.ticker} ${pos.structure}`}
         ariaExpanded={expanded}
       >
-        {/* Title row: ticker + direction pill + qty | P&L + chevron */}
         <div className="mobile-card__title-row">
           <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -260,7 +259,6 @@ const PositionCard = memo(function PositionCard({ pos, prices, showExpiry, riskF
           </div>
         </div>
 
-        {/* Quote strip: live last price (+trend arrow) and underlying spot */}
         <div className="mobile-card__quote">
           <span className="mobile-card__quote-seg" data-testid={`mobile-position-${pos.ticker}-last`}>
             <span className="mobile-card__quote-k">Last</span>
@@ -280,7 +278,6 @@ const PositionCard = memo(function PositionCard({ pos, prices, showExpiry, riskF
           )}
         </div>
 
-        {/* 2x2 MetricCell grid — the scan set */}
         <div className="mobile-card__grid">
           <MetricCell label="MV" value={mv != null ? fmtUsd(mv) : "—"} />
           <MetricCell

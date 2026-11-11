@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -49,7 +48,6 @@ from utils import uw_budget  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 
-# ── constants ─────────────────────────────────────────────────────
 VOL_CONE_JSON = _PROJECT_DIR / "data" / "vol_cone.json"
 # R-176: vol_cone_history is append-only and unbounded; read it in pages.
 HISTORY_READ_PAGE_ROWS = 1000
@@ -189,8 +187,6 @@ def session_ivs(rows: list[dict[str, Any]], spot: float) -> Optional[dict[str, f
     }
 
 
-# ── monthly expiry selection ──────────────────────────────────────
-
 def third_friday(year: int, month: int) -> date:
     """Third Friday of the month (standard monthly option expiration)."""
     first_friday_offset = (4 - date(year, month, 1).weekday()) % 7
@@ -217,8 +213,6 @@ def select_target_expiries(as_of: date) -> list[date]:
         raise ValueError(f"no monthly expiry in [{_MIN_DTE}, {_MAX_DTE}] DTE as of {as_of}")
     return candidates
 
-
-# ── cone stats + regime ───────────────────────────────────────────
 
 def percentile(values: list[float], p: float) -> float:
     """Linear order-statistic percentile on sorted ``values``."""
@@ -399,8 +393,6 @@ class _DefaultClient:
             raise ValueError(f"no spot close for {ticker}")
         return spot
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _series_point(row: dict[str, Any]) -> dict[str, Any]:
     point = {
@@ -624,8 +616,6 @@ def _scan_time_iso(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-# ── session fetching ──────────────────────────────────────────────
-
 def _missing_sessions(stored_dates: set[str], last_completed: str) -> list[str]:
     """Trading days in the 80-session lookback not yet stored, ascending."""
     anchor = datetime.strptime(last_completed, "%Y-%m-%d").replace(hour=16, minute=30)
@@ -688,8 +678,6 @@ def _backfill_ticker(
         )
     return new_rows
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def _monotonic() -> float:
     return time.monotonic()
@@ -803,8 +791,6 @@ def run(
     _write_json_cache(payload)
     return payload
 
-
-# ── intraday live sample ──────────────────────────────────────────
 
 def _uw_remaining() -> int:
     try:

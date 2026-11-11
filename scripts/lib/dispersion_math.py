@@ -227,8 +227,6 @@ def _metric_stats(series: list[dict[str, Any]], m_field: str, z_field: str) -> d
     }
 
 
-# ── plausibility guard ────────────────────────────────────────────
-
 def ensure_plausible_rows(rows: list[dict[str, Any]], *, backfill: bool) -> None:
     """Raise ValueError on any row outside the C.1 bands; every row is checked."""
     if not rows:

@@ -161,8 +161,6 @@ async function fetchFromIB(symbols: string[], token: string | null): Promise<Rec
   });
 }
 
-/* ── Source outcomes ────────────────────────────────────── */
-
 /**
  * A source either resolved a close, answered that it has none, could not be
  * reached, or was skipped because it is not configured. Only a definitive
@@ -178,8 +176,6 @@ type SourceOutcome =
 
 const MISSING: SourceOutcome = { status: "missing" };
 const UNAVAILABLE: SourceOutcome = { status: "unavailable" };
-
-/* ── UW source ──────────────────────────────────────────── */
 
 async function fetchFromUW(symbol: string): Promise<SourceOutcome> {
   try {
@@ -204,8 +200,6 @@ async function fetchFromUW(symbol: string): Promise<SourceOutcome> {
     return UNAVAILABLE;
   }
 }
-
-/* ── Yahoo Finance source ───────────────────────────────── */
 
 /**
  * "YYYY-MM-DD" formatted in America/New_York. Used to filter Yahoo's
@@ -290,8 +284,6 @@ async function fetchFromYahoo(symbol: string): Promise<SourceOutcome> {
   }
 }
 
-/* ── Combined fetcher with cache ────────────────────────── */
-
 async function getPreviousClose(symbol: string): Promise<number | null> {
   const key = cacheKey(symbol);
   if (cache.has(key)) return cache.get(key)!;
@@ -318,8 +310,6 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
   if (answered && !failed) rememberMiss(key, now);
   return null;
 }
-
-/* ── Route handler ──────────────────────────────────────── */
 
 export const radonCapability = "read";
 

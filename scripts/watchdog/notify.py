@@ -45,11 +45,6 @@ Severity routing for the Pushover channel (DUR-14 escalation)
    in ``DIGEST_STATE_PATH``, flushed by the daily watchdog bucket via
    :func:`flush_daily_digest`).
 
-The Resend email channel was DELETED 2026-06-12: ``enabled_channels()``
-registered it but no emitter ever existed (the startup log claimed a
-channel that did not exist), and no RESEND_API_KEY is present in any
-environment (production `/etc/radon/env`, the retired `radon-cloud/.env`,
-unit files, laptop .env / web/.env / ~/.zshrc: all checked, zero matches).
 
 If no external channel is configured a one-line warning prints on
 startup so the operator notices alerts will only land in the table.
@@ -92,8 +87,6 @@ PUSHOVER_EMERGENCY_RETRY_SECS = 300
 PUSHOVER_EMERGENCY_EXPIRE_SECS = 3600
 
 
-# ── env-driven channel registry ─────────────────────────────────────
-
 PUSHOVER_ENV_VARS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
 
@@ -127,8 +120,6 @@ def log_startup_warning() -> None:
         sys.stderr.write(f"[watchdog] channels enabled: {sorted(channels)}\n")
 
 
-# ── HTTP seam (mocked in tests) ─────────────────────────────────────
-
 def _http_post(url: str, payload: dict, headers: Optional[dict] = None) -> tuple[int, bytes]:
     """Thin urllib wrapper so tests can monkeypatch a single function.
     Returns (status_code, body). Raises on transport-level failure.
@@ -144,8 +135,6 @@ def _http_post(url: str, payload: dict, headers: Optional[dict] = None) -> tuple
     except urllib_error.HTTPError as exc:
         return exc.code, exc.read() if hasattr(exc, "read") else b""
 
-
-# ── per-channel emitters ────────────────────────────────────────────
 
 _EMOJI = {"P1": "🚨", "P2": "❌", "P3": "⚠️"}
 
@@ -411,8 +400,6 @@ def heartbeat_ok(*, bucket: str, now) -> None:
     _write_dispatcher_health(now=now, dispatcher_error=None, bucket=bucket)
 
 
-# ── once-daily P2/P3 digest (DUR-14) ───────────────────────────────
-#
 # Non-P1 outcomes used to land in journalctl + service_health only —
 # operationally invisible unless the operator went looking. They now
 # batch into a small JSON state file and the DAILY watchdog bucket
@@ -465,7 +452,6 @@ def _save_digest_state(state: dict) -> None:
 
 
 def _enqueue_digest(outcome: CheckOutcome) -> None:
-    """Best-effort: append a non-P1 outcome to the pending digest."""
     try:
         with _digest_state_lock():
             state = _load_digest_state()
@@ -546,8 +532,6 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
         log.info("daily digest dispatched (%d entries)", len(pending))
         return None
 
-
-# ── public entry point ─────────────────────────────────────────────
 
 def _mark_notified_best_effort(
     *, service: str, severity: str, now, kind: Optional[str] = None

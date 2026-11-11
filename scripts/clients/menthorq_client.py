@@ -55,9 +55,6 @@ load_env_file(Path(__file__).resolve().parent.parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════════════════════════════
-# Constants
-# ══════════════════════════════════════════════════════════════════════
 
 BASE_URL = "https://menthorq.com/account/"
 LOGIN_URL = "https://menthorq.com/login/"
@@ -183,11 +180,6 @@ Rules:
 - Return ONLY the JSON array, no markdown, no explanation"""
 
 
-# ══════════════════════════════════════════════════════════════════════
-# Exception Hierarchy
-# ══════════════════════════════════════════════════════════════════════
-
-
 class MenthorQError(Exception):
     """Base exception for all MenthorQ client errors."""
 
@@ -202,11 +194,6 @@ class MenthorQNotFoundError(MenthorQError):
 
 class MenthorQExtractionError(MenthorQError):
     """Vision or HTML parse failure."""
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Client
-# ══════════════════════════════════════════════════════════════════════
 
 
 class MenthorQClient:
@@ -285,8 +272,6 @@ class MenthorQClient:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    # ── credentials ────────────────────────────────────────────────
-
     def _restore_session(self) -> bool:
         """Reuse a stored authenticated browser state when still valid."""
         if not self._storage_state_path or not self._storage_state_path.exists():
@@ -349,8 +334,6 @@ class MenthorQClient:
 
     # Back-compat alias — internal callers still reach in via the underscore.
     _persist_storage_state = persist_storage_state
-
-    # ── login ──────────────────────────────────────────────────────
 
     def _login(self) -> None:
         """Authenticate to MenthorQ via WordPress login form."""
@@ -534,8 +517,6 @@ class MenthorQClient:
             encoding="utf-8",
         )
 
-    # ── navigation ─────────────────────────────────────────────────
-
     def _navigate(self, params: Dict[str, str]) -> Page:
         """Build MenthorQ URL from params, navigate, wait for load.
 
@@ -561,11 +542,7 @@ class MenthorQClient:
 
         return self._page
 
-    # ══════════════════════════════════════════════════════════════
     # Phase 1: Core Methods
-    # ══════════════════════════════════════════════════════════════
-
-    # ── EOD ─────────────────────────────────────────────────────
 
     def get_eod(self, ticker: str, date: str) -> dict:
         """Fetch end-of-day data for a ticker via HTML scraping.
@@ -597,8 +574,6 @@ class MenthorQClient:
             )
         self.persist_storage_state()
         return result
-
-    # ── CTA ─────────────────────────────────────────────────────
 
     def get_cta(self, date: str) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch CTA positioning data via S3 image download + Vision extraction.
@@ -669,8 +644,6 @@ class MenthorQClient:
 
         self.persist_storage_state()
         return tables
-
-    # ── Screeners ──────────────────────────────────────────────
 
     def get_screener(self, commands: str) -> List[Dict[str, Any]]:
         """Fetch screener results via HTML table scraping.
@@ -842,8 +815,6 @@ class MenthorQClient:
         self.persist_storage_state()
         return results
 
-    # ── Summary ──────────────────────────────────────────────────
-
     def get_summary(self, category: str) -> List[Dict[str, Any]]:
         """Fetch summary page data via HTML table scraping.
 
@@ -872,8 +843,6 @@ class MenthorQClient:
         rows = self._scrape_tables(self._page)
         self.persist_storage_state()
         return rows
-
-    # ── Forex Levels ─────────────────────────────────────────────
 
     def get_forex_levels(self) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch forex gamma levels and blindspot data via text card scraping.
@@ -937,11 +906,7 @@ class MenthorQClient:
         self.persist_storage_state()
         return result
 
-    # ══════════════════════════════════════════════════════════════
     # Phase 2: Dashboard Images + Asset Lists
-    # ══════════════════════════════════════════════════════════════
-
-    # ── Dashboard Images ─────────────────────────────────────────
 
     def get_dashboard_image(
         self,
@@ -1054,8 +1019,6 @@ class MenthorQClient:
         self.persist_storage_state()
         return png
 
-    # ── Intraday ─────────────────────────────────────────────────
-
     def get_intraday(self) -> List[Dict[str, Any]]:
         """Fetch intraday data via HTML table scraping.
 
@@ -1070,8 +1033,6 @@ class MenthorQClient:
         rows = self._scrape_tables(self._page)
         self.persist_storage_state()
         return rows
-
-    # ── Futures ──────────────────────────────────────────────────
 
     def get_futures_list(self) -> List[Dict[str, Any]]:
         """Fetch list of futures instruments via HTML table scraping.
@@ -1130,8 +1091,6 @@ class MenthorQClient:
         self.persist_storage_state()
         return rows
 
-    # ── Forex ────────────────────────────────────────────────────
-
     def get_forex_list(self) -> List[Dict[str, Any]]:
         """Fetch list of forex instruments via HTML table scraping.
 
@@ -1166,8 +1125,6 @@ class MenthorQClient:
         self.persist_storage_state()
         return rows
 
-    # ── Crypto ───────────────────────────────────────────────────
-
     def get_crypto_list(self) -> List[Dict[str, Any]]:
         """Fetch list of crypto instruments via HTML table scraping.
 
@@ -1201,10 +1158,6 @@ class MenthorQClient:
         rows = self._scrape_tables(self._page)
         self.persist_storage_state()
         return rows
-
-    # ══════════════════════════════════════════════════════════════
-    # Low-Level Extraction Methods
-    # ══════════════════════════════════════════════════════════════
 
     def _scrape_tables(self, page: Page) -> List[Dict[str, Any]]:
         """Extract all HTML tables from page into list of dicts.

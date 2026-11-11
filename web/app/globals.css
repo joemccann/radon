@@ -895,7 +895,6 @@ body {
   }
 }
 
-/* ─── StarToggle ─── */
 .star-toggle {
   display: inline-flex;
   align-items: center;
@@ -947,7 +946,6 @@ body {
   letter-spacing: 0.08em;
 }
 
-/* ─── Profile surface ─── */
 .profile-surface {
   display: flex;
   flex-direction: column;
@@ -1657,8 +1655,6 @@ body {
   overflow-y: auto;
   padding: 20px;
 }
-
-/* ─── Watchlist standalone workspace ───────────────────── */
 
 @media (min-width: 900px) {
   .app-shell .content:has(> .watchlist-shell) {
@@ -6410,15 +6406,11 @@ td.negative, .negative {
   cursor: not-allowed;
 }
 
-/* ── Cell utility classes ── */
-
 .cell-muted { opacity: 0.7; font-size: 0.85em; }
 /* Leg descriptions sit in the narrow Structure column now that the contract
    count moved to the Qty column, so keep them on one line. */
 .cell-indent { padding-left: 1.5rem; white-space: nowrap; }
 .section-message { padding: 12px 16px; }
-
-/* ─── Leg disclosure toggle ─── */
 
 .ticker-with-chevron {
   display: flex;
@@ -6537,8 +6529,6 @@ tr.leg-row td {
     opacity: 0.7;
   }
 }
-
-/* ── Connection Banner ── */
 
 .connection-banner {
   display: flex;
@@ -6669,8 +6659,6 @@ tr.leg-row td {
   }
 }
 
-/* ── Toasts ── */
-
 .toast-container {
   position: fixed;
   bottom: 20px;
@@ -6749,8 +6737,6 @@ tr.leg-row td {
   transition-duration: 150ms;
   pointer-events: none;
 }
-
-/* ── Modal ── */
 
 /* Pointer-only presence for research panels and the Columns menu. The hidden
    exit is inert immediately; keyboard activation never starts a transition. */
@@ -7029,8 +7015,6 @@ tr.leg-row td {
 @media (hover: hover) and (pointer: fine) {
   .trial-expired-cta:hover { filter: brightness(1.08); }
 }
-
-/* ── Order Action Buttons ── */
 
 .actions-th {
   font-family: var(--font-mono);
@@ -7483,8 +7467,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   min-height: 28px;
 }
 
-/* ── Cancel Dialog ── */
-
 .cancel-dialog {
   display: flex;
   flex-direction: column;
@@ -7552,8 +7534,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   color: var(--text-secondary, var(--text-muted));
   min-width: 0;
 }
-
-/* ── Modify Dialog ── */
 
 .modify-order-modal .modal-content {
   width: 560px;
@@ -7941,8 +7921,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   }
 }
 
-/* ── Shared button styles ── */
-
 .btn-secondary {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -8017,8 +7995,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
-/* ── Pending Cancel Row ── */
 
 .row-pending-cancel {
   opacity: 0.45;
@@ -8110,8 +8086,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   border-top: 1px solid var(--border-dim);
 }
 
-/* ── Pagination ── */
-
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border-dim); font-family: var(--font-mono); font-size: 11px; }
 .pagination button { background: none; border: 1px solid var(--border-dim); color: var(--text-muted); padding: 4px 10px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
 @media (hover: hover) and (pointer: fine) {
@@ -8120,14 +8094,10 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .pagination button:disabled { opacity: 0.3; cursor: default; }
 .pagination .page-info { color: var(--text-muted); }
 
-/* ── Ticker Link ── */
-
 .ticker-link { cursor: pointer; transition: text-decoration 150ms; background: none; border: none; color: inherit; font: inherit; font-weight: 700; padding: 0; text-align: left; }
 @media (hover: hover) and (pointer: fine) {
   .ticker-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 }
-
-/* ── Ticker Detail Page ── */
 
 .ticker-detail-page { max-width: 1200px; padding: 16px 0; }
 .ticker-back-nav { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; cursor: pointer; padding: 0; margin-bottom: 12px; transition: color 150ms; }
@@ -8837,7 +8807,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .position-trade-leg-review ul { list-style: none; padding: 0; margin: 0; }
 .position-trade-leg-review li { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.6; overflow-wrap: anywhere; }
 
-/* ── Position-deck trade affordances ─────────────────────────────────────── */
 .position-trade-actions {
   display: flex;
   align-items: center;
@@ -9487,7 +9456,6 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .company-stats { display: flex; flex-direction: column; gap: 8px; }
 .company-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 
-/* ── Modify dialog pending row ── */
 .row-pending-modify {
   opacity: 0.6;
   background: repeating-linear-gradient(
@@ -9531,7 +9499,6 @@ body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
   -webkit-overflow-scrolling: touch;
 }
 
-/* ── PositionTable toolbar ── */
 .position-table-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -9539,7 +9506,6 @@ body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
   padding: 0 0 6px;
 }
 
-/* ── Columns visibility toggle ── */
 .columns-toggle {
   position: relative;
   display: inline-block;
@@ -9836,13 +9802,9 @@ body[data-mobile="true"] .columns-toggle {
   transform: none;
 }
 
-/* ── Smooth table row hover ── */
-
 tr {
   transition: background 150ms ease-in-out;
 }
-
-/* ── Chat message entrance ── */
 
 .chat-message {
   animation: chat-msg-in 200ms var(--ease-out);
@@ -9859,8 +9821,6 @@ tr {
   }
 }
 
-/* ── Streaming indicator pulse ── */
-
 .chat-message.streaming .chat-line {
   animation: stream-pulse 1.5s ease-in-out infinite;
 }
@@ -9869,8 +9829,6 @@ tr {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
-
-/* ── Seasonality Tab ── */
 
 .seasonality-tab { display: flex; flex-direction: column; gap: 16px; }
 
@@ -9925,8 +9883,6 @@ tr {
 .seasonality-cell-nodata { opacity: 0.4; }
 .seasonality-cell-nodata-text { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
 .seasonality-row-nodata { opacity: 0.5; }
-
-/* ── Instrument Detail Modal ── */
 
 .instrument-detail-modal .modal-content { width: 480px; }
 
@@ -10437,8 +10393,6 @@ tr {
   .leg-clickable:hover { color: var(--text-primary); opacity: 1; text-decoration: underline; text-underline-offset: 2px; }
 }
 
-/* ── Clickable Metric Cards ── */
-
 .metric-card-clickable { cursor: pointer; }
 .metric-card-clickable:focus-visible {
   outline: 1px solid var(--border-focus);
@@ -10454,8 +10408,6 @@ tr {
   font: inherit;
   appearance: none;
 }
-
-/* ── Account Metric Modal ── */
 
 .account-metric-modal .modal-content { width: 480px; max-width: 95vw; }
 .metric-definition-modal .modal-content { width: 540px; max-width: 95vw; }
@@ -10476,8 +10428,6 @@ tr {
   text-transform: uppercase;
   color: var(--text-muted);
 }
-
-/* ── Exposure Breakdown Modal ── */
 
 .exposure-breakdown-modal .modal-content { width: 860px; max-width: 95vw; }
 
@@ -12452,8 +12402,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   padding: 16px;
 }
 
-/* ── CtaBriefing ─────────────────────────────────────── */
-
 .cta-briefing {
   width: 100%;
 }
@@ -12550,8 +12498,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   padding: 2px 8px;
 }
 
-/* ── CTA Share Modal ─────────────────────────────────── */
-
 .cta-share-backdrop {
   position: fixed;
   inset: 0;
@@ -12621,8 +12567,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   background: var(--bg-base);
 }
 
-/* ── CTA Section Callout ─────────────────────────────── */
-
 .cta-section-callout {
   margin: 0 16px 8px;
   padding: 7px 10px;
@@ -12642,8 +12586,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 .cta-section-callout-body {
   color: var(--text-secondary);
 }
-
-/* ── CTA Flag Column ─────────────────────────────────── */
 
 .cta-td-flag {
   width: 24px;
@@ -12677,8 +12619,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   color: var(--signal-core-text);
   border-color: color-mix(in srgb, var(--signal-core) 40%, transparent);
 }
-
-/* ─────────────────────────────────────────────────────── */
 
 .cta-status-banner {
   margin: 12px 16px 0;
@@ -12827,8 +12767,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   }
 }
 
-/* ── Fills Modal ── */
-
 .fills-modal .modal-content { width: 860px; max-width: 95vw; }
 
 .fills-empty {
@@ -12915,10 +12853,8 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   opacity: 0.8;
 }
 
-/* ── PnlBreakdownModal ── */
 .pnl-breakdown-modal .modal-content { width: 860px; max-width: 95vw; }
 
-/* ── PnlBreakdownModal total row ── */
 .pb-total-row {
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
@@ -12943,8 +12879,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   padding: 0 4px;
   vertical-align: middle;
 }
-
-/* ─── Share PnL Button ─────────────────────────────────── */
 
 .share-pnl-button {
   display: inline-flex;
@@ -13073,8 +13007,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   border-radius: 4px;
   background: var(--bg-base);
 }
-
-/* ─── Options Chain ─── */
 
 .chain-expiry-bar {
   display: flex;
@@ -14285,8 +14217,6 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 12px;
 }
 
-/* ── Theta Harvester Scanner ───────────────────────────────────── */
-
 .scanner-page-shell {
   display: flex;
   flex-direction: column;
@@ -14588,8 +14518,6 @@ body[data-mobile="true"] .journal-pnl-strip__stat--range {
   margin-left: 0;
   width: 100%;
 }
-
-/* ─── GARCH Convergence scanner ───────────────────────── */
 
 .garch-scanner__header {
   gap: 8px;
@@ -15630,8 +15558,6 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   text-transform: uppercase;
 }
 
-/* ── GEX Panel ─────────────────────────────────────────── */
-
 .gex-panel .section-body {
   padding: 16px;
 }
@@ -15965,7 +15891,6 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   }
 }
 
-/* ── Gamma Rotation Gap Panel ─────────────────────────────────── */
 .grg-panel .section-body {
   padding: 16px;
 }
@@ -16985,7 +16910,6 @@ body[data-mobile="true"] .toast button {
   background: color-mix(in srgb, var(--signal-core) 10%, var(--bg-panel-raised));
 }
 
-/* ── Staleness treatment ── */
 .telemetry-rail--stale .rail-v {
   color: var(--warn-text);
 }
@@ -17032,8 +16956,6 @@ body[data-mobile="true"] .toast button {
   border-radius: 4px;
   pointer-events: none;
 }
-
-/* ── Mobile Card primitive ── */
 
 .mobile-card {
   background: var(--bg-panel-raised);
@@ -17458,8 +17380,6 @@ body[data-mobile="true"] .toast button {
   color: var(--accent-bg);
   border-color: var(--accent-bg);
 }
-
-/* ── Mobile Options Chain ladder ── */
 
 .mobile-chain {
   display: flex;
@@ -17978,8 +17898,6 @@ body[data-mobile="true"] .section-header-actions .pill {
   }
 }
 
-/* ── Mobile Ticker Search overlay ── */
-
 .mobile-search-root {
   position: fixed;
   inset: 0;
@@ -18076,8 +17994,6 @@ body[data-mobile="true"] .share-pnl-action {
   width: 100%;
 }
 
-/* ── Mobile chart sizing ── */
-
 body[data-mobile="true"] .cri-history-chart-surface {
   min-height: min(440px, 60vh);
 }
@@ -18137,8 +18053,6 @@ body[data-mobile="true"] .chart-tooltip {
   color: var(--negative);
   border-color: var(--negative);
 }
-
-/* ── Mobile chain pending-legs strip ── */
 
 .mobile-chain__pending-strip {
   position: fixed;
@@ -18233,8 +18147,6 @@ body[data-mobile="true"] .chart-tooltip {
 .mobile-chain__pending-clear:active {
   background: color-mix(in srgb, var(--negative) 12%, transparent);
 }
-
-/* ── Mobile order ticket ── */
 
 .mobile-ticket {
   display: flex;
@@ -18659,8 +18571,6 @@ body[data-mobile="true"] td.right {
   font-size: max(12px, 1em);
   font-variant-numeric: tabular-nums;
 }
-
-/* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
   position: fixed;
@@ -20198,10 +20108,8 @@ body[data-mobile="true"] td.right {
 .admin-log-target { color: var(--text-primary); }
 .admin-log-detail { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ============================================================ */
 /* /admin redesign: status bar, reliability strip, verdicts.    */
 /* Brand tokens + color-mix only; 4px max radius.               */
-/* ============================================================ */
 
 .admin-card-subhead {
   margin: -2px 0 12px;
@@ -20376,7 +20284,6 @@ body[data-mobile="true"] td.right {
   }
 }
 
-/* --- Services table verdict cell --- */
 .admin-verdict-cell {
   display: inline-flex;
   align-items: center;
@@ -20673,8 +20580,6 @@ body[data-mobile="true"] td.right {
   color: var(--text-secondary);
 }
 
-/* ── Mobile Design System Primitives ── */
-
 /* Touch target floor for pressable elements that the button rule misses. */
 .tap-target {
   min-height: var(--touch-min);
@@ -20961,8 +20866,6 @@ body[data-mobile="true"] td.right {
   color: var(--negative);
   flex-shrink: 0;
 }
-
-/* ── Mobile single-column teardown ── */
 
 body[data-mobile="true"] .dashboard-surface {
   display: flex;
@@ -21988,7 +21891,6 @@ body[data-mobile="true"] .alerts-rule__channel {
   display: none;
 }
 
-/* ── Preferences page ── */
 .preferences-shell {
   display: flex;
   flex-direction: column;
@@ -22562,8 +22464,6 @@ body[data-mobile="true"] .alerts-rule__channel {
 
 .vixcor-base-rate-table tbody tr:last-child th,
 .vixcor-base-rate-table tbody tr:last-child td { border-bottom: none; }
-
-/* ══ end VIX-COR regime tab ════════════════════════════════════════════ */
 
 .thinking-wait {
   display: inline-flex;

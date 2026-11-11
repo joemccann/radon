@@ -37,9 +37,6 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ---------------------------------------------------------------------------
-# PATHS
-# ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 
@@ -51,10 +48,6 @@ REPORTS_DIR = PROJECT_DIR / "reports"
 TODAY = date.today()
 TODAY_STR = TODAY.strftime('%Y-%m-%d')
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# DATA FETCHING
-# ═══════════════════════════════════════════════════════════════════════════
 
 def connect_ib(port: int = 4001, client_id: int = 55):
     """Connect to IB Gateway/TWS."""
@@ -246,10 +239,6 @@ def _flow_strength(ratio: float) -> float:
     return max(0, abs(ratio - 0.5) * 200)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# POSITION GROUPING
-# ═══════════════════════════════════════════════════════════════════════════
-
 def group_positions(positions: List[Dict]) -> List[Dict]:
     """Group raw position legs into logical structures."""
     by_sym_exp = defaultdict(list)
@@ -257,7 +246,6 @@ def group_positions(positions: List[Dict]) -> List[Dict]:
         key = (p['symbol'], p['expiry'] or 'stock')
         by_sym_exp[key].append(p)
 
-    # ── Covered call merge pass ──
     # Merge standalone short-call group with same-ticker stock group
     by_sym_exp = _merge_covered_call_groups_report(by_sym_exp)
 
@@ -400,10 +388,6 @@ def _multi_leg(sym, exp, legs):
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TRADE LOG
-# ═══════════════════════════════════════════════════════════════════════════
-
 def load_trade_log() -> Dict[str, Dict]:
     from db.readers import read_journal_trades
 
@@ -412,10 +396,6 @@ def load_trade_log() -> Dict[str, Dict]:
         if t.get('decision') == 'EXECUTED' and 'close_date' not in t
     }
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# HTML HELPERS
-# ═══════════════════════════════════════════════════════════════════════════
 
 def fc(val, sign=False):
     """Format currency."""
@@ -523,10 +503,6 @@ def check_thesis(symbol: str, trade: Dict, flow: Dict) -> Tuple[str, str]:
 
     return 'INTACT', f"Current: {current_dir} ({current_ratio:.0%})"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# HTML SECTION BUILDERS
-# ═══════════════════════════════════════════════════════════════════════════
 
 def build_metrics_html(account: Dict, grouped: List[Dict], trade_log: Dict) -> str:
     net_liq = float(account.get('NetLiquidation', 0))
@@ -710,10 +686,6 @@ def build_flow_html(grouped: List[Dict], flow_data: Dict) -> str:
     return '\n'.join(rows)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# REPORT ASSEMBLY
-# ═══════════════════════════════════════════════════════════════════════════
-
 def generate_report(grouped, account, flow_data, trade_log, timestamp, market_open) -> str:
     """Assemble the full report by filling in the template."""
     template = TEMPLATE_PATH.read_text()
@@ -763,10 +735,6 @@ def generate_report(grouped, account, flow_data, trade_log, timestamp, market_op
         html = html.replace(key, val)
     return html
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(description="Generate portfolio HTML report with live IB data")

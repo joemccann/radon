@@ -62,7 +62,6 @@ SERVICE_NAME = "journal-reconcile"
 # error heal_journal_reconcile_if_recovered may clear.
 GAP_CAUSE = "journal_gap"
 
-# Look back this many calendar days when scanning executed_orders.
 RECONCILE_WINDOW_DAYS = 7
 
 # Maximum gap rows to include in the detail payload (keeps service_health
@@ -71,7 +70,6 @@ _MAX_GAP_DETAIL = 5
 
 
 def _iso_date(dt_str: str) -> str:
-    """Normalise a datetime string to YYYY-MM-DD. Returns '' on failure."""
     try:
         return datetime.fromisoformat(dt_str.replace("Z", "+00:00")).strftime("%Y-%m-%d")
     except Exception:
@@ -168,7 +166,6 @@ def _build_journal_coverage(
 
 
 def _executed_orders_in_window(db: Any, since_ts: str) -> list[dict[str, Any]]:
-    """Fetch executed_orders rows with fill_time >= since_ts."""
     cursor = db.execute(
         """
         SELECT exec_id, perm_id, payload, fill_time, recorded_at
@@ -221,7 +218,6 @@ def _extract_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
         right = ""
     # expiry may be ISO or compact — normalise to compact YYYYMMDD for comparison
     expiry_raw = str(contract.get("expiry") or contract.get("lastTradeDateOrContractMonth") or "")
-    # compact form: strip dashes if ISO
     expiry = expiry_raw.replace("-", "") if len(expiry_raw) == 10 and "-" in expiry_raw else expiry_raw
     return ticker, strike, right, expiry
 
@@ -275,7 +271,6 @@ def _find_gaps(
             continue
         if item["exec_id"] in exec_ids:
             continue
-        # Fallback: any journal row for the same contract within ±1 day
         if _has_nearby_journal_row(item, contract_dates):
             continue
         gaps.append(item)
@@ -329,8 +324,6 @@ class JournalReconcileHandler(BaseHandler):
             )
             return
         super()._ensure_cycle_heartbeat(result, started_at=started_at)
-
-    # -- helpers -----------------------------------------------------------
 
     @staticmethod
     def _open_db() -> Any:

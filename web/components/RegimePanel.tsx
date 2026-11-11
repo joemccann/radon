@@ -126,8 +126,6 @@ type RegimePanelProps = {
   marketState?: MarketState;
 };
 
-/* ─── Helpers ────────────────────────────────────────── */
-
 function levelColor(level: CriLevel): string {
   switch (level) {
     case "LOW": return "var(--positive)";
@@ -151,8 +149,6 @@ function fmtSigned(v: number | null | undefined, decimals = 2): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return `${v >= 0 ? "+" : ""}${v.toFixed(decimals)}`;
 }
-
-/* ─── Component Bar ──────────────────────────────────── */
 
 const COMPONENT_TOOLTIPS: Record<string, string> = {
   VIX: "CBOE Volatility Index: 30-day implied vol of SPX. Score rises as VIX exceeds 20 (elevated) and 30 (high). Extreme spikes indicate tail-risk hedging by institutional players.",
@@ -180,8 +176,6 @@ function ComponentBar({ label, score, live }: { label: string; score: number; li
   );
 }
 
-/* ─── Trigger Row ────────────────────────────────────── */
-
 function TriggerRow({ label, met, value, live }: { label: string; met: boolean; value: string; live: boolean }) {
   return (
     <div className="regime-trigger-row">
@@ -194,8 +188,6 @@ function TriggerRow({ label, met, value, live }: { label: string; met: boolean; 
     </div>
   );
 }
-
-/* ─── Main Panel ─────────────────────────────────────── */
 
 export default function RegimePanel({
   prices,
@@ -301,7 +293,6 @@ export default function RegimePanel({
     setVvixLastTs(new Date().toLocaleTimeString());
   }, [liveVvix]);
 
-  // ── Intraday realized vol ────────────────────────────────────────────────
   // Replace today's last close in the 21-day SPY series with the live price,
   // then recompute: std(log_returns) * sqrt(252) * 100  (same as cri_scan.py).
   // When the market is closed, skip live computation — use data?.realized_vol.
@@ -669,7 +660,6 @@ export default function RegimePanel({
       <div className="regime-detail-pane">
 
       {compact ? (
-        /* ── MOBILE CRI layout ────────────────────────────── */
         <>
           <h2 className="clear-risk-title">Crash risk index</h2>
           {/* Headline: score inline with level badge */}
@@ -786,7 +776,6 @@ export default function RegimePanel({
           </div>
         </>
       ) : (
-        /* ── DESKTOP CRI layout ───────────────────────────── */
         <>
           {/* ── Row 1: CRI Score Hero ──────────────────── */}
           <div className="regime-hero">
@@ -815,7 +804,6 @@ export default function RegimePanel({
             </div>
           </div>
 
-          {/* ── Market Closed Indicator ───────────────── */}
           {!marketOpen && (
             <div
               data-testid="market-closed-indicator"

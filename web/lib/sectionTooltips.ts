@@ -4,8 +4,6 @@
  */
 
 export const SECTION_TOOLTIPS: Record<string, string> = {
-  /* ── Flow Analysis ───────────────────────────────────── */
-
   "Flow Supports Position":
     "Positions where dark pool flow direction matches your trade thesis. " +
     "Derived from Unusual Whales dark pool prints: accumulation flow confirms long bias, " +
@@ -26,8 +24,6 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "or showing early signs of institutional repositioning. These warrant daily review " +
     "and potential action if conditions deteriorate.",
 
-  /* ── Portfolio ───────────────────────────────────────── */
-
   "Defined Risk Positions":
     "Options positions with capped maximum loss: vertical spreads, long options, or " +
     "debit structures where loss is limited to premium paid or spread width minus credit. " +
@@ -43,15 +39,11 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "Daily P&L = (last - prior close) x quantity. Total P&L = market value minus entry cost. " +
     "These carry directional equity risk without the convexity properties of options.",
 
-  /* ── Scanner ─────────────────────────────────────────── */
-
   "Scanner Signals":
     "Dark pool flow scanner results from the watchlist. Score = composite of flow strength, " +
     "buy ratio, and sustained activity. Direction indicates accumulation (bullish) or " +
     "distribution (bearish). Prints = number of dark pool transactions. " +
     "Sustained days measures how long the signal has persisted.",
-
-  /* ── Discover ────────────────────────────────────────── */
 
   "Discovery Candidates":
     "Market-wide options flow scan for new trade candidates not on the watchlist. " +
@@ -59,16 +51,12 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "40-59 = monitor, <40 = weak signal. Bias derived from put/call ratio and " +
     "flow side (ask-side = buying pressure, bid-side = selling pressure).",
 
-  /* ── Journal ─────────────────────────────────────────── */
-
   "Trade Journal":
     "Append-only execution log from the Turso journal. Each entry records structure, " +
     "Kelly sizing, gate pass/fail status, and edge analysis. Date range filters activity " +
     "in America/New_York; Realized P&L sums closes whose close date falls in the range " +
     "(opens in range are listed but not summed). Return on Risk = Realized P&L / Capital " +
     "at Risk. Use this to audit decision quality and identify pattern drift.",
-
-  /* ── Orders ──────────────────────────────────────────── */
 
   "Open Orders":
     "Pending orders in IB Gateway: limit orders, stop-limits, and pending manual entries. " +
@@ -93,8 +81,6 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "Aggregate labels identify collapsed records that may combine buys and sells, not separate entry or exit prices. " +
     "Session fills on Today's Executed may land here after journal_sync / fill_monitor " +
     "with open/close labels; use Refresh to re-pull. Not a live IB session blotter.",
-
-  /* ── Regime / CRI ────────────────────────────────────── */
 
   "CRI COMPONENTS":
     "Crash Risk Index broken into 4 sub-scores (0-25 each, 100 total). " +
@@ -122,8 +108,6 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "A positive gap means COR1M is richer than RVOL on a normalized basis: reduce gross exposure, keep or add index hedges, and avoid pressing short-vol beta until realized stress confirms. " +
     "A negative gap means realized volatility is leading implied correlation: harvest crash hedges into strength, lean back toward single-name expression or dispersion, and only add market beta if the gap starts to mean-revert.",
 
-  /* ── CTA Page ────────────────────────────────────────── */
-
   "VOL-TARGETING MODEL":
     "CTA vol-targeting exposure estimate from CRI scan (SPY 20d realized vol, " +
     "10% target, fixed $400B AUM). Implied Exposure = target / rvol (100% = full allocation). " +
@@ -135,8 +119,6 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "Institutional CTA positioning data from MenthorQ. Shows normalized positions " +
     "(-2 to +2 scale) for trend-following funds across asset classes. " +
     "Fetched daily post-close via Playwright + Vision extraction from MenthorQ charts.",
-
-  /* ── CTA Table Section Labels ────────────────────────── */
 
   "MAIN INDICES":
     "CTA positioning in major equity indices (S&P 500, Nasdaq 100, etc). " +

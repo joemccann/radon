@@ -176,7 +176,6 @@ export function drawExposureChart(ctx: CanvasRenderingContext2D, model: Exposure
   ctx.fillStyle = COLOR.canvas;
   ctx.fillRect(0, 0, width, height);
 
-  // ── header ──
   ctx.fillStyle = COLOR.textMuted;
   ctx.font = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
   ctx.textBaseline = "top";
@@ -204,7 +203,6 @@ export function drawExposureChart(ctx: CanvasRenderingContext2D, model: Exposure
   ctx.fillStyle = COLOR.grid;
   ctx.fillRect(PAD_X, HEADER_HEIGHT - 14, width - PAD_X * 2, 1);
 
-  // ── column headers ──
   // The value gets its OWN column rather than sitting on the track: drawn over
   // the bar it was half-occluded, and a teal label on a teal bar is unreadable.
   const strikeX = PAD_X;
@@ -226,7 +224,6 @@ export function drawExposureChart(ctx: CanvasRenderingContext2D, model: Exposure
   ctx.fillStyle = COLOR.grid;
   ctx.fillRect(PAD_X, y - 6, width - PAD_X * 2, 1);
 
-  // ── rows ──
   const centerX = trackX + trackW / 2;
   for (const row of rows) {
     if (row.isSpot) {
@@ -276,7 +273,6 @@ export function drawExposureChart(ctx: CanvasRenderingContext2D, model: Exposure
     y += ROW_HEIGHT;
   }
 
-  // ── footer ──
   ctx.fillStyle = COLOR.grid;
   ctx.fillRect(PAD_X, height - FOOTER_HEIGHT + 6, width - PAD_X * 2, 1);
   ctx.fillStyle = COLOR.signal;

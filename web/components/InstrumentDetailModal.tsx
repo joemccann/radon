@@ -126,8 +126,6 @@ export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onC
   );
 }
 
-/* ─── Single-instrument order form ─── */
-
 function LegOrderForm({
   ticker,
   expiry,

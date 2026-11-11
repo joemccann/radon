@@ -50,8 +50,6 @@ body { font-family: 'Inter', sans-serif; background: #0a0f14; color: #e2e8f0; wi
 """
 
 
-# ── Data loading ──────────────────────────────────────────────────
-
 def load_vcg() -> dict:
     """Load VCG data from cache."""
     if CACHE_PATH.exists():
@@ -62,8 +60,6 @@ def load_vcg() -> dict:
     print("No VCG data found. Run: curl -X POST http://localhost:8321/vcg/scan", file=sys.stderr)
     sys.exit(1)
 
-
-# ── Helpers ───────────────────────────────────────────────────────
 
 def interp_color(interpretation: str) -> str:
     return {
@@ -116,8 +112,6 @@ def fmt_pct(v) -> str:
         return "---"
     return f"+{v:.2f}%" if v >= 0 else f"{v:.2f}%"
 
-
-# ── Card wrapper ─────────────────────────────────────────────────
 
 def card_wrap(title: str, body: str, card_n: int, total: int, ds: str) -> str:
     d = datetime.strptime(ds, "%Y-%m-%d")
@@ -348,8 +342,6 @@ def card4_history(data: dict, ds: str) -> str:
     return card_wrap("VCG History", body, 4, 4, ds)
 
 
-# ── Tweet text ───────────────────────────────────────────────────
-
 def build_tweet(data: dict, ds: str) -> str:
     sig = data.get("signal", {})
     vcg = sig.get("vcg")
@@ -432,8 +424,6 @@ def build_tweet(data: dict, ds: str) -> str:
         )
         action = "Normal regime. No VCG signal."
 
-    # ── Assemble tweet ──
-
     driver = "VVIX (convexity demand)" if vvix_pct > 50 else "VIX (broad vol)"
 
     return f"""{hook}
@@ -448,10 +438,6 @@ def build_tweet(data: dict, ds: str) -> str:
 
 Analyzed by Radon · radon.run"""
 
-
-
-
-# ── Preview HTML ─────────────────────────────────────────────────
 
 def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
     labels = [
@@ -532,8 +518,6 @@ function copyImg(id,btn){{
 </script>
 </body></html>"""
 
-
-# ── Main ─────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Generate VCG X share report")

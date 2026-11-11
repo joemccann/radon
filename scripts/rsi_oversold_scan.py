@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -45,7 +44,6 @@ from db import writer
 from ma_ratio_scan import attach_spx_series, fetch_spx_overlay_closes
 from utils.atomic_io import atomic_save
 
-# ── constants ─────────────────────────────────────────────────────
 SCHEMA_VERSION = 1
 SERVICE = "rsi-oversold"
 RSI_OVERSOLD_JSON = _PROJECT_DIR / "data" / "rsi_oversold.json"
@@ -71,8 +69,6 @@ def _log(message: str) -> None:
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-
-# ── pure computation ──────────────────────────────────────────────
 
 def _rsi_from_avgs(avg_gain: float, avg_loss: float) -> float:
     if avg_loss == 0 and avg_gain == 0:
@@ -236,8 +232,6 @@ def _missing_payload(reason: str, scan_time: str) -> dict[str, Any]:
     }
 
 
-# ── constituents ──────────────────────────────────────────────────
-
 def resolve_spx_constituents() -> tuple[list[str], str]:
     """Current SPX members via the shared cache/seed chain (never fails)."""
     tickers, source = resolve_constituents(
@@ -245,8 +239,6 @@ def resolve_spx_constituents() -> tuple[list[str], str]:
     )
     return tickers, source
 
-
-# ── persistence ───────────────────────────────────────────────────
 
 def _record_ok_heartbeat(finished_at: str) -> None:
     """Best-effort ok heartbeat. A Turso read timeout must not fail the
@@ -277,8 +269,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 def _data_dir() -> Path:
     return Path(os.environ.get("RSI_OVERSOLD_DATA_DIR", str(_PROJECT_DIR / "data")))
 
-
-# ── orchestration ─────────────────────────────────────────────────
 
 def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
     scan_time = _now_iso()
@@ -346,8 +336,6 @@ def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
     )
     return payload
 
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(

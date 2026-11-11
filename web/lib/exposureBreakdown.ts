@@ -2,8 +2,6 @@ import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { legPriceKey } from "@/lib/positionUtils";
 
-/* ─── Types ───────────────────────────────────────────── */
-
 export type ExposureBreakdownLeg = {
   type: string;
   direction: string;
@@ -146,8 +144,6 @@ function positionDeltaDetailed(
     legs,
   };
 }
-
-/* ─── Main computation ───────────────────────────────── */
 
 export function computeExposureDetailed(
   portfolio: PortfolioData,

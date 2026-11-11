@@ -123,14 +123,12 @@ logging.getLogger("ib_insync").setLevel(logging.WARNING)
 logging.getLogger("ib_insync.wrapper").setLevel(logging.WARNING)
 logging.getLogger("ib_insync.client").setLevel(logging.WARNING)
 
-# ---------------------------------------------------------------------------
 from clients.uw_client import UWClient
 from clients.uw_client import UWAPIError, UWNotFoundError
 from ib_insync import Index
 
 
 # Shared state
-# ---------------------------------------------------------------------------
 ib_pool: Optional[IBPool] = None
 uw_available: bool = False
 test_mode: bool = os.environ.get("RADON_API_TEST_MODE", "").lower() in {"1", "true", "yes", "on"}
@@ -1341,9 +1339,7 @@ app.add_middleware(
 app.add_middleware(_CanonicalHostForPin)
 
 
-# ---------------------------------------------------------------------------
 # Secret scrubbing for error responses
-# ---------------------------------------------------------------------------
 # Error paths interpolate raw upstream text (str(exc), subprocess stderr,
 # result.error) into HTTPException detail at ~64 sites. A libsql/Turso failure,
 # an IB error, or a subprocess crash can carry the Turso URL, an auth token, or
@@ -1394,10 +1390,6 @@ async def scrubbed_http_exception_handler(request: Request, exc: StarletteHTTPEx
         headers=getattr(exc, "headers", None),
     )
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _read_cache(path: Path) -> Optional[dict]:
     """Read a JSON cache file, return None if missing/corrupt."""
@@ -2020,10 +2012,6 @@ async def _fetch_risk_reversal_history(
     )
 
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
 # The demo VM deploy (cloud/scripts/deploy-demo-vm.sh) writes the shipped commit
 # into <app>/REVISION; /health echoes it so off-box drift checks can see what is
 # live. Absent on hosts deployed any other way, and the key is then omitted.
@@ -2432,9 +2420,7 @@ async def ib_operator_hold_set(request: Request):
     return payload
 
 
-# ---------------------------------------------------------------------------
 # Operator admin — service control (systemd-backed)
-# ---------------------------------------------------------------------------
 
 def _admin_actor(request: Request) -> str:
     """Who asked, for the service-control audit line (JWT ``sub`` or ``local``)."""
@@ -2535,9 +2521,7 @@ async def admin_stack_restart(request: Request):
     return _admin_action_response(result)
 
 
-# ---------------------------------------------------------------------------
 # Phase 1: Stateless UW-only endpoints (subprocess-based)
-# ---------------------------------------------------------------------------
 
 @app.get("/uw/usage")
 async def uw_usage():
@@ -3006,9 +2990,7 @@ async def attribution():
     return result.data
 
 
-# ---------------------------------------------------------------------------
 # Phase 2: IB file-writer endpoints
-# ---------------------------------------------------------------------------
 
 # Auth states that join ib-gateway-grouped via the stale bucket. A fresh
 # error row would clear that bucket, so a miss in these states stays silent.
@@ -3145,9 +3127,7 @@ async def orders_refresh(
     return outcome.payload or {}
 
 
-# ---------------------------------------------------------------------------
 # Phase 3: IB order operations
-# ---------------------------------------------------------------------------
 
 # REL-005: accepted-placement timestamps for the per-minute rate cap, each
 # tagged with the orderRef it was reserved for. In-process deque is
@@ -3819,9 +3799,7 @@ async def orders_modify(request: Request):
     return result.data
 
 
-# ---------------------------------------------------------------------------
 # Kill switch (REL-004): halt/resume/status, mass-cancel, one-shot kill.
-# ---------------------------------------------------------------------------
 
 @app.get("/trading/status")
 async def trading_status():
@@ -3888,9 +3866,7 @@ async def trading_kill(request: Request):
     return {"halted": halt_state["halted"], "halt": halt_state, "cancel": cancel}
 
 
-# ---------------------------------------------------------------------------
 # Phase 4: Market data & long-running endpoints (subprocess-based)
-# ---------------------------------------------------------------------------
 
 @app.post("/cta/share")
 async def cta_share():
@@ -5316,8 +5292,6 @@ async def regime_share():
     return result.data
 
 
-# ── LLM Token Expenditure Index ─────────────────────────────────────
-
 _llm_token_index_cache: dict[str, Any] = {"data": None, "fetched_at": 0.0, "days": 0}
 _LLM_TOKEN_INDEX_TTL_S = 300  # 5 min — the underlying data updates once/day
 
@@ -5906,7 +5880,6 @@ async def futures_chain(symbol: str):
     return {"symbol": symbol_upper, "exchange": "CFE", "contracts": [], "count": 0}
 
 
-# ── PI command surface ──────────────────────────────────────────────
 # Scripts the embedded /api/pi chat command surface is permitted to spawn,
 # split into two privilege tiers. The Next.js layer does the argument
 # parsing / normalisation (preserving the existing helpers + tests);
@@ -6178,10 +6151,6 @@ async def ticker_ratings(ticker: str):
         return payload[0] if payload else {}
     return payload
 
-
-# ---------------------------------------------------------------------------
-# IB Gateway auto-recovery
-# ---------------------------------------------------------------------------
 
 # Cooldown: after a CONFIRMED gateway-down verdict, skip subsequent attempts
 # for this many seconds to avoid churn. 0.0 = clear, else the monotonic time
@@ -6458,9 +6427,7 @@ async def _run_ib_script_with_recovery(
     return result
 
 
-# ---------------------------------------------------------------------------
 # Cash flows (deposits, withdrawals, dividends, interest, fees)
-# ---------------------------------------------------------------------------
 
 @app.get("/cash-flows")
 async def cash_flows(
@@ -6690,10 +6657,6 @@ def _classify_cash_flow_error(message: str) -> dict[str, Any]:
         verdict["error_summary"] = message
     return verdict
 
-
-# ---------------------------------------------------------------------------
-# Short availability probe
-# ---------------------------------------------------------------------------
 
 # IB generic tick IDs for short availability:
 #   46 = shortable (difficulty score: 3.0 easy / 1.5-2.5 locate / <1.5 no)
@@ -6990,9 +6953,7 @@ def _fetch_uw_short_data(ticker: str) -> Optional[dict]:
         return None
 
 
-# ---------------------------------------------------------------------------
 # Knowledge retrieval (Phase 2 — hybrid search over the `knowledge` table)
-# ---------------------------------------------------------------------------
 
 _KNOWLEDGE_QUERY_MAX_CHARS = 500
 _KNOWLEDGE_LIMIT_DEFAULT = 8
@@ -7242,10 +7203,6 @@ async def knowledge_prior_evals(ticker: str, limit: int = _KNOWLEDGE_LIMIT_DEFAU
     )
     return {"ticker": upper, "results": results, "retrieval": retrieval}
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn

@@ -292,7 +292,6 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
           <CredentialsPanel />
         ) : null}
 
-        {/* ── Sticky Save Profile button ── */}
         <div className="m-sticky-cta">
           <button
             type="button"
@@ -315,7 +314,6 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
     );
   }
 
-  /* ── Desktop layout ── */
   return (
     <div className="profile-surface">
       <section className="profile-header panel">
@@ -448,8 +446,6 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
   );
 }
 
-/* ─── Desktop BookmarksPanel ─────────────────────────── */
-
 function BookmarksPanel({
   bookmarks,
   isLoading,
@@ -496,8 +492,6 @@ function BookmarksPanel({
   );
 }
 
-/* ─── Mobile BookmarksPanel ──────────────────────────── */
-
 function BookmarksPanelMobile({
   bookmarks,
   isLoading,
@@ -543,8 +537,6 @@ function BookmarksPanelMobile({
   );
 }
 
-/* ─── Desktop WatchlistPanel ─────────────────────────── */
-
 function WatchlistPanel({
   watchlist,
   isLoading,
@@ -583,8 +575,6 @@ function WatchlistPanel({
   );
 }
 
-/* ─── Mobile WatchlistPanel ──────────────────────────── */
-
 function WatchlistPanelMobile({
   watchlist,
   isLoading,
@@ -622,8 +612,6 @@ function WatchlistPanelMobile({
     </ul>
   );
 }
-
-/* ─── Desktop WatchRow ───────────────────────────────── */
 
 export function WatchRow({
   entry,
@@ -668,8 +656,6 @@ export function WatchRow({
     </li>
   );
 }
-
-/* ─── Mobile WatchRow ────────────────────────────────── */
 
 function WatchRowMobile({
   entry,

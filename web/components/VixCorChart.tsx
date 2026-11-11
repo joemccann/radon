@@ -30,8 +30,6 @@ import {
  * Spec: docs/indicators/vixcor.md section G.4.
  */
 
-/* ─── Layout ─────────────────────────────────────────── */
-
 const VIX_PANE_HEIGHT = 260;
 const CORR_PANE_HEIGHT = 168;
 const PANE_GAP = 12;
@@ -51,8 +49,6 @@ const CORR_DOMAIN: [number, number] = [-0.6, 1.0];
 const CORR_TICKS = [-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0];
 /** Padding either side of the VIX extent, as a share of the extent. */
 const VIX_DOMAIN_PAD = 0.04;
-
-/* ─── Tokens ─────────────────────────────────────────── */
 
 const CHART_GRID = "var(--chart-grid, var(--border-dim))";
 const CHART_AXIS = "var(--chart-axis, var(--border-dim))";

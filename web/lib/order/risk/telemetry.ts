@@ -43,7 +43,6 @@ export interface OrderRiskTrace {
   netPremiumAdjustment: number;
   /** Final max-loss reported to the operator. `null` ⇒ UNBOUNDED. */
   maxLoss: number | null;
-  /** True iff the model returned UNBOUNDED max loss. */
   maxLossUnbounded: boolean;
   /** True for any undefined-risk verdict (uncovered short call, naked short put, etc.). */
   hasUndefinedRisk: boolean;

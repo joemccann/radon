@@ -493,9 +493,6 @@ def _embed_docs(docs: list[KnowledgeDoc], embedder, *, write_v2: bool | None = N
     return wrote
 
 
-# ── CLI ──────────────────────────────────────────────────────────────
-
-
 class _PersistenceExhausted(RuntimeError):
     """The prepared write used its retry budget; never replay enrichment."""
 

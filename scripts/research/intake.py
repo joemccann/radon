@@ -171,7 +171,6 @@ class Pipeline:
         self._deadline = None
         self._progress = None
 
-    # -- bounded lease, as v1 -------------------------------------------------
     def _checkpoint(self, stage):
         if self.clock() > self._deadline:
             raise DocumentDeadlineExceeded(f'document review deadline exceeded during {stage}')
@@ -182,7 +181,6 @@ class Pipeline:
         if self._deadline - self.clock() < REVIEWER_CALL_TIMEOUT_SECS:
             raise DocumentDeadlineExceeded(f'document review deadline exhausted before {stage}')
 
-    # -- whole-document duplicate index --------------------------------------
     def _index(self):
         try:
             stored = json.loads((self.root / FINGERPRINTS).read_text())

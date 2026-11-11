@@ -23,17 +23,12 @@ def atomic_save(path: str, data: dict) -> str:
     The checksum is computed on the payload WITHOUT the _checksum field,
     then embedded as data["_checksum"] in the written file.
 
-    Args:
-        path: Destination file path.
-        data: Dict to serialize as JSON.
-
     Returns:
         The SHA-256 hex digest (64-char string).
 
     Raises:
         TypeError: If data contains non-serializable values.
     """
-    # Work on a copy so we don't mutate the caller's dict
     payload = {k: v for k, v in data.items() if k != "_checksum"}
     checksum = _compute_checksum(payload)
     payload["_checksum"] = checksum
@@ -60,7 +55,6 @@ def atomic_save(path: str, data: dict) -> str:
         finally:
             os.close(dir_fd)
     except BaseException:
-        # Clean up temp file on any failure
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -77,12 +71,6 @@ def verified_load(path: str) -> dict:
     - If the file has no _checksum (legacy), returns data as-is.
     - The _checksum field is always stripped from the returned dict.
 
-    Args:
-        path: File path to load.
-
-    Returns:
-        The deserialized dict (without _checksum).
-
     Raises:
         FileNotFoundError: If the file doesn't exist.
         ValueError: If the checksum doesn't match (data corruption).
@@ -93,7 +81,6 @@ def verified_load(path: str) -> dict:
 
     stored_checksum = data.pop("_checksum", None)
     if stored_checksum is None:
-        # Legacy file without checksum — return as-is
         return data
 
     expected = _compute_checksum(data)

@@ -33,10 +33,6 @@ from ib_insync import Option, Stock
 from vol_surface import surface_from_contracts, smile_residual
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def fetch_flow_data(ticker: str) -> Dict:
     """Run fetch_flow.py and return parsed JSON."""
     try:
@@ -69,10 +65,6 @@ def fetch_options_data(ticker: str) -> Dict:
     except Exception as e:
         return {"error": str(e)}
 
-
-# ---------------------------------------------------------------------------
-# IB Chain Fetcher
-# ---------------------------------------------------------------------------
 
 def fetch_chain(
     ticker: str,
@@ -213,10 +205,6 @@ def fetch_chain(
         "long_right": long_right,
     }
 
-
-# ---------------------------------------------------------------------------
-# Risk Reversal Matrix Builder
-# ---------------------------------------------------------------------------
 
 def build_matrix(
     chain_data: Dict,
@@ -375,10 +363,6 @@ def build_matrix(
     }
 
 
-# ---------------------------------------------------------------------------
-# HTML Report Generator
-# ---------------------------------------------------------------------------
-
 def _fmt_net(net: float) -> str:
     if net >= 0:
         return f'+${net:.2f} CR'
@@ -527,18 +511,15 @@ def generate_report(
     direction_label = "Bearish" if bearish else "Bullish"
     direction_detail = "Sell Call / Buy Put" if bearish else "Sell Put / Buy Call"
 
-    # -- DP flow context --
     dp = flow_data.get("dark_pool", {})
     agg = dp.get("aggregate", {})
     dp_buy_ratio = agg.get("dp_buy_ratio", 0)
     dp_strength = agg.get("flow_strength", 0)
     dp_direction = agg.get("flow_direction", "UNKNOWN")
 
-    # -- Options flow context --
     pc_ratio = options_data.get("put_call_ratio", 0) or 0
     combined_bias = options_data.get("combined_bias", "UNKNOWN")
 
-    # -- Skew range --
     all_skew = []
     for rows in matrix["skew_by_exp"].values():
         for r in rows:
@@ -547,15 +528,10 @@ def generate_report(
     skew_min = min(all_skew) if all_skew else 0
     skew_max = max(all_skew) if all_skew else 0
 
-    # -- Extract top picks --
     primary = matrix["primary"]
     alternative = matrix["alternative"]
     aggressive = matrix["aggressive"]
     net_label = "CREDIT" if primary and primary["net"] >= 0 else "COSTLESS" if primary and abs(primary["net"]) < 0.10 else "SMALL DEBIT"
-
-    # ============================================================
-    # Build section HTML
-    # ============================================================
 
     # SECTION 2: Metrics
     metrics_html = f"""
@@ -793,9 +769,6 @@ def generate_report(
       </div>
     </div>"""
 
-    # ============================================================
-    # Replace template variables
-    # ============================================================
     html = template
     replacements = {
         "{{TICKER}}": ticker,
@@ -824,10 +797,6 @@ def generate_report(
     output_path.write_text(html)
     return str(output_path)
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(

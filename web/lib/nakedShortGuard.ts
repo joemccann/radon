@@ -11,8 +11,6 @@
  * two test suites, and the CLAUDE.md status block).
  */
 
-/* ---------- types ---------- */
-
 export type OrderPayload = {
   type: "stock" | "option" | "combo" | "future";
   symbol: string;
@@ -65,8 +63,6 @@ export type NakedShortOpenOrder = {
 };
 
 export type GuardResult = { allowed: boolean; reason?: string };
-
-/* ---------- helpers ---------- */
 
 /** Count long stock shares for a ticker across all positions. */
 function countLongShares(ticker: string, portfolio: NakedShortPortfolio): number {
@@ -154,8 +150,6 @@ function countMatchingLongOptionContracts(
 
   return contracts;
 }
-
-/* ---------- main guard ---------- */
 
 export function checkNakedShortRisk(
   order: OrderPayload,
@@ -306,8 +300,6 @@ export function _checkNakedShortRiskImpl(
 
   return { allowed: true };
 }
-
-/* ---------- audit open orders ---------- */
 
 export function auditOpenOrders(
   _orders: NakedShortOpenOrder[],

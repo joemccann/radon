@@ -82,9 +82,6 @@ def _send_pushover(payload: dict) -> None:
             raise RuntimeError(f"pushover HTTP {resp.status}")
 
 
-# ── Pure logic ─────────────────────────────────────────────────────
-
-
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
@@ -143,8 +140,6 @@ def build_digest(rows: list[dict], unresolved: int) -> str:
         message += f" ({unresolved} unresolved)"
     return message[:MAX_PUSHOVER_MESSAGE_CHARS]
 
-
-# ── Cycle ──────────────────────────────────────────────────────────
 
 _COLUMNS = ("id", "received_at", "symbol", "exchange", "price", "interval", "alert_name", "bar_time")
 _SELECT = f"SELECT {', '.join(_COLUMNS)} FROM tv_alert_events"

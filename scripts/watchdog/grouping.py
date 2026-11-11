@@ -92,8 +92,6 @@ def _cooldown_allows_fire(*, service: str, severity: str, now: datetime) -> bool
         return True
 
 
-# ── /health probe ──────────────────────────────────────────────────
-
 def fetch_health() -> dict:
     """Return ``{auth_state: <state>}`` from FastAPI ``/health``.
 
@@ -123,8 +121,6 @@ def fetch_health() -> dict:
         return {"auth_state": data.get("auth_state") or "unknown"}
     return {"auth_state": "unknown"}
 
-
-# ── helpers ────────────────────────────────────────────────────────
 
 def _ib_dependent(outcome: CheckOutcome) -> bool:
     return services_mod.requires_ib(outcome.service)
@@ -297,8 +293,6 @@ def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
         return f"{head} Approve on phone or POST /ib/reset-backoff."
     return f"{head} Gateway is down. Recover with radon restart."
 
-
-# ── public entry point ────────────────────────────────────────────
 
 def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -> DispatchSummary:
     """Replacement for the per-outcome dispatch loop in __main__.

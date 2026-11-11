@@ -255,8 +255,6 @@ _SPECIFIC_SCRUB_PATTERNS = [
     ),
 ]
 
-# ── One value tokenizer, shared by redaction and detection ───────────────
-#
 # DS-2026-10-22-10 .. -15: the value of a credential assignment used to be
 # matched by a family of single-purpose regexes, each modelling part of a
 # quoted literal. Every one of them had an edge the others did not cover, and

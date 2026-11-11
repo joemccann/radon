@@ -63,7 +63,6 @@ def _thread_event_loop() -> Iterator[None]:
 
 
 def _run_with_thread_event_loop(work: Callable[[], Any]) -> Any:
-    """Run ``work`` on a thread guaranteed to own an asyncio event loop."""
     with _thread_event_loop():
         return work()
 
@@ -89,16 +88,6 @@ def sd_notify(state: str) -> None:
 
 
 class MonitorDaemon:
-    """
-    Main daemon that orchestrates multiple monitoring handlers.
-    
-    Features:
-    - Plugin architecture: register any handler implementing BaseHandler
-    - Per-handler intervals: each handler runs on its own schedule
-    - State persistence: handlers can save/restore state across restarts
-    - Market hours awareness: can skip runs outside trading hours
-    """
-    
     # US market hours in ET
     MARKET_OPEN_HOUR = 9
     MARKET_OPEN_MINUTE = 30
@@ -126,7 +115,6 @@ class MonitorDaemon:
         ] = {}
     
     def register(self, handler: BaseHandler) -> None:
-        """Register a handler with the daemon."""
         self.handlers.append(handler)
         logger.info(f"Registered handler: {handler.name} (interval: {handler.interval_seconds}s)")
     
@@ -142,11 +130,9 @@ class MonitorDaemon:
         Returns:
             True if within market hours
         """
-        # Weekend check
         if weekday >= 5:  # Saturday=5, Sunday=6
             return False
         
-        # Convert to minutes since midnight for easier comparison
         current_mins = hour * 60 + minute
         open_mins = self.MARKET_OPEN_HOUR * 60 + self.MARKET_OPEN_MINUTE
         close_mins = self.MARKET_CLOSE_HOUR * 60 + self.MARKET_CLOSE_MINUTE
@@ -195,7 +181,6 @@ class MonitorDaemon:
             return clock_open
 
     def _handler_can_run_now(self, handler: BaseHandler, market_hours: Optional[bool] = None) -> bool:
-        """Return True when the handler is eligible to run in the current window."""
         if not handler.is_due():
             return False
 
@@ -273,12 +258,6 @@ class MonitorDaemon:
             return False
     
     def run_once(self, market_hours: Optional[bool] = None) -> Dict[str, Any]:
-        """
-        Run all due handlers once.
-        
-        Returns:
-            Dict mapping handler names to their results
-        """
         results = {}
         flushed = False
         if market_hours is None and self.respect_market_hours:
@@ -421,11 +400,6 @@ class MonitorDaemon:
             logger.warning(f"timeout heartbeat failed for {handler.name}: {exc}")
 
     def run_loop(self) -> None:
-        """
-        Run continuously until stopped.
-        
-        Checks handlers every loop_interval seconds.
-        """
         self._running = True
         logger.info(f"Starting daemon loop (interval: {self.loop_interval}s)")
         sd_notify("READY=1")
@@ -436,7 +410,6 @@ class MonitorDaemon:
                 # pinging and systemd's WatchdogSec restarts the unit.
                 sd_notify("WATCHDOG=1")
                 market_hours = self.is_market_hours() if self.respect_market_hours else None
-                # Run handlers
                 results = self.run_once(market_hours=market_hours)
                 
                 if results:
@@ -454,7 +427,6 @@ class MonitorDaemon:
             self._running = False
     
     def stop(self) -> None:
-        """Stop the daemon loop."""
         self._running = False
     
     def save_state(self) -> None:
@@ -615,7 +587,6 @@ class MonitorDaemon:
         _signal.signal(_signal.SIGTERM, _terminate)
     
     def status(self) -> Dict[str, Any]:
-        """Get daemon status summary."""
         return {
             "handlers": [
                 {

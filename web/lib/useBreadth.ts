@@ -59,8 +59,6 @@ export type BreadthData = {
   intraday: BreadthIntradayPoint[];
 };
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 const BREADTH_SYNC_CONFIG = {
   endpoint: "/api/breadth",
   interval: 60_000,

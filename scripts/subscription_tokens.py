@@ -135,7 +135,6 @@ DEAD_GRANT_CODES = frozenset(
 # client is fixed in this table, never by the operator logging in again.
 CLIENT_REJECTED_CODES = frozenset({"invalid_client", "unauthorized_client"})
 
-# -- states -----------------------------------------------------------------
 LIVE = "live"
 REFRESHED = "refreshed"
 RESTORED = "restored"
@@ -168,11 +167,6 @@ def redact(value: Any) -> str:
     """The ONLY representation of token material allowed anywhere."""
     text = value if isinstance(value, str) else ""
     return f"<redacted len={len(text)}>"
-
-
-# ---------------------------------------------------------------------------
-# provider adapters
-# ---------------------------------------------------------------------------
 
 
 def _aware(dt: datetime) -> datetime:
@@ -580,11 +574,6 @@ PROVIDERS: dict[str, Provider] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# vault
-# ---------------------------------------------------------------------------
-
-
 class Vault:
     """Thin adapter over the existing encrypted secret store."""
 
@@ -643,11 +632,6 @@ def open_vault(env: Mapping[str, str]) -> Vault:
         return Vault(SecretStore())
     except Exception as exc:  # noqa: BLE001 - every open failure is fatal here
         raise VaultUnavailable(f"{type(exc).__name__}: {exc}") from exc
-
-
-# ---------------------------------------------------------------------------
-# transport
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -716,9 +700,7 @@ def record_heartbeat(service: str, state: str, **kwargs) -> None:
     writer.record_service_health(SERVICE_NAME, state, **kwargs)
 
 
-# ---------------------------------------------------------------------------
 # the provider's own CLI: probe + login
-# ---------------------------------------------------------------------------
 
 
 def _home(env: Mapping[str, str]) -> Path:
@@ -953,11 +935,6 @@ def default_login(
         return False
 
 
-# ---------------------------------------------------------------------------
-# atomic credential write
-# ---------------------------------------------------------------------------
-
-
 def atomic_write_credential(path: Path, text: str) -> None:
     """Same-directory temp file, fsync, replace. Mode 0600, parent 0700."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1003,11 +980,6 @@ def _key_paths(obj: Any, prefix: tuple = ()) -> set:
     return paths
 
 
-# ---------------------------------------------------------------------------
-# runtime
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class Runtime:
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
@@ -1040,11 +1012,6 @@ class ProviderResult:
     last_error: Optional[str] = None
     last_probe_at: Optional[str] = None
     probe_inconclusive: bool = False
-
-
-# ---------------------------------------------------------------------------
-# engine
-# ---------------------------------------------------------------------------
 
 
 def _unproven_since(result: ProviderResult, prior: Mapping[str, Any], now: datetime) -> Optional[str]:
@@ -1081,8 +1048,6 @@ class _Run:
 
     def seconds_left(self) -> float:
         return RUN_BUDGET_SECONDS - (self.rt.monotonic() - self.started)
-
-    # -- sidecar ---------------------------------------------------------
 
     def _load_sidecar(self) -> dict:
         try:
@@ -1128,8 +1093,6 @@ class _Run:
         prior = self.sidecar["providers"].get(provider, {})
         return int(prior.get("consecutive_error_count") or 0)
 
-    # -- keepalive -------------------------------------------------------
-
     def unproven_since(self, provider: str) -> Optional[datetime]:
         prior = self.sidecar["providers"].get(provider, {})
         return _parse_rfc3339(prior.get("unproven_since"))
@@ -1149,8 +1112,6 @@ class _Run:
         except Exception as exc:  # noqa: BLE001 - a probe never fails the run
             log.warning("%s probe failed: %s", provider.name, type(exc).__name__)
             return PROBE_FAILED
-
-    # -- paging ----------------------------------------------------------
 
     def is_page_due(self, result: ProviderResult, ignore_cooldown: bool = False) -> bool:
         if result.state not in (NEEDS_REAUTH, STORE_UNAVAILABLE, ERROR):
@@ -1195,8 +1156,6 @@ class _Run:
             return
         self.sidecar["pages"][result.provider] = self.now.isoformat()
 
-    # -- push login ------------------------------------------------------
-
     def login_binary(self, result: ProviderResult) -> Optional[str]:
         """The CLI to log in with, when a push login can fix this result."""
         provider = PROVIDERS.get(result.provider)
@@ -1225,8 +1184,6 @@ class _Run:
         except Exception as exc:  # noqa: BLE001 - a login never fails the run
             log.warning("%s login failed: %s", result.provider, type(exc).__name__)
             return False
-
-    # -- endpoint resolution --------------------------------------------
 
     def token_endpoint(self, provider: Provider, doc: Mapping[str, Any]) -> Optional[str]:
         issuer = provider.read_issuer(doc)
@@ -1261,8 +1218,6 @@ class _Run:
             self.discovery[base] = endpoint
             return endpoint
         return provider.token_url
-
-    # -- refresh ---------------------------------------------------------
 
     def post_refresh(self, url: str, fields: dict) -> HttpResponse:
         """Form-encoded first; one JSON retry on 400/415 (providers differ)."""

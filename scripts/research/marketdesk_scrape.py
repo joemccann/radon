@@ -150,8 +150,6 @@ def parse_folders(rows) -> list[str]:
     return folders
 
 
-# ---- API calls -----------------------------------------------------------------------------
-
 def list_latest(session) -> list[ArticleRef]:
     ids = session.api("POST", LATEST_PATH, {"institutions": []})
     if not isinstance(ids, list):
@@ -197,8 +195,6 @@ def download_pdf(session, article: Article, dest: Path) -> Path:
         raise ScrapeError("not_pdf")
     return _write_private(Path(dest) / f"{article.ref.article_id}.pdf", data)
 
-
-# ---- public image fetch --------------------------------------------------------------------
 
 def _resolve_host(host: str) -> list[str]:
     try:

@@ -728,7 +728,6 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
     Premium is a FILTER (min threshold), not a scoring component.
     Score is based on edge quality: DP strength, sustained direction, confluence.
     """
-    # --- Targeted mode ---
     if tickers:
         return discover_targeted(
             tickers, dp_days=dp_days, min_premium=min_premium, top=top,

@@ -34,8 +34,6 @@ REGIME_LOOSENING = "LOOSENING"
 REGIME_COUPLED = "COUPLED"
 
 
-# ── correlation ───────────────────────────────────────────────────
-
 def corr_window(xs: Iterable[float], ys: Iterable[float]) -> Optional[float]:
     """Sample Pearson correlation of two equal-length level series.
 
@@ -59,8 +57,6 @@ def corr_window(xs: Iterable[float], ys: Iterable[float]) -> Optional[float]:
         return None
     return numerator / denominator
 
-
-# ── the join ──────────────────────────────────────────────────────
 
 def join_series(
     vix_rows: list[dict[str, Any]], cor3m_rows: list[dict[str, Any]]
@@ -102,8 +98,6 @@ def compute_corr_series(joined: list[dict[str, Any]]) -> list[dict[str, Any]]:
         series.append({**row, "corr20": corr20})
     return series
 
-
-# ── breakdown episodes ────────────────────────────────────────────
 
 def _sub_exit_runs(values: list[float]) -> list[list[int]]:
     """Maximal runs of consecutive positions with ``corr20 < BREAKDOWN_EXIT``."""
@@ -406,8 +400,6 @@ def build_current(
         "episode": open_episode,
     }
 
-
-# ── session arithmetic ────────────────────────────────────────────
 
 def count_vix_sessions_between(
     vix_dates: Iterable[str], after: str, through: str

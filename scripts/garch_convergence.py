@@ -43,7 +43,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.request import Request, urlopen
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -68,7 +67,6 @@ except Exception:  # pragma: no cover — DB layer optional
 
 _CACHE_PATH = _PROJECT_DIR / "data" / "garch_convergence.json"
 
-# ── built-in pair presets ─────────────────────────────────────────
 PAIR_PRESETS: Dict[str, Dict[str, Any]] = {
     "semis": {
         "description": "Semiconductors",
@@ -92,7 +90,6 @@ PAIR_PRESETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# ── data classes ──────────────────────────────────────────────────
 
 @dataclass
 class TickerVol:
@@ -207,8 +204,6 @@ def _calc_hv(prices: List[float], period: int) -> float:
     return math.sqrt(var) * math.sqrt(252) * 100
 
 
-# ── UW data fetchers ─────────────────────────────────────────────
-
 def _fetch_uw_iv(
     ticker: str, client: UWClient
 ) -> Tuple[Optional[float], Optional[float]]:
@@ -269,8 +264,6 @@ def _fetch_uw_leaps(ticker: str, client: UWClient, min_year: int = 2027) -> List
             continue
     return results
 
-
-# ── Parallel ticker data fetcher ─────────────────────────────────
 
 def fetch_ticker_vol(ticker: str, uw_client: UWClient, ib: Any = None) -> TickerVol:
     """Fetch all vol data for one ticker. Thread-safe (uses shared UWClient session)."""
@@ -343,8 +336,6 @@ def fetch_all_tickers(tickers: List[str], max_workers: int = 16) -> Dict[str, Ti
     return results
 
 
-# ── Pair analysis ─────────────────────────────────────────────────
-
 def analyze_pair(
     a: str, b: str, vol_data: Dict[str, TickerVol], vol_driver: str = ""
 ) -> PairAnalysis:
@@ -394,7 +385,6 @@ def analyze_pair(
         pa.expected_iv = round(leader_vol.iv_hv60 * lagger_vol.hv60, 1)
         pa.expected_move = round(pa.expected_iv - lagger_vol.leap_atm_iv, 1)
 
-    # ── Gate checks ──
     # 1. IV ratio divergence: leader ≥ 1.0, lagger < 0.85 (strict) OR divergence > 0.15 (relaxed)
     pa.gate_divergence = (leader_vol.iv_hv60 >= 1.0 and pa.divergence >= 0.15)
     if not pa.gate_divergence:
@@ -484,8 +474,6 @@ def resolve_inputs(
     return all_tickers, all_pairs, desc, driver
 
 
-# ── HTML report generation ────────────────────────────────────────
-
 def _pill(text: str, kind: str = "") -> str:
     cls = f"pill pill-{kind}" if kind else "pill"
     return f'<span class="{cls}">{text}</span>'
@@ -543,7 +531,6 @@ def generate_html(
 
     body_parts: List[str] = []
 
-    # ── header ──
     body_parts.append(f"""
 <header class="header">
   <div>
@@ -556,7 +543,6 @@ def generate_html(
   </div>
 </header>""")
 
-    # ── metrics ──
     body_parts.append(f"""
 <div class="metrics">
   <div class="metric">
@@ -616,7 +602,6 @@ def generate_html(
 
     body_parts.append("</tbody></table></div>")
 
-    # ── pair analysis panels ──
     body_parts.append('<hr class="divider"><div class="section-header">Pair Divergence Analysis</div>')
 
     for pa in pairs:
@@ -676,7 +661,6 @@ def generate_html(
 
         body_parts.append("</div></div>")
 
-    # ── scorecard table ──
     body_parts.append('<hr class="divider"><div class="section-header">Signal Criteria Scorecard</div>')
     body_parts.append("""
 <div class="panel"><table>
@@ -701,7 +685,6 @@ def generate_html(
 
     body_parts.append("</tbody></table></div>")
 
-    # ── watchlist ──
     watchable = [pa for pa in pairs if pa.lagger_hv_iv_gap > 0 or pa.divergence > 0.20]
     if watchable:
         body_parts.append('<div class="section-header">Watchlist — Monitor for Changes</div>')
@@ -720,7 +703,6 @@ def generate_html(
             )
         body_parts.append("</tbody></table></div></div>")
 
-    # ── footer ──
     body_parts.append(
         f'<div class="footer">'
         f"<strong>GARCH Convergence Spread Scan</strong> · {total_tickers} tickers · {len(pairs)} pairs<br>"
@@ -734,8 +716,6 @@ def generate_html(
     html = html.replace("{{BODY}}", body)
     return html
 
-
-# ── JSON output ───────────────────────────────────────────────────
 
 def to_json(
     all_vol: Dict[str, TickerVol],
@@ -802,8 +782,6 @@ def budget_blocked_payload(universe: str, requested_tickers: List[str]) -> Dict:
         prior = to_json({}, [], universe=universe, requested_tickers=requested_tickers)
     return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}
 
-
-# ── CLI entry point ───────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -894,7 +872,6 @@ Examples:
 
     elapsed = time.time() - t_start
 
-    # ── Print summary to stderr ──
     actionable = [p for p in pair_results if p.all_gates_pass]
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"SCAN COMPLETE — {elapsed:.1f}s", file=sys.stderr)

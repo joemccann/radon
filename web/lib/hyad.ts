@@ -68,7 +68,6 @@ export function hyAdRegimeColor(regime: HyAdRegime): string {
   }
 }
 
-/** Signed count with thousands separators: -2535 renders "-2,535", 900 renders "+900". */
 export function formatSignedThousands(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
   const rounded = Math.round(v);
@@ -76,7 +75,6 @@ export function formatSignedThousands(v: number | null | undefined): string {
   return `${rounded < 0 ? "-" : "+"}${magnitude}`;
 }
 
-/** Unsigned count with thousands separators: 1227 renders "1,227". */
 export function formatThousands(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return Math.round(v).toLocaleString("en-US");

@@ -112,7 +112,6 @@ a {
   color: var(--color-primary);
 }
 
-/* ---------- Clear metadata eyebrow ---------- */
 .editorial-eyebrow {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -175,7 +174,6 @@ main p {
   padding-left: 1.1em;
 }
 
-/* ---------- Journal plate frame ---------- */
 .plate {
   margin: 0;
   border: 1px solid var(--color-grid);
@@ -331,7 +329,6 @@ html[data-theme="dark"] .plate-shot .shot-dark {
   letter-spacing: 0.04em;
 }
 
-/* ---------- Four Gates lattice ---------- */
 .gates {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -397,7 +394,6 @@ html[data-theme="dark"] .plate-shot .shot-dark {
   text-decoration: line-through;
 }
 
-/* ---------- Pipeline counter ---------- */
 .pipeline {
   counter-reset: ms;
   border-top: 1px solid var(--color-grid);
@@ -411,7 +407,6 @@ html[data-theme="dark"] .plate-shot .shot-dark {
   content: "0" counter(ms);
 }
 
-/* ---------- Scan + registry tables ---------- */
 .scan-table {
   width: 100%;
   border-collapse: collapse;
@@ -559,7 +554,6 @@ html[data-theme="dark"] .plate-shot .shot-dark {
   stroke-width: 1;
 }
 
-/* ---------- Scroll reveal ---------- */
 .reveal {
   opacity: 0;
   transform: translateY(16px);

@@ -1,14 +1,7 @@
-/**
- * Unified Order System Types
- *
- * Shared type definitions for the order component system.
- */
-
 export type OrderAction = "BUY" | "SELL";
 export type OrderTif = "DAY" | "GTC";
 export type OrderType = "stock" | "option" | "combo";
 
-/** Computed prices for an order (single or spread) */
 export interface OrderPrices {
   bid: number | null;
   mid: number | null;
@@ -18,7 +11,6 @@ export interface OrderPrices {
   available: boolean;         // true if all prices resolved
 }
 
-/** A single leg in a multi-leg order */
 export interface OrderLeg {
   id: string;
   action: OrderAction;
@@ -31,7 +23,6 @@ export interface OrderLeg {
   ask?: number | null;
 }
 
-/** Order form state */
 export interface OrderFormState {
   action: OrderAction;
   quantity: string;
@@ -43,7 +34,6 @@ export interface OrderFormState {
   success: string | null;
 }
 
-/** Validation result */
 export interface OrderValidation {
   isValid: boolean;
   errors: {
@@ -203,21 +193,18 @@ export function isAugmentedOrderSummary(
  */
 export type OrderSummary = OrderPresentationSummary;
 
-/** Props for price-related components */
 export interface PriceDisplayProps {
   prices: OrderPrices;
   showSpread?: boolean;
   compact?: boolean;
 }
 
-/** Props for leg display components */
 export interface LegDisplayProps {
   legs: OrderLeg[];
   compact?: boolean;
   showPrices?: boolean;
 }
 
-/** Common order form props */
 export interface OrderFormProps {
   ticker: string;
   type: OrderType;

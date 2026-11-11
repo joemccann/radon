@@ -92,8 +92,6 @@ class UwEmbargo:
     def path(self) -> Path:
         return self._path_source()
 
-    # ── sidecar ───────────────────────────────────────────────────
-
     def deadline(self, now: datetime) -> Optional[datetime]:
         """Live deadline, or None. Read-only — never clears the sidecar."""
         stored = self._read()
@@ -143,9 +141,6 @@ class UwEmbargo:
         except (OSError, ValueError, TypeError, AttributeError):
             return None
         return _parse(raw)
-
-
-    # ── telemetry ─────────────────────────────────────────────────
 
     def record_error(
         self, exc: BaseException, *, now: datetime, next_attempt_at: str

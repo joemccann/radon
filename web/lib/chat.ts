@@ -514,7 +514,6 @@ export async function streamMessage(
     return;
   }
 
-  // Everything past the cap is written in one go rather than dropped.
   const animated = parts.slice(0, MAX_STREAM_CHUNKS);
   const remainder = parts.slice(MAX_STREAM_CHUNKS).join("");
 
@@ -598,7 +597,6 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "profile";
   }
 
-  // Dynamic ticker route: /AAPL, /GOOG, /VIX3M, etc.
   const segments = pathname.split("/");
   if (segments.length === 2 && isTickerRouteSegment(segments[1])) {
     return "ticker-detail";

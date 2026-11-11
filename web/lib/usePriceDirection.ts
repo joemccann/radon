@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 
-/* ─── Price direction hook ─────────────────────────────── */
-
 export function usePriceDirection(price: number | null): {
   direction: "up" | "down" | null;
   flashDirection: "up" | "down" | null;

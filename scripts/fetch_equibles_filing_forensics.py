@@ -45,7 +45,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -58,7 +57,6 @@ try:
 except Exception:
     pass
 
-# ── constants ─────────────────────────────────────────────────────
 
 SERVICE_NAME = "equibles-filing-forensics"
 CACHE_DIR = _PROJECT_DIR / "data" / "equibles_filing_forensics"
@@ -131,9 +129,6 @@ ON CONFLICT(ticker) DO UPDATE SET
 """
 
 
-# ── source results ────────────────────────────────────────────────
-
-
 @dataclass
 class SourceResult:
     """One endpoint's answer: rows plus whether it answered at all.
@@ -168,9 +163,6 @@ class GoingConcernUniverse:
             "truncated": self.truncated,
             "error": self.error,
         }
-
-
-# ── defensive field access ────────────────────────────────────────
 
 
 def _first_value(row: dict[str, Any], *keys: str) -> Any:
@@ -219,9 +211,6 @@ def _usd(amount: float) -> str:
     if abs(amount) >= 1_000_000:
         return f"${amount / 1_000_000:,.1f}M"
     return f"${amount:,.0f}"
-
-
-# ── check construction ────────────────────────────────────────────
 
 
 def _check(
@@ -416,9 +405,6 @@ def _going_concern_check(ticker: str, universe: GoingConcernUniverse) -> dict[st
             "figure": None, "filing": None}
 
 
-# ── dossier assembly ──────────────────────────────────────────────
-
-
 def build_dossier(
     ticker: str,
     sources: dict[str, SourceResult],
@@ -463,9 +449,6 @@ def build_dossier(
 def has_usable_data(dossier: dict[str, Any]) -> bool:
     """At least one source answered. Gate every cache write on this."""
     return any(s["status"] != STATUS_ERROR for s in dossier["sources"].values())
-
-
-# ── fetching ──────────────────────────────────────────────────────
 
 
 def _rows_of(payload: Any) -> list[dict[str, Any]]:
@@ -630,9 +613,6 @@ def fetch_dossier(
     )
 
 
-# ── persistence ───────────────────────────────────────────────────
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -678,9 +658,6 @@ def _record_health(state: str, error: Optional[dict[str, Any]] = None) -> None:
 def _write_json_cache(dossier: dict[str, Any]) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     (CACHE_DIR / f"{dossier['ticker']}.json").write_text(json.dumps(dossier, indent=2))
-
-
-# ── orchestration ─────────────────────────────────────────────────
 
 
 def load_watchlist_tickers() -> list[str]:
@@ -836,9 +813,6 @@ def run(
         "flagged": [d["ticker"] for d in dossiers if d["flag_count"]],
         "dossiers": dossiers,
     }
-
-
-# ── CLI ───────────────────────────────────────────────────────────
 
 
 def _print_summary(result: dict[str, Any]) -> None:

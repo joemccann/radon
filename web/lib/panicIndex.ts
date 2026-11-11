@@ -15,8 +15,6 @@ export const INFO_TOOLTIP =
   "one-day change: a large negative print is a panic unwind, a large positive " +
   "print is a panic surge. Source: CBOE (VIX, VIX3M, VVIX, SKEW).";
 
-/* ─── Payload types ──────────────────────────────────── */
-
 export interface PanicIndexLeg {
   value: number | null;
   z: number | null;

@@ -158,7 +158,6 @@ export function updateDerivedLast(data) {
 
 export function updatePriceFromTickPrice(data, tickType, value) {
   switch (tickType) {
-    // ── Live tick types ───────────────────────────────────────────────────
     case TICK_TYPE.BID:
       if (data.lastIsCalculated) data.last = null;
       data.bid = normalizePrice(value);

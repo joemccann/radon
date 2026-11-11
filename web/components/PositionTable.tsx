@@ -74,10 +74,6 @@ function useDensity(tableId: string): [DensityMode, () => void] {
   return [mode, toggle];
 }
 
-/* ─── Helpers ──────────────────────────────────────────── */
-
-/* ─── Sort extract factory ─────────────────────────────── */
-
 export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "initial_value" | "entry_cost" | "market_value" | "pnl" | "pnl_pct" | "expiry";
 
 /** User-toggleable columns. `ticker` is the only always-on identity column —
@@ -211,8 +207,6 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: n
 }
 
 export { resolveActiveInstrument, type ActiveInstrumentIdentity } from "@/lib/activeInstrument";
-
-/* ─── Leg row ──────────────────────────────────────────── */
 
 function LegRow({
   leg,
@@ -356,8 +350,6 @@ function LegRow({
     </tr>
   );
 }
-
-/* ─── Position row ─────────────────────────────────────── */
 
 type PositionRowProps = {
   pos: PortfolioPosition;
@@ -639,8 +631,6 @@ const PositionRow = memo(function PositionRow({ pos, showExpiry = true, showUnde
     </>
   );
 }, positionRowPropsEqual);
-
-/* ─── Position table ───────────────────────────────────── */
 
 export default function PositionTable({
   positions,

@@ -117,8 +117,6 @@ class JournalSyncHandler(BaseHandler):
         # Fills the last _fills_to_entries pass refused to label.
         self.unlabelled = 0
 
-    # -- public ------------------------------------------------------------
-
     def execute(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
             "imported": 0,
@@ -533,8 +531,6 @@ class JournalSyncHandler(BaseHandler):
                 continue
             target.clear()
             target.update(entry)
-
-    # -- internals ---------------------------------------------------------
 
     def _load_existing_with_recovery(self, db: Any) -> tuple[Dict[str, Any], Optional[Dict[str, int]]]:
         try:

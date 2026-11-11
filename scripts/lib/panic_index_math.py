@@ -12,7 +12,6 @@ from __future__ import annotations
 import statistics
 from typing import Any, Optional
 
-# ── named constants ───────────────────────────────────────────────
 Z_WINDOW = 252            # sessions in the rolling z-score window, inclusive of t
 RANK_WINDOW = 2520        # trailing sessions for the 10y rank and the Δ1d z
 RANK_MIN_ROWS = 504       # Δ1d z / rank are None until this many Δ1d rows exist

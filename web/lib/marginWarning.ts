@@ -103,7 +103,6 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
   const cashToClear = cashToClearWarning({ nlv, el, mmr, ewl });
   const deposit = depositSuffix(cashToClear);
 
-  // Active margin call — Excess Liquidity has crossed zero.
   if (el <= 0) {
     return {
       level: "critical",

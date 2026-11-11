@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { VolConeData } from "./volCone";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: radon-vol-cone.timer runs the fetcher daily, so there is no
 // manual-scan POST and an hourly poll is already generous. Types + pure
 // helpers live in lib/volCone.ts.

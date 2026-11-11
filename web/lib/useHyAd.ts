@@ -3,8 +3,6 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { HyAdData } from "./hyad";
 
-/* ─── Hook ───────────────────────────────────────────────────── */
-
 // GET-only: the hy-ad timer writes one row per bond-market session, so there
 // is no manual-scan POST and an hourly poll is plenty for the series.
 // Types + pure helpers live in lib/hyad.ts.
