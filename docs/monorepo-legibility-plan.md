@@ -72,8 +72,8 @@ Live GitHub state on 2026-08-20:
 | `site/` | 142 | Marketing site. Separate Vercel project. Still npm. |
 | `docs/` | 100 | Specs plus 9 HTML dumps (6 of them `show-me-*`). |
 | `tasks/` | 43 | Session plans, completed checklists, HTML reports. |
-| `.pi/` | 40 | Pi commands, prompts, extensions. Load-bearing. |
-| `lib/` | 29 | Pi tools. Vitest + CI include them. |
+| `.pi/` | 40 | Pi commands, prompts, extensions. The Pi harness was deleted 2026-11-11; only `.pi/AGENTS.md` and the HTML report templates remain. |
+| `lib/` | 29 | Tool schemas and wrappers. Vitest + CI include them. |
 | `context/` | 18 | Agent memory. March 2026 facts. Constructor still reads it. |
 | `tests/` | 17 | TWR money-math. CI collects this directory by name. |
 | `config/` | 16 | Laptop ops launchd plists (pull/watch the VPS). |

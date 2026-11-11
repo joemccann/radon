@@ -45,10 +45,6 @@ export default defineConfig({
       "scripts/mktnews/**/*.test.js",
       "web/tests/**/*.test.ts",
       "web/tests/**/*.test.tsx",
-      // T-058: the PI extension security tests (browser command boundary,
-      // workspace trust, bounded startup jobs). A dot-directory needs an
-      // explicit leading-dot segment — a `**` glob will not descend into it.
-      ".pi/tests/**/*.test.ts",
     ],
     environment: "node",
     fileParallelism: true,
@@ -140,7 +136,6 @@ export default defineConfig({
         "web/lib/OrderActionsContext.tsx",
         "web/lib/TickerDetailContext.tsx",
         "web/lib/types.ts",       // Pure type definitions, no runtime code
-        "lib/tools/pi-tools.ts",  // PI framework registration, untestable without PI
         "lib/tools/schemas/index.ts",   // Re-export barrel
         "lib/tools/wrappers/index.ts",  // Re-export barrel
         "lib/tools/wrappers/fetch-ticker.ts", // Thin runScript wrapper

@@ -402,7 +402,7 @@ Every GARCH convergence report MUST include:
 | Callout box | `.callout`, `.callout.positive`, `.callout.warning` |
 | Metrics grid | `.metrics` + `.metric` |
 
-See `.pi/skills/html-report/SKILL.md` for full CSS reference.
+The template itself (`.pi/skills/html-report/template.html`) is the full CSS reference.
 
 ---
 

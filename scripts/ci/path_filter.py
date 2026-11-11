@@ -95,7 +95,7 @@ DOC_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico")
 # Both tuples are derived from the checkout and pinned by
 # scripts/tests/test_path_filter.py, which re-derives them on every run from
 # vitest.config.ts's test.include globs and from the path literals inside
-# web/tests, lib/tools/__tests__, site/lib, scripts/lib, .pi/tests and
+# web/tests, lib/tools/__tests__, site/lib, scripts/lib and
 # tests/, scripts/tests/, cloud/tests/. Adding a new cross-tree read without
 # updating these turns that test red. They only ever switch a gate ON.
 #
