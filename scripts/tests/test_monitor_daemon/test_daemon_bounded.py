@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """REL-008 — bound the monitor daemon (RELIABILITY_AUDIT.md R-013).
 
-Three unbounded surfaces let one hang wedge exit-order management
+Three unbounded surfaces let one hang wedge the monitor daemon
 alive-but-dead: the per-cycle `upsert_daemon_state` ran on native libsql
 (no timeout, holds the GIL), `handler.run()` had no deadline (ib_insync
 blocks forever on an auth-wedged gateway), and radon-monitor.service had

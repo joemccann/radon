@@ -194,7 +194,7 @@ Open positions, bankroll and exposure live in Turso `portfolio_snapshots`; trade
 
 - [ ] `scripts/cloud.sh` (VPN preflight, probes radon-app:8321, exports VPS URLs, runs `next dev`)
 - [ ] `curl http://radon-app:8321/health` → `ib_gateway.auth_state: authenticated`; verify [readiness](docs/ib-gateway-recovery.md#readiness-verification)
-- [ ] VPS timers own reconciliation, exit orders, CRI (`ssh root@radon-app radon status`)
+- [ ] VPS timers own reconciliation and CRI (`ssh root@radon-app radon status`); exits are placed by hand
 - [ ] Market hours: `TZ=America/New_York date +"%A %H:%M"` (9:30–16:00 ET, Mon–Fri)
 
 ## Response Format

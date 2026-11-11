@@ -1164,7 +1164,7 @@ class TestOperatorSafetyOwners:
         rules = {r["id"]: r for r in _load_owners()["rules"]}
         assert "scripts/bankroll_guard.py" in rules["kelly-sizing"]["globs"]
         assert "scripts/app_preferences.py" in rules["kelly-sizing"]["globs"]
-        for placer in ("ib_place_order.py", "ib_execute.py", "exit_order_service.py"):
+        for placer in ("ib_place_order.py", "ib_execute.py"):
             assert "check_if_enforced_on_all_paths" in (_ROOT / "scripts" / placer).read_text()
 
     def test_subscription_recovery_links_opt_in_policy(self):

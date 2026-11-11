@@ -144,7 +144,6 @@ Observations that drive the picks:
 - Rejected, intraday (W07 to W09, O15, O16): weeks of data, meaningless.
 - Rejected, order-type demos (O01 to O14, O18): they demonstrate the fill
   engine, not a signal; most are negative after the risk-free deduction. Radon's
-  exit discipline (bracket, trailing, stop) already lives in
-  `exit_order_service.py` and the chain builder.
+  exits are placed by hand.
 - Rejected, risk parity (W19, W20): 35% and 48% drawdowns; an equal-risk
   long-only book is the opposite of a defined-risk convex book.

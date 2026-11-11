@@ -165,10 +165,6 @@ CROSS_TREE_CONTRACTS = (
         tests=("scripts/tests/test_rel108_og_brand_tokens.py",),
     ),
     CrossTreeContract(
-        patterns=("web/app/api/menthorq/cta/image/route.tsx",),
-        tests=("scripts/tests/test_rel108_cta_image_sections.py",),
-    ),
-    CrossTreeContract(
         patterns=(
             "web/lib/*.js",
             "web/lib/*.jsx",
@@ -227,7 +223,6 @@ CROSS_TREE_CONTRACTS = (
             "cloud/tests/test_nextjs_db_watchdog.py::TestHealthRowServiceIsInBothCatalogs::test_registered_in_the_typescript_catalog",
             "scripts/tests/test_cadence_and_growth_bounds.py::TestSignalsFreshnessMatchesItsCadence::test_the_web_windows_agree_with_the_watchdog",
             "scripts/tests/test_cadence_and_growth_bounds.py::TestSignalsFreshnessMatchesItsCadence::test_the_web_side_measures_from_the_open",
-            "scripts/tests/test_exit_orders_unregistered.py::test_exit_orders_absent_from_both_watchdog_catalogs",
             "scripts/tests/test_indicator_storage_hygiene.py::TestTrinClosedWindowCoversTheWeekend::test_both_catalogs_use_a_multi_day_closed_window",
             "scripts/tests/test_monitor_daemon/test_menthorq_session_check.py::TestRegistrationContract::test_typescript_window_mirrors_python",
             "scripts/tests/test_rel141_catalog_exemptions_are_true.py::TestTheTwoGenuineGapsAreClosed::test_the_service_is_in_both_catalogs",

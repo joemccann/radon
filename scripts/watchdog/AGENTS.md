@@ -7,7 +7,7 @@ Applies under `scripts/watchdog/`. Mirrors `scripts/watchdog/CLAUDE.md`.
 Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and writes always-on `service_health` rows.
 
 - `intraday`: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync`.
-- `continuous`: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, plus `replica-watchdog` only while `data/replica.db` exists.
+- `continuous`: `newsfeed-scraper`, `fill-monitor`, `journal-sync`, plus `replica-watchdog` only while `data/replica.db` exists.
 - `daily`: `cash-flow-sync`, `flex-token-check`, `cta-sync`.
 - `error`: every scheduled service except `watchdog-alerts` itself.
 

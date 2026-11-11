@@ -1,4 +1,4 @@
-"""NF-1 follow-up: operator preference extends Gate 3 to ib_execute + exit service.
+"""NF-1 follow-up: operator preference extends Gate 3 to ib_execute.
 
 RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS (app_preferences, Turso-backed). Default
 Off (bypass): these paths behave as before. On (enforce): the same 2.5% NLV /
@@ -14,7 +14,6 @@ import pytest
 
 import app_preferences
 import bankroll_guard
-import exit_order_service
 import ib_execute
 import trading_halt
 
@@ -103,43 +102,3 @@ class TestIbExecute:
         }])
         sell = [a if a != "BUY" else "SELL" for a in BUY_CALL]
         assert len(_run_execute(sell)) == 1
-
-
-# ── exit_order_service ────────────────────────────────────────────────
-
-EXIT_LEGS = [
-    {"type": "Long Call", "strike": 200.0},
-    {"type": "Short Call", "strike": 210.0},
-]
-HELD_SPREAD = {
-    "ticker": "AAPL", "expiry": "2026-10-16",
-    "legs": [
-        {"type": "Call", "strike": 200.0, "direction": "LONG", "contracts": 2},
-        {"type": "Call", "strike": 210.0, "direction": "SHORT", "contracts": 2},
-    ],
-}
-
-
-def _place_exit(contracts=2):
-    client = MagicMock()
-    client.place_order.return_value = MagicMock(
-        orderStatus=MagicMock(status="Submitted"), order=MagicMock(orderId=7)
-    )
-    result = exit_order_service.place_target_order(
-        client, "AAPL", EXIT_LEGS, contracts, 8.0, order_data={"legs": [{"expiry": "20261016"}]}
-    )
-    return result, client.place_order.called
-
-
-class TestExitOrderService:
-    def test_default_bypass_passes_stale(self, guard):
-        assert _place_exit()[1] is True
-
-    def test_enforce_refuses_non_close_with_stale(self, guard):
-        _enforce()  # nothing held -> not a close-out -> stale refuses
-        assert _place_exit() == (None, False)
-
-    def test_enforce_allows_close_out_with_stale(self, guard):
-        _enforce()
-        guard["snapshot"] = _snapshot(age_min=600, positions=[HELD_SPREAD])
-        assert _place_exit()[1] is True
