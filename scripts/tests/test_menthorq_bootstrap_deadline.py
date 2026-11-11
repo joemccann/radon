@@ -34,7 +34,11 @@ from clients import menthorq_dashboard_client as mq
 
 
 @pytest.fixture(autouse=True)
-def _clear_embargo():
+def _clear_embargo(tmp_path, monkeypatch):
+    # The embargo is also persisted beside the session file for 300s. Without a
+    # private path a second run inside that window found the first run's file
+    # and failed before reaching the code under test.
+    monkeypatch.setenv("MENTHORQ_DASHBOARD_STORAGE_STATE", str(tmp_path / "storage_state.json"))
     mq._reset_auth_embargo_for_tests()
     yield
     mq._reset_auth_embargo_for_tests()

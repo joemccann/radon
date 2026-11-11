@@ -19,8 +19,9 @@ scans). A held underlying the store cannot cover deeply or recently enough is
 backfilled through the mandated IB -> Robinhood -> UW -> Yahoo ladder and persisted back to
 Turso, so the next run is a pure read. The legacy
 ``data/price_history_cache/`` request cache remains a last-ditch fallback only:
-its sole writer (``portfolio_performance.py``) is no longer invoked by any
-timer, which is why Gate 3 read "measurement unavailable" for every ticker.
+its bulk writer (``portfolio_performance.py``, since deleted) was no longer
+invoked by any timer, which is why Gate 3 read "measurement unavailable" for
+every ticker.
 """
 
 from __future__ import annotations
