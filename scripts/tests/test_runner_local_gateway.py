@@ -71,6 +71,7 @@ def test_gateway_daemon_runs_the_root_installed_copy_as_its_own_account():
     assert env["RADON_MODEL_PROVIDER_CONCURRENCY"] == "6"
     assert env["PATH"].split(":")[0] == "/Library/Radon/model-clients/current/bin"
     assert env["ANTIGRAVITY_CLI"] == "/usr/local/radon-runner/gateway/bin/agy"
+    assert env["RADON_ANTIGRAVITY_KEYCHAIN_HOME"] == "/Library/Radon/model-gateway-local/agy-home"
     # No provider credential value is ever written into a plist.
     assert not {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} & set(env)
 
