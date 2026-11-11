@@ -28,6 +28,7 @@ from utils.cta_sync_health import (  # noqa: E402
     ARTIFACT_DIR,
     LOCK_DIR,
     classify_sync_error,
+    fill_missing_cta_tables,
     latest_artifacts,
     latest_available_cta_date,
     load_cta_sync_status,
@@ -192,6 +193,43 @@ def write_final_status(status: dict[str, Any]) -> None:
     write_cta_sync_history(status)
 
 
+def _normalized_cache_payload(path: Path, target: str) -> dict[str, Any] | None | bool:
+    """Payload to accept on the skip path.
+
+    ``None`` means the file could not be read (skip, no dual-write).
+    ``False`` means it was read and is still not a valid CTA payload (refetch).
+    A dict has required table keys filled and passed validation.
+    """
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[cta-sync] dual-write skipped (cache unreadable): {exc}", file=sys.stderr)
+        return None
+    if not isinstance(payload, dict):
+        print(f"[cta-sync] cache for {target} failed validation (empty_payload); refetching", file=sys.stderr)
+        return False
+    tables = payload.get("tables")
+    if isinstance(tables, dict):
+        filled = fill_missing_cta_tables(tables)
+        if filled:
+            print(
+                f"[cta-sync] filled missing table keys: {', '.join(filled)}",
+                file=sys.stderr,
+            )
+            try:
+                atomic_save(str(path), payload)
+            except (OSError, TypeError, ValueError) as exc:
+                print(f"[cta-sync] cache rewrite failed: {exc}", file=sys.stderr)
+    valid, reason = validate_cta_payload(payload, target)
+    if not valid:
+        print(
+            f"[cta-sync] cache for {target} failed validation ({reason}); refetching",
+            file=sys.stderr,
+        )
+        return False
+    return payload
+
+
 def run_cta_sync(
     *,
     target_date: str | None = None,
@@ -207,28 +245,27 @@ def run_cta_sync(
     target_cache = cache_path(target)
 
     if target_cache.exists() and not force:
-        finished_at = utc_now_iso()
-        status = build_status(
-            previous,
-            run_id=run_id,
-            state="healthy",
-            target_date=target,
-            source=source,
-            started_at=started_at,
-            finished_at=finished_at,
-            latest_available_date=target,
-            attempt_count=0,
-            cache_path_value=str(target_cache),
-            message="CTA cache already fresh for target date",
-        )
-        write_final_status(status)
-        try:
-            cached_payload = json.loads(target_cache.read_text())
-            _dual_write_cta_to_db(target, cached_payload, finished_at)
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[cta-sync] dual-write skipped (cache unreadable): {exc}", file=sys.stderr)
-        print(f"CTA cache already exists for {target} — skipping", file=sys.stderr)
-        return 0
+        cached_payload = _normalized_cache_payload(target_cache, target)
+        if cached_payload is not False:
+            finished_at = utc_now_iso()
+            status = build_status(
+                previous,
+                run_id=run_id,
+                state="healthy",
+                target_date=target,
+                source=source,
+                started_at=started_at,
+                finished_at=finished_at,
+                latest_available_date=target,
+                attempt_count=0,
+                cache_path_value=str(target_cache),
+                message="CTA cache already fresh for target date",
+            )
+            write_final_status(status)
+            if isinstance(cached_payload, dict):
+                _dual_write_cta_to_db(target, cached_payload, finished_at)
+            print(f"CTA cache already exists for {target} — skipping", file=sys.stderr)
+            return 0
 
     try:
         with cta_sync_lock(target_date=target, run_id=run_id), _sigterm_raises():
@@ -347,15 +384,27 @@ def _run_attempts(
         if captured_stderr:
             print(captured_stderr, end="", file=sys.stderr)
 
-        # Parse payload from JSON stdout
+        # Parse payload from JSON stdout. A completed child can omit a
+        # required table key after the screenshot fallback; an empty list is
+        # valid, a missing key is not. Fill before validating so that shape
+        # does not exit 1.
         payload = None
         if fetch_returncode == 0 and captured_stdout.strip():
             try:
                 payload = json.loads(captured_stdout)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as exc:
+                print(f"[cta-sync] fetch stdout was not JSON: {exc}", file=sys.stderr)
+        if isinstance(payload, dict) and isinstance(payload.get("tables"), dict):
+            filled = fill_missing_cta_tables(payload["tables"])
+            if filled:
+                print(
+                    f"[cta-sync] filled missing table keys: {', '.join(filled)}",
+                    file=sys.stderr,
+                )
 
         valid, reason = validate_cta_payload(payload, target)
+        if not valid:
+            print(f"[cta-sync] fetch payload rejected: {reason}", file=sys.stderr)
         artifact_payload = latest_artifacts(artifact_dir=attempt_artifact_dir)
 
         if valid:
