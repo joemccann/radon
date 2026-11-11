@@ -1,10 +1,12 @@
 """Single service owner for bounded provider renewal and native credential locks."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from .client import GatewayError
@@ -14,6 +16,18 @@ from .client import GatewayError
 # request is joined to a job that will still refresh its providers, or queued,
 # never dropped.
 JobStatus = Literal["queued", "running", "complete"]
+STATE_DIR_ENV = "RADON_SUBSCRIPTION_STATE_DIR"
+
+
+def _state_paths():
+    """Renewal sidecar and run lock; the Mac-local gateway has no /var/lib/radon."""
+    raw = os.environ.get(STATE_DIR_ENV, "")
+    if not raw:
+        return {}
+    root = Path(raw)
+    if not root.is_absolute():
+        raise ValueError("renewal state directory must be absolute")
+    return {"sidecar_path": root / "state.json", "lock_path": root / "run.lock"}
 
 
 @dataclass
@@ -106,10 +120,11 @@ class RefreshManager:
             job.status = "running"
             names = list(job.providers)
         try:
+            paths = _state_paths()
             for name in names:
                 # Only this provider pauses; other rungs remain available.
-                with self.locks[name]:
-                    runtime = tokens.Runtime(heartbeat=lambda *a, **k: None, **({} if job.interactive else {"login": lambda *a, **k: False}))
+                with self.locks[name].exclusive():
+                    runtime = tokens.Runtime(heartbeat=lambda *a, **k: None, **paths, **({} if job.interactive else {"login": lambda *a, **k: False}))
                     report = tokens.run(job.mode, [name], runtime)
                 with self.guard:
                     job.done.add(name)

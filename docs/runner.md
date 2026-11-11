@@ -132,36 +132,60 @@ from `/Library/Radon/model-clients/current` and routes native model requests
 through its authenticated local adapter. Existing tool permissions, GitHub
 identity and process-group cleanup remain local.
 
-### 5. Model transport (operator)
+### 5. Model gateway (operator)
 
-Provision the root-owned `cloud/scripts/mac_model_gateway.py` helper with the
-model host's authenticated Ed25519 host key and operator account. Its `prepare`
-operation creates a dedicated transport key; the corresponding Linux
-`cloud/scripts/model_transport.py prepare` grants that public key only
-read-only artifact SFTP and private inference-socket forwarding. The Mac
-`activate` operation verifies the release and installs supervised tunnel and
-half-hour artifact-update jobs. Neither operation receives an operator SSH key
-or a provider grant. See [the service contract](model-gateway.md).
+Runner model calls go to a gateway on this Mac, signed with this Mac's own
+subscriptions. Nothing in the runner path reaches the VPS. `install.sh` creates
+the disabled-login account `_radonmodelgw`, installs the service and starts
+`com.radon.model-gateway-local`
+([service contract](model-gateway.md#mac-local-gateway-for-the-nightly-runners)).
+Grants live in `/Library/Radon/model-gateway-local/home`, readable by that
+account only. Provision them once, from your own tab, after `install.sh`:
 
-Provider authentication and renewal belong to the Linux gateway. A Mac reboot
-does not require unlocking the bot's model keychain. A provider requiring new
-human consent uses the gateway's existing reauthorization alert path.
+1. Claude. Generate a long-lived subscription token and store it as the gateway account (paste the token, then Ctrl-D):
+
+   ```bash
+   /Library/Radon/model-clients/current/bin/claude setup-token
+   ```
+
+   ```bash
+   sudo -u _radonmodelgw /bin/sh -c 'umask 077; cat > /Library/Radon/model-gateway-local/home/claude-oauth-token'
+   ```
+
+2. Codex, stored as a file the gateway reads (device login prints a code to approve in your browser):
+
+   ```bash
+   sudo -u _radonmodelgw /bin/sh -c 'umask 077; mkdir -p "$HOME/.codex" && printf "cli_auth_credentials_store = \"file\"\n" > "$HOME/.codex/config.toml"'
+   ```
+
+   ```bash
+   sudo -u _radonmodelgw -H env CODEX_HOME=/Library/Radon/model-gateway-local/home/.codex /Library/Radon/model-clients/current/bin/codex login --device-auth
+   ```
+
+3. Restart the gateway so it reads the new grants:
+
+   ```bash
+   sudo launchctl kickstart -k system/com.radon.model-gateway-local
+   ```
+
+The runner no longer uses `com.radon.model-gateway-tunnel`. The
+`com.radon.model-gateway-updater` job still promotes the pinned Claude, Codex
+and Grok client binaries from the VPS release export; a VPS outage only delays
+a client upgrade. A provider requiring new consent shows up as `no_key` or a
+401 in `/Library/Radon/model-gateway-local/log/gateway.log`; repeat its step.
 
 ### 6. Model readiness (bot shell)
 
 ```bash
-RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway/gateway.sock \
+RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway-local/run/gateway.sock \
   python3.13 -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py status
 ```
 
-The result identifies wired providers and service capabilities. A failed
-connection stops model work; it never creates local provider settings or
-credentials. `agent_cli_bootstrap.sh` performs the same status check. Model
-execution no longer uses the bot-side NVIDIA/Cerebras env, native login files
-or fx proxy. Quarantining known bot model grants is a separate, explicit
-operator step after canonical gateway grants and real native transport are
-verified; the installer does not automate it. Personal operator CLI logins
-remain untouched.
+The result identifies wired providers and service capabilities; `anthropic`
+and `codex` must both be listed. A failed connection stops model work; it never
+creates local provider settings or credentials. Model execution does not use the bot-side
+NVIDIA/Cerebras env, native login files or fx proxy. Personal operator CLI
+logins remain untouched.
 
 ### 7. GitHub machine account (operator, browser)
 
@@ -433,8 +457,8 @@ failures with the loop name and sanitized log, never credentials.
 | Rotate the GitHub token (before its expiry) | step 7.5 to 7.6, then step 8 |
 | Release a completed P1 fix | the loop exports immutable source to private CI; the operator coordinator owns independent review, public PR, merge and host sync. No terminal-written marker. P0 requires incident coordination |
 | Read a security loop's private report | the Pushover page's "Open private report" link (`joemccann/radon-security-reports`) |
-| After a reboot | Verify `com.radon.model-gateway-tunnel` and `com.radon.model-gateway-updater` in system launchd, then step 6 |
-| Provider needs renewed consent | Follow the gateway reauthorization alert; do not create bot-side model grants |
+| After a reboot | Verify `com.radon.model-gateway-local` and `com.radon.model-gateway-updater` in system launchd, then step 6 |
+| Provider needs renewed consent | Repeat its step in step 5; never create bot-side model grants |
 
 ## Troubleshooting
 
