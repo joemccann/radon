@@ -38,6 +38,7 @@ CACHE_DIR = _PROJECT_DIR / "data" / "menthorq_cache"
 from utils.env_loader import load_env_file
 from utils.atomic_io import atomic_save
 from utils.cta_percentiles import reconcile_tables
+from utils.cta_sync_health import fill_missing_cta_tables
 
 # Load .env from project root (before any os.environ reads)
 load_env_file(_PROJECT_DIR / ".env")
@@ -227,6 +228,18 @@ def fetch_menthorq_cta(
     except Exception as exc:
         print(f"  ERROR: Unexpected failure: {exc}", file=sys.stderr)
         return None
+
+    # A screenshot fallback can omit a card (cta_index had no img src on
+    # 2026-11-10). An empty list is a valid table; a missing key is not.
+    # Fill before the hollow-extraction guard so a partial card set is not
+    # cached in the shape the parent rejects.
+    if isinstance(tables, dict):
+        filled = fill_missing_cta_tables(tables)
+        if filled:
+            print(
+                f"  WARN: filled missing CTA tables: {', '.join(filled)}",
+                file=sys.stderr,
+            )
 
     # Reject empty AND hollow extractions ({"main": [], ...}) — caching a dict
     # whose tables are all empty poisons data/menthorq_cache for the day

@@ -180,3 +180,112 @@ class TestFetchTimeoutEnvelope:
         assert final["last_error"]["type"] == "timeout"
         assert final["last_attempt_finished_at"]
         assert "syncing" != final["state"]
+
+
+# Production 2026-11-10 21:34Z: child logged the cta_index S3 miss, the
+# screenshot fallback, Cached, and Completed in 56.8s, then the parent
+# exited 1. validate_cta_payload allows an empty required table; it rejects
+# a missing key. The child omitted index. One non-retryable attempt pages P1.
+_MISSING_INDEX_STDERR = (
+    "No img src found for card slug: cta_index\n"
+    "S3 download failed, falling back to card screenshots\n"
+    "  Cached: /home/radon/radon/data/menthorq_cache/cta_2026-11-10.json\n"
+    "  Completed in 56.8s\n"
+)
+_MISSING_INDEX_PAYLOAD = {
+    "date": "2026-11-10",
+    "tables": {
+        "main": [{"underlying": "E-Mini S&P 500"}],
+        "commodity": [{"underlying": "Gold"}],
+        "currency": [{"underlying": "Euro"}],
+    },
+}
+
+
+class TestCompletedFetchMissingTableKey:
+    def test_completed_fetch_missing_index_key_does_not_exit_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        statuses = _isolate_cta_sync(tmp_path, monkeypatch)
+        captured: list[dict] = []
+        monkeypatch.setattr(
+            cta_sync_svc,
+            "_dual_write_cta_to_db",
+            lambda _date, payload, _finished: captured.append(payload),
+        )
+        monkeypatch.setattr(
+            cta_sync_svc.subprocess,
+            "run",
+            lambda *_a, **_k: _completed(
+                0,
+                stdout=json.dumps(_MISSING_INDEX_PAYLOAD),
+                stderr=_MISSING_INDEX_STDERR,
+            ),
+        )
+
+        exit_code = cta_sync_svc.run_cta_sync(
+            target_date="2026-11-10",
+            source="launchd",
+            sleep_fn=lambda _s: None,
+        )
+
+        assert exit_code == 0
+        assert statuses[-1]["state"] == "healthy"
+        assert captured[0]["tables"]["index"] == []
+        assert captured[0]["tables"]["main"][0]["underlying"] == "E-Mini S&P 500"
+
+    def test_cached_missing_index_is_normalized_before_dual_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        cache_file = cache_dir / "cta_2026-11-10.json"
+        cache_file.write_text(json.dumps(_MISSING_INDEX_PAYLOAD))
+        captured: list[dict] = []
+        monkeypatch.setattr(cta_sync_svc, "LOCK_DIR", tmp_path / "lock")
+        monkeypatch.setattr(cta_sync_svc, "ARTIFACT_DIR", tmp_path / "artifacts")
+        monkeypatch.setattr(cta_sync_svc, "cache_path", lambda date_str: cache_dir / f"cta_{date_str}.json")
+        monkeypatch.setattr(cta_sync_svc, "load_cta_sync_status", lambda: None)
+        monkeypatch.setattr(cta_sync_svc, "latest_available_cta_date", lambda: "2026-11-09")
+        monkeypatch.setattr(cta_sync_svc, "write_cta_sync_status", lambda _p: None)
+        monkeypatch.setattr(cta_sync_svc, "write_cta_sync_history", lambda _p: None)
+        monkeypatch.setattr(
+            cta_sync_svc,
+            "_dual_write_cta_to_db",
+            lambda _date, payload, _finished: captured.append(payload),
+        )
+        monkeypatch.setattr(
+            cta_sync_svc.subprocess,
+            "run",
+            lambda *_a, **_k: pytest.fail("refetched a cache that only lacked empty table keys"),
+        )
+
+        exit_code = cta_sync_svc.run_cta_sync(target_date="2026-11-10", source="launchd")
+
+        assert exit_code == 0
+        assert captured[0]["tables"]["index"] == []
+        reloaded = json.loads(cache_file.read_text())
+        assert reloaded["tables"]["index"] == []
+
+    def test_completed_fetch_with_no_rows_still_exits_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        statuses = _isolate_cta_sync(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            cta_sync_svc.subprocess,
+            "run",
+            lambda *_a, **_k: _completed(
+                0,
+                stdout=json.dumps({"date": "2026-11-10", "tables": {"main": []}}),
+                stderr="No CTA data extracted.\n",
+            ),
+        )
+
+        exit_code = cta_sync_svc.run_cta_sync(
+            target_date="2026-11-10",
+            source="launchd",
+            sleep_fn=lambda _s: None,
+        )
+
+        assert exit_code == 1
+        assert statuses[-1]["state"] == "degraded"

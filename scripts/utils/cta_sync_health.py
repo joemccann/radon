@@ -78,6 +78,24 @@ def write_cta_sync_history(payload: dict[str, Any], history_dir: str | Path = HI
     return history_path
 
 
+REQUIRED_CTA_TABLE_KEYS = ("main", "index", "commodity", "currency")
+
+
+def fill_missing_cta_tables(tables: dict[str, Any]) -> list[str]:
+    """Insert empty lists for required table keys the extractor omitted.
+
+    ``validate_cta_payload`` accepts an empty required table and rejects a
+    missing key. A screenshot fallback that never produced ``index`` therefore
+    failed the parent after the child had already cached and exited 0.
+    """
+    filled: list[str] = []
+    for key in REQUIRED_CTA_TABLE_KEYS:
+        if key not in tables or tables[key] is None:
+            tables[key] = []
+            filled.append(key)
+    return filled
+
+
 def validate_cta_payload(payload: Optional[dict[str, Any]], target_date: str) -> tuple[bool, Optional[str]]:
     if not payload:
         return False, "empty_payload"
@@ -88,11 +106,10 @@ def validate_cta_payload(payload: Optional[dict[str, Any]], target_date: str) ->
     if not isinstance(tables, dict):
         return False, "missing_tables"
 
-    required = ("main", "index", "commodity", "currency")
-    if any(key not in tables for key in required):
+    if any(key not in tables for key in REQUIRED_CTA_TABLE_KEYS):
         return False, "missing_tables"
 
-    if all(not tables.get(key) for key in required):
+    if all(not tables.get(key) for key in REQUIRED_CTA_TABLE_KEYS):
         return False, "empty_tables"
 
     return True, None

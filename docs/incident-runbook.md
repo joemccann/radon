@@ -892,6 +892,56 @@ leftover scan wall.** Peak: 2026-10-28 18:15Z, page
 
 ---
 
+## cta-sync-missing-table-key-pages-p1
+
+**`radon-cta-sync.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a completed fetch omits a required table key.**
+Peak: 2026-11-10 21:35Z, page `dad9b416b06e15f4889bb3ce4d573d7c`. Next
+timer 2026-11-11 18:17Z.
+
+- **Mechanism:** `fetch_menthorq_cta.py` logged `No img src found for
+  card slug: cta_index`, fell back from S3 to screenshots, cached
+  `cta_2026-11-10.json`, and printed `Completed in 56.8s` (child exit
+  0). `validate_cta_payload` accepts an empty required table and rejects
+  a missing key. The child omitted `index`. The parent classified the
+  S3 warning as `unexpected_failure` (not retryable), wrote no Turso
+  `cta-sync` heartbeat, and exited 1. Wall clock was 58s
+  (21:34:05Z to 21:35:03Z), not `FETCH_TIMEOUT_S`. `menthorq-cta` still
+  heartbeated `ok` at 21:35:03Z because the child records extraction
+  health before the parent validates. The cache then makes a same-day
+  rerun skip and dual-write the missing-key payload. IB unused
+  (`requires_ib: False`). `:8321/health/lite` stayed up.
+- **Detection:** journal has the S3 miss, `falling back to card
+  screenshots`, `Cached:`, `Completed in`, then `CTA sync runtime
+  failed (exit 1)`. ExecMainStart to InactiveEnter is about one minute,
+  not 720s. `systemctl show` is `exit-code` / `NRestarts=0`. Health row
+  `cta-sync` can still be `ok` from the prior skip. `menthorq-cta` can
+  be `ok` from the same fire.
+- **Discriminating check:** child stderr contains `Completed in` and
+  the parent exits 1, with no `TimeoutExpired` and no
+  `vision_cascade_exhausted`. `Result=signal` is deploy stop-clean. If
+  `/health/lite` is down too, stand down (API). A whole-cascade miss
+  is `vision_cascade_exhausted` (ops_only). A 300s or 720s hang is
+  `cta-sync-fetch-timeout-expired`.
+- **Remediation (code):** fill omitted required keys with `[]` before
+  validation and before cache. An all-empty extraction still exits 1.
+  A readable cache that only lacked those keys is normalized and
+  rewritten on the skip path so a post-deploy restart does not publish
+  the raw shape. Do not restart-flap on the old code. After this fix
+  deploys, one `radon unit restart radon-cta-sync.service` clears the
+  failed oneshot and normalizes the 2026-11-10 cache. The unit is not
+  on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `test_cta_sync_service.py::TestCompletedFetchMissingTableKey`
+  (`test_completed_fetch_missing_index_key_does_not_exit_1`,
+  `test_cached_missing_index_is_normalized_before_dual_write`,
+  `test_completed_fetch_with_no_rows_still_exits_1`).
+- **Code:** `scripts/utils/cta_sync_health.py`
+  (`fill_missing_cta_tables`), `scripts/cta_sync_service.py` (accept
+  and skip paths), `scripts/fetch_menthorq_cta.py` (fill before cache).
+
+---
+
 ## divyield-yahoo-sweep-timeout
 
 **`radon-divyield.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
