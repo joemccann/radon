@@ -112,16 +112,20 @@ def _post(path: str, url: str, payload: dict) -> tuple[int, dict]:
 
 
 def test_installed_file_list_is_enough_to_serve(tmp_path):
-    """Copy only GATEWAY_FILES and the launcher, as install.sh does, and start it.
+    """Stage the gateway with install.sh's own copy code, then start it.
 
-    A module missing from the list fails here, not at 00:50 on the Mac.
+    A module missing from the list, or a copy step that mangles a path (the
+    first live install turned top-level `subscription_tokens.py` into a
+    directory), fails here, not at 00:50 on the Mac.
     """
     root = tmp_path / "gateway"
+    subprocess.run(["bash", str(INSTALL), "--stage-gateway", str(root)],
+                   env={**os.environ, "RADON_RUNNER_PYTHON": sys.executable},
+                   capture_output=True, text=True, timeout=60, check=True)
     for name in gateway_files():
-        target = root / "src" / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO / "scripts" / name, target)
-    shutil.copy2(RUNNER / "gateway_launch.py", root / "gateway_launch.py")
+        staged = root / "src" / name
+        assert staged.is_file() and staged.read_bytes() == (REPO / "scripts" / name).read_bytes(), name
+    assert (root / "gateway_launch.py").read_bytes() == (RUNNER / "gateway_launch.py").read_bytes()
     # AF_UNIX paths are capped near 104 bytes on macOS.
     run = Path(tempfile.mkdtemp(prefix="rg", dir="/tmp"))
     try:

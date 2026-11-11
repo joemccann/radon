@@ -316,6 +316,19 @@ ensure_gateway_user() {
   dseditgroup -o edit -a "$BOT" -t user "$GW_GROUP"
 }
 
+# Copies the gateway source and launcher into $1; the rest is install's
+# ownership flags (root:wheel on the Mac, none for --stage-gateway).
+stage_gateway() {
+  local dest="$1" file
+  shift
+  install -d "$@" -m 755 "$dest" "$dest/src"
+  for file in $GATEWAY_FILES; do
+    [[ "$file" != */* ]] || install -d "$@" -m 755 "$dest/src/${file%/*}"
+    atomic_install "$@" -m 644 "$SRC/../$file" "$dest/src/$file"
+  done
+  atomic_install "$@" -m 644 "$SRC/gateway_launch.py" "$dest/gateway_launch.py"
+}
+
 # Root owns the tree and its root (group traversal only), so the gateway
 # account cannot swap a directory root later writes or chowns.
 install_gateway() {
@@ -323,12 +336,7 @@ install_gateway() {
   install -d -o root -g "$GW_GROUP" -m 710 "$GW_ROOT"
   install -d -o "$GW_USER" -g "$GW_GROUP" -m 700 "$GW_HOME" "$GW_ROOT/run" "$GW_ROOT/control"
   install -d -o "$GW_USER" -g "$GW_GROUP" -m 750 "$GW_ROOT/log"
-  install -d -o root -g wheel -m 755 "$PREFIX/gateway" "$PREFIX/gateway/src"
-  for file in $GATEWAY_FILES; do
-    install -d -o root -g wheel -m 755 "$PREFIX/gateway/src/${file%/*}"
-    atomic_install -o root -g wheel -m 644 "$SRC/../$file" "$PREFIX/gateway/src/$file"
-  done
-  atomic_install -o root -g wheel -m 644 "$SRC/gateway_launch.py" "$PREFIX/gateway/gateway_launch.py"
+  stage_gateway "$PREFIX/gateway" -o root -g wheel
   want="$(shasum -a 256 "$SRC/gateway-requirements.txt" | awk '{print $1}') $("$GUARD_PYTHON" -I -c 'import sys; print(sys.version.split()[0])')"
   stamp="$PREFIX/gateway/venv/.radon-requirements"
   if [[ ! -f "$stamp" || "$(cat "$stamp")" != "$want" ]]; then
@@ -622,6 +630,10 @@ PY_READY
 
 main() {
   [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  if [[ "$1" == "--stage-gateway" ]]; then
+    stage_gateway "${2:?destination}"
+    return 0
+  fi
   if [[ "$1" == "--print-gateway-plist" ]]; then
     gateway_ids
     print_gateway_plist
