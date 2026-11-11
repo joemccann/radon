@@ -1,7 +1,7 @@
 """Shared fixtures for the monitor_daemon test suite.
 
 Why this file exists: `fill_monitor`, `journal_sync`, `replica_watchdog`,
-`cash_flow_sync`, and `exit_orders` all import `db.writer` writers and
+and `cash_flow_sync` all import `db.writer` writers and
 call them inline. The handlers wrap writes in try/except (so a write
 failure never crashes the cycle) which means tests that DON'T patch the
 writers silently let real writes through to whatever Turso URL the env
