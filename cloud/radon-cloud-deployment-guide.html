@@ -189,7 +189,7 @@ Internet (HTTPS)
                                 |
                            IB Gateway   :4001 (localhost only, Docker)
                                 |
-                           +-- Monitor daemon (fill tracking, exit orders)
+                           +-- Monitor daemon (fill tracking, journal sync)
                            +-- Refresh timer  (CRI/VCG scans, market hours)
 </pre>
 </div>
@@ -202,7 +202,7 @@ Internet (HTTPS)
   <tr><td>FastAPI</td><td>8321</td><td>Python 3.13</td><td>IB-backed REST API, order management</td></tr>
   <tr><td>Node relay</td><td>8765</td><td>Node.js</td><td>Realtime WebSocket price streaming</td></tr>
   <tr><td>IB Gateway</td><td>4001</td><td>Docker</td><td>Interactive Brokers API (localhost only)</td></tr>
-  <tr><td>Monitor</td><td>&mdash;</td><td>Python 3.13</td><td>Fill tracking, exit order placement</td></tr>
+  <tr><td>Monitor</td><td>&mdash;</td><td>Python 3.13</td><td>Fill tracking, journal sync</td></tr>
   <tr><td>Refresh timer</td><td>&mdash;</td><td>Python 3.13</td><td>CRI/VCG scans, Mon&ndash;Fri 9:30&ndash;16:00 every 15m</td></tr>
 </table>
 </div>

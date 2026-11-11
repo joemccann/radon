@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "journal-gap-sli"
 
-# Continuous cadence — same ballpark as journal_sync / exit-orders.
+# Continuous cadence — same ballpark as journal_sync.
 GAP_SLI_INTERVAL_SECONDS = 300
 
 # Rolling window matches daily reconcile so both sensors see the same set.
