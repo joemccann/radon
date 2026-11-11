@@ -64,10 +64,6 @@ export function readCachedPortfolioEntryDates<T>(
   );
 }
 
-export function invalidatePortfolioSnapshotCache(): void {
-  invalidateCache(PORTFOLIO_SNAPSHOT_CACHE_KEY);
-}
-
 /** A successful live sync can publish both a new snapshot and journal fills. */
 export function invalidatePortfolioReadCaches(): void {
   invalidateCache(PORTFOLIO_SNAPSHOT_CACHE_KEY);

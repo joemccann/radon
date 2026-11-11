@@ -51,17 +51,6 @@ export interface Skew2dData {
 
 export const SKEW2D_LIVE_MAX_AGE_MS = 3 * 60_000;
 
-export function isFreshIntradaySkew2d(
-  current: Skew2dCurrent | null | undefined,
-  nowMs = Date.now(),
-): boolean {
-  if (!current?.is_intraday || !current.as_of) return false;
-  const asOfMs = Date.parse(current.as_of);
-  if (!Number.isFinite(asOfMs)) return false;
-  const age = nowMs - asOfMs;
-  return age >= 0 && age <= SKEW2D_LIVE_MAX_AGE_MS;
-}
-
 /* ─── Formatting ─────────────────────────────────────── */
 
 /** Signed two-decimal daily change: "-0.12", "+0.05"; "---" null/non-finite. */

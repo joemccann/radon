@@ -77,12 +77,6 @@ function isBpiThresholds(value: unknown): value is BpiThresholds {
   return finite(thresholds.oversold) && finite(thresholds.overbought);
 }
 
-export function isBpiMissingIndex(value: unknown): value is BpiMissingIndex {
-  if (!value || typeof value !== "object") return false;
-  const entry = value as Partial<BpiMissingIndex>;
-  return entry.missing === true && typeof entry.index_symbol === "string";
-}
-
 export function isBpiPayload(value: unknown): value is BpiPayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Partial<BpiPayload>;

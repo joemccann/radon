@@ -1,18 +1,6 @@
-/**
- * Panic Proxy — equal-weight mean of 252-session z-scores of four Cboe
- * series (VIX, VVIX, VIX/VIX3M, SKEW). Display types + formatters only.
- * The UI never recomputes a z-score, the composite, the change, or the rank.
- *
- * Display types + formatters only. Spec: docs/indicators/panic-index.md.
- */
 
-/* ─── Constants (display copy only) ──────────────────── */
-
-export const Z_WINDOW = 252;
 export const RANK_WINDOW = 2520;
 export const RANK_MIN_ROWS = 504;
-export const ALERT_SIGMA = 3.0;
-export const ALERT_TOP_N = 10;
 
 export const DISCLAIMER = "Radon reconstruction - not the Goldman Sachs index";
 

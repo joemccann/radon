@@ -23,12 +23,6 @@ export interface AiSnapshot {
   version: 1; generated_at: string; as_of: string; indicators: AiIndicator[]; sources: AiSource[];
   shadow: { status: "experimental"; state: "insufficient_evidence" | "watch" | "clear"; reason: string; evaluated_at: string; eligible_weeks: number };
 }
-export const AI_PANES: { id: AiPane; title: string; question: string; note: string }[] = [
-  { id: "demand", title: "Demand", question: "Is useful activity converting into demand?", note: "Routed tokens measure publisher activity. Shares describe mix, not market size or actual spend." },
-  { id: "compute", title: "Compute", question: "What does comparable compute cost?", note: "Read asking prices alongside matched supply. Falling prices alone do not establish excess capacity." },
-  { id: "delivery", title: "Delivery", question: "Is promised capacity becoming productive?", note: "Orders, backlog, revenue and energized capacity are separate stages. Grid load is not AI consumption." },
-  { id: "finance", title: "Finance", question: "Can cash generation fund the buildout?", note: "Compare synchronized fiscal periods. Cloud revenue and company capex are not AI-only measurements." },
-];
 export function sourceHref(url: string): string | undefined {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) && !parsed.username && !parsed.password ? parsed.href : undefined; } catch { return undefined; }
 }

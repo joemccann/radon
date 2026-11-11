@@ -158,11 +158,3 @@ export function advertisedPins(sources: PinSources): PinRecord[] {
 export function buildRuntimeCatalog(sources: PinSources): CatalogOperation[] {
   return advertisedPins(sources).map(toOperation);
 }
-
-export function nextOnlyRouteIds(sources: PinSources): string[] {
-  const ids = new Set<string>();
-  for (const pin of advertisedPins(sources)) {
-    if (pin.surface === "next" && pin.routeId) ids.add(pin.routeId);
-  }
-  return [...ids].sort();
-}

@@ -44,9 +44,6 @@ export interface IeiHygData {
   series: IeiHygPoint[];
 }
 
-export type IeiHygPayload = IeiHygData;
-export type IeiHygRow = IeiHygPoint;
-
 // Contract: absent IEI/HYG data is HTTP 200 with missing:true, never a 4xx.
 export const MISSING_IEI_HYG: IeiHygData = Object.freeze({
   missing: true,

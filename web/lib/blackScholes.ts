@@ -6,7 +6,6 @@
  */
 
 export const RISK_FREE_RATE_DEFAULT = 0.0;
-export const DIVIDEND_YIELD_DEFAULT = 0.0;
 export const SIGMA_FLOOR = 0.001;
 
 const SQRT_2 = Math.sqrt(2);

@@ -39,15 +39,6 @@ export type Message = {
   attachments?: ChatImageAttachment[];
 };
 
-export type FlowRow = {
-  ticker: string;
-  position: string;
-  flowLabel: string;
-  flowClass: string;
-  strength: string;
-  note: string;
-};
-
 /** Anthropic Messages API content blocks, verbatim. */
 export type ApiTextBlock = { type: "text"; text: string };
 export type ApiImageBlock = {
