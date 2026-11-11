@@ -1039,6 +1039,8 @@ documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
 
 ## Pinned operator clients
 
+`deploy.sh` first runs `radon-app-runtime stage-model-clients <sha>` right after the exact-SHA pull, while the current release still serves. It exports (or reuse-clones) the target's Linux tree and Darwin bundle without moving `current`. `install-model-clients` then only selects a staged tree whose receipt `image_id` equals the image id inspected at that moment and whose Linux and Darwin receipts verify; any miss exports during restart as before. Staging is best-effort (no grant or a refusal only warns) and runs under the deploy lock, never from the prepull job, so it cannot race the fixed export container name. Before it, a changed gateway payload exported inside the `stop-clean` to `restart-managed` window and held app.radon.run on 502 for about 100 seconds (2026-11-11).
+
 Before managed services start, `radon-app-runtime install-model-clients`
 exports the exact gateway image's CLI payloads and Node runtime through a
 network-disabled, unprivileged container. When the new exact SHA's local

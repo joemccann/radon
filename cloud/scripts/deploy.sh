@@ -496,6 +496,23 @@ preflight_model_disk() {
   fi
 }
 
+# Export the target's operator clients while the current release still serves.
+# Inside restart-managed this export ran with every core unit stopped: a
+# changed gateway payload held app.radon.run on 502 for ~100s (2026-11-11,
+# 34b30c3a7). Best-effort: a missing grant or a refusal leaves
+# install-model-clients to export during restart exactly as before.
+stage_model_clients() {
+  local requested_sha="$1"
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" stage-model-clients "$requested_sha" >/dev/null 2>&1; then
+    log_warn "Model client staging is not granted; clients export during restart"
+    return 0
+  fi
+  if ! timeout "$APP_IMAGE_PREPULL_TIMEOUT" sudo -n "$APP_RUNTIME_HELPER" stage-model-clients "$requested_sha"; then
+    log_warn "Model client staging failed; clients export during restart"
+  fi
+  return 0
+}
+
 # The serving release keeps serving while Turso is unhealthy; stopping it then
 # trades a degraded database for a full outage.
 preflight_database() {
@@ -2033,6 +2050,7 @@ main() {
   fi
 
   prepull_app_images "$requested_sha"
+  stage_model_clients "$requested_sha"
   preflight_database
 
   log_info "Promoting staged artifacts and restarting services..."
