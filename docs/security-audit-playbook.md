@@ -99,9 +99,8 @@ line here whenever you ship a security fix.**
   (`web/tests/rate-limit.test.ts`)
 - **Unauthenticated render inputs are bounded, not just rate-limited** — a request
   limiter counts requests, not the cost of one request, so every caller-supplied
-  value an image route hands to satori is bounded BEFORE layout: the canvas by
-  `web/lib/ctaImageLayout.ts`, and the strings by `clampCardText`
-  (`web/lib/sharePnlHero.ts`) in BOTH dimensions — length, and character class.
+  value an image route hands to satori is bounded BEFORE layout: the strings by
+  `clampCardText` (`web/lib/sharePnlHero.ts`) in BOTH dimensions — length, and character class.
   The character class matters because `next/og` always installs satori's
   `loadAdditionalAsset`, so a grapheme the bundled faces cannot resolve turns a
   render into an outbound fetch plus a process-wide cache entry keyed on the

@@ -130,7 +130,7 @@ def _build_scheduled_handler_classes() -> set[str]:
 
     A handler class that nothing registers writes no heartbeat, so demanding
     a freshness window for it would force both catalogs to advertise a
-    control that never runs (R-141, `ExitOrdersHandler`).
+    control that never runs (`CashFlowSyncHandler` since 2026-09-02).
     """
     tree = _parse(_SCRIPTS_DIR / "monitor_daemon" / "run.py")
     assert tree is not None, "monitor_daemon/run.py must parse"
@@ -292,15 +292,13 @@ class TestCollectorsAreNotBlind:
         }
         missing = expected - names
         assert not missing, f"handler collector lost: {sorted(missing)}"
-        # `exit-orders` was in this set until R-141: the class exists and
+        # `cash-flow-sync` left this set on 2026-09-02: the class exists and
         # still carries its service_name, but `create_daemon()` does not
-        # register it, so it writes no heartbeat and must not be demanded of
-        # either catalog. The class-level literal is still discoverable.
-        # `cash-flow-sync` left the same way on 2026-09-02: the sFTP ingest
-        # (flex_delivery_ingest) writes the row directly now.
-        assert "exit-orders" not in names
+        # register it (the sFTP ingest, flex_delivery_ingest, writes the row
+        # directly now), so it must not be demanded of either catalog. The
+        # class-level literal is still discoverable.
         assert "cash-flow-sync" not in names
-        assert "exit-orders" in _build_handler_service_names(scheduled_only=False)
+        assert "cash-flow-sync" in _build_handler_service_names(scheduled_only=False)
 
     def test_scan_mirror_collector_sees_mirror_fed_scans(self):
         names = collect_scan_mirror_names()
