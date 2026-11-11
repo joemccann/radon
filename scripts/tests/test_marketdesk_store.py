@@ -104,6 +104,21 @@ def test_record_failure_counts_and_flips_at_five(db):
     assert saved["status"] == "failed" and saved["last_error"] == "err 4"
 
 
+def test_record_failure_final_retires_on_the_first_attempt(db):
+    store.claim(ref())
+    assert store.record_failure("4AJs5Adl2Yp", "no_summary", final=True) == store.MAX_ATTEMPTS
+    saved = row(db)
+    assert saved["status"] == "failed" and saved["last_error"] == "no_summary"
+    assert store.claim(ref()) is False
+
+
+def test_record_failure_final_never_demotes_published(db):
+    store.claim(ref())
+    store.record_published("4AJs5Adl2Yp", "research-" + "a" * 32, "/x.pdf", "b" * 64)
+    store.record_failure("4AJs5Adl2Yp", "no_summary", final=True)
+    assert row(db)["status"] == "published"
+
+
 def test_record_failure_never_demotes_published(db):
     store.claim(ref())
     store.record_published("4AJs5Adl2Yp", "research-" + "a" * 32, "/x.pdf", "b" * 64)

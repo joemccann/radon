@@ -19,8 +19,9 @@ MarketDesk and Dropbox share the hard issuer gate while retaining separate topic
 MarketDesk lists an item before it has summarised it (empty summary, MarketDesk's "Document Missing"
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
 against the per-cycle cap, and fails as ``no_summary`` once it is older than MARKETDESK_SUMMARY_WAIT_HOURS.
-That deadline still writes the error row and spends an attempt, and the oneshot exits 0 so the 5-minute
-timer does not page P1. Any other article failure still exits 1.
+A retry cannot change that outcome (MarketDesk's summarizer can answer with an apology instead of bullets), so
+the deadline retires the article at once: one error row, and the oneshot exits 0 so the 5-minute timer does
+not page P1. An operator re-queue revives it. Any other article failure still exits 1.
 """
 from __future__ import annotations
 
@@ -92,7 +93,7 @@ class CycleTerminated(BaseException):
 
 
 class ArticleRejected(RuntimeError):
-    """The article cannot be published as scraped ('no_summary'). Spends an attempt."""
+    """The article cannot be published as scraped ('no_summary' retires it; 'summary_too_large' spends an attempt)."""
 
 
 class SummaryPending(RuntimeError):
@@ -503,9 +504,10 @@ def _scrape(*, env, deps: Deps, workdir: Path, counts: dict, notes: dict) -> Non
                 if str(exc) == "unauthenticated":
                     raise  # the session is gone: every later article would fail the same way
                 continue
-            attempts = store.record_failure(ref.article_id, error)
+            deadline = error == SUMMARY_DEADLINE
+            attempts = store.record_failure(ref.article_id, error, final=deadline)
             counts["failed"] += 1
-            if error == SUMMARY_DEADLINE:
+            if deadline:
                 notes["no_summary"] = int(notes.get("no_summary") or 0) + 1
             if attempts >= store.MAX_ATTEMPTS:
                 counts["retired"] += 1

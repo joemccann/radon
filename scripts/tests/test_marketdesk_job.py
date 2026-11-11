@@ -900,22 +900,35 @@ def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, cap
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
     assert job.main([]) == 0
     saved = ledger(db, "SummDead01")
-    assert saved["status"] == "pending" and saved["attempts"] == 1
+    assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
     assert any("no_summary" in message for message in research_errors(world))
     assert "no_summary" in capsys.readouterr().err
 
 
-def test_repeated_summary_deadline_exits_zero_until_retired(world, db, monkeypatch):
+def test_summary_deadline_retires_the_article_on_its_first_error_cycle(world, db, monkeypatch):
+    """Past the wait the outcome is fixed (MarketDesk's summarizer replied with an apology, 2026-11-11):
+    one error row, then the writer is green again instead of red for MAX_ATTEMPTS cycles."""
     world.refs = [make_ref("SummDead04", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
-    for _ in range(store.MAX_ATTEMPTS):
+    for _ in range(3):
         assert job.main([]) == 0
     saved = ledger(db, "SummDead04")
     assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
-    assert len(research_errors(world)) == store.MAX_ATTEMPTS
+    assert len(research_errors(world)) == 1
+    assert [c for c in world.calls if c == ("fetch_article", "SummDead04")] == [("fetch_article", "SummDead04")]
+    assert health_for(world, "marketdesk-research")[-1][1] == "ok"
+
+
+def test_summary_deadline_retirement_is_reported_in_the_error_row(world, db):
+    world.refs = [make_ref("SummDead05", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
+    world.summary = []
+    with pytest.raises(job.ArticlesFailed) as failure:
+        run(world)
+    assert failure.value.provider_deadline
+    assert "1 retired" in str(failure.value) and "no_summary" in str(failure.value)
 
 
 def test_copy_failure_still_fails_the_oneshot(world, monkeypatch):
