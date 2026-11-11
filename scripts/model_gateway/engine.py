@@ -133,9 +133,9 @@ def acquire_model_slot(limiter, max_wait):
         raise
 
 
-# One in-flight call per provider. The first pass only probes the lock so the
-# ladder can fail over; a busy provider gets a second pass that waits for it,
-# because a busy subscription is still a working one.
+# Bounded in-flight calls per provider (provider_gate.ProviderGate). The first
+# pass only probes for a slot so the ladder can fail over; a busy provider gets
+# a second pass that waits for it, because a busy subscription still works.
 _PROVIDER_BUSY = "provider_busy"
 _BUSY_PROBE_SECONDS = 1.0
 _DEFERRED_LOCK_WAIT_SECONDS = 60.0

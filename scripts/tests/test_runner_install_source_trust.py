@@ -32,6 +32,12 @@ def _lib_files() -> list[str]:
     return block.group(1).split()
 
 
+def _gateway_files() -> list[str]:
+    block = re.search(r'GATEWAY_FILES="([^"]+)"', INSTALL.read_text(encoding="utf-8"))
+    assert block, "install.sh must declare GATEWAY_FILES"
+    return block.group(1).split()
+
+
 def _fake_tree(tmp_path: Path) -> Path:
     tree = tmp_path / "radon"
     (tree / "scripts" / "runner" / "loops").mkdir(parents=True)
@@ -39,7 +45,7 @@ def _fake_tree(tmp_path: Path) -> Path:
     (tree / "scripts" / "runner" / "loops" / "security-deepsec.env").write_text(
         "PHASES=audit\n", encoding="utf-8"
     )
-    for name in _lib_files():
+    for name in ["runner/gateway_launch.py", "runner/gateway-requirements.txt", *_lib_files(), *_gateway_files()]:
         target = tree / "scripts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("# fixture\n", encoding="utf-8")
@@ -102,3 +108,13 @@ def test_the_source_root_is_resolved_physically() -> None:
     assert src.group(1).strip() == "pwd -P", (
         "SRC uses logical pwd while check_source resolves with pwd -P"
     )
+
+
+@pytest.mark.parametrize("name", ["model_gateway/provider_gate.py", "clients/provider_cooldown.py", "runner/gateway_launch.py"])
+def test_a_writable_gateway_source_is_refused(tmp_path: Path, name: str) -> None:
+    """Root copies GATEWAY_FILES into the gateway tree it supervises."""
+    tree = _fake_tree(tmp_path)
+    victim = tree / "scripts" / name
+    victim.chmod(stat.S_IMODE(victim.stat().st_mode) | stat.S_IWOTH)
+    result = _run(tree)
+    assert result.returncode == 77, result.stdout + result.stderr
