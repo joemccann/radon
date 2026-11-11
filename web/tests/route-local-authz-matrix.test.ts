@@ -8,7 +8,7 @@ const ROUTES = [
   "cash-flows", "discover", "flow-analysis", "flow-analysis/[ticker]",
   "futures/chain", "gamma-rotation", "gex", "headlines", "index-options/chain", "internals",
   "journal", "journal/sync", "leap",
-  "leap/scan", "menthorq/[command]/image", "menthorq/cta", "menthorq/cta/image", "newsfeed/posts",
+  "leap/scan", "menthorq/cta", "newsfeed/posts",
   "options/chain", "options/expirations", "options/exposure", "options/rv-ratio",
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
