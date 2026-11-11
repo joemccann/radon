@@ -28,8 +28,9 @@ cloud/
 `radon-vix-model-spread.service` and `.timer` are included in setup's
 `SERVICE_FILES` and `config/installed-units.sha256`; the normal green deploy
 installs them and enables the timer without an operator root install. The
-personal-use collector samples official Cboe closes daily at 02:50 UTC, with
-no randomized delay. Migration 0098, payload/storage and operator-only access
+personal-use collector samples every 5 minutes 09:00-16:55 ET Mon-Fri (a
+provisional current-session row in the `vix-model-spread:live` snapshot) and
+daily at 16:01 ET (13:01 PT), with no randomized delay. Migration 0098, payload/storage and operator-only access
 are defined in [the indicator spec](../docs/indicators/vix-model-spread.md).
 
 ## Taiwan and Korea export sampling

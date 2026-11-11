@@ -20,9 +20,20 @@ official URLs below. No bulk history or real-data screenshot is committed.
   Do not replace VIXEQ with equity/ETF IV, realized vol or Yahoo proxies.
 - Common history begins 2014-06-19; VIXEQ before its 2024-11-04 launch is backtested.
 - Daily source files, no promised publication SLA. Observed VIX/VIXEQ update
-  01:11 UTC, COR1M 21:31 UTC on the latest sample. Sampling is daily 02:50 UTC,
-  including weekend unchanged-data heartbeats. This is a sampling time, not
-  a promise of source publication.
+  01:11 UTC, COR1M 21:31 UTC on the latest sample. Sampling is every 5 minutes
+  09:00-16:55 ET Mon-Fri plus daily 16:01 ET (13:01 PT), including weekend
+  unchanged-data heartbeats. This is a sampling time, not a promise of source
+  publication; the official close lands on the first fire after Cboe posts it.
+- Provisional current session: each fire also builds today's row from one
+  source for all three inputs, IB pool daily bars when the VIXEQ probe is
+  `available`, else Cboe delayed quotes
+  (`https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_<SYMBOL>.json`,
+  15-minute delay, all three on one session date). The row is computed with the
+  same rolling statistics, written only to the `vix-model-spread:live`
+  snapshot (never to history or source_series), and appended by the API when
+  newer than the official `data_date`, with `provisional` naming source and
+  quote time. A live tick rewrites the multi-MB official snapshot only when the
+  official series changed or the snapshot is over 12h old.
 
 ## Calculation
 
@@ -104,10 +115,10 @@ Cache headers300/3600, tag vix-model-spread. Register assistant static loader,
 all route access/demo/catalog/refresh pin inventories. No demo raw fixture.
 
 `VixModelSpreadData`, `VixModelSpreadEntry`, `SpreadWindow=20|252` in
-web/lib/vixModelSpread.ts. `useVixModelSpread` GET-only useSyncHook hourly,
+web/lib/vixModelSpread.ts. `useVixModelSpread` GET-only useSyncHook every 5 minutes,
 extractTimestamp scan_time. No client recomputation of rolling statistics. The HTTP response omits writer-only source_series; SQL removes it before transfer, and the disk reader omits it too.
-`VIX_MODEL_SPREAD_REFRESH = [daily(2,50)]` mirrors
-OnCalendar=*-*-* 02:50:00 UTC, no jitter; FreshnessRail directly under strip,
+`VIX_MODEL_SPREAD_REFRESH` mirrors both OnCalendar lines (5-minute ET
+session line and `*-*-* 16:01:00 America/New_York`), no jitter; FreshnessRail directly under strip,
 testId vix-model-spread-freshness-rail, asOfTestId
 vix-model-spread-strip-asof, asOf=data.data_date.
 

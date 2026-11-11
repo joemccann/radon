@@ -1,7 +1,11 @@
 [Unit]
-Description=Radon VIX P/C Indicator - daily 5-session VIX put/call ratio
+Description=Radon VIX P/C Indicator - 5-session VIX put/call ratio, every 5 minutes in ET trading hours plus daily final
 
 [Timer]
+# UW options-volume serves the in-progress session row intraday, so the
+# 5-minute ET line keeps the current session's put/call live (09:00-16:55 ET,
+# Mon-Fri, VCG precedent). Off-session fires restate unchanged volumes.
+OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
 # 02:00 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
 # 21:00 UTC winter), so the UW VIX options-volume row is final. Runs
 # every calendar day: weekend and holiday runs are unchanged-data
