@@ -167,19 +167,3 @@ def get_risk_free_rate(
         return cached[latest], None
 
     return 0.0, "Rf unavailable — FRED_API_KEY not set or fetch failed; Sharpe = excess over 0"
-
-
-def get_series_for_metrics(
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> dict[str, float]:
-    """Return filtered DGS3MO series for metric window, or {} if unavailable."""
-    cached = _load_cache()
-    if not cached and os.environ.get("FRED_API_KEY"):
-        try:
-            cached = fetch_dgs3mo_series(save=True)
-        except Exception:
-            cached = {}
-    if start_date or end_date:
-        return {d: v for d, v in cached.items() if (not start_date or d >= start_date) and (not end_date or d <= end_date)}
-    return cached

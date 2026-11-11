@@ -111,6 +111,3 @@ export function enrichWithParentTags(tags) {
 
   return result;
 }
-
-// Test seam.
-export const __TECHNICAL_ANALYSIS_CHILDREN = TECHNICAL_ANALYSIS_CHILDREN;

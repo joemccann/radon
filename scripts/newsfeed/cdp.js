@@ -13,10 +13,6 @@ export function setActivePage(page, context) {
   activeContext = context || null;
 }
 
-export function getActivePage() {
-  return activePage;
-}
-
 export async function listTargets() {
   if (!activePage) {
     throw new Error("No active Playwright page — call setActivePage(page) before listTargets().");
@@ -93,9 +89,4 @@ export async function fetchCookieHeader(_targetId, urls) {
   } catch {
     return "";
   }
-}
-
-export const DEFAULT_CDP_PATH = null;
-export function resolveCdpPath() {
-  return null;
 }

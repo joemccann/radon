@@ -3528,3 +3528,46 @@ class TestDocumentation20261108:
         assert 'source: "memory"' in web
         assert "never disk" in web
         assert "nothing may read them" in (_ROOT / "CLAUDE.md").read_text()
+
+
+class TestDocumentation20261111:
+    """DOC-265/266/267/268: MSR timer in the ops table; deleted performance
+    script and POST /performance/background stay out of live owner docs."""
+
+    def test_ops_table_names_the_msr_timer(self):
+        operations = (_ROOT / "docs/operations.md").read_text()
+        table = operations.split("| Service | Cadence | Purpose |", 1)[1]
+        table = table.split("\n\n", 1)[0]
+        assert "radon-msr.timer" in table
+        assert "indicators/msr.md" in table
+        timer = (_ROOT / "cloud/services/radon-msr.timer").read_text()
+        assert "OnCalendar=*-*-* 03:00:00 UTC" in timer
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "### MSR (`radon-msr.timer`)" in cloud
+
+    def test_ib_timeout_owner_does_not_name_deleted_performance_script(self):
+        text = (_ROOT / "docs/ib-connection-troubleshooting.md").read_text()
+        budget = text.split("## Timeout Budget", 1)[1].split("\n## ", 1)[0]
+        assert "portfolio_performance.py" not in budget
+        assert "ib_place_order.py" in budget
+        assert "evaluate.py" in budget
+        assert not (_ROOT / "scripts/portfolio_performance.py").exists()
+
+    def test_flex_transfers_owner_does_not_restart_api_for_deleted_route(self):
+        text = (_ROOT / "docs/ib-flex-transfers-runbook.md").read_text()
+        env = text.split("## 5. Env wiring", 1)[1].split("\n## ", 1)[0]
+        assert "POST /performance/background" not in env
+        assert "radon unit restart radon-api" not in env
+        assert "radon-perf-twr.service" in env
+        server = (_ROOT / "scripts/api/server.py").read_text()
+        assert '@app.post("/performance/background")' not in server
+        performance = server.split("@app.post(\"/performance\")", 1)[1]
+        performance = performance.split("\n@", 1)[0]
+        assert "status_code=404" in performance
+
+    def test_reconstruction_owner_does_not_keep_deleted_performance_script(self):
+        text = (_ROOT / "docs/performance-reconstruction.md").read_text()
+        built = text.split("## Infrastructure Built", 1)[1]
+        built = built.split("\n## ", 1)[0]
+        assert "portfolio_performance.py" not in built
+        assert not (_ROOT / "scripts/portfolio_performance.py").exists()

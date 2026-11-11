@@ -75,7 +75,6 @@ MAX_SUMMARY_CHARS = 3000  # Input-only facts; never silently trim away a trailin
 MAX_TAGS = 12
 BODY_MAX = 12_000
 REQUEUE_BATCH = 5
-RECENT_TITLES = 30
 UPLOAD_BATCH = 10
 ERROR_MAX_CHARS = 300
 DEFAULT_PUBLISHER = "MarketDesk"
@@ -138,9 +137,7 @@ class Deps:
     marketdesk_path: Callable
     service_cycle: Callable
     record_health: Callable
-    select: Callable
     book_tickers: Callable
-    recent_titles: Callable
     record_outcome: Callable
     feedback_rows: Callable
     research_root: Callable
@@ -151,8 +148,7 @@ class Deps:
 def default_deps() -> Deps:
     from db import writer as db_writer
     from db.service_cycle import service_cycle
-    from api.db_http import hrana_execute
-    from research import book, feedback, marketdesk_auth, marketdesk_copy, marketdesk_filter, marketdesk_scrape
+    from research import book, feedback, marketdesk_auth, marketdesk_copy, marketdesk_scrape
     from research import marketdesk_store, marketdesk_pdf_store, publish
     from research.assets import read_asset, store_asset
     from research.dropbox_writer import DropboxWriter, marketdesk_path
@@ -162,10 +158,6 @@ def default_deps() -> Deps:
         if ensure is not None:
             ensure()
         db_writer.record_service_health(service, state, started_at=started_at, finished_at=finished_at, error=error)
-
-    def recent_titles():
-        rows = hrana_execute("SELECT title, timestamp FROM posts ORDER BY timestamp DESC LIMIT ?", (RECENT_TITLES,))
-        return [{"title": r[0], "timestamp": r[1]} for r in rows]
 
     def research_root():
         return Path(os.environ.get("RADON_RESEARCH_DIR", "/var/lib/radon/research"))
@@ -182,7 +174,7 @@ def default_deps() -> Deps:
         certify=certify, writer_from_env=DropboxWriter.from_env,
         marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
-        select=marketdesk_filter.ladder_select, book_tickers=book.current_tickers, recent_titles=recent_titles,
+        book_tickers=book.current_tickers,
         record_outcome=publish.record_outcome, feedback_rows=feedback.fetch_rows, research_root=research_root,
         enqueue_pdf=marketdesk_pdf_store.enqueue,
     )
@@ -358,9 +350,8 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     root = Path(deps.research_root())
     decision = relevance(
         article_id=ref.article_id, title=title, folders=folders, folder_date=folder_date, pages=pages,
-        created=created, summary=summary, root=root, select=deps.select, book_tickers=deps.book_tickers,
-        recent=[], index=fingerprint_index(root, store.published_fingerprints()),
-        note=store.note_for(ref.article_id), evidence_kind="article")
+        created=created, summary=summary, root=root, book_tickers=deps.book_tickers,
+        index=fingerprint_index(root, store.published_fingerprints()), note=store.note_for(ref.article_id))
     review = decision.review
     review["document"].update(source_url=ref.url, evidence_kind="article", page_count=0)
     work = {"key": "marketdesk:" + ref.article_id, "folder_date": folder_date,
