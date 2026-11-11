@@ -118,9 +118,6 @@ class TestServiceCatalogContract:
             "orders-sync",
             "portfolio-sync",
             "fill-monitor",
-            # `exit-orders` was here until R-141 — ExitOrdersHandler is no
-            # longer registered by create_daemon(), so it never writes a
-            # heartbeat and must not be in either catalog.
             "journal-sync",
             # REL-001: PositionReconcileHandler connects to IB every cycle
             # (fetch_ib_positions via IBClient) — verified in
@@ -285,7 +282,6 @@ class TestBuckets:
         assert "newsfeed-scraper" in cont
         assert "replica-watchdog" in cont
         assert "fill-monitor" in cont
-        assert "exit-orders" not in cont  # R-141: unscheduled, no heartbeat
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont
 

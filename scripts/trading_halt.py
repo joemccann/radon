@@ -3,7 +3,7 @@
 
 One JSON file on local disk is the authority: every order-placing process
 on the host (FastAPI routes, ib_place_order subprocess, the workflow
-bridge, the exit-orders daemon handler, CLI tools) checks it before
+bridge, CLI tools) checks it before
 transmitting anything to IB.
 
 Semantics (HaltStatus):
