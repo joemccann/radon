@@ -20,7 +20,6 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Knowledge embeddings, backfill and retrieval verification | [`docs/knowledge-embeddings.md`](knowledge-embeddings.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |
 | Python script map | [`scripts/README.md`](../scripts/README.md) |
-| Repo layout plan | [`docs/monorepo-legibility-plan.md`](monorepo-legibility-plan.md) |
 
 ## Operations and cloud
 

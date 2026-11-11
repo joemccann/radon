@@ -1,4 +1,4 @@
--- 0029_rv_ratio.sql — RV Ratio indicator (tasks/rv-ratio-indicator-plan.md).
+-- 0029_rv_ratio.sql — RV Ratio indicator (tasks/archive/rv-ratio-indicator-plan.md).
 --
 -- price_history_daily: durable cross-host store of daily closes (split-
 -- adjusted, dividend-UNadjusted) shared across assets — SPY is fetched once
