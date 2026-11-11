@@ -28,8 +28,8 @@ Order admission has two independent controls:
 - [The all-placer bankroll gate](../../scripts/bankroll_guard.py), selected
   by `RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS`, defaults off in
   [app preferences](../../scripts/app_preferences.py). When enabled it checks
-  opening orders in `ib_place_order.py`, `ib_execute.py` and
-  `exit_order_service.py` against fresh IB net liquidation from the latest
+  opening orders in `ib_place_order.py` and `ib_execute.py` against fresh IB
+  net liquidation from the latest
   portfolio snapshot. Missing, stale or invalid bankroll and unpriceable or
   over-cap opening risk are refused. A verified close-out is exempt: the
   snapshot must prove the combined contract deltas reduce held positions

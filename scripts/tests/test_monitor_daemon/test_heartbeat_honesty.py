@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """REL-007 — heartbeat honesty (RELIABILITY_AUDIT.md R-019, R-020).
 
-Two silent-degradation paths reported green while the money path was
+A silent-degradation path reported green while the money path was
 down:
 
-  - exit_orders._load_pending_orders swallowed a Turso read failure and
-    returned [] — the cycle heartbeated ok while exit protection
-    silently stopped being placed.
   - journal_sync._dual_write swallowed upsert failures while execute()
     counted every candidate as "imported" — a write-only Turso outage
     lost fills behind a green heartbeat (production has no per-cycle
@@ -19,30 +16,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
 from monitor_daemon.handlers.journal_sync import JournalSyncHandler
-
-
-class _RaisingDb:
-    def execute(self, *a, **k):
-        raise RuntimeError("hrana 502: upstream forward failed")
-
-
-class TestExitOrdersLoadFailureHonesty:
-    def test_pending_load_failure_surfaces_error(self, tmp_path, monkeypatch):
-        import trading_halt
-
-        monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
-        with patch(
-            "monitor_daemon.handlers.exit_orders.IBClient",
-            side_effect=AssertionError("no IB work when the journal is unreadable"),
-        ):
-            handler = ExitOrdersHandler(db=_RaisingDb())
-            result = handler.execute()
-
-        assert "error" in result
-        assert "journal" in result["error"].lower() or "load" in result["error"].lower()
-        assert result.get("orders_placed", 0) == 0
 
 
 class TestJournalSyncUpsertFailureHonesty:

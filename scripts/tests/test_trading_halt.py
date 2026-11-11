@@ -6,14 +6,14 @@ No halt flag existed anywhere; "Stop Gateway" only severed the API session
 while GTC orders kept working blind. These tests pin the halt module's
 file semantics (fail closed on corruption) and the refusal behavior of
 every order-placing chokepoint: ib_place_order.place_order (covers the
-/orders/place subprocess AND the workflow bridge), the exit-orders
-handler, and ib_execute's CLI entry.
+/orders/place subprocess AND the workflow bridge) and ib_execute's CLI
+entry.
 """
 
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -143,21 +143,3 @@ class TestPlacementChokepoint:
             })
         assert result["status"] == "error"
         assert "halt" in result["message"].lower()
-
-
-class TestExitOrdersChokepoint:
-    def test_exit_orders_skips_cycle_when_halted(self, halt_file):
-        trading_halt.set_halt(reason="kill switch", actor="test")
-        from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
-
-        with patch(
-            "monitor_daemon.handlers.exit_orders.IBClient",
-            side_effect=AssertionError("no IB connection while halted"),
-        ):
-            handler = ExitOrdersHandler(db=MagicMock())
-            result = handler.execute()
-
-        assert result.get("halted") is True
-        assert result.get("orders_placed", 0) == 0
-        # Deliberate operator state — not an error condition.
-        assert "error" not in result
