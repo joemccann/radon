@@ -234,6 +234,7 @@ CROSS_TREE_CONTRACTS = (
             "scripts/tests/test_rel148_operability_fixes.py::TestEveryTimerDrivenScanIsWatched::test_the_web_catalog_no_longer_calls_it_on_demand",
             "scripts/tests/test_service_registration_completeness.py",
             "scripts/tests/test_watchdog/test_services.py",
+            "scripts/tests/test_watchdog/test_weekday_timer_age.py::test_trading_day_age_set_matches_typescript",
             "scripts/tests/test_watchdog_catalog_and_journal_bound.py::TestEveryScheduledServiceIsInABucket::test_perf_twr_is_in_both_catalogs",
             "scripts/tests/test_watchdog_catalog_parity.py",
         ),
