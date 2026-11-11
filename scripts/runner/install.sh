@@ -26,6 +26,21 @@ GUARD_PYTHON="${RADON_RUNNER_PYTHON:-/opt/homebrew/bin/python3.13}"
 LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly_green_base.py
   nightly_audit_context.py nightly_phase_status.py nightly_deliver.py credential_redaction.py security_claude_ladder.py claude_cli_env_drift.py
   claude_cli_env_reviewed.txt model_gateway/__init__.py model_gateway/client.py model_gateway/cli.py model_gateway/cli_bridge.py ci/check_pr_body.py nightly_toolchain_update.py utils/atomic_io.py"
+# The Mac-local model gateway: copied from scripts/ into $PREFIX/gateway/src,
+# paths kept. Runner sessions reach this gateway, signed with the Mac's own
+# subscription logins, instead of a tunnel to the VPS.
+GATEWAY_FILES="model_gateway/__init__.py model_gateway/client.py model_gateway/contracts.py model_gateway/credentials.py
+  model_gateway/engine.py model_gateway/lifecycle.py model_gateway/native.py model_gateway/provider_gate.py
+  model_gateway/server.py model_gateway/specialized.py model_gateway/_forecast_backend.py model_gateway/_catalog_backend.py clients/__init__.py clients/prepaid_denylist.py clients/prepaid_denylist.json
+  clients/provider_cooldown.py subscription_tokens.py subscription_vault.py utils/__init__.py utils/atomic_io.py utils/ipv4_first.py"
+GW_USER=_radonmodelgw
+GW_GROUP=_radonmodel
+GW_ROOT=/Library/Radon/model-gateway-local
+GW_HOME="$GW_ROOT/home"
+GW_SOCKET="$GW_ROOT/run/gateway.sock"
+GW_CONTROL="$GW_ROOT/control/control.sock"
+# Concurrent calls per provider. Two security loops share one Claude login.
+GW_CONCURRENCY=6
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of
@@ -57,7 +72,8 @@ check_source() {
   # leaf-only check accepted a group-writable scripts/utils, and that is where
   # utils/atomic_io.py the root updater imports comes from.
   local dirs=("$tree" "$tree/scripts") seen=" scripts "
-  for file in $LIB_FILES; do
+  paths+=("$tree/scripts/runner/gateway_launch.py" "$tree/scripts/runner/gateway-requirements.txt")
+  for file in $LIB_FILES $GATEWAY_FILES; do
     paths+=("$tree/scripts/$file")
     [[ "$file" == */* ]] || continue
     local sub="${file%/*}"
@@ -129,6 +145,48 @@ print_model_shim() {
 #!/bin/bash
 set -euo pipefail
 exec $GUARD_PYTHON -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py launch $kind -- /Library/Radon/model-clients/current/bin/$kind "\$@"
+EOF
+}
+
+# Ids baked into the gateway plists. As root they come from the directory
+# service; the env overrides exist only for the no-root print mode tests use.
+gateway_ids() {
+  if [[ $EUID -eq 0 ]]; then
+    GW_CLIENT_UID="$(id -u "$BOT")"
+    GW_GID="$(dscl . -read "/Groups/$GW_GROUP" PrimaryGroupID | awk '{print $2}')"
+  else
+    GW_CLIENT_UID="${RADON_GATEWAY_CLIENT_UID:?}"
+    GW_GID="${RADON_GATEWAY_GID:?}"
+  fi
+  [[ "$GW_CLIENT_UID" =~ ^[1-9][0-9]*$ && "$GW_GID" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "model gateway identities are invalid" >&2; return 77; }
+}
+
+print_gateway_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.model-gateway-local</string>
+<key>UserName</key><string>$GW_USER</string>
+<key>GroupName</key><string>$GW_GROUP</string>
+<key>ProgramArguments</key><array><string>$PREFIX/gateway/venv/bin/python</string><string>-I</string><string>$PREFIX/gateway/gateway_launch.py</string><string>serve</string><string>--socket</string><string>$GW_SOCKET</string><string>--control-socket</string><string>$GW_CONTROL</string></array>
+<key>EnvironmentVariables</key><dict>
+<key>HOME</key><string>$GW_HOME</string>
+<key>PATH</key><string>/Library/Radon/model-clients/current/bin:/usr/bin:/bin</string>
+<key>CLAUDE_CODE_OAUTH_TOKEN_FILE</key><string>$GW_HOME/claude-oauth-token</string>
+<key>CODEX_HOME</key><string>$GW_HOME/.codex</string>
+<key>RADON_SUBSCRIPTION_STATE_DIR</key><string>$GW_HOME/state</string>
+<key>RADON_MODEL_CLIENT_UIDS</key><string>$GW_CLIENT_UID</string>
+<key>RADON_MODEL_TUNNEL_GID</key><string>$GW_GID</string>
+<key>RADON_MODEL_PROVIDER_CONCURRENCY</key><string>$GW_CONCURRENCY</string>
+</dict>
+<key>KeepAlive</key><true/>
+<key>RunAtLoad</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardOutPath</key><string>$GW_ROOT/log/gateway.log</string>
+<key>StandardErrorPath</key><string>$GW_ROOT/log/gateway.log</string>
+</dict></plist>
 EOF
 }
 
@@ -222,6 +280,70 @@ ensure_perf_probe_user() {
     || { echo "snapshot helper must not be an administrator" >&2; return 77; }
   [[ "$(dscl . -read "/Users/$helper" NFSHomeDirectory)" == 'NFSHomeDirectory: /var/empty' ]] \
     || { echo "snapshot helper must use its disabled-login home" >&2; return 77; }
+}
+
+# A fixed disabled-login account holds the Mac's model grants. The bot never
+# can read them: it reaches the gateway only through the group socket.
+ensure_gateway_user() {
+  local gid next_uid membership
+  if ! dscl . -read "/Groups/$GW_GROUP" >/dev/null 2>&1; then
+    dseditgroup -o create "$GW_GROUP"
+  fi
+  gid="$(dscl . -read "/Groups/$GW_GROUP" PrimaryGroupID | awk '{print $2}')"
+  [[ "$gid" =~ ^[0-9]+$ && "$gid" -gt 0 ]] || { echo "model gateway group is invalid" >&2; return 77; }
+  if ! id "$GW_USER" >/dev/null 2>&1; then
+    next_uid=400
+    while dscl . -search /Users UniqueID "$next_uid" | grep -q .; do
+      next_uid=$((next_uid + 1))
+      [[ "$next_uid" -lt 500 ]] || { echo "no reserved gateway uid available" >&2; return 77; }
+    done
+    dscl . -create "/Users/$GW_USER"
+    dscl . -create "/Users/$GW_USER" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Users/$GW_USER" UniqueID "$next_uid"
+    dscl . -create "/Users/$GW_USER" PrimaryGroupID "$gid"
+    dscl . -create "/Users/$GW_USER" NFSHomeDirectory "$GW_HOME"
+    dscl . -create "/Users/$GW_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$GW_USER" Password '*'
+    dscl . -create "/Users/$GW_USER" IsHidden 1
+  fi
+  [[ "$(id -g "$GW_USER")" == "$gid" ]] || { echo "model gateway account must use $GW_GROUP" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$GW_USER" UserShell)" == 'UserShell: /usr/bin/false' ]] \
+    || { echo "model gateway account must have a disabled login shell" >&2; return 77; }
+  membership="$(dsmemberutil checkmembership -U "$GW_USER" -G admin)" \
+    || { echo "model gateway group membership is unverifiable" >&2; return 77; }
+  [[ "$membership" == *'is not a member'* ]] || { echo "model gateway account must not be an administrator" >&2; return 77; }
+  dseditgroup -o edit -a "$GW_USER" -t user "$GW_GROUP"
+  dseditgroup -o edit -a "$BOT" -t user "$GW_GROUP"
+}
+
+# Root owns the tree and its root (group traversal only), so the gateway
+# account cannot swap a directory root later writes or chowns.
+install_gateway() {
+  local file stamp want
+  install -d -o root -g "$GW_GROUP" -m 710 "$GW_ROOT"
+  install -d -o "$GW_USER" -g "$GW_GROUP" -m 700 "$GW_HOME" "$GW_ROOT/run" "$GW_ROOT/control"
+  install -d -o "$GW_USER" -g "$GW_GROUP" -m 750 "$GW_ROOT/log"
+  install -d -o root -g wheel -m 755 "$PREFIX/gateway" "$PREFIX/gateway/src"
+  for file in $GATEWAY_FILES; do
+    install -d -o root -g wheel -m 755 "$PREFIX/gateway/src/${file%/*}"
+    atomic_install -o root -g wheel -m 644 "$SRC/../$file" "$PREFIX/gateway/src/$file"
+  done
+  atomic_install -o root -g wheel -m 644 "$SRC/gateway_launch.py" "$PREFIX/gateway/gateway_launch.py"
+  want="$(shasum -a 256 "$SRC/gateway-requirements.txt" | awk '{print $1}') $("$GUARD_PYTHON" -I -c 'import sys; print(sys.version.split()[0])')"
+  stamp="$PREFIX/gateway/venv/.radon-requirements"
+  if [[ ! -f "$stamp" || "$(cat "$stamp")" != "$want" ]]; then
+    "$GUARD_PYTHON" -I -m venv --clear "$PREFIX/gateway/venv"
+    "$PREFIX/gateway/venv/bin/python" -I -m pip install --quiet --disable-pip-version-check --no-input \
+      --require-hashes --no-deps --only-binary :all: -r "$SRC/gateway-requirements.txt"
+    printf '%s\n' "$want" > "$stamp"
+  fi
+  chown -R root:wheel "$PREFIX/gateway/venv"
+  chmod -R go-w "$PREFIX/gateway/venv"
+  gateway_ids
+  atomic_text /Library/LaunchDaemons/com.radon.model-gateway-local.plist 644 print_gateway_plist
+  plutil -lint /Library/LaunchDaemons/com.radon.model-gateway-local.plist >/dev/null
+  launchctl bootout system/com.radon.model-gateway-local 2>/dev/null || true
+  launchctl bootstrap system /Library/LaunchDaemons/com.radon.model-gateway-local.plist
 }
 
 print_perf_probe_plist() {
@@ -500,6 +622,11 @@ PY_READY
 
 main() {
   [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  if [[ "$1" == "--print-gateway-plist" ]]; then
+    gateway_ids
+    print_gateway_plist
+    return 0
+  fi
   if [[ "$1" == "--print-perf-probe-plist" ]]; then
     print_perf_probe_plist
     return 0
@@ -537,8 +664,10 @@ main() {
   refuse_active_install
   ensure_user
   ensure_perf_probe_user
+  ensure_gateway_user
   configure_user
   install_runner
+  install_gateway
   for loop in "$@"; do install_loop "$loop"; done
   if [[ -f "$PREFIX/loops/performance.env" ]]; then install_perf_probe_service; fi
   write_maintenance_ready

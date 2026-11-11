@@ -239,6 +239,30 @@ vi.mock("../lib/useRegime", () => ({
   useRegime: () => ({ data: null, syncing: false, lastSync: null, error: null, syncNow: vi.fn() }),
 }));
 
+// PERF-050: tab panels load through next/dynamic. Resolve the loader to
+// the already-mocked panel so URL-driven selection stays a sync assertion.
+vi.mock("next/dynamic", async () => {
+  const React = await import("react");
+  return {
+    default: (loader: () => Promise<{ default: React.ComponentType }>) => {
+      return function DynamicPanel(props: Record<string, unknown>) {
+        const [Comp, setComp] = React.useState<React.ComponentType | null>(null);
+        React.useEffect(() => {
+          let cancelled = false;
+          void Promise.resolve(loader()).then((mod) => {
+            if (!cancelled) setComp(() => mod.default);
+          });
+          return () => {
+            cancelled = true;
+          };
+        }, []);
+        if (!Comp) return React.createElement("div", { "data-testid": "regime-tab-skeleton" });
+        return React.createElement(Comp, props);
+      };
+    },
+  };
+});
+
 import RegimePanel from "../components/RegimePanel";
 
 describe("RegimePanel — tab is URL-driven", () => {
@@ -257,26 +281,26 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(within(container).queryByTestId("grg-panel-stub")).toBeNull();
   });
 
-  it("renders the VCG panel when pathname is /regime/vcg", () => {
+  it("renders the VCG panel when pathname is /regime/vcg", async () => {
     mockedPathname = "/regime/vcg";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("vcg-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("vcg-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("gex-panel-stub")).toBeNull();
     expect(within(container).queryByTestId("grg-panel-stub")).toBeNull();
   });
 
-  it("renders the GEX panel when pathname is /regime/gex", () => {
+  it("renders the GEX panel when pathname is /regime/gex", async () => {
     mockedPathname = "/regime/gex";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("gex-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("gex-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vcg-panel-stub")).toBeNull();
     expect(within(container).queryByTestId("grg-panel-stub")).toBeNull();
   });
 
-  it("renders the GRG panel when pathname is /regime/grg", () => {
+  it("renders the GRG panel when pathname is /regime/grg", async () => {
     mockedPathname = "/regime/grg";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("grg-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("grg-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vcg-panel-stub")).toBeNull();
     expect(within(container).queryByTestId("gex-panel-stub")).toBeNull();
   });
@@ -310,10 +334,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/grg");
   });
 
-  it("renders the Breadth panel when pathname is /regime/breadth", () => {
+  it("renders the Breadth panel when pathname is /regime/breadth", async () => {
     mockedPathname = "/regime/breadth";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("breadth-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("breadth-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vcg-panel-stub")).toBeNull();
   });
 
@@ -324,10 +348,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/breadth");
   });
 
-  it("renders the BPI panel when pathname is /regime/bpi", () => {
+  it("renders the BPI panel when pathname is /regime/bpi", async () => {
     mockedPathname = "/regime/bpi";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("bpi-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("bpi-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("breadth-panel-stub")).toBeNull();
   });
 
@@ -338,10 +362,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/bpi");
   });
 
-  it("renders the Margin panel when pathname is /regime/margin", () => {
+  it("renders the Margin panel when pathname is /regime/margin", async () => {
     mockedPathname = "/regime/margin";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("margin-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("margin-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("breadth-panel-stub")).toBeNull();
   });
 
@@ -352,10 +376,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/margin");
   });
 
-  it("renders the Quant panel when pathname is /regime/quant", () => {
+  it("renders the Quant panel when pathname is /regime/quant", async () => {
     mockedPathname = "/regime/quant";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("quant-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("quant-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
   });
 
@@ -366,10 +390,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/quant");
   });
 
-  it("renders the Straddle panel when pathname is /regime/straddle", () => {
+  it("renders the Straddle panel when pathname is /regime/straddle", async () => {
     mockedPathname = "/regime/straddle";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("straddle-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("straddle-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
   });
 
@@ -380,10 +404,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/straddle");
   });
 
-  it("renders the MSR panel when pathname is /regime/msr", () => {
+  it("renders the MSR panel when pathname is /regime/msr", async () => {
     mockedPathname = "/regime/msr";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("msr-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("msr-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
   });
 
@@ -394,10 +418,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/msr");
   });
 
-  it("renders the Cor panel when pathname is /regime/cor", () => {
+  it("renders the Cor panel when pathname is /regime/cor", async () => {
     mockedPathname = "/regime/cor";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("cor-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("cor-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
   });
 
@@ -408,10 +432,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/cor");
   });
 
-  it("renders the Skew panel when pathname is /regime/skew", () => {
+  it("renders the Skew panel when pathname is /regime/skew", async () => {
     mockedPathname = "/regime/skew";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("skew-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("skew-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
   });
 
@@ -422,10 +446,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/skew");
   });
 
-  it("renders the Skew2d panel when pathname is /regime/skew2d", () => {
+  it("renders the Skew2d panel when pathname is /regime/skew2d", async () => {
     mockedPathname = "/regime/skew2d";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("skew2d-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("skew2d-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("skew-panel-stub")).toBeNull();
   });
 
@@ -436,10 +460,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/skew2d");
   });
 
-  it("renders the Yield Curve panel when pathname is /regime/curve", () => {
+  it("renders the Yield Curve panel when pathname is /regime/curve", async () => {
     mockedPathname = "/regime/curve";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("curve-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("curve-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
   });
 
@@ -450,10 +474,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/curve");
   });
 
-  it("renders the Credit Spread panel when pathname is /regime/credit", () => {
+  it("renders the Credit Spread panel when pathname is /regime/credit", async () => {
     mockedPathname = "/regime/credit";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("credit-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("credit-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("curve-panel-stub")).toBeNull();
   });
 
@@ -464,10 +488,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/credit");
   });
 
-  it("renders the IEI/HYG panel when pathname is /regime/iei-hyg", () => {
+  it("renders the IEI/HYG panel when pathname is /regime/iei-hyg", async () => {
     mockedPathname = "/regime/iei-hyg";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("iei-hyg-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("iei-hyg-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("credit-panel-stub")).toBeNull();
   });
 
@@ -478,10 +502,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/iei-hyg");
   });
 
-  it("renders the CREDIT/VIX panel when pathname is /regime/credit-vix", () => {
+  it("renders the CREDIT/VIX panel when pathname is /regime/credit-vix", async () => {
     mockedPathname = "/regime/credit-vix";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("credit-vix-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("credit-vix-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("iei-hyg-panel-stub")).toBeNull();
     expect(within(container).queryByTestId("credit-panel-stub")).toBeNull();
   });
@@ -493,10 +517,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/credit-vix");
   });
 
-  it("renders the TRIN panel when pathname is /regime/trin", () => {
+  it("renders the TRIN panel when pathname is /regime/trin", async () => {
     mockedPathname = "/regime/trin";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("trin-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("trin-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("iei-hyg-panel-stub")).toBeNull();
   });
 
@@ -507,10 +531,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/trin");
   });
 
-  it("renders the DIV YIELD panel when pathname is /regime/divyield", () => {
+  it("renders the DIV YIELD panel when pathname is /regime/divyield", async () => {
     mockedPathname = "/regime/divyield";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("divyield-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("divyield-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("trin-panel-stub")).toBeNull();
   });
 
@@ -521,10 +545,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/divyield");
   });
 
-  it("renders the MA RATIO panel when pathname is /regime/ma-ratio", () => {
+  it("renders the MA RATIO panel when pathname is /regime/ma-ratio", async () => {
     mockedPathname = "/regime/ma-ratio";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("ma-ratio-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("ma-ratio-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("divyield-panel-stub")).toBeNull();
     // "ma-ratio" must not be swallowed by the "margin" alternation.
     expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
@@ -537,10 +561,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/ma-ratio");
   });
 
-  it("renders the RSI OVERSOLD panel when pathname is /regime/rsi-oversold", () => {
+  it("renders the RSI OVERSOLD panel when pathname is /regime/rsi-oversold", async () => {
     mockedPathname = "/regime/rsi-oversold";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("rsi-oversold-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("rsi-oversold-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("ma-ratio-panel-stub")).toBeNull();
   });
 
@@ -551,10 +575,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/rsi-oversold");
   });
 
-  it("renders the CALM STREAK panel when pathname is /regime/calm-streak", () => {
+  it("renders the CALM STREAK panel when pathname is /regime/calm-streak", async () => {
     mockedPathname = "/regime/calm-streak";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("calm-streak-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("calm-streak-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("ma-ratio-panel-stub")).toBeNull();
   });
 
@@ -565,10 +589,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/calm-streak");
   });
 
-  it("renders the HY AD panel when pathname is /regime/hyad", () => {
+  it("renders the HY AD panel when pathname is /regime/hyad", async () => {
     mockedPathname = "/regime/hyad";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("hyad-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("hyad-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("divyield-panel-stub")).toBeNull();
   });
 
@@ -579,10 +603,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/hyad");
   });
 
-  it("renders the HH LEV panel when pathname is /regime/hhlev", () => {
+  it("renders the HH LEV panel when pathname is /regime/hhlev", async () => {
     mockedPathname = "/regime/hhlev";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("hhlev-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("hhlev-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("hyad-panel-stub")).toBeNull();
   });
 
@@ -599,10 +623,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(within(container).queryByRole("button", { name: /^VOL CONE$/ })).toBeNull();
   });
 
-  it("renders the COT panel when pathname is /regime/cot", () => {
+  it("renders the COT panel when pathname is /regime/cot", async () => {
     mockedPathname = "/regime/cot";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("cot-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("cot-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("curve-panel-stub")).toBeNull();
   });
 
@@ -613,10 +637,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/cot");
   });
 
-  it("renders the ATS venue-share panel when pathname is /regime/ats", () => {
+  it("renders the ATS venue-share panel when pathname is /regime/ats", async () => {
     mockedPathname = "/regime/ats";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("ats-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("ats-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("cot-panel-stub")).toBeNull();
   });
 
@@ -627,10 +651,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/ats");
   });
 
-  it("renders the short-crowding panel when pathname is /regime/short", () => {
+  it("renders the short-crowding panel when pathname is /regime/short", async () => {
     mockedPathname = "/regime/short";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("short-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("short-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("ats-panel-stub")).toBeNull();
   });
 
@@ -641,10 +665,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/short");
   });
 
-  it("renders the IV Rank panel when pathname is /regime/ivrank", () => {
+  it("renders the IV Rank panel when pathname is /regime/ivrank", async () => {
     mockedPathname = "/regime/ivrank";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("ivrank-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("ivrank-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("short-panel-stub")).toBeNull();
   });
 
@@ -655,10 +679,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/ivrank");
   });
 
-  it("renders the IV SPREAD panel when pathname is /regime/iv-spread", () => {
+  it("renders the IV SPREAD panel when pathname is /regime/iv-spread", async () => {
     mockedPathname = "/regime/iv-spread";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("iv-spread-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("iv-spread-panel-stub")).toBeTruthy();
     // "iv-spread" shares a prefix with "ivrank": neither may swallow the other.
     expect(within(container).queryByTestId("ivrank-panel-stub")).toBeNull();
   });
@@ -670,10 +694,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/iv-spread");
   });
 
-  it("renders the VIX TS panel when pathname is /regime/vixts", () => {
+  it("renders the VIX TS panel when pathname is /regime/vixts", async () => {
     mockedPathname = "/regime/vixts";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("vixts-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("vixts-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("ivrank-panel-stub")).toBeNull();
   });
 
@@ -684,18 +708,18 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/vixts");
   });
 
-  it("renders and navigates to the VIX model panel", () => {
+  it("renders and navigates to the VIX model panel", async () => {
     mockedPathname = "/regime/vix-model-spread";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("vix-model-spread-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("vix-model-spread-panel-stub")).toBeTruthy();
     within(container).getByRole("button", { name: /^VIX MODEL$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/vix-model-spread");
   });
 
-  it("renders the VIX P/C panel when pathname is /regime/vix-pc", () => {
+  it("renders the VIX P/C panel when pathname is /regime/vix-pc", async () => {
     mockedPathname = "/regime/vix-pc";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("vix-pc-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("vix-pc-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
   });
 
@@ -706,10 +730,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/vix-pc");
   });
 
-  it("renders the Panic Proxy panel when pathname is /regime/panic-index", () => {
+  it("renders the Panic Proxy panel when pathname is /regime/panic-index", async () => {
     mockedPathname = "/regime/panic-index";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("panic-index-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("panic-index-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
   });
 
@@ -720,10 +744,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/panic-index");
   });
 
-  it("renders the DISPERSION panel when pathname is /regime/dispersion", () => {
+  it("renders the DISPERSION panel when pathname is /regime/dispersion", async () => {
     mockedPathname = "/regime/dispersion";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("dispersion-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("dispersion-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
   });
 
@@ -734,10 +758,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/dispersion");
   });
 
-  it("renders the STREAKS panel when pathname is /regime/streaks", () => {
+  it("renders the STREAKS panel when pathname is /regime/streaks", async () => {
     mockedPathname = "/regime/streaks";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("streaks-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("streaks-panel-stub")).toBeTruthy();
     expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
   });
 
@@ -782,10 +806,10 @@ describe("export lead route", () => {
     expect(FLAGGABLE_REGIME_TABS).not.toContain("exports");
   });
   afterEach(() => cleanup());
-  it("mounts the export panel and navigates through the Models rail", () => {
+  it("mounts the export panel and navigates through the Models rail", async () => {
     mockedPathname = "/regime/exports";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("exports-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("exports-panel-stub")).toBeTruthy();
     within(container).getByRole("button", { name: /^EXPORT LEAD$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/exports");
   });
@@ -793,10 +817,10 @@ describe("export lead route", () => {
 
  describe("High-Low route", () => {
   afterEach(() => cleanup());
-  it("renders and navigates through the breadth rail", () => {
+  it("renders and navigates through the breadth rail", async () => {
     mockedPathname = "/regime/high-low";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("high-low-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("high-low-panel-stub")).toBeTruthy();
     within(container).getByRole("button", { name: /^HIGH LOW$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/high-low");
   });
@@ -804,10 +828,10 @@ describe("export lead route", () => {
 
  describe("Imbalance route", () => {
   afterEach(() => cleanup());
-  it("renders and navigates through the breadth rail", () => {
+  it("renders and navigates through the breadth rail", async () => {
     mockedPathname = "/regime/imbalance";
     const { container } = render(<RegimePanel prices={{}} />);
-    expect(within(container).getByTestId("imbalance-panel-stub")).toBeTruthy();
+    expect(await within(container).findByTestId("imbalance-panel-stub")).toBeTruthy();
     within(container).getByRole("button", { name: /^IMBALANCE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/imbalance");
   });
