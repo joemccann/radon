@@ -254,11 +254,15 @@ def published_fingerprints() -> list[tuple]:
     return [tuple(r) for r in rows]
 
 
-def record_failure(article_id: str, error: str) -> int:
-    """Count one failed attempt on a pending row; it becomes 'failed' (never retried) at MAX_ATTEMPTS."""
+def record_failure(article_id: str, error: str, *, final: bool = False) -> int:
+    """Count one failed attempt on a pending row; it becomes 'failed' (never retried) at MAX_ATTEMPTS.
+
+    ``final`` spends every remaining attempt at once, for an outcome a retry cannot change.
+    """
+    spent = f"MAX(attempts+1, {MAX_ATTEMPTS})" if final else "attempts+1"
     rows = hrana_execute(
-        "UPDATE marketdesk_articles SET attempts=attempts+1, last_error=?, updated_at=?, "
-        f"status=CASE WHEN attempts+1>={MAX_ATTEMPTS} THEN 'failed' ELSE status END "
+        f"UPDATE marketdesk_articles SET attempts={spent}, last_error=?, updated_at=?, "
+        f"status=CASE WHEN {spent}>={MAX_ATTEMPTS} THEN 'failed' ELSE status END "
         "WHERE article_id=? AND status='pending' RETURNING attempts",
         (_error(error), _now(), article_id))
     if rows:
