@@ -185,10 +185,8 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
-          cache-dependency-glob: |
-            requirements-dev.txt
-            cloud/requirements-test.txt
-      - run: uv pip install -r requirements-dev.txt -r cloud/requirements-test.txt
+          cache-dependency-glob: requirements-dev.txt
+      - run: uv pip install -r requirements-dev.txt
       - run: >-
           python -m pytest ${{ needs.changes.outputs.contract_cloud_tests }}
           -q --durations=25
@@ -443,7 +441,6 @@ jobs:
             requirements.txt
             scripts/requirements-api.txt
             requirements-dev.txt
-            cloud/requirements-test.txt
       - name: Install dependencies
         run: |
           python scripts/deps/materialize_fastembed_pillow13.py
@@ -614,15 +611,9 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
-          cache-dependency-glob: |
-            requirements-dev.txt
-            cloud/requirements-test.txt
+          cache-dependency-glob: requirements-dev.txt
       - name: Install dependencies
-        run: |
-          uv pip install -r requirements-dev.txt
-          if [ -f cloud/requirements-test.txt ]; then
-            uv pip install -r cloud/requirements-test.txt
-          fi
+        run: uv pip install -r requirements-dev.txt
       # cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism is the only
       # EXECUTABLE proof of the R-219 bound on a hung upstream and the R-220
       # non-replay of a severed POST /api/orders/place. R-220 is an
@@ -1339,12 +1330,11 @@ jobs:
             SHA='${{ github.sha }}'
             RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
-            LEGACY_CLOUD="${HOME}/radon-cloud"
-            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
-              ENV_FILE=/etc/radon/env
-            else
-              ENV_FILE="${LEGACY_CLOUD}/.env"
+            if [[ ! -f /etc/radon/env || -L /etc/radon/env ]]; then
+              echo "/etc/radon/env is missing or not a regular file; /home/radon/radon-cloud/.env is retired and is not a fallback" >&2
+              exit 1
             fi
+            ENV_FILE=/etc/radon/env
             RUNNER_ROOT="${HOME}/.radon-deploy-runners"
             RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}.prestage"
             RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
@@ -1514,11 +1504,11 @@ jobs:
             RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
             LEGACY_CLOUD="${HOME}/radon-cloud"
-            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
-              ENV_FILE=/etc/radon/env
-            else
-              ENV_FILE="${LEGACY_CLOUD}/.env"
+            if [[ ! -f /etc/radon/env || -L /etc/radon/env ]]; then
+              echo "/etc/radon/env is missing or not a regular file; /home/radon/radon-cloud/.env is retired and is not a fallback" >&2
+              exit 1
             fi
+            ENV_FILE=/etc/radon/env
             RUNNER_ROOT="${HOME}/.radon-deploy-runners"
             RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}"
             RUNNER_KEEP_NEWEST=4
