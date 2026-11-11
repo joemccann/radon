@@ -160,7 +160,7 @@ class TestMarketHours:
         from datetime import datetime as dt
         from zoneinfo import ZoneInfo
         mock_now = dt(2026, 3, 17, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.price_cache.datetime") as mock_dt:
+        with patch("utils.market_calendar.datetime") as mock_dt:
             mock_dt.now.return_value = mock_now
             mock_dt.fromisoformat = dt.fromisoformat
             assert is_market_hours() is True
@@ -170,7 +170,7 @@ class TestMarketHours:
         from datetime import datetime as dt
         from zoneinfo import ZoneInfo
         mock_now = dt(2026, 3, 17, 17, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.price_cache.datetime") as mock_dt:
+        with patch("utils.market_calendar.datetime") as mock_dt:
             mock_dt.now.return_value = mock_now
             mock_dt.fromisoformat = dt.fromisoformat
             assert is_market_hours() is False
@@ -181,7 +181,7 @@ class TestMarketHours:
         from zoneinfo import ZoneInfo
         # 2026-03-14 is a Saturday
         mock_now = dt(2026, 3, 14, 12, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.price_cache.datetime") as mock_dt:
+        with patch("utils.market_calendar.datetime") as mock_dt:
             mock_dt.now.return_value = mock_now
             mock_dt.fromisoformat = dt.fromisoformat
             assert is_market_hours() is False

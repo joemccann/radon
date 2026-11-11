@@ -38,6 +38,7 @@ from utils.env_loader import load_env_file
 from utils.atomic_io import atomic_save
 from utils.cta_percentiles import reconcile_tables
 from utils.cta_sync_health import fill_missing_cta_tables
+from utils.market_calendar import is_market_open_et, most_recent_session_date
 
 # Load .env from project root (before any os.environ reads)
 load_env_file(_PROJECT_DIR / ".env")
@@ -51,56 +52,13 @@ CTA_TABLES = {
 }
 
 def is_market_open() -> bool:
-    """Check if US equity markets are currently open."""
-    import zoneinfo
-    try:
-        et = zoneinfo.ZoneInfo("America/New_York")
-    except Exception:
-        from datetime import timedelta as _td
-        now_utc = datetime.now(timezone.utc)
-        et_offset = _td(hours=-5)
-        now_et = now_utc + et_offset
-        return now_et.weekday() < 5 and 9 * 60 + 30 <= now_et.hour * 60 + now_et.minute <= 16 * 60
-
-    now_et = datetime.now(et)
-    if now_et.weekday() >= 5:
-        return False
-    minutes = now_et.hour * 60 + now_et.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+    return is_market_open_et()
 
 
 def resolve_trading_date() -> str:
-    """Return the latest trading session date (YYYY-MM-DD).
-
-    If market is open or it's a weekday after market close, use today.
-    On weekends or before market open on Monday, use last Friday.
-    """
-    import zoneinfo
-    try:
-        et = zoneinfo.ZoneInfo("America/New_York")
-        now = datetime.now(et)
-    except Exception:
-        from datetime import timedelta as _td
-        now = datetime.now(timezone.utc) + _td(hours=-5)
-
-    weekday = now.weekday()  # Mon=0 ... Sun=6
-
-    if weekday == 5:  # Saturday → Friday
-        delta = 1
-    elif weekday == 6:  # Sunday → Friday
-        delta = 2
-    elif weekday == 0 and now.hour < 9:  # Monday pre-market → Friday
-        delta = 3
-    else:
-        # Weekday: if before 9:30 AM, use previous trading day
-        if now.hour * 60 + now.minute < 9 * 60 + 30:
-            delta = 1 if weekday > 0 else 3  # Mon pre-market → Friday
-        else:
-            delta = 0
-
-    from datetime import timedelta
-    target = now - timedelta(days=delta)
-    return target.strftime("%Y-%m-%d")
+    """Return the latest trading session date (YYYY-MM-DD): today once the
+    cash session has opened, otherwise the prior trading day."""
+    return most_recent_session_date()
 
 
 def resolve_menthorq_creds() -> tuple[Optional[str], Optional[str]]:

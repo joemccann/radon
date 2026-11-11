@@ -10,12 +10,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "market_holidays.json"
+# Static NYSE half days ({date: "HH:MM" ET close}), the fallback when the IBKR
+# cache has no row for the date. Shared with web/lib/serviceHealthWindows.ts.
+_EARLY_CLOSES_PATH = Path(__file__).parent.parent / "config" / "market_early_closes.json"
 # IBKR-sourced rolling calendar written daily by scripts/fetch_market_calendar.py.
 # This is the authoritative layer (ad-hoc closures + half-days the static table
 # can't carry); a missing/empty file degrades to the static holiday table.
 _IBKR_CACHE_PATH = Path(__file__).parent.parent.parent / "data" / "market_calendar.json"
 
 _holidays_cache: dict = {}
+_early_closes_cache: dict = {}
 # IBKR calendar cache, re-read periodically so a long-running process (FastAPI)
 # picks up the daily refresh without a restart.
 _ibkr_cache: dict = {}
@@ -38,6 +42,16 @@ def _load_holidays_file() -> dict:
         except (FileNotFoundError, json.JSONDecodeError):
             pass
     return _holidays_cache
+
+
+def _load_early_closes() -> dict:
+    if not _early_closes_cache:
+        try:
+            with open(_EARLY_CLOSES_PATH) as f:
+                _early_closes_cache.update(json.load(f))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+    return _early_closes_cache
 
 
 def _load_ibkr_calendar() -> dict:
@@ -114,12 +128,13 @@ def parse_liquid_hours(liquid_hours: str) -> dict:
     return out
 
 
-def _resolve_market_state(minutes: int, weekday: int, ibkr_day, is_holiday: bool) -> dict:
+def _resolve_market_state(minutes: int, weekday: int, ibkr_day, is_holiday: bool,
+                          static_close_et: "str | None" = None) -> dict:
     """Pure market-state decision. ``weekday`` is Python's 0(Mon)..6(Sun).
 
     Failure-safe order: IBKR cache (authoritative) → weekend → static holiday →
-    weekday+time. A missing IBKR row can only fall through to the more
-    conservative static/weekday layers — it never widens the open window.
+    static half day → weekday+time. A missing IBKR row can only fall through to
+    the more conservative static/weekday layers — it never widens the open window.
     """
     if ibkr_day:
         if ibkr_day.get("status") == "closed":
@@ -134,6 +149,11 @@ def _resolve_market_state(minutes: int, weekday: int, ibkr_day, is_holiday: bool
         return {"state": "closed", "is_open": False, "reason": "weekend"}
     if is_holiday:
         return {"state": "closed", "is_open": False, "reason": "static:holiday"}
+    static_close = _hhmm_to_min(static_close_et)
+    if static_close is not None:
+        if _OPEN_MIN <= minutes <= static_close:
+            return {"state": "early_close", "is_open": True, "reason": "static:early_close"}
+        return {"state": "closed", "is_open": False, "reason": "outside_hours"}
     is_open = _OPEN_MIN <= minutes <= _CLOSE_MIN
     return {
         "state": "open" if is_open else "closed",
@@ -159,7 +179,8 @@ def market_state(now: datetime = None) -> dict:
     minutes = now_et.hour * 60 + now_et.minute
     ibkr_day = _load_ibkr_calendar().get(date_str)
     is_holiday = date_str in load_holidays(now_et.year)
-    return _resolve_market_state(minutes, now_et.weekday(), ibkr_day, is_holiday)
+    static_close_et = _load_early_closes().get(date_str)
+    return _resolve_market_state(minutes, now_et.weekday(), ibkr_day, is_holiday, static_close_et)
 
 
 def load_holidays(year: int = None) -> set:
@@ -176,36 +197,6 @@ def load_holidays(year: int = None) -> set:
     data = _load_holidays_file()
     dates = data.get(str(year), [])
     return set(dates)
-
-
-def is_market_open(now: datetime = None) -> bool:
-    """Check whether the US equity market is open at the given moment.
-
-    Rules:
-        - Monday through Friday only
-        - 9:30 AM -- 4:00 PM Eastern (naive datetime assumed ET)
-        - Not a configured holiday
-
-    Args:
-        now: datetime to check.  Defaults to ``datetime.now()``.
-    """
-    if now is None:
-        now = datetime.now()
-
-    if now.weekday() >= 5:
-        return False
-
-    date_str = now.strftime("%Y-%m-%d")
-    holidays = load_holidays(now.year)
-    if date_str in holidays:
-        return False
-
-    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-    if now < market_open or now > market_close:
-        return False
-
-    return True
 
 
 def get_last_n_trading_days(n: int, from_date: datetime = None,
@@ -250,16 +241,26 @@ def get_last_n_trading_days(n: int, from_date: datetime = None,
 
 
 def is_market_open_et(now: datetime = None) -> bool:
-    """Market-open check that converts to ET first (safe on UTC hosts).
-
-    The legacy ``is_market_open`` treats its datetime's raw fields as ET, which
-    is wrong when called bare on a UTC host (e.g. the VPS). This variant resolves
-    the ET wall-clock before checking the weekday/holiday/time window.
+    """True during the US equity regular session (09:30-16:00 ET, or the
+    IBKR half-day close). The one Python "is the market open" answer: every
+    regular-session gate in scripts/ delegates here. A naive ``now`` is read
+    as ET wall-clock; an aware one is converted to ET first.
     """
-    # Reimplemented on the single source of truth so every caller inherits the
-    # IBKR cache (ad-hoc closures / half-days) without a logic fork. With no
-    # cache present this is identical to the legacy weekday+holiday+time check.
     return market_state(now)["is_open"]
+
+
+# market_state() reasons that mean the whole ET day is a non-session, as
+# opposed to a trading day that is merely outside its regular hours.
+_NON_SESSION_REASONS = frozenset({"weekend", "static:holiday", "ibkr:closed"})
+
+
+def is_trading_day_et(now: datetime = None) -> bool:
+    """True when the ET calendar day of ``now`` is a US equity trading day.
+
+    Holiday- and IBKR-cache-aware; a half day is a trading day. The time of
+    day does not matter.
+    """
+    return market_state(now)["reason"] not in _NON_SESSION_REASONS
 
 
 def is_equity_ext_session_et(now: datetime = None) -> bool:

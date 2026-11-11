@@ -1530,23 +1530,8 @@ def _today_et_str() -> str:
 
 
 def _is_market_open_now_et() -> bool:
-    # Holiday-aware (market_calendar.is_market_open_et consults
-    # scripts/config/market_holidays.json), so the orders-sync / portfolio loop
-    # no longer treats mid-week holidays like Juneteenth as open. Falls back to
-    # weekday + 09:30-16:00 ET only if the calendar import/file is unavailable.
-    try:
-        from utils.market_calendar import is_market_open_et
-        return is_market_open_et()
-    except Exception:
-        from zoneinfo import ZoneInfo
-        try:
-            et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
-        except Exception:
-            et = datetime.now()
-        if et.weekday() >= 5:
-            return False
-        minutes = et.hour * 60 + et.minute
-        return 9 * 60 + 30 <= minutes <= 16 * 60
+    from utils.market_calendar import is_market_open_et
+    return is_market_open_et()
 
 
 def _is_orders_session_live_now_et() -> bool:
@@ -1562,16 +1547,10 @@ def _is_orders_session_live_now_et() -> bool:
         return _is_market_open_now_et()
 
 
-# market_state() reasons that mean the whole day is a non-session (as opposed
-# to a trading day merely outside 09:30-16:00 ET). Unknown/new reasons fall
-# through as trading days so the gate can only ever fail open.
-_NON_TRADING_SESSION_REASONS = {"weekend", "static:holiday", "ibkr:closed"}
-
-
 def _is_trading_session_today() -> bool:
     try:
-        from utils.market_calendar import market_state
-        return market_state()["reason"] not in _NON_TRADING_SESSION_REASONS
+        from utils.market_calendar import is_trading_day_et
+        return is_trading_day_et()
     except Exception:
         # Fail open: a calendar bug must never silently disable startup
         # reconciliation forever.

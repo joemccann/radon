@@ -24,6 +24,7 @@ import math
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from clients.uw_client import UWClient, UWRateLimitError
@@ -254,11 +255,7 @@ def flow_for(ticker: str, flow_payload: Optional[Mapping[str, Any]]) -> Optional
 def completed_cutoff(now: Optional[datetime] = None) -> str:
     """Latest session date allowed in stage 1: today only after the 16:00 ET close."""
     now = now or datetime.now(timezone.utc)
-    try:
-        from zoneinfo import ZoneInfo
-        et = now.astimezone(ZoneInfo("America/New_York"))
-    except Exception:  # pragma: no cover
-        et = now - timedelta(hours=4)
+    et = now.astimezone(ZoneInfo("America/New_York"))
     today = et.date()
     return today.isoformat() if et.hour >= 16 else (today - timedelta(days=1)).isoformat()
 

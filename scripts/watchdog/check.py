@@ -118,33 +118,16 @@ def _resolve_severity(*, service: str, kind: str, market_state: str) -> str:
 def _market_state_for(now: datetime) -> str:
     """Mirror of getMarketStateFromDate() in web/lib/serviceHealthWindows.ts.
     UTC datetime in, ET-derived 'open' | 'extended' | 'closed' out.
+
+    A weekday holiday is "closed", never "open": otherwise market-hours-only
+    writers get the tight open-state window while legitimately dormant and the
+    intraday bucket pages P1 (the Juneteenth false-page incident). A half day
+    is "extended" after its early close.
     """
-    # Convert to ET. UTC offset for America/New_York is -5 (EST) / -4 (EDT).
-    # zoneinfo handles DST.
-    try:
-        from zoneinfo import ZoneInfo
-        et = now.astimezone(ZoneInfo("America/New_York"))
-    except Exception:
-        et = now  # fallback — should never happen on a tzdata-equipped host
-    day = et.weekday()  # 0=Mon, 6=Sun
-    if day >= 5:
-        return "closed"
-    # A US market holiday on a weekday is "closed", NOT "open" — otherwise
-    # market-hours-only writers (vcg/cri/portfolio-sync) get the tight open-state
-    # freshness window while legitimately dormant, are flagged stale, and the
-    # intraday bucket escalates them to P1 EMERGENCY Pushover pages (the
-    # Juneteenth false-page incident). Guarded so a calendar hiccup can never
-    # break the watchdog cycle. Same class as feedback_extended_market_state_window.
-    try:
-        from utils import market_calendar
-        if et.strftime("%Y-%m-%d") in market_calendar.load_holidays(et.year):
-            return "closed"
-    except Exception:
-        pass
-    minutes = et.hour * 60 + et.minute
-    if 9 * 60 + 30 <= minutes <= 16 * 60:
+    from utils import market_calendar
+    if market_calendar.is_market_open_et(now):
         return "open"
-    if (4 * 60 <= minutes < 9 * 60 + 30) or (16 * 60 < minutes <= 20 * 60):
+    if market_calendar.is_equity_ext_session_et(now):
         return "extended"
     return "closed"
 
