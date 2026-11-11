@@ -50,7 +50,6 @@ def _assert_no_legacy_data_files(path: Path) -> None:
                 "portfolio_report.py",
             }
             allowed_ratings_cache = "analyst_ratings_cache.json" in text and path.name == "fetch_analyst_ratings.py"
-            allowed_service_log = "exit_order_service.log" in text and path.name == "exit_order_service.py"
             allowed_strategy_config = "strategies.json" in text and path.name == "portfolio_attribution.py"
             # Operator-supplied Activity/Trade Confirmation XML, not trade_log.json.
             allowed_flex_from_file = path.name == "journal_rehydrate.py" and "from_file" in text
@@ -60,7 +59,6 @@ def _assert_no_legacy_data_files(path: Path) -> None:
                 or allowed_flow_cache
                 or allowed_report_output
                 or allowed_ratings_cache
-                or allowed_service_log
                 or allowed_strategy_config
                 or allowed_flex_from_file
             ), (
@@ -86,7 +84,6 @@ def test_trade_portfolio_scripts_do_not_use_flat_json_source_truth() -> None:
         "scripts/leap_iv_scanner.py",
         "scripts/fetch_analyst_ratings.py",
         "scripts/free_trade_analyzer.py",
-        "scripts/exit_order_service.py",
         "scripts/portfolio_attribution.py",
         "scripts/fetch_x_watchlist.py",
         "scripts/fetch_x_xai.py",

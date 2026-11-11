@@ -88,13 +88,6 @@ def create_daemon() -> MonitorDaemon:
         send_notifications=True
     ))
     
-    # ExitOrdersHandler is deliberately NOT registered (R-141): no producer
-    # anywhere writes the `exit_orders` section it reads, so every cycle
-    # connected to IB, placed nothing, and reported an ok heartbeat for a
-    # control that does not exist. The handler and its drills stay in the
-    # tree; scripts/tests/test_exit_orders_unregistered.py fails the moment a
-    # producer lands, which is when this registration comes back.
-
     daemon.register(PresetRebalanceHandler())
 
     daemon.register(FlexTokenCheck())

@@ -156,12 +156,10 @@ class TestHandlerOptIn:
         assert JournalSyncHandler.post_close_grace_minutes == 15
 
     def test_other_market_hours_handlers_default_to_zero(self):
-        from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
         from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
 
         assert BaseHandler.post_close_grace_minutes == 0
         assert FillMonitorHandler.post_close_grace_minutes == 0
-        assert ExitOrdersHandler.post_close_grace_minutes == 0
 
     def test_fill_monitor_opts_into_equity_ext_session(self):
         from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
