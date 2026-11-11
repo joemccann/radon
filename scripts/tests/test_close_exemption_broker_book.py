@@ -389,7 +389,34 @@ class TestAComboModifyMeetsTheBankrollCap(_AResizeMeetsTheBankrollCap):
     def _client(self, working, confirmed, held=0.0):
         client = super()._client(working, confirmed)
         client.qualify_contracts.return_value = [self.LONG, self.SHORT]
+        client.get_positions.return_value = (
+            [SimpleNamespace(contract=self.LONG, position=held),
+             SimpleNamespace(contract=self.SHORT, position=-held)] if held else []
+        )
         return client
+
+    # Sized so the same SELL, not exempted as a close, is a credit spread
+    # whose max loss breaches the 2.5% cap: only the close exemption admits it.
+    def test_a_close_is_not_reserved_against_itself(self):
+        client = self._client(self._working(50, "SELL"), self._working(30, "SELL"), held=50.0)
+
+        assert self._modify(client, 30) == 0
+        client.place_order.assert_called_once()
+
+    def test_a_partially_filled_close_is_priced_on_its_remainder(self):
+        working = self._working(50, "SELL")
+        working.orderStatus.filled = 30.0
+        working.orderStatus.remaining = 20.0
+        confirmed = self._working(50, "SELL")
+        confirmed.order.lmtPrice = 0.70
+        client = self._client(working, confirmed, held=20.0)
+
+        from ib_order_manage import modify_order
+
+        with pytest.raises(SystemExit) as exc:
+            modify_order(client, 10, 12345, 0.70, "127.0.0.1", 4001)
+        assert exc.value.code == 0
+        client.place_order.assert_called_once()
 
     def test_an_unresolvable_leg_is_unpriceable(self, capsys):
         client = self._client(self._working(1), self._working(2))
