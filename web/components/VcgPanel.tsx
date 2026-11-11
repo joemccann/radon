@@ -487,7 +487,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           positive bands above zero (stress rising), negative bands
           below (bounce territory). Range chips slice the underlying
           history (1M / 3M / 6M / 1Y / All); vcg_scan emits the full
-          Yahoo intersection so chip clicks reshape without re-fetch. */}
+          date intersection so chip clicks reshape without re-fetch. */}
       {data.history && data.history.length >= 2 && (() => {
         const [start, end] = chartRange;
         const slice = data.history.slice(start, end + 1);

@@ -36,7 +36,7 @@ export interface LinearRiskInput {
   action: "BUY" | "SELL";
   /** Per-unit count: shares or futures contracts. */
   quantity: number;
-  /** Per-unit signed price (positive magnitude; sign comes from action). */
+  /** Per-unit price (positive magnitude; sign comes from action). */
   limitPrice: number;
   /** Contract multiplier: 1 for stock; instrument-specific for futures. */
   multiplier: number;
@@ -65,8 +65,8 @@ export function computeLinearRisk(input: LinearRiskInput): OrderRisk {
   const heldShort = Math.max(0, input.heldShort ?? 0);
 
   // Close-out short-circuit. SELL against LONG OR BUY against SHORT, up to
-  // the held quantity, is a pure close — adds no new exposure. The (qty −
-  // held) excess is treated as a fresh open in the opposite direction.
+  // the held quantity, is a pure close — adds no new exposure. Any (qty −
+  // held) excess is handled below as a fresh open in the opposite direction.
   const closingLong = input.action === "SELL" && heldLong >= qty;
   const closingShort = input.action === "BUY" && heldShort >= qty;
   if (closingLong || closingShort) {

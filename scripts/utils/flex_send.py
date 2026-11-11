@@ -13,8 +13,8 @@ class FlexSendDisabled(RuntimeError):
 
 def assert_sendrequest_permitted(*, allowed: bool) -> None:
     # `allowed` FIRST. Embargo state describes what a SendRequest would do to
-    # the token, so it can only be relevant to a run that will issue one. The
-    # daily cash_flow_sync run passes neither --from-file nor --sendrequest and
+    # the token, so it can only be relevant to a run that will issue one. A
+    # cash_flow_sync run that passes neither --from-file nor --sendrequest
     # touches no network, and checking the embargo ahead of `allowed` made it
     # alarm or not purely as a function of sidecar state. R-360.
     if not allowed:

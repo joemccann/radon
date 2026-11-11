@@ -298,7 +298,7 @@ def fetch_rh_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
     """Robinhood daily closes (read-only MCP). Indices (SPX) are skipped.
 
     Ranked after IB, before UW and Yahoo. Unconfigured hosts return {}
-    without any network I/O so the ladder falls through to Yahoo.
+    without any network I/O so the ladder falls through to UW, then Yahoo.
     """
     fetchable = [t for t in tickers if t not in RH_SKIP]
     if not fetchable:

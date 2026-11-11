@@ -40,7 +40,8 @@ class FreshnessWindow(TypedDict):
     # True when the writer's data-flow depends on IB Gateway. The watchdog
     # groups alerts on these services into a single "IB Gateway awaiting
     # 2FA" message when ``/health.auth_state`` flags an upstream IB
-    # problem — see scripts/watchdog/check.py:check_bucket. False for
+    # problem — see scripts/watchdog/grouping.py:dispatch_with_grouping.
+    # False for
     # writers that talk to UW, Flex Web Service, Playwright sources, or
     # nothing IB-related; their alerts are routed normally.
     #
@@ -71,8 +72,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # radon-demo-mirror.timer: daily 21:45 + 23:30 UTC retry slot, weekends
     # included, so no window needs to absorb a weekend gap.
     "demo-mirror":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # Market-hours-only writers (gated by MonitorDaemon's
-    # requires_market_hours=True). Mirrors web/lib/serviceHealthWindows.ts;
+    # Market-hours-only writers (MonitorDaemon handlers gated by
+    # requires_market_hours=True, plus FastAPI's market-hours sync ticks).
+    # Mirrors web/lib/serviceHealthWindows.ts;
     # closed window absorbs the longest weekend gap so the banner doesn't
     # fire overnight. extended is folded into closed on the TS side for
     # the same reason — writers don't run in extended hours.
@@ -144,23 +146,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls
     #    Artificial Analysis only, no IB. Has not fired on weekends in
     #    practice; closed widened to 4d to cover Fri-06:30 → Mon-06:30 gap.
-    #  * leap-scan       — radon-leap.timer, once daily 14:00 UTC + on-demand;
-    #    UW-only. 26h open covers a weekend, 3d closed the long gap.
-    #  * garch-scan      — radon-garch.timer 3x/RTH day + on-demand dashboard;
-    #    UW-only. Same daily windows as leap-scan.
-    #  * oi-changes      — radon-oi-changes.timer 3x/RTH day (14/17/20 UTC
-    #    Mon-Fri); market-wide fetch_oi_changes.py --market heartbeats via
-    #    mirror_scan_snapshot; holiday skips heartbeat ok. UW-only.
-    #  * catalysts      — radon-catalysts.timer at 06:30, 10:00, and 16:00 ET;
-    #    heartbeats ok on holiday skips (run_catalysts.sh). Seven hours spans
-    #    the active-day schedule; four days bridges a long weekend. UW-only.
     "llm-token-index":  {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # margin-debt — daily wrapper every calendar day (FINRA monthly source,
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # Monthly official exports, sampled daily including weekends at 09:40 UTC.
     # Approved StockCharts daily sampling at 00:30 UTC, including weekends.
+    # Monthly official exports, sampled daily including weekends at 09:40 UTC.
     "high-low-line": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "asia-export-lead": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # hhlev — radon-hhlev.timer, daily 13:20 UTC every calendar day (quarterly
@@ -169,16 +161,16 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Data age (a quarter can be ~100+ days old) is legitimate and never
     # conflated with writer health. FRED HTTP only — no IB dependency.
     "hhlev":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
-    # model-catalog — radon-model-catalog.timer, daily 03:10 UTC every
-    # calendar day (provider model lists move on release cadence, not market
-    # cadence, so weekend runs heartbeat like any other). Uniform 26h window.
-    # Provider HTTP only — no IB dependency.
     "aa-frontier-basket": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle-backfill":  {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # liquidcompute — radon-liquidcompute.timer, daily 07:30 UTC homepage
     # GPU index ticker. Uniform 26h window. Public HTTP only, no IB.
     "liquidcompute":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # model-catalog — radon-model-catalog.timer, daily 03:10 UTC every
+    # calendar day (provider model lists move on release cadence, not market
+    # cadence, so weekend runs heartbeat like any other). Uniform 26h window.
+    # Provider HTTP only — no IB dependency.
     "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # slm-tagger-monitor — radon-slm-tagger-monitor.timer, daily 07:10 UTC.
     # No-op when RADON_SLM_TAGGER_MODE is off or shadow. 26h window. No IB.
@@ -275,10 +267,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors its
     # cor parent. Cboe CDN plus Turso cor_history only — no IB dependency.
     "vixcor":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    "vix-model-spread": {"open": 26 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
     # vix-pc - radon-vix-pc.timer, daily 02:00 UTC every calendar day
     # (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
     # window matches its daily siblings. UW VIX options-volume only - no IB.
-    "vix-model-spread": {"open": 26 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
     "vix-pc":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # vixts — radon-vixts.timer, daily 02:45 UTC every calendar day, in the
     # slot after straddle/cor/vixcor so the Cboe CDN hits stay staggered
@@ -342,6 +334,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Uniform 26h window (24h grace + timer jitter) mirrors
     # web/lib/serviceHealthWindows.ts. Turso + Cerebras + local ONNX — no IB.
     "knowledge-ingest": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # More daily-cadence writers:
+    #  * leap-scan       — radon-leap.timer, once daily 14:00 UTC + on-demand;
+    #    UW-only. 26h open covers one missed run, 3d closed the weekend.
+    #  * garch-scan      — radon-garch.timer 3x/RTH day + on-demand dashboard;
+    #    UW-only. Same daily windows as leap-scan.
+    #  * oi-changes      — radon-oi-changes.timer 3x/RTH day (14/17/20 UTC
+    #    Mon-Fri); market-wide fetch_oi_changes.py --market heartbeats via
+    #    mirror_scan_snapshot; holiday skips heartbeat ok. UW-only.
+    #  * catalysts      — radon-catalysts.timer at 06:30, 10:00, and 16:00 ET;
+    #    heartbeats ok on holiday skips (run_catalysts.sh). Seven hours spans
+    #    the active-day schedule; four days bridges a long weekend. UW-only.
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
@@ -381,12 +384,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # the relay error IS the IB-data-plane-dead signal, so grouping it under
     # IB-outage suppression would mute the alert.
     "ib-realtime-relay": {"open": 5 * _MIN, "closed": 24 * _HOUR, "requires_ib": False},
+    "uw-stream":        {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
+    "uw-research":      {"open": 3 * _HOUR, "closed": 3 * _HOUR, "requires_ib": False},
     # R-459: the MKTNews headlines hub (radon-mktnews.service) writes `ok` at
     # most every 5 min while upstream frames flow and `error` after 3 failed
     # dials or 5 min of silence; 24/7 feed, so one 15-min window (three missed
     # heartbeats) in every state. Mirrors web/lib/serviceHealthWindows.ts.
-    "uw-stream":        {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
-    "uw-research":      {"open": 3 * _HOUR, "closed": 3 * _HOUR, "requires_ib": False},
     "mktnews-hub":      {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # Event-driven writer when a replica file exists. Match the 24h window
     # from web/lib/serviceHealthWindows.ts; applicability is checked at
@@ -580,9 +583,9 @@ BUCKETS: dict[str, list[str]] = {
         "journal-sync",
         # Always-on heartbeat (writes service_health every 60s cycle).
         "ib-watchdog",
-        # Event-driven relay health (error on stale-tick escalation, ok on
-        # recovery). The error bucket below catches the escalation; including
-        # it in continuous lets the 24h staleness window flag a dead relay.
+        # Relay health (~60s heartbeat in RTH, error on stale-tick
+        # escalation). The error bucket below catches the escalation; including
+        # it in continuous lets the staleness window flag a dead relay.
         "ib-realtime-relay",
         # Headlines hub: 5-min ok heartbeat while upstream frames flow (R-459).
         "mktnews-hub",
@@ -613,7 +616,7 @@ BUCKETS: dict[str, list[str]] = {
         # Hourly RTH dark-pool flow driver. It always wrote its own row; it
         # was simply in neither catalog, so nothing aged it. R-412.
         "flow-refresh",
-        # Weekday 21:45 UTC prod->demo market-analytics mirror (R-325).
+        # Daily 21:45 UTC prod->demo market-analytics mirror (R-325).
         "demo-mirror",
         # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex
         # lockout, a throttle embargo or a dead timer, and /performance keeps
@@ -739,7 +742,7 @@ BUCKETS: dict[str, list[str]] = {
         # hourly check surfaces a missed run within 1h of the 4d window.
         "bpi-scan",
         # Top-candidates scans fired by radon-signals-refresh.timer — hourly
-        # check surfaces a dead timer within 1h of the 4d window (R-068).
+        # check surfaces a dead timer within 1h of the 3h open window (R-187).
         "theta-harvester",
         "strength-confirmation",
         "scanner",

@@ -8,14 +8,14 @@ the prober is actually dead — the exact failure Tier-3 exists to prevent.
 
 The rule: a row is only trustworthy if its OWN checked_at is fresh relative to
 the prober's cadence. GitHub cron is nominally every 5 min but is best-effort
-and routinely lags 5-15 min under load, so the staleness window must be
+and has been observed dispatching over an hour apart, so the staleness window must be
 generous — a few missed cycles, not one. We treat a row as STALE (and therefore
 the prober as DEAD, NOT the edge as green) once checked_at is older than
 STALE_AFTER_SECONDS.
 
 This is pure: callers fetch the row however they like (libsql on-box, the
 HTTP API, a dashboard query) and pass it in. The documented equivalent SQL
-query is in the module docstring of classify_external_probe.
+query is in the docstring of classify_external_probe.
 """
 from __future__ import annotations
 

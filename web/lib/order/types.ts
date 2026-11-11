@@ -104,7 +104,7 @@ export interface OrderPresentationSummary {
    * may omit it; it rides inside the existing brand (no brand change). Only
    * populated by `useOrderRisk` when coverage is resolved AND a baseline
    * (available funds / buying power) is present — never $0 for a missing
-   * baseline. `source` is the Phase-1 union; Phase 2 will add `'ib-whatif'`.
+   * baseline.
    * For naked / undefined-risk shorts `requirement` is the Reg-T ESTIMATE,
    * NOT `maxLoss` (which is the assignment-at-zero stress bound and massively
    * overstates real margin).
@@ -146,11 +146,11 @@ export interface OrderPresentationSummary {
 /**
  * Branded augmented summary — the ONLY shape `<OrderConfirmSummary>` accepts.
  *
- * The `__augmented` brand is a `unique symbol` declared in the risk module.
- * It can only be attached by `useOrderRisk`. A plain literal `{ description:
+ * The `__augmented` brand is a `unique symbol` declared in this module.
+ * It is meant to be attached only by `useOrderRisk`. A plain literal `{ description:
  * "...", ... }` will FAIL TYPECHECK against `<OrderConfirmSummary>` because
- * it lacks the symbol-keyed property — and the symbol itself is not exported
- * from any module outside `lib/order/risk/`. Bypass requires defeating the
+ * it lacks the symbol-keyed property — and the symbol is imported only by
+ * producer code inside `lib/order/risk/`. Bypass requires defeating the
  * type system explicitly (`as AugmentedOrderSummary`), the ESLint rule (which
  * bans `as` casts on this type), AND a dev-mode runtime assertion (below).
  *
@@ -162,16 +162,15 @@ export interface OrderPresentationSummary {
  *                      didn't thread it); same skeleton + warning as pending
  *                      so the operator never sees wrong risk silently
  *
- * `traceId` correlates with the per-session telemetry buffer (added in a
- * follow-up step). Today it's a UUID slice; tomorrow it lights up bug
- * reports.
+ * `traceId` correlates with the per-session telemetry buffer
+ * (`lib/order/risk/telemetry.ts`).
  */
 export type CoverageStatus = "resolved" | "pending" | "no-portfolio";
 
 // The brand symbol lives at runtime so dev-mode guards can detect a missing
-// brand. It's intentionally NOT exported — only producer code inside
-// `lib/order/risk/` references it via the SAME module identity. Consumer
-// code cannot construct the symbol because they cannot import it.
+// brand. It is exported only so producer code inside `lib/order/risk/`
+// references it via the SAME module identity. Consumer code must not
+// import it.
 export const ORDER_RISK_BRAND: unique symbol = Symbol("AugmentedOrderSummary");
 
 export type AugmentedOrderSummary = OrderPresentationSummary & {

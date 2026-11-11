@@ -3,7 +3,7 @@
 /**
  * Per-session order-risk telemetry buffer.
  *
- * Each `<OrderRiskGate>` render writes one record to a `sessionStorage` ring
+ * Each new `<OrderRiskGate>` traceId writes one record to a `sessionStorage` ring
  * buffer keyed by `radon:order-risk-traces`. The buffer keeps the most
  * recent 50 traces. Bug reports include the dump so a future "wrong
  * max-loss" filing can be cross-referenced against exactly which surface

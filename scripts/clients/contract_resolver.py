@@ -5,9 +5,7 @@ quotes / qualify a contract / place an order should route through here
 instead. Indices (VIX, SPX, NDX, RUT, ...) need `secType=IND` not STK
 or IBKR returns no data.
 
-Phase 1 surface: STK + IND.
-Phase 2 will extend with Future().
-Phase 3 will extend with Option() / FOP() (index options).
+Surface: STK + IND quotes, Future() and Option() (index options).
 """
 from __future__ import annotations
 
@@ -49,8 +47,8 @@ def is_tradeable(symbol: str) -> bool:
 
 # ── Futures ────────────────────────────────────────────────────────────
 
-# Map of underlying symbol → CFE futures root + exchange. Currently
-# scoped to VIX; extend as we wire more index-futures.
+# Map of underlying symbol → futures root + exchange (VIX on CFE;
+# SPX/NDX/RUT on CME).
 FUTURES_ROOTS: dict[str, dict[str, str]] = {
     "VIX": {"root": "VIX", "exchange": "CFE", "multiplier": "1000"},
     # Cash indices → their CME E-mini future. `root` is IB's contract symbol;

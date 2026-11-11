@@ -142,6 +142,8 @@ function AccountRow({
   onDividendsClick,
 }: {
   acct: AccountSummary;
+  /** IB streamed dailyPnL, already gated on a trading day (null otherwise). */
+  ibDailyPnl: number | null;
   /** Client-computed day-move aggregate, used as the pre-market /
    *  off-hours fallback when IB's `dailyPnL` stream is not active.
    *  Pre-market (04:00-09:30 ET) and after-hours, IB returns NaN for
@@ -149,8 +151,6 @@ function AccountRow({
    *  per-leg `last`/`close` math in `computeTodayUnrealizedPnl` still
    *  works because pre-market quotes populate `prices[*].last` — the
    *  Today's P&L breakout further down the page already uses this. */
-  /** IB streamed dailyPnL, already gated on a trading day (null otherwise). */
-  ibDailyPnl: number | null;
   todayUnrealized: { pnl: number; positionsWithData: number; totalPositions: number } | null;
   effectiveDayPnl: number | null;
   /** True when the portfolio has at least one open position. */
@@ -177,10 +177,13 @@ function AccountRow({
   //   1. "TODAY"               — IB streamed dailyPnL (regular trading hours)
   //   2. "ESTIMATED (LIVE | PRE-MARKET | AFTER HOURS)" — IB silent but live
   //      quotes give a day-move; the parenthetical names the current ET session
+  //      (bare "ESTIMATED" when the session is closed)
   //   3. "WAITING FOR IB"      — positions exist but the WS prices feed is
   //      empty, so the IB Gateway is unreachable (not "closed")
-  //   4. "MARKET CLOSED"       — no positions, or all positions stale (the
-  //      honest "nothing to compute" state)
+  //   4. "INCOMPLETE QUOTES"   — positions and prices exist and the session
+  //      is not closed, but there is no full day-move to show
+  //   5. "MARKET CLOSED"       — everything else (the honest "nothing to
+  //      compute" state)
   let displayLabel: string;
   if (ibDaily != null) displayLabel = "TODAY";
   else if (fallback != null) {
@@ -232,10 +235,9 @@ function AccountRow({
           }}
           onClick={onDayPnlClick}
         />
-        {/* When the fallback fires, the card is still clickable — the
-            Day P&L modal already uses the client-computed breakdown
-            via computeDayMoveBreakdown, so the drill-down is accurate
-            even when IB's aggregate is unavailable. */}
+        {/* When the fallback fires, the Day P&L card is still clickable —
+            its modal shows the formula and names the source (IB reqPnL
+            or the price-based estimate). */}
         <MetricCard
           card={{ label: "Unrealized P&L", value: fmtSignedExact(acct.unrealized_pnl), change: "OPEN POSITIONS", tone: acct.unrealized_pnl !== 0 ? tone(acct.unrealized_pnl) : "neutral" }}
           onClick={onUnrealizedClick}

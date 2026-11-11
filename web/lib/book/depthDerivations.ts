@@ -131,14 +131,14 @@ export function buildLadderRows(
 }
 
 /** Pad the FAR-from-touch end (top) so the inside row stays last (adjacent to
- *  the spine). Truncated to `rows` when already full. */
+ *  the spine). */
 function padTop(levelRows: LadderRow[], rows: number): LadderRow[] {
   const missing = Math.max(0, rows - levelRows.length);
   return [...Array(missing).fill(PLACEHOLDER_ROW), ...levelRows];
 }
 
 /** Pad the FAR-from-touch end (bottom) so the inside row stays first (adjacent
- *  to the spine). Truncated to `rows` when already full. */
+ *  to the spine). */
 function padBottom(levelRows: LadderRow[], rows: number): LadderRow[] {
   const missing = Math.max(0, rows - levelRows.length);
   return [...levelRows, ...Array(missing).fill(PLACEHOLDER_ROW)];

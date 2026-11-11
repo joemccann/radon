@@ -58,7 +58,7 @@ export const CONTENT_HASH_TTL_MS = 15_000;
 export const CLIENT_KEY_TTL_MS = 300_000;
 /**
  * Floor on how long an indeterminate outcome is retained. The abort window is
- * itself ~30s wide. Explicit and content-derived keys now both exceed this floor.
+ * itself ~30s wide.
  * Retention is `max(ttlMs, this)`; an explicit client key (300s) already exceeds
  * it. An operator who has checked open orders and genuinely wants to place again
  * passes a fresh `idempotencyKey` rather than waiting this out.

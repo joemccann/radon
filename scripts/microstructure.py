@@ -6,9 +6,8 @@ Mirrors the TypeScript derivation in ``web/lib/book/microstructure.ts`` so a
 Python scan and the live Book tab agree on the numbers. Edit one, edit the
 other.
 
-Two signals, both derived from resting depth only (the trade-direction tape is
-still Phase 3 / empty, so VPIN / order-flow toxicity is deliberately OUT of
-scope here):
+Two signals, both derived from resting depth only (VPIN / order-flow toxicity
+needs the trade-direction tape and is deliberately OUT of scope here):
 
   - ``book_imbalance`` — net resting pressure in [-1, 1] over the top-N levels:
         (sum bid size - sum ask size) / (sum bid size + sum ask size)

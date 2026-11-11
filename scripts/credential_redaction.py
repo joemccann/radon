@@ -255,9 +255,6 @@ _SPECIFIC_SCRUB_PATTERNS = [
     ),
 ]
 
-# Generic `password = ...` / `token: ...` shapes. They scrub well but match
-# ordinary code (`token = uuid4().hex`), so detection uses only the
-# specific shapes above.
 # ── One value tokenizer, shared by redaction and detection ───────────────
 #
 # DS-2026-10-22-10 .. -15: the value of a credential assignment used to be
@@ -742,6 +739,9 @@ def _quoted_value_is_secret(body: str) -> bool:
     return any(_is_opaque(m.group(0)) for m in _QUOTED_VALUE_TOKEN.finditer(body))
 
 
+# Generic `password = ...` / `token: ...` shapes. They scrub well but match
+# ordinary code (`token = uuid4().hex`), so detection uses only the
+# specific shapes above.
 _GENERIC_ASSIGNMENT_PATTERNS = [
     # A cookie header carries several opaque values; redact through end of line.
     # `=` too: an unquoted `COOKIE=a=b; sid=...` env line, same as detection.

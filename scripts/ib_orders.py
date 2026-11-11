@@ -331,12 +331,12 @@ def _dual_write_orders_to_db(data: dict, heartbeat: bool = True) -> None:
 
     try:
         # Open orders: full snapshot replace. IB returns the entire open
-        # set on each fills() call; cancelled / filled orders simply
+        # set on each get_open_orders() call; cancelled / filled orders simply
         # disappear from the snapshot, so DELETE+INSERT keeps DB in sync
         # without manual diff logic.
         # service_cycle (DUR-14): ok heartbeat on clean exit, error row
         # (+ retry embargo) on failure, re-raised into the non-fatal
-        # except below — the disk JSON stays the failure-safe path.
+        # except below.
         cycle_scope = (
             service_cycle("orders-sync", market_hours_class="intraday")
             if heartbeat

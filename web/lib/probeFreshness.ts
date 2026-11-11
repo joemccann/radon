@@ -180,9 +180,9 @@ export function evaluateRelayTick(
 
 /**
  * Scan snapshot freshness per the writer's own cadence window. Scheduled
- * scans (vcg-scan) run an autonomous RTH cadence, so they are asserted
- * during "open" against their open window. On-demand writers (gex-scan
- * today) only run when a user acts — quiet is expected at ANY hour, so
+ * scans (vcg-scan, gex-scan) run an autonomous RTH cadence, so they are
+ * asserted during "open" against their open window. On-demand writers
+ * only run when a user acts — quiet is expected at ANY hour, so
  * they are never applicable. Flips automatically if the category in
  * SERVICE_FRESHNESS_WINDOWS ever changes.
  */

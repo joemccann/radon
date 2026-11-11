@@ -40,7 +40,7 @@ Severity routing for the Pushover channel (DUR-14 escalation)
 
  * P1 → Pushover EMERGENCY (priority=2, retry/expire) — repeats until
    the operator acknowledges the push. A successful P1 delivery also
-   inserts a ``watchdog_pages`` row for the laptop Grok responder.
+   inserts a ``watchdog_pages`` row for the Grok responder.
  * P2 / P3 → service_health heartbeat + once-daily digest push (batched
    in ``DIGEST_STATE_PATH``, flushed by the daily watchdog bucket via
    :func:`flush_daily_digest`).
@@ -207,7 +207,7 @@ def build_pushover_payload(*, user: str, token: str, title: str, message: str,
 
     ``tag`` stamps emergency pushes so they can be cancelled by tag once the
     condition recovers (``cancel_emergency``) — otherwise an emergency keeps
-    re-alerting every 60s for the full hour even after the outage clears."""
+    re-alerting every 5 min for the full hour even after the outage clears."""
     payload = {"token": token, "user": user, "title": title, "message": message}
     if severity == "P1":
         payload["priority"] = 2
@@ -633,7 +633,7 @@ def dispatch(
 
 
 def _enqueue_grok_page(outcome: CheckOutcome) -> None:
-    """Best-effort ticket for the laptop Grok responder. Never raise."""
+    """Best-effort ticket for the Grok responder. Never raise."""
     try:
         from . import pages
         pages.enqueue_delivered_page(

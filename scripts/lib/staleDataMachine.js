@@ -41,15 +41,15 @@ export const MAX_RECONNECT_CYCLES = 3;
 export const ESCALATION_COOLDOWN_MS = 900_000; // 15 min
 
 /**
- * IB info codes that report market-data farm connection state. When the
- * most recent farm signal is a positive "connection is OK" (2104 / 2106 /
- * 2158), the socket is healthy and the right recovery is a fresh
+ * IB info codes that report data farm connection state. When the most
+ * recent farm signal is a positive "connection is OK" (2104 market data /
+ * 2106 HMDS / 2158 sec-def), the socket is healthy and the right recovery is a fresh
  * resubscribe rather than a socket bounce.
  */
 export const FARM_OK_CODES = new Set([2104, 2106, 2158]);
 
 /**
- * IB info codes that report a market-data farm as broken / inactive
+ * IB info codes that report a data farm as broken / inactive
  * (2103 connection lost, 2105 HMDS lost, 2108 connection inactive). These
  * mean a socket bounce is the appropriate recovery.
  */
@@ -287,6 +287,35 @@ export function farmStateAfterIdleDrain() {
 }
 
 /**
+ * R-168: while the IB socket is DOWN during RTH the relay wrote no
+ * service_health row at all — decideStaleAction returns "none" on
+ * !ibConnected, hasHealthyDataPlane is false so the heartbeat and clearError
+ * are withheld, and isDataPlaneNulled is false so `degraded` is withheld too.
+ * A relay whose socket is simply gone mid-session was byte-identical, on the
+ * health surface, to one that is fine.
+ *
+ * Bounded by the same staleness threshold the tick ladder uses, so an
+ * ordinary reconnect (seconds) never writes an error row.
+ *
+ * @param {StaleDataInput & {disconnectedSinceAt?: number|null}} input
+ * @returns {boolean}
+ */
+export function isDisconnectedDuringDemand({
+  ibConnected,
+  isMarketHours,
+  activeSubscriptions = 0,
+  subscribedSymbols = activeSubscriptions,
+  now,
+  disconnectedSinceAt,
+}) {
+  if (isMarketHours !== true) return false;
+  if (ibConnected) return false;
+  if (subscribedSymbols <= 0 && activeSubscriptions <= 0) return false;
+  if (disconnectedSinceAt == null) return false;
+  return now - disconnectedSinceAt > STALE_DATA_THRESHOLD_MS;
+}
+
+/**
  * Decide BOTH the recovery action and whether to write the ok tick-heartbeat
  * from a single snapshot, so the two can never race.
  *
@@ -325,37 +354,8 @@ export function farmStateAfterIdleDrain() {
  * writes a non-ok row instead so the blackout is visible.
  *
  * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number, subscribedSymbols?: number}} input
- * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean, degraded: boolean}}
+ * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean, degraded: boolean, disconnected: boolean}}
  */
-/**
- * R-168: while the IB socket is DOWN during RTH the relay wrote no
- * service_health row at all — decideStaleAction returns "none" on
- * !ibConnected, hasHealthyDataPlane is false so the heartbeat and clearError
- * are withheld, and isDataPlaneNulled is false so `degraded` is withheld too.
- * A relay whose socket is simply gone mid-session was byte-identical, on the
- * health surface, to one that is fine.
- *
- * Bounded by the same staleness threshold the tick ladder uses, so an
- * ordinary reconnect (seconds) never writes an error row.
- *
- * @param {StaleDataInput & {disconnectedSinceAt?: number|null}} input
- * @returns {boolean}
- */
-export function isDisconnectedDuringDemand({
-  ibConnected,
-  isMarketHours,
-  activeSubscriptions = 0,
-  subscribedSymbols = activeSubscriptions,
-  now,
-  disconnectedSinceAt,
-}) {
-  if (isMarketHours !== true) return false;
-  if (ibConnected) return false;
-  if (subscribedSymbols <= 0 && activeSubscriptions <= 0) return false;
-  if (disconnectedSinceAt == null) return false;
-  return now - disconnectedSinceAt > STALE_DATA_THRESHOLD_MS;
-}
-
 export function decideHealthWrite(input) {
   const action = decideStaleAction(input);
   const isHealthyCycle = action === "none" && hasHealthyDataPlane(input);
