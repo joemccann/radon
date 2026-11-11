@@ -79,7 +79,7 @@ class IBContractError(IBError):
 #   10-19   WS relay (persistent, ib_realtime_server.js)
 #   20-49   Subprocess scripts (on-demand, auto-allocated with retry)
 #   50-69   Scanners (fixed ids per scanner; table in scripts/CLAUDE.md)
-#   70-89   Standalone daemon CLIs (ib_fill_monitor, exit_order_service);
+#   70-89   Standalone daemon CLIs (ib_fill_monitor);
 #           monitor_daemon handlers use client_id="auto" (20-49)
 #   90-99   Standalone CLI (manual runs)
 #
@@ -104,7 +104,6 @@ CLIENT_IDS: dict = {
     "ib_order": 22,            # subprocess range
     "ib_execute": 23,          # subprocess range
     "ib_fill_monitor": 70,     # daemon range
-    "exit_order_service": 71,  # daemon range
     "fetch_analyst_ratings": 90, # standalone CLI range
     "ib_place_order": 24,      # subprocess range
     "vcg_scanner": 50,         # scanner range
