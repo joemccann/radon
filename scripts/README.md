@@ -5,7 +5,7 @@ Python and Node daemons for Radon. **Do not move these files into
 systemd / launchd / docs-owner update in the same commit.** Fifty units
 `ExecStart=` these paths.
 
-CLI aliases live in `.pi/commands.json`. Human index:
+CLI command index:
 [`docs/scripts-reference.md`](../docs/scripts-reference.md).
 
 ## Launchers

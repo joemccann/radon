@@ -36,12 +36,11 @@ def test_lint_typecheck_is_present_and_non_required() -> None:
     assert "ubuntu-latest" not in str(job["runs-on"])
 
 
-def test_lib_tools_ci_project_excludes_only_the_unresolved_module() -> None:
+def test_lib_tools_ci_project_typechecks_every_tool_module() -> None:
     text = (ROOT / "lib" / "tsconfig.ci.json").read_text(encoding="utf-8")
     assert '"extends": "./tsconfig.json"' in text
-    assert "tools/__tests__/**" in text
-    assert "tools/pi-tools.ts" in text
-    assert "@mariozechner/pi-coding-agent" in text
+    assert '"exclude": ["tools/__tests__/**"]' in text
+    assert not (ROOT / "lib" / "tools" / "pi-tools.ts").exists()
 
 
 def test_oxlint_script_uses_the_pinned_config() -> None:
