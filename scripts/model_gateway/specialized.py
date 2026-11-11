@@ -74,28 +74,6 @@ def embed(payload: dict) -> dict:
     return {"vectors": _vectors(vectors, len(texts), dimensions), "dimensions": dimensions, "model": model}
 
 
-def ocr(payload: dict) -> dict:
-    from . import _ocr_backend as backend
-    _fields(payload, {"model", "image", "timeout_seconds"})
-    model = payload.get("model")
-    configured = {part.strip() for part in os.environ.get("RADON_RESEARCH_PARSE_MODELS", "").split(",") if part.strip()}
-    allowed = {"nvidia/nemotron-parse", "nvidia/nemotron-parse-2.0", "nvidia/nemotron-parse-2"} | configured
-    if not isinstance(model, str) or model not in allowed:
-        raise ValueError("unsupported document parser model")
-    encoded = payload.get("image")
-    if not isinstance(encoded, str) or len(encoded) > 7_000_000:
-        raise ValueError("invalid OCR image")
-    raw = base64.b64decode(encoded, validate=True)
-    if not raw or len(raw) > 5_000_000:
-        raise ValueError("OCR image exceeds byte limit")
-    timeout = _bounded(payload.get("timeout_seconds", 100), 0.1, 270, "OCR deadline")
-    body = backend._request_body(model, "data:image/png;base64," + encoded)
-    result = backend._post_with_retries(model, body, post=None, sleep=None,
-                                       monotonic=None, jitter=None,
-                                       deadline=backend._clock(None) + timeout)
-    return {"payload": result}
-
-
 def x_search(payload: dict) -> dict:
     from . import _x_search_backend as backend
     _fields(payload, {"account", "days"})
@@ -211,7 +189,7 @@ def clairic(payload: dict) -> dict:
 
 
 def dispatch(operation: str, payload: dict) -> dict:
-    operations = {"embed": embed, "ocr": ocr, "x-search": x_search,
+    operations = {"embed": embed, "x-search": x_search,
                   "forecast": forecast, "clairic": clairic, "validate-credential": validate_credential,
                   "refresh-catalog": refresh_catalog}
     if operation not in operations:

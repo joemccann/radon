@@ -1,8 +1,7 @@
 """Tests for the off-box (Backblaze B2) leg of scripts/db_backup.py.
 
 No live B2 and NO boto3 dependency: the CI cloud-tests job installs only
-requirements-dev.txt + cloud/requirements-test.txt, neither of which
-carries boto3, and db_backup.py imports it lazily precisely so these tests
+requirements-dev.txt, which does not carry boto3, and db_backup.py imports it lazily precisely so these tests
 never need it. Tests that must reach the transport install a fake ``boto3``
 / ``botocore`` module tree in ``sys.modules`` (see _install_fake_boto3), so
 the real lazy-import path in ``_s3_client`` / ``_transfer_config`` is
@@ -104,8 +103,8 @@ def _install_fake_boto3(monkeypatch, client):
     """Put a minimal fake boto3/botocore in sys.modules and return the kwargs
     db_backup passes into them.
 
-    Stubbing beats adding the dependency: cloud/requirements-test.txt is a
-    deliberately minimal three-line file, and the module documents its
+    Stubbing beats adding the dependency: requirements-dev.txt carries no
+    AWS SDK, and the module documents its
     import as lazy so unit runs never pull botocore/s3transfer. monkeypatch
     restores sys.modules after each test.
     """

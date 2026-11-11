@@ -74,6 +74,8 @@ There is no threshold override or automatic data deletion. A rejected prestage
 or capacity probe cannot fall back to a host compile. Promotion rechecks before
 writing; concurrent disk growth can still cause a later refusal.
 
+`deploy.sh` first runs `radon-app-runtime stage-model-clients <sha>` right after the exact-SHA pull, while the current release still serves. It exports (or reuse-clones) the target's Linux tree and Darwin bundle without moving `current`. `install-model-clients` then only selects a staged tree whose receipt `image_id` equals the image id inspected at that moment and whose Linux and Darwin receipts verify; any miss exports during restart as before. Staging is best-effort (no grant or a refusal only warns) and runs under the deploy lock, never from the prepull job, so it cannot race the fixed export container name. Before it, a changed gateway payload exported inside the `stop-clean` to `restart-managed` window and held app.radon.run on 502 for about 100 seconds (2026-11-11).
+
 Promotion of a new exact SHA reuses a verified Linux receipt and Darwin
 bundle when the local engine reports the same image id. Donors are exact
 `ghcr.io/joemccann/radon-model-gateway:<40 hex>` tags, the same image id
@@ -118,7 +120,8 @@ It signs requests with the Mac's own subscription grants, kept in
 Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`,
 Grok from `~/.grok/auth.json`, Antigravity from a dedicated keychain (macOS
 agy has no token file; `RADON_ANTIGRAVITY_KEYCHAIN_HOME` holds only that
-empty-password keychain, unlocked per call) through a pinned, Google-signed macOS `agy`
+empty-password keychain, unlocked per call; agy's item is service `gemini`,
+account `antigravity`) through a pinned, Google-signed macOS `agy`
 (`scripts/runner/antigravity-darwin.json`, `install_antigravity.py`: SHA-512,
 Developer ID team and arm64 checked before install). The `json` and `chat`
 ladder runs here in the VPS order. Embeddings, OCR and forecasting stay on the VPS.

@@ -63,7 +63,7 @@
     },
     {
       "id": "network-trust",
-      "globs": ["cloud/tailscale/**", "cloud/ibc-overrides/**", "cloud/scripts/host-firewall.sh", "cloud/hetzner/**", ".github/actions/connect-tailscale/**"],
+      "globs": ["cloud/tailscale/**", "cloud/scripts/host-firewall.sh", "cloud/hetzner/**", ".github/actions/connect-tailscale/**"],
       "owners": ["docs/operations.md"],
       "note": "Ops Plane step 2 network trust: tailnet policy, host firewalls, Hetzner Cloud Firewalls. All operator-applied; the runbook is the only place the apply order lives."
     },
@@ -152,7 +152,7 @@
     },
     {
       "id": "research-worker",
-      "globs": ["scripts/research/worker.py", "scripts/research/identify.py", "scripts/research/clairic.py"],
+      "globs": ["scripts/research/identify.py", "scripts/research/clairic.py"],
       "owners": ["docs/dropbox-research.md"],
       "note": "Research lifecycle, bounded processing and publication recovery share the existing worker owner (DOC-146)."
     },
@@ -187,11 +187,6 @@
       "globs": ["scripts/flex_sftp_pull.py", "scripts/cleanup_legacy_flex_aggregates.py", "scripts/rebuild_flex_gross_breakdown.py"],
       "owners": ["docs/cloud-services.md"],
       "note": "Duplicate-delivery outcomes and legacy aggregate cleanup and gross-coverage rebuilding share the Flex recovery owner (DOC-078/119/122)."
-    },
-    {
-      "id": "cli",
-      "globs": [".pi/commands.json"],
-      "owners": ["docs/scripts-reference.md"]
     },
     {
       "id": "kelly-sizing",

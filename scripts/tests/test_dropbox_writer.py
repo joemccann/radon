@@ -19,7 +19,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from research import dropbox_writer as dw  # noqa: E402
-from research.dropbox import DropboxError, content_hash  # noqa: E402
+from research.dropbox_writer import DropboxError, content_hash  # noqa: E402
 
 TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 ACCOUNT_URL = 'https://api.dropboxapi.com/2/users/get_current_account'
@@ -401,9 +401,9 @@ class MarketdeskPathTests(unittest.TestCase):
         when = datetime(2026, 9, 7, 16, 0, tzinfo=timezone.utc)
         self.assertIn('/2026/September/Sep 07/', dw.marketdesk_path(when, 't', '4AJs5Adl2Yp'))
 
-    def test_month_names_match_reader_layout(self):
-        from research.state import MONTHS
-        self.assertIs(dw.MONTHS, MONTHS)
+    def test_month_names_are_full_english_names_in_calendar_order(self):
+        self.assertEqual(len(dw.MONTHS), 12)
+        self.assertEqual((dw.MONTHS[0], dw.MONTHS[8], dw.MONTHS[11]), ('January', 'September', 'December'))
 
     def test_slug_ascii_kebab_bounded(self):
         when = datetime(2026, 10, 2, 14, 0, tzinfo=timezone.utc)

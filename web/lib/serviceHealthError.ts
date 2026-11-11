@@ -35,7 +35,7 @@ import { userErrorMessage } from "./userError";
  * Beyond JSON safety, the readable form also avoids developer-flavoured
  * phrasing in the dashboard. ``ERR: cash flow fetch failed: Flex
  * SendRequest failed (code 1001): Statement could not be generated...``
- * becomes ``Flex Web Service rate limit hit retry in 1d`` — same
+ * becomes ``Flex statement could not be generated (transient) retry in 1d`` — same
  * information, no stack-trace tone.
  */
 
@@ -163,13 +163,13 @@ const HUMAN_REWRITES: ReadonlyArray<{
   pattern: RegExp;
   rewrite: string;
 }> = [
-  // Flex throttle codes — sliding-window rate limit. These are the
-  // codes that drove the May 9 incident; copy matches the daemon's
-  // circuit-breaker mental model.
+  // 1001 is a transient generation failure IBKR asks to retry shortly,
+  // not a rate limit (scripts/cash_flow_sync.py _FLEX_TRANSIENT_CODES).
   {
     pattern: /code\s*1001\b/i,
-    rewrite: "Flex Web Service rate limit hit",
+    rewrite: "Flex statement could not be generated (transient)",
   },
+  // 1018 is the only documented Flex rate limit (_FLEX_THROTTLE_CODES).
   {
     pattern: /code\s*1018\b/i,
     rewrite: "Flex Web Service rate limit hit",

@@ -16,6 +16,7 @@
  */
 
 import { lastCompletedSessionDate } from "./marketSession";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 
 const CACHE_TTL_MS = 60_000; // 1 minute — intraday refresh interval
 
@@ -23,15 +24,6 @@ export interface CriDataShape {
   date?: string;
   market_open?: boolean;
   [key: string]: unknown;
-}
-
-function isMarketOpenNow(): boolean {
-  const now = new Date();
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
 }
 
 /**
@@ -44,7 +36,7 @@ export function isCriDataStale(
   data: CriDataShape,
   mtimeMs: number,
   todayET: string,
-  currentMarketOpen: boolean = isMarketOpenNow(),
+  currentMarketOpen: boolean = isMarketOpenAt(),
   lastCompletedSession: string = lastCompletedSessionDate()
 ): boolean {
   if (!data.date) return true;

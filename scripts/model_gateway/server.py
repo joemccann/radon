@@ -192,15 +192,15 @@ class Gateway:
         providers = list(engine.wired_providers())
         return {"status": "ok", "providers": providers,
                 "capabilities": {"json": bool(providers), "chat": bool(providers), "forecast": specialized.forecast_available(),
-                                 "embeddings": True, "ocr": "nvidia" in providers}, "version": os.environ.get("RADON_DEPLOY_SHA", "unknown")}
+                                 "embeddings": True}, "version": os.environ.get("RADON_DEPLOY_SHA", "unknown")}
 
     def handle(self, operation, payload, *, cancelled=lambda: False):
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise GatewayError("invalid_request", "Unknown model operation", 400)
         defaults = {"native": 270, "forecast": 300, "x-search": 300, "clairic": 12,
-                    "ocr": 100, "refresh-catalog": 180, "refresh": 180,
+                    "refresh-catalog": 180, "refresh": 180,
                     "validate-credential": 12, "models": 10, "status": 10, "refresh-status": 10}
-        field = {"chat": "timeoutMs", "json": "read_timeout", "native": "timeout_seconds", "ocr": "timeout_seconds"}.get(operation)
+        field = {"chat": "timeoutMs", "json": "read_timeout", "native": "timeout_seconds"}.get(operation)
         default = 45_000 if operation == "chat" else defaults.get(operation, 120)
         budget = bounded(payload.get(field, default) if field else default, 0, 300_000 if operation == "chat" else 300)
         if operation == "chat":
@@ -254,10 +254,10 @@ class Gateway:
                 with self._scope(state, cancelled):
                     return complete(payload)
             from .specialized import dispatch
-            budgets = {"forecast": 300, "ocr": payload.get("timeout_seconds", 100), "x-search": 300, "clairic": 12, "embed": 120, "validate-credential": 12, "refresh-catalog": 180}
+            budgets = {"forecast": 300, "x-search": 300, "clairic": 12, "embed": 120, "validate-credential": 12, "refresh-catalog": 180}
             budget = bounded(budgets.get(operation, 120), .1, 300)
             state = {"deadline": self.clock() + budget, "seen": set()}
-            lock_name = {"embed": "nvidia" if payload.get("dimensions") == 2048 else "embed", "ocr": "nvidia", "x-search": "grok", "clairic": "clairic", "forecast": "forecast"}.get(operation)
+            lock_name = {"embed": "nvidia" if payload.get("dimensions") == 2048 else "embed", "x-search": "grok", "clairic": "clairic", "forecast": "forecast"}.get(operation)
             lock = self.provider_locks.setdefault(lock_name, threading.RLock()) if lock_name else None
             with self._scope(state, cancelled) as scope:
                 scope.slice_seconds = budget

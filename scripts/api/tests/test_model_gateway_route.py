@@ -105,7 +105,7 @@ def test_public_unauthenticated_call_stops_at_real_perimeter(monkeypatch,verb,pa
     assert reply.status_code==503
 
 
-@pytest.mark.parametrize('operation,payload,expected',[('forecast',{},305),('x-search',{},305),('ocr',{'timeout_seconds':240},245),('clairic',{},17)])
+@pytest.mark.parametrize('operation,payload,expected',[('forecast',{},305),('x-search',{},305),('clairic',{},17)])
 def test_api_budget_matches_specialized_service_contract(operation,payload,expected):
     assert module()._budget(operation,payload)==expected
 

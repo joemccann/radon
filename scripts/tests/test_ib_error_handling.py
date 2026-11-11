@@ -318,40 +318,6 @@ class TestConnectionErrorPatterns:
 
 
 # ---------------------------------------------------------------------------
-# CLOSE_WAIT detection
-# ---------------------------------------------------------------------------
-
-
-class TestCloseWaitDetection:
-    """Test _has_close_wait detection of dead upstream IB sessions."""
-
-    @patch("api.ib_gateway.subprocess.check_output")
-    def test_close_wait_detected(self, mock_lsof):
-        from api.ib_gateway import _has_close_wait
-        mock_lsof.return_value = (
-            "java 62381 user 50u IPv6 0xce TCP 10.0.0.215:52097->8.17.22.31:4001 (CLOSE_WAIT)\n"
-            "java 62381 user 41u IPv6 0xa9 TCP *:4001 (LISTEN)\n"
-        )
-        assert _has_close_wait() is True
-
-    @patch("api.ib_gateway.subprocess.check_output")
-    def test_healthy_no_close_wait(self, mock_lsof):
-        from api.ib_gateway import _has_close_wait
-        mock_lsof.return_value = (
-            "java 62381 user 41u IPv6 0xa9 TCP *:4001 (LISTEN)\n"
-            "java 62381 user 56u IPv6 0xf8 TCP localhost:4001->localhost:52132 (ESTABLISHED)\n"
-        )
-        assert _has_close_wait() is False
-
-    @patch("api.ib_gateway.subprocess.check_output")
-    def test_lsof_failure_returns_false(self, mock_lsof):
-        import subprocess
-        from api.ib_gateway import _has_close_wait
-        mock_lsof.side_effect = subprocess.SubprocessError("lsof not found")
-        assert _has_close_wait() is False
-
-
-# ---------------------------------------------------------------------------
 # Pre-flight pool check
 # ---------------------------------------------------------------------------
 

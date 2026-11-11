@@ -160,13 +160,6 @@ If a script fails:
 | **Save a fact** | `python3.13 scripts/context_constructor.py --save-fact "key" "value" --confidence 0.95 --source "source"` |
 | **Save session episode** | `python3.13 scripts/context_constructor.py --save-episode "summary" --session-id "id"` |
 
-### Tweet-It Commands
-| Action | Command |
-|--------|---------|
-| **Generate tweet + card** | `tweet-it` (6-step workflow: text → card HTML → screenshot → base64 → preview → open) |
-
-**⚠️ Card PNG must be base64-encoded into preview HTML as a data URI.** Chrome CORS blocks all `file://` image loads. See `.pi/skills/tweet-it/SKILL.md` for the full workflow.
-
 ### Order Execution Commands
 
 **⚠️ ALWAYS use `ib_execute.py` — it monitors and logs automatically.**

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from . import ack as ack_mod
@@ -118,33 +118,16 @@ def _resolve_severity(*, service: str, kind: str, market_state: str) -> str:
 def _market_state_for(now: datetime) -> str:
     """Mirror of getMarketStateFromDate() in web/lib/serviceHealthWindows.ts.
     UTC datetime in, ET-derived 'open' | 'extended' | 'closed' out.
+
+    A weekday holiday is "closed", never "open": otherwise market-hours-only
+    writers get the tight open-state window while legitimately dormant and the
+    intraday bucket pages P1 (the Juneteenth false-page incident). A half day
+    is "extended" after its early close.
     """
-    # Convert to ET. UTC offset for America/New_York is -5 (EST) / -4 (EDT).
-    # zoneinfo handles DST.
-    try:
-        from zoneinfo import ZoneInfo
-        et = now.astimezone(ZoneInfo("America/New_York"))
-    except Exception:
-        et = now  # fallback — should never happen on a tzdata-equipped host
-    day = et.weekday()  # 0=Mon, 6=Sun
-    if day >= 5:
-        return "closed"
-    # A US market holiday on a weekday is "closed", NOT "open" — otherwise
-    # market-hours-only writers (vcg/cri/portfolio-sync) get the tight open-state
-    # freshness window while legitimately dormant, are flagged stale, and the
-    # intraday bucket escalates them to P1 EMERGENCY Pushover pages (the
-    # Juneteenth false-page incident). Guarded so a calendar hiccup can never
-    # break the watchdog cycle. Same class as feedback_extended_market_state_window.
-    try:
-        from utils import market_calendar
-        if et.strftime("%Y-%m-%d") in market_calendar.load_holidays(et.year):
-            return "closed"
-    except Exception:
-        pass
-    minutes = et.hour * 60 + et.minute
-    if 9 * 60 + 30 <= minutes <= 16 * 60:
+    from utils import market_calendar
+    if market_calendar.is_market_open_et(now):
         return "open"
-    if (4 * 60 <= minutes < 9 * 60 + 30) or (16 * 60 < minutes <= 20 * 60):
+    if market_calendar.is_equity_ext_session_et(now):
         return "extended"
     return "closed"
 
@@ -172,6 +155,40 @@ def _seconds_since_open(now: datetime) -> int:
         return 1 << 30
     open_et = et.replace(hour=9, minute=30, second=0, microsecond=0)
     return max(0, int((et - open_et).total_seconds()))
+
+
+def _is_us_trading_day(day: date) -> bool:
+    if day.weekday() >= 5:
+        return False
+    # Same guard as _market_state_for: a calendar hiccup degrades to
+    # weekday-only rather than breaking the watchdog cycle.
+    try:
+        from utils import market_calendar
+        return day.isoformat() not in market_calendar.load_holidays(day.year)
+    except Exception:
+        return True
+
+
+def _trading_day_age_seconds(start: datetime, end: datetime) -> int:
+    """Seconds between ``start`` and ``end`` that fall on US trading days (ET).
+
+    Mirror of tradingDayAgeExceeds() in web/lib/serviceHealthWindows.ts, for
+    the Mon..Fri timer rows in services.TRADING_DAY_AGE_SERVICES.
+    """
+    from zoneinfo import ZoneInfo
+
+    eastern = ZoneInfo("America/New_York")
+    total = 0.0
+    day = start.astimezone(eastern).date()
+    last_day = end.astimezone(eastern).date()
+    while day <= last_day:
+        day_start = datetime.combine(day, time(), eastern)
+        day_end = datetime.combine(day + timedelta(days=1), time(), eastern)
+        overlap = (min(end, day_end) - max(start, day_start)).total_seconds()
+        if overlap > 0 and _is_us_trading_day(day):
+            total += overlap
+        day += timedelta(days=1)
+    return int(total)
 
 
 def check_service(*, service: str, kind: str, now: datetime, market_state: str) -> CheckOutcome:
@@ -360,6 +377,8 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
                 or service in services_mod.OPEN_BELL_GRACE_SERVICES
             ):
                 effective_age = min(age_s, _seconds_since_open(now))
+            if service in services_mod.TRADING_DAY_AGE_SERVICES:
+                effective_age = _trading_day_age_seconds(updated, now)
             is_stale = effective_age > window_s
         except Exception:
             is_stale = True

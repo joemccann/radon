@@ -8,7 +8,7 @@ import pytest
 from test_app_runtime import CLOUD, TEST_SHA, _run, _run_line, _subscription_home
 
 GATEWAY = "radon-model-gateway.service"
-CONSUMERS = ("radon-api.service", "radon-nextjs.service", "radon-newsfeed.service", "radon-marketdesk.service", "radon-research.service", "radon-monitor.service")
+CONSUMERS = ("radon-api.service", "radon-nextjs.service", "radon-newsfeed.service", "radon-marketdesk.service", "radon-monitor.service")
 SOCKET_DIR = "/run/radon-model-gateway"
 
 

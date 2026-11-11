@@ -9,6 +9,7 @@ import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { cachedRead } from "@/lib/dbCache";
 import { buildDemoGexFixture } from "@/lib/demo/fixtures/regime";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
 // the dev server restarts.
@@ -59,15 +60,6 @@ const EMPTY_GEX = {
   source_delta: null as null | Record<string, unknown>,
 };
 
-function isMarketOpenNow(): boolean {
-  const now = new Date();
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
-}
-
 async function readCachedGexFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const result = await dbExecute({
     sql: `SELECT payload FROM gex_snapshots WHERE ticker = 'SPX' ORDER BY scan_time DESC LIMIT 1`,
@@ -95,7 +87,7 @@ function normalizeGexPayload(raw: Record<string, unknown>): Record<string, unkno
     ...EMPTY_GEX,
     ...raw,
     scan_time: typeof raw.scan_time === "string" ? raw.scan_time : "",
-    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenNow(),
+    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenAt(),
     ticker: typeof raw.ticker === "string" ? raw.ticker : "SPX",
     levels: typeof raw.levels === "object" && raw.levels !== null
       ? { ...EMPTY_GEX.levels, ...(raw.levels as object) }
@@ -134,7 +126,7 @@ export async function GET(): Promise<Response> {
   }
   const cached = await cachedRead("gex:SPX", GEX_CACHE_TTL_MS, readCachedGex);
   const data = normalizeGexPayload(cached ?? {});
-  const currentMarketOpen = isMarketOpenNow();
+  const currentMarketOpen = isMarketOpenAt();
 
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 

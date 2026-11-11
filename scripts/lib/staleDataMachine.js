@@ -356,22 +356,6 @@ export function decideHealthWrite(input) {
 }
 
 /**
- * Gateway modes from which the relay may drive a Gateway restart on escalation.
- *
- * docker/cloud: the Gateway runs as a container the radon stack owns; the relay
- * hands off to the lock-holding ``POST /ib/restart`` (which owns the 2FA push
- * lock + backoff) so a dead market-data farm self-heals. launchd/local: the
- * Gateway is the operator's laptop IBC session — repeated relay-driven restarts
- * thrash the auth session and stack 2FA prompts, so the relay stays alert-only.
- *
- * @param {string|undefined} gatewayMode
- * @returns {boolean}
- */
-export function shouldRequestGatewayRestart(gatewayMode) {
-  return gatewayMode === "docker" || gatewayMode === "cloud";
-}
-
-/**
  * IBKR operator hold: the operator logged in to IBKR Mobile / the web portal
  * with the username the Gateway shares, so the Gateway is down ON PURPOSE.
  * Every non-healthy output of decideHealthWrite (disconnected row, degraded

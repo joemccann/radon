@@ -24,7 +24,6 @@ EXPECTED_SERVICE_FILES = [
     "radon-ib-gateway-remote.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
-    "radon-research.service",
     "radon-nextjs.service",
     "radon-refresh.service",
     "radon-refresh.timer",
@@ -120,6 +119,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-demo-mirror.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
+    "radon-market-calendar.service",
+    "radon-market-calendar.timer",
     "radon-mktnews.service",
     "radon-model-catalog.service",
     "radon-model-catalog.timer",
@@ -741,10 +742,6 @@ class TestMarketDeskResearch:
         assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in lines
         assert "ExecStop=/usr/local/sbin/radon-app-runtime halt %n 30" in lines
         assert "ExecStopPost=/usr/local/sbin/radon-app-runtime stop %n" in lines
-
-    def test_retired_watcher_unit_file_is_kept(self, services_dir):
-        # Kept on disk so the deploy can disable it; never re-enabled.
-        assert (services_dir / "radon-research.service").is_file()
 
 
 class TestDbRetention:

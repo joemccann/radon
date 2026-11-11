@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-model-gateway.service radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-research-asset-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-model-gateway.service radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research-archive.service radon-research-asset-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -124,7 +124,7 @@ readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
 STAGED_CREDENTIAL_UNIT=""
 
 usage() {
-  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|prune|prune-locked [<sha>]|reclaim-locked|check-model-space|install-model-clients|stage-model-clients <sha>|recover-model-clients|commit-model-clients|run <unit>|halt <unit> <grace-seconds>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -143,7 +143,7 @@ is_model_gateway() { [[ "$1" == radon-model-gateway.service ]]; }
 # Every other app container uses the same private service interface.
 is_model_consumer() { ! is_model_gateway "$1" && [[ "$1" != radon-marketdesk-pdf.service && "$1" != radon-subscription-vault.service ]]; }
 # Units that own the private research bind read-write and nothing else.
-is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-research-asset-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
+is_research_unit() { [[ "$1" == "radon-research-archive.service" || "$1" == "radon-research-asset-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
 # Units whose Chromium renders third-party web content. Each gets an isolated
 # bridge network, the vendored seccomp profile, a sized /dev/shm, an env
 # allowlist and no writable host-shared credential grant.
@@ -424,6 +424,25 @@ cmd_install_model_clients() {
   tag="$(image_tag)" || return $?
   image="$(model_gateway_image)" || return $?
   "$PYTHON" -I /usr/local/lib/radon/model_clients.py "$DOCKER" "$image" "$tag"
+}
+
+# Deploy calls this after the exact-SHA pull while the current release still
+# serves. It prepares the target's clients without selecting them, so the
+# export (~90s on a changed gateway payload) is not spent inside the
+# stop-clean -> restart-managed outage. install-model-clients then only
+# selects a staged tree whose receipt names this exact local image id.
+cmd_stage_model_clients() {
+  local target="$1" image
+  [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "radon-app-runtime: stage-model-clients takes a 40-hex release SHA" >&2
+    exit 64
+  }
+  image="ghcr.io/joemccann/radon-model-gateway:${target}"
+  if ! image_in_local_store "$image"; then
+    echo "radon-app-runtime: exact gateway image ${image} is not local" >&2
+    return 69
+  fi
+  "$PYTHON" -I /usr/local/lib/radon/model_clients.py stage "$DOCKER" "$image" "$target"
 }
 
 cmd_recover_model_clients() {
@@ -1172,7 +1191,7 @@ cmd_run() {
       }
       gateway_release="${BASH_REMATCH[1]}"
       ;;
-    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-research-asset-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
+    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research-archive.service|radon-research-asset-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -1504,9 +1523,6 @@ cmd_run() {
     radon-api.service)
       set -- "$@" sh -c 'python scripts/db/migrate.py --boot && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75'
       ;;
-    radon-research.service)
-      set -- "$@" python -m research.worker --daemon
-      ;;
     # Same script as the base unit's host ExecStart; this bind is the only
     # place the private root is readable.
     radon-research-archive.service)
@@ -1573,6 +1589,10 @@ case "$1" in
   install-model-clients)
     [[ $# -eq 1 ]] || usage
     cmd_install_model_clients
+    ;;
+  stage-model-clients)
+    [[ $# -eq 2 ]] || usage
+    cmd_stage_model_clients "$2"
     ;;
   recover-model-clients)
     [[ $# -eq 1 ]] || usage

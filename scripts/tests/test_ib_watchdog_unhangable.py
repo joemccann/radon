@@ -256,9 +256,9 @@ def test_watchdog_cannot_resurrect_replica_with_clean_env():
     """Regression: the watchdog unit shipped without
     Environment=RADON_DB_NO_REPLICA=1 while get_db() defaulted to the replica,
     so it ran conn.sync() against a multi-GB replica.db every cycle, hanging
-    the oneshot. The fix is structural now — db.client defaults to
-    direct-to-cloud and the replica is opt-in only (DUR-07) — so importing the
-    watchdog with a completely clean env must leave the replica branch OFF.
+    the oneshot. The fix is structural now — db.client has no replica
+    branch at all — so importing the watchdog with a completely clean env
+    must find no replica decision to take.
     Run in a subprocess so CI-set env values can't mask a regression.
     """
     import os
@@ -272,8 +272,8 @@ def test_watchdog_cannot_resurrect_replica_with_clean_env():
     }
     code = (
         "import scripts.ib_watchdog;"
-        "from scripts.db.client import _replica_opted_in;"
-        "print(_replica_opted_in())"
+        "import scripts.db.client as c;"
+        "print(hasattr(c, '_replica_opted_in') or hasattr(c, '_REPLICA_PATH'))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code],
@@ -283,6 +283,6 @@ def test_watchdog_cannot_resurrect_replica_with_clean_env():
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False", (
-        f"expected the replica branch OFF after a clean-env watchdog import, "
+        f"expected no replica branch in db.client after a watchdog import, "
         f"got {out.stdout!r}"
     )

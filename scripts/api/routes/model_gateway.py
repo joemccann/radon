@@ -22,7 +22,7 @@ from model_gateway import client as gateway
 
 router = APIRouter(prefix="/model-gateway")
 MAX_REQUEST_BYTES = gateway.MAX_REQUEST_BYTES
-APP_OPERATIONS = frozenset({"chat", "json", "vision", "embed", "ocr", "forecast", "x-search", "clairic"})
+APP_OPERATIONS = frozenset({"chat", "json", "vision", "embed", "forecast", "x-search", "clairic"})
 # Two workers match a chat plus one slow forecast. The ceiling is the pool
 # size, so a queued call cannot open a third thread on the order executor.
 _BRIDGE_WORKERS = 2
@@ -51,8 +51,6 @@ def _budget(operation, payload):
         if type(value) not in (int, float):
             raise gateway.GatewayError("invalid_request", status=400)
         value /= 1000
-    elif operation == "ocr":
-        value = payload.get("timeout_seconds", 100)
     elif operation == "json":
         value = payload.get("read_timeout", 120)
     else:

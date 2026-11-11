@@ -37,15 +37,17 @@ function freezeNow(): void {
 }
 
 describe("humanizeServiceHealthError - Flex throttle codes", () => {
-  it("rewrites a 1001 Flex throttle into plain language", () => {
+  it("rewrites a 1001 transient generation failure truthfully, not as a rate limit", () => {
     freezeNow();
     const raw = JSON.stringify({
       message:
         "ERR: cash flow fetch failed: Flex SendRequest failed (code 1001): Statement could not be generated at this time. Please try again shortly.",
     });
     const out = humanizeServiceHealthError(raw);
-    expect(out.toLowerCase()).toContain("flex");
-    expect(out.toLowerCase()).toContain("rate limit");
+    // 1018 is the only Flex rate limit (scripts/cash_flow_sync.py
+    // _FLEX_THROTTLE_CODES); 1001 is a transient generation failure.
+    expect(out).toBe("Flex statement could not be generated (transient)");
+    expect(out.toLowerCase()).not.toContain("rate limit");
     // No raw stack-trace flavor should leak into banner copy.
     expect(out).not.toContain("ERR:");
     expect(out).not.toContain("SendRequest");
@@ -202,8 +204,7 @@ describe("humanizeServiceHealthError - graceful fallback", () => {
     const out = humanizeServiceHealthError({
       message: "Flex SendRequest failed (code 1001): ...",
     });
-    expect(out.toLowerCase()).toContain("flex");
-    expect(out.toLowerCase()).toContain("rate limit");
+    expect(out).toBe("Flex statement could not be generated (transient)");
   });
 
   it("strips raw script prefixes like ERR: even from unrecognised messages", () => {

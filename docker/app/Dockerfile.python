@@ -109,24 +109,6 @@ PY
 
 RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
 
-# Exercise the actual research renderer as the runtime user, without web deps
-# or network access. Missing D3, font or Chromium payloads fail the image gate.
-RUN python - <<'PY'
-import sys
-import tempfile
-from pathlib import Path
-sys.path.insert(0, 'scripts')
-from research.chart_render import render_chart
-plan = {'kind': 'bar', 'title': 'Research renderer smoke', 'unit': '%',
-        'axis': [0, 5], 'ticks': [0, 1, 2, 3, 4, 5],
-        'bars': [{'id': 'prior', 'label': 'Prior', 'value': 4.15},
-                 {'id': 'current', 'label': 'Current', 'value': 4.35}]}
-with tempfile.TemporaryDirectory() as folder:
-    result = render_chart(plan, Path(folder) / 'smoke.png', publisher='Runtime smoke')
-    assert result['width'] == 2400
-    assert not result['geometry']['text_overflow']
-PY
-
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1", "--timeout-keep-alive", "75"]
 
 # Optional local AI runtimes belong only to the private gateway, never to API,

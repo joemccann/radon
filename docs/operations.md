@@ -33,7 +33,7 @@ The variable inventory is owned by the example files, not by this page:
 `RADON_IB_REMOTE_*` block) and
 [`cloud/config/required-env.txt`](../cloud/config/required-env.txt) (what the
 deploy preflight refuses without). Production values: `IB_GATEWAY_MODE=cloud`,
-`RADON_MODE=hetzner`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`;
+`RADON_MODE=hetzner`;
 `IB_GATEWAY_HOST` is loopback on a combined or broker host and the broker's
 `10.0.0.4` on an app host. Read Flex query ids from the live env, never from a
 doc (root `CLAUDE.md` "Credentials").
@@ -585,9 +585,9 @@ production is untouched.
 
 ## IB Gateway
 
-`IB_GATEWAY_MODE=cloud` is the only deployed mode: lifecycle is owned by `/usr/local/bin/radon-ib-gateway-control` on the broker; FastAPI performs TCP/API health checks only and reports `service_state=reachable`; a local Compose restart returns 503. The `docker` / `launchd` code branches are legacy laptop paths kept as the test harness.
+`IB_GATEWAY_MODE=cloud` is the only deployed mode: lifecycle is owned by `/usr/local/bin/radon-ib-gateway-control` on the broker; FastAPI performs TCP/API health checks only and reports `service_state=reachable`; a local restart returns 503. FastAPI has no other Gateway mode and no longer reads `IB_GATEWAY_MODE`; the deploy preflight still refuses any value but `cloud`.
 
-**2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. `restart_ib_gateway()` runs an explicit `managedAccounts()` probe; non-empty resets backoff, empty advances it (1m → 2m → 5m → 15m → 30m → 60m capped). `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | reachable | unknown`), `upstream_dead`, and `restart_backoff` (attempt count, next attempt in seconds, push lock holder/TTL, last outcome). Schema-v2 `/status` treats nested broker degradation (`awaiting_2fa`, `upstream_dead`, unhealthy service) as aggregate-down even when FastAPI returns HTTP 200, and treats cloud-mode `reachable` as healthy. `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** after 3 consecutive `auth_state=awaiting_2fa` cycles with no active push or scheduled retry, the watchdog acquires the cross-process lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter. The adapter consumes that exact lease once and calls `/usr/local/bin/radon-ib-gateway-control`; boot, admin, operator, and laptop cloud starts use the same helper. Never run raw Docker or unmanaged `systemctl restart radon-ib-gateway.service` when the helper is installed.
+**2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. FastAPI never cycles the Gateway, so it has no restart ladder. `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | reachable | unknown`), `upstream_dead`, and `restart_backoff` (push lock holder/TTL, `applicable: false`). Schema-v2 `/status` treats nested broker degradation (`awaiting_2fa`, `upstream_dead`, unhealthy service) as aggregate-down even when FastAPI returns HTTP 200, and treats cloud-mode `reachable` as healthy. `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** after 3 consecutive `auth_state=awaiting_2fa` cycles with no active push or scheduled retry, the watchdog acquires the cross-process lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter. The adapter consumes that exact lease once and calls `/usr/local/bin/radon-ib-gateway-control`; boot, admin, operator, and laptop cloud starts use the same helper. Never run raw Docker or unmanaged `systemctl restart radon-ib-gateway.service` when the helper is installed.
 
 **IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`, with the hold CLI it runs staged root-owned at `/usr/local/lib/radon/ib_operator_hold.py`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
 
@@ -974,11 +974,9 @@ the baseline to match without review.
 **Rollback:** `launchctl bootout gui/$(id -u)/com.radon.security-live-drift`
 and remove its plist.
 
-### IBC trusted API clients (`cloud/ibc-overrides/trusted-ips.txt`)
+### IBC trusted API clients
 
-`TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` (was `100.0.0.0/8`: every tailnet node plus public space). No laptop or Mac mini `/32`: no laptop process opens an IB socket (broker binds `10.0.0.4` and loopback only).
-
-The file is a reference. Nothing in deploy, setup or compose reads it (`cloud/tests/test_ibc_trusted_ips.py` pins that), so merging changes nothing live. It is also moot for the Docker Gateway: the gnzsnz image relays `4003 -> 127.0.0.1:4001` with socat inside the container, so every API client reaches the Gateway as `127.0.0.1`. Who can open `4001` is decided by the compose bind address and the host and Hetzner firewalls below, not by IBC. Operator step: none. If a Gateway is ever run without the socat relay, copy this value into its IBC `config.ini` and restart it (one 2FA).
+Nothing in deploy, setup or compose sets IBC `TrustedTwsApiClientIPs`; the old reference file `cloud/ibc-overrides/trusted-ips.txt` was deleted as unread. The gnzsnz image relays `4003 -> 127.0.0.1:4001` with socat inside the container, so every API client reaches the Gateway as `127.0.0.1`. Who can open `4001` is decided by the compose bind address and the host and Hetzner firewalls below, not by IBC. If a Gateway is ever run without the socat relay, set `TrustedTwsApiClientIPs=127.0.0.1,10.0.0.2` in its IBC `config.ini` and restart it (one 2FA).
 
 ### Host firewalls (`cloud/scripts/host-firewall.sh`)
 
@@ -1237,7 +1235,7 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 **Banner humanization.** `service_health.last_error` JSON payloads are rewritten into operator-friendly copy before render (`humanizeServiceHealthError` in `web/lib/serviceHealthError.ts`).
 
-**Database access pattern (post-2026-05-20):** production processes go direct-to-cloud. The code default since DUR-07 is replica opt-in only via `RADON_DB_USE_REPLICA=1`, with the `RADON_DB_NO_REPLICA=1` kill switch applied fleet-wide through the `radon-.service.d/common.conf` prefix drop-in. The libsql embedded-replica architecture (`data/replica.db`) was retired after multi-writer WAL contention and then single-writer frame conflicts between the replica owner and direct-cloud writers. Reads cost +30–60 ms per cloud round-trip, absorbed by SWR caching. The `replica_watchdog` handler still exists in `monitor_daemon` as a vestigial safety net (it sits idle in the no-replica world), but `data/replica.db` itself should not exist on any host. See `feedback_libsql_replica_one_writer.md`.
+**Database access pattern (post-2026-05-20):** production processes go direct-to-cloud. No DB client can open a replica (the DUR-07 `RADON_DB_USE_REPLICA=1` opt-in was removed); the `RADON_DB_NO_REPLICA=1` kill switch is still applied fleet-wide through the `radon-.service.d/common.conf` prefix drop-in. The libsql embedded-replica architecture (`data/replica.db`) was retired after multi-writer WAL contention and then single-writer frame conflicts between the replica owner and direct-cloud writers. Reads cost +30–60 ms per cloud round-trip, absorbed by SWR caching. The `replica_watchdog` handler still exists in `monitor_daemon` as a vestigial safety net (it sits idle in the no-replica world), but `data/replica.db` itself should not exist on any host. See `feedback_libsql_replica_one_writer.md`.
 
 **Market-hours gate.** Handlers tagged `requires_market_hours=True` (`fill_monitor`, `journal_sync`) only run during their session window: 09:30-16:00 ET by default, or 04:00-20:00 ET for `fill_monitor` (`session_window = "equity_ext"`, so outsideRth stock fills reach `/orders` after the cash close; the FastAPI orders-sync tick uses the same window). The daemon converts UTC to ET via `zoneinfo.ZoneInfo("America/New_York")` so DST is handled automatically; a fail-open UTC-5 fallback fires only if the host is missing `tzdata`. Never hardcode a fixed offset for ET — it silently shifts the window 1h every DST season.
 
@@ -1309,7 +1307,7 @@ Every `pull` holds the pull lock (`/run/radon-app-runtime/image-pull.lock`, shar
 
 `pull <sha>` prunes before it fetches any layer, then pulls. It protects that SHA. When the transition journal exists it also protects both journal SHAs and does not read the green marker. When the journal is absent it protects green-marker line 1 and does not add green-marker line 2. `pull` from `deploy.sh` holds the deploy lock, so this prune skips. The CI prepull job runs `pull` without the deploy lock, so this prune runs unless prestage holds the lock.
 
-`prune-locked <sha>` protects that SHA, green-marker line 1 and line 2 when line 2 is valid, or the SHA plus both journal SHAs while a journal exists. `deploy.sh`'s supervisor calls it with FD 9 as stdin after it takes the deploy lock and recovers any pending transition, before the inner deploy builds, pulls or runs model disk admission (prestage included; an ungranted call is skipped with a warning). Deploy order: `prune-locked`, then admission and build (or a loaded prestage), `pull <sha>` (its own prune skips under the deploy lock), admission, teardown admission. Root's weekly `disk_cleanup.py` calls `prune-locked` with no SHA and its own held lock; that form keeps the no-argument `prune` keep-set below. Right after `prune-locked`, the supervisor runs `reclaim-locked` (no argument, same FD 9 as stdin): `disk_cleanup.py --deploy-locked` exits at once when `/` has at least `HEADROOM_THRESHOLD_BYTES` free, and otherwise reclaims every non-image category and heartbeats `disk-cleanup` (`error` when headroom is still short). Ungranted or failed, it is skipped with a warning and admission decides as before.
+`prune-locked <sha>` protects that SHA, green-marker line 1 and line 2 when line 2 is valid, or the SHA plus both journal SHAs while a journal exists. `deploy.sh`'s supervisor calls it with FD 9 as stdin after it takes the deploy lock and recovers any pending transition, before the inner deploy builds, pulls or runs model disk admission (prestage included; an ungranted call is skipped with a warning). Deploy order: `prune-locked`, then admission and build (or a loaded prestage), `pull <sha>` (its own prune skips under the deploy lock), admission, `stage-model-clients <sha>` (best-effort, exports the target's operator clients before teardown; see `docs/model-gateway.md`), teardown admission. Root's weekly `disk_cleanup.py` calls `prune-locked` with no SHA and its own held lock; that form keeps the no-argument `prune` keep-set below. Right after `prune-locked`, the supervisor runs `reclaim-locked` (no argument, same FD 9 as stdin): `disk_cleanup.py --deploy-locked` exits at once when `/` has at least `HEADROOM_THRESHOLD_BYTES` free, and otherwise reclaims every non-image category and heartbeats `disk-cleanup` (`error` when headroom is still short). Ungranted or failed, it is skipped with a warning and admission decides as before.
 
 The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it after the supervisor closes the lock fd, after a green deploy and after a failed one (a failed deploy leaves the green marker alone, so its target set goes), and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
 
@@ -1355,9 +1353,12 @@ is replaced by `radon-marketdesk.timer`
 ([MarketDesk research](marketdesk-research.md)). `radon-deploy-root
 restart-managed` and `recover` now run `retire_research_watcher`: an enabled
 watcher is `disable --now`ed, a hand-started one is stopped, and either
-outcome is non-fatal. The unit file, its drop-in, the 150s research stop wait
-and the read-only API research bind stay. The text below is the historical
-activation contract for the retired unit; do not re-enable it. Current app
+outcome is non-fatal. Once the watcher is inactive the same step deletes the
+installed unit file and drop-in and runs `daemon-reload`, so the drift audit
+never reports an untracked unit. The unit, its code and the Dropbox reader keys
+were deleted from the repository on 2026-11-11; the 150s research stop wait and
+the read-only API research bind stay. The text below is the historical
+activation contract for the retired unit; it cannot be re-enabled. Current app
 containers do not receive those grant directories. Only `radon-model-gateway` does.
 
 The research worker executes the Python image's pinned `claude`, `codex`,

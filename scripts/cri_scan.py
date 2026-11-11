@@ -37,6 +37,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -590,24 +591,10 @@ def current_session_date_et(now: Optional[datetime] = None) -> str:
     """Return the active ET market session date as YYYY-MM-DD.
 
     Before the cash open, use the prior trading session. After the open,
-    use the current calendar day. Weekends resolve to the prior Friday.
+    use the current calendar day. Weekends and holidays resolve to the prior
+    trading day.
     """
-    now_et = _now_et(now)
-
-    def previous_trading_day(dt: datetime) -> datetime:
-        candidate = dt - timedelta(days=1)
-        while candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-        return candidate
-
-    if now_et.weekday() >= 5:
-        return previous_trading_day(now_et).strftime("%Y-%m-%d")
-
-    minutes = now_et.hour * 60 + now_et.minute
-    if minutes < 9 * 60 + 30:
-        return previous_trading_day(now_et).strftime("%Y-%m-%d")
-
-    return now_et.strftime("%Y-%m-%d")
+    return most_recent_session_date(now)
 
 
 def build_post_close_snapshot(session_date: str, use_official_cboe_close: bool) -> Dict[str, Optional[float]]:
@@ -789,6 +776,11 @@ def cor1m_level_and_change(
 # Realized Volatility (shared implementation, see utils/realized_vol.py)
 
 from utils.realized_vol import compute_realized_vol  # noqa: E402
+from utils.market_calendar import (  # noqa: E402
+    is_market_open_et,
+    is_trading_day_et,
+    most_recent_session_date,
+)
 
 
 # CRI Component Scoring (each 0-25)
@@ -1562,32 +1554,20 @@ def generate_html_report(
 
 
 def _now_et(now: Optional[datetime] = None) -> datetime:
-    import zoneinfo
-    try:
-        et = zoneinfo.ZoneInfo("America/New_York")
-        if now is not None:
-            return now.astimezone(et) if now.tzinfo else now
-        return datetime.now(et)
-    except Exception:
-        if now is not None:
-            return now
-        now_utc = datetime.now(timezone.utc)
-        return now_utc + timedelta(hours=-5)
+    et = ZoneInfo("America/New_York")
+    if now is not None:
+        return now.astimezone(et) if now.tzinfo else now
+    return datetime.now(et)
 
 
 def is_market_open(now: Optional[datetime] = None) -> bool:
-    """Check if US equity markets are currently open."""
-    now_et = _now_et(now)
-    if now_et.weekday() >= 5:
-        return False
-    minutes = now_et.hour * 60 + now_et.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+    return is_market_open_et(now)
 
 
 def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
     """True once the official Cboe daily close should be available after 4:20pm ET."""
     now_et = _now_et(now)
-    if now_et.weekday() >= 5:
+    if not is_trading_day_et(now_et):
         return False
     minutes = now_et.hour * 60 + now_et.minute
     return minutes >= (16 * 60 + CBOE_POST_CLOSE_VERIFICATION_MINUTES)
@@ -1731,7 +1711,7 @@ def main():
     # (the HTML report path always rebuilds).
     if args.json and not args.force:
         now_et = _now_et()
-        in_post_close = now_et.weekday() < 5 and (16 * 60) <= (now_et.hour * 60 + now_et.minute) < (16 * 60 + 35)
+        in_post_close = is_trading_day_et(now_et) and (16 * 60) <= (now_et.hour * 60 + now_et.minute) < (16 * 60 + 35)
         if not in_post_close:
             try:
                 from utils.scan_cache_gate import cached_scan_if_fresh

@@ -9,9 +9,9 @@ after the decision is made. This keying is the whole no-look-ahead guarantee:
 the decision uses data up to t, and the P&L it earns is the return that follows
 t, so the realised mark never feeds back into the decision.
 
-Costs are a per-trade fraction subtracted from the gross return (the caller
-supplies it; ``scripts/costs.py`` produces a dollar figure that the strategy
-layer converts to a fraction of premium — see ``strategies.py``).
+Costs are a per-trade fraction subtracted from the gross return. The caller
+supplies either one constant fraction or a per-trade cost rule; the strategy
+layer defaults to the ``scripts/costs.py`` round trip (see ``cost_model.py``).
 
 Pure logic: numpy not even required here. No torch / chronos / DB / network.
 """
@@ -26,6 +26,9 @@ from .metrics import compute_metrics
 #: An entry rule: (history_up_to_and_including_origin, origin_point) -> position.
 #: Position is a signed weight; sign is direction, magnitude scales the return.
 EntryRule = Callable[[Sequence["SignalPoint"], "SignalPoint"], float]
+
+#: A cost rule: origin_point -> round-trip cost as a fraction of notional.
+CostRule = Callable[["SignalPoint"], float]
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ def walk_forward_backtest(
     forward_returns: Mapping[str, float],
     entry_rule: EntryRule,
     *,
-    cost_fraction: float = 0.0,
+    cost_fraction: float | CostRule = 0.0,
     periods_per_year: int = 252,
 ) -> dict:
     """Replay ``series`` in date order, applying ``entry_rule`` at each origin.
@@ -63,11 +66,13 @@ def walk_forward_backtest(
         Sees ONLY ``series[: i + 1]`` at origin i. Returns a signed position.
     cost_fraction:
         Round-trip cost as a fraction of notional, subtracted from the gross
-        return of every non-flat trade.
+        return of every non-flat trade. Either one constant for every trade
+        or a ``CostRule`` evaluated at each trade's origin.
 
     Returns a dict with the per-trade list and the aggregate metrics bundle.
     """
     ordered = sorted(series, key=lambda p: p.date)
+    cost_for = _as_cost_rule(cost_fraction)
     trades: list[dict] = []
 
     for i, point in enumerate(ordered):
@@ -80,17 +85,26 @@ def walk_forward_backtest(
 
         forward = float(forward_returns[point.date])
         gross = position * forward
-        net = gross - cost_fraction
+        cost = float(cost_for(point))
         trades.append(
             {
                 "date": point.date,
                 "position": position,
                 "forward_return": forward,
                 "gross_return": gross,
-                "net_return": net,
+                "cost_fraction": cost,
+                "net_return": gross - cost,
             }
         )
 
     net_returns = [t["net_return"] for t in trades]
     metrics = compute_metrics(net_returns, periods_per_year=periods_per_year)
     return {"trades": trades, "metrics": metrics}
+
+
+def _as_cost_rule(cost_fraction: float | CostRule) -> CostRule:
+    """Normalise a constant fraction or a per-trade rule to a rule."""
+    if callable(cost_fraction):
+        return cost_fraction
+    constant = float(cost_fraction)
+    return lambda point: constant

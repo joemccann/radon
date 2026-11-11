@@ -8,8 +8,7 @@
  *  - the legacy `connectionState` was derived separately and disagreed with
  *    `displayStatus` (e.g. awaiting_2fa vs "connected");
  *  - market-data degradation survived a socket drop.
- * Vocabulary: scripts/api/ib_gateway.py (_check_docker / _check_cloud /
- * check_ib_gateway).
+ * Vocabulary: scripts/api/ib_gateway.py (_check_cloud / check_ib_gateway).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";

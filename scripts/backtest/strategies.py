@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
+from .cost_model import real_round_trip_cost_rule
 from .engine import SignalPoint, walk_forward_backtest
 from .signal_replay import (
     forward_returns_from_underlying,
@@ -159,6 +160,10 @@ class Strategy:
     entry_doc: str
     loader: Optional[Callable[[], tuple[list[SignalPoint], list[tuple[str, float]]]]] = None
     rule: Optional[Callable[[Sequence[SignalPoint], SignalPoint], float]] = None
+    #: Signal key holding the underlying close the engine marks trades on.
+    price_field: str = ""
+    #: Legs of the documented primary structure, for the costs.py round trip.
+    num_legs: int = 1
 
 
 STRATEGIES: dict[str, Strategy] = {
@@ -172,6 +177,7 @@ STRATEGIES: dict[str, Strategy] = {
         ),
         loader=load_cri_series,
         rule=cri_entry_rule,
+        price_field="spy",
     ),
     "dark_pool_flow": Strategy(
         key="dark_pool_flow",
@@ -180,6 +186,7 @@ STRATEGIES: dict[str, Strategy] = {
         entry_doc="3+ consecutive days same direction AND flow strength > 50.",
         loader=load_dark_pool_series,
         rule=dark_pool_flow_entry_rule,
+        price_field="close",
     ),
     "leap_iv": Strategy(
         key="leap_iv",
@@ -212,6 +219,7 @@ STRATEGIES: dict[str, Strategy] = {
         entry_doc="VIX > 28 AND VCG z-score > 2.5 AND both betas < 0.",
         loader=load_vcg_series,
         rule=vcg_entry_rule,
+        price_field="credit",
     ),
 }
 
@@ -246,11 +254,18 @@ def _insufficient_data_result(strategy: Strategy, horizon: int) -> dict:
     return empty
 
 
+def _trade_cost(strategy: Strategy, cost_fraction: Optional[float]):
+    """The explicit override, else the strategy's real costs.py cost rule."""
+    if cost_fraction is not None:
+        return cost_fraction
+    return real_round_trip_cost_rule(strategy.price_field, strategy.num_legs)
+
+
 def run_strategy(
     key: str,
     *,
     horizon: int = 1,
-    cost_fraction: float = 0.0,
+    cost_fraction: Optional[float] = None,
     history: Optional[list[dict]] = None,
 ) -> dict:
     """Run a wired strategy end-to-end and return trades + metrics + status.
@@ -259,6 +274,10 @@ def run_strategy(
     replayable daily series (sparse/absent snapshot table, or an empty replayed
     history) the result carries ``status: "insufficient_data"`` and zero trades
     — never a fabricated result.
+
+    ``cost_fraction`` omitted (None) charges every trade the real costs.py
+    round trip for the strategy's structure at that trade's origin close. An
+    explicit value, zero included, overrides it for every trade.
     """
     strategy = STRATEGIES.get(key)
     if strategy is None:
@@ -280,8 +299,9 @@ def run_strategy(
 
     forward = forward_returns_from_underlying(underlying, horizon=horizon)
     result = walk_forward_backtest(
-        points, forward, rule, cost_fraction=cost_fraction
+        points, forward, rule, cost_fraction=_trade_cost(strategy, cost_fraction)
     )
+    result["cost_source"] = "costs.py" if cost_fraction is None else "override"
     result["strategy"] = key
     result["label"] = strategy.label
     result["horizon"] = horizon
