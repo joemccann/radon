@@ -1611,7 +1611,7 @@ def _note_provider_cooldown(name: str, status: int, body_text: str, env: Mapping
 
     Returns True when the failure is an exhausted quota, so the rung's other
     models (same account) are not tried. A bare 429 records nothing: the next
-    document or oneshot may try the rung again (scripts/tests/test_research_runtime.py).
+    document or oneshot may try the rung again.
     """
     seconds = provider_cooldown.reset_seconds(body_text, None)
     if provider_cooldown.is_quota_exhausted(body_text):

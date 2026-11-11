@@ -6,7 +6,7 @@ set -euo pipefail
 # radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-model-gateway.service radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service radon-research-archive.service radon-research-asset-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
+readonly APP_UNITS="radon-model-gateway.service radon-uw-stream.service radon-uw-research.service radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research-archive.service radon-research-asset-archive.service radon-marketdesk.service radon-marketdesk-pdf.service radon-subscription-vault.service radon-ai-cycle.service radon-ai-cycle-backfill.service radon-aa-frontier-refresh.service"
 # DS-2026-10-05-05: every unit that opens the encrypted secret store. Each gets
 # the master key only through the radon-secrets staging below, inside image
 # code, never as a User=radon host process running the radon-writable venv.
@@ -143,7 +143,7 @@ is_model_gateway() { [[ "$1" == radon-model-gateway.service ]]; }
 # Every other app container uses the same private service interface.
 is_model_consumer() { ! is_model_gateway "$1" && [[ "$1" != radon-marketdesk-pdf.service && "$1" != radon-subscription-vault.service ]]; }
 # Units that own the private research bind read-write and nothing else.
-is_research_unit() { [[ "$1" == "radon-research.service" || "$1" == "radon-research-archive.service" || "$1" == "radon-research-asset-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
+is_research_unit() { [[ "$1" == "radon-research-archive.service" || "$1" == "radon-research-asset-archive.service" || "$1" == "radon-marketdesk.service" || "$1" == "radon-marketdesk-pdf.service" ]]; }
 # Units whose Chromium renders third-party web content. Each gets an isolated
 # bridge network, the vendored seccomp profile, a sized /dev/shm, an env
 # allowlist and no writable host-shared credential grant.
@@ -1172,7 +1172,7 @@ cmd_run() {
       }
       gateway_release="${BASH_REMATCH[1]}"
       ;;
-    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research.service|radon-research-archive.service|radon-research-asset-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
+    radon-uw-stream.service|radon-uw-research.service|radon-api.service|radon-monitor.service|radon-research-archive.service|radon-research-asset-archive.service|radon-marketdesk.service|radon-marketdesk-pdf.service) image="$(python_image)" ;;
     radon-subscription-vault.service|radon-ai-cycle.service|radon-ai-cycle-backfill.service|radon-aa-frontier-refresh.service)
       image="$(python_image)"
       ;;
@@ -1503,9 +1503,6 @@ cmd_run() {
       ;;
     radon-api.service)
       set -- "$@" sh -c 'python scripts/db/migrate.py --boot && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75'
-      ;;
-    radon-research.service)
-      set -- "$@" python -m research.worker --daemon
       ;;
     # Same script as the base unit's host ExecStart; this bind is the only
     # place the private root is readable.

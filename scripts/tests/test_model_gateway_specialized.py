@@ -1,11 +1,10 @@
 """Fixed-capability service operations never accept arbitrary provider transport."""
 from __future__ import annotations
-import base64
 import pytest
 from model_gateway import specialized
 
 
-@pytest.mark.parametrize("operation", ["embed", "ocr", "x-search", "forecast", "validate-credential", "refresh-catalog"])
+@pytest.mark.parametrize("operation", ["embed", "x-search", "forecast", "validate-credential", "refresh-catalog"])
 def test_specialized_rejects_unknown_transport_fields(operation):
     with pytest.raises(ValueError):
         specialized.dispatch(operation, {"url": "http://169.254.169.254/"})
@@ -40,17 +39,6 @@ def test_local_embedding_model_is_cached_in_service(monkeypatch):
         result = specialized.embed({"texts": ["text"], "dimensions": 384, "input_type": "passage"})
         assert result["dimensions"] == 384
     assert calls == [True]
-
-
-def test_ocr_native_payload_and_deadline_preserved(monkeypatch):
-    from model_gateway import _ocr_backend as backend
-    seen = []
-    monkeypatch.setattr(backend, "_clock", lambda _: 10)
-    monkeypatch.setattr(backend, "_post_with_retries", lambda *args, **kw: seen.append((args, kw)) or {"choices": []})
-    result = specialized.ocr({"model": "nvidia/nemotron-parse", "image": base64.b64encode(b"png").decode(), "timeout_seconds": 20})
-    assert result == {"payload": {"choices": []}}
-    assert seen[0][1]["deadline"] == 30
-    assert seen[0][0][1]["tools"][0]["function"]["name"] == "markdown_bbox"
 
 
 @pytest.mark.parametrize("account", ["../../file", "a" * 16, "@user", "http://x"])

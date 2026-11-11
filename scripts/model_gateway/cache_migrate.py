@@ -85,7 +85,7 @@ _PACING_TIMES = frozenset({'next_at', 'cooldown_until', 'tripped_until', 'last_4
 _PACING_KEYS = _PACING_TIMES | {'consecutive_429', 'last_auth_failure'}
 # Fixed root-captured aliases; no provider HOME directory is admitted.
 _PACING_NAMES = ('host.json', 'managed-unit.json', *(unit + '.json' for unit in (
-    'radon-api.service', 'radon-research.service', 'radon-research-archive.service',
+    'radon-api.service', 'radon-research-archive.service',
     'radon-marketdesk.service', 'radon-marketdesk-pdf.service', 'radon-monitor.service',
     'radon-uw-research.service', 'radon-ai-cycle.service', 'radon-ai-cycle-backfill.service',
     'radon-aa-frontier-refresh.service', 'radon-newsfeed.service', 'radon-nextjs.service',

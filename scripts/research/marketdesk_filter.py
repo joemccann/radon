@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from research import equity_admission, force_include, identify, novelty
-from research.intake import FINGERPRINTS
+
+# The retired PDF pipeline's published-document fingerprints; still read so
+# MarketDesk never republishes a document it already covered.
+FINGERPRINTS = 'fingerprints.json'
 
 PIPELINE = "marketdesk"
 # identify.publisher_folder reads segment 6 of the old Dropbox path: /joe mccann/current/<y>/<m>/<d>/<publisher>/...

@@ -1391,7 +1391,7 @@ class TestModelLadderByteCapOwner:
         assert rule["owners"] == ["docs/dropbox-research.md", "docs/model-gateway.md"]
         doc = (_ROOT / "docs/dropbox-research.md").read_text(encoding="utf-8")
         ladder = doc.split("### Model ladder (shared HTTP)", 1)[1].split(
-            "### Verified host placement", 1
+            "### Subscription stream completion", 1
         )[0]
         assert "extract_via_vision" in ladder
         assert "2,000,000" in ladder
@@ -1436,7 +1436,7 @@ class TestNightlyReportingDoc:
 
 
 class TestResearchCutCommandDoc:
-    @pytest.mark.parametrize("module", ["worker", "harness", "cut_report"])
+    @pytest.mark.parametrize("module", ["cut_report"])
     def test_documented_research_commands_resolve_from_repository_root(self, module):
         doc = (_ROOT / "docs/dropbox-research.md").read_text()
         commands = re.findall(r"`([^`]*\bpython[\d.]* -m research\." + module + r"\b[^`]*)`", doc)
@@ -1623,7 +1623,7 @@ class TestRecurringOwnerCoverage:
     @pytest.mark.parametrize("source,owner", [
         ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
         ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
-        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("scripts/research/identify.py", "docs/dropbox-research.md"),
         ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
         ("scripts/clients/tradingview_client.py", "docs/tradingview-mcp-client.md"),
         ("scripts/clients/tradingview_auth.py", "docs/tradingview-mcp-client.md"),
@@ -1785,27 +1785,6 @@ class TestNetworkTrustRolloutDocumentation:
         assert "fresh SSH" in procedure
         assert "record the current machine tags" in procedure
         assert "test_tailnet_policy.py" in procedure
-
-
-class TestResearchAliasDocumentation:
-    """DOC-166: one discovery contract must preserve watched folder aliases."""
-
-    def test_discovery_does_not_claim_all_unpadded_scopes_are_fallback_only(self):
-        text = (_ROOT / "docs/dropbox-research.md").read_text()
-        assert "the unpadded spelling is listed only when the padded folder is absent" not in text
-        discovery = next(line for line in text.splitlines() if line.startswith("- `research.state`:"))
-        assert "watched" in discovery and "padded" in discovery
-        assert "test_research_ingestion.py" in discovery
-        assert "Saved unpadded day-folder cursors remain polled" not in text
-
-
-class TestResearchDiagnosticDocumentation:
-    """DOC-167: extraction detail is retained at health and queue sinks."""
-
-    def test_journal_guidance_does_not_contradict_retained_extraction_detail(self):
-        text = (_ROOT / "docs/dropbox-research.md").read_text()
-        assert "Journal output contains stage counts/error classes only." not in text
-        assert "Extraction `EvidenceError` text is persisted" in text
 
 
 class TestNightlyInfrastructureOwners:
@@ -2251,19 +2230,6 @@ class TestDocumentation20261013:
         assert "position_capital_observations" in row
         assert "VALID" in row
         assert "journal or portfolio" in row
-
-    def test_unknown_publisher_is_held_before_selection(self):
-        intake = (_ROOT / "scripts/research/intake.py").read_text()
-        process = intake.split("def _process", 1)[1].split("\n    def ", 1)[0]
-        assert process.index("PUBLISHER_UNKNOWN") < process.index("fingerprint(")
-        identify = (_ROOT / "scripts/research/identify.py").read_text()
-        assert "TOPIC_FOLDERS" in identify
-        assert "_discover_publisher" in identify
-        doc = (_ROOT / "docs/dropbox-research.md").read_text()
-        assert "publisher from the Dropbox folder," not in doc
-        assert "PUBLISHER_UNKNOWN" in doc
-        assert "before fingerprinting" in doc
-        assert "always-publish" in doc
 
     def test_ramp_d7_cadence_is_not_the_monthly_source(self):
         sys.path.insert(0, str(_ROOT))

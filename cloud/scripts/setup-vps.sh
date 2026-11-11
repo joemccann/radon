@@ -92,7 +92,6 @@ readonly SERVICE_FILES=(
   radon-control.service
   radon-mcp.service
   radon-newsfeed.service
-  radon-research.service
   radon-refresh.service
   radon-refresh.timer
   radon-vcg-refresh.service
@@ -1410,9 +1409,6 @@ enable_services() {
   local timer_owned_services=()
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
-    # Retired shared-folder watcher: installed so deploys can disable it,
-    # never enabled. radon-marketdesk.timer is the research source.
-    [[ "$svc" == "radon-research.service" ]] && continue
     # UW requires explicit entitlement/channel admission before activation.
     [[ "$svc" == radon-uw-stream.service || "$svc" == radon-uw-research.service || "$svc" == radon-uw-research.timer ]] && continue
     # Mutable model upgrades are replaced by exact CI image promotion.

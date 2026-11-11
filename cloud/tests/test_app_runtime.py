@@ -39,7 +39,6 @@ APP_UNITS = (
     "radon-relay.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
-    "radon-research.service",
 )
 TEST_SHA = "d" * 40
 FORBIDDEN_UNITS = (
@@ -2338,10 +2337,10 @@ exit 0
 
 
 def test_research_runtime_is_private_and_uses_python_image(tmp_path):
-    result = _run(tmp_path, ["run", "radon-research.service"])
+    result = _run(tmp_path, ["run", "radon-marketdesk.service"])
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text()
-    assert "radon-python:" in log and "python -m research.worker --daemon" in log
+    assert "radon-python:" in log and "python scripts/research/marketdesk_job.py" in log
     assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:rw" in log
     assert ":/var/lib/radon/media" not in log
     assert ":/home/radon/radon/data" not in log
@@ -2402,7 +2401,7 @@ def test_research_mount_refuses_untrusted_ancestors(tmp_path, attack):
         state.chmod(0o777)
     else:
         anchor.mkdir(mode=0o755)
-    result = _run(tmp_path, ['run', 'radon-research.service'])
+    result = _run(tmp_path, ['run', 'radon-marketdesk.service'])
     assert result.returncode == 78, result.stderr
     assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())
     assert outside.stat().st_mode & 0o777 == 0o700
@@ -2476,7 +2475,7 @@ def test_run_research_binds_subscription_and_antigravity(tmp_path: Path) -> None
     home = _subscription_home(tmp_path)
     result = _run(
         tmp_path,
-        ["run", "radon-research.service"],
+        ["run", "radon-marketdesk.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr

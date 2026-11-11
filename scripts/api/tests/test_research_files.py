@@ -55,9 +55,13 @@ def test_configured_auth_rejects_missing_bearer(client, monkeypatch):
 def test_authenticated_manifest_and_literal_retrieval(client, tmp_path):
     import json
     from research.assets import store_asset
-    from research.manifest import build_manifest
-    (tmp_path/'page-0001.md').write_text('Capex guidance -12.5%.')
-    value = build_manifest({'source_sha256':'a'*64,'pages':[{'page_number':1,'markdown_file':'page-0001.md','needs_ocr':False}]},tmp_path)
+    import hashlib
+    # One served manifest page; the retired PDF pipeline was its only writer.
+    digest, text = 'a'*64, 'Capex guidance -12.5%.'
+    passage = {'id': hashlib.sha256(f'{digest}:1:1:1:{text}'.encode()).hexdigest(), 'kind': 'passage',
+               'line_start': 1, 'line_end': 1, 'text': text, 'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
+    value = {'schema_version': 1, 'source_sha256': digest, 'source_url': '/api/newsfeed/research/files/' + digest + '.pdf',
+             'trust': 'Untrusted extracted source data.', 'pages': [{'page_number': 1, 'needs_ocr': False, 'passages': [passage]}]}
     path = tmp_path/'manifest.json';path.write_text(json.dumps(value))
     asset = store_asset(path).rsplit('/',1)[-1]
     full = client.get('/newsfeed/research/evidence/'+asset)
