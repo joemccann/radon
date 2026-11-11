@@ -184,7 +184,19 @@ directory, and without it the shell prints `getcwd: Permission denied`.
    cd / && sudo -u _radonmodelgw -H /Library/Radon/model-clients/current/bin/grok login --device-auth
    ```
 
-4. Restart the gateway so it reads the new grants:
+4. Antigravity, the first rung of the model ladder (`json` and `chat`
+   requests from scripts the loops run), as on the VPS. `install.sh` installs
+   the pinned, Google-signed macOS build as `/usr/local/radon-runner/gateway/bin/agy`
+   (`scripts/runner/antigravity-darwin.json`, same version as the VPS image).
+   This prints a sign-in URL: open it, then paste the code back within 60
+   seconds. The grant lands in the gateway account's
+   `~/.gemini/antigravity-cli/antigravity-oauth-token`:
+
+   ```bash
+   cd / && sudo -u _radonmodelgw -H /usr/local/radon-runner/gateway/bin/agy -p ok
+   ```
+
+5. Restart the gateway so it reads the new grants:
 
    ```bash
    sudo launchctl kickstart -k system/com.radon.model-gateway-local
@@ -203,8 +215,8 @@ RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway-local/run/gateway.sock \
   python3.13 -I /Library/Radon/model-clients/current/lib/model_gateway/cli.py status
 ```
 
-The result identifies wired providers and service capabilities; `anthropic`,
-`codex` and `grok` must be listed. A failed connection stops model work; it never
+The result identifies wired providers and service capabilities; `antigravity`,
+`anthropic`, `grok` and `codex` must be listed. A failed connection stops model work; it never
 creates local provider settings or credentials. Model execution does not use the bot-side
 NVIDIA/Cerebras env, native login files or fx proxy. Personal operator CLI
 logins remain untouched.
