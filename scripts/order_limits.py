@@ -178,8 +178,7 @@ def _combo_risk_per_unit(legs: Any, *, reverse: bool = False) -> Optional[float]
     ``reverse`` inverts each leg's side, for a SELL BAG envelope: IB flips
     every leg of a combo sold short, so a SELL envelope of BUY legs is short
     at the broker. Reading the leg action alone priced it at $0. A leg with
-    no action at all keeps its existing "long" meaning (the exit-order
-    service passes position legs with none, and never an envelope action).
+    no action at all keeps its existing "long" meaning.
     """
     if not isinstance(legs, list) or not legs:
         return None
@@ -629,7 +628,7 @@ def _is_known_action(action: Any) -> bool:
     """False for a supplied action other than BUY/SELL. The loss math reads
     anything not starting with SELL as long while the placer forwards the raw
     string, so an unknown action would be priced as the wrong side. Absent
-    stays allowed: the exit-order service passes position legs with none."""
+    stays allowed and reads as long."""
     if action is None or action == "":
         return True
     return isinstance(action, str) and action.strip().upper() in _COMBO_ACTIONS

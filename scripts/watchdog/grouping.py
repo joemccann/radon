@@ -3,7 +3,7 @@
 When the FastAPI ``/health`` endpoint reports the IB Gateway session
 is ``awaiting_2fa`` or ``unreachable``, IB-dependent services
 (vcg-scan, cri-scan, orders-sync, portfolio-sync, fill-monitor,
-exit-orders, journal-sync) tend to go stale in the same cycle. Firing
+journal-sync) tend to go stale in the same cycle. Firing
 N separate Pushover alerts trains the operator to mute the noise.
 
 Only failures that look IB-caused join the group: an IB-shaped
@@ -38,7 +38,7 @@ it NAMED. That roster is the armed set: while the grouped key is muted,
 a service whose own row still allows firing was never in a delivered
 page, so it is NOT absorbed — it falls through to the per-service path
 and pages once. Without that, a service joining the outage after the
-grouped page (exit-orders going stale 40 min into a 2FA window) was
+grouped page (journal-sync going stale 40 min into a 2FA window) was
 returned as ``grouped_handled`` every cycle and never paged at all.
 """
 from __future__ import annotations

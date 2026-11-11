@@ -2873,7 +2873,7 @@ def upsert_daemon_state(
 
     Bounded Hrana transport (REL-008 / R-013): this write runs after EVERY
     daemon cycle — on native libsql a Turso stall held the GIL and froze
-    the whole loop, exit orders included.
+    the whole loop.
     """
     _hrana_execute(
         """

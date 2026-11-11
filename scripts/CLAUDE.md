@@ -18,7 +18,7 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 | 50–69 | Scanners — fixed IDs: CRI 50–61, breadth 62–66, RV-ratio 67–68 (`rv_ratio_scan.py:RV_RATIO_IB_CLIENT_IDS`), credit-spread 56+69 (`fetch_credit_spread.py:CREDIT_IB_HISTORY_CLIENT_IDS`; shared with iei-hyg and credit-vix — the 21:45/21:55/22:25 gaps are NOT the mutex, `RandomizedDelaySec=300` on the timers can close them, so those units serialize on `flock /run/lock/radon-ib-history-5669.lock`, R-127) |
 | 90–99 | CLI |
 
-**Never hardcode in 20–49.** As of 2026-05-20 daemon handlers (`fill_monitor`, `exit_orders`, `journal_sync`) also use `client_id="auto"` — prior hardcoded 70/71/72 left them one CLOSE_WAIT away from stuck "client id already in use". Auto-allocator: `scripts/clients/ib_client.py:_connect_auto_allocate`.
+**Never hardcode in 20–49.** As of 2026-05-20 daemon handlers (`fill_monitor`, `journal_sync`) also use `client_id="auto"` — prior hardcoded 70/71/72 left them one CLOSE_WAIT away from stuck "client id already in use". Auto-allocator: `scripts/clients/ib_client.py:_connect_auto_allocate`.
 
 ---
 
