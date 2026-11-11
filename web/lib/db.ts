@@ -65,12 +65,17 @@ export const DB_TRANSPORT_TIMEOUT_MS = 2_750;
 // Agent.destroy() aborts every in-flight request on the shared pool; each
 // aborted request rejects TypeError('fetch failed') and its catch calls
 // resetDb() again, destroying the freshly rebuilt Agent under the next wave
-// of traffic (3s heartbeat + parallel SWR polls) — a self-sustaining destroy
-// storm that only a process restart cleared. Rate-limiting the destroy HERE
-// (the one chokepoint all six reset callers funnel through) lets a genuinely
-// wedged pool be torn down while collateral failures inside the window leave
-// the replacement Agent alive. Must exceed the 3s heartbeat so the metronome
-// cannot re-trigger within the same storm.
+// of traffic (then a 3s heartbeat + parallel SWR polls) — a self-sustaining
+// destroy storm that only a process restart cleared. Rate-limiting the destroy
+// HERE (the one chokepoint all six reset callers funnel through) lets a
+// genuinely wedged pool be torn down while collateral failures inside the
+// window leave the replacement Agent alive. Must exceed the 3s read deadline
+// (DEFAULT_DB_READ_TIMEOUT_MS) so reads issued against the rebuilt pool get one
+// full deadline before it can be torn down again. Since 2026-07-12 the
+// heartbeat is 30s (DB_KEEPALIVE_INTERVAL_MS), above the failure-cluster
+// window below, so heartbeat failures alone can no longer complete a cluster;
+// the cooldown does not need to span it, and doing so would hold a genuinely
+// wedged replacement pool for 30s.
 export const DB_POOL_DESTROY_COOLDOWN_MS = 5_000;
 // ── Failure-cluster gate (2026-07-03 diagnosis) ──────────────────────────
 // The ~hourly reset triggers are genuine Turso tail-latency events, not
