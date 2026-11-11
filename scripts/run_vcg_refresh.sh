@@ -2,8 +2,9 @@
 #
 # Autonomous VCG refresh wrapper.
 #
-# Runs every 5 minutes during ET trading hours (09:30-16:00) via
-# radon-vcg-refresh.timer on Hetzner. Gives vcg-scan the same "real-time
+# Fired every 5 minutes, 09:00-16:55 ET on weekdays, by
+# radon-vcg-refresh.timer on Hetzner; the market-state gate below skips
+# runs while the market is not open. Gives vcg-scan the same "real-time
 # during market hours" cadence the user expects without depending on a
 # browser tab being open.
 #
@@ -33,7 +34,7 @@ cd "$(dirname "$0")/.."
 #
 # Parses each line literally rather than via `set -a; . "$tmp"; set +a`
 # because the latter shell-expands `$VARNAME` substrings inside values —
-# which combined with `set -u` (line above) silently aborts the script
+# which combined with `set -u` (set above) silently aborts the script
 # when a secret happens to contain `$` followed by [a-zA-Z_]. See
 # feedback_env_file_shell_expansion.md for the case that surfaced this.
 _load_env() {

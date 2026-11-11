@@ -407,7 +407,7 @@ def _fetch_rh_daily(symbol: str) -> dict[str, float]:
     """Robinhood (official trading MCP, read-only) daily closes.
 
     Ranked after IB, before UW and Yahoo. Unconfigured hosts return {}
-    without any network I/O so the chain falls through to Yahoo.
+    without any network I/O so the chain falls through to UW, then Yahoo.
     """
     try:
         from clients.robinhood_client import fetch_robinhood_closes

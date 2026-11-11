@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Retroactively tag posts in posts.json. Default mode tags posts with <3 tags.
+// Retroactively tag posts in posts.json. Default mode tags posts missing a
+// complete text or vision classification.
 // --retag re-tags every post (use after refining the prompt or naming rules).
 // Novel tags returned by the model are auto-appended to data/tag_taxonomy.json.
 //
-// Routing: posts with a local image use the Anthropic vision tagger
-// (claude-haiku-4-5); text-only posts use the shared model ladder via
-// tagger.js -> model_ladder_cli.py. Throttle stays conservative.
+// Routing: every post gets the text tagger; posts with a local image also
+// get the vision tagger. Throttle stays conservative.
 
 import path from "path";
 import { fileURLToPath } from "url";

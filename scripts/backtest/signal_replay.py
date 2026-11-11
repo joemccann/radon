@@ -11,9 +11,9 @@ Each loader returns a list of ``SignalPoint`` ascending by date, where
 also expose an underlying price series so the engine can build forward returns
 without the strategy peeking at the future.
 
-Only the CRI loader is fully wired (its snapshot history carries a clean daily
-series with SPY closes). The other strategies are registered but raise
-``NotImplementedError`` with an honest message — see ``strategies.py``.
+The CRI, VCG and dark-pool loaders live here. A strategy with no usable
+price-bearing series reports ``insufficient_data`` instead of fabricating
+trades — see ``strategies.py``.
 """
 
 from __future__ import annotations

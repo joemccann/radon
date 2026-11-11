@@ -1,8 +1,9 @@
 """Authentication middleware for FastAPI.
 
-Supports two auth methods:
+Supports three auth methods:
 1. Clerk JWT — browser-based user auth via JWKS
 2. API key — headless machine-to-machine auth (scoped to read-only data endpoints)
+3. Service token — demo frontend to demo VM (``RADON_SERVICE_TOKEN``)
 """
 
 from __future__ import annotations
@@ -306,7 +307,7 @@ _jwks_negative: OrderedDict[str, float] = OrderedDict()
 
 
 def _get_jwks_client():
-    """Lazy-initialize JWKS client with key caching."""
+    """Lazy-initialize JWKS client."""
     global _jwks_client
     if _jwks_client is None:
         import jwt as pyjwt
@@ -474,7 +475,8 @@ async def verify_clerk_jwt(request: Request) -> dict:
     Returns the decoded payload on success.
     Raises HTTPException(401) for missing/invalid tokens.
     Raises HTTPException(403) for non-allowlisted users.
-    Bypasses validation for localhost requests (server-to-server).
+    Bypasses validation for trusted localhost / tailnet requests
+    (server-to-server) and the demo service token.
     """
     # Skip auth for genuine server-to-server calls from localhost or tailnet
     # (Next.js → FastAPI; cloud-thin laptop dev → Hetzner FastAPI). Requests

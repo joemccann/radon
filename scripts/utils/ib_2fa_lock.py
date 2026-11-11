@@ -573,15 +573,17 @@ def remaining_lock_secs(
 # --- CLI entry point ---------------------------------------------------------
 #
 # Shell control planes that cannot import this module (the radon operator
-# CLI in radon-cloud/scripts/operator-radon.sh) consult the lock via
+# CLI in cloud/scripts/operator-radon.sh) consult the lock via
 #
-#   python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder> [<acquired_at>]}
+#   python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder> [<acquired_at>]
+#       |release-any|consume <holder> <marker-path> [<acquired_at>]}
 #
 # ``acquire`` prints the lease's ``acquired_at`` token; passing it back to
 # ``release`` / ``consume`` binds them to that one acquisition.
 #
-# Exit codes are the contract: 0 = free / acquired / released,
-# 1 = held by another holder, 2 = usage error. Success markers print to
+# Exit codes are the contract: 0 = free / acquired / released / consumed,
+# 1 = refused (held by another holder, lease changed, or not consumable),
+# 2 = usage error. Success markers print to
 # stdout; refusals print holder + remaining seconds to stderr so callers
 # can surface them verbatim.
 

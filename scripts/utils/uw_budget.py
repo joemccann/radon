@@ -1,7 +1,8 @@
 """Process-wide Unusual Whales daily request budget.
 
 Quota day is America/New_York and resets at 20:00 ET (same as fetch_skew).
-NDX / preset universe scans refuse after 50% of the 40000 daily cap.
+NDX / preset universe scans refuse after 50% of the configured daily cap
+(never when the cap is unlimited).
 Per-ticker and explicit ticker scans are not blocked.
 
 Every hit is tallied by caller and by endpoint class, and the spent day is

@@ -182,7 +182,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # cooldown-gated dispatch fires normally. See scripts/watchdog/grouping.py.
     dispatch_summary = grouping.dispatch_with_grouping(outcomes=fired, now=now)
 
-    # Cancel-on-recovery: a P1 Pushover emergency re-alerts every 60s for a full
+    # Cancel-on-recovery: a P1 Pushover emergency re-alerts every 5 min for a full
     # hour, even after the condition clears (a transient blip thus spams for an
     # hour). Once the service is healthy again — or IB is authenticated, for the
     # grouped key — cancel its emergency push so it stops paging.
