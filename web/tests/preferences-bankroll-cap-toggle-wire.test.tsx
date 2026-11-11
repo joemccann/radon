@@ -22,7 +22,7 @@ const ENTRY = {
   hard_min: false,
   hard_max: true,
   unit: "",
-  description: "On: ib_execute and the exit order service enforce Gate 3.",
+  description: "On: ib_execute enforces Gate 3.",
   applies_immediately: true,
   risk_gated: true,
   source: "default",
