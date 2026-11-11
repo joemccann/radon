@@ -1,8 +1,7 @@
 """Auto-recovery for the documented IB pool stuck-after-2FA failure mode.
 
-When `auth_state` transitions `awaiting_2fa → authenticated` (either via the
-periodic `/health` probe or a successful `restart_ib_gateway()` post-restart
-probe), the FastAPI IB connection pool clients (sync/orders/data) can stay
+When `auth_state` transitions `awaiting_2fa → authenticated` (via the
+periodic `/health` probe), the FastAPI IB connection pool clients (sync/orders/data) can stay
 `connected: False`. The manual recovery was `systemctl restart radon-api.service`.
 These tests pin the autonomous recovery contract:
 
@@ -38,17 +37,12 @@ from scripts.api import ib_gateway
 
 @pytest.fixture(autouse=True)
 def _reset_module_state(tmp_path, monkeypatch):
-    """Each test starts with clean restart and auth-transition state.
+    """Each test starts with clean auth-transition state.
 
     Also redirects the cross-process 2FA push lock to a tmp file so we
     never touch the production /var/lib/radon path during tests.
     """
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json"))
-    ib_gateway._restart_state["attempt_count"] = 0
-    ib_gateway._restart_state["next_attempt_after"] = 0.0
-    ib_gateway._restart_state["last_attempt_at"] = 0.0
-    ib_gateway._restart_state["last_outcome"] = None
-    ib_gateway._restart_state["last_accounts"] = []
     ib_gateway._auth_transition_state["previous_auth_state"] = None
     ib_gateway._auth_transition_state["last_reconnect_at"] = 0.0
     yield
@@ -248,7 +242,7 @@ def test_idempotent_reconnect_within_short_window():
 
 
 # ---------------------------------------------------------------------------
-# Integration: check_ib_gateway invokes the transition handler in docker mode
+# Integration: check_ib_gateway invokes the transition handler
 # ---------------------------------------------------------------------------
 
 
@@ -271,21 +265,17 @@ def test_check_ib_gateway_drives_transition_handler(monkeypatch):
     # which we control via the mock and which reports disconnected slots →
     # reconnect should fire.
 
-    async def fake_check_docker():
+    async def fake_check_cloud():
         return {
             "port_listening": True,
             "upstream_dead": False,
-            "service_state": "healthy",
-            "container_state": "running",
-            "container_health": "healthy",
+            "service_state": "reachable",
             "host": "127.0.0.1",
             "port": 4001,
-            "gateway_mode": "docker",
+            "gateway_mode": "cloud",
         }
 
-    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: False)
-    monkeypatch.setattr(ib_gateway, "is_docker_mode", lambda: True)
-    monkeypatch.setattr(ib_gateway, "_check_docker", fake_check_docker)
+    monkeypatch.setattr(ib_gateway, "_check_cloud", fake_check_cloud)
 
     result = asyncio.run(ib_gateway.check_ib_gateway(pool_status=pool_status, pool=pool))
 
@@ -293,27 +283,3 @@ def test_check_ib_gateway_drives_transition_handler(monkeypatch):
     pool.reconnect_all.assert_awaited_once()
 
 
-def test_restart_ib_gateway_drives_transition_handler(monkeypatch):
-    """Post-restart, when `_probe_authenticated` returns accounts, the pool
-    reconnect must be triggered as part of the success path so callers don't
-    have to remember to do it after every restart.
-    """
-    ib_gateway._auth_transition_state["previous_auth_state"] = "awaiting_2fa"
-    pool = _make_mock_pool({"sync": False, "orders": False, "data": False})
-
-    async def fake_restart_docker():
-        return {"restarted": True, "port_listening": True, "gateway_mode": "docker"}
-
-    async def fake_probe(timeout=8.0):
-        return (True, ["U1234567"])
-
-    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: False)
-    monkeypatch.setattr(ib_gateway, "is_docker_mode", lambda: True)
-    monkeypatch.setattr(ib_gateway, "_restart_docker", fake_restart_docker)
-    monkeypatch.setattr(ib_gateway, "_probe_authenticated", fake_probe)
-
-    result = asyncio.run(ib_gateway.restart_ib_gateway(pool=pool))
-
-    assert result["authenticated"] is True
-    assert result["auth_state"] == "authenticated"
-    pool.reconnect_all.assert_awaited_once()

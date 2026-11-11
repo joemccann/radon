@@ -1,55 +1,59 @@
-"""An unrecognized IB_GATEWAY_MODE must fail safe (audit §3.2).
+"""IB_GATEWAY_MODE can no longer select a local Gateway lifecycle (audit §3.2).
 
-Each mode predicate compared the raw env string, so a typo made all three
-False. The runtime recovery predicate read "not cloud, not docker, not
-launchd" as "auto-restart allowed", and restart/ensure fell through to the
-launchd lifecycle. An unknown mode now never restarts or starts anything.
+The docker and launchd lifecycles were retired: production only ever ran
+``cloud`` (cloud/scripts/check-env.py refuses anything else at deploy time),
+but FastAPI still read the variable and defaulted to ``docker``, so a drifted
+or missing value reached ``docker compose`` and could fire a 2FA push. The
+module now has one behavior whatever the environment says: probe the remote
+Gateway, never spawn a process, never take the push lease.
 """
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+import importlib
 
 import pytest
 
-from scripts.api import server
-
-gw = server.ib_gateway
+from scripts.api import ib_gateway as gw
 
 
-@pytest.mark.parametrize("raw, expected", [
-    ("cloud", "cloud"), ("docker", "docker"), ("launchd", "launchd"),
-    ("dokcer", "unknown"), ("Cloud", "unknown"), ("", "unknown"),
-])
-def test_gateway_mode_parses_to_one_enum(monkeypatch, raw, expected):
-    monkeypatch.setattr(gw, "GATEWAY_MODE", raw)
-    assert gw.gateway_mode() is gw.GatewayMode(expected)
+@pytest.fixture(params=["docker", "launchd", "dokcer", "", None])
+def drifted_mode(request, monkeypatch, tmp_path):
+    """Re-import the module under each drifted env, then restore it."""
+    if request.param is None:
+        monkeypatch.delenv("IB_GATEWAY_MODE", raising=False)
+    else:
+        monkeypatch.setenv("IB_GATEWAY_MODE", request.param)
+    monkeypatch.setenv("RADON_HOST_ROLE", "combined")
+    monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "lock.json"))
+    module = importlib.reload(gw)
+    monkeypatch.setattr(module, "_port_listening", lambda *a, **k: False)
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned a Gateway process")),
+    )
+    monkeypatch.setattr(
+        module.ib_2fa_lock, "acquire_2fa_push_lock",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("took the 2FA push lease")),
+    )
+    yield module
+    monkeypatch.undo()
+    importlib.reload(gw)
 
 
-@pytest.mark.parametrize("raw", ["cloud", "docker", "launchd", "dokcer", ""])
-def test_runtime_failure_never_auto_restarts(monkeypatch, raw):
-    monkeypatch.setattr(gw, "GATEWAY_MODE", raw)
-    assert server._should_auto_restart_ib_gateway_after_runtime_failure() is False
+def test_ensure_only_reports_reachability(drifted_mode):
+    result = asyncio.run(drifted_mode.ensure_ib_gateway())
+    assert result["gateway_mode"] == "cloud"
+    assert result["status"] == "unreachable"
 
 
-def test_unknown_mode_restart_refuses_without_touching_a_lifecycle(monkeypatch):
-    monkeypatch.setattr(gw, "GATEWAY_MODE", "dokcer")
-    monkeypatch.setattr(gw, "_app_role_refusal", lambda action: None)
-    monkeypatch.setattr(gw, "_restart_launchd", AsyncMock(side_effect=AssertionError("launchd")))
-    monkeypatch.setattr(gw, "_restart_docker", AsyncMock(side_effect=AssertionError("docker")))
-    monkeypatch.setattr(gw, "_acquire_2fa_push_lock_bounded",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("lease")))
-    result = asyncio.run(gw.restart_ib_gateway())
+def test_restart_refuses(drifted_mode):
+    result = asyncio.run(drifted_mode.restart_ib_gateway())
+    assert result["gateway_mode"] == "cloud"
     assert result["restarted"] is False
-    assert result["gateway_mode"] == "unknown"
-    assert "IB_GATEWAY_MODE" in result["error"]
 
 
-def test_unknown_mode_ensure_refuses_without_touching_a_lifecycle(monkeypatch):
-    monkeypatch.setattr(gw, "GATEWAY_MODE", "dokcer")
-    monkeypatch.setattr(gw, "_app_role_refusal", lambda action: None)
-    monkeypatch.setattr(gw, "_ensure_launchd", AsyncMock(side_effect=AssertionError("launchd")))
-    monkeypatch.setattr(gw, "_ensure_docker_container", AsyncMock(side_effect=AssertionError("docker")))
-    result = asyncio.run(gw.ensure_ib_gateway())
-    assert result["status"] == "refused"
-    assert result["gateway_mode"] == "unknown"
+def test_health_reports_cloud(drifted_mode):
+    result = asyncio.run(drifted_mode.check_ib_gateway())
+    assert result["gateway_mode"] == "cloud"
+    assert result["auth_state"] == "unreachable"

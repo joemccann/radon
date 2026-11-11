@@ -1703,7 +1703,7 @@ class TestRelayRecoveryDocumentation:
 
     def test_recovery_owner_explains_escalation_and_safe_operator_boundaries(self):
         owner = _section((_ROOT / "docs/ib-gateway-recovery.md").read_text(), "Relay recovery")
-        for required in ("shouldRequestGatewayRestart", "docker", "cloud", "launchd", "POST /ib/restart", "operator hold", "lease", "backoff", "stop", "verification", "rollback", "escalate"):
+        for required in ("docker", "POST /ib/restart", "operator hold", "lease", "backoff", "stop", "verification", "rollback", "escalate"):
             assert required.casefold() in owner.casefold(), required
 
 

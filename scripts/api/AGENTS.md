@@ -23,21 +23,20 @@ API Hrana pooling applies only to proven SELECT pipelines. Writes, mixed SQL and
 - `/docs` and `/openapi.json` are not publicly exempt; they require the trusted-local bypass so the endpoint map is not exposed through Caddy.
 - WebSocket tickets have 30s TTL.
 
-## IB Gateway Modes
+## IB Gateway Mode
 
-- `cloud`: production lifecycle delegates to the installed Gateway control helper; app-role hosts proxy control over mTLS. Laptop remote aliases remain probe-only.
-- `docker` / `launchd` branches are legacy laptop paths kept only as the test harness; no launcher selects them.
+- One mode, cloud: production lifecycle delegates to the installed Gateway control helper; app-role hosts proxy control over mTLS. Laptop remote aliases remain probe-only. `ib_gateway.py` does not read `IB_GATEWAY_MODE`; the `docker` / `launchd` lifecycles were removed.
 - Auto-recovery must verify port down or CLOSE_WAIT before restart. Client ID collision, VOL error, or transient timeout is not restart evidence.
 
 ## 2FA Restart Rules
 
-- `/health` exposes `auth_state`, `service_state`, `upstream_dead`, and `restart_backoff`.
-- Restart paths must acquire the cross-process 2FA push lock and respect backoff. Do not stack IBKR Mobile pushes.
+- `/health` exposes `auth_state`, `service_state`, `upstream_dead`, and `restart_backoff` (`push_lock`, `applicable: false`).
+- Restart paths outside FastAPI must acquire the cross-process 2FA push lock. FastAPI never takes it. Do not stack IBKR Mobile pushes.
 - Production Gateway actions must call `/usr/local/bin/radon-ib-gateway-control`; never pre-acquire a lease and then call the helper, and never control `radon-ib-gateway-preheld-restart.service` from the admin API.
-- `POST /ib/reset-backoff` clears in-memory restart backoff and push lock.
+- `POST /ib/reset-backoff` releases the push lock.
 - IBKR operator hold: `/health` carries `ib_gateway.operator_hold`. While held, `/ib/restart` and admin Gateway `start|restart` return 423 with no broker call, and the recovery heartbeat stands down. `GET|POST /ib/operator-hold` sets and clears it through the broker daemon `hold`/`unhold`.
 - IBC relogin on 2FA timeout is disabled; do not re-enable.
-- Watchdog stuck-2FA self-heal fires only after repeated stuck cycles when no push is in flight and backoff has elapsed.
+- Watchdog stuck-2FA self-heal fires only after repeated stuck cycles when no push is in flight.
 - If `auth_state=authenticated` but pool clients remain disconnected while a direct probe works, restart `radon-api.service`.
 
 ## Options exposure
@@ -52,7 +51,7 @@ API Hrana pooling applies only to proven SELECT pipelines. Writes, mixed SQL and
 - Each scan subprocess records its own snapshot + `service_health` row via `scripts/db/scan_mirror.py` (the FastAPI-side mirror is gone).
 - Scheduled writers must heartbeat every cycle, including no-change cycles.
 - Failures record `state=error` with `last_error.message`.
-- Hetzner units live in monorepo `cloud/services/` (installed under `/etc/systemd/system` via control-plane bootstrap). Wrappers use literal env parsing to avoid `$VAR` expansion. Production: `IB_GATEWAY_MODE=cloud`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`, secrets at `/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired.
+- Hetzner units live in monorepo `cloud/services/` (installed under `/etc/systemd/system` via control-plane bootstrap). Wrappers use literal env parsing to avoid `$VAR` expansion. Production: `IB_GATEWAY_MODE=cloud` (deploy-time check), secrets at `/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired.
 
 ## Subprocess JSON Discipline
 
