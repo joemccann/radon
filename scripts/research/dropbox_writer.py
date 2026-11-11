@@ -1,6 +1,6 @@
 """Write-scoped Dropbox client for MarketDesk PDFs.
 
-Separate from the read-only research.dropbox.DropboxClient on purpose: its own
+Its own
 credentials (DROPBOX_WRITE_*), an account/namespace identity check, a narrow RPC
 allowlist, one content endpoint (files/upload, mode add, never overwrite) and a
 single folder boundary (DROPBOX_WRITE_ROOT, default /Radon/MarketDesk).
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import http.client
 import io
 import json
@@ -24,8 +25,20 @@ import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
 
-from research.dropbox import DropboxError, content_hash
-from research.state import MONTHS
+MONTHS = ('January February March April May June July August September October November December').split()
+
+
+class DropboxError(RuntimeError):
+    def __init__(self, message, *, status=None, retry_after=None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
+
+
+def content_hash(data):
+    """Dropbox content_hash: SHA-256 over the SHA-256 of each 4 MiB block."""
+    blocks = b''.join(hashlib.sha256(data[i:i + 4194304]).digest() for i in range(0, len(data), 4194304))
+    return hashlib.sha256(blocks).hexdigest()
 
 DEFAULT_ROOT = '/Radon/MarketDesk'
 TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'

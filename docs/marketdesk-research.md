@@ -384,11 +384,11 @@ retired and the watchdog does not page it. The operator stop is
    `files.content.write`; mint an offline PKCE refresh token and set
    `DROPBOX_WRITE_*`. Done 2026-10-26: app `radon-marketdesk-writer`, personal
    account; the values are in the laptop `.env`.
-3. After a green deploy, confirm the retired watcher is off and the timer is
+3. After a green deploy, confirm the retired watcher is gone and the timer is
    live, then that the first ledger row and post landed in Turso:
 
 ```bash
-systemctl is-enabled radon-research.service      # disabled
+systemctl cat radon-research.service             # fails: no such unit (deploys uninstall it)
 systemctl list-timers radon-marketdesk.timer
 journalctl -u radon-marketdesk.service -n 50
 ```

@@ -246,8 +246,6 @@ readonly -a SOURCES=(
   services/radon-uw-stream.service.d/runtime-container.conf
   services/radon-uw-research.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
-  services/radon-research.service
-  services/radon-research.service.d/runtime-container.conf
   services/radon-subscription-vault.service
   services/radon-subscription-vault.service.d/runtime-container.conf
   services/radon-ai-cycle.service.d/runtime-container.conf
@@ -322,8 +320,6 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf
   /etc/systemd/system/radon-uw-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
-  /etc/systemd/system/radon-research.service
-  /etc/systemd/system/radon-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-subscription-vault.service
   /etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf
   /etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf
@@ -365,8 +361,6 @@ readonly -a MODES=(
   0440
   0440
   0440
-  0644
-  0644
   0644
   0644
   0644
@@ -473,8 +467,6 @@ readonly -a KINDS=(
   dropin
   dropin
   dropin
-  dropin
-  systemd
   dropin
   systemd
   dropin

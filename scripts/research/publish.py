@@ -12,7 +12,12 @@ import time
 from api.db_http import HRANA_TIMEOUT_S, hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
 from research import book, equity_admission, force_include, humanizer, rendered_copy
-from research.summary_editor import HumanizerCertificateError
+
+
+
+class HumanizerCertificateError(ValueError):
+    """An unpublished payload must return to source review, never bypass editorial admission."""
+
 
 PT = ZoneInfo("America/Los_Angeles")
 HELD_TTL_HOURS = 24

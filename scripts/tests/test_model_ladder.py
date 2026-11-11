@@ -434,20 +434,16 @@ class TestTextJsonPath:
         assert response.closed
 
 
-class TestResearchReviewerFailover:
+class TestMultimodalReviewFailover:
     def test_reviewer_falls_through_anthropic_credit(self):
-        from research.model import Reviewer
-
         router = _Router(
             {"api.anthropic.com": _credit_low(), "api.x.ai": _openai_obj_ok()}
         )
-        from types import SimpleNamespace
-
-        reviewer = Reviewer(
-            env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV},
-            session=SimpleNamespace(post=router),
+        result = complete_multimodal_json(
+            "evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV}, post=router,
+            stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True,
         )
-        assert reviewer.ask("evaluate") == OBJ
+        assert result.data == OBJ
 
     def test_exhausted_message_is_safe(self):
         router = _Router({"api.anthropic.com": _credit_low()})
@@ -470,10 +466,8 @@ class TestAnthropicHttpxStream:
             httpx.post("https://example.invalid", json={}, timeout=0.1, stream=True)
 
     def test_default_adapter_streams_via_client_send_not_httpx_post(self, monkeypatch):
-        """Production Reviewer() has no session; _default_post must not use httpx.post(stream=)."""
+        """A caller without post= uses the default adapter, which must not use httpx.post(stream=)."""
         import httpx
-
-        from research.model import Reviewer
 
         closed: list[str] = []
         post_calls: list[dict] = []
@@ -482,7 +476,7 @@ class TestAnthropicHttpxStream:
             post_calls.append(kwargs)
             if "stream" in kwargs:
                 raise TypeError("post() got an unexpected keyword argument 'stream'")
-            raise AssertionError("non-stream httpx.post should not run on the Reviewer path")
+            raise AssertionError("non-stream httpx.post should not run on the default streaming path")
 
         class Response:
             status_code = 200
@@ -516,8 +510,8 @@ class TestAnthropicHttpxStream:
 
         monkeypatch.setattr(httpx, "post", guarded_post)
         monkeypatch.setattr(httpx, "Client", Client)
-        reviewer = Reviewer(env={"CLAUDE_CODE_OAUTH_TOKEN": "a"})
-        assert reviewer.ask("evaluate") == OBJ
+        result = complete_multimodal_json("evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"}, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
+        assert result.data == OBJ
         assert post_calls == []
         assert closed == ["response", "client"]
 

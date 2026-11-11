@@ -7,8 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from research import intake, publish
-from tests.test_research_intake import Reviewer, catalogue, extractor, selection, verdict, work  # synthetic fixtures
+from research import publish
+
+
+def work(name="tic data.pdf", folder="goldman sachs", folder_date="2026-09-17"):
+    return {"key": "k" * 64, "folder_date": folder_date,
+            "metadata": {"name": name, "id": "id:one", "rev": "r1", "content_hash": "a" * 64,
+                         "path_lower": f"/joe mccann/current/2026/september/sep 17/{folder}/{name}",
+                         "client_modified": "2026-09-17T08:00:00Z"}}
 
 
 def review(**overrides):
@@ -80,25 +86,6 @@ def test_record_outcome_keeps_held_at_on_reupsert_of_the_same_held_row(monkeypat
     published_sql, published_args = calls[2]
     assert published_args[-1] is None
     assert "ELSE research_outcomes.held_at END" in published_sql
-
-
-def test_intake_records_every_outcome_and_survives_a_mirror_failure(tmp_path):
-    recorded = []
-    publisher = SimpleNamespace(store_asset=lambda p: "/api/newsfeed/research/files/" + "b" * 64 + "." + str(p).rsplit(".", 1)[-1],
-                                record_outcome=lambda w, r: recorded.append((w["key"], r["outcome"])))
-    pipe = intake.Pipeline(tmp_path, Reviewer([selection(), verdict()]), publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
-    assert len(pipe.process(work(), tmp_path / "r.pdf", [])) == 1
-    dropped = dict(work("gbpusd_en_1666701.pdf"), key="d" * 64)
-    assert pipe.process(dropped, tmp_path / "r.pdf", []) == []
-    assert recorded == [("k" * 64, "reviewed"), ("d" * 64, "dropped")]
-
-    def broken(w, r):
-        raise RuntimeError("turso down")
-    publisher.record_outcome = broken
-    again = dict(work("other note.pdf"), key="e" * 64)
-    again["metadata"] = dict(again["metadata"], id="id:three")
-    pipe = intake.Pipeline(tmp_path / "second", Reviewer([selection(), verdict()]), publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
-    assert len(pipe.process(again, tmp_path / "r.pdf", [])) == 1, "the mirror is telemetry; it never fails a document"
 
 
 def test_outcome_row_carries_enough_context_to_judge_a_document_with_no_drafts():
@@ -252,18 +239,6 @@ def test_expire_sql_uses_held_at_when_present_and_leaves_updated_at():
     ).fetchone()
     assert fresh == ("held", "2026-09-17T10:00:00+00:00", None)
     connection.close()
-
-
-def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publishes_nothing(tmp_path):
-    seen = []
-    publisher = SimpleNamespace(store_asset=lambda p: "/api/newsfeed/research/files/" + "c" * 64 + "." + str(p).rsplit(".", 1)[-1],
-                                record_outcome=lambda w, r: seen.append(r))
-    pipe = intake.Pipeline(tmp_path, Reviewer([{"candidates": [], "reason": "no measured finding"}]), publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
-    pdf = tmp_path / "r.pdf"; pdf.write_bytes(b"%PDF-1.4")
-    assert pipe.process(work(), pdf, []) == []
-    document = seen[0]["document"]
-    assert document["page_count"] == 2 and document["excerpt"].startswith("## Economics Research ## 16 September 2026")
-    assert len(document["excerpt"]) <= 900 and document["source_url"].endswith(".pdf")
 
 
 @pytest.mark.parametrize("protected_context", [

@@ -204,18 +204,14 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 Production is three planes: host, broker, and app. IB Gateway runs from the control-plane artifact `/etc/radon/ib-gateway-compose.yml` via the root-owned `radon-docker-gw` shim (installed from `cloud/docker-compose.yml` by `bootstrap-control-plane.sh`/`setup-vps.sh` at the deployed commit — the checkout copy is the source, not what runs); the five long-lived app services run from exact-SHA `docker/app` images through installed per-unit `runtime-container.conf` drop-ins; timer-owned oneshots remain host systemd. Main CI gates deploy on both app images, pre-pulls them in parallel with prestage, and the runtime refuses `latest`. Do not install the fleet `radon-.service.d` example because it would override Gateway and health. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 
-The private research worker also runs in the Python app image. Its generated
-charts use the separately locked D3 runtime in
-[`docker/app/chart-runtime/`](../docker/app/chart-runtime/package.json), installed
-with lifecycle scripts disabled and copied read-only to `/opt/radon-charts`.
-Inter and IBM Plex Mono fonts ship in that image beside D3; rendering uses the
-image's Python Playwright Chromium, without web dependencies or remote assets.
-The Python image build exports a real 2400px PNG as the runtime user, so missing
-D3, fonts, or Chromium fail the image gate before deployment. Chart publication
-and image-review gates are owned by [Dropbox research](dropbox-research.md).
-That worker (`radon-research.service`) is retired: deploys disable it, and the
-research source is now the `radon-marketdesk.timer` oneshot in the same Python
-image ([MarketDesk research](#marketdesk-research)).
+The retired private research worker (`radon-research.service`) and its chart
+renderer were deleted on 2026-11-11; deploys disable and uninstall any leftover
+copy. The research source is the `radon-marketdesk.timer` oneshot in the Python
+image ([MarketDesk research](#marketdesk-research)). The image still carries
+the locked D3 runtime in
+[`docker/app/chart-runtime/`](../docker/app/chart-runtime/package.json) at
+`/opt/radon-charts`: that stage also supplies the image's `node` binary and is a
+model-client payload input, so it is removed separately.
 
 ## Trades — single source of truth
 

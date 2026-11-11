@@ -62,8 +62,6 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-uw-stream.service.d/runtime-container.conf
   services/radon-uw-research.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
-  services/radon-research.service
-  services/radon-research.service.d/runtime-container.conf
   services/radon-subscription-vault.service
   services/radon-subscription-vault.service.d/runtime-container.conf
   services/radon-ai-cycle.service.d/runtime-container.conf
@@ -138,8 +136,6 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-uw-stream.service.d/runtime-container.conf
   /etc/systemd/system/radon-uw-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
-  /etc/systemd/system/radon-research.service
-  /etc/systemd/system/radon-research.service.d/runtime-container.conf
   /etc/systemd/system/radon-subscription-vault.service
   /etc/systemd/system/radon-subscription-vault.service.d/runtime-container.conf
   /etc/systemd/system/radon-ai-cycle.service.d/runtime-container.conf
@@ -181,8 +177,6 @@ readonly -a CONTROL_PLANE_MODES=(
   440
   440
   440
-  644
-  644
   644
   644
   644
@@ -950,31 +944,54 @@ is_retired_unit() {
   [[ "$1" == radon-research.service ]]
 }
 
-# The shared-folder Dropbox watcher is retired: radon-marketdesk.timer is the
-# research source now (docs/marketdesk-research.md). The unit file stays
-# installed so this can turn it off; a deploy disables an enabled watcher
-# and stops one that was started by hand or replayed from the active
-# snapshot. Idempotent and never fatal: a refusal here must not roll back a
-# release that is otherwise green.
+# The shared-folder Dropbox watcher is retired and its code and unit are no
+# longer in the repository: radon-marketdesk.timer is the research source
+# (docs/marketdesk-research.md). A deploy disables an enabled leftover copy,
+# stops one that was started by hand or replayed from the active snapshot,
+# then deletes its installed unit file and drop-in so the drift audit never
+# reports an untracked unit. Idempotent and never fatal: a refusal here must
+# not roll back a release that is otherwise green.
 retire_research_watcher() {
+  stop_retired_research_watcher || return 0
+  remove_retired_research_unit
+}
+
+# Succeeds once the leftover watcher is inactive; fails while it may still run.
+stop_retired_research_watcher() {
   local enabled_state="" state=""
   enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || true
   state="$(active_state radon-research.service)" || true
   if [[ "$enabled_state" == "enabled" || "$enabled_state" == "enabled-runtime" ]]; then
     systemctl_bounded --no-block disable --now radon-research.service || {
       echo "warning: could not disable retired radon-research.service" >&2
-      return 0
+      return 1
     }
   elif [[ "$state" == "active" || "$state" == "activating" || "$state" == "reloading" ]]; then
     systemctl_bounded --no-block stop radon-research.service || {
       echo "warning: could not stop retired radon-research.service" >&2
-      return 0
+      return 1
     }
   else
     return 0
   fi
-  wait_for_unit_state radon-research.service inactive || \
+  wait_for_unit_state radon-research.service inactive || {
     echo "warning: retired radon-research.service is still stopping" >&2
+    return 1
+  }
+}
+
+remove_retired_research_unit() {
+  local unit_file
+  [[ -n "$SYSTEMD_UNIT_DIR" ]] || return 0
+  unit_file="${SYSTEMD_UNIT_DIR}/radon-research.service"
+  [[ -e "$unit_file" || -L "$unit_file" || -e "${unit_file}.d" || -L "${unit_file}.d" ]] || return 0
+  "$RM" -rf -- "${unit_file}.d" "$unit_file" || {
+    echo "warning: could not remove retired radon-research.service" >&2
+    return 0
+  }
+  systemctl_bounded daemon-reload || \
+    echo "warning: daemon-reload failed after removing retired radon-research.service" >&2
+  systemctl_bounded reset-failed radon-research.service >/dev/null 2>&1 || true
   return 0
 }
 

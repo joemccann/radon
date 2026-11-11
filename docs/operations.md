@@ -1353,9 +1353,12 @@ is replaced by `radon-marketdesk.timer`
 ([MarketDesk research](marketdesk-research.md)). `radon-deploy-root
 restart-managed` and `recover` now run `retire_research_watcher`: an enabled
 watcher is `disable --now`ed, a hand-started one is stopped, and either
-outcome is non-fatal. The unit file, its drop-in, the 150s research stop wait
-and the read-only API research bind stay. The text below is the historical
-activation contract for the retired unit; do not re-enable it. Current app
+outcome is non-fatal. Once the watcher is inactive the same step deletes the
+installed unit file and drop-in and runs `daemon-reload`, so the drift audit
+never reports an untracked unit. The unit, its code and the Dropbox reader keys
+were deleted from the repository on 2026-11-11; the 150s research stop wait and
+the read-only API research bind stay. The text below is the historical
+activation contract for the retired unit; it cannot be re-enabled. Current app
 containers do not receive those grant directories. Only `radon-model-gateway` does.
 
 The research worker executes the Python image's pinned `claude`, `codex`,

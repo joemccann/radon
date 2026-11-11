@@ -565,7 +565,7 @@ class TestInstallCopyOwedClaims:
 
 
 class TestResearchCutCommandDoc:
-    @pytest.mark.parametrize("module", ["worker", "harness", "cut_report"])
+    @pytest.mark.parametrize("module", ["cut_report"])
     def test_documented_research_commands_resolve_from_repository_root(self, module):
         doc = (_ROOT / "docs/dropbox-research.md").read_text()
         commands = re.findall(r"`([^`]*\bpython[\d.]* -m research\." + module + r"\b[^`]*)`", doc)
@@ -592,7 +592,7 @@ class TestRecurringOwnerCoverage:
     @pytest.mark.parametrize("source,owner", [
         ("config/com.radon.external-probe-dispatch.plist", "docs/operations.md"),
         ("scripts/credential_redaction.py", "docs/security-audit-playbook.md"),
-        ("scripts/research/worker.py", "docs/dropbox-research.md"),
+        ("scripts/research/identify.py", "docs/dropbox-research.md"),
         ("cloud/services/radon-knowledge-eval.service", "docs/knowledge-embeddings.md"),
         ("scripts/clients/tradingview_client.py", "docs/tradingview-mcp-client.md"),
         ("scripts/clients/tradingview_auth.py", "docs/tradingview-mcp-client.md"),

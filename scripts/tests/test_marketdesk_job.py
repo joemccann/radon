@@ -107,7 +107,7 @@ class FakeWriter:
             raise self.world.connect_error
 
     def upload(self, local, remote):
-        from research.dropbox import DropboxError
+        from research.dropbox_writer import DropboxError
         data = Path(local).read_bytes()
         assert data.startswith(b"%PDF-")
         self.world.uploads.append((remote, data))
@@ -465,7 +465,7 @@ def test_writer_absent_publishes_skips_upload_and_pauses_health(world, db):
 
 
 def test_upload_failure_errors_health_and_retries_next_cycle(world, db):
-    from research.dropbox import DropboxError
+    from research.dropbox_writer import DropboxError
     world.refs = [make_ref("Jjjjjjjj10")]
     preseed_stored_pdf(world, db, world.refs[0])
     world.upload_error = DropboxError("Dropbox request failed (503)")
@@ -484,7 +484,7 @@ def test_upload_failure_errors_health_and_retries_next_cycle(world, db):
 
 
 def test_connect_failure_leaves_rows_and_errors_health(world, db):
-    from research.dropbox import DropboxError
+    from research.dropbox_writer import DropboxError
     world.refs = [make_ref("Kkkkkkkk11")]
     preseed_stored_pdf(world, db, world.refs[0])
     world.connect_error = DropboxError("Dropbox account mismatch")
@@ -1077,7 +1077,7 @@ def test_copy_sees_the_figure_images(world, db):
 
 
 def test_incomplete_dropbox_creds_error_health_without_touching_rows(world, db):
-    from research.dropbox import DropboxError
+    from research.dropbox_writer import DropboxError
     world.refs = [make_ref("Zzzzzzzz05")]
     preseed_stored_pdf(world, db, world.refs[0])
     world.writer_error = DropboxError("Dropbox write credentials incomplete: missing DROPBOX_WRITE_ACCOUNT_ID")
