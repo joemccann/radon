@@ -934,7 +934,7 @@ def upsert_flow_analysis_snapshot(scan_time: str, payload: dict[str, Any]) -> No
 
 
 def upsert_performance_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
-    """Phase 2.3 — portfolio_performance.py output."""
+    """Phase 2.3 — perf_twr_builder.py output."""
     db = get_db()
     db.execute(
         """
@@ -942,32 +942,6 @@ def upsert_performance_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
         VALUES (?, ?)
         """,
         (taken_at, json.dumps(payload)),
-    )
-    db.commit()
-
-
-def upsert_nav_history(date_str: str, net_liq: float, daily_pnl: Optional[float]) -> None:
-    """Phase 2.3 — append-only NAV history (one row per trading day)."""
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO nav_history (date, net_liq, daily_pnl, recorded_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (date_str, float(net_liq), float(daily_pnl) if daily_pnl is not None else None, _now_iso()),
-    )
-    db.commit()
-
-
-def upsert_twr_history(date_str: str, twr: float) -> None:
-    """Phase 2.3 — time-weighted return series (one row per trading day)."""
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO twr_history (date, twr, recorded_at)
-        VALUES (?, ?, ?)
-        """,
-        (date_str, float(twr), _now_iso()),
     )
     db.commit()
 

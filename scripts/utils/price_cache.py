@@ -162,8 +162,8 @@ def write_cache(cache_dir: Path, key: str, data: Dict[str, float], source: str, 
     }
     atomic_save(str(path), payload)
     # R-033 put the cap enforcement here so every writer maintains it.
-    # R-174: but `write_cache` runs inside the PARALLEL fetch path
-    # (portfolio_performance's pool), and `prune_cache`'s own docstring says
+    # R-174: but `write_cache` ran inside the PARALLEL fetch path (the
+    # since-deleted portfolio_performance pool), and `prune_cache`'s own docstring says
     # "call ONCE after all parallel writes complete" — N threads each ran a
     # full two-directory stat sweep and each computed its own oldest-first
     # list from a tree the others were mutating. Single-flight + rate-limited:

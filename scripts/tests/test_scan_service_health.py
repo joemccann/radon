@@ -293,27 +293,6 @@ class TestFlowAnalysisWiring:
         assert service == "flow-analysis"
 
 
-class TestPerformanceWiring:
-    def _run(self, monkeypatch):
-        import portfolio_performance
-
-        monkeypatch.setattr(portfolio_performance, "build_payload", lambda **kwargs: {})
-        with redirect_stdout(io.StringIO()):
-            portfolio_performance.main(["--json"])
-
-    def test_records_ok_row(self, monkeypatch, writer_calls):
-        self._run(monkeypatch)
-        [(service, _)] = _ok_rows(writer_calls)
-        assert service == "performance"
-        assert writer_calls["upserts"][0][0] == "upsert_performance_snapshot"
-
-    def test_records_error_row_when_upsert_fails(self, monkeypatch, writer_calls):
-        _make_upsert_raise(monkeypatch, "upsert_performance_snapshot")
-        self._run(monkeypatch)
-        [(service, _)] = _error_rows(writer_calls)
-        assert service == "performance"
-
-
 class TestOiChangesWiring:
     def _run(self, monkeypatch, argv):
         import fetch_oi_changes

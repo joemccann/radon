@@ -1,12 +1,5 @@
-"""REL-052 group A / R-132, R-133, R-134 (all P2) — Flex callers outside the
+"""REL-052 group A / R-133, R-134 (all P2) — Flex callers outside the
 embargo, and a 1025 taxonomy quadruplicated into disagreement.
-
-R-132: `portfolio_performance.py` has three raw Flex paths with no
-`flex_embargo` import and no 1025 detection, and its poll loops `continue`
-whenever `<FlexStatements` is absent — exactly what a 1025 error envelope
-looks like. One invocation is 1 SendRequest plus up to 30 GetStatements
-against a locked token, each extending it.
-`_throttle_backoff.py` names this file as the known uncontrolled consumer.
 
 R-133: the SECOND `FlexQueryFetcher`, in `blotter_service.py`, has no
 embargo check and no 1025 handling, and treats the presence of
@@ -103,17 +96,3 @@ class TestBlotterServiceRespectsTheEmbargo:
             "ERROR envelope — a 1025 body parses to zero Trade nodes and is "
             "returned as a successful empty execution list"
         )
-
-
-class TestPortfolioPerformanceRespectsTheEmbargo:
-    def test_it_imports_the_shared_embargo(self):
-        source = (REPO / "scripts" / "portfolio_performance.py").read_text()
-        assert "flex_embargo" in source, (
-            "three raw Flex paths, no embargo check: one CLI invocation is "
-            "1 SendRequest + up to 30 GetStatements against a locked token"
-        )
-        assert "raise_if_blocked" in source
-
-    def test_it_detects_a_lockout_envelope(self):
-        source = (REPO / "scripts" / "portfolio_performance.py").read_text()
-        assert "is_lockout_code" in source

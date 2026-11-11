@@ -1,5 +1,5 @@
-"""R-334 / R-352 / R-353 / REL-119: the equity-chain retry retries only what
-it was written for, and a Flex policy block is not a transient outage.
+"""R-334 / R-352 / REL-119: the equity-chain retry retries only what
+it was written for.
 
 R-334: `_connect_with_retry` caught bare `Exception`, so it retried EVERY
 failure class identically to the transient handshake timeout it exists for —
@@ -14,12 +14,6 @@ serialised handshakes on the same queue `ib_place_order.py` must win.
 R-352: the retry budget does not fit inside the caller's 45s cap, so the
 `except Exception` that prints the JSON error envelope never runs and the
 operator gets a bare subprocess-timeout string.
-
-R-353: `assert_sendrequest_permitted` and the embargo check it invokes sat
-INSIDE a `try` whose `except Exception` rewrote them into a generic `IBError`,
-so a deliberate policy block and a real 1025 lockout both presented as a
-transient Flex outage and every performance reconstruction silently ran on
-stale cache.
 """
 
 from __future__ import annotations
@@ -146,76 +140,3 @@ class TestConnectBudgetFitsTheCallerCap:
             f"but /options/chain kills the subprocess at {CAP}s"
         )
         assert chain.CONNECT_ATTEMPTS >= 2, "the transient-timeout retry must survive"
-
-
-class TestFlexPolicyBlockIsNotATransientOutage:
-    def test_flex_send_disabled_propagates_as_itself(self, monkeypatch):
-        from clients.ib_client import IBClient
-        from utils.flex_send import FlexSendDisabled
-
-        client = IBClient.__new__(IBClient)
-        import logging
-
-        client.logger = logging.getLogger("test")
-        with pytest.raises(FlexSendDisabled):
-            client.run_flex_query(query_id=1234, token="t")
-
-    def test_a_token_lockout_propagates_as_itself(self, monkeypatch):
-        from clients.ib_client import IBClient
-        from utils import flex_embargo, flex_send
-        import logging
-
-        def _blocked():
-            raise flex_embargo.FlexTokenLocked("1025 embargo live")
-
-        monkeypatch.setattr(flex_embargo, "raise_if_blocked", _blocked)
-        monkeypatch.setattr(flex_send, "assert_sendrequest_permitted",
-                            lambda **_k: _blocked())
-
-        client = IBClient.__new__(IBClient)
-        client.logger = logging.getLogger("test")
-        with pytest.raises(flex_embargo.FlexTokenLocked):
-            client.run_flex_query(query_id=1234, token="t")
-
-    def test_a_real_flex_transport_failure_is_still_an_iberror(self, monkeypatch):
-        from clients.ib_client import IBClient, IBError
-        from utils import flex_send
-        import logging
-
-        monkeypatch.setattr(flex_send, "assert_sendrequest_permitted", lambda **_k: None)
-        monkeypatch.setattr(
-            "ib_insync.FlexReport",
-            lambda **_k: (_ for _ in ()).throw(RuntimeError("flex 503")),
-            raising=False,
-        )
-        client = IBClient.__new__(IBClient)
-        client.logger = logging.getLogger("test")
-        with pytest.raises(IBError, match="Flex query 1234 failed"):
-            client.run_flex_query(query_id=1234, token="t")
-
-
-class TestPortfolioPerformanceNamesThePolicyState:
-    """R-353: the degrade warning must not call a permanent state transient."""
-
-    def test_a_policy_block_is_not_reported_as_unavailable(self):
-        import portfolio_performance as pp
-        from utils.flex_send import FlexSendDisabled
-
-        reason = pp._flex_unavailability_reason(FlexSendDisabled("file-ingest only"))
-        assert "DISABLED by policy" in reason
-        assert "will not clear on its own" in reason
-
-    def test_a_token_lockout_is_not_reported_as_unavailable(self):
-        import portfolio_performance as pp
-        from utils.flex_embargo import FlexTokenLocked
-
-        reason = pp._flex_unavailability_reason(FlexTokenLocked("1025"))
-        assert "LOCKED OUT" in reason
-        assert "1025 token embargo" in reason
-
-    def test_a_real_outage_keeps_the_original_wording(self):
-        import portfolio_performance as pp
-
-        assert pp._flex_unavailability_reason(RuntimeError("connection reset")) == (
-            "Live IB Flex Query unavailable"
-        )
