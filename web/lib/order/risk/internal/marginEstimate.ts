@@ -104,9 +104,6 @@ export type MarginEstimateArgs =
       kind: "stock-covered-call";
     };
 
-/**
- * Estimate the Phase-1 initial-margin requirement for an order. Pure.
- */
 export function estimateInitialMargin(args: MarginEstimateArgs): MarginEstimate {
   switch (args.kind) {
     case "close-out":

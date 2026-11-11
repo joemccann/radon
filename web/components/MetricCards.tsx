@@ -61,7 +61,6 @@ type CardDef = {
   value: string;
   change: string;
   tone: "positive" | "negative" | "neutral";
-  /** Optional subtitle rendered between value and change line. */
   subtitle?: ReactNode;
   /** The one figure the row leads with (net liquidation). */
   hero?: boolean;
@@ -149,7 +148,6 @@ function AccountRow({
    *  Today's P&L breakout further down the page already uses this. */
   todayUnrealized: { pnl: number; positionsWithData: number; totalPositions: number } | null;
   effectiveDayPnl: number | null;
-  /** True when the portfolio has at least one open position. */
   hasPositions: boolean;
   /** True when the WS prices map has at least one entry. Used to
    *  distinguish "IB unreachable" (positions exist but no prices)
@@ -247,8 +245,6 @@ function AccountRow({
   );
 }
 
-/* ─── Risk row (margin / capacity) ───────────────────────── */
-
 function RiskRow({
   acct,
   collapsed,
@@ -290,8 +286,6 @@ function RiskRow({
     </>
   );
 }
-
-/* ─── Margin row (EWL / SMA) ───────────────────────────────── */
 
 function MarginRow({
   acct,
@@ -335,8 +329,6 @@ function MarginRow({
   );
 }
 
-/* ─── Capital row (cash / funds / position value) ──────────── */
-
 function CapitalRow({
   acct,
   collapsed,
@@ -378,8 +370,6 @@ function CapitalRow({
     </>
   );
 }
-
-/* ─── Exposure row (real-time computed, clickable) ────────── */
 
 function buildDollarDeltaSubtitle(
   exposure: ExposureDataWithBreakdown,
@@ -484,12 +474,6 @@ function ExposureRow({
   );
 }
 
-/* ─── Today's P&L row ──────────────────────────────────────
- *  "Unrealized" renamed to "Day Move" to distinguish it from
- *  ACCOUNT "Unrealized P&L" (which is entry-cost-based, not intraday).
- *  All three cards are now clickable with proof modals.
- * ─────────────────────────────────────────────────────────── */
-
 function TodayPnlRow({
   todayUnrealized,
   hasDaily,
@@ -521,7 +505,6 @@ function TodayPnlRow({
       <SectionHeader label="TODAY'S P&L" collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && hasDaily ? (
         <div className="metrics-grid-3">
-          {/* Renamed: "Unrealized" → "Day Move" — intraday change from yesterday's close */}
           <MetricCard
             card={{
               label: "Day Move",
@@ -574,8 +557,6 @@ function TodayPnlRow({
   );
 }
 
-/* ─── Legacy NET LEVERAGE row (no account_summary) ───────── */
-
 function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
   portfolio: PortfolioData; pnl: number; pnlPct: number; unmeasuredBasisCount: number;
 }) {
@@ -606,7 +587,6 @@ function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
 type MetricModal = "fills" | "unrealized" | "dayMove" | "total" | "netLiq" | "dayPnl" | "dividends" | "buyingPower" | "margin" | "excessLiq" | "settledCash" | "ewl" | "prevEwl" | "regT" | "sma" | "cash" | "availFunds" | "initMargin" | "grossPos";
 
 export default function MetricCards({ portfolio, prices, realizedPnl, executedOrders = [], section }: MetricCardsProps) {
-  // Section collapse state: Account + Today's P&L expanded by default, rest collapsed
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     account: false,
     risk: true,
@@ -687,7 +667,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
       && todayUnrealized.positionsWithData === todayUnrealized.totalPositions
       ? todayUnrealized.pnl : null);
 
-  // Breakdown rows (computed lazily — only used when modals open)
   const unrealizedBreakdownRows = openModal === "unrealized"
     ? computeUnrealizedBreakdown(portfolio)
     : [];
@@ -699,7 +678,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
 
   return (
     <>
-      {/* Row 1: ACCOUNT (IB authoritative) or legacy NET LEVERAGE */}
       {acct ? (
         <AccountRow
           acct={acct}
@@ -719,7 +697,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} unmeasuredBasisCount={unmeasuredBasisCount} />
       )}
 
-      {/* Row 2: RISK */}
       {acct && (
         <RiskRow
           acct={acct}
@@ -732,7 +709,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* Row 3: MARGIN (EWL / SMA — only when data present) */}
       {acct && acct.equity_with_loan != null && (
         <MarginRow
           acct={acct}
@@ -745,7 +721,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* Row 4: CAPITAL (cash / funds / position value — only when data present) */}
       {acct && acct.available_funds != null && (
         <CapitalRow
           acct={acct}
@@ -758,7 +733,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* Row 5: EXPOSURE (real-time, all 4 clickable) */}
       <ExposureRow
         exposure={exposure}
         netLiquidation={acct?.net_liquidation}
@@ -767,7 +741,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onCardClick={setActiveMetric}
       />
 
-      {/* Row 6: TODAY'S P&L — renamed "Unrealized" → "Day Move" */}
       <TodayPnlRow
         todayUnrealized={todayUnrealized}
         hasDaily={hasDaily}
@@ -782,7 +755,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onTotalClick={() => setOpenModal("total")}
       />
 
-      {/* Exposure breakdown */}
       {exposure && (
         <ExposureBreakdownModal
           metric={activeMetric}
@@ -793,7 +765,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* ACCOUNT: Unrealized P&L → position-level open P&L (entry cost vs market value) */}
       <PnlBreakdownModal
         open={openModal === "unrealized"}
         title="Unrealized P&L: Open Positions"
@@ -813,7 +784,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onClose={() => closeModal("unrealized")}
       />
 
-      {/* TODAY'S P&L: Day Move → per-position intraday change (close → current) */}
       <PnlBreakdownModal
         open={openModal === "dayMove"}
         title="Day Move: Intraday P&L"
@@ -830,7 +800,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onClose={() => closeModal("dayMove")}
       />
 
-      {/* TODAY'S P&L: Realized → session fills with P&L (ET day-cut) */}
       <FillsModal
         open={openModal === "fills"}
         fills={todayExecutedFills}
@@ -1069,7 +1038,6 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* TODAY'S P&L: Total → formula proof */}
       <PnlBreakdownModal
         open={openModal === "total"}
         title="Today's Total P&L"

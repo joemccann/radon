@@ -92,8 +92,6 @@ def _cooldown_allows_fire(*, service: str, severity: str, now: datetime) -> bool
         return True
 
 
-# ── /health probe ──────────────────────────────────────────────────
-
 def fetch_health() -> dict:
     """Return ``{auth_state: <state>}`` from FastAPI ``/health``.
 

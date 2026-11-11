@@ -5,14 +5,6 @@ import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/api
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
 
-/**
- * POST /api/leap/scan
- *
- * Triggers leap_scanner_uw.py via the FastAPI /leap/scan endpoint. Cooldown
- * + lock live on the FastAPI side. Body accepts {preset?, min_gap?, tickers?}
- * where tickers (comma-separated string or array) wins over preset; preset
- * and min_gap have FastAPI defaults (preset=largecaps, min_gap=10.0).
- */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 600;

@@ -386,7 +386,6 @@ def contract_limit_shape(contract: Any) -> dict[str, Any]:
 
 
 def _future_multiplier(params: dict) -> Optional[float]:
-    """The caller-supplied contract multiplier; None when absent/invalid."""
     multiplier = _finite(params.get("multiplier"))
     if multiplier is None or multiplier <= 0:
         return None
@@ -741,10 +740,6 @@ def check_modify_limits(
     is refused. With no snapshot the notional, ratio, and combo-loss checks
     have nothing to measure, and the contract-count cap does not stand in
     for them.
-
-    R-431: the shape is read through `_working_order_shape`, because the Turso
-    `open_orders` payload nests it one level down and reading the top level
-    typed every real working order as an option.
     """
     if not isinstance(working_order, dict):
         if new_quantity is not None or new_price is not None:

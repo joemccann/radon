@@ -71,11 +71,6 @@ export function formatServiceHealthError(
   return truncateAtWordBoundary(sanitized, maxLength);
 }
 
-/**
- * Resolve the raw input down to a candidate string. Returns ``""`` when
- * nothing meaningful is available — callers translate that into the
- * fallback copy.
- */
 function extractCandidate(raw: ServiceHealthErrorInput): string {
   if (raw == null) return "";
   if (typeof raw === "string") {
@@ -155,8 +150,6 @@ function truncateAtWordBoundary(text: string, maxLength: number): string {
   return `${slice.trimEnd()}${ELLIPSIS}`;
 }
 
-// ---------------------------------------------------------------- humanizer
-
 /**
  * Pattern → plain-language rewrite. Each entry recognises a known
  * error shape via a regex against the lower-cased message and returns
@@ -206,7 +199,6 @@ const HUMAN_REWRITES: ReadonlyArray<{
     pattern: /traceback\s*\(most\s+recent\s+call\s+last\)/i,
     rewrite: "Background sync raised an unexpected error",
   },
-  // Network / urllib errors.
   {
     pattern: /urlopen\s+error|errno\s+\d+/i,
     rewrite: "Network unreachable",
@@ -215,7 +207,6 @@ const HUMAN_REWRITES: ReadonlyArray<{
     pattern: /connection\s+(refused|reset|aborted)/i,
     rewrite: "Network connection refused",
   },
-  // Database / replica errors.
   {
     pattern: /wal\s+(conflict|locked)/i,
     rewrite: "Database temporarily busy",
@@ -231,10 +222,6 @@ const DEV_PREFIX_RE = /^(?:err(?:or)?|warn(?:ing)?|fatal|info|debug)\s*:?\s*/i;
 // prefix that monitor-daemon scripts prepend before the real cause.
 const SCRIPT_PREFIX_RE = /^[a-z][a-z0-9_\s]*\s+(?:fetch|sync|scan|update|load|fill|pull|run)\s+failed\s*:\s*/i;
 
-/**
- * Find the first ``HUMAN_REWRITES`` entry whose pattern matches the
- * given message. Returns null if nothing matches.
- */
 function findHumanRewrite(message: string): string | null {
   for (const { pattern, rewrite } of HUMAN_REWRITES) {
     if (pattern.test(message)) return rewrite;
@@ -258,11 +245,6 @@ const MILLIS_PER_MINUTE = 60_000;
 const MILLIS_PER_HOUR = 3_600_000;
 const MILLIS_PER_DAY = 86_400_000;
 
-/**
- * Render an absolute UTC timestamp as a short "in N units" string
- * suitable for inline banner copy. Returns null when the timestamp is
- * not in the future or cannot be parsed.
- */
 function formatRelativeRetry(nextAttemptAt: string, nowMs: number): string | null {
   const parsed = Date.parse(nextAttemptAt);
   if (Number.isNaN(parsed)) return null;
@@ -280,11 +262,6 @@ function formatRelativeRetry(nextAttemptAt: string, nowMs: number): string | nul
   return `${days}d`;
 }
 
-/**
- * Pull ``next_attempt_at`` from a raw payload if present and parseable
- * into a future-dated retry suffix. Returns the empty string when
- * absent or invalid.
- */
 function extractRetrySuffix(raw: ServiceHealthErrorInput, nowMs: number): string {
   const obj = toObject(raw);
   if (!obj) return "";
@@ -294,11 +271,6 @@ function extractRetrySuffix(raw: ServiceHealthErrorInput, nowMs: number): string
   return formatted ? ` retry in ${formatted}` : "";
 }
 
-/**
- * Coerce a raw input down to a plain object when one is recoverable.
- * Returns null for primitives and unparseable strings. Used by retry-
- * suffix extraction; the main candidate path uses ``extractCandidate``.
- */
 function toObject(raw: ServiceHealthErrorInput): Record<string, unknown> | null {
   if (raw == null) return null;
   if (typeof raw === "object") return raw as Record<string, unknown>;

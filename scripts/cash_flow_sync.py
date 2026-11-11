@@ -89,7 +89,6 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-# Paths / sys.path
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPTS_DIR.parent
 _DATA_DIR = _PROJECT_DIR / "data"
@@ -108,7 +107,6 @@ except Exception:
 # fetch_cash_transactions) can be unit-tested without libsql_experimental
 # installed in the test environment.
 
-# Flex Web Service endpoints
 _SEND_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
 _GET_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
 
@@ -753,7 +751,6 @@ def fetch_cash_transactions(
     max_poll_sleep: float = MAX_POLL_SLEEP_SECONDS,
     budget_seconds: Optional[float] = None,
 ) -> list[dict[str, Any]]:
-    """Fetch the NAV Flex Query and parse CashTransaction rows."""
     return parse_cash_transactions(
         fetch_statement_xml(
             token,

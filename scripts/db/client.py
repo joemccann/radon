@@ -202,7 +202,6 @@ def sync_db() -> None:
 
 
 def reset_for_tests() -> None:
-    """Drop the cached client (test seam)."""
     global _cached
     with _lock:
         _cached = None

@@ -82,8 +82,6 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "Session fills on Today's Executed may land here after journal_sync / fill_monitor " +
     "with open/close labels; use Refresh to re-pull. Not a live IB session blotter.",
 
-  /* ── Regime / CRI ────────────────────────────────────── */
-
   "CRI COMPONENTS":
     "Crash Risk Index broken into 4 sub-scores (0-25 each, 100 total). " +
     "VIX and VVIX measure implied vol stress. Correlation tracks COR1M implied herding in the largest S&P 500 stocks. " +

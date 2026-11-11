@@ -78,7 +78,6 @@ from db.readers import (
     read_open_orders,
 )
 
-# Default connection settings
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS["ib_sync"]
 
@@ -86,7 +85,6 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
-    """Connect to TWS/IB Gateway, return an IBClient."""
     client = IBClient()
     try:
         client.connect(host=host, port=port, client_id=client_id)
@@ -145,7 +143,6 @@ def get_account_summary(client: IBClient, account_id: str = "") -> dict:
 
 
 def get_pnl(client: IBClient, account: str = "") -> dict:
-    """Fetch daily P&L via reqPnL. Polls up to 10s for data to arrive."""
     from ib_insync import util as ib_util
 
     def _valid(val):
@@ -183,7 +180,6 @@ def get_pnl(client: IBClient, account: str = "") -> dict:
 
 
 def format_option_structure(contract, position) -> str:
-    """Format option contract into readable structure string"""
     if contract.secType == 'OPT':
         right = 'Call' if contract.right == 'C' else 'Put'
         return f"{right} ${contract.strike} ({contract.lastTradeDateOrContractMonth})"
@@ -210,7 +206,6 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
         right = "Call" if leg.get('right') == 'C' else "Put"
         return f"{direction} {right}", "defined" if direction == "Long" else "undefined"
     
-    # Sort legs by strike for consistent ordering
     opt_legs = [l for l in legs if l['secType'] == 'OPT']
     stk_legs = [l for l in legs if l['secType'] == 'STK']
     
@@ -234,7 +229,6 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
                 # Partially covered — still has naked exposure
                 return "Partially Covered Call", "undefined"
     
-    # Analyze leg composition
     calls = [l for l in opt_legs if l.get('right') == 'C']
     puts = [l for l in opt_legs if l.get('right') == 'P']
     long_legs = [l for l in opt_legs if l['position'] > 0]
@@ -244,7 +238,6 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
     long_puts = [l for l in puts if l['position'] > 0]
     short_puts = [l for l in puts if l['position'] < 0]
     
-    # Helper: detect if leg contract counts differ (ratio position)
     def _is_ratio(leg_a, leg_b):
         return abs(leg_a['position']) != abs(leg_b['position'])
 
@@ -271,12 +264,10 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
         ratio_prefix = "Ratio " if _is_ratio(puts[0], calls[0]) else ""
 
         if puts[0]['position'] < 0 and calls[0]['position'] > 0:
-            # Long Call + Short Put
             if same_strike:
                 return f"{ratio_prefix}Synthetic Long", "undefined"
             return f"{ratio_prefix}Risk Reversal", "undefined"
         if puts[0]['position'] > 0 and calls[0]['position'] < 0:
-            # Long Put + Short Call
             if same_strike:
                 return f"{ratio_prefix}Synthetic Short", "undefined"
             return f"{ratio_prefix}Reverse Risk Reversal", "undefined"
@@ -334,7 +325,6 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
         if covered:
             return f"Combo ({len(legs)} legs)", "defined"
 
-    # Default for complex structures
     return f"Combo ({len(legs)} legs)", "complex"
 
 
@@ -410,7 +400,6 @@ def _display_ratio_label(structure_type: str, opt_legs: list, all_legs: list) ->
 
 
 def format_structure_description(structure_type: str, legs: list) -> str:
-    """Create human-readable structure description with strikes"""
     if structure_type == "Stock":
         return legs[0]['structure']
 
@@ -478,7 +467,6 @@ def format_structure_description(structure_type: str, legs: list) -> str:
             return f"{structure_type}{ratio_suffix} ${strikes[0]}"
         return f"{structure_type}{ratio_suffix} ${min(strikes)}/${max(strikes)}"
 
-    # Single-leg options: Short Put, Short Call, Long Put, Long Call
     if len(opt_legs) == 1:
         strike = opt_legs[0].get('strike', '?')
         return f"{structure_type} ${strike}"
@@ -502,26 +490,22 @@ def _merge_covered_call_groups(groups: dict) -> dict:
     """
     from collections import defaultdict
     
-    # Find all stock groups and short-call-only groups per ticker
     stock_groups = {}  # ticker -> (key, legs)
     short_call_groups = {}  # ticker -> [(key, legs), ...]
     
     for key, legs in groups.items():
         account_id, symbol, _expiry = key
         
-        # Is this a stock-only group?
         if all(l['secType'] == 'STK' for l in legs):
             long_shares = sum(l['position'] for l in legs if l['position'] > 0)
             if long_shares > 0:
                 stock_groups[(account_id, symbol)] = key
         
-        # Is this a short-call-only group?
         elif all(l['secType'] == 'OPT' for l in legs):
             opt_legs = legs
             if all(l.get('right') == 'C' and l['position'] < 0 for l in opt_legs):
                 short_call_groups.setdefault((account_id, symbol), []).append(key)
     
-    # Merge matching pairs
     merged = dict(groups)  # copy
     for account_symbol, sc_keys in short_call_groups.items():
         if account_symbol not in stock_groups:
@@ -537,13 +521,10 @@ def _merge_covered_call_groups(groups: dict) -> dict:
             shares_needed = total_short_contracts * 100
             
             if total_shares >= shares_needed:
-                # Merge: combine legs into a single group keyed by the option expiry
                 combined = list(stk_legs) + list(sc_legs)
                 # Use the option expiry as the group key (more informative than N/A)
                 merged[sc_key] = combined
-                # Remove the stock group (now absorbed)
                 del merged[stk_key]
-                # Reduce available shares for any additional short call groups
                 total_shares -= shares_needed
                 break  # Only merge one short call group per stock group
     
@@ -624,20 +605,14 @@ def _position_basis_source(formatted_legs: list) -> Optional[str]:
 
 
 def collapse_positions(positions: list) -> list:
-    """
-    Collapse individual legs into multi-leg structures.
-    Groups by ticker + expiry, detects structure type.
-    """
     from collections import defaultdict
     
-    # Group by ticker + expiry
     groups = defaultdict(list)
     for pos in positions:
         # Use N/A expiry for stocks to keep them separate
         key = (pos.get('account_id') or '', pos['symbol'], pos['expiry'])
         groups[key].append(pos)
     
-    # ── Second pass: merge covered calls ──
     # A standalone short call group + same-ticker stock group = covered call.
     # Merge them into a single group so detect_structure_type can identify it.
     groups = _merge_covered_call_groups(groups)
@@ -676,7 +651,6 @@ def collapse_positions(positions: list) -> list:
         long_legs = [l for l in legs if l['position'] > 0]
         contracts = int(abs(long_legs[0]['position'])) if long_legs else int(abs(legs[0]['position']))
         
-        # Determine net direction
         net_position = sum(l['position'] for l in legs)
         num_legs = len(legs)
         if structure_type == "Stock":
@@ -688,7 +662,6 @@ def collapse_positions(positions: list) -> list:
         else:
             direction = "LONG" if net_position > 0 else "SHORT"
         
-        # Calculate max risk
         if risk_profile == "defined":
             # For defined risk, max loss is net debit paid
             if structure_type.startswith("Combo ("):
@@ -723,7 +696,6 @@ def collapse_positions(positions: list) -> list:
             min(leg_session_dates) if leg_session_dates and all(leg_session_dates) else None
         )
 
-        # Format legs for subtree
         formatted_legs = []
         for leg in sorted(legs, key=lambda x: (x.get('right', 'Z'), x.get('strike', 0))):
             formatted_legs.append({
@@ -786,10 +758,8 @@ def collapse_positions(positions: list) -> list:
         })
         position_id += 1
     
-    # Sort by ticker, then expiry
     collapsed.sort(key=lambda x: (x['ticker'], x['expiry'] or 'Z'))
     
-    # Re-assign IDs after sorting
     for i, pos in enumerate(collapsed, 1):
         pos['id'] = i
     
@@ -797,7 +767,6 @@ def collapse_positions(positions: list) -> list:
 
 
 def parse_expiry(contract) -> str:
-    """Parse expiry date from contract"""
     if hasattr(contract, 'lastTradeDateOrContractMonth') and contract.lastTradeDateOrContractMonth:
         expiry_str = contract.lastTradeDateOrContractMonth
         # Format: YYYYMMDD -> YYYY-MM-DD
@@ -1206,7 +1175,6 @@ def fetch_positions(
     journal_basis_lookup: Optional[dict[str, float]] = None,
     fill_basis_lookup: Optional[dict] = None,
 ) -> list:
-    """Fetch all positions from IB"""
     positions = client.get_positions()
     journal_basis_lookup = journal_basis_lookup or {}
     journal_net_qty_lookup = getattr(journal_basis_lookup, "net_qty", {}) or {}
@@ -1216,12 +1184,10 @@ def fetch_positions(
     for pos in positions:
         contract = pos.contract
         
-        # Calculate position value
         avg_cost = pos.avgCost
         ib_avg_cost = pos.avgCost
         position_size = pos.position
         
-        # For options, avgCost is per share, multiply by 100 for per contract
         if contract.secType == 'OPT':
             entry_cost = abs(avg_cost * position_size)  # Already multiplied by multiplier internally
         else:
@@ -1319,7 +1285,6 @@ def wait_for_streaming_data(
 
 
 def display_portfolio(account: dict, positions: list, collapsed: list = None):
-    """Pretty print portfolio"""
     print("\n" + "="*70)
     print("INTERACTIVE BROKERS PORTFOLIO")
     print("="*70)
@@ -1332,13 +1297,11 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
     print("\n📈 POSITIONS")
     print("-"*50)
     
-    # Use collapsed view if available
     display_positions = collapsed if collapsed else positions
     
     if not display_positions:
         print("  No open positions")
     elif collapsed:
-        # Display collapsed multi-leg structures
         for pos in collapsed:
             risk_icon = "✓" if pos['risk_profile'] == 'defined' else "⚠"
             print(f"\n  [{pos['id']}] {pos['ticker']} — {pos['structure']}")
@@ -1362,7 +1325,6 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
             if pos['expiry'] and pos['expiry'] != "N/A":
                 print(f"      Expiry: {pos['expiry']}")
             
-            # Show legs subtree
             if len(pos['legs']) > 1:
                 print("      ├─ Legs:")
                 for i, leg in enumerate(pos['legs']):
@@ -1375,7 +1337,6 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
                         print(f" → ${leg['market_value']:,.2f}", end="")
                     print()
     else:
-        # Fallback: group by underlying (old behavior)
         by_symbol = {}
         for pos in positions:
             sym = pos['symbol']
@@ -1696,7 +1657,6 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
 
     bankroll = account.get('NetLiquidation', account.get('TotalCashValue', 0))
 
-    # Calculate totals from collapsed positions
     # A position with a mixed leg basis publishes no entry_cost, so it
     # contributes nothing to deployed capital rather than a blended figure.
     # That makes the total an UNDER-statement, which makes
@@ -1710,10 +1670,6 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     total_deployed = sum(p['entry_cost'] or 0 for p in collapsed_positions)
     deployed_pct = (total_deployed / bankroll * 100) if bankroll > 0 else 0
 
-    # Derive entry_date from journal rows and the previous portfolio snapshot.
-    # Priority: journal per-contract date → journal ticker+structure date →
-    # IB fills → previous portfolio → today (truly new position).
-    #
     # `today` MUST be the ET trading day, not the host's local day. On Hetzner
     # (UTC host) `datetime.now()` after 20:00 ET is already the next calendar
     # day in UTC, so a brand-new position opened at 21:00 ET would get stamped
@@ -1726,7 +1682,6 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     except Exception:
         trade_log_dates, blotter_dates = {}, {}
 
-    # Previous portfolio dates + per-unit basis (fallback)
     prev_dates: dict[str, str] = {}
     prev_contract_dates: dict[str, str] = {}
     prev_basis: dict[str, dict] = {}
@@ -2047,7 +2002,6 @@ def save_portfolio(
     margin_observed_through: str = "",
     allow_empty: bool = False,
 ):
-    """Save portfolio to the canonical Turso portfolio_snapshots table."""
     from db.service_cycle import service_cycle
     from db.writer import insert_account_margin_sample, upsert_portfolio_snapshot
 
@@ -2078,7 +2032,6 @@ def save_portfolio(
             print(f"  return_capital reconcile skipped: {exc}")
     print(f"✓ Saved portfolio snapshot to Turso at {taken_at}")
 
-    # Track daily NAV for performance history
     acct = portfolio.get("account_summary", {})
     net_liq = acct.get("net_liquidation") or portfolio.get("bankroll")
     if net_liq:
@@ -2112,13 +2065,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Connect
     timer = PhaseTimer("ib_sync", stream_marks=True)
     client = connect_ib(args.host, args.port, args.client_id or "auto")
     timer.mark("connect")
 
     try:
-        # ── Phase 1: Account summary (fast, no sleep needed) ──
         print("Fetching account summary...")
         accounts = client.ib.managedAccounts()
         try:
@@ -2128,7 +2079,6 @@ def main():
         margin_observed_from = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         account = get_account_summary(client, ib_account)
 
-        # ── Phase 2: Request account PnL + positions concurrently ──
         # reqPnL is a subscription — request it, then do other work while it streams
         print("Fetching P&L + positions...")
         from ib_insync import util as ib_util
@@ -2138,7 +2088,6 @@ def main():
 
         pnl_obj = client.ib.reqPnL(ib_account) if ib_account else None
 
-        # Fetch positions while PnL streams
         journal_basis_lookup = build_journal_basis_lookup(client)
         try:
             session_fills = client.get_fills()
@@ -2157,7 +2106,6 @@ def main():
         margin_observed_through = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if not args.no_prices and positions:
-            # ── Phase 3: Set exchange + request ALL data at once ──
             # Contracts from get_positions() already have conId but lack exchange.
             # Setting exchange='SMART' avoids the 1s qualifyContracts() round-trip.
             print("Requesting market data + per-position PnL...")
@@ -2190,7 +2138,6 @@ def main():
                 ticker = client.ib.reqMktData(pos['contract'], "", False, False)
                 tickers.append(ticker)
 
-            # ── Phase 4: wait for first ticks, cap at the old 2.5s floor ──
             wait_for_streaming_data(
                 client,
                 pnl_obj=pnl_obj,
@@ -2200,8 +2147,6 @@ def main():
             )
             timer.mark("sleep")
 
-            # ── Phase 5: Read all results ──
-            # Market prices
             session_marks = _load_position_marks(positions)
             today = _et_today()
             dirty = False
@@ -2215,7 +2160,6 @@ def main():
                 save_session_marks(session_marks)
             timer.mark("prices")
 
-            # Per-position PnL
             def _valid_daily(val):
                 return val is not None and not ib_util.isNan(val) and val != 1.7976931348623157e+308
 
@@ -2231,7 +2175,6 @@ def main():
                 else:
                     pos['ibDailyPnl'] = None
         else:
-            # No prices requested
             for pos in positions:
                 if 'contract' in pos:
                     del pos['contract']
@@ -2239,7 +2182,6 @@ def main():
             timer.mark("qualify")
             timer.mark("sleep")
 
-        # ── Phase 6: Read account PnL (should have arrived during the combined sleep) ──
         pnl_data = {}
         if pnl_obj:
             # reqPnL subscription started in Phase 2 — has had 2.7s+ to arrive.
@@ -2256,14 +2198,11 @@ def main():
             except Exception:
                 pass
 
-        # Collapse multi-leg structures
         print("Analyzing position structures...")
         collapsed = collapse_positions(positions)
 
-        # Display with collapsed view
         display_portfolio(account, positions, collapsed)
 
-        # Summary stats
         defined = len([p for p in collapsed if p['risk_profile'] == 'defined'])
         undefined = len([p for p in collapsed if p['risk_profile'] != 'defined'])
         print(f"\n📋 SUMMARY: {len(collapsed)} positions ({defined} defined risk, {undefined} undefined)")
@@ -2271,7 +2210,6 @@ def main():
         portfolio = None
         db_save_error = None
 
-        # Sync or emit JSON if requested
         if args.sync or args.json_output:
             fill_dates = build_fill_dates(client, fills=session_fills)
             portfolio = convert_to_portfolio_format(
@@ -2296,7 +2234,6 @@ def main():
                 else:
                     raise
 
-            # ── Naked Short Audit (post-sync) ──
             if not args.skip_audit:
                 try:
                     from naked_short_audit import find_naked_short_violations
@@ -2312,7 +2249,6 @@ def main():
                             for v in violations:
                                 log.warning("  → %s: %s (order %s)", v["symbol"], v["reason"], v["order_id"])
 
-                            # Auto-cancel only if client is still connected
                             if client.is_connected():
                                 from naked_short_audit import cancel_violations
                                 cancelled = cancel_violations(client, violations)

@@ -377,7 +377,6 @@ def combine_source(sources: dict[str, str]) -> str:
 
 
 def align_series(hyg: dict[str, float], spx: dict[str, float]) -> list[dict[str, Any]]:
-    """Inner-join on date, ascending {date, hyg_close, spx_close}."""
     return [
         {"date": date, "hyg_close": hyg[date], "spx_close": spx[date]}
         for date in sorted(set(hyg) & set(spx))
@@ -389,7 +388,6 @@ def lookback_window(series: list[dict[str, Any]], n: int = LOOKBACK_SESSIONS) ->
 
 
 def lookback_return(window: list[dict[str, Any]], key: str) -> Optional[float]:
-    """last / first - 1 when both finite and first != 0; else None."""
     if len(window) < 2:
         return None
     first = window[0].get(key)
@@ -451,7 +449,6 @@ def build_series(aligned: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def merge_series(
     cached: list[dict[str, Any]], fresh: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Fresh wins per date."""
     by_date = {row["date"]: row for row in cached}
     by_date.update({row["date"]: row for row in fresh})
     return [by_date[d] for d in sorted(by_date)]
@@ -464,7 +461,6 @@ def _db_fields(row: dict[str, Any]) -> tuple:
 def diff_new_rows(
     cached: list[dict[str, Any]], series: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Rows absent from or different in (date, hyg_close, spx_close)."""
     cached_by_date = {row["date"]: row for row in cached}
     return [
         row

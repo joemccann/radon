@@ -296,12 +296,10 @@ class IBClient:
         # Invalid contracts — callers can check before requesting
         self._failed_contracts: Set[Any] = set()
 
-        # Wire up error callback
         self._ib.errorEvent += self._on_error
 
     @property
     def ib(self) -> IB:
-        """Return the underlying ``ib_insync.IB`` instance."""
         return self._ib
 
     @property
@@ -340,12 +338,10 @@ class IBClient:
         """
         # A dropped session may never have called disconnect().
         self._reset_session_state()
-        # Resolve client ID
         if client_id == "auto":
             return self._connect_auto_allocate(host, port, timeout)
 
         if client_id is None and client_name is not None:
-            # Check pool roles first, then legacy registry
             if client_name in POOL_ROLES:
                 client_id = POOL_ROLES[client_name]
             elif client_name in CLIENT_IDS:
@@ -421,7 +417,6 @@ class IBClient:
                         "Client ID %d in use, trying next", cid,
                     )
                     continue
-                # Non-conflict error — don't rotate, just fail
                 raise IBConnectionError(
                     f"Failed to connect to IB on {host}:{port} after "
                     f"1 attempt(s): {exc}"
@@ -447,7 +442,6 @@ class IBClient:
             self.logger.debug("disconnect() called but already disconnected")
 
     def reconnect(self) -> None:
-        """Disconnect and reconnect using the last connection parameters."""
         self.logger.info("Reconnecting to IB (%s:%s)", self._last_host, self._last_port)
         self.disconnect()
         self.connect(
@@ -458,7 +452,6 @@ class IBClient:
         )
 
     def is_connected(self) -> bool:
-        """Return ``True`` if connected to IB."""
         return self._ib.isConnected()
 
     def __enter__(self) -> "IBClient":
@@ -468,7 +461,6 @@ class IBClient:
         self.disconnect()
 
     def _require_connection(self) -> None:
-        """Raise if not connected."""
         if not self.is_connected():
             raise IBConnectionError("Not connected to IB. Call connect() first.")
 
@@ -512,10 +504,6 @@ class IBClient:
         return bool(predicate())
 
     def _on_error(self, reqId: Any, errorCode: Any, errorString: str, contract: Any = None) -> None:
-        """Handle IB error/warning callbacks.
-
-        This is wired into ``ib.errorEvent``.
-        """
         code = int(errorCode) if errorCode else 0
 
         if code in _IGNORE_CODES:
@@ -530,7 +518,6 @@ class IBClient:
             self.logger.warning("IB connectivity %d: %s", code, errorString)
             return
 
-        # Pacing violations — track per reqId, cap at max retries
         if code in _PACING_CODES:
             rid = int(reqId) if reqId else 0
             current = self._pacing_retries.get(rid, 0)
@@ -547,7 +534,6 @@ class IBClient:
                 )
             return
 
-        # Invalid contracts — add to failed set, no retry
         if code in _INVALID_CONTRACT_CODES:
             if contract is not None:
                 if contract not in self._failed_contracts and len(self._failed_contracts) >= _MAX_FAILED_CONTRACTS:
@@ -559,7 +545,6 @@ class IBClient:
             )
             return
 
-        # Store last error for operations to check
         self._last_error = (code, errorString)
         self.logger.error("IB error %d: %s", code, errorString)
 
@@ -571,7 +556,6 @@ class IBClient:
     # callback would block the event loop.
 
     def clear_subscriptions(self) -> None:
-        """Clear all tracked subscriptions."""
         self._subscriptions.clear()
         self.logger.debug("Cleared all tracked subscriptions")
 
@@ -640,12 +624,10 @@ class IBClient:
         return self._ib.positions()
 
     def get_portfolio(self, account: str = "") -> list:
-        """Return portfolio items (``ib.portfolio()``)."""
         self._require_connection()
         return self._ib.portfolio(account)
 
     def get_account_summary(self, group: str = "", tags: Optional[List[str]] = None) -> list:
-        """Return account summary values."""
         self._require_connection()
         return self._ib.accountSummary(account=group)
 
@@ -658,7 +640,6 @@ class IBClient:
         return pnl
 
     def cancel_pnl(self, pnl_obj: Any) -> None:
-        """Cancel P&L subscription."""
         if pnl_obj:
             self._ib.cancelPnL(pnl_obj)
 
@@ -676,18 +657,12 @@ class IBClient:
         return pnl
 
     def cancel_pnl_single(self, account: str, con_id: int) -> None:
-        """Cancel per-position P&L subscription."""
         try:
             self._ib.cancelPnLSingle(account, "", con_id)
         except Exception:
             pass  # ignore cancel errors
 
     def place_order(self, contract: Any, order: Any) -> Any:
-        """Place an order and return the ``Trade`` object.
-
-        Raises:
-            IBOrderError: If the order placement fails.
-        """
         self._require_connection()
         # REL-304 / R-723: caller preflight can precede slow broker work.
         # Recheck the kill switch at each placement/re-submit admission.
@@ -825,14 +800,6 @@ class IBClient:
             raise IBOrderError(f"Failed to place bracket order: {exc}") from exc
 
     def cancel_order(self, order: Any) -> Any:
-        """Cancel an open order.
-
-        Args:
-            order: The ``Order`` object to cancel.
-
-        Raises:
-            IBOrderError: If the cancellation fails.
-        """
         self._require_connection()
         try:
             result = self._ib.cancelOrder(order)
@@ -858,7 +825,6 @@ class IBClient:
             reason = get_halt_state().get("reason", "manual halt")
             raise IBOrderError(f"Trading halted: {reason}")
 
-        # Apply modifications
         if "lmt_price" in kwargs:
             order.lmtPrice = kwargs["lmt_price"]
         if "total_quantity" in kwargs:
@@ -959,7 +925,6 @@ class IBClient:
         return self._ib.openTrades()
 
     def get_open_trades(self) -> list:
-        """Return currently open trades."""
         self._require_connection()
         return self._ib.openTrades()
 
@@ -971,11 +936,6 @@ class IBClient:
     def get_order_status(
         self, order_id: Optional[int] = None, perm_id: Optional[int] = None,
     ) -> Optional[Any]:
-        """Look up a trade by order ID or permanent ID.
-
-        Returns:
-            The matching ``Trade`` or ``None`` if not found.
-        """
         self._require_connection()
         trades = self._ib.trades()
 
@@ -985,7 +945,6 @@ class IBClient:
                 if trade.order.permId == perm_id:
                     return trade
 
-        # Fallback to order_id
         if order_id is not None:
             for trade in trades:
                 if trade.order.orderId == order_id:
@@ -1006,7 +965,6 @@ class IBClient:
         if snapshot:
             self.wait_until(lambda: ticker_has_quote(ticker), timeout=2.0)
         else:
-            # Track active streaming subscription
             self._subscriptions.append({
                 "contract": contract,
                 "generic_ticks": generic_ticks,
@@ -1014,7 +972,6 @@ class IBClient:
         return ticker
 
     def cancel_market_data(self, contract: Any) -> None:
-        """Cancel streaming market data for a contract and untrack it."""
         self._require_connection()
         self._ib.cancelMktData(contract)
         self._subscriptions = [
@@ -1039,10 +996,6 @@ class IBClient:
         self, symbol: str, expiry: str, strike: float, right: str,
         exchange: str = "SMART", currency: str = "USD",
     ) -> Any:
-        """Get a quote for a specific option contract.
-
-        Creates, qualifies, and requests market data for the option.
-        """
         self._require_connection()
         contract = Option(
             symbol=symbol,
@@ -1076,14 +1029,10 @@ class IBClient:
         return results[0]
 
     def qualify_contracts(self, *contracts: Any) -> list:
-        """Qualify multiple contracts in a single call."""
         self._require_connection()
         return self._ib.qualifyContracts(*contracts)
 
-    # -- execution / fill operations ----------------------------------------
-
     def get_executions(self, exec_filter: Any = None) -> list:
-        """Return recent executions, optionally filtered."""
         self._require_connection()
         if exec_filter is not None:
             return self._ib.reqExecutions(exec_filter)
@@ -1226,7 +1175,6 @@ class IBClient:
         )
 
     def get_contract_details(self, contract: Any) -> list:
-        """Return full contract details (``ContractDetails`` list)."""
         self._require_connection()
         return self._ib.reqContractDetails(contract)
 

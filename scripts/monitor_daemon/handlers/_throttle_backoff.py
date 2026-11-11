@@ -77,7 +77,6 @@ class FlexThrottleError(RuntimeError):
 
 
 def initial_state() -> Dict[str, Any]:
-    """Return a fresh, empty backoff state."""
     return {"throttle_count": 0, "blocked_until": None}
 
 
@@ -89,7 +88,6 @@ def _embargo_seconds_for(count: int) -> int:
 
 
 def record_throttle(state: Dict[str, Any], *, now_utc: datetime) -> Dict[str, Any]:
-    """Advance the throttle counter and compute the next eligible time."""
     count = int(state.get("throttle_count") or 0) + 1
     embargo = _embargo_seconds_for(count)
     return {
@@ -99,7 +97,6 @@ def record_throttle(state: Dict[str, Any], *, now_utc: datetime) -> Dict[str, An
 
 
 def record_success(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Reset on a successful sync."""
     return initial_state()
 
 

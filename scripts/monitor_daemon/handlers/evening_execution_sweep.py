@@ -108,7 +108,6 @@ def _fire_slot(et_now: datetime) -> Optional[str]:
 
 
 def _is_trading_day_et(now_utc: datetime) -> bool:
-    """True iff the ET calendar day is a US equity trading day."""
     et_dt = now_utc.astimezone(ET)
     if et_dt.weekday() >= 5:
         return False

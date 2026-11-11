@@ -58,7 +58,6 @@ FUTURES_ROOTS: dict[str, dict[str, str]] = {
 
 
 def supports_futures(symbol: str) -> bool:
-    """True iff Radon knows how to resolve a futures contract for this symbol."""
     return symbol.upper() in FUTURES_ROOTS
 
 
@@ -103,7 +102,6 @@ INDEX_OPTION_ROOTS: dict[str, dict[str, str]] = {
 
 
 def supports_index_options(symbol: str) -> bool:
-    """True iff Radon knows how to resolve index options for this symbol."""
     return symbol.upper() in INDEX_OPTION_ROOTS
 
 
@@ -144,7 +142,6 @@ def resolve_option_contract(
             contract.multiplier = meta["multiplier"]
         return contract
 
-    # Equity option — legacy SMART routing
     return Option(
         symbol=upper,
         lastTradeDateOrContractMonth=expiry,

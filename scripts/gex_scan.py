@@ -92,7 +92,6 @@ def _get_uw_client():
 
 
 def fetch_strike_gex(client, ticker: str) -> List[Dict[str, Any]]:
-    """Fetch per-strike GEX data from UW. Returns parsed rows."""
     data = client.get_greek_exposure_by_strike(ticker)
     rows = data.get("data", [])
     parsed = []
@@ -118,7 +117,6 @@ def fetch_strike_gex(client, ticker: str) -> List[Dict[str, Any]]:
 
 
 def fetch_aggregate_gex(client, ticker: str) -> List[Dict[str, Any]]:
-    """Fetch aggregate GEX time series for history."""
     data = client.get_greek_exposure(ticker)
     rows = data.get("data", [])
     parsed = []
@@ -171,7 +169,6 @@ def fetch_iv_rank(client, ticker: str) -> Optional[float]:
 
 
 def fetch_vol_pc(client, ticker: str) -> Optional[float]:
-    """Fetch volume put/call ratio from UW screener."""
     try:
         data = client.get_stock_screener(ticker=ticker)
         rows = data.get("data", [])
@@ -188,7 +185,6 @@ def fetch_vol_pc(client, ticker: str) -> Optional[float]:
         return None
 
 
-# Map UW tickers to MenthorQ dashboard slugs
 _MQ_TICKER_MAP: Dict[str, str] = {
     "SPX": "spx", "NDX": "ndx", "SPY": "spy", "QQQ": "qqq",
     "IWM": "iwm", "SMH": "smh", "IBIT": "ibit", "VIX": "vix",
@@ -338,7 +334,6 @@ def fetch_spot_price(client, ticker: str) -> Optional[float]:
     Never falls back to strike-midpoint estimation which can be wildly
     wrong when IB is unavailable (e.g. weekends).
     """
-    # 1. UW stock info
     try:
         data = client.get_stock_info(ticker)
         info = data.get("data", [{}])
@@ -362,7 +357,6 @@ def fetch_spot_price(client, ticker: str) -> Optional[float]:
     except Exception:
         pass
 
-    # 3. Yahoo Finance fallback (never estimate from strike midpoint)
     try:
         import urllib.request as _urlreq
         yt = "^GSPC" if ticker.upper() == "SPX" else ticker.upper()
@@ -387,7 +381,6 @@ def bucket_profile(
     spot: float,
     range_pct: float = PROFILE_RANGE_PCT,
 ) -> List[Dict[str, Any]]:
-    """Aggregate per-strike GEX into buckets within range of spot."""
     low_bound = spot * (1 - range_pct)
     high_bound = spot * (1 + range_pct)
 
@@ -438,7 +431,6 @@ def compute_gex_flip(profile: List[Dict[str, Any]], spot: float) -> Optional[flo
 def find_key_levels(
     profile: List[Dict[str, Any]], spot: float
 ) -> Dict[str, Optional[Dict[str, Any]]]:
-    """Identify max magnet, 2nd magnet, max accelerator, put wall, call wall."""
     if not profile:
         return {
             "max_magnet": None,
@@ -488,7 +480,6 @@ def tag_profile(
     flip: Optional[float],
     levels: Dict[str, Optional[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    """Add tags to profile buckets for chart annotation."""
     spot_bucket = None
     min_dist = float("inf")
     for b in profile:
@@ -519,7 +510,6 @@ def tag_profile(
 def compute_expected_range(
     spot: float, atm_iv: Optional[float]
 ) -> Dict[str, Any]:
-    """Compute 1-day expected range from ATM IV."""
     if atm_iv is None or atm_iv <= 0:
         return {"low": None, "high": None, "iv_1d": None}
     iv_1d = atm_iv / math.sqrt(TRADING_DAYS_PER_YEAR)
@@ -538,7 +528,6 @@ def compute_directional_bias(
     levels: Dict[str, Optional[Dict[str, Any]]],
     days_above_flip: int,
 ) -> Dict[str, Any]:
-    """Determine directional bias heuristic."""
     reasons = []
 
     if flip is None:
@@ -618,7 +607,6 @@ def compute_days_above_flip(
 
 
 def build_history_from_cache(cache_path: Path) -> List[Dict[str, Any]]:
-    """Load prior history from cache file for flip migration and day counting."""
     if not cache_path.exists():
         return []
     try:
@@ -634,7 +622,6 @@ def merge_history(
     current_entry: Dict[str, Any],
     max_days: int = HISTORY_DAYS,
 ) -> List[Dict[str, Any]]:
-    """Merge current day's data into history, deduplicating by date."""
     by_date = {h["date"]: h for h in prior}
     by_date[current_entry["date"]] = current_entry
     sorted_entries = sorted(by_date.values(), key=lambda h: h["date"])
@@ -642,7 +629,6 @@ def merge_history(
 
 
 def is_market_open() -> bool:
-    """Check if US equity markets are currently open."""
     import zoneinfo
     try:
         et = zoneinfo.ZoneInfo("America/New_York")
@@ -673,17 +659,13 @@ def build_gex_output(
     iv_rank: Optional[float] = None,
     mq: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build the full GEX output JSON."""
     bucket_size = _bucket_size_for(ticker, spot)
 
-    # Bucket the profile
     profile = bucket_profile(strike_data, bucket_size, spot)
 
-    # Compute levels
     flip = compute_gex_flip(profile, spot)
     levels = find_key_levels(profile, spot)
 
-    # Add flip as a level entry
     flip_level = None
     if flip is not None:
         flip_level = {
@@ -693,17 +675,13 @@ def build_gex_output(
             "distance_pct": round((flip - spot) / spot * 100, 2),
         }
 
-    # Tag profile for chart annotations
     profile = tag_profile(profile, spot, flip, levels)
 
-    # Aggregate net values
     net_gex = sum(row["net_gex"] for row in strike_data)
     net_dex = sum(row["net_delta"] for row in strike_data)
 
-    # Expected range
     expected_range = compute_expected_range(spot, atm_iv)
 
-    # Today's date (ET)
     import zoneinfo
     try:
         et = zoneinfo.ZoneInfo("America/New_York")
@@ -711,7 +689,6 @@ def build_gex_output(
     except Exception:
         today_et = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # Build today's history entry
     today_entry = {
         "date": today_et,
         "net_gex": round(net_gex, 2),
@@ -723,26 +700,20 @@ def build_gex_output(
         "bias": None,  # filled after bias computation
     }
 
-    # Merge with prior history
     history = merge_history(prior_history, today_entry)
 
-    # Compute days above/below flip
     days_above = compute_days_above_flip(history)
 
-    # Flip migration from history
     flip_migration = []
     for h in history[-5:]:
         if h.get("gex_flip") is not None:
             flip_migration.append({"date": h["date"], "flip": h["gex_flip"]})
 
-    # Directional bias
     bias = compute_directional_bias(spot, flip, net_gex, levels, days_above)
     bias["flip_migration"] = flip_migration
 
-    # Update today's bias in history
     today_entry["bias"] = bias["direction"]
 
-    # Day change
     day_change = round(spot - close, 2) if close else None
     day_change_pct = round((spot - close) / close * 100, 4) if close else None
 
@@ -752,7 +723,6 @@ def build_gex_output(
     if flip_level is not None:
         all_levels["gex_flip"] = flip_level
 
-    # Source delta (UW vs MenthorQ level comparison)
     source_delta = compute_source_delta(all_levels, mq)
 
     # IV data: prefer UW 30D iv (from iv_rank endpoint); supplement with MQ
@@ -824,12 +794,9 @@ def run_persist_then_enrich(
     """Persist UW-only snapshot, then attempt MQ enrichment.
 
     Args:
-        ticker: Symbol being scanned.
         uw_result: Result dict from `build_gex_output(...mq=None)`.
-        cache_path: Disk path for the JSON cache file.
         build_with_mq: Callable taking a MQ payload dict and returning a
             re-built result dict including enrichment.
-        fetch_mq: Whether to attempt MQ enrichment at all.
 
     Returns:
         The most-recent result dict (enriched if MQ succeeded, UW-only otherwise).
@@ -849,7 +816,6 @@ def run_persist_then_enrich(
     if not mq_data:
         return uw_result
 
-    # Pass 2 — re-persist with enrichment.
     enriched = build_with_mq(mq_data)
     persist_snapshot(ticker, enriched, cache_path)
     return enriched
@@ -891,7 +857,6 @@ def main():
 
     t_start = time.time()
 
-    # Fetch all data from UW
     print("  Fetching UW data...", file=sys.stderr)
     client = _get_uw_client()
 
@@ -932,7 +897,6 @@ def main():
         if hasattr(client, "close"):
             client.close()
 
-    # Load prior history from cache
     cache_path = _PROJECT_DIR / "data" / "gex.json"
     prior_history = []
     if not args.no_cache:
@@ -989,7 +953,6 @@ def main():
     elapsed = time.time() - t_start
     print(f"\n  Scan completed in {elapsed:.1f}s", file=sys.stderr)
 
-    # Output
     if args.json:
         print(json.dumps(result, indent=2))
     else:
@@ -999,7 +962,6 @@ def main():
 
 
 def _print_summary(result: Dict[str, Any]) -> None:
-    """Print human-readable GEX summary."""
     t = result["ticker"]
     spot = result["spot"]
     flip = result["levels"].get("gex_flip", {})

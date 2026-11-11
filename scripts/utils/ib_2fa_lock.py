@@ -631,7 +631,6 @@ def _cli_release(holder: str, acquired_at: Optional[float] = None) -> int:
         _print_held(lock)
         return 1
     if release_2fa_push_lock(expected_holder=holder, expected_acquired_at=acquired_at) is None:
-        # The lease changed between the check and the release transaction.
         print(f"not released holder={holder}: lease changed", file=sys.stderr)
         return 1
     print(f"released holder={holder}")

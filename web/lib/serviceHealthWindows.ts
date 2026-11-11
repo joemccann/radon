@@ -724,10 +724,6 @@ const DEFAULT_WINDOW: Window = {
   requires_ib: false,
 };
 
-/**
- * Resolve the freshness window for ``service`` under the given market
- * state. Unknown services fall back to a 1h default.
- */
 export function getFreshnessWindowMs(service: string, market: MarketState): number {
   const entry = SERVICE_FRESHNESS_WINDOWS[service] ?? DEFAULT_WINDOW;
   return entry[market];

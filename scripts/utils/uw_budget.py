@@ -201,7 +201,6 @@ def record_hit(
     caller: Optional[str] = None,
     endpoint: Optional[str] = None,
 ) -> int:
-    """Increment today's HTTP hit count and persist the attributed totals."""
     return record_hits(1, path=path, now=now, caller=caller, endpoint=endpoint)
 
 

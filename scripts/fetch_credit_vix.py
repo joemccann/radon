@@ -138,8 +138,6 @@ def z_gap(spread: float, vix: float, spreads: list[float], vixes: list[float]) -
     return z_score(spread, spreads) - z_score(vix, vixes)
 
 
-# ── VIX ladder (never the equity cascade) ─────────────────────────
-
 def _ib_gateway_unavailable() -> bool:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":

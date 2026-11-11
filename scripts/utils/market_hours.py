@@ -15,33 +15,20 @@ import pytz
 from typing import Tuple
 
 
-# US Eastern timezone
 EASTERN = pytz.timezone('America/New_York')
 
-# Market hours
 MARKET_OPEN = time(9, 30)   # 9:30 AM ET
 MARKET_CLOSE = time(16, 0)  # 4:00 PM ET
 
 
 def get_eastern_now() -> datetime:
-    """Get current time in Eastern timezone."""
     return datetime.now(EASTERN)
 
 
 def is_market_open(dt: datetime = None) -> bool:
-    """
-    Check if the options market is currently open.
-    
-    Args:
-        dt: Datetime to check (defaults to now)
-        
-    Returns:
-        True if market is open, False otherwise
-    """
     if dt is None:
         dt = get_eastern_now()
     else:
-        # Ensure timezone awareness
         if dt.tzinfo is None:
             dt = EASTERN.localize(dt)
         else:
@@ -51,21 +38,11 @@ def is_market_open(dt: datetime = None) -> bool:
     if dt.weekday() >= 5:  # Saturday or Sunday
         return False
     
-    # Check time
     current_time = dt.time()
     return MARKET_OPEN <= current_time < MARKET_CLOSE
 
 
 def get_market_status(dt: datetime = None) -> Tuple[bool, str]:
-    """
-    Get market status with human-readable description.
-    
-    Args:
-        dt: Datetime to check (defaults to now)
-        
-    Returns:
-        Tuple of (is_open, status_message)
-    """
     if dt is None:
         dt = get_eastern_now()
     else:
@@ -105,15 +82,6 @@ def get_market_status(dt: datetime = None) -> Tuple[bool, str]:
 
 
 def get_last_market_close(dt: datetime = None) -> datetime:
-    """
-    Get the datetime of the most recent market close.
-    
-    Args:
-        dt: Reference datetime (defaults to now)
-        
-    Returns:
-        Datetime of last market close
-    """
     if dt is None:
         dt = get_eastern_now()
     else:
@@ -122,30 +90,22 @@ def get_last_market_close(dt: datetime = None) -> datetime:
         else:
             dt = dt.astimezone(EASTERN)
     
-    # If currently during market hours, last close was yesterday
-    # If after market hours today, last close was today
-    # If before market hours today, last close was previous trading day
-    
     current_date = dt.date()
     current_time = dt.time()
     weekday = dt.weekday()
     
     if weekday >= 5:
-        # Weekend - last close was Friday
         days_back = weekday - 4  # Saturday=5 -> 1 day, Sunday=6 -> 2 days
         close_date = current_date.replace() - __import__('datetime').timedelta(days=days_back)
     elif current_time < MARKET_OPEN:
-        # Before market open - last close was previous trading day
         if weekday == 0:  # Monday
             days_back = 3  # Go back to Friday
         else:
             days_back = 1
         close_date = current_date - __import__('datetime').timedelta(days=days_back)
     elif current_time >= MARKET_CLOSE:
-        # After hours - last close was today
         close_date = current_date
     else:
-        # During market hours - last close was previous trading day
         if weekday == 0:  # Monday
             days_back = 3  # Go back to Friday
         else:
@@ -156,7 +116,6 @@ def get_last_market_close(dt: datetime = None) -> datetime:
 
 
 if __name__ == "__main__":
-    # Test
     is_open, status = get_market_status()
     eastern_now = get_eastern_now()
     

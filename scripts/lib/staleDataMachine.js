@@ -26,7 +26,6 @@
 /** No tick for this long during RTH is considered stale. */
 export const STALE_DATA_THRESHOLD_MS = 45_000;
 
-/** How often the relay re-evaluates staleness. */
 export const STALE_CHECK_INTERVAL_MS = 30_000;
 
 /**
@@ -98,22 +97,16 @@ export function decideStaleAction(input) {
   if (activeSubscriptions <= 0) return "none";
   if (now - lastTickAt <= STALE_DATA_THRESHOLD_MS) return "none";
 
-  // Ticks are stale during RTH with live subscriptions.
-
   // A positive farm signal means the socket is healthy — prefer a fresh
   // resubscribe (cheap, no auth churn) over bouncing the connection.
   if (farmState != null && FARM_OK_CODES.has(farmState)) {
     return "resubscribe";
   }
 
-  // Bounded ladder: bounce the socket up to K times. Once we've burned K
-  // reconnect cycles and ticks are still stale, escalate to an alert.
   if (reconnectCycles < MAX_RECONNECT_CYCLES) {
     return "reconnect";
   }
 
-  // Escalation is rate-limited so a persistently dead farm raises one
-  // alert per cooldown window, never a stacked push storm.
   if (lastEscalationAt != null && now - lastEscalationAt < ESCALATION_COOLDOWN_MS) {
     return "none";
   }
@@ -122,10 +115,6 @@ export function decideStaleAction(input) {
 }
 
 /**
- * True iff ``code`` is a known market-data farm info code (OK or down).
- * The relay uses this to decide whether an EventName.info payload should
- * update farmState fed into decideStaleAction.
- *
  * @param {number} code
  * @returns {boolean}
  */

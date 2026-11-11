@@ -40,7 +40,6 @@ LARGE_CAP_UNIVERSE_NAME = "largecaps"
 
 @dataclass
 class Preset:
-    """A strategy-agnostic ticker preset."""
     name: str
     description: str
     tickers: List[str]
@@ -64,13 +63,11 @@ class Preset:
         return list(self.groups.keys())
 
     def group_tickers(self, group_key: str) -> List[str]:
-        """Return tickers for a specific group."""
         if group_key in self.groups:
             return self.groups[group_key].get("tickers", [])
         return []
 
     def group_pairs(self, group_key: str) -> List[List[str]]:
-        """Return pairs for a specific group."""
         if group_key in self.groups:
             return self.groups[group_key].get("pairs", [])
         return []
@@ -185,14 +182,10 @@ def load_preset(name: str) -> Preset:
               `indexes` (ndx100 + sp500 + r2k) and `largecaps` (ndx100 +
               sp500) are virtual unions of the file presets.
 
-    Returns:
-        Preset dataclass instance.
-
     Raises:
         FileNotFoundError: If preset doesn't exist or the name is not a bare slug.
         ValueError: If preset file is malformed.
     """
-    # Strip .json if provided
     name = name.replace(".json", "")
 
     filepath = _resolve_preset_path(name)
@@ -224,12 +217,10 @@ def load_preset(name: str) -> Preset:
 
 
 def get_preset_tickers(name: str) -> List[str]:
-    """Convenience: load preset and return just tickers."""
     return load_preset(name).tickers
 
 
 def get_preset_pairs(name: str) -> List[List[str]]:
-    """Convenience: load preset and return just pairs."""
     return load_preset(name).pairs
 
 

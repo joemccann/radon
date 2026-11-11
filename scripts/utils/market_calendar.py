@@ -15,7 +15,6 @@ _CONFIG_PATH = Path(__file__).parent.parent / "config" / "market_holidays.json"
 # can't carry); a missing/empty file degrades to the static holiday table.
 _IBKR_CACHE_PATH = Path(__file__).parent.parent.parent / "data" / "market_calendar.json"
 
-# Module-level cache so we only read the file once per process.
 _holidays_cache: dict = {}
 # IBKR calendar cache, re-read periodically so a long-running process (FastAPI)
 # picks up the daily refresh without a restart.
@@ -31,7 +30,6 @@ _EXT_CLOSE_MIN = 20 * 60  # 20:00 ET exclusive
 
 
 def _load_holidays_file() -> dict:
-    """Load the holidays JSON file (cached)."""
     if not _holidays_cache:
         try:
             with open(_CONFIG_PATH) as f:
@@ -194,17 +192,14 @@ def is_market_open(now: datetime = None) -> bool:
     if now is None:
         now = datetime.now()
 
-    # Weekend check
     if now.weekday() >= 5:
         return False
 
-    # Holiday check
     date_str = now.strftime("%Y-%m-%d")
     holidays = load_holidays(now.year)
     if date_str in holidays:
         return False
 
-    # Time window: 9:30 -- 16:00
     market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
     market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
     if now < market_open or now > market_close:
@@ -234,11 +229,9 @@ def get_last_n_trading_days(n: int, from_date: datetime = None,
     trading_days: list = []
     current = from_date
 
-    # If include_today and today is a trading day, add it first
     if include_today and _is_trading_day(current):
         trading_days.append(current.strftime("%Y-%m-%d"))
 
-    # If today isn't eligible yet, step back one day
     if not _is_trading_day(current) or current.hour < 16:
         current -= timedelta(days=1)
 
@@ -350,7 +343,6 @@ def _session_date_at_boundary(now: datetime, boundary_minutes: int) -> str:
 
 
 def _is_trading_day(dt: datetime) -> bool:
-    """Check if *dt* falls on a trading day (weekday + not holiday)."""
     if dt.weekday() >= 5:
         return False
     date_str = dt.strftime("%Y-%m-%d")

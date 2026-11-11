@@ -171,7 +171,6 @@ class Pipeline:
         self._deadline = None
         self._progress = None
 
-    # -- bounded lease, as v1 -------------------------------------------------
     def _checkpoint(self, stage):
         if self.clock() > self._deadline:
             raise DocumentDeadlineExceeded(f'document review deadline exceeded during {stage}')

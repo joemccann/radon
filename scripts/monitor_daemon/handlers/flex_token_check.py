@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "data" / "flex_token_config.json"
 
-# Run once per day (86400s)
 CHECK_INTERVAL = 86400
 
 
@@ -110,11 +109,9 @@ class FlexTokenCheck(BaseHandler):
                 "is unmonitored"
             )
 
-        # Parse expiry — handle both offset-aware and naive
         expires_at = datetime.fromisoformat(expires_str)
         now = datetime.now(timezone.utc)
         if expires_at.tzinfo is None:
-            # Treat as UTC if no TZ
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         else:
             expires_at = expires_at.astimezone(timezone.utc)
@@ -125,7 +122,6 @@ class FlexTokenCheck(BaseHandler):
         renewal_url = config.get("renewal_url", "")
         breadcrumb = config.get("breadcrumb", "")
 
-        # Determine if we should fire a reminder
         should_warn = False
         fired_reminder = None
         for threshold in sorted(reminder_days, reverse=True):
@@ -133,11 +129,9 @@ class FlexTokenCheck(BaseHandler):
             if days_remaining <= threshold and key not in reminders_sent:
                 should_warn = True
                 fired_reminder = threshold
-                # Record that we sent this reminder
                 reminders_sent[key] = datetime.now(timezone.utc).isoformat()
                 break
 
-        # Persist updated reminders_sent
         if fired_reminder is not None:
             config["reminders_sent"] = reminders_sent
             with open(CONFIG_PATH, "w") as f:
@@ -149,8 +143,6 @@ class FlexTokenCheck(BaseHandler):
                 f"(threshold: {fired_reminder}d). Renew at: {renewal_url}"
             )
 
-        # Phase 4 dual-write — mirror config + computed days_remaining
-        # into the app_config k/v store. Best-effort.
         _dual_write_flex_state_to_app_config(config, days_remaining)
 
         expired = days_remaining <= 0

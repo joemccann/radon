@@ -90,8 +90,6 @@ interface Entry {
 const registry = new Map<string, Entry>();
 let hydratedFromDisk = false;
 
-// ── Durable layer (L2) ────────────────────────────────────────────────
-
 type PersistedEntry =
   | { ttlMs: number; settledAt: number; value?: unknown; indeterminate?: undefined; inFlightSince?: undefined }
   | { ttlMs: number; settledAt: number; indeterminate: { name: string; message: string }; inFlightSince?: undefined }
@@ -145,7 +143,6 @@ function isLiveAt(entry: { settledAt: number; ttlMs: number }, now: number): boo
   return now - entry.settledAt <= entry.ttlMs;
 }
 
-/** Retention of an indeterminate outcome: never below the floor. */
 function indeterminateTtl(ttlMs: number): number {
   return Math.max(ttlMs, INDETERMINATE_RETENTION_MS);
 }

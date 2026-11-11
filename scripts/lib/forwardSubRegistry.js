@@ -33,9 +33,7 @@
  * }}
  */
 export function createForwardSubRegistry() {
-  /** key → Set<owner> */
   const keyToOwners = new Map();
-  /** owner → Set<key> */
   const ownerToKeys = new Map();
 
   /**
