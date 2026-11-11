@@ -1,7 +1,7 @@
-// DUR-07 — scripts/db/writer.js must mirror web/lib/db.ts: the libsql
-// embedded replica (retired 2026-05-20) is opt-in ONLY via
-// RADON_DB_USE_REPLICA=1, and the legacy RADON_DB_NO_REPLICA kill switch
-// still forces it off. Companion to db-direct-cloud.test.ts.
+// scripts/db/writer.js must mirror web/lib/db.ts: the libsql embedded
+// replica (retired 2026-05-20) cannot be opened. The DUR-07
+// RADON_DB_USE_REPLICA=1 opt-in was removed, so every knob combination
+// resolves a direct-to-cloud config. Companion to db-direct-cloud.test.ts.
 //
 // DUR-09 — the direct-cloud config rewrites libsql:// to https:// (HTTP
 // transport, the only one that honours a custom fetch) and installs the
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe("scripts/db/writer.js direct-cloud default", () => {
-  it("does not resolve an embedded-replica config unless explicitly opted in", async () => {
+  it("resolves a direct-to-cloud config with a clean env", async () => {
     const writer = await freshWriterModule();
     process.env.NODE_ENV = "development";
 
@@ -48,7 +48,7 @@ describe("scripts/db/writer.js direct-cloud default", () => {
     });
   });
 
-  it("resolves the replica config only on explicit opt-in, with a loud warning", async () => {
+  it("stays direct-to-cloud when the removed RADON_DB_USE_REPLICA opt-in is set", async () => {
     const writer = await freshWriterModule();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     process.env.NODE_ENV = "development";
@@ -56,18 +56,15 @@ describe("scripts/db/writer.js direct-cloud default", () => {
 
     const config = writer.resolveClientConfig();
 
-    expect(config).toEqual(
-      expect.objectContaining({
-        syncUrl: "libsql://example.turso.io",
-        authToken: "token",
-      }),
-    );
-    expect(String(config.url)).toMatch(/^file:.*replica\.db$/);
-    const warned = warnSpy.mock.calls.flat().join(" ");
-    expect(warned).toContain("RADON_DB_USE_REPLICA");
+    expect(config).toEqual({
+      url: "https://example.turso.io",
+      authToken: "token",
+      fetch: expect.any(Function),
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it("lets legacy RADON_DB_NO_REPLICA force direct cloud even when both are set", async () => {
+  it("stays direct-to-cloud with both legacy knobs set", async () => {
     const writer = await freshWriterModule();
     process.env.NODE_ENV = "development";
     process.env.RADON_DB_USE_REPLICA = "1";
@@ -82,7 +79,7 @@ describe("scripts/db/writer.js direct-cloud default", () => {
     });
   });
 
-  it("never resolves a replica config under NODE_ENV=test", async () => {
+  it("stays direct-to-cloud under NODE_ENV=test", async () => {
     const writer = await freshWriterModule();
     process.env.RADON_DB_USE_REPLICA = "1";
 

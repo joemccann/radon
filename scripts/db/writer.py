@@ -69,11 +69,9 @@ VALUES (?, ?)
 def ensure_no_replica_for_writers() -> None:
     """Belt-and-suspenders replica kill switch for writer entry points.
 
-    Since DUR-07 the embedded replica is OFF by default (opt-in only via
-    RADON_DB_USE_REPLICA=1 in db.client), so this is normally redundant.
-    Kept because writers must never open the replica even if a future
-    operator opts a host in: RADON_DB_NO_REPLICA beats RADON_DB_USE_REPLICA.
-    No-op if already set.
+    db.client can no longer open an embedded replica, so this is
+    redundant. It stays until the guards are removed in a follow-up
+    change. No-op if already set.
     """
     os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
