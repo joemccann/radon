@@ -11,7 +11,6 @@ Edge cases:
 """
 
 import asyncio
-import json
 import os
 import sys
 import tempfile
@@ -24,6 +23,7 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+import api.subprocess as api_subprocess
 from api.subprocess import (
     run_script,
     run_module,
@@ -34,12 +34,17 @@ from api.subprocess import (
 
 
 @pytest.fixture
-def temp_script(tmp_path):
-    """Create a temporary Python script for testing."""
+def temp_script(tmp_path, monkeypatch):
+    """Write a script into a stand-in scripts/ dir and return its relative name.
+
+    run_script resolves names against ``SCRIPTS_DIR``; pointing that at
+    tmp_path runs the real function on a throwaway script.
+    """
+    monkeypatch.setattr(api_subprocess, "SCRIPTS_DIR", tmp_path)
+
     def _create(content: str, name: str = "test_script.py") -> str:
-        script = tmp_path / name
-        script.write_text(content)
-        return str(script)
+        (tmp_path / name).write_text(content)
+        return name
     return _create
 
 
@@ -55,9 +60,8 @@ class TestRunScript:
 
     def test_successful_json_output(self, temp_script):
         script = temp_script('import json; print(json.dumps({"status": "ok", "count": 42}))')
-        # run_script expects path relative to scripts/, so we need to adjust
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert result.ok
         assert result.data["status"] == "ok"
@@ -73,7 +77,7 @@ class TestRunScript:
             'print(json.dumps({"result": "done"}))\n'
         )
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert result.ok
         assert result.data["result"] == "done"
@@ -95,7 +99,7 @@ class TestRunScript:
             'print("  Combo order: 2 legs, NonGuaranteed=1, ratios=[1, 1]")\n'
             'print(json.dumps({"status": "ok", "orderId": 12345, "permId": 67890}))\n'
         )
-        result = asyncio.run(_run_raw_script(script))
+        result = asyncio.run(run_script(script))
         assert result.ok
         assert result.data["status"] == "ok"
         assert result.data["orderId"] == 12345
@@ -111,7 +115,7 @@ class TestRunScript:
             'print("Step 3: ratios=[1, 1, 1]")\n'
             'print(json.dumps({"status": "ok"}))\n'
         )
-        result = asyncio.run(_run_raw_script(script))
+        result = asyncio.run(run_script(script))
         assert result.ok
         assert result.data["status"] == "ok"
 
@@ -123,7 +127,7 @@ class TestRunScript:
             'print("Computing...")\n'
             'print(json.dumps([{"ticker": "AAPL"}, {"ticker": "TSLA"}]))\n'
         )
-        result = asyncio.run(_run_raw_script(script))
+        result = asyncio.run(run_script(script))
         assert result.ok
         assert isinstance(result.data, list)
         assert len(result.data) == 2
@@ -132,7 +136,7 @@ class TestRunScript:
         """Scripts that write to files produce no stdout JSON."""
         script = temp_script('print("Saved to file")')
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert result.ok
         assert result.data == {}
@@ -144,23 +148,26 @@ class TestRunScript:
             'sys.exit(1)\n'
         )
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert not result.ok
         assert result.exit_code == 1
         assert "error context" in result.error.lower()
 
     def test_stderr_noise_filtering(self, temp_script):
-        """NotOpenSSLWarning and warnings.warn lines should be filtered."""
+        """NotOpenSSLWarning and warnings.warn lines should be filtered.
+
+        The noise comes LAST so the filter, not line order, decides the result.
+        """
         script = temp_script(
             'import sys\n'
+            'print("The real error message", file=sys.stderr)\n'
             'print("warnings.warn(some_warning)", file=sys.stderr)\n'
             'print("NotOpenSSLWarning blah", file=sys.stderr)\n'
-            'print("The real error message", file=sys.stderr)\n'
             'sys.exit(1)\n'
         )
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert not result.ok
         assert "real error message" in result.error.lower()
@@ -174,7 +181,7 @@ class TestRunScript:
             f'import sys\nprint("{long_msg}", file=sys.stderr)\nsys.exit(1)\n'
         )
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert not result.ok
         assert len(result.error) <= 310  # 300 + "..."
@@ -191,7 +198,7 @@ class TestRunScript:
         """Script outputs something that starts with { but isn't valid JSON."""
         script = temp_script('print("{not valid json")')
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert not result.ok
         assert "json" in result.error.lower()
@@ -202,7 +209,7 @@ class TestRunScript:
             'import time\ntime.sleep(60)\n'
         )
         result = asyncio.run(
-            _run_raw_script(script, timeout=0.1)
+            run_script(script, timeout=0.1)
         )
         assert not result.ok
         assert "timed out" in result.error.lower()
@@ -210,7 +217,7 @@ class TestRunScript:
     def test_exit_code_preserved(self, temp_script):
         script = temp_script('import sys; sys.exit(42)')
         result = asyncio.run(
-            _run_raw_script(script)
+            run_script(script)
         )
         assert not result.ok
         assert result.exit_code == 42
@@ -266,64 +273,6 @@ class TestScriptResult:
         assert r.data is None
         assert r.error == "something broke"
         assert r.exit_code == 1
-
-
-# ---------------------------------------------------------------------------
-# Helper: run a script by absolute path (bypasses relative-to-scripts/ resolution)
-# ---------------------------------------------------------------------------
-
-async def _run_raw_script(script_path: str, timeout: float = 10.0) -> ScriptResult:
-    """Run a script by absolute path using asyncio subprocess directly.
-
-    This mirrors run_script() logic but accepts an absolute path for testing.
-    """
-    import asyncio as _aio
-
-    try:
-        proc = await _aio.create_subprocess_exec(
-            sys.executable, script_path,
-            stdout=_aio.subprocess.PIPE,
-            stderr=_aio.subprocess.PIPE,
-        )
-
-        stdout_bytes, stderr_bytes = await _aio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
-
-        if proc.returncode != 0:
-            lines = [
-                l for l in stderr.strip().split("\n")
-                if "warnings.warn(" not in l and "NotOpenSSLWarning" not in l
-            ]
-            err_msg = lines[-1] if lines else f"Script exited with code {proc.returncode}"
-            if len(err_msg) > 300:
-                err_msg = err_msg[:300] + "..."
-            return ScriptResult(ok=False, error=err_msg, exit_code=proc.returncode)
-
-        # Use the real extractor so this helper exercises the production
-        # parser. Embedding a separate copy here is what kept the EWY
-        # bearish-risk-reversal bug invisible to the test suite — the
-        # stale embedded copy used `stdout.find("{")` and only saw the
-        # first `{`/`[` in stdout, missing the case where a progress
-        # line contained a list literal.
-        payload = _extract_json_payload(stdout)
-        if payload is None:
-            return ScriptResult(ok=True, data={})
-        return ScriptResult(ok=True, data=payload)
-
-    except _aio.TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        return ScriptResult(ok=False, error=f"Script timed out after {timeout}s")
-
-    except json.JSONDecodeError as e:
-        return ScriptResult(ok=False, error=f"Invalid JSON output: {e}")
 
 
 class TestTrailingJsonShadowing:
