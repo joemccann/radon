@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -50,6 +50,18 @@ def _deps(*, targets=None, fills=(), prior=(), net_liq=None, placer=None, persis
 
 
 TODAY = date(2026, 11, 7)
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 11, 7, 14, 35, tzinfo=timezone.utc).astimezone(tz)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch):
+    """main() reads the wall clock; pin it to TODAY so fixture targets never age past the staleness gate."""
+    monkeypatch.setattr(qe, "datetime", _FrozenDatetime)
 
 
 class TestSizing:
