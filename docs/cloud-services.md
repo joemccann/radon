@@ -876,9 +876,11 @@ deploy's `install-units` verb from `installed-units.sha256`. Spec:
 
 ### VIX P/C (`radon-vix-pc.timer`)
 
-Daily `02:00 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vix_pc.py`,
+Every 5 minutes 09:00-16:55 ET Mon-Fri, plus daily `02:00 UTC` for the final
+row (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vix_pc.py`,
 `TimeoutStartSec=300`. Five-session cumulative VIX put/call ratio from
-Unusual Whales `GET /api/stock/VIX/options-volume?limit=500`. IB has no
+Unusual Whales `GET /api/stock/VIX/options-volume?limit=500`, which serves the
+in-progress session row intraday (verified 2026-11-11 15:54 ET). IB has no
 historical VIX put versus call volume split. 02:00 UTC is after the 16:00 ET
 close year-round. Runs every calendar day; weekend and holiday runs are
 unchanged-data heartbeats that keep `vix-pc` inside its 26h window. A UW

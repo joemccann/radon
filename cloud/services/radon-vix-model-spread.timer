@@ -1,10 +1,15 @@
 [Unit]
-Description=Radon VIX Model Spread - daily official close sampling
+Description=Radon VIX Model Spread - every 5 minutes in ET trading hours plus daily 16:01 ET
 
 [Timer]
-# Sampling time only; Cboe does not promise a publication SLA.
-# Weekends refresh the unchanged-source heartbeat and actual session lag.
-OnCalendar=*-*-* 02:50:00 UTC
+# Intraday fires add a provisional current-session row (IB when it covers
+# VIXEQ, else Cboe 15-minute delayed quotes) in the small
+# vix-model-spread:live snapshot, and pick up the official Cboe close CSVs
+# whenever Cboe publishes them (no publication SLA).
+OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
+# 16:01 ET (13:01 PT) every calendar day samples the closing quotes; weekend
+# runs refresh the unchanged-source heartbeat and actual session lag.
+OnCalendar=*-*-* 16:01:00 America/New_York
 Persistent=true
 RandomizedDelaySec=0
 

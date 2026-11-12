@@ -50,11 +50,25 @@ describe("VIX model panel", () => {
     expect(screen.getByTestId("vix-model-spread-mean").textContent).toContain("1.00");
     expect(screen.getByTestId("vix-model-spread-brush")).toBeTruthy();
   });
-  it("uses data_date and the exact 02:50 UTC schedule", () => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-17T01:20:00Z"));
+  it("uses data_date and the 5-minute ET session schedule", () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-16T14:02:00Z"));
     render(<VixModelSpreadPanel />);
     expect(screen.getByTestId("vix-model-spread-strip-asof").textContent).toBe("2026-10-16");
-    expect(screen.getByTestId("vix-model-spread-freshness-rail-countdown").textContent).toBe("1h 30m");
+    expect(screen.getByTestId("vix-model-spread-freshness-rail-countdown").textContent).toBe("3m 00s");
+  });
+  it("samples the close at 16:01 ET on a weekend", () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-17T19:00:00Z"));
+    render(<VixModelSpreadPanel />);
+    expect(screen.getByTestId("vix-model-spread-freshness-rail-countdown").textContent).toBe("1h 01m");
+  });
+  it("labels a provisional current session and its source", () => {
+    setup({ ...data(), provisional: { source: "cboe_delayed", quote_time: "2026-10-19T14:45:00", scan_time: "2026-10-19T19:00:00Z" } } as ReturnType<typeof data>);
+    render(<VixModelSpreadPanel />);
+    expect(screen.getByTestId("vix-model-spread-provisional").textContent).toBe("Current session is provisional: Cboe 15-minute delayed quotes as of 14:45 ET, until the official close posts.");
+  });
+  it("has no provisional label on an official close", () => {
+    render(<VixModelSpreadPanel />);
+    expect(screen.queryByTestId("vix-model-spread-provisional")).toBeNull();
   });
   it("keeps all four mobile metrics and one date owner", () => {
     state.mobile = true; render(<VixModelSpreadPanel />);

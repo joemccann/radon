@@ -23,6 +23,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -43,6 +44,10 @@ from utils.market_calendar import last_completed_session_date
 from utils.ib_preflight import ib_auth_state
 
 SERVICE = "vix-model-spread"
+# Provisional current-session row, kept apart from the multi-MB official snapshot.
+LIVE_SERVICE = f"{SERVICE}:live"
+LIVE_QUOTE_URL = "https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_{symbol}.json"
+FULL_SNAPSHOT_MAX_AGE = timedelta(hours=12)
 VIX_MODEL_SPREAD_JSON = _PROJECT_DIR / 'data' / 'vix-model-spread.json'
 SYMBOLS = ('VIX', 'VIXEQ', 'COR1M')
 _SNAPSHOT_CHUNK_CHARS = 64 * 1024
@@ -263,6 +268,20 @@ def _read_previous():
     return _read_disk_previous()
 
 
+def _pool_daily_bars(symbol, duration):
+    """Daily index bars through the FastAPI IB pool; never opens a new IB socket."""
+    import requests
+    headers = {'User-Agent': 'radon/2.0'}
+    if os.environ.get('MDW_API_KEY'):
+        headers['X-API-Key'] = os.environ['MDW_API_KEY']
+    response = requests.post('http://127.0.0.1:8321/historical/bars', headers=headers,
+                             json={'contract': {'sec_type': 'IND', 'symbol': symbol,
+                                                'exchange': 'CBOE', 'currency': 'USD'},
+                                   'duration': duration, 'bar_size': '1 day'}, timeout=15)
+    response.raise_for_status()
+    return response.json().get('bars')
+
+
 def _probe_ib():
     """Check coverage through the existing pool, never open a new IB socket."""
     import requests
@@ -270,15 +289,7 @@ def _probe_ib():
     if state and state != 'authenticated':
         return {'status': 'skipped', 'auth_state': state}
     try:
-        headers = {'User-Agent': 'radon/2.0'}
-        if os.environ.get('MDW_API_KEY'):
-            headers['X-API-Key'] = os.environ['MDW_API_KEY']
-        response = requests.post('http://127.0.0.1:8321/historical/bars', headers=headers,
-                                 json={'contract': {'sec_type': 'IND', 'symbol': 'VIXEQ',
-                                                    'exchange': 'CBOE', 'currency': 'USD'},
-                                       'duration': '2 D', 'bar_size': '1 day'}, timeout=15)
-        response.raise_for_status()
-        bars = response.json().get('bars')
+        bars = _pool_daily_bars('VIXEQ', '2 D')
         if not isinstance(bars, list):
             return {'status': 'unavailable'}
         valid = _validated([{'date': bar.get('date'), 'value': bar.get('close')}
@@ -287,6 +298,83 @@ def _probe_ib():
     except (requests.RequestException, ValueError, TypeError, AttributeError):
         # No upstream body, URL, account identifier or credential in diagnostics.
         return {'status': 'unavailable'}
+
+
+def _et_today(now):
+    return now.astimezone(ZoneInfo('America/New_York')).date().isoformat()
+
+
+def _live_ib(now):
+    """Today's partial daily bar for all three indexes, or None."""
+    today = _et_today(now)
+    values = {}
+    for symbol in SYMBOLS:
+        bars = _pool_daily_bars(symbol, '1 D')
+        rows = _validated([{'date': bar.get('date'), 'value': bar.get('close')}
+                           for bar in bars or [] if isinstance(bar, dict)], symbol)
+        if not rows or rows[-1]['date'] != today:
+            return None
+        values[symbol] = rows[-1]['value']
+    return {'date': today, 'values': values, 'source': 'ib', 'quote_time': None}
+
+
+def _live_cboe():
+    """Cboe 15-minute delayed quotes for all three, all on one session, or None."""
+    import requests
+    values, dates, times = {}, set(), []
+    for symbol in SYMBOLS:
+        response = requests.get(LIVE_QUOTE_URL.format(symbol=symbol),
+                                headers={'User-Agent': 'radon/2.0'}, timeout=15)
+        response.raise_for_status()
+        data = response.json().get('data') or {}
+        stamp = data.get('last_trade_time')
+        rows = _validated([{'date': str(stamp)[:10], 'value': data.get('current_price')}], symbol)
+        if not rows:
+            return None
+        values[symbol] = rows[0]['value']
+        dates.add(rows[0]['date'])
+        times.append(stamp)
+    if len(dates) != 1:
+        return None
+    return {'date': dates.pop(), 'values': values, 'source': 'cboe_delayed', 'quote_time': max(times)}
+
+
+def _fetch_live(probe, now):
+    """Provisional current-session inputs. IB when it covers VIXEQ, then Cboe delayed.
+
+    All three inputs always come from one source so the spread is never built
+    from mismatched timestamps. Advisory only: a failure returns None.
+    """
+    if probe.get('status') == 'available':
+        try:
+            live = _live_ib(now)
+            if live:
+                return live
+        except Exception as exc:  # noqa: BLE001 - fall through to Cboe
+            print(f'[{SERVICE}] IB live bars unavailable: {type(exc).__name__}', file=sys.stderr)
+    try:
+        return _live_cboe()
+    except Exception as exc:  # noqa: BLE001 - live row is advisory
+        print(f'[{SERVICE}] Cboe delayed quotes unavailable: {type(exc).__name__}', file=sys.stderr)
+        return None
+
+
+def _live_row(raw_sources, live, now):
+    """Official history plus one provisional session, computed the same way."""
+    official = min(rows[-1]['date'] for rows in raw_sources.values())
+    if not live or not (official < live['date'] <= _et_today(now)):
+        return None
+    extended = [raw_sources[s] + [{'date': live['date'], 'value': live['values'][s]}] for s in SYMBOLS]
+    series = compute_series(*extended)
+    return series[-1] if series and series[-1]['date'] == live['date'] else None
+
+
+def _snapshot_is_old(previous, now):
+    try:
+        stamp = datetime.fromisoformat(str(previous.get('scan_time')).replace('Z', '+00:00'))
+    except ValueError:
+        return True
+    return now - stamp > FULL_SNAPSHOT_MAX_AGE
 
 
 def run(client=None, previous=None, *, now=None):
@@ -330,7 +418,19 @@ def run(client=None, previous=None, *, now=None):
         payload['series_hash'] = _series_hash(series)
         prior_hash = previous.get('series_hash')
         changed = payload['series_hash'] != prior_hash if prior_hash else series != previous.get('series')
-        persist_result(payload, rows_changed=changed)
+        live = _fetch_live(probe, now)
+        row = _live_row(raw_sources, live, now)
+        live_payload = {'scan_time': scan_time, 'row': row,
+                        'source': live['source'] if row else None,
+                        'quote_time': live['quote_time'] if row else None}
+        # A live tick never rewrites the multi-MB official snapshot unless the
+        # official series moved or the snapshot nears its freshness window.
+        full = changed or row is None or _snapshot_is_old(previous, now)
+        if full:
+            persist_result(payload, rows_changed=changed)
+        writer.upsert_scan_snapshot(LIVE_SERVICE, scan_time, live_payload)
+        if not full:
+            writer.record_service_health(SERVICE, 'ok', finished_at=scan_time)
         return payload
     except Exception as exc:
         _record_error(scan_time, exc)
