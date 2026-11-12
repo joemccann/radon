@@ -154,7 +154,7 @@ test.describe("/orders section layout + collapse", () => {
 
     // Clear and click refresh — must not collapse
     await filter.fill("");
-    await section.locator("button.sync-button").click();
+    await section.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 });

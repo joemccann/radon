@@ -274,7 +274,7 @@ test("IWM combo close confirmation uses close-order metrics instead of max-gain 
   await installMockWebSocket(page);
   await stubApis(page);
 
-  await page.goto("http://127.0.0.1:3000/IWM?posId=13&tab=order");
+  await page.goto("/IWM?posId=13&tab=order");
 
   const input = page.locator(".modify-price-input").first();
   await input.fill("3.00");
