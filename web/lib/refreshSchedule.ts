@@ -118,10 +118,16 @@ export const ASIA_EXPORT_LEAD_REFRESH: RefreshSchedule = [daily(9, 40)];
 export const MARGIN_DEBT_REFRESH: RefreshSchedule = [daily(13, 10)];
 
 /** cloud/services/radon-vix-model-spread.timer */
-export const VIX_MODEL_SPREAD_REFRESH: RefreshSchedule = [daily(2, 50)];
+export const VIX_MODEL_SPREAD_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+];
 
 /** cloud/services/radon-vix-pc.timer */
-export const VIX_PC_REFRESH: RefreshSchedule = [daily(2, 0)];
+export const VIX_PC_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  daily(2, 0),
+];
 
 /** cloud/services/radon-straddle.timer */
 export const STRADDLE_REFRESH: RefreshSchedule = [daily(2, 15)];
@@ -136,10 +142,17 @@ export const COR_REFRESH: RefreshSchedule = [daily(2, 20)];
 export const VIXCOR_REFRESH: RefreshSchedule = [daily(2, 35)];
 
 /** cloud/services/radon-vixts.timer */
-export const VIXTS_REFRESH: RefreshSchedule = [daily(2, 45)];
+export const VIXTS_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+];
 
 /** cloud/services/radon-panic-index.timer */
-export const PANIC_INDEX_REFRESH: RefreshSchedule = [daily(2, 50), daily(13, 15)];
+export const PANIC_INDEX_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+  daily(13, 15),
+];
 
 /** cloud/services/radon-dispersion.timer — 22:20 sweep, 23:20 if a deploy killed it */
 export const DISPERSION_REFRESH: RefreshSchedule = [daily(22, 20), daily(23, 20)];

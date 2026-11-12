@@ -41,8 +41,11 @@ from db.hrana_http import HRANA_TIMEOUT_S, hrana_execute, hrana_query
 from utils.atomic_io import atomic_save, verified_load
 from utils.market_calendar import last_completed_session_date
 from utils.ib_preflight import ib_auth_state
+from utils import index_live
 
 SERVICE = "vix-model-spread"
+# Provisional current-session row, kept apart from the multi-MB official snapshot.
+LIVE_SERVICE = index_live.live_service(SERVICE)
 VIX_MODEL_SPREAD_JSON = _PROJECT_DIR / 'data' / 'vix-model-spread.json'
 SYMBOLS = ('VIX', 'VIXEQ', 'COR1M')
 _SNAPSHOT_CHUNK_CHARS = 64 * 1024
@@ -270,15 +273,7 @@ def _probe_ib():
     if state and state != 'authenticated':
         return {'status': 'skipped', 'auth_state': state}
     try:
-        headers = {'User-Agent': 'radon/2.0'}
-        if os.environ.get('MDW_API_KEY'):
-            headers['X-API-Key'] = os.environ['MDW_API_KEY']
-        response = requests.post('http://127.0.0.1:8321/historical/bars', headers=headers,
-                                 json={'contract': {'sec_type': 'IND', 'symbol': 'VIXEQ',
-                                                    'exchange': 'CBOE', 'currency': 'USD'},
-                                       'duration': '2 D', 'bar_size': '1 day'}, timeout=15)
-        response.raise_for_status()
-        bars = response.json().get('bars')
+        bars = index_live.pool_daily_bars('VIXEQ', '2 D')
         if not isinstance(bars, list):
             return {'status': 'unavailable'}
         valid = _validated([{'date': bar.get('date'), 'value': bar.get('close')}
@@ -287,6 +282,40 @@ def _probe_ib():
     except (requests.RequestException, ValueError, TypeError, AttributeError):
         # No upstream body, URL, account identifier or credential in diagnostics.
         return {'status': 'unavailable'}
+
+
+def _live_ib(now):
+    """Today's partial daily bar for all three indexes, or None."""
+    return index_live.live_from_ib(SYMBOLS, now)
+
+
+def _live_cboe():
+    """Cboe 15-minute delayed quotes for all three, all on one session, or None."""
+    return index_live.live_from_cboe(SYMBOLS)
+
+
+def _fetch_live(probe, now):
+    """Provisional current-session inputs. IB when it covers VIXEQ, then Cboe delayed.
+
+    All three inputs always come from one source so the spread is never built
+    from mismatched timestamps. Advisory only: a failure returns None.
+    """
+    return index_live.fetch_live(SYMBOLS, now, try_ib=probe.get('status') == 'available', label=SERVICE,
+                                 ib=lambda symbols, when: _live_ib(when), cboe=lambda symbols: _live_cboe())
+
+
+def _live_row(raw_sources, live, now):
+    """Official history plus one provisional session, computed the same way."""
+    official = min(rows[-1]['date'] for rows in raw_sources.values())
+    if not index_live.is_newer(live, official, now):
+        return None
+    extended = [raw_sources[s] + [{'date': live['date'], 'value': live['values'][s]}] for s in SYMBOLS]
+    series = compute_series(*extended)
+    return series[-1] if series and series[-1]['date'] == live['date'] else None
+
+
+def _snapshot_is_old(previous, now):
+    return index_live.snapshot_is_old(previous.get('scan_time'), now)
 
 
 def run(client=None, previous=None, *, now=None):
@@ -330,7 +359,19 @@ def run(client=None, previous=None, *, now=None):
         payload['series_hash'] = _series_hash(series)
         prior_hash = previous.get('series_hash')
         changed = payload['series_hash'] != prior_hash if prior_hash else series != previous.get('series')
-        persist_result(payload, rows_changed=changed)
+        live = _fetch_live(probe, now)
+        row = _live_row(raw_sources, live, now)
+        live_payload = {'scan_time': scan_time, 'row': row,
+                        'source': live['source'] if row else None,
+                        'quote_time': live['quote_time'] if row else None}
+        # A live tick never rewrites the multi-MB official snapshot unless the
+        # official series moved or the snapshot nears its freshness window.
+        full = changed or row is None or _snapshot_is_old(previous, now)
+        if full:
+            persist_result(payload, rows_changed=changed)
+        writer.upsert_scan_snapshot(LIVE_SERVICE, scan_time, live_payload)
+        if not full:
+            writer.record_service_health(SERVICE, 'ok', finished_at=scan_time)
         return payload
     except Exception as exc:
         _record_error(scan_time, exc)
