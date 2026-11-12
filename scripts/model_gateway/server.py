@@ -37,7 +37,7 @@ from .lifecycle import RefreshManager
 from .provider_gate import ProviderGate, provider_concurrency
 
 log = logging.getLogger("model_gateway")
-PROVIDERS = frozenset(engine.MODEL_LADDER_ORDER) | {"slm-tagger"}
+PROVIDERS = frozenset(engine.MODEL_LADDER_ORDER)
 JSON_FIELDS = {"instruction", "system", "images", "model", "model_override", "providers", "max_tokens", "read_timeout", "max_response_bytes", "require_end_turn", "stream_anthropic", "log_prefix", "continuation", "accept", "purpose", "post_id", "taxonomy"}
 
 
@@ -142,7 +142,7 @@ class Gateway:
         if sum(len(value) for _, value in decoded) > 10_000_000:
             raise GatewayError("request_too_large", "Model images exceed the service limit", 413)
         if decoded:
-            providers = [name for name in (providers or engine.MODEL_LADDER_ORDER) if name not in {"antigravity", "cursor", "slm-tagger"}]
+            providers = [name for name in (providers or engine.MODEL_LADDER_ORDER) if name not in {"antigravity", "cursor"}]
         model = payload.get("model_override", payload.get("model"))
         if model is not None and (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", model)):
             raise GatewayError("invalid_request", "Invalid model selection", 400)
@@ -154,25 +154,17 @@ class Gateway:
         taxonomy = payload.get("taxonomy")
         if taxonomy is not None and (purpose != "newsfeed-tags" or not isinstance(taxonomy, list) or len(taxonomy) > 4096 or any(not isinstance(tag, str) or not 0 < len(tag) <= 128 for tag in taxonomy)):
             raise GatewayError("invalid_request", "Invalid tagger taxonomy", 400)
-        def invoke(selection, *, auxiliary=False):
-            scope_state = {**state, "seen": set()} if auxiliary else state
-            with self._scope(scope_state, cancelled), engine.slm_taxonomy(taxonomy):
-                return engine.complete_multimodal_json(payload["instruction"], decoded,
-                    system=payload.get("system", ""), model_override=model, providers=selection,
-                    max_tokens=max_tokens, read_timeout=budget, max_response_bytes=response_limit,
-                    require_end_turn=payload.get("require_end_turn", True), stream_anthropic=payload.get("stream_anthropic", True),
-                    accept=accept, log_prefix="model-gateway-json")
-        shadow = None
-        if purpose == "newsfeed-tags":
-            if decoded or providers is not None or payload.get("accept") != "tags":
-                raise GatewayError("invalid_request", "Invalid tagger routing contract", 400)
-            from .slm import complete
-            result, shadow = complete(payload, invoke)
-        else:
-            result = invoke(providers)
+        if purpose == "newsfeed-tags" and (decoded or providers is not None or payload.get("accept") != "tags"):
+            raise GatewayError("invalid_request", "Invalid tagger routing contract", 400)
+        with self._scope(state, cancelled):
+            result = engine.complete_multimodal_json(payload["instruction"], decoded,
+                system=payload.get("system", ""), model_override=model, providers=providers,
+                max_tokens=max_tokens, read_timeout=budget, max_response_bytes=response_limit,
+                require_end_turn=payload.get("require_end_turn", True), stream_anthropic=payload.get("stream_anthropic", True),
+                accept=accept, log_prefix="model-gateway-json")
         state["attempted"].extend(result.attempted)
         return {"data": result.data, "text": result.text, "provider": result.provider, "model": result.model,
-                "attempted": state["attempted"], "continuation": self._save_session(state), **({"shadow": shadow} if shadow else {})}
+                "attempted": state["attempted"], "continuation": self._save_session(state)}
 
     def models(self):
         from .specialized import model_inventory
