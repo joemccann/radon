@@ -190,6 +190,7 @@ print_gateway_plist() {
 </dict>
 <key>KeepAlive</key><true/>
 <key>RunAtLoad</key><true/>
+<key>SessionCreate</key><true/>
 <key>ThrottleInterval</key><integer>10</integer>
 <key>StandardOutPath</key><string>$GW_ROOT/log/gateway.log</string>
 <key>StandardErrorPath</key><string>$GW_ROOT/log/gateway.log</string>

@@ -56,6 +56,10 @@ def test_gateway_daemon_runs_the_root_installed_copy_as_its_own_account():
     assert plist["Label"] == "com.radon.model-gateway-local"
     assert plist["UserName"] == "_radonmodelgw" and plist["GroupName"] == "_radonmodel"
     assert plist["KeepAlive"] is True and plist["RunAtLoad"] is True
+    # A daemon without its own audit session searches only the system keychain
+    # domain, so agy's search-list lookup misses its grant (launchd probe,
+    # 2026-11-11: rc 44 without SessionCreate, 0 with it).
+    assert plist["SessionCreate"] is True
     assert plist["ProgramArguments"] == [
         "/usr/local/radon-runner/gateway/venv/bin/python", "-I",
         "/usr/local/radon-runner/gateway/gateway_launch.py", "serve",
