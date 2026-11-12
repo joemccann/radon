@@ -154,7 +154,7 @@ def _run_scan(
         return False
 
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path.write_text(json.dumps(data, indent=2))
+    tmp_path.write_text(json.dumps(data, separators=(",", ":")))
     tmp_path.rename(out_path)
     _log(f"{script} complete ({elapsed:.1f}s) → {out_path.name}")
     return True
