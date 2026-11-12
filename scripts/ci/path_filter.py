@@ -95,7 +95,7 @@ DOC_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico")
 # Both tuples are derived from the checkout and pinned by
 # scripts/tests/test_path_filter.py, which re-derives them on every run from
 # vitest.config.ts's test.include globs and from the path literals inside
-# web/tests, lib/tools/__tests__, site/lib, scripts/lib, .pi/tests and
+# web/tests, lib/tools/__tests__, site/lib, scripts/lib and
 # tests/, scripts/tests/, cloud/tests/. Adding a new cross-tree read without
 # updating these turns that test red. They only ever switch a gate ON.
 #
@@ -229,6 +229,7 @@ CROSS_TREE_CONTRACTS = (
             "scripts/tests/test_rel148_operability_fixes.py::TestEveryTimerDrivenScanIsWatched::test_the_web_catalog_no_longer_calls_it_on_demand",
             "scripts/tests/test_service_registration_completeness.py",
             "scripts/tests/test_watchdog/test_services.py",
+            "scripts/tests/test_watchdog/test_weekday_timer_age.py::test_trading_day_age_set_matches_typescript",
             "scripts/tests/test_watchdog_catalog_and_journal_bound.py::TestEveryScheduledServiceIsInABucket::test_perf_twr_is_in_both_catalogs",
             "scripts/tests/test_watchdog_catalog_parity.py",
         ),
@@ -280,12 +281,6 @@ CROSS_TREE_CONTRACTS = (
         patterns=("web/package-lock.json", "web/bun.lock"),
         tests=(
             "cloud/tests/test_beta_sunset.py::test_root_and_web_do_not_ship_npm_lockfiles",
-        ),
-    ),
-    CrossTreeContract(
-        patterns=("web/README.md",),
-        tests=(
-            "scripts/tests/test_docs_contract.py::TestThinIndex::test_web_readme_does_not_teach_npm",
         ),
     ),
     CrossTreeContract(

@@ -2,7 +2,7 @@
 Description=Radon private AI model gateway and subscription lifecycle
 Wants=network-online.target radon-subscription-vault.service
 After=network-online.target radon-subscription-vault.service
-Before=radon-api.service radon-nextjs.service radon-newsfeed.service radon-monitor.service radon-marketdesk.service radon-research.service radon-subscription-tokens.service
+Before=radon-api.service radon-nextjs.service radon-newsfeed.service radon-monitor.service radon-marketdesk.service radon-subscription-tokens.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 

@@ -1,7 +1,7 @@
 """Pure classification: probe findings -> incidents mapped to runbook cases.
 
 No clock reads — the cycle passes ``now`` so every rule is testable with a
-pinned clock (the only I/O is a once-per-year cached holiday-config read).
+pinned clock (the only I/O is market_calendar's cached calendar-file read).
 ``unknown`` findings never classify as the probed condition (a probe that
 could not observe is not evidence of an outage) — but a probe whose unknown
 is DEFINITIVE (missing/rotated token, non-200 auth response) cannot self-heal
@@ -16,39 +16,17 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from functools import lru_cache
-from zoneinfo import ZoneInfo
+
+try:
+    from utils.market_calendar import is_market_open_et
+except ImportError:
+    from scripts.utils.market_calendar import is_market_open_et
 
 RUNBOOK = "docs/incident-runbook.md"
 
-ET = ZoneInfo("America/New_York")
-RTH_OPEN_MINUTES = 9 * 60 + 30
-RTH_CLOSE_MINUTES = 16 * 60
-
-
-@lru_cache(maxsize=8)
-def _holidays(year: int) -> frozenset[str]:
-    try:
-        from utils.market_calendar import load_holidays
-    except ImportError:
-        try:
-            from scripts.utils.market_calendar import load_holidays
-        except ImportError:
-            return frozenset()
-    try:
-        return frozenset(load_holidays(year))
-    except Exception:
-        return frozenset()
-
 
 def _is_market_open(now: datetime) -> bool:
-    et = now.astimezone(ET)
-    if et.weekday() >= 5:
-        return False
-    if et.strftime("%Y-%m-%d") in _holidays(et.year):
-        return False
-    minutes = et.hour * 60 + et.minute
-    return RTH_OPEN_MINUTES <= minutes < RTH_CLOSE_MINUTES
+    return is_market_open_et(now)
 
 
 def _embargo_in_future(last_error: str | None, now: datetime) -> bool:

@@ -296,14 +296,13 @@ def test_original_bank_attribution_is_accepted(db,post):
 
 
 def test_publication_manifest_binds_exact_source_pdf(db, tmp_path, monkeypatch):
-    from research.manifest import build_manifest
+    from research_manifest_fixtures import build_manifest
     # Reuse the real asset/publish fixture construction without external data.
     monkeypatch.setenv('RADON_RESEARCH_DIR', str(tmp_path/'research'))
     pdf = tmp_path/'source.pdf';pdf.write_bytes(b'%PDF-1.4 fixture')
     url = publish.store_asset(pdf)
     digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
-    (tmp_path/'page-0001.md').write_text('Report date: 7 September 2026. Capex 20.')
-    manifest = build_manifest({'source_sha256':digest,'pages':[{'page_number':1,'markdown_file':'page-0001.md','needs_ocr':False}]},tmp_path)
+    manifest = build_manifest(digest, [('Report date: 7 September 2026. Capex 20.', False)])
     file = tmp_path/'manifest.json';file.write_text(json.dumps(manifest))
     evidence_url = publish.store_asset(file)
     post = {'id':'research-'+'d'*32,'title':'Sector capex research','content':'Capex 20.',
@@ -509,31 +508,6 @@ def test_publication_rechecks_current_book_even_with_valid_editorial_certificate
         publish.publish(post)
     assert caught.value.reason_code==reason
     assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
-
-
-def test_legacy_certified_outbox_cannot_publish_after_book_removal(db,post,monkeypatch,tmp_path):
-    from research import book
-    from research.state import State
-    from research.worker import flush_outbox
-    post=certify({**post,'title':'Robinhood (HOOD) earnings','content':'Robinhood EPS rose 10%.'})
-    current={'HOOD'}
-    monkeypatch.setattr(book,'current_tickers',lambda:current)
-    humanizer.validate_certificate(post)
-    state=State(tmp_path/'outbox.sqlite')
-    with state.db:
-        state.db.execute("INSERT INTO work(key,file_id,rev,path,scope,metadata,status,result) VALUES('work','id:abc','r1','/report.pdf','scope','{}','complete',?)",
-                         (json.dumps({'status':'reviewed','items':1}),))
-        state.db.execute("INSERT INTO outbox VALUES(?,'work',?,'pending')",(post['id'],json.dumps(post)))
-    current.clear()
-    assert flush_outbox(state,publish)==0
-    assert flush_outbox(state,publish)==0
-    assert state.outbox()==[]
-    row=state.db.execute('SELECT status,error,result FROM work').fetchone()
-    assert row['status']=='complete' and row['error']=='EQUITY_RESEARCH_NOT_IN_BOOK'
-    assert json.loads(row['result'])['status']=='dropped'
-    assert json.loads(state.db.execute('SELECT payload FROM outbox').fetchone()[0])==post
-    assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
-    state.close()
 
 
 @pytest.mark.parametrize('caption,current,blocked', [

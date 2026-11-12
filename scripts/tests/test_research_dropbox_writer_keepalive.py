@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from research.dropbox import DropboxError
+from research.dropbox_writer import DropboxError
 from research.dropbox_writer import DropboxWriter
 
 

@@ -109,10 +109,8 @@ class TestAuthTracker:
     @pytest.fixture(autouse=True)
     def _clean(self):
         ib_gateway._auth_transition_state["previous_auth_state"] = None
-        ib_gateway._restart_state.update(attempt_count=0, next_attempt_after=0.0, last_outcome=None)
         yield
         ib_gateway._auth_transition_state["previous_auth_state"] = None
-        ib_gateway._restart_state.update(attempt_count=0, next_attempt_after=0.0, last_outcome=None)
 
     def test_unreachable_to_authenticated_heals_and_releases(self, monkeypatch):
         heal = AsyncMock(return_value=[])
@@ -130,38 +128,6 @@ class TestAuthTracker:
         heal.assert_awaited_once()
         release.assert_called_once_with(expected_holder=ib_gateway.IB_GATEWAY_ENSURE_LOCK_HOLDER)
         pool.reconnect_all.assert_awaited_once()
-
-    @pytest.mark.parametrize("port_up, probe, expected", [
-        (False, (False, []), "unreachable"),
-        (True, (False, []), "awaiting_2fa"),
-    ])
-    def test_restart_routes_its_observation_through_the_transition(
-        self, monkeypatch, port_up, probe, expected,
-    ):
-        seen = []
-
-        async def record(state, pool, **kwargs):
-            seen.append(state)
-            return False
-
-        async def fake_restart_docker():
-            return {"restarted": True, "port_listening": port_up}
-
-        async def fake_probe(timeout=8.0):
-            return probe
-
-        monkeypatch.setattr(ib_gateway, "GATEWAY_MODE", "docker")
-        monkeypatch.setattr(ib_gateway, "_app_role_refusal", lambda action: None)
-        monkeypatch.setattr(ib_gateway, "_restart_docker", fake_restart_docker)
-        monkeypatch.setattr(ib_gateway, "_probe_authenticated", fake_probe)
-        monkeypatch.setattr(ib_gateway, "handle_auth_state_transition", record)
-
-        asyncio.run(ib_gateway.restart_ib_gateway())
-
-        assert seen == [expected]
-        assert ib_gateway._auth_transition_state["previous_auth_state"] is None, (
-            "restart_ib_gateway must not write the tracker itself"
-        )
 
 
 def test_ib_pool_has_one_connected_truth():

@@ -16,6 +16,7 @@
 
 import { scanTimeToEtDate } from "./parseScanTime";
 import { mostRecentSessionDate } from "./marketSession";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 
 export interface GammaRotationDataShape {
   scan_time?: string;
@@ -23,19 +24,10 @@ export interface GammaRotationDataShape {
   [key: string]: unknown;
 }
 
-function isMarketOpenNow(): boolean {
-  const now = new Date();
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
-}
-
 export function isGammaRotationStale(
   data: GammaRotationDataShape,
   todayET: string = mostRecentSessionDate(),
-  currentMarketOpen: boolean = isMarketOpenNow(),
+  currentMarketOpen: boolean = isMarketOpenAt(),
 ): boolean {
   const scanTime = typeof data.scan_time === "string" ? data.scan_time : "";
   const sessionDate = scanTimeToEtDate(scanTime);

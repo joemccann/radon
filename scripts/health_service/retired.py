@@ -1,8 +1,8 @@
 """Retired research health. Stdlib only: the health daemon imports this.
 
-The ingestion review stage (`research.ingestion.stage_health(..., 'review')`)
-runs only inside `radon-research.service`, which writes the Turso row
-`dropbox-research`. That unit is disabled. `marketdesk_job` and
+The ingestion review stage ran only inside `radon-research.service`, which
+wrote the Turso row `dropbox-research`. That unit and its code are deleted
+and deploys remove any installed copy. `marketdesk_job` and
 `marketdesk_pdf_job` do not call it. They write `marketdesk-research` and
 `marketdesk-pdf`. A leftover row can still carry the 2026-10-15 `DbHttpError`.
 Readers mark that row retired and point current research health at the live

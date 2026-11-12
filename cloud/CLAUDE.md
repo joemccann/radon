@@ -511,9 +511,10 @@ manufacture a healthy heartbeat.
 **Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: its three host jobs join Tailscale as ephemeral `tag:ci` nodes before key-authenticated SSH to the app tailnet address (public app SSH is closed; [network trust](../docs/operations.md#ci-deploy-over-the-tailnet) owns enrollment and recovery). The final deploy job materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets remain outside the checkout; [Environment Handling](#environment-handling) owns canonical and compatibility paths. After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. The SSH script first waits a bounded time (`RADON_DEPLOY_LOCK_WAIT_SECS`, default 480s) for a still-finishing previous release to free `/var/lib/radon-lock/deploy.lock` and the retained compatibility inode `~/.radon-deploy.lock`, so back-to-back green merges queue instead of failing on the lock (2026-09-19, run 35463319654); `deploy.sh` itself stays non-blocking and still refuses with exit 75 if the lock is held after the wait. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). Checked-in Caddy configuration provides HTTPS with an HTTP redirect for the dedicated MCP host; follow the [hosted-MCP owner](../docs/cloud-services.md#hosted-mcp-radon-mcpservice-issue-232-chunk-1) for operator TLS verification before changing the published consumer URL. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
 
 The root helper normally polls service state for 60 seconds. Production stops
-of the retired `radon-research.service` (now only ever stopped, by
-`retire_research_watcher`) instead allow 150 seconds: its canonical unit has
-`TimeoutStopSec=120`, followed by container cleanup in `ExecStopPost`. Research
+of a leftover installed copy of the retired `radon-research.service` (now only
+ever stopped, then uninstalled, by `retire_research_watcher`) instead allow 150
+seconds: its last shipped unit had `TimeoutStopSec=120`, followed by container
+cleanup in `ExecStopPost`. Research
 startup and all other state waits keep their original bounds. The root mutation
 supervisor still caps the complete action at 180 seconds and fails closed into
 recovery if shutdown does not complete. `cloud/tests/test_research_deploy.py`
@@ -537,7 +538,9 @@ promote-in-place` instead of `stop-clean` / `restart-managed`. That verb
 clears the previous release's commit receipt and exports model clients for
 the new SHA without stopping anything. Do not write the receipt by hand.
 `cloud/tests/test_deploy_inplace_promotion.py` pins the sudoers grant and
-the no-restart path.
+the no-restart path. `scripts/runner/*` (the Mac agent-loop runner, never run
+on the VPS) is non-runtime alongside docs and tests; a diff that also touches a
+runtime path still restarts.
 
 ## Post-deploy hooks
 
@@ -917,9 +920,17 @@ allowlist and the read-only inference socket. Provider grants stay on the
 model gateway. Heartbeats `marketdesk-research` and
 `marketdesk-dropbox` (15m). `radon-research.service` is retired:
 `restart-managed` and `recover` run `retire_research_watcher` (disable --now an
-enabled watcher, stop a hand-started one, never fatal) in place of the old
-`start_optional_research`; the unit file stays installed. Spec:
+enabled watcher, stop a hand-started one, then delete the installed unit file
+and drop-in and `daemon-reload`; never fatal). The unit and its code are no
+longer in the repository. Spec:
 [`docs/marketdesk-research.md`](../docs/marketdesk-research.md).
+
+`setup-vps.sh` inventories `radon-market-calendar.{service,timer}` and
+`enable_services` enables the timer; existing hosts get it from the deploy's
+`install-units` (new timer, `enable --now`). Weekly `Sun 22:00 UTC`, oneshot
+`scripts/fetch_market_calendar.py` (IBKR SPY liquidHours into
+`data/market_calendar.json`, the same script `POST /market-calendar/refresh`
+runs). Heartbeat `market-calendar` (8d, requires IB).
 
 `setup-vps.sh` inventories `radon-rsi-oversold.{service,timer}` and
 `enable_services` enables the timer. Daily 16:40 ET, twenty minutes
@@ -1039,6 +1050,8 @@ documented in `docs/operations.md` and `docs/uw-rest-governance.md`.
 
 
 ## Pinned operator clients
+
+`deploy.sh` first runs `radon-app-runtime stage-model-clients <sha>` right after the exact-SHA pull, while the current release still serves. It exports (or reuse-clones) the target's Linux tree and Darwin bundle without moving `current`. `install-model-clients` then only selects a staged tree whose receipt `image_id` equals the image id inspected at that moment and whose Linux and Darwin receipts verify; any miss exports during restart as before. Staging is best-effort (no grant or a refusal only warns) and runs under the deploy lock, never from the prepull job, so it cannot race the fixed export container name. Before it, a changed gateway payload exported inside the `stop-clean` to `restart-managed` window and held app.radon.run on 502 for about 100 seconds (2026-11-11).
 
 Before managed services start, `radon-app-runtime install-model-clients`
 exports the exact gateway image's CLI payloads and Node runtime through a

@@ -31,6 +31,7 @@ Treat a file name as a lead, never as proof. A change needs a documentation upda
 - `docs/README.md` is a thin human index. Each durable fact has exactly one owner doc.
 - `docs/owners.json` maps path globs to owner docs. Add a mapping only for drift that has recurred and has a clear owner.
 - `scripts/tests/test_docs_contract.py` enforces same-change owner updates. A mapped change resolves to one of: an owner update, a generated contract, a test, or a specific `docs-skip: <reason>` in the commit message. A vague skip, or any skip on a P0 or P1 contract, is itself a finding.
+- `scripts/tests/test_docs_contract.py` checks structure only: the owner map, the doc indexes, links, the append-only ledgers, and documented commands it can run. It does not pin wording. Never add a test that asserts a doc contains or omits a phrase.
 - `docs/archive/` is not current truth. `CONTRIBUTING.md`, `.github/CODEOWNERS` and `scripts/ci/path_filter.py` also belong to this contract.
 - `docs/` holds mixed content. `docs/options-structures.json` and `docs/owners.json` are runtime and CI inputs, not prose. Never treat the whole directory as documentation-only.
 - Read the root `CLAUDE.md` and any subdirectory `CLAUDE.md` for the paths you touch. Their rules apply to you.
@@ -46,8 +47,8 @@ Treat a file name as a lead, never as proof. A change needs a documentation upda
 
 If Reader, Action, Harm or Why prose has no concrete answer, add nothing. Otherwise:
 - If an existing owner can hold the fact, do not create a file.
-- If the fact is an exact inventory (endpoints, fields, flags, defaults, versions, services, ports, schedules, env names, dependencies), generate it or test it. Never copy it into Markdown by hand.
-- If the fact is an enforceable rule and the code already behaves correctly, pin it in a focused test.
+- If the fact is an exact inventory (endpoints, fields, flags, defaults, versions, services, ports, schedules, env names, dependencies), generate it, or test it by deriving the doc from the source. Never copy it into Markdown by hand.
+- If the fact is an enforceable rule and the code already behaves correctly, pin the code's behavior in a focused test. Never pin the doc's wording.
 - If the code is wrong or missing, do not fix it here. Note it in the PR's Next section with file:line evidence.
 - Create an ADR only for a significant decision with real alternatives that the source cannot show.
 
@@ -109,6 +110,7 @@ For each finding, write down `actor -> action -> harm if stale -> source file:li
 - Check documented commands and flags against the parsers or `--help`. Never run them live.
 - `git diff --check`
 - Scan the diff for secrets.
+- A doc-only fix is verified by the existing structural tests above and by your review of the diff. It does not add a test.
 - If you touch a test, generator or other code, show the new test failing before the fix and passing after it, and run the affected suites. Leave full-suite runs to CI.
 - A changed runbook must state: symptom, prerequisites, blast radius, safe diagnosis, stop conditions, verification, rollback and escalation.
 

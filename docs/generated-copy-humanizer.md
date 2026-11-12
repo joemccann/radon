@@ -12,7 +12,6 @@ about human authorship.
 | Surface | Generation instructions | Final enforcement |
 | --- | --- | --- |
 | MarketDesk articles | `scripts/research/marketdesk_copy.py` | Shared Python review, including captions; publisher validates exact-copy certificate |
-| PDF research articles, both pipeline versions | `scripts/research/policy.md` | `summary_editor.py` reviews titles, bodies and captions; publisher validates certificate |
 | Newsfeed Explain | `web/lib/newsfeedExplain.ts` | Local checks plus model review before caching; cache keys include rubric version |
 | CTA social copy | `scripts/utils/cta_llm.py` | Source fidelity, shared scored review, bounded rewrite, final certificate; failure uses deterministic template |
 | Operational assistant prose | Shared draft instructions in assistant system prompt | Negative-parallelism and repetition checks, one bounded regeneration; a remaining style finding still answers, only repetition takes the existing error path |

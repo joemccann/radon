@@ -185,10 +185,8 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
-          cache-dependency-glob: |
-            requirements-dev.txt
-            cloud/requirements-test.txt
-      - run: uv pip install -r requirements-dev.txt -r cloud/requirements-test.txt
+          cache-dependency-glob: requirements-dev.txt
+      - run: uv pip install -r requirements-dev.txt
       - run: >-
           python -m pytest ${{ needs.changes.outputs.contract_cloud_tests }}
           -q --durations=25
@@ -443,7 +441,6 @@ jobs:
             requirements.txt
             scripts/requirements-api.txt
             requirements-dev.txt
-            cloud/requirements-test.txt
       - name: Install dependencies
         run: |
           python scripts/deps/materialize_fastembed_pillow13.py
@@ -614,15 +611,9 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           activate-environment: true
-          cache-dependency-glob: |
-            requirements-dev.txt
-            cloud/requirements-test.txt
+          cache-dependency-glob: requirements-dev.txt
       - name: Install dependencies
-        run: |
-          uv pip install -r requirements-dev.txt
-          if [ -f cloud/requirements-test.txt ]; then
-            uv pip install -r cloud/requirements-test.txt
-          fi
+        run: uv pip install -r requirements-dev.txt
       # cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism is the only
       # EXECUTABLE proof of the R-219 bound on a hung upstream and the R-220
       # non-replay of a severed POST /api/orders/place. R-220 is an
@@ -881,9 +872,9 @@ jobs:
     # navigates the loopback 127.0.0.1 directly (PLAYWRIGHT_BASE_HOST below).
     # `next dev` still never readies in the constrained container (cold-compiling
     # heavy routes hangs), so the job builds once and serves a prebuilt
-    # `next start` (the perimeter-smoke pattern). day-move-ib-daily-pnl is held
-    # out (dev-vs-prod Day Move divergence, TEST_AUDIT NEW_FINDINGS); still runs
-    # locally.
+    # `next start` (the perimeter-smoke pattern). day-move-ib-daily-pnl was held
+    # out for a dev-vs-prod Day Move divergence; it passed 2/2 under a local
+    # `next start` preflight on 2026-11-11 (owner decision D8) and is curated.
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
@@ -1001,6 +992,40 @@ jobs:
           e2e/uw-advanced-research.spec.ts
           e2e/scanner-ticker-scan.spec.ts
           e2e/ticker-search-chain.spec.ts
+          e2e/cash-flows-section.spec.ts
+          e2e/cash-flows-withdrawal-may8.spec.ts
+          e2e/chain-column-toggle.spec.ts
+          e2e/chain-sticky-header.spec.ts
+          e2e/chain-strikes-selector.spec.ts
+          e2e/clear-overview.spec.ts
+          e2e/day-move-breakdown-net-combo.spec.ts
+          e2e/day-move-ib-daily-pnl.spec.ts
+          e2e/fill-toast.spec.ts
+          e2e/mobile-blotter.spec.ts
+          e2e/mobile-chain-ladder.spec.ts
+          e2e/mobile-combo-instrument-switcher.spec.ts
+          e2e/mobile-orders.spec.ts
+          e2e/mobile-positions.spec.ts
+          e2e/mobile-risk-reversal-quote-sign.spec.ts
+          e2e/mobile-same-day-pnl-parity.spec.ts
+          e2e/mobile-stop-order.spec.ts
+          e2e/mobile-ticket-session-refresh.spec.ts
+          e2e/open-order-single-detail.spec.ts
+          e2e/order-cancel-error-propagation.spec.ts
+          e2e/order-payoff-ratio.spec.ts
+          e2e/orders-empty-state.spec.ts
+          e2e/orders-historical-trades-today.spec.ts
+          e2e/orders-ux-command-strip.spec.ts
+          e2e/performance-market-closed.spec.ts
+          e2e/performance-page.spec.ts
+          e2e/portfolio-market-closed.spec.ts
+          e2e/portfolio-ratio-risk-reversal-label.spec.ts
+          e2e/portfolio-return-capital.spec.ts
+          e2e/risk-reversal-skew.spec.ts
+          e2e/short-strangle-skew.spec.ts
+          e2e/spread-price-bar.spec.ts
+          e2e/theta-harvester-prefill.spec.ts
+          e2e/unrealized-modal-reconciles-rows.spec.ts
       - name: Upload UW Advanced research screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1339,12 +1364,11 @@ jobs:
             SHA='${{ github.sha }}'
             RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
-            LEGACY_CLOUD="${HOME}/radon-cloud"
-            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
-              ENV_FILE=/etc/radon/env
-            else
-              ENV_FILE="${LEGACY_CLOUD}/.env"
+            if [[ ! -f /etc/radon/env || -L /etc/radon/env ]]; then
+              echo "/etc/radon/env is missing or not a regular file; /home/radon/radon-cloud/.env is retired and is not a fallback" >&2
+              exit 1
             fi
+            ENV_FILE=/etc/radon/env
             RUNNER_ROOT="${HOME}/.radon-deploy-runners"
             RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}.prestage"
             RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
@@ -1514,11 +1538,11 @@ jobs:
             RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
             LEGACY_CLOUD="${HOME}/radon-cloud"
-            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
-              ENV_FILE=/etc/radon/env
-            else
-              ENV_FILE="${LEGACY_CLOUD}/.env"
+            if [[ ! -f /etc/radon/env || -L /etc/radon/env ]]; then
+              echo "/etc/radon/env is missing or not a regular file; /home/radon/radon-cloud/.env is retired and is not a fallback" >&2
+              exit 1
             fi
+            ENV_FILE=/etc/radon/env
             RUNNER_ROOT="${HOME}/.radon-deploy-runners"
             RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}"
             RUNNER_KEEP_NEWEST=4

@@ -371,7 +371,6 @@ def test_control_does_not_depend_on_live_app_venv(control_env, tmp_path):
 
 def test_operator_and_setup_route_gateway_through_control_helper():
     operator = (CLOUD_ROOT / "scripts" / "operator-radon.sh").read_text()
-    start_services = (CLOUD_ROOT / "scripts" / "start-services.sh").read_text()
     post_setup = (CLOUD_ROOT / "scripts" / "post-setup.sh").read_text()
     setup = (CLOUD_ROOT / "scripts" / "setup-vps.sh").read_text()
 
@@ -384,12 +383,8 @@ def test_operator_and_setup_route_gateway_through_control_helper():
     assert "PERSISTENT_UNITS=(" in operator
     assert "require_2fa_push_lock" not in operator
     assert not re.search(r"systemctl\s+(?:start|restart)\s+radon-ib-gateway", operator)
-    assert "docker compose up -d" not in start_services
-    assert "/usr/local/bin/radon" in start_services
-    assert "systemctl start radon-nextjs" not in start_services
     assert post_setup.count("/usr/local/bin/radon start") == 1
     assert "systemctl start radon-nextjs" not in post_setup
-    assert not re.search(r"sudo\s+systemctl\s+restart", start_services)
     start_fn = setup[setup.index("start_services() {"):setup.index("# -- Firewall")]
     # setup starts the stack only through the locked operator, which owns the
     # Gateway control helper and deploy lock. Direct helper/systemctl is banned.

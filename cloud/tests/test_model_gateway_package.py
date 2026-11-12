@@ -31,9 +31,6 @@ except ImportError:
 else:
     raise AssertionError("DB persistence must fail closed when its SDK is unavailable")
 assert "db" not in sys.modules and "libsql_experimental" not in sys.modules''',
-    '''from scripts.model_gateway import _ocr_backend
-server.engine._text_from_openai=lambda value: "same engine"
-assert _ocr_backend._openai_text({})=="same engine"''',
     '''from scripts.model_gateway import _catalog_backend
 assert _catalog_backend._ladder() is server.engine''',
     '''from scripts.model_gateway import _x_search_backend

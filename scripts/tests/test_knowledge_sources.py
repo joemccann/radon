@@ -361,6 +361,16 @@ def test_docs_scope_and_doc_keys(db, docs_tree):
     assert all(d.source == "docs" for d in docs)
 
 
+def test_docs_archive_is_never_ingested(db, docs_tree):
+    docs_dir, _ = docs_tree
+    (docs_dir / "live.md").write_text("# Live\n\nCurrent truth.\n")
+    (docs_dir / "archive").mkdir()
+    (docs_dir / "archive" / "old-plan.md").write_text("# Old plan\n\nFinished.\n")
+    keys = {d.doc_key for d in docs_source.fetch(db)}
+    assert keys == {"docs/live.md"}
+    assert docs_source.ingested_doc_keys() == ["docs/live.md"]
+
+
 def test_docs_long_section_splits_sequentially(db, docs_tree):
     docs_dir, _ = docs_tree
     paragraphs = "\n\n".join("prose " * 300 for _ in range(5))

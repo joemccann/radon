@@ -223,17 +223,8 @@ def _et_date(now_utc: datetime) -> str:
 
 
 def _is_trading_day_et(now_utc: datetime) -> bool:
-    et_dt = now_utc.astimezone(ET)
-    if et_dt.weekday() >= 5:
-        return False
-    # Lazy import — keeps the handler importable in environments without
-    # the holiday config in place.
-    try:
-        from utils.market_calendar import load_holidays
-    except Exception:
-        return True
-    holidays = load_holidays(et_dt.year)
-    return et_dt.strftime("%Y-%m-%d") not in holidays
+    from utils.market_calendar import is_trading_day_et
+    return is_trading_day_et(now_utc)
 
 
 class CashFlowSyncHandler(BaseHandler):
@@ -456,7 +447,7 @@ class CashFlowSyncHandler(BaseHandler):
         self._record_failure(self._utc_now_iso(), message)
 
     def _classify_failure(self, message: str, exc: Optional[BaseException]) -> str:
-        """throttle | permanent | config | lockout | soft.
+        """throttle | permanent | config | lockout | preflight_embargo | soft.
 
         Prefers the typed exception carrying the subprocess's exit code.
         The stderr substring match is retained ONLY as a fallback for a
@@ -465,7 +456,7 @@ class CashFlowSyncHandler(BaseHandler):
         if isinstance(exc, FlexThrottleError):
             return "throttle"
         flex_class = getattr(exc, "flex_class", None)
-        if flex_class in ("throttle", "permanent", "config", "lockout"):
+        if flex_class in ("throttle", "permanent", "config", "lockout", "preflight_embargo"):
             return flex_class
         if flex_class is not None:
             return "soft"

@@ -208,10 +208,7 @@ class TestOrderLaneRegistry:
 
 
 class _BlockingProcess:
-    """Stand-in child that holds its slot until it is explicitly killed.
-
-    Mirrors `test_ib_gateway_subprocess_cleanup._BlockingProcess`.
-    """
+    """Stand-in child that holds its slot until it is explicitly killed."""
 
     def __init__(self) -> None:
         self.started = asyncio.Event()

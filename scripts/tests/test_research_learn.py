@@ -1,11 +1,7 @@
 """Learning from operator votes: selector examples are automatic; hard rules are only ever proposed."""
 import json
-from types import SimpleNamespace
 
-import pytest
-
-from research import identify, intake, learn, triage
-from tests.test_research_intake import Reviewer, catalogue, extractor, selection, verdict, work
+from research import identify, learn, triage
 
 
 def vote(id_, target, vote_, snapshot, *, reasons=(), comment="", key=None, created="2026-09-19T12:00:00Z"):
@@ -84,19 +80,3 @@ def test_approved_rules_drop_documents_with_their_own_reason_codes():
     assert triage.decide(ident, rules={"series_deny": set(), "doc_type_drop": {"research"}, "publisher_deny": set()}) == ("drop", "RULE_DOC_TYPE")
     assert triage.decide(ident, rules={"series_deny": set(), "doc_type_drop": set(), "publisher_deny": {"UBS"}}) == ("drop", "RULE_PUBLISHER")
     assert triage.decide(ident, rules=None) == ("review", None)
-
-
-def test_intake_feeds_examples_to_the_selector_and_applies_approved_rules(tmp_path):
-    publisher = SimpleNamespace(store_asset=lambda p: "/api/newsfeed/research/files/" + "b" * 64 + "." + str(p).rsplit(".", 1)[-1])
-    (tmp_path / "examples.json").write_text(json.dumps({"examples": learn.examples(rows())}))
-    reviewer = Reviewer([selection(), verdict()])
-    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
-    assert len(pipe.process(work(), tmp_path / "r.pdf", [])) == 1
-    prompt = reviewer.calls[0][1]
-    assert "OPERATOR PREFERENCES" in prompt and "single stock, not for me" in prompt and "rates decisions always matter" in prompt
-
-    (tmp_path / "rules.json").write_text(json.dumps({"series_deny": ["tic data"], "doc_type_drop": [], "publisher_deny": []}))
-    blocked = dict(work(), key="z" * 64)
-    assert pipe.process(blocked, tmp_path / "r.pdf", []) == []
-    review = json.loads((tmp_path / "evidence" / ("z" * 64) / "review.json").read_text())
-    assert review["outcome"] == "dropped" and review["reason_code"] == "SERIES_DENYLIST"

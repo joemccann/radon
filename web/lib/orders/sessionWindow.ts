@@ -7,60 +7,12 @@
  */
 
 import { MarketState, marketStateAt } from "@/lib/useMarketHours";
-import { isHolidayTableCovering, isUsTradingDay } from "@/lib/serviceHealthWindows";
 import type { OpenOrderDisplayRow } from "@/lib/openOrderCombos";
 
-/** US equity early closes (13:00 ET), from the NYSE published calendar.
- *
- * `marketStateAt` models neither holidays nor early closes — it is a weekend
- * test plus fixed 09:30-16:00 minutes — yet the chip states a definitive fill
- * claim off it. At 14:30 ET on an early-close day it read RTH, every resting
- * DAY order was presented as still fillable, and the EXPIRES warning was
- * suppressed. Full closures come from the shared holiday table
- * (`scripts/config/market_holidays.json` via `isUsTradingDay`); early closes
- * have no shared table, so they are listed here with an explicit coverage
- * bound — outside it the chip degrades rather than guesses. R-336.
- */
-const EQUITY_EARLY_CLOSE_MIN: Record<string, number> = {
-  "2026-07-02": 13 * 60,
-  "2026-11-27": 13 * 60,
-  "2026-12-24": 13 * 60,
-  "2027-07-02": 13 * 60,
-  "2027-11-26": 13 * 60,
-  "2027-12-23": 13 * 60,
-};
-
-function etDateParts(now: Date): { iso: string; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(now);
-  const value = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
-  return {
-    iso: `${value("year")}-${value("month")}-${value("day")}`,
-    minutes: Number(value("hour")) % 24 * 60 + Number(value("minute")),
-  };
-}
-
-/** Market state for the chip: holiday- and early-close-aware. */
+/** Market state for the chip: holiday- and early-close-aware via the shared
+ * calendar (R-336: past a 13:00 half-day close the session reads EXTENDED). */
 export function chipMarketState(now: Date): MarketState {
-  const base = marketStateAt(now);
-  const { iso, minutes } = etDateParts(now);
-
-  // Outside the holiday table there is nothing to check against, so keep the
-  // base verdict rather than inventing one.
-  if (!isHolidayTableCovering(iso)) return base;
-
-  // A full-closure weekday is CLOSED all day, not OPEN or EXTENDED.
-  if (!isUsTradingDay(iso)) return MarketState.CLOSED;
-
-  const earlyClose = EQUITY_EARLY_CLOSE_MIN[iso];
-  if (earlyClose != null && base === MarketState.OPEN && minutes > earlyClose) {
-    // Past the early close the session is over; extended hours run to 20:00.
-    return MarketState.EXTENDED;
-  }
-  return base;
+  return marketStateAt(now);
 }
 
 export type SessionEligibility = "extended" | "rth-only";

@@ -1,6 +1,7 @@
 import type { BpiIndexSymbol, BpiPayload, BpiResponse, BpiState } from "@/lib/bpi";
 import type { BreadthData, BreadthDivergence, BreadthHistoryEntry, BreadthIntradayPoint } from "@/lib/useBreadth";
 import type { DispersionData, DispersionPoint } from "@/lib/dispersion";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 import { lastCompletedSessionDate, mostRecentSessionDate } from "@/lib/marketSession";
 import type { TrinData, TrinHourlyBar, TrinState } from "@/lib/trin";
 import type { GammaRotationData, GammaRotationHistoryEntry } from "@/lib/useGammaRotation";
@@ -17,20 +18,6 @@ function round(value: number, decimals = 2): number {
 
 function etCalendarDate(now: Date): string {
   return now.toLocaleDateString("sv", { timeZone: ET_TIME_ZONE });
-}
-
-function isMarketOpenAt(now: Date): boolean {
-  const parts = new Intl.DateTimeFormat("en-US-u-hc-h23", {
-    timeZone: ET_TIME_ZONE,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  if (values.weekday === "Sat" || values.weekday === "Sun") return false;
-  const minutes = Number(values.hour) * 60 + Number(values.minute);
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
 }
 
 function etWallClockTimestamp(sessionDate: string, hour: number, minute: number): string {

@@ -1,6 +1,9 @@
 """Docs connector — docs/*.md (scope research) plus tasks/lessons.md (scope
 ops). Chunks on top-level headings (fence-aware, so `# comment` lines inside
-```bash blocks never split a section), then ~4000-char paragraph splits."""
+```bash blocks never split a section), then ~4000-char paragraph splits.
+
+Only top-level docs are current truth. ``docs/archive/`` holds finished plans
+and is never ingested."""
 from __future__ import annotations
 
 import re
@@ -17,15 +20,29 @@ LESSONS_SCOPE = "ops"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_DIR = _REPO_ROOT / "docs"
 LESSONS_PATH = _REPO_ROOT / "tasks" / "lessons.md"
+LESSONS_KEY = "tasks/lessons.md"
 
 _HEADING = re.compile(r"^(#{1,2})\s+(.*)")
 
 
 def fetch(db) -> Iterator[KnowledgeDoc]:
-    for path in sorted(DOCS_DIR.glob("*.md")):
+    for path in _current_docs():
         yield from _file_docs(path, doc_key=f"docs/{path.name}", scope=SCOPE)
     if LESSONS_PATH.exists():
-        yield from _file_docs(LESSONS_PATH, doc_key="tasks/lessons.md", scope=LESSONS_SCOPE)
+        yield from _file_docs(LESSONS_PATH, doc_key=LESSONS_KEY, scope=LESSONS_SCOPE)
+
+
+def ingested_doc_keys() -> list[str]:
+    """Every doc_key this connector ingests, for checking golden-set pins."""
+    keys = [f"docs/{path.name}" for path in _current_docs()]
+    if LESSONS_PATH.exists():
+        keys.append(LESSONS_KEY)
+    return keys
+
+
+def _current_docs() -> list[Path]:
+    """Top-level docs/*.md only: subdirectories, docs/archive/ included, are not ingested."""
+    return sorted(path for path in DOCS_DIR.glob("*.md") if path.parent == DOCS_DIR)
 
 
 def _file_docs(path: Path, doc_key: str, scope: str) -> Iterator[KnowledgeDoc]:

@@ -147,31 +147,6 @@ def test_malformed_gateway_envelopes_fail_closed(monkeypatch, reply):
         model_ladder.complete_text_json("test")
 
 
-def test_ocr_consumer_preserves_image_and_uses_gateway(monkeypatch):
-    from research import nemotron_parse
-    seen = []
-    monkeypatch.setattr(nemotron_parse, "gateway_request", lambda op, payload, **kw: seen.append((op, payload)) or {"payload": {"choices": []}})
-    body = {"messages": [{"content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,cG5n"}}]}]}
-    assert nemotron_parse._post_with_retries("nvidia/nemotron-parse", body, post=None, sleep=None, monotonic=lambda: 1, jitter=None, deadline=10) == {"choices": []}
-    assert seen[0][0] == "ocr"
-    assert seen[0][1]["image"] == "cG5n"
-    assert seen[0][1]["timeout_seconds"] == 9
-
-
-def test_research_reviewer_uses_gateway_inventory_and_json(monkeypatch):
-    from clients import model_ladder
-    from research.model import Reviewer
-    calls = []
-    def request(operation, payload, **kwargs):
-        calls.append(operation)
-        if operation == "status":
-            return {"providers": ["antigravity"]}
-        return {"data": {"candidates": []}, "text": '{"candidates":[]}', "provider": "antigravity", "model": ""}
-    monkeypatch.setattr(model_ladder, "gateway_request", request)
-    assert Reviewer(env={}).ask_text("select") == {"candidates": []}
-    assert calls == ["status", "status", "json"]
-
-
 def test_clairic_consumer_does_not_read_candidate_credentials(monkeypatch):
     from research import clairic
     calls = []

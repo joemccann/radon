@@ -239,15 +239,6 @@ class TestPythonImage:
         for name in ("Inter-Variable.woff2", "IBMPlexMono-400.woff2"):
             assert (REPO_ROOT / "web/public/fonts" / name).is_file()
 
-    def test_real_chart_export_is_smoked_as_the_runtime_user(self) -> None:
-        text = PYTHON_DF.read_text(encoding="utf-8")
-        smoke = text.split("# Exercise the actual research renderer", 1)[1]
-        assert text.index("USER radon") < text.index("# Exercise the actual research renderer")
-        assert "from research.chart_render import render_chart" in smoke
-        assert "render_chart(plan, Path(folder) / 'smoke.png'" in smoke
-        assert "assert result['width'] == 2400" in smoke
-        assert "assert not result['geometry']['text_overflow']" in smoke
-
     def test_user_radon_is_final(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
         assert _final_user(text) == "radon"

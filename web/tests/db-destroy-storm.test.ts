@@ -290,9 +290,34 @@ describe("destroy cooldown breaks the reset feedback loop", () => {
     expect(totalDestroys()).toBe(2);
   });
 
-  it("cooldown outlives one full keep-alive heartbeat so the 3s metronome cannot sustain a storm", async () => {
+  it("cooldown stays above 3s, the read deadline and the pre-2026-07-12 heartbeat interval", async () => {
     const db = await freshDbModule();
     expect(db.DB_POOL_DESTROY_COOLDOWN_MS).toBeGreaterThan(3_000);
+  });
+
+  it("cooldown outlives one read deadline, so reads against a rebuilt pool get a full deadline before it can be torn down again", async () => {
+    const db = await freshDbModule();
+    const { DEFAULT_DB_READ_TIMEOUT_MS } = await import("../lib/dbExecute");
+    expect(db.DB_POOL_DESTROY_COOLDOWN_MS).toBeGreaterThan(DEFAULT_DB_READ_TIMEOUT_MS);
+  });
+
+  it("the keep-alive heartbeat alone can never complete a failure cluster", async () => {
+    const db = await freshDbModule();
+    const { DB_KEEPALIVE_INTERVAL_MS } = await import("../lib/dbKeepAlive");
+    expect(DB_KEEPALIVE_INTERVAL_MS).toBeGreaterThan(db.DB_POOL_FAILURE_CLUSTER_WINDOW_MS);
+
+    const nowSpy = vi.spyOn(Date, "now");
+    let t = 1_000_000;
+    nowSpy.mockImplementation(() => t);
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+
+    for (let beat = 0; beat < 5; beat += 1) {
+      db.resetDb(); // every heartbeat fails, with no other traffic
+      t += DB_KEEPALIVE_INTERVAL_MS;
+    }
+    expect(totalDestroys()).toBe(0);
   });
 
   it("__resetDbForTests bypasses the cooldown (test isolation stays deterministic)", async () => {

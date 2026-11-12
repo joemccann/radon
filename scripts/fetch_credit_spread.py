@@ -164,7 +164,7 @@ def fetch_ib_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
         print(
-            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/RH/Yahoo)",
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to Robinhood → UW → Yahoo)",
             file=sys.stderr,
         )
         return {}
@@ -647,7 +647,7 @@ def run() -> dict[str, Any]:
     `service_health`. The whole body is inside the health-reporting block
     (docs/operations.md) so an outage is recorded, not merely silent.
     """
-    print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → RH → Yahoo)", file=sys.stderr)
+    print(f"[{SERVICE}] fetching HYG and SPX (IB → Robinhood → UW → Yahoo)", file=sys.stderr)
     try:
         source_errors: list[dict[str, Any]] = []
         closes, sources = fetch_closes(source_errors=source_errors)

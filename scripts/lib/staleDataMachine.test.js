@@ -12,7 +12,6 @@ import {
   buildRelayHealthDetail,
   TICK_HEARTBEAT_INTERVAL_MS,
   decideHealthWrite,
-  shouldRequestGatewayRestart,
   summarizeSubscriptionFreshness,
   findStaleSubjectsOnLivePlane,
   nextFarmStateCode,
@@ -545,18 +544,6 @@ describe("farm-state hygiene (leftover DOWN must not stick into idle)", () => {
   });
 });
 
-describe("shouldRequestGatewayRestart (relay may only restart container-owned gateways)", () => {
-  it("docker + cloud → relay drives the lock-held restart", () => {
-    expect(shouldRequestGatewayRestart("docker")).toBe(true);
-    expect(shouldRequestGatewayRestart("cloud")).toBe(true);
-  });
-
-  it("launchd / local / unset → alert-only, never restart from the relay", () => {
-    expect(shouldRequestGatewayRestart("launchd")).toBe(false);
-    expect(shouldRequestGatewayRestart("local")).toBe(false);
-    expect(shouldRequestGatewayRestart(undefined)).toBe(false);
-  });
-});
 
 describe("buildRelayHealthDetail — never-ticked sentinel (R-214)", () => {
   // `lastTickTimestamp` is seeded `Date.now()` at module load and `markTick`

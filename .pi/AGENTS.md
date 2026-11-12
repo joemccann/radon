@@ -125,7 +125,6 @@ Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set a
 
 ## Commands
 
-- `commands`: immediately read `.pi/commands.json` and display a formatted table. No other actions.
 - `evaluate [TICKER]`: run `python3.13 scripts/evaluate.py [TICKER]`.
 - `scan`: run scanner then CRI scan and generate daily scan report.
 - `discover`: run `python3.13 scripts/discover.py`.
@@ -133,7 +132,7 @@ Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set a
 - `sync`: run `python3.13 scripts/ib_sync.py --sync`.
 - `risk-reversal [TICKER]`: run `python3.13 scripts/risk_reversal.py [TICKER]`.
 - `garch-convergence [TICKERS]`: run `python3.13 scripts/garch_convergence.py ...`.
-- `vcg`: call the `vcg_scan` Pi tool; do not read strategy docs.
+- `vcg`: run `python3.13 scripts/vcg_scan.py`; do not read strategy docs.
 
 ## Repository State
 

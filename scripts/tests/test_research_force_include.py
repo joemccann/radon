@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from research import force_include, identify
-from tests.test_research_intake import work
 
 
 def ident(publisher, series='', folder=''):
@@ -90,7 +89,7 @@ def test_real_identity_from_db_positioning_filename():
 
 
 def test_real_identity_from_oct1_rubner_q4_reload():
-    root = work()["metadata"]["path_lower"].rsplit("/", 4)[0]
+    root = "/joe mccann/current/2026"
     path = f"{root}/october/oct 01/citadel/citadel - the q4 reload october 1 oct 2026.pdf"
     found = identify.identify(
         {1: RUBNER_PAGE},
@@ -101,15 +100,3 @@ def test_real_identity_from_oct1_rubner_q4_reload():
     assert force_include.matches(found, filename=found.series, page_text=RUBNER_PAGE) is True
     assert force_include.always_publish(found, filename="Citadel - The Q4 Reload October 1 Oct 2026.pdf",
                                        page_text=RUBNER_PAGE) is True
-
-
-def test_fallback_copy_has_attribution_and_no_ungrounded_numbers():
-    identity = SimpleNamespace(publisher="Citadel", series="the q4 reload", date="2026-10-01",
-                               date_page=1, date_source="text")
-    title, content, pages = force_include.fallback_copy(identity, {1: RUBNER_PAGE})
-    assert "Scott Rubner" in content and "Citadel Securities" in content
-    assert "2.35" not in title + content and "-0.80" not in title + content
-    assert pages == [1]
-    from research import ground
-    assert ground.ground([title, content], {1: RUBNER_PAGE}, pages,
-                         known={"date": "2026-10-01", "date_page": 1})["passed"]

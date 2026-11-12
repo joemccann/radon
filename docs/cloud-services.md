@@ -7,7 +7,7 @@ This document covers Radon's production topology on Hetzner. The laptop is a thi
 Production host boundaries are owned by [the host-split runbook](spof-host-split.md).
 The laptop runs only Next.js ([attach contract](#mode-switch)).
 
-- **Database**: Turso (libSQL). Production processes talk **directly** to the cloud DB for both reads and writes. A non-Linux process cannot make that write, whatever `RADON_MODE` is (`RADON_MODE` is not a permit): `db.hrana_http.hrana_execute`, `api.db_http.hrana_execute`, and `api.db_http.hrana_transaction` raise `ProductionWriterRefused` before any socket, `db.client.get_db` refuses to open the connection, and `scripts/monitor_daemon/run.py` exits 78. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
+- **Database**: Turso (libSQL). Production processes talk **directly** to the cloud DB for both reads and writes. A non-Linux process cannot make that write, whatever `RADON_MODE` is (`RADON_MODE` is not a permit): `db.hrana_http.hrana_execute`, `api.db_http.hrana_execute`, and `api.db_http.hrana_transaction` raise `ProductionWriterRefused` before any socket, `db.client.get_db` refuses to open the connection, and `scripts/monitor_daemon/run.py` exits 78. No DB client can open an embedded replica (the DUR-07 `RADON_DB_USE_REPLICA=1` opt-in was removed), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` still sets `RADON_DB_NO_REPLICA=1` on every `radon-*` unit until its scheduled removal. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`. The production scraper writes to the local media mount.
 - **Schedulers**: Hetzner host systemd only; no laptop plist runs a collector. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is a headless Playwright flow that runs on Hetzner. The laptop does not run it. No magic-link or Chrome Debug.app dependency.
@@ -204,18 +204,14 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 Production is three planes: host, broker, and app. IB Gateway runs from the control-plane artifact `/etc/radon/ib-gateway-compose.yml` via the root-owned `radon-docker-gw` shim (installed from `cloud/docker-compose.yml` by `bootstrap-control-plane.sh`/`setup-vps.sh` at the deployed commit — the checkout copy is the source, not what runs); the five long-lived app services run from exact-SHA `docker/app` images through installed per-unit `runtime-container.conf` drop-ins; timer-owned oneshots remain host systemd. Main CI gates deploy on both app images, pre-pulls them in parallel with prestage, and the runtime refuses `latest`. Do not install the fleet `radon-.service.d` example because it would override Gateway and health. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 
-The private research worker also runs in the Python app image. Its generated
-charts use the separately locked D3 runtime in
-[`docker/app/chart-runtime/`](../docker/app/chart-runtime/package.json), installed
-with lifecycle scripts disabled and copied read-only to `/opt/radon-charts`.
-Inter and IBM Plex Mono fonts ship in that image beside D3; rendering uses the
-image's Python Playwright Chromium, without web dependencies or remote assets.
-The Python image build exports a real 2400px PNG as the runtime user, so missing
-D3, fonts, or Chromium fail the image gate before deployment. Chart publication
-and image-review gates are owned by [Dropbox research](dropbox-research.md).
-That worker (`radon-research.service`) is retired: deploys disable it, and the
-research source is now the `radon-marketdesk.timer` oneshot in the same Python
-image ([MarketDesk research](#marketdesk-research)).
+The retired private research worker (`radon-research.service`) and its chart
+renderer were deleted on 2026-11-11; deploys disable and uninstall any leftover
+copy. The research source is the `radon-marketdesk.timer` oneshot in the Python
+image ([MarketDesk research](#marketdesk-research)). The image still carries
+the locked D3 runtime in
+[`docker/app/chart-runtime/`](../docker/app/chart-runtime/package.json) at
+`/opt/radon-charts`: that stage also supplies the image's `node` binary and is a
+model-client payload input, so it is removed separately.
 
 ## Trades — single source of truth
 
@@ -1088,6 +1084,19 @@ feed: an IB outage re-serves the cached payload as `stale_source` with an
 `error` heartbeat. Heartbeat `iv-spread`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iv-spread.md`](indicators/iv-spread.md).
+
+### Market calendar (`radon-market-calendar.timer`)
+
+Weekly `Sun 22:00 UTC` (`RandomizedDelaySec=120`, `Persistent=true`),
+oneshot `scripts/fetch_market_calendar.py`, the same script
+`POST /market-calendar/refresh` runs. Pulls SPY `liquidHours` from IB (about
+six days ahead) and merges it into `data/market_calendar.json`, the cache
+the relay and `market_state()` read, so the coming week's holidays and
+early closes land before Monday. IB is the only source; an unauthenticated
+Gateway exits 1 and the cache keeps its last days. Heartbeat
+`market-calendar` (8-day window, `requires_ib`), written by the route path
+too. Installed and enabled by the
+deploy's `install-units` verb from `installed-units.sha256`.
 
 ### Flex sFTP pull (`radon-flex-pull.timer`)
 

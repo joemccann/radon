@@ -58,8 +58,7 @@ def _unit_stop_timeout(unit: str) -> int:
 
 def _helper_stop_wait(unit: str) -> int:
     helper = HELPER.read_text(encoding="utf-8")
-    name = "RESEARCH_STOP_WAIT_SECONDS" if unit == "radon-research.service" else "STATE_WAIT_SECONDS"
-    return int(re.search(rf"^  readonly {name}=(\d+)$", helper, re.M).group(1))
+    return int(re.search(r"^  readonly STATE_WAIT_SECONDS=(\d+)$", helper, re.M).group(1))
 
 
 @pytest.mark.parametrize("unit", APP_UNITS)

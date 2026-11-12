@@ -10,6 +10,7 @@
 
 import { lastCompletedSessionDate } from "./marketSession";
 import { parseScanTime } from "./parseScanTime";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 
 const MARKET_HOURS_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AFTER_HOURS_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
@@ -32,14 +33,6 @@ export function flowReportTimestamp(report: FlowReportLike | null | undefined): 
     ?? report.cache_meta?.last_refresh
     ?? null
   );
-}
-
-function isMarketOpenNow(now: Date = new Date()): boolean {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
 }
 
 /**
@@ -77,7 +70,7 @@ export function isFlowReportStale(
   const ageMs = now.getTime() - timestamp;
   if (ageMs < 0) return false;
 
-  const marketOpen = marketOpenOverride ?? isMarketOpenNow(now);
+  const marketOpen = marketOpenOverride ?? isMarketOpenAt(now);
   if (marketOpen) return ageMs > MARKET_HOURS_TTL_MS;
   // REL-184 (R-516): a report that postdates the last close cannot go stale
   // off-hours — no newer session data exists. Checking the flat 8h TTL first
