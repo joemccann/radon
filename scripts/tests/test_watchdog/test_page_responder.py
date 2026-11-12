@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -1152,18 +1153,30 @@ class TestSignalKilledOneshotRerun:
 
     def test_allowlist_matches_the_polkit_grant(self):
         """The responder has no general right to start radon-* units; every
-        rerunnable oneshot must be explicitly granted in the polkit source."""
+        installed rerunnable oneshot must be explicitly granted in the polkit
+        source. radon-llm-index.service is not installed, so it is not granted."""
         repo_root = Path(__file__).resolve().parents[3]
         rules = (
             repo_root / "cloud" / "config" / "polkit" / "50-radon-services.rules"
         ).read_text()
-        assert RERUNNABLE_ONESHOT_UNITS, "allowlist must not be empty"
-        for unit in RERUNNABLE_ONESHOT_UNITS:
+        granted = set(re.findall(r'"([^"]+\.service)": true', rules))
+        assert granted
+        assert "radon-llm-index.service" not in granted
+        assert granted == set(RERUNNABLE_ONESHOT_UNITS) - {"radon-llm-index.service"}
+        for unit in granted:
             assert f'"{unit}"' in rules, f"{unit} missing from polkit grant"
             assert unit.startswith("radon-") and unit.endswith(".service")
             assert not unit.startswith("radon-ib-gateway")
         assert '"reset-failed"' in rules
         assert '"start"' in rules
+        assert rules.count("radonTransientStart(action)") >= 2
+        helper = rules.split("polkit.addRule", 1)[0]
+        assert 'indexOf("transient")' in helper
+        assert 'message === ""' in helper
+        for chunk in rules.split("polkit.addRule")[1:]:
+            assert chunk.index("radonTransientStart(action)") < chunk.index(
+                "return polkit.Result.YES"
+            )
 
 
 class TestResponderLock:

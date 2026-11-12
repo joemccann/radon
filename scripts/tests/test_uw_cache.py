@@ -65,6 +65,22 @@ def test_stock_info_disk_ttl_outlives_15_min(cache_dir: Path) -> None:
     assert uw_cache.get_disk_cached(key, now=1_000.0 + 60 * 60) is None
 
 
+def test_make_key_does_not_collide_on_delimiter_values() -> None:
+    """A value containing & or = must not alias a different parameter set."""
+    from urllib.parse import parse_qsl
+
+    embedded = uw_cache.make_key("stock/AAPL/flow", {"a": "1&b=2"})
+    separate = uw_cache.make_key("stock/AAPL/flow", {"a": "1", "b": "2"})
+    assert embedded != separate
+    parsed = dict(parse_qsl(embedded.split("?", 1)[1], keep_blank_values=True))
+    assert parsed == {"a": "1&b=2"}
+
+    key_delim = uw_cache.make_key("stock/AAPL/flow", {"a&b": "1"})
+    assert dict(parse_qsl(key_delim.split("?", 1)[1], keep_blank_values=True)) == {
+        "a&b": "1"
+    }
+
+
 def test_params_are_distinct_disk_keys(cache_dir: Path) -> None:
     a = uw_cache.make_key("stock/AAPL/option-contracts", {"expiry": "2026-03-20"})
     b = uw_cache.make_key("stock/AAPL/option-contracts", {"expiry": "2026-06-19"})

@@ -1,17 +1,53 @@
 #!/usr/bin/env python3
 """
 Scenario Stress Test — HTML Report Generator
-Reads /tmp/scenario_analysis.json and produces a full interactive report
-with expandable detail rows per position.
+Reads scenario JSON (default /tmp/scenario_analysis.json) and produces a full
+interactive report with expandable detail rows per position. The JSON must be
+a regular file owned by the user running this script.
 """
 
 import json
-from datetime import datetime
 import math
+import os
+import stat
+from datetime import datetime
+
+_JSON_PATH = os.environ.get("RADON_SCENARIO_JSON", "/tmp/scenario_analysis.json")
+_TEMPLATE_PATH = os.environ.get(
+    "RADON_SCENARIO_TEMPLATE", ".pi/skills/html-report/template.html"
+)
+_HTML_PATH = os.environ.get(
+    "RADON_SCENARIO_HTML", "reports/scenario-stress-test-2026-03-08.html"
+)
 
 
-with open('/tmp/scenario_analysis.json') as f:
-    data = json.load(f)
+def load_scenario_json(path):
+    """Read scenario JSON only from a regular file this user owns.
+
+    /tmp is shared. O_NOFOLLOW refuses a planted symlink. A different owner
+    or a world-writable file is refused.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        raise SystemExit(f"refusing scenario json: {exc.strerror or exc}") from None
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_mode & stat.S_IWOTH
+        ):
+            raise SystemExit("refusing scenario json: untrusted file")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            return json.load(handle)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+data = load_scenario_json(_JSON_PATH)
 
 results = data['results']
 totals = data['totals']
@@ -22,7 +58,7 @@ oil_sens = data['oil_sensitivity']
 vix_mult = data['vix_multipliers']
 baseline_iv = data.get('baseline_iv', {})
 
-with open('.pi/skills/html-report/template.html') as f:
+with open(_TEMPLATE_PATH) as f:
     template = f.read()
 
 # NARRATIVE ENGINE — Per-position explanations
@@ -325,10 +361,10 @@ best_5 = base_sorted[-5:][::-1]
 body += '<div class="grid-2" style="grid-template-columns: 1fr 1fr;">\n'
 body += '  <div class="callout negative"><div class="callout-title">🔴 Biggest Losers (Base Case)</div>\n'
 for r in worst_5:
-    body += f'    <p><strong>{r["ticker"]}</strong> {r["structure_type"]}: <span class="text-negative">{fmt_dollars(r["pnl"])}</span> ({fmt_pct(r["pnl_pct"])})</p>\n'
+    body += f'    <p><strong>{escape_html(str(r["ticker"]))}</strong> {escape_html(str(r["structure_type"]))}: <span class="text-negative">{fmt_dollars(r["pnl"])}</span> ({fmt_pct(r["pnl_pct"])})</p>\n'
 body += '  </div>\n  <div class="callout positive"><div class="callout-title">🟢 Biggest Winners (Base Case)</div>\n'
 for r in best_5:
-    body += f'    <p><strong>{r["ticker"]}</strong> {r["structure_type"]}: <span class="text-positive">{fmt_dollars(r["pnl"])}</span> ({fmt_pct(r["pnl_pct"])})</p>\n'
+    body += f'    <p><strong>{escape_html(str(r["ticker"]))}</strong> {escape_html(str(r["structure_type"]))}: <span class="text-positive">{fmt_dollars(r["pnl"])}</span> ({fmt_pct(r["pnl_pct"])})</p>\n'
 body += '  </div>\n</div>\n'
 
 
@@ -425,8 +461,8 @@ for key in sorted_keys:
     
     body += f'''      <tr{row_class} onclick="toggleRow({row_id})" style="cursor:pointer;">
         <td class="text-center">{chevron}</td>
-        <td><strong>{ticker}</strong></td>
-        <td class="text-small">{base['structure_type']}</td>
+        <td><strong>{escape_html(str(ticker))}</strong></td>
+        <td class="text-small">{escape_html(str(base['structure_type']))}</td>
         <td>{risk_pill}</td>
         <td class="text-center">{dte_str}</td>
         <td class="text-right">${abs(base['entry_cost']):,.0f}</td>
@@ -469,7 +505,7 @@ for key in sorted_keys:
           <div style="padding:20px 24px; background:var(--bg-hover);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
               <div>
-                <strong style="font-size:14px;">{ticker}</strong>
+                <strong style="font-size:14px;">{escape_html(str(ticker))}</strong>
                 <span class="text-muted" style="margin-left:8px;">{narr.get('company', '')}</span>
               </div>
               {sentiment}
@@ -592,7 +628,7 @@ for r in sorted(results['base'], key=lambda x: x['pnl']):
         bar_style = f'margin-left:{50-bar_w/2}%; width:{bar_w/2}%; background:{color}; height:18px;'
     
     body += f'''    <div style="display:flex; align-items:center; margin-bottom:2px;">
-      <div style="width:80px; font-size:11px; text-align:right; padding-right:8px; flex-shrink:0;"><strong>{r['ticker']}</strong></div>
+      <div style="width:80px; font-size:11px; text-align:right; padding-right:8px; flex-shrink:0;"><strong>{escape_html(str(r['ticker']))}</strong></div>
       <div style="flex:1; position:relative; height:20px;">
         <div style="position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--border-focus);"></div>
         <div style="{bar_style}"></div>
@@ -697,7 +733,7 @@ html = html.replace('{{BODY}}', body)
 html = html.replace('</style>', custom_css + '\n</style>')
 html = html.replace('</body>', custom_js + '\n</body>')
 
-output_path = 'reports/scenario-stress-test-2026-03-08.html'
+output_path = _HTML_PATH
 with open(output_path, 'w') as f:
     f.write(html)
 

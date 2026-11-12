@@ -1,3 +1,16 @@
+// StartTransientUnit uses manage-units verb=start and a caller-chosen unit
+// name (systemd reports that name since 257). The message is what marks a
+// transient unit. A start or restart with no message is not a file-backed
+// unit action either.
+function radonTransientStart(action) {
+    var verb = action.lookup("verb");
+    if (verb != "start" && verb != "restart") {
+        return false;
+    }
+    var message = action.lookup("polkit.message") || "";
+    return message === "" || message.indexOf("transient") !== -1;
+}
+
 // The watchdog may invoke only its fixed preheld adapter, which consumes its
 // exact 2FA lease once. Every other mutation uses the root-owned operator.
 // Any unit where unit.indexOf("radon-ib-gateway") != 0 is non-gateway and is
@@ -7,6 +20,9 @@ polkit.addRule(function(action, subject) {
         subject.user == "radon") {
         var unit = action.lookup("unit");
         var verb = action.lookup("verb");
+        if (radonTransientStart(action)) {
+            return polkit.Result.NO;
+        }
         if (!unit) {
             return polkit.Result.NOTHING;
         }
@@ -26,8 +42,8 @@ polkit.addRule(function(action, subject) {
 // them mid-run, or when they exited non-zero and a fix has deployed since,
 // and the next timer slot is more than 12h away. No stop, no restart, no
 // other units. Keep in sync with RERUNNABLE_ONESHOT_UNITS in
-// scripts/grok_page_responder.py (pinned by
-// test_allowlist_matches_the_polkit_grant).
+// scripts/grok_page_responder.py except radon-llm-index.service, which is
+// not installed (pinned by test_allowlist_matches_the_polkit_grant).
 polkit.addRule(function(action, subject) {
     if (action.id != "org.freedesktop.systemd1.manage-units" ||
         (subject.user != "radon" && subject.user != "radon-responder")) {
@@ -35,6 +51,9 @@ polkit.addRule(function(action, subject) {
     }
     var unit = action.lookup("unit");
     var verb = action.lookup("verb");
+    if (radonTransientStart(action)) {
+        return polkit.Result.NO;
+    }
     var rerunnable = {
         "radon-vol-cone.service": true,
         "radon-skew.service": true,
@@ -55,7 +74,7 @@ polkit.addRule(function(action, subject) {
         "radon-cta-sync.service": true,
         "radon-oi-changes.service": true,
         "radon-perf-twr.service": true,
-        "radon-llm-index.service": true,
+        // radon-llm-index.service is not installed; do not grant its name.
         "radon-equibles-filings.service": true,
         "radon-equibles-short-crowding.service": true,
         "radon-equibles-13f.service": true,
