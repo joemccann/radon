@@ -1919,6 +1919,55 @@ Timer next ~24h. Edge and `:8321/health/lite` stayed up.
 
 ---
 
+## ai-cycle-backfill-deadline-transport-label
+
+**`radon-ai-cycle-backfill.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when a publisher GET times out on the 500s run deadline
+and is labeled `Publisher transport failed`.** Peak: 2026-11-12 05:45Z,
+page `2c07f973eb1b9f9a11295462e868007b`. Timer next ~24h.
+
+- **Mechanism:** `--backfill` walks vercel, gpu-rental, sec, and eia before
+  NOAA. Those windows include yesterday, so the checkpoint key misses and
+  the long SEC and gpu-rental refetches run again. `Transport.deadline` is
+  500s from init. NOAA started at 05:38:34Z with about 3s left. The attempt
+  timeout shrinks to that remainder. The GET raised a requests timeout as
+  the deadline passed. The handler treated that as a reason to stop
+  retrying and raised `Publisher transport failed`. That status is
+  `error`, so `main` returned 1. Openrouter then recorded
+  `Per-run time budget exhausted` (`unavailable`). The snapshot still ran
+  (`generated_at` 2026-11-12T05:45:57Z). `Type=oneshot` has no `Restart=`.
+  ExecMain 05:30:16Z to 05:45:58Z, `ExecMainStatus=1`, CPU 51.388s, under
+  `TimeoutStartSec=1200`. `:8321/health/lite` stayed authenticated with
+  `database=up`. `GET /ai-cycle` returned 200. NOAA TCP and TLS succeeded
+  from this host after the page. A one-day daily-summaries body did not
+  return within 25s. That upstream hang is not this page: the wall gap
+  was 3.9s, not 50s and not 600s.
+- **Detection:** journal report `noaa.status=error` and
+  `reason=Publisher transport failed`, with `checked_at` a few seconds
+  before the next source's `Per-run time budget exhausted`.
+  `systemctl show` is `exit-code` / `NRestarts=0`. Localhost
+  `GET /admin/logs?unit=radon-ai-cycle-backfill.service` shows the report.
+  Journal is root-only (`User=root` via `radon-app-runtime`).
+- **Discriminating check:** NOAA start to the next source is a few seconds,
+  and that next source is the budget stop. A gap of about 50s (two 25s
+  attempts) with time remaining is the EIA stall and still exits 1. A gap
+  of about 600s is the address-walk case. `Observation persistence failed`
+  is the insert case. `/ai-cycle` 503, or `database` not `up`, means
+  Turso: stand down. `Result=signal` is deploy stop-clean. `/health/lite`
+  down means API/IB, stand down. Do not `reset-failed` and start before
+  this label is live: the same clipped GET still exits 1.
+- **Remediation (code):** a request error at or after the run deadline is
+  `Per-run time budget exhausted` (`unavailable`, exit 0). A second stall
+  with time remaining is still `Publisher transport failed` and exits 1.
+  After deploy, the next 05:30 UTC backfill records the budget stop
+  instead of paging. NOAA still needs leftover budget to finish. The
+  checkpoint still skips only successful windows.
+- **Regression:**
+  `scripts/tests/test_ai_cycle_collectors.py::test_backfill_deadline_during_publisher_get_exits_zero`.
+- **Code:** `scripts/ai_cycle/collectors.py` (`Transport._download`).
+
+---
+
 ## liquidcompute-ticker-snapshot-timeout
 
 **`radon-liquidcompute.service` oneshot pages P1 `Result=timeout`
