@@ -4,6 +4,8 @@ import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
+import { readLiveSnapshot } from "@/lib/provisionalRow";
+import { withLiveRow, type VixModelSpreadData, type VixModelSpreadEntry, type VixModelSpreadLive } from "@/lib/vixModelSpread";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,7 +53,14 @@ async function readFromDb(): Promise<TimestampedRead<Payload> | null> {
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   const data = parsePayload(row.payload);
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+  // Freshness stays on the official snapshot; the live row only extends it.
+  const merged = isMissingPayload(data) ? data : withLiveRow(data as unknown as VixModelSpreadData, await readLive());
+  return { data: merged as unknown as Payload, timestampMs: contentTimestampMs(data.scan_time) };
+}
+
+/** Provisional current-session row from the writer's side snapshot; advisory. */
+function readLive(): Promise<VixModelSpreadLive | null> {
+  return readLiveSnapshot(dbExecute, "vix-model-spread", (value): value is VixModelSpreadEntry => isEntry(value));
 }
 
 export async function GET(request: Request): Promise<Response> {

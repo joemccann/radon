@@ -47,11 +47,14 @@ except ImportError:  # pragma: no cover — tests inject a FakeWriter
     writer = None  # type: ignore[assignment]
 
 from lib.vixts_math import (  # noqa: E402
+    RATIO_SANITY_MAX,
+    RATIO_SANITY_MIN,
     build_current,
     compute_stats,
     ensure_plausible_series,
     join_series,
 )
+from utils import index_live  # noqa: E402
 
 VIXTS_JSON = _PROJECT_DIR / "data" / "vixts.json"
 
@@ -66,10 +69,10 @@ _MAX_CACHE_LAG_DAYS = 4
 _SYMBOLS = ("VIX", "VIX3M", "SPX")
 _VALUE_COLUMN = {"VIX": "CLOSE", "VIX3M": "CLOSE", "SPX": "SPX"}
 
-# Mirrors radon-vixts.timer (OnCalendar=*-*-* 02:45:00 UTC) so heartbeat copy
-# can name the next attempt instead of hardcoding cadence text.
-TIMER_HOUR_UTC = 2
-TIMER_MINUTE_UTC = 45
+# Provisional current-session row (radon-vixts.timer fires every 5 minutes in
+# ET trading hours): one source for all three legs, written apart from the
+# official snapshot so a live tick never rewrites the full history.
+LIVE_SERVICE = index_live.live_service(SERVICE)
 
 
 def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
@@ -112,8 +115,12 @@ def _write_db(
     *,
     rows_changed: bool,
     health_error: Optional[dict[str, Any]] = None,
+    snapshot: bool = True,
 ) -> None:
     """Snapshot + heartbeat every cycle; row upserts only when the source moved.
+
+    ``snapshot=False`` is the unchanged-source live tick: heartbeat only, the
+    official snapshot stays as written (it is re-aged at least every 12h).
 
     The snapshot and heartbeat run even on the 304 path so a silently dead
     writer trips the staleness banner (feedback_service_health_heartbeat).
@@ -134,7 +141,8 @@ def _write_db(
         }
     snapshot_error: Optional[dict[str, Any]] = None
     try:
-        writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+        if snapshot:
+            writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
     except Exception as exc:  # noqa: BLE001
         # Same argument R-192 made for the row upsert, applied one statement
         # later: a failed snapshot must not take the HEARTBEAT down with it.
@@ -260,8 +268,13 @@ def _run_cycle(client: Any, *, scan_time: str, now: datetime) -> dict[str, Any]:
         # the data stands still. Same contract as
         # `fetch_vixcor.restate_cached_payload`. R-333.
         payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
-        _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
-        _write_json_cache(payload)
+        live = _live_payload(payload, scan_time=scan_time, now=now)
+        if live["row"] is not None and not index_live.snapshot_is_old(cached.get("scan_time"), now):
+            _write_db(payload, scan_time, rows_changed=False, health_error=health_error, snapshot=False)
+        else:
+            _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
+            _write_json_cache(payload)
+        _write_live(live, scan_time)
         return payload
 
     _refetch_unchanged(client, texts, stamps)
@@ -287,7 +300,45 @@ def _run_cycle(client: Any, *, scan_time: str, now: datetime) -> dict[str, Any]:
     )
     _write_db(payload, scan_time, rows_changed=True, health_error=health_error)
     _write_json_cache(payload)
+    _write_live(_live_payload(payload, scan_time=scan_time, now=now), scan_time)
     return payload
+
+
+def _fetch_live(now: datetime) -> Optional[dict[str, Any]]:
+    return index_live.fetch_live(_SYMBOLS, now, try_ib=index_live.ib_allowed(), label=SERVICE)
+
+
+def _live_payload(payload: dict[str, Any], *, scan_time: str, now: datetime) -> dict[str, Any]:
+    """Provisional row for the session after the official close, or row None."""
+    live = _fetch_live(now)
+    row: Optional[dict[str, Any]] = None
+    if index_live.is_newer(live, payload.get("data_date"), now):
+        values = live["values"]  # type: ignore[index]
+        ratio = round(values["VIX"] / values["VIX3M"], 4)
+        if RATIO_SANITY_MIN <= ratio <= RATIO_SANITY_MAX:
+            row = {"date": live["date"], "vix": values["VIX"], "vix3m": values["VIX3M"],  # type: ignore[index]
+                   "ratio": ratio, "spx": values["SPX"]}
+    return {
+        "scan_time": scan_time,
+        "row": row,
+        "current": build_current([row]) if row else None,
+        "source": live["source"] if row else None,  # type: ignore[index]
+        "quote_time": live["quote_time"] if row else None,  # type: ignore[index]
+    }
+
+
+def _write_live(live: dict[str, Any], scan_time: str) -> None:
+    """Advisory: a failed live write never fails the official run.
+
+    Only a real row is written; the API ignores a row not newer than the
+    official close, so yesterday's provisional row needs no clearing write.
+    """
+    if writer is None or live["row"] is None:
+        return
+    try:
+        writer.upsert_scan_snapshot(LIVE_SERVICE, scan_time, live)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[vixts] live snapshot write non-fatal: {exc}", file=sys.stderr)
 
 
 def restate_cached_payload(

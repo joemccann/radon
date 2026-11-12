@@ -1,4 +1,6 @@
 /** Personal-use Cboe model spread. Statistics are computed by the daily writer. */
+import { appendProvisionalRow, type LiveSnapshot, type ProvisionalMeta } from "./provisionalRow";
+
 export type SpreadWindow = 20 | 252;
 export type SpreadBandState = "ABOVE BAND" | "WITHIN BAND" | "BELOW BAND" | "WARMUP" | "NO VARIATION";
 
@@ -37,6 +39,18 @@ export interface VixModelSpreadData {
   series: VixModelSpreadEntry[];
   /** Retained raw source series support conditional GETs; operator-only. */
   source_series?: Partial<Record<"VIX" | "VIXEQ" | "COR1M", Array<{ date: string; value: number }>>>;
+  /** Set when `current` is the in-progress session, not an official Cboe close. */
+  provisional?: VixModelSpreadProvisional | null;
+}
+
+export type VixModelSpreadProvisional = ProvisionalMeta;
+
+/** The writer's `vix-model-spread:live` side snapshot. */
+export type VixModelSpreadLive = LiveSnapshot<VixModelSpreadEntry>;
+
+/** Append the provisional current-session row when it is newer than the last official close. */
+export function withLiveRow<T extends VixModelSpreadData>(payload: T, live: VixModelSpreadLive | null): T {
+  return appendProvisionalRow(payload, live) as T;
 }
 
 function finite(value: number | null | undefined): number | null {

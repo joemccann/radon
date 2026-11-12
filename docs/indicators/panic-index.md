@@ -916,3 +916,22 @@ each is evidenced in the PR body with the fragment shown:
 11. §O.1 correlation figure reported.
 12. `docs/indicators/README.md` row flipped to shipped; `docs/cloud-services.md` section added.
 13. CI on the PR head green (`gh pr checks --watch`), PR left as **draft**, not merged. First production run per §O.4 is an operator step after merge, listed under the PR's "after merge" heading.
+
+## Intraday provisional row (2026-11-11)
+
+`radon-panic-index.timer` now fires every 5 minutes 09:00-16:55 ET Mon-Fri and daily
+at 16:01 ET (13:01 PT) plus the existing 13:15 UTC slot, replacing the 02:50 UTC slot. The
+official Cboe CSV row still lands on the first fire after Cboe publishes it.
+
+Each run also reads VIX, VIX3M, VVIX and SKEW from one live source for all inputs
+(`scripts/utils/index_live.py`): IB pool daily bars unless `/health` names a
+non-authenticated state, else Cboe 15-minute delayed quotes
+(`https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_<SYMBOL>.json`),
+all on one session date or nothing. The row reruns the join, 252-session z, level and delta math over the last 260 official sessions plus the live inputs, and the `current` card is built against the full official series so the 10-year delta ranks stay exact. The UW 25d overlay is not available live and stays null. A provisional row never triggers the record-decline alert.
+
+The row is written only to the `panic-index:live` scan snapshot, never to history,
+and `/api/panic-index` appends it with `provisional {source, quote_time,
+scan_time}` when it is newer than the official `data_date`. The panel labels
+it. An unchanged-source live tick heartbeats without rewriting the official
+snapshot unless that snapshot is over 12h old.
+

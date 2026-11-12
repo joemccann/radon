@@ -117,6 +117,12 @@ Sunday 2026-10-18, latest row Friday 2026-10-16. No Last-Modified / ETag.
 Unchanged path is content-equal: newest date + volumes match the last
 stored row.
 
+UW also serves the in-progress session row intraday (2026-11-11 15:54 ET:
+609,098 puts / 749,370 calls), so a second line
+`OnCalendar=Mon..Fri *-*-* 09..16:00,05,...,55 America/New_York` refreshes the
+current session every 5 minutes. The cum5 during the session includes a
+partial day.
+
 Timer: `OnCalendar=*-*-* 02:00:00 UTC` every calendar day.
 `Persistent=true`, `RandomizedDelaySec=120`. 02:00 UTC is after the
 16:00 ET close year-round (20:00/21:00 UTC) and sits before

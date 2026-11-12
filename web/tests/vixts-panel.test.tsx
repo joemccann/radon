@@ -355,22 +355,31 @@ describe("VixTsPanel — writer freshness", () => {
 });
 
 describe("VixTsPanel — freshness rail", () => {
-  it("shows the Cboe session date and counts down to the 02:45 UTC slot", () => {
-    // 00:30 UTC on a Thursday: 2h15m short of radon-vixts.timer's 02:45 UTC
-    // slot. The neighbouring overnight Cboe pulls (straddle 02:15, cor 02:20,
-    // vixcor 02:35) all land on a different number from here.
+  it("shows the Cboe session date and counts down to the 16:01 ET slot", () => {
+    // 14:00 ET on a Saturday: no 5-minute session fires, so the next sample is
+    // radon-vixts.timer's 16:01 ET (13:01 PT) daily slot, 2h 01m away.
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-27T00:30:00Z"));
-    const data = buildData({ data_date: "2026-08-26" });
-    data.current = { ...data.current!, date: "2026-08-26" };
+    vi.setSystemTime(new Date("2026-08-29T18:00:00Z"));
+    const data = buildData({ data_date: "2026-08-28" });
+    data.current = { ...data.current!, date: "2026-08-28" };
     renderPanel(hookState({ data }));
     act(() => {
       vi.advanceTimersByTime(0);
     });
     const rail = screen.getByTestId("vixts-freshness-rail");
     expect(rail).toBeTruthy();
-    expect(rail.textContent).toContain("2026-08-26");
-    expect(screen.getByTestId("vixts-freshness-rail-countdown").textContent).toBe("2h 15m");
+    expect(rail.textContent).toContain("2026-08-28");
+    expect(screen.getByTestId("vixts-freshness-rail-countdown").textContent).toBe("2h 01m");
     expect(rail.textContent).toContain("Next sample");
+  });
+
+  it("labels a provisional current session and omits the label on an official close", () => {
+    const provisional = { source: "ib" as const, quote_time: null, scan_time: "2026-08-27T19:05:00Z" };
+    renderPanel(hookState({ data: { ...buildData({ data_date: "2026-08-27" }), provisional } }));
+    expect(screen.getByTestId("vixts-provisional").textContent).toBe(
+      "Current session is provisional: IB index bars as of 15:05 ET, until the official close posts.");
+    cleanup();
+    renderPanel(hookState({ data: buildData({ data_date: "2026-08-26" }) }));
+    expect(screen.queryByTestId("vixts-provisional")).toBeNull();
   });
 });

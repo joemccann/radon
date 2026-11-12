@@ -121,7 +121,9 @@ Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`,
 Grok from `~/.grok/auth.json`, Antigravity from a dedicated keychain (macOS
 agy has no token file; `RADON_ANTIGRAVITY_KEYCHAIN_HOME` holds only that
 empty-password keychain, unlocked per call; agy's item is service `gemini`,
-account `antigravity`) through a pinned, Google-signed macOS `agy`
+account `antigravity`; the daemon sets launchd `SessionCreate`, since without
+its own audit session a daemon's keychain search covers only `System.keychain`
+and agy reports "not logged in") through a pinned, Google-signed macOS `agy`
 (`scripts/runner/antigravity-darwin.json`, `install_antigravity.py`: SHA-512,
 Developer ID team and arm64 checked before install). The `json` and `chat`
 ladder runs here in the VPS order. Embeddings, OCR and forecasting stay on the VPS.

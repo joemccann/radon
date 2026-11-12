@@ -71,6 +71,7 @@ def orchestration(monkeypatch,tmp_path):
     monkeypatch.setattr(mod,'writer',fake)
     monkeypatch.setattr(mod,'VIX_MODEL_SPREAD_JSON',tmp_path/'model.json')
     monkeypatch.setattr(mod,'_probe_ib',lambda:{'status':'unavailable'})
+    monkeypatch.setattr(mod,'_fetch_live',lambda probe,now:None)
     monkeypatch.setattr(mod,'hrana_query',lambda *a,**k:[])
     return mod,fake
 
@@ -94,7 +95,8 @@ def test_run_writes_snapshot_health_and_atomic_fallback(orchestration):
     assert payload['source_dates']==dict.fromkeys(('VIX','VIXEQ','COR1M'),'2026-10-16')
     assert payload['source']=='cboe'
     writer.upsert_vix_model_spread_rows.assert_called_once_with(payload['series'],recorded_at=payload['scan_time'])
-    writer.upsert_scan_snapshot.assert_called_once_with('vix-model-spread',payload['scan_time'],payload)
+    writer.upsert_scan_snapshot.assert_any_call('vix-model-spread',payload['scan_time'],payload)
+    assert [c.args[0] for c in writer.upsert_scan_snapshot.call_args_list]==['vix-model-spread','vix-model-spread:live']
     assert mod._read_previous()['current']==payload['current']
 
 def test_all_304_refreshes_heartbeat_not_history_and_rechecks_session(orchestration):
@@ -577,3 +579,131 @@ def test_persistence_budget_expiry_preserves_last_good_and_cleanup_error_does_no
         mod.run(SourceClient(_texts()), previous={}, now=_now())
     assert 'staging cleanup failed: RuntimeError' in capsys.readouterr().err
     assert conn.execute('SELECT service,scan_time,payload FROM scan_snapshots').fetchall() == [(mod.SERVICE, 'old', '{"last_good":true}')]
+
+
+# ── intraday provisional row (5-minute market-hours timer) ─────────────
+from unittest.mock import Mock
+from fetch_vix_model_spread import _fetch_live as REAL_FETCH_LIVE
+
+
+def _session_now(hour=19, minute=0):
+    from datetime import datetime, timezone
+    return datetime(2026, 10, 19, hour, minute, tzinfo=timezone.utc)  # Mon 15:00 ET at 19:00
+
+
+def _live(day='2026-10-19', values=(18.0, 40.0, 12.0), source='cboe_delayed'):
+    return {'date': day, 'values': dict(zip(('VIX', 'VIXEQ', 'COR1M'), values)),
+            'source': source, 'quote_time': f'{day}T14:45:00'}
+
+
+def _live_snapshot(writer):
+    calls = [c for c in writer.upsert_scan_snapshot.call_args_list if c.args[0] == 'vix-model-spread:live']
+    assert len(calls) == 1
+    return calls[0].args[2]
+
+
+def _unchanged():
+    return SourceClient(dict.fromkeys(('VIX', 'VIXEQ', 'COR1M')))
+
+
+def test_live_quote_appends_provisional_row_in_side_snapshot_only(orchestration, monkeypatch):
+    mod, writer = orchestration
+    previous = mod.run(SourceClient(_texts()), previous={}, now=_session_now(13))
+    writer.reset_mock()
+    monkeypatch.setattr(mod, '_fetch_live', lambda probe, now: _live())
+    payload = mod.run(_unchanged(), previous=previous, now=_session_now())
+    live = _live_snapshot(writer)
+    assert live['row']['date'] == '2026-10-19'
+    assert live['row']['model_vix'] == pytest.approx(math.sqrt(0.12) * 40.0)
+    assert live['row']['spread'] == pytest.approx(18.0 - math.sqrt(0.12) * 40.0)
+    assert live['source'] == 'cboe_delayed' and live['quote_time'] == '2026-10-19T14:45:00'
+    # Official history and its multi-MB snapshot are untouched by a live tick.
+    assert payload['data_date'] == '2026-10-16'
+    assert all(r['date'] != '2026-10-19' for r in payload['series'])
+    assert all(r['date'] != '2026-10-19' for rows in payload['source_series'].values() for r in rows)
+    writer.upsert_vix_model_spread_rows.assert_not_called()
+    assert [c.args[0] for c in writer.upsert_scan_snapshot.call_args_list] == ['vix-model-spread:live']
+    writer.record_service_health.assert_called_once()
+
+
+def test_live_tick_rewrites_full_snapshot_once_it_is_twelve_hours_old(orchestration, monkeypatch):
+    mod, writer = orchestration
+    previous = mod.run(SourceClient(_texts()), previous={}, now=_session_now(5))
+    writer.reset_mock()
+    monkeypatch.setattr(mod, '_fetch_live', lambda probe, now: _live())
+    mod.run(_unchanged(), previous=previous, now=_session_now(18))
+    services = sorted(c.args[0] for c in writer.upsert_scan_snapshot.call_args_list)
+    assert services == ['vix-model-spread', 'vix-model-spread:live']
+
+
+@pytest.mark.parametrize('live', [None, _live(day='2026-10-16'), _live(day='2026-10-20')])
+def test_live_quote_not_after_official_or_in_the_future_is_dropped(orchestration, monkeypatch, live):
+    mod, writer = orchestration
+    monkeypatch.setattr(mod, '_fetch_live', lambda probe, now: live)
+    payload = mod.run(SourceClient(_texts()), previous={}, now=_session_now())
+    assert _live_snapshot(writer)['row'] is None
+    assert payload['data_date'] == '2026-10-16'
+
+
+def test_live_fetch_failure_never_fails_the_official_run(orchestration, monkeypatch):
+    mod, writer = orchestration
+    monkeypatch.setattr(mod, '_fetch_live', REAL_FETCH_LIVE)
+    monkeypatch.setattr(mod, '_live_ib', Mock(side_effect=RuntimeError('pool down')))
+    monkeypatch.setattr(mod, '_live_cboe', Mock(side_effect=RuntimeError('cdn down')))
+    payload = mod.run(SourceClient(_texts()), previous={}, now=_session_now())
+    assert _live_snapshot(writer)['row'] is None and payload['data_date'] == '2026-10-16'
+
+
+def test_fetch_live_tries_ib_first_only_when_vixeq_is_covered(monkeypatch):
+    import fetch_vix_model_spread as mod
+    ib = Mock(return_value=_live(source='ib'))
+    cboe = Mock(return_value=_live())
+    monkeypatch.setattr(mod, '_live_ib', ib)
+    monkeypatch.setattr(mod, '_live_cboe', cboe)
+    assert mod._fetch_live({'status': 'available'}, _session_now())['source'] == 'ib'
+    cboe.assert_not_called()
+    ib.reset_mock()
+    assert mod._fetch_live({'status': 'unavailable'}, _session_now())['source'] == 'cboe_delayed'
+    ib.assert_not_called()
+    ib.return_value = None
+    assert mod._fetch_live({'status': 'available'}, _session_now())['source'] == 'cboe_delayed'
+
+
+def _quote(price, when):
+    response = Mock()
+    response.json = Mock(return_value={'data': {'current_price': price, 'last_trade_time': when}})
+    return response
+
+
+def test_cboe_delayed_quotes_need_all_three_on_one_session(monkeypatch):
+    import fetch_vix_model_spread as mod
+    import requests
+    quotes = {'VIX': _quote(17.51, '2026-11-11T15:39:31'), 'VIXEQ': _quote(41.87, '2026-11-11T15:39:32'),
+              'COR1M': _quote(9.92, '2026-11-11T15:39:31')}
+    get = Mock(side_effect=lambda url, **k: quotes[url.rsplit('_', 1)[1].removesuffix('.json')])
+    monkeypatch.setattr(requests, 'get', get)
+    assert mod._live_cboe() == {'date': '2026-11-11', 'values': {'VIX': 17.51, 'VIXEQ': 41.87, 'COR1M': 9.92},
+                                'source': 'cboe_delayed', 'quote_time': '2026-11-11T15:39:32'}
+    assert get.call_args_list[0].args[0] == 'https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_VIX.json'
+    assert get.call_args_list[0].kwargs['headers'] == {'User-Agent': 'radon/2.0'}
+    quotes['COR1M'] = _quote(9.92, '2026-11-10T16:14:00')
+    assert mod._live_cboe() is None
+    quotes['COR1M'] = _quote(float('nan'), '2026-11-11T15:39:31')
+    assert mod._live_cboe() is None
+
+
+def test_ib_live_bars_need_todays_bar_for_all_three(monkeypatch):
+    import fetch_vix_model_spread as mod
+    import requests
+    closes = {'VIX': 17.5, 'VIXEQ': 41.8, 'COR1M': 9.9}
+
+    def post(url, **kwargs):
+        response = Mock()
+        response.json = Mock(return_value={'bars': [{'date': '2026-10-16', 'close': 1.0},
+                                                    {'date': '2026-10-19', 'close': closes[kwargs['json']['contract']['symbol']]}]})
+        return response
+
+    monkeypatch.setattr(requests, 'post', post)
+    live = mod._live_ib(_session_now())
+    assert live['source'] == 'ib' and live['date'] == '2026-10-19' and live['values'] == closes
+    assert mod._live_ib(_session_now(3)) is None  # 23:00 ET Sunday: no bar dated today

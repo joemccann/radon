@@ -228,3 +228,41 @@ describe("GET /api/vixts freshness budget", () => {
     expect((json.current as Payload).ratio).toBe(0.8455);
   });
 });
+
+describe("GET /api/vixts provisional current session", () => {
+  const TODAY = daysAgo(0);
+  const liveRow = { date: TODAY, vix: 17.49, vix3m: 19.24, ratio: 0.909, spx: 6700.5 };
+  const live = (overrides: Payload = {}): Payload => ({
+    scan_time: new Date().toISOString(), row: liveRow, current: { ...liveRow, regime: "CONTANGO" },
+    source: "cboe_delayed", quote_time: `${TODAY}T15:44:32`, ...overrides,
+  });
+
+  it("appends the vixts:live row as provisional current", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertSnapshot(live(), "vixts:live");
+    const { GET } = await import("../app/api/vixts/route");
+    const json = await jsonOf(await GET());
+    expect(json.data_date).toBe(TODAY);
+    expect(json.current).toEqual({ ...liveRow, regime: "CONTANGO" });
+    expect((json.series as Payload[]).at(-1)).toEqual(liveRow);
+    expect(json.count).toBe((official.series as Payload[]).length + 1);
+    expect(json.provisional).toEqual({ source: "cboe_delayed", quote_time: `${TODAY}T15:44:32`, scan_time: expect.any(String) });
+  });
+
+  it("ignores a live row that is not newer than the official close", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertSnapshot(live({ row: { ...liveRow, date: DATA_DATE } }), "vixts:live");
+    const { GET } = await import("../app/api/vixts/route");
+    expect(await jsonOf(await GET())).toEqual(official);
+  });
+
+  it("ignores a malformed live row", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertSnapshot(live({ row: { ...liveRow, ratio: "x" } }), "vixts:live");
+    const { GET } = await import("../app/api/vixts/route");
+    expect(await jsonOf(await GET())).toEqual(official);
+  });
+});

@@ -16,6 +16,7 @@ import VixModelSpreadChart from "./VixModelSpreadChart";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import { VIX_MODEL_SPREAD_REFRESH } from "@/lib/refreshSchedule";
 import { formatVolPoints, formatSpreadZ, spreadBandState, spreadWindowStats, type SpreadWindow } from "@/lib/vixModelSpread";
+import { provisionalNote } from "@/lib/provisionalRow";
 import { useVixModelSpread } from "@/lib/useVixModelSpread";
 import { useViewport } from "@/lib/useViewport";
 
@@ -65,6 +66,7 @@ export default function VixModelSpreadPanel() {
       </div>
       <VixModelSpreadChart history={series.slice(range[0], range[1] + 1)} window={window} />
       {series.length >= 2 ? <BrushMinimap values={series.map((row) => Number.isFinite(row.spread) ? row.spread : null)} range={range} onRangeChange={setCustom} onCustom={() => setPreset("custom")} testIdPrefix="vix-model-spread-brush" ariaLabel="VIX model history range brush" /> : null}
+      {data.provisional ? <div className="section-footnote" data-testid="vix-model-spread-provisional">{provisionalNote(data.provisional)}</div> : null}
       <div className="section-footnote" data-testid="vix-model-spread-source-footnote">Cboe VIX, VIXEQ and COR1M closes, aligned by session. VIXEQ history before its November 4, 2024 launch is backtested. Statistical windows use the full aligned history, independently of the visible range.</div>
     </div>
   </>;

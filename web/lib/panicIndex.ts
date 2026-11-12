@@ -1,4 +1,6 @@
 
+import type { ProvisionalMeta } from "./provisionalRow";
+
 export const RANK_WINDOW = 2520;
 export const RANK_MIN_ROWS = 504;
 
@@ -96,6 +98,20 @@ export interface PanicIndexData {
   alert: PanicIndexAlert | null;
   series: PanicIndexPoint[];
   missing?: boolean;
+  /** Set when `current` is the in-progress session, not an official Cboe close. */
+  provisional?: ProvisionalMeta | null;
+}
+
+const finiteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const finiteOrNull = (v: unknown) => v === null || v === undefined || finiteNumber(v);
+
+/** Shape guard for a provisional `panic-index:live` row before the route appends it. */
+export function isPanicIndexPoint(value: unknown): value is PanicIndexPoint {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+    && ["vix", "vix3m", "vvix", "ts", "skew"].every((key) => finiteNumber(row[key]))
+    && ["z_vix", "z_vvix", "z_ts", "z_skew", "level", "delta_1d", "skew25d", "z_skew25d"].every((key) => finiteOrNull(row[key]));
 }
 
 /** Contract: absent Panic Proxy data is HTTP 200 with missing:true, never a 4xx. */

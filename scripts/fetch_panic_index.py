@@ -56,6 +56,8 @@ from lib.panic_index_math import (  # noqa: E402
     should_fire_decline,
     strip_compute_fields,
 )
+from lib.panic_index_math import Z_WINDOW  # noqa: E402
+from utils import index_live  # noqa: E402
 
 PANIC_INDEX_JSON = _PROJECT_DIR / "data" / "panic_index.json"
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
@@ -66,9 +68,10 @@ _MAX_CACHE_LAG_DAYS = 4
 _SYMBOLS = ("VIX", "VIX3M", "VVIX", "SKEW")
 _VALUE_COLUMN = {"VIX": "CLOSE", "VIX3M": "CLOSE", "VVIX": "VVIX", "SKEW": "SKEW"}
 
-# Mirrors radon-panic-index.timer (OnCalendar 02:50 and 13:15 UTC) so heartbeat
-# copy can name the next attempt instead of hardcoding cadence text.
-TIMER_SLOTS_UTC = ((2, 50), (13, 15))
+# Provisional current-session row (radon-panic-index.timer fires every 5
+# minutes in ET trading hours): one source for all four inputs, written apart
+# from the ~1 MB official snapshot. Never alerts.
+LIVE_SERVICE = index_live.live_service(SERVICE)
 
 ALERT_URL = "https://app.radon.run/regime/panic-index"
 ALERT_URL_TITLE = "Open Panic Proxy"
@@ -132,8 +135,13 @@ def _write_db(
     *,
     rows_changed: bool,
     health_error: Optional[dict[str, Any]] = None,
+    snapshot: bool = True,
 ) -> None:
-    """Snapshot + heartbeat every cycle; row upserts only when the source moved."""
+    """Snapshot + heartbeat every cycle; row upserts only when the source moved.
+
+    ``snapshot=False`` is the unchanged-source live tick: heartbeat only, the
+    official snapshot stays as written (it is re-aged at least every 12h).
+    """
     if writer is None:
         return
     row_error: Optional[dict[str, Any]] = None
@@ -148,7 +156,8 @@ def _write_db(
         }
     snapshot_error: Optional[dict[str, Any]] = None
     try:
-        writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+        if snapshot:
+            writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
     except Exception as exc:  # noqa: BLE001
         print(f"[panic-index] snapshot write failed: {exc}", file=sys.stderr)
         snapshot_error = {
@@ -260,8 +269,13 @@ def _run_cycle(
     if cached and all(text is None for text in texts.values()):
         print("[panic-index] all sources unchanged (304); refreshing snapshot only", file=sys.stderr)
         payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
-        _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
-        _write_json_cache(payload)
+        live = _live_payload(payload, scan_time=scan_time, now=now)
+        if live["row"] is not None and not index_live.snapshot_is_old(cached.get("scan_time"), now):
+            _write_db(payload, scan_time, rows_changed=False, health_error=health_error, snapshot=False)
+        else:
+            _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
+            _write_json_cache(payload)
+        _write_live(live, scan_time)
         return payload
 
     _refetch_unchanged(client, texts, stamps)
@@ -299,7 +313,70 @@ def _run_cycle(
     )
     _write_db(payload, scan_time, rows_changed=True, health_error=health_error)
     _write_json_cache(payload)
+    _write_live(_live_payload(payload, scan_time=scan_time, now=now), scan_time)
     return payload
+
+
+def _fetch_live(now: datetime) -> Optional[dict[str, Any]]:
+    return index_live.fetch_live(_SYMBOLS, now, try_ib=index_live.ib_allowed(), label=SERVICE)
+
+
+_LIVE_FIELDS = {"VIX": "vix", "VIX3M": "vix3m", "VVIX": "vvix", "SKEW": "skew"}
+
+
+def _live_payload(
+    payload: dict[str, Any],
+    *,
+    scan_time: str,
+    now: datetime,
+    fetched: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Provisional row for the session after the official close, or row None.
+
+    Rebuilt with the same join / z / level / delta math over the last
+    Z_WINDOW + 8 official sessions plus the live inputs, then carded against
+    the full official series so the 10-year delta ranks stay exact. The UW
+    25d overlay is not available live and stays None.
+    """
+    live = fetched if fetched is not None else _fetch_live(now)
+    series = payload.get("series") or []
+    row: Optional[dict[str, Any]] = None
+    current: Optional[dict[str, Any]] = None
+    if series and index_live.is_newer(live, payload.get("data_date"), now):
+        tail = series[-(Z_WINDOW + 8):]
+        raw = {symbol: [{"date": r["date"], "value": r[field]} for r in tail]
+               + [{"date": live["date"], "value": live["values"][symbol]}]  # type: ignore[index]
+               for symbol, field in _LIVE_FIELDS.items()}
+        rebuilt, _dropped, _base = join_series(raw["VIX"], raw["VIX3M"], raw["VVIX"], raw["SKEW"])
+        attach_z_scores(rebuilt)
+        attach_level(rebuilt)
+        attach_delta(rebuilt)
+        attach_skew25d(rebuilt, [])
+        strip_compute_fields(rebuilt)
+        if rebuilt and rebuilt[-1]["date"] == live["date"] and rebuilt[-1]["level"] is not None:  # type: ignore[index]
+            row = rebuilt[-1]
+            current = build_current([*series, row])
+    return {
+        "scan_time": scan_time,
+        "row": row,
+        "current": current,
+        "source": live["source"] if row else None,  # type: ignore[index]
+        "quote_time": live["quote_time"] if row else None,  # type: ignore[index]
+    }
+
+
+def _write_live(live: dict[str, Any], scan_time: str) -> None:
+    """Advisory: a failed live write never fails the official run.
+
+    Only a real row is written; the API ignores a row not newer than the
+    official close, so yesterday's provisional row needs no clearing write.
+    """
+    if writer is None or live["row"] is None:
+        return
+    try:
+        writer.upsert_scan_snapshot(LIVE_SERVICE, scan_time, live)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[panic-index] live snapshot write non-fatal: {exc}", file=sys.stderr)
 
 
 def _maybe_alert(
