@@ -9,7 +9,7 @@ import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { buildDemoVcgFixture } from "@/lib/demo/fixtures/regime";
-import { getMarketStateFromDate, isUsTradingDay } from "@/lib/serviceHealthWindows";
+import { isMarketOpenAt, mostRecentSessionDate } from "@/lib/marketCalendar";
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
 // the dev server restarts.
@@ -36,22 +36,8 @@ const EMPTY_VCG = {
   history: [],
 };
 
-function isMarketOpenNow(now = new Date()): boolean {
-  if (getMarketStateFromDate(now) !== "open") return false;
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
-}
-
 export function expectedVcgSessionDate(now = new Date()): string {
-  const today = now.toLocaleDateString("sv", { timeZone: "America/New_York" });
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const afterOpen = et.getHours() * 60 + et.getMinutes() >= 9 * 60 + 30;
-  if (afterOpen && isUsTradingDay(today)) return today;
-  const cursor = new Date(`${today}T12:00:00Z`);
-  do cursor.setUTCDate(cursor.getUTCDate() - 1);
-  while (!isUsTradingDay(cursor.toISOString().slice(0, 10)));
-  return cursor.toISOString().slice(0, 10);
+  return mostRecentSessionDate(now);
 }
 
 // Mirrors the intraday scan_time TTL in vcgStaleness.ts.
@@ -94,7 +80,7 @@ function normalizeVcgPayload(raw: Record<string, unknown>): Record<string, unkno
   return {
     ...EMPTY_VCG,
     scan_time: typeof raw.scan_time === "string" ? raw.scan_time : "",
-    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenNow(),
+    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenAt(),
     credit_proxy: typeof raw.credit_proxy === "string" ? raw.credit_proxy : "HYG",
     signal: {
       ...EMPTY_VCG.signal,
@@ -121,7 +107,7 @@ export async function GET(): Promise<Response> {
   }
   const cached = await readCachedVcg();
   const data = normalizeVcgPayload(cached ?? {});
-  const currentMarketOpen = isMarketOpenNow();
+  const currentMarketOpen = isMarketOpenAt();
 
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 

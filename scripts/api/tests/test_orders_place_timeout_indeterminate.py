@@ -139,8 +139,7 @@ async def test_structured_unacknowledged_combo_is_indeterminate(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["cloud", "managed", "restart-success", "restart-failure"])
-async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, mode):
+async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch):
     """Exercise real recovery: a down gateway cannot erase post-transmit identity."""
     from scripts.api import server
     from scripts.api.subprocess import ScriptResult
@@ -155,23 +154,16 @@ async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, 
         ok=False, error=outcome["message"], data=outcome,
     ))
     gateway = AsyncMock(return_value={"port_listening": False, "upstream_dead": True})
-    restart = AsyncMock(return_value={
-        "restarted": mode == "restart-success",
-        "port_listening": mode == "restart-success",
-        "error": "gateway unavailable" if mode == "restart-failure" else None,
-    })
+    restart = AsyncMock(side_effect=AssertionError("runtime recovery never restarts"))
     audit = AsyncMock()
     monkeypatch.setattr(server, "test_mode", False)
     monkeypatch.setattr(server, "run_script", runner)
     monkeypatch.setattr(server, "record_order_event", audit)
     monkeypatch.setattr(server, "check_ib_gateway", gateway)
     monkeypatch.setattr(server, "restart_ib_gateway", restart)
-    monkeypatch.setattr(server, "_working_open_order_perm_ids", AsyncMock(return_value=[]))
     monkeypatch.setattr(server, "_pool_has_any_connection", lambda: True)
     monkeypatch.setattr(server, "_ib_last_failure", 0.0)
     monkeypatch.setattr(server, "ib_pool", None)
-    monkeypatch.setattr(server, "is_cloud_mode", lambda: mode == "cloud")
-    monkeypatch.setattr(server, "_should_auto_restart_ib_gateway_after_runtime_failure", lambda: mode.startswith("restart-"))
 
     with pytest.raises(HTTPException) as exc:
         await server._orders_place_after_rate_reservation(body)
@@ -179,10 +171,7 @@ async def test_recovery_preserves_structured_placement_uncertainty(monkeypatch, 
     # Prove the recovery branch ran before judging its returned outcome.
     runner.assert_awaited_once()
     gateway.assert_awaited_once()
-    if mode.startswith("restart-"):
-        restart.assert_awaited_once()
-    else:
-        restart.assert_not_awaited()
+    restart.assert_not_awaited()
     assert exc.value.status_code == 504
     assert exc.value.detail == {**outcome, "code": "ORDER_INDETERMINATE"}
     audit.assert_awaited_once()

@@ -11,9 +11,19 @@
  * services is normal so the closed-hour window is intentionally loose.
  */
 
-import staticHolidays from "../../scripts/config/market_holidays.json";
+import type { MarketState } from "./marketCalendar";
+import { isUsTradingDay } from "./marketCalendar";
 
-export type MarketState = "open" | "extended" | "closed";
+// The market calendar lives in lib/marketCalendar.ts; these names are
+// re-exported because many service-health callers import them from here.
+export {
+  HOLIDAY_TABLE_YEARS,
+  getMarketPhaseFromDate,
+  getMarketStateFromDate,
+  isHolidayTableCovering,
+  isUsTradingDay,
+} from "./marketCalendar";
+export type { MarketPhase, MarketState } from "./marketCalendar";
 
 /**
  * How a writer is triggered.
@@ -357,17 +367,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // covers the weekend gap (see cri-scan note above).
   "vcg-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``cta-sync`` has an autonomous Mon-Fri schedule on the VPS
-  // (radon-cta-sync.timer fires 18:15, 19:00, 21:30 UTC). Stale > 25h
-  // means the VPS timer failed; 25h tolerates a long
-  // weekend (Friday 21:30 UTC → Monday 18:15 UTC ≈ 69h) plus any
-  // single missed firing.
+  // (radon-cta-sync.timer fires 18:15, 19:00, 20:10, 21:30 UTC). Its age
+  // is counted on trading days only (TRADING_DAY_AGE_SERVICES), so 25h is
+  // one trading day of cadence (21:30 UTC to the next 18:15 UTC) plus
+  // slack, and the weekend and Monday before the first run stay fresh.
   // MenthorQ source via Playwright — no IB dependency.
-  "cta-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
+  "cta-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // ``menthorq-cta`` is the EXTRACTION-quality row written by the same
   // radon-cta-sync.timer firings (R-297): `error` when more than half the
   // rows lost their percentile to the z-score check. Same cadence as
   // ``cta-sync`` above, so the same windows apply.
-  "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
+  "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
 
   // scanner / discover / flow-analysis: radon-flow-refresh.timer hourly
   // ET RTH (plus SCAN). Wrapper skips closed session without a
@@ -444,11 +454,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // runs still heartbeat (incremental no-op), so the gap never widens past
   // the weekend. Yahoo + Turso only — no IB.
   "bpi-scan": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
-  // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
-  // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
-  // Mon morning) without flipping stale; the on-demand button can
-  // bring it fresh in between.
-  "leap-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // ``leap-scan`` runs Mon-Fri 10:00 ET (radon-leap.timer) and via the
+  // on-demand dashboard refresh. Its age is counted on trading days only
+  // (TRADING_DAY_AGE_SERVICES), so 26h is one trading day of cadence plus
+  // timer jitter and a Friday run stays fresh until Monday's run.
+  "leap-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   // ``garch-scan`` runs on-demand via the dashboard and on radon-garch.timer
   // (Mon-Fri 14:00 / 17:00 / 20:00 UTC). UW-only data flow, no IB dependency.
   "garch-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
@@ -663,6 +673,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "equibles-13f": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-ats-venue-share": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
   "equibles-cot-positioning": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+  // ``market-calendar`` — radon-market-calendar.timer, weekly Sun 22:00 UTC,
+  // IBKR SPY liquidHours only. 8-day window = weekly cadence + one day.
+  "market-calendar": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: true },
 
   // Event odds refreshes when GET /event-odds/{ticker} is requested. There is
   // no VPS timer; retained observations become dormant between requests.
@@ -751,7 +764,59 @@ export function isStale(
     const todayOpenEt = nowMs - elapsedOpenMs;
     if (ts < todayOpenEt) return elapsedOpenMs > window;
   }
+  if (TRADING_DAY_AGE_SERVICES.has(service)) return tradingDayAgeExceeds(ts, nowMs, window);
   return nowMs - ts > window;
+}
+
+/**
+ * Writers fired by a Mon..Fri timer. Their age skips weekends and full-closure
+ * holidays, so the window states one trading day of cadence and a Friday run
+ * stays fresh until the first run of the next trading day. Mirrored by
+ * TRADING_DAY_AGE_SERVICES in scripts/watchdog/services.py.
+ */
+const TRADING_DAY_AGE_SERVICES = new Set([
+  // radon-cta-sync.timer: Mon..Fri 18:15, 19:00, 20:10, 21:30 UTC.
+  "cta-sync",
+  "menthorq-cta",
+  // radon-leap.timer: Mon..Fri 10:00 ET.
+  "leap-scan",
+]);
+
+const ET_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+function etWallClock(ms: number): { isoDate: string; msSinceMidnight: number } {
+  const parts = ET_PARTS.formatToParts(ms);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "0";
+  const msSinceMidnight =
+    (Number(part("hour")) * 60 + Number(part("minute"))) * MIN + Number(part("second")) * 1000 + (ms % 1000);
+  return { isoDate: `${part("year")}-${part("month")}-${part("day")}`, msSinceMidnight };
+}
+
+/** Instant of the ET midnight that starts the calendar day after ``ms``. */
+function nextEtMidnightMs(ms: number): number {
+  const guess = ms - etWallClock(ms).msSinceMidnight + DAY;
+  const drift = etWallClock(guess).msSinceMidnight;
+  return drift < 12 * HOUR ? guess - drift : guess + (DAY - drift);
+}
+
+/** True once the time between ``fromMs`` and ``toMs`` spent on US trading days (ET) passes ``windowMs``. */
+function tradingDayAgeExceeds(fromMs: number, toMs: number, windowMs: number): boolean {
+  let ageMs = 0;
+  for (let cursor = fromMs; cursor < toMs && ageMs <= windowMs; ) {
+    const dayEnd = Math.min(nextEtMidnightMs(cursor), toMs);
+    if (isUsTradingDay(etWallClock(cursor).isoDate)) ageMs += dayEnd - cursor;
+    cursor = dayEnd;
+  }
+  return ageMs > windowMs;
 }
 
 const RTH_ONLY_SERVICES = new Set([
@@ -770,96 +835,3 @@ const RTH_ONLY_SERVICES = new Set([
   "vcg-scan",
   "ib-realtime-relay",
 ]);
-
-/** ET calendar date ("YYYY-MM-DD") is a full-closure US market holiday per
- * the static table (scripts/config/market_holidays.json — the same SoT the
- * relay's marketCalendar.js consults). Early-close half-days are NOT here;
- * they only make afternoon windows conservatively tight, never noisy-wide.
- * Years missing from the table fall back to weekday-only (pre-2026-07-03
- * behavior) rather than guessing. */
-function isUsMarketHoliday(et: Date): boolean {
-  const isoDate = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, "0")}-${String(et.getDate()).padStart(2, "0")}`;
-  return isHolidayIso(isoDate);
-}
-
-/**
- * R-164: the static table is finite, and `isHolidayIso` returns false for any
- * year it does not cover — so once it runs out, `isUsTradingDay` silently
- * degrades to weekday-only and every full-closure holiday reads as a trading
- * day. Blanking a whole uncovered year would be far worse than being wrong on
- * ~9 days, so the runtime behaviour is unchanged and the coverage is instead
- * made explicit here and pinned by a contract test that fails CI a year
- * before the data runs out.
- */
-export const HOLIDAY_TABLE_YEARS: readonly string[] = Object.freeze(
-  Object.keys(staticHolidays as Record<string, string[]>).sort(),
-);
-
-export function isHolidayTableCovering(isoDate: string): boolean {
-  return HOLIDAY_TABLE_YEARS.includes(isoDate.slice(0, 4));
-}
-
-function isHolidayIso(isoDate: string): boolean {
-  const dates = (staticHolidays as Record<string, string[]>)[isoDate.slice(0, 4)];
-  return Array.isArray(dates) && dates.includes(isoDate);
-}
-
-/**
- * Date-only trading-day check against the same holiday SoT: a weekday that is
- * not a full-closure US market holiday. Pure on the ISO "YYYY-MM-DD" string —
- * the weekday is derived at UTC noon so the calendar date never shifts with
- * the host timezone.
- */
-export function isUsTradingDay(isoDate: string): boolean {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
-  if (weekday === 0 || weekday === 6) return false;
-  return !isHolidayIso(isoDate);
-}
-
-/**
- * Server-side market-state derivation, mirrored from
- * web/lib/useMarketHours.ts but pure (no React, no setInterval).
- *
- * Returns the current MarketState in America/New_York. Full-closure
- * holidays read as "closed" all day (an observed holiday that computed
- * as "open" applied the tight RTH windows to scan writers that correctly
- * did not run — 6-7 stale rows of footer noise on 2026-07-03).
- */
-export function getMarketStateFromDate(now: Date = new Date()): MarketState {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return "closed";
-  if (isUsMarketHoliday(et)) return "closed";
-
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
-  if (
-    (minutes >= 4 * 60 && minutes < 9 * 60 + 30) ||
-    (minutes > 16 * 60 && minutes <= 20 * 60)
-  ) {
-    return "extended";
-  }
-  return "closed";
-}
-
-export type MarketPhase = "pre" | "open" | "after" | "closed";
-
-/**
- * Finer-grained sibling of getMarketStateFromDate that splits "extended"
- * into "pre" (04:00-09:30 ET) and "after" (16:00-20:00 ET) so the Day P&L
- * card can name the correct session. Pure, no React, testable with a
- * pinned clock.
- */
-export function getMarketPhaseFromDate(now: Date = new Date()): MarketPhase {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return "closed";
-  if (isUsMarketHoliday(et)) return "closed";
-
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
-  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre";
-  if (minutes > 16 * 60 && minutes <= 20 * 60) return "after";
-  return "closed";
-}

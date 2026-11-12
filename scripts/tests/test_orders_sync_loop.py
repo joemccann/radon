@@ -324,8 +324,6 @@ async def test_orders_sync_tick_real_failure_does_not_stamp_ok():
 # during an operator hold (page 0607c701, 2026-10-16 18:50Z).
 _GATEWAY_DOWN_SYNC_ERRORS = (
     "IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
-    "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
-    "approve any existing IBKR Mobile 2FA prompt.",
     "IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
     "IB Gateway connection recently failed. Retrying shortly.",
 )
@@ -358,72 +356,6 @@ async def test_orders_sync_tick_confirmed_gateway_down_stays_silent(error: str):
     assert captured == [], (
         "a confirmed gateway-down tick must not heartbeat; "
         f"wrote {captured!r} for {error!r}"
-    )
-    assert srv._orders_sync_consecutive_sheds == 0
-    srv._reset_orders_sync_shed_state()
-
-
-@pytest.mark.asyncio
-async def test_restart_failed_producer_stays_silent():
-    """The auto-restart failure sentence is built in _run_ib_script_with_recovery.
-
-    The parametrized silence cases above hand the matcher its own other
-    substrings. Deleting "ib gateway is down and restart failed" from
-    the gateway-down verdict markers left those four cases green and this
-    producer sentence wrote an orders-sync error heartbeat. The grouping
-    list carries the same phrase, but the sentence always ends in "2FA",
-    which an older pattern already matches, so this test does not claim
-    that list.
-    """
-
-    async def fake_run_script(script, args, timeout=30):
-        return ScriptResult(
-            ok=False,
-            error="ConnectionRefusedError(61, 'Connect call failed')",
-        )
-
-    async def fake_check_ib_gateway(*_args, **_kwargs):
-        return {"port_listening": False, "upstream_dead": True}
-
-    async def fake_restart():
-        return {"restarted": False, "error": "port still closed"}
-
-    async def no_working_orders():
-        return []
-
-    srv._ib_last_failure = 0.0
-    try:
-        with patch.object(srv, "run_script", new=fake_run_script), \
-             patch.object(srv, "check_ib_gateway", new=fake_check_ib_gateway), \
-             patch.object(srv, "restart_ib_gateway", new=fake_restart), \
-             patch.object(srv, "is_cloud_mode", return_value=False), \
-             patch.object(srv, "_should_auto_restart_ib_gateway_after_runtime_failure", return_value=True), \
-             patch.object(srv, "_pool_has_any_connection", return_value=True), \
-             patch.object(srv, "_working_open_order_perm_ids", new=no_working_orders):
-            produced = await srv._run_ib_script_with_recovery("ib_orders.py", ["--sync"])
-    finally:
-        srv._ib_last_failure = 0.0
-
-    assert produced.ok is False
-    error = produced.error or ""
-    assert "restart failed" in error.lower()
-
-    srv._reset_orders_sync_shed_state()
-    captured, fake_hrana = _capture_hrana()
-    with patch.object(srv, "test_mode", False), \
-         patch.object(srv, "_is_orders_session_live_now_et", return_value=True), \
-         patch.object(srv, "_pool_has_any_connection", return_value=True), \
-         patch.object(
-             srv,
-             "_coordinated_orders_sync",
-             new=AsyncMock(return_value=_fail_outcome(error)),
-         ), \
-         patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
-        await srv._orders_sync_tick()
-
-    assert captured == [], (
-        "the restart-failed sentence the recovery function returns must not "
-        f"heartbeat; wrote {captured!r} for {error!r}"
     )
     assert srv._orders_sync_consecutive_sheds == 0
     srv._reset_orders_sync_shed_state()

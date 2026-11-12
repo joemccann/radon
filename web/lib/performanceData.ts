@@ -99,18 +99,12 @@ function isoDay(ms: number): string {
 }
 
 /**
- * The most recent session whose 16:00 ET close has passed, holidays included.
- *
- * `lastCompletedSessionDate` is weekday-only by design (its own docstring calls
- * holidays an accepted caveat for the scan-storm checks it was written for).
- * DECISION 6 needs the exact Python boundary instead, so a holiday that never
- * opened is walked back off here rather than counted as a session that closed:
- * MLK Monday after the bell resolves to the preceding Friday on both sides.
+ * The most recent session whose 16:00 ET close has passed, holidays included
+ * (DECISION 6, the Python boundary): MLK Monday after the bell resolves to the
+ * preceding Friday on both sides.
  */
 export function lastCompletedSession(now: Date = new Date()): string {
-  let cursor = Date.parse(`${lastCompletedSessionDate(now)}T00:00:00Z`);
-  while (!isUsTradingDay(isoDay(cursor))) cursor -= 86_400_000;
-  return isoDay(cursor);
+  return lastCompletedSessionDate(now);
 }
 
 /**

@@ -9,7 +9,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
-from research import intake, learn, marketdesk_filter as mf, novelty  # noqa: E402
+from research import learn, marketdesk_filter as mf, novelty  # noqa: E402
 
 FIXTURES = SCRIPTS / "tests/fixtures/marketdesk"
 # Real MarketDesk library chain for 4AJs5Adl2Yp (CBOE), minus the "Current" root.
@@ -104,14 +104,14 @@ def test_operator_preferences_cannot_restore_model_relevance_veto(tmp_path):
 
 
 def test_index_reads_research_fingerprints_and_ledger(tmp_path):
-    (tmp_path / intake.FINGERPRINTS).write_text(json.dumps({"documents": {"dropbox:a": "00000000000000ff"},
+    (tmp_path / mf.FINGERPRINTS).write_text(json.dumps({"documents": {"dropbox:a": "00000000000000ff"},
                                                             "publishers": {"dropbox:a": "UBS"}}))
     index = mf.fingerprint_index(tmp_path, [("art1", "0000000000000f0f", "Cboe"), ("art2", None, None)])
     assert index == {"dropbox:a": (0xff, "UBS"), "marketdesk:art1": (0xf0f, "Cboe")}
 
 
 def test_index_tolerates_missing_or_corrupt_research_file(tmp_path):
-    (tmp_path / intake.FINGERPRINTS).write_text("{nope")
+    (tmp_path / mf.FINGERPRINTS).write_text("{nope")
     assert mf.fingerprint_index(tmp_path, []) == {}
     assert mf.fingerprint_index(tmp_path / "absent", []) == {}
 

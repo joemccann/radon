@@ -301,6 +301,23 @@ class TestOutputShape:
 
 
 class TestGoldenSetFile:
+    def test_every_docs_pin_matches_a_doc_the_kb_ingests(self):
+        from knowledge.sources import docs as docs_source
+
+        golden = json.loads(DEFAULT_GOLDEN_PATH.read_text(encoding="utf-8"))
+        ingested = docs_source.ingested_doc_keys()
+        missing = [
+            (entry["id"], want["doc_key_pattern"])
+            for entry in golden["questions"]
+            for want in entry["relevant"]
+            if want["source"] == "docs"
+            and not any(re.search(want["doc_key_pattern"], key) for key in ingested)
+        ]
+        assert missing == [], (
+            "golden-set docs pins must match a doc the KB ingests "
+            f"(docs/*.md or tasks/lessons.md; never docs/archive/): {missing}"
+        )
+
     def test_shipped_golden_set_is_well_formed(self):
         from knowledge.eval_golden import validate_golden_set
 

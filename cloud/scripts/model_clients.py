@@ -310,7 +310,7 @@ def _link_identical_release(root: Path, stage: Path, release: str, owner_uid: in
     return True
 
 
-def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0, image_id: str | None = None) -> Path:
+def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0, image_id: str | None = None, activate: bool = True) -> Path:
     """Validate a bounded payload completely before selecting the new release."""
     if not isinstance(release, str) or not re.fullmatch(r"[0-9a-f]{40}", release):
         raise ValueError("exact release SHA required")
@@ -405,8 +405,9 @@ def install_from_tar(stream, root: Path, release: str, *, owner_uid: int = 0, im
                     raise ValueError("existing client helper changed")
         else:
             os.rename(stage, target)
-        _activate(root, release)
-        _prune_releases(root, release, owner_uid)
+        if activate:
+            _activate(root, release)
+            _prune_releases(root, release, owner_uid)
         return target
     finally:
         _remove_stage(stage)
@@ -728,7 +729,7 @@ def _copy_verified_tree(source: Path, stage: Path) -> None:
         os.chmod(folder,0o555)
 
 
-def _clone_verified_release(root: Path, exports: Path, donor: str, release: str, owner_uid: int, image_id: str | None = None) -> None:
+def _clone_verified_release(root: Path, exports: Path, donor: str, release: str, owner_uid: int, image_id: str | None = None, activate: bool = True) -> None:
     """Copy one verified image's receipts onto a new exact SHA without exporting."""
     _verify_linux_release(root,donor,owner_uid)
     _verify_darwin_export(exports,donor,owner_uid)
@@ -783,8 +784,9 @@ def _clone_verified_release(root: Path, exports: Path, donor: str, release: str,
         os.chmod(exports/release,0o555)
         _verify_linux_release(root,release,owner_uid)
         _verify_darwin_export(exports,release,owner_uid)
-        _activate(root,release)
-        _prune_releases(root,release,owner_uid)
+        if activate:
+            _activate(root,release)
+            _prune_releases(root,release,owner_uid)
     except Exception:
         # A half-moved tree would make the export fallback refuse the release.
         # Leave a tree alone once current already names it.
@@ -802,7 +804,7 @@ def _clone_verified_release(root: Path, exports: Path, donor: str, release: str,
                     pass
 
 
-def reuse_identical_image_clients(engine: str, image: str, release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> bool:
+def reuse_identical_image_clients(engine: str, image: str, release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0, activate: bool = True) -> bool:
     """Reuse clients already verified for this image id. A miss exports as before."""
     root=ROOT if root is None else Path(root)
     exports=EXPORT_ROOT/"releases" if exports is None else Path(exports)
@@ -860,13 +862,60 @@ def reuse_identical_image_clients(engine: str, image: str, release: str, *, root
                         continue
         for donor in sorted(donors):
             try:
-                _clone_verified_release(root,exports,donor,release,owner_uid,image_id=requested)
+                _clone_verified_release(root,exports,donor,release,owner_uid,image_id=requested,activate=activate)
                 return True
             except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
                 continue
         return False
     except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
         return False
+
+
+def activate_staged_clients(engine: str, image: str, release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> bool:
+    """Select a tree staged before teardown when its receipt names this exact local image id.
+
+    Tree existence alone is not proof (a rebuilt tag must still export), so the
+    receipt's image id must equal the image id inspected now. Any miss returns
+    False and promotion falls through to reuse/export exactly as before.
+    """
+    root=ROOT if root is None else Path(root)
+    exports=EXPORT_ROOT/"releases" if exports is None else Path(exports)
+    try:
+        if not re.fullmatch(r"[0-9a-f]{40}",release) or image!="ghcr.io/joemccann/radon-model-gateway:"+release:
+            return False
+        _trusted_root(root,owner_uid)
+        _trusted_root(exports,owner_uid)
+        if not (root/release).is_dir() or (root/release).is_symlink() or not (exports/release).is_dir():
+            return False
+        recorded=_receipt_image_id(root/release)
+        if recorded is None or recorded!=_image_id(engine,image):
+            return False
+        _verify_linux_release(root,release,owner_uid)
+        _verify_darwin_export(exports,release,owner_uid)
+        _activate(root,release)
+        _prune_releases(root,release,owner_uid)
+        return True
+    except (OSError,ValueError,subprocess.SubprocessError,json.JSONDecodeError):
+        return False
+
+
+def stage_clients(engine: str, image: str, release: str) -> str:
+    """Prepare (never select) the exact release's clients while the old release serves."""
+    check_model_space()
+    _trusted_root(ROOT, 0)
+    _trusted_root(EXPORT_ROOT, 0)
+    if (ROOT/release).exists() or (EXPORT_ROOT/"releases"/release).exists():
+        return "model clients already present for release; promotion verifies them"
+    if reuse_identical_image_clients(engine, image, release, activate=False):
+        return "model clients staged from verified identical image"
+    image_id=_image_id(engine,image)
+    with tempfile.TemporaryFile(dir=ROOT) as stream:
+        export_from_image(engine, image, stream)
+        install_from_tar(stream, ROOT, release, image_id=image_id, activate=False)
+    with tempfile.TemporaryFile(dir=EXPORT_ROOT) as stream:
+        export_from_image(engine,image,stream,darwin=True)
+        publish_darwin_bundle(stream,EXPORT_ROOT/"releases",release)
+    return "model clients staged from exact CI image"
 
 
 def recover_clients(release: str, *, root: Path | None = None, exports: Path | None = None, owner_uid: int = 0) -> None:
@@ -911,6 +960,16 @@ def main(args: list[str]) -> int:
             print("Darwin export activation failed: "+type(exc).__name__,file=sys.stderr)
             return 78
         return 0
+    if len(args)==4 and args[0]=="stage":
+        engine, image, release = args[1:]
+        if engine not in ("/usr/bin/podman", "/usr/bin/docker") or image != "ghcr.io/joemccann/radon-model-gateway:" + release or not re.fullmatch(r"[0-9a-f]{40}", release):
+            return 64
+        try:
+            print(stage_clients(engine, image, release))
+        except Exception as exc:
+            print(f"model client staging failed: {type(exc).__name__}", file=sys.stderr)
+            return 78
+        return 0
     if len(args) != 3:
         return 64
     engine, image, release = args
@@ -920,6 +979,11 @@ def main(args: list[str]) -> int:
         check_model_space()
         _trusted_root(ROOT, 0)
         _trusted_root(EXPORT_ROOT, 0)
+        # Staged before teardown (stage-model-clients): selection only, no export.
+        if activate_staged_clients(engine, image, release):
+            print("activated model clients staged before teardown")
+            print("model clients promoted from exact CI image")
+            return 0
         # A retagged image still has the clients exported for its previous SHA.
         # Reusing those verified bytes avoids two cold starts of the gateway
         # image during the deploy outage. Any miss keeps the export below.

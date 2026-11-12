@@ -80,7 +80,7 @@ def test_key_holding_container_gets_no_host_executable_or_checkout_bind(tmp_path
 
 def test_research_uses_image_clis_even_when_host_executables_exist(tmp_path):
     home = _subscription_home(tmp_path)
-    result = _run(tmp_path, ["run", "radon-research.service"], extra_env={
+    result = _run(tmp_path, ["run", "radon-marketdesk.service"], extra_env={
         "RADON_SUBSCRIPTION_HOME": str(home), "NOTIFY_SOCKET": "",
     })
     assert result.returncode == 0, result.stderr

@@ -3,7 +3,7 @@
 
 Computes the asset/SPY realized-vol ratio over up to ~10 years of aligned
 daily closes, with full-history stats, a +/-1 sigma band, and a tiered
-divergence regime. Contract: tasks/rv-ratio-indicator-plan.md (payload is
+divergence regime. Contract: tasks/archive/rv-ratio-indicator-plan.md (payload is
 schema_version 1, section 6).
 
 Scan math (plan step 3): ``align_sessions``, ``compute_ratio``,

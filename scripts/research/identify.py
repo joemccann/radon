@@ -10,6 +10,18 @@ import re
 from dataclasses import dataclass, asdict
 from datetime import date, datetime
 
+# Nemotron image-derived spans are fenced in the extracted page text; the
+# grounding text (what a copy figure must match) excludes them.
+_FENCE_OPEN = "<!-- image-derived -->"
+_FENCE_CLOSE = "<!-- /image-derived -->"
+_IMAGE_FENCE = re.compile(r"<!--\s*image-derived\s*-->.*?<!--\s*/image-derived\s*-->", re.S)
+
+
+def grounding_text(text: str) -> str:
+    """Page text with image-derived Nemotron spans removed."""
+    return _IMAGE_FENCE.sub("", text or "")
+
+
 # Dropbox folders that group by topic rather than by publisher.
 TOPIC_FOLDERS = {'nuclear', 'other', 'week ahead', 'misc', 'unknown', 'unidentified', 'unverified'}
 
@@ -109,7 +121,6 @@ def _brand_on_page(text):
 
 
 def _publisher_ownership(page_text):
-    from research.nemotron_parse import grounding_text
     for number in sorted(page_text, reverse=True):
         text = grounding_text(page_text[number])
         for display, owner in LEGAL_PUBLISHERS:
@@ -225,7 +236,6 @@ def _discover_publisher(page_text):
     if not numbers:
         return None
     # Image-derived (OCR) text counts here: a publisher name is not a figure the copy has to ground.
-    from research.nemotron_parse import _FENCE_CLOSE, _FENCE_OPEN
     pages = {n: _plain((page_text[n] or '').replace(_FENCE_OPEN, ' ').replace(_FENCE_CLOSE, ' ')) for n in numbers}
     focus_numbers = list(dict.fromkeys([*numbers[:2], *numbers[-3:]]))
     focus = [pages[n] for n in focus_numbers]
@@ -394,7 +404,6 @@ def identify(page_text, metadata, folder_date, pdf_created=None):
     """page_text: {page_number: markdown}. Returns an Identity with sourced facts."""
     folder = publisher_folder(metadata.get('path_lower', ''))
     name = metadata.get('name') or metadata.get('path_lower', '').split('/')[-1]
-    from research.nemotron_parse import grounding_text
     page_one = grounding_text(page_text.get(1, '')) if page_text else ''
     attribution_page, attribution_quote = None, None
     if folder and folder not in TOPIC_FOLDERS:

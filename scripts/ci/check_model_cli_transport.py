@@ -37,17 +37,21 @@ def _exited(process):
         return True
 
 
-def _signal_group(process, sig):
+def _signal_group(process, sig, grace=1.0):
     try:
         os.killpg(process.pid, sig)
     except ProcessLookupError:
         pass
     except PermissionError:
-        # macOS answers EPERM, not ESRCH, when the group's only member has
-        # exited but is not yet reaped: the child finished between poll() and
-        # killpg(). A live group refusing the signal is still an error.
-        if not _exited(process):
-            raise
+        # macOS answers EPERM, not ESRCH, when the group's leader has exited
+        # or is still exiting: the child finished between poll() and killpg(),
+        # and waitid() may not report it for a moment. A group whose leader is
+        # still alive after the grace window refusing the signal is an error.
+        deadline = time.monotonic() + grace
+        while not _exited(process):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(.02)
 
 
 def _stop_owned(process):

@@ -2,13 +2,7 @@
 // Mirrors web/lib/db.ts but constructed for use from arbitrary Node scripts
 // — the scraper runs outside Next.js and needs its own client instance.
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
-
-const __filename = fileURLToPath(import.meta.url);
-const PROJECT_ROOT = path.resolve(path.dirname(__filename), "..", "..");
-const REPLICA_PATH = path.join(PROJECT_ROOT, "data", "replica.db");
 
 let cached = null;
 
@@ -161,17 +155,8 @@ function serialiseImageSources(post) {
 
 // Embedded replicas were retired on 2026-05-20 after WAL conflicts between
 // multi-writer hosts (feedback_libsql_replica_one_writer.md). Mirrors
-// web/lib/db.ts: direct-to-cloud is the default; a replica requires an
-// explicit RADON_DB_USE_REPLICA=1 opt-in, and the legacy
-// RADON_DB_NO_REPLICA=1 kill switch still forces the direct path.
-function shouldUseReplica() {
-  return (
-    process.env.NODE_ENV !== "test" &&
-    process.env.RADON_DB_USE_REPLICA === "1" &&
-    process.env.RADON_DB_NO_REPLICA !== "1"
-  );
-}
-
+// web/lib/db.ts: every client is direct to cloud and no env var opens a
+// replica.
 export function resolveClientConfig() {
   const url = process.env.TURSO_DB_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
@@ -184,16 +169,7 @@ export function resolveClientConfig() {
   // Direct-cloud goes over the libSQL HTTP transport (libsql:// would pick
   // hrana-over-websocket, which ignores a custom fetch) so the per-request
   // AbortSignal timeout is a real socket-level bound.
-  if (!shouldUseReplica()) {
-    return { url: httpUrlFromLibsql(url), authToken, fetch: boundedFetch };
-  }
-
-  console.warn(
-    `[radon-db] WARNING: RADON_DB_USE_REPLICA=1 — opening the RETIRED libsql ` +
-      `embedded replica at ${REPLICA_PATH}. Only one process per host may hold ` +
-      `it (WalConflict). Direct-to-cloud has been the default since 2026-05-20.`,
-  );
-  return { url: `file:${REPLICA_PATH}`, syncUrl: url, authToken, syncInterval: 60 };
+  return { url: httpUrlFromLibsql(url), authToken, fetch: boundedFetch };
 }
 
 export function getDb() {

@@ -7,7 +7,7 @@
  * Resolution order (failure-safe — a missing source can only NARROW the open
  * window, never widen it):
  *   1. IBKR-sourced cache `data/market_calendar.json` (authoritative, written
- *      daily by scripts/fetch_market_calendar.py). Carries ad-hoc closures +
+ *      weekly by scripts/fetch_market_calendar.py). Carries ad-hoc closures +
  *      half-days the static table can't.
  *   2. Static `scripts/config/market_holidays.json` (the existing hand list).
  *   3. Bare weekday + 09:30-16:00 ET window (legacy behavior).

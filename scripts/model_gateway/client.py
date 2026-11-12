@@ -17,7 +17,7 @@ DEFAULT_CONTROL_SOCKET = "/run/radon-model-control/control.sock"
 CONTROL_OPERATIONS = frozenset({"refresh", "refresh-status", "refresh-catalog", "validate-credential"})
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-OPERATIONS = frozenset({"json", "vision", "chat", "embed", "ocr", "x-search", "forecast", "models", "status",
+OPERATIONS = frozenset({"json", "vision", "chat", "embed", "x-search", "forecast", "models", "status",
                         "validate-credential", "refresh-catalog", "refresh", "refresh-status", "native", "clairic"})
 
 

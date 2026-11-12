@@ -9,6 +9,7 @@ import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
 import { buildDemoGammaRotationFixture } from "@/lib/demo/fixtures/regime";
+import { isMarketOpenAt } from "@/lib/marketCalendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -68,15 +69,6 @@ const EMPTY_GAMMA_ROTATION = {
   },
 };
 
-function isMarketOpenNow(): boolean {
-  const now = new Date();
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
-  const minutes = et.getHours() * 60 + et.getMinutes();
-  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
-}
-
 // Staleness now lives in the shared, market-gated lib/gammaRotationStaleness.ts
 // (closed-guard precedes the date-roll check) so off-hours GETs stop firing a
 // background scan on every weekend/overnight tab open.
@@ -125,7 +117,7 @@ function normalizeGammaRotationPayload(raw: Record<string, unknown>): Record<str
     ...EMPTY_GAMMA_ROTATION,
     ...raw,
     scan_time: typeof raw.scan_time === "string" ? raw.scan_time : "",
-    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenNow(),
+    market_open: typeof raw.market_open === "boolean" ? raw.market_open : isMarketOpenAt(),
     signal: { ...EMPTY_GAMMA_ROTATION.signal, ...signal },
     assets: {
       SPY: normalizeAsset(assets.SPY, "SPY"),
@@ -156,7 +148,7 @@ export async function GET(): Promise<Response> {
   }
   const cached = await readCachedGammaRotation();
   const data = normalizeGammaRotationPayload(cached ?? {});
-  const currentMarketOpen = isMarketOpenNow();
+  const currentMarketOpen = isMarketOpenAt();
 
   data.market_open = currentMarketOpen;
 

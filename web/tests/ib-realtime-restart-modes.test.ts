@@ -35,21 +35,19 @@ describe("ib_realtime_server.js WebSocket auth", () => {
   });
 });
 
-describe("ib_realtime_server.js stale-data restart modes", () => {
-  it("keeps cloud and docker on reconnect-only recovery", () => {
-    const cloudDockerBlock = source.match(
-      /if \(GATEWAY_MODE === "cloud" \|\| GATEWAY_MODE === "docker"\) \{[\s\S]*?\n  \} else \{/,
-    )?.[0] ?? "";
+describe("ib_realtime_server.js stale-data recovery", () => {
+  it("reconnects the socket and never reads a Gateway mode", () => {
+    const reconnectBlock = source.match(/function reconnectIBSocket\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
 
-    expect(cloudDockerBlock).toContain('GATEWAY_MODE === "cloud" || GATEWAY_MODE === "docker"');
-    expect(cloudDockerBlock).toContain("disconnecting and scheduling reconnect");
-    expect(cloudDockerBlock).not.toContain("restart-secure-ibc-service.sh");
+    expect(reconnectBlock).toContain("disconnecting and scheduling reconnect");
+    expect(source).not.toContain("IB_GATEWAY_MODE");
+    expect(source).not.toContain("GATEWAY_MODE");
   });
 
-  it("does not restart local launchd IBC on stale ticks", () => {
-    const launchdBlock = source.match(/else \{\n    \/\/ Local launchd mode[\s\S]*?\n  \}/)?.[0] ?? "";
+  it("escalates to the lock-held /ib/restart and never runs IBC locally", () => {
+    const escalateBlock = source.match(/function escalateStaleData\([\s\S]*?\n\}/)?.[0] ?? "";
 
-    expect(launchdBlock).toContain("manual IBC restart required");
+    expect(escalateBlock).toContain("void requestGatewayRestart();");
     expect(source).toContain("try { ib.disconnect(); } catch { /* ignore */ }");
     expect(source).toContain("scheduleReconnect();");
     expect(source).not.toContain("restart-secure-ibc-service.sh");

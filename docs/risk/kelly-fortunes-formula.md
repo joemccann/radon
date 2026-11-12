@@ -4,6 +4,10 @@ This owner serves trading operators choosing risk controls and maintainers
 integrating evaluation or order placement. Source and tests define the exact
 parameters; deployed preferences require operator verification.
 
+The Pi harness files this page names (`.pi/SYSTEM.md`, `lib/tools/pi-tools.ts`)
+were deleted on 2026-11-11. Plan steps below that edit them are historical;
+the restructure rule itself lives in `scripts/kelly.py`.
+
 ## Implemented controls
 
 [Kelly sizing](../../scripts/kelly.py) uses half Kelly by default, permits a

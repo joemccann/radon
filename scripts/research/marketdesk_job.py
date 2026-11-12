@@ -51,7 +51,7 @@ import time  # noqa: E402
 from api.db_http import DbHttpError  # noqa: E402
 from research import equity_admission, rendered_copy
 from research.assets import URL_PREFIX  # noqa: E402
-from research.dropbox import DropboxError  # noqa: E402
+from research.dropbox_writer import DropboxError  # noqa: E402
 from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
 from research.marketdesk_copy import scrub  # noqa: E402
 from research.marketdesk_filter import decide as relevance, fingerprint_index  # noqa: E402

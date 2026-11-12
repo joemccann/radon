@@ -194,6 +194,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-liquidcompute.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
+    "radon-market-calendar.service",
+    "radon-market-calendar.timer",
     "radon-media-backup.service",
     "radon-media-backup.timer",
     "radon-model-catalog.service",

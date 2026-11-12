@@ -1,5 +1,5 @@
 """Knowledge ingest pipeline: connector fetch → pre-filter → distill → embed
-→ upsert → prune (tasks/knowledge-base-plan.md Phase 1).
+→ upsert → prune (tasks/archive/knowledge-base-plan.md Phase 1).
 
 Determinism/cost guard: before distilling anything, the stored state for the
 source is loaded in ONE query and any document whose connector-supplied

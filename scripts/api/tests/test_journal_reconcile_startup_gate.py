@@ -32,7 +32,7 @@ def reconcile_runner(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["weekend", "static:holiday", "ibkr:closed"])
 async def test_skips_reconcile_on_non_trading_day(monkeypatch, reconcile_runner, reason):
-    monkeypatch.setattr(market_calendar, "market_state", lambda: _state(reason))
+    monkeypatch.setattr(market_calendar, "market_state", lambda now=None: _state(reason))
 
     await srv._warm_journal_reconciliation_on_startup()
 
@@ -51,7 +51,7 @@ async def test_skips_reconcile_on_non_trading_day(monkeypatch, reconcile_runner,
     ],
 )
 async def test_runs_reconcile_on_trading_day(monkeypatch, reconcile_runner, reason, is_open):
-    monkeypatch.setattr(market_calendar, "market_state", lambda: _state(reason, is_open=is_open))
+    monkeypatch.setattr(market_calendar, "market_state", lambda now=None: _state(reason, is_open=is_open))
 
     await srv._warm_journal_reconciliation_on_startup()
 
@@ -71,13 +71,13 @@ async def test_calendar_error_fails_open_and_runs_reconcile(monkeypatch, reconci
 
 
 def test_skip_reasons_exist_in_calendar_vocabulary():
-    """Pin _NON_TRADING_SESSION_REASONS to strings market_state() can actually
+    """Pin market_calendar._NON_SESSION_REASONS to strings market_state() can actually
     emit — a calendar rename would otherwise silently turn every skip reason
     into fail-open."""
     import inspect
 
     calendar_source = inspect.getsource(market_calendar)
-    for reason in srv._NON_TRADING_SESSION_REASONS:
+    for reason in market_calendar._NON_SESSION_REASONS:
         assert f'"{reason}"' in calendar_source, (
             f"gate skip reason {reason!r} is not a reason string "
             "utils/market_calendar.py can emit"

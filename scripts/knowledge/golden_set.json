@@ -279,7 +279,7 @@
       "relevant": [
         {
           "source": "docs",
-          "doc_key_pattern": "^docs/flex-delivery-architecture\\.md$",
+          "doc_key_pattern": "^docs/flex-sftp-cutover\\.md$",
           "grade": 3
         }
       ]
@@ -507,7 +507,7 @@
       "relevant": [
         {
           "source": "docs",
-          "doc_key_pattern": "^docs/monorepo-legibility-plan\\.md$",
+          "doc_key_pattern": "^docs/README\\.md$",
           "grade": 3
         }
       ]
@@ -880,18 +880,6 @@
         {
           "source": "docs",
           "doc_key_pattern": "^docs/README\\.md$",
-          "grade": 3
-        }
-      ]
-    },
-    {
-      "id": "q-docs-077-flex-sftp-cutover-review",
-      "question": "What did the Flex sFTP cutover review conclude?",
-      "category": "paraphrase",
-      "relevant": [
-        {
-          "source": "docs",
-          "doc_key_pattern": "^docs/flex-sftp-cutover-review\\.md$",
           "grade": 3
         }
       ]

@@ -65,7 +65,6 @@ from api.ib_gateway import (
     ensure_ib_gateway,
     restart_ib_gateway,
     recover_stuck_pool,
-    is_cloud_mode,
     reset_restart_backoff,
 )
 from api import ib_gateway
@@ -1530,23 +1529,8 @@ def _today_et_str() -> str:
 
 
 def _is_market_open_now_et() -> bool:
-    # Holiday-aware (market_calendar.is_market_open_et consults
-    # scripts/config/market_holidays.json), so the orders-sync / portfolio loop
-    # no longer treats mid-week holidays like Juneteenth as open. Falls back to
-    # weekday + 09:30-16:00 ET only if the calendar import/file is unavailable.
-    try:
-        from utils.market_calendar import is_market_open_et
-        return is_market_open_et()
-    except Exception:
-        from zoneinfo import ZoneInfo
-        try:
-            et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
-        except Exception:
-            et = datetime.now()
-        if et.weekday() >= 5:
-            return False
-        minutes = et.hour * 60 + et.minute
-        return 9 * 60 + 30 <= minutes <= 16 * 60
+    from utils.market_calendar import is_market_open_et
+    return is_market_open_et()
 
 
 def _is_orders_session_live_now_et() -> bool:
@@ -1562,16 +1546,10 @@ def _is_orders_session_live_now_et() -> bool:
         return _is_market_open_now_et()
 
 
-# market_state() reasons that mean the whole day is a non-session (as opposed
-# to a trading day merely outside 09:30-16:00 ET). Unknown/new reasons fall
-# through as trading days so the gate can only ever fail open.
-_NON_TRADING_SESSION_REASONS = {"weekend", "static:holiday", "ibkr:closed"}
-
-
 def _is_trading_session_today() -> bool:
     try:
-        from utils.market_calendar import market_state
-        return market_state()["reason"] not in _NON_TRADING_SESSION_REASONS
+        from utils.market_calendar import is_trading_day_et
+        return is_trading_day_et()
     except Exception:
         # Fail open: a calendar bug must never silently disable startup
         # reconciliation forever.
@@ -2287,13 +2265,9 @@ def _ib_restart_refusal_reason(action) -> str:
 
 @app.post("/ib/restart")
 async def ib_restart():
-    """Restart IB Gateway via IBC service, then reconnect pool.
+    """Restart IB Gateway through the host that owns it.
 
-    Honors the restart backoff (1m → 60m capped) when prior attempts haven't
-    completed login. Use POST /ib/reset-backoff after approving 2FA to retry
-    immediately.
-
-    Cloud mode on the gateway HOST delegates to the sanctioned systemd
+    The gateway HOST delegates to the sanctioned systemd
     lifecycle unit (2026-07-26 incident: the operator page's restart button
     landed here and was refused unconditionally, while the watchdog stood
     down at its awaiting-2fa cap — leaving no working restart path). The
@@ -2321,7 +2295,7 @@ async def ib_restart():
                 "error": admin_services.OPERATOR_HOLD_DETAIL,
             },
         )
-    if ib_gateway.is_cloud_mode() and _gateway_unit_controllable():
+    if _gateway_unit_controllable():
         action = await admin_services.control_unit(admin_services.GATEWAY_UNIT, "restart")
         if action.ok:
             return {
@@ -2348,20 +2322,9 @@ async def ib_restart():
             },
         )
 
-    result = await restart_ib_gateway(pool=ib_pool)
-    if not result.get("restarted"):
-        # Surface deferred (backoff) and unauthenticated outcomes as 503 so the
-        # caller treats them as failure, but include the structured payload for
-        # operator follow-up.
-        raise HTTPException(status_code=503, detail=result)
-
-    # Reconnect pool after Gateway restart
-    if ib_pool:
-        await ib_pool.disconnect_all()
-        pool_status = await ib_pool.connect_all()
-        result["pool"] = pool_status
-
-    return result
+    # This process cannot cycle the Gateway; surface the structured refusal
+    # as 503 so the caller treats it as failure.
+    raise HTTPException(status_code=503, detail=await restart_ib_gateway(pool=ib_pool))
 
 
 @app.post("/ib/reset-backoff")
@@ -4688,8 +4651,9 @@ async def market_calendar_refresh():
 
     fetch_market_calendar.py merges the rolling window into
     data/market_calendar.json (the SoT the relay + market_state() resolver read)
-    and emits the summary JSON we return. The daily radon-market-calendar timer
-    targets this route.
+    and emits the summary JSON we return. The weekly radon-market-calendar timer
+    (Sunday 22:00 UTC) runs the same script directly; this route is the
+    on-demand path.
     """
     result = await run_script("fetch_market_calendar.py", [], timeout=60)
     if not result.ok:
@@ -6231,37 +6195,6 @@ def _pool_has_any_connection() -> bool:
     return False
 
 
-def _should_auto_restart_ib_gateway_after_runtime_failure() -> bool:
-    """Runtime subprocess failures should not churn a local launchd/IBC session.
-
-    Startup still uses ensure_ib_gateway(); this only governs mid-session recovery.
-    Every known mode delegates recovery (cloud: the remote host; docker and
-    launchd: the lock-aware watchdog). An unrecognized IB_GATEWAY_MODE used to
-    fall through to True; a config typo must fail safe, so nothing returns
-    True. The restart branch below stays as the legacy harness seam.
-    """
-    return False
-
-
-async def _working_open_order_perm_ids() -> list:
-    """permIds of working orders from Turso ``open_orders`` — no IB call.
-
-    REL-018 (R-007): the auto-restart path must know what it is about to
-    orphan. A snapshot failure returns [] — inventory is advisory, never
-    restart-blocking.
-    """
-    try:
-        rows = await asyncio.to_thread(
-            db_http.hrana_execute,
-            "SELECT perm_id FROM open_orders ORDER BY updated_at DESC",
-            (),
-        )
-    except Exception as exc:
-        logger.warning("Working-order snapshot failed before gateway restart: %s", exc)
-        return []
-    return [row[0] for row in rows if row and row[0] is not None]
-
-
 async def _run_ib_script_with_recovery(
     script: str, args: list, timeout: float = 30, raw: bool = False
 ) -> ScriptResult:
@@ -6354,75 +6287,15 @@ async def _run_ib_script_with_recovery(
 
         _arm_ib_cooldown()
 
-        if not _should_auto_restart_ib_gateway_after_runtime_failure():
-            if is_cloud_mode():
-                logger.warning(
-                    "IB Gateway unreachable in cloud mode (port=%s, upstream_dead=%s) — remote host owns recovery",
-                    port_ok, upstream_dead,
-                )
-                result = ScriptResult(
-                    ok=False,
-                    data=placement_outcome,
-                    error=ib_gateway.GATEWAY_NOT_RESPONDING_CLOUD_ERROR,
-                )
-            else:
-                logger.warning(
-                    "IB Gateway unreachable in managed mode (port=%s, upstream_dead=%s) — lock-aware watchdog owns recovery",
-                    port_ok,
-                    upstream_dead,
-                )
-                result = ScriptResult(
-                    ok=False,
-                    data=placement_outcome,
-                    error=ib_gateway.GATEWAY_NOT_RESPONDING_MANAGED_ERROR,
-                )
-        else:
-            working_perm_ids = await _working_open_order_perm_ids()
-            if working_perm_ids:
-                logger.warning(
-                    "restarting gateway with %d working orders: %s",
-                    len(working_perm_ids), working_perm_ids,
-                )
-            logger.warning(
-                "IB Gateway unreachable (port=%s, upstream_dead=%s), attempting auto-restart...",
-                port_ok, upstream_dead,
-            )
-            gw_result = await restart_ib_gateway()
-
-            if gw_result.get("restarted") and gw_result.get("port_listening"):
-                _clear_ib_cooldown()
-                if ib_pool:
-                    await ib_pool.disconnect_all()
-                    await ib_pool.connect_all()
-                if script in _NON_IDEMPOTENT_IB_SCRIPTS:
-                    logger.warning(
-                        "IB Gateway restarted after %s failed — NOT re-running a "
-                        "non-idempotent order script; outcome is indeterminate",
-                        script,
-                    )
-                    error_msg = (
-                        "IB Gateway was restarted after the placement attempt "
-                        "failed. The order was NOT automatically retried — the "
-                        "first attempt may have reached IB before the failure. "
-                        "Check open orders before re-placing."
-                    )
-                    if working_perm_ids:
-                        error_msg += (
-                            f" {len(working_perm_ids)} working orders were live "
-                            f"at restart (permIds: {working_perm_ids})."
-                        )
-                    result = ScriptResult(ok=False, data=placement_outcome, error=error_msg)
-                else:
-                    logger.info("IB Gateway restarted, retrying %s", script)
-                    result = await _runner(script, args, timeout=timeout)
-            else:
-                logger.error("IB Gateway restart failed: %s", gw_result)
-                result = ScriptResult(
-                    ok=False,
-                    data=placement_outcome,
-                    error=f"{ib_gateway.GATEWAY_RESTART_FAILED_PREFIX} {gw_result.get('error', '')}".strip()
-                        + " Check IBKR Mobile for 2FA approval.",
-                )
+        logger.warning(
+            "IB Gateway unreachable in cloud mode (port=%s, upstream_dead=%s) — remote host owns recovery",
+            port_ok, upstream_dead,
+        )
+        result = ScriptResult(
+            ok=False,
+            data=placement_outcome,
+            error=ib_gateway.GATEWAY_NOT_RESPONDING_CLOUD_ERROR,
+        )
 
     return result
 

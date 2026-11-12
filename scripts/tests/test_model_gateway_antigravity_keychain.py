@@ -53,7 +53,8 @@ def test_grant_is_detected_in_the_dedicated_keychain(tmp_path, monkeypatch, foun
     assert engine._antigravity_cli(env_for(home, cli)) == (str(cli) if expected else "")
     assert [argv for argv, _ in calls] == [
         [SECURITY, "unlock-keychain", "-p", "", str(keychain)],
-        [SECURITY, "find-generic-password", "-s", "antigravity", str(keychain)],
+        # The item macOS agy 1.3.1 actually writes (dump-keychain, 2026-11-11).
+        [SECURITY, "find-generic-password", "-s", "gemini", "-a", "antigravity", str(keychain)],
     ]
     assert all(env == {"HOME": str(home), "PATH": "/usr/bin:/bin"} for _, env in calls)
 

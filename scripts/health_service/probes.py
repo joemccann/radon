@@ -10,12 +10,20 @@ import errno
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import math
 import socket
 import urllib.error
 import urllib.request
 
 from .retired import present_service_health_section
+
+# Stdlib-only, so the isolation contract holds. `scripts.` resolves under
+# `python -m scripts.health_service.serve`; tests put scripts/ on the path.
+try:
+    from scripts.utils.market_calendar import is_equity_ext_session_et
+except ImportError:
+    from utils.market_calendar import is_equity_ext_session_et
 
 
 # Three-valued state vocabulary used everywhere:
@@ -272,20 +280,12 @@ def effective_not_applicable(probe_results: dict, units: dict,
 def _now_et(now_et=None):
     if now_et is not None:
         return now_et
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo("America/New_York"))
-    except Exception:
-        from datetime import timedelta, timezone
-        return datetime.now(timezone.utc) + timedelta(hours=-5)
+    return datetime.now(ZoneInfo("America/New_York"))
 
 
 def _market_closed_et(dt) -> bool:
-    """Weekend, or a weekday outside the 04:00-20:00 ET equity EXT session."""
-    if dt.weekday() >= 5:
-        return True
-    minutes = dt.hour * 60 + dt.minute
-    return not (4 * 60 <= minutes < 20 * 60)
+    """Outside the 04:00-20:00 ET equity EXT session, or a weekend/holiday."""
+    return not is_equity_ext_session_et(dt)
 
 
 def _gateway_dwell_suppressed(value: dict, now_et) -> bool:

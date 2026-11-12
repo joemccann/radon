@@ -4,7 +4,7 @@
 Pulls ``SPY`` ``contractDetails.liquidHours`` (the authoritative RTH
 open/closed/early-close schedule, native ET), parses it, and MERGES the rolling
 ~6-day window into ``data/market_calendar.json`` so the forward calendar
-accumulates across daily runs. The relay (``scripts/lib/marketCalendar.js``) and
+accumulates across weekly runs (radon-market-calendar.timer). The relay (``scripts/lib/marketCalendar.js``) and
 the Python resolver (``utils.market_calendar.market_state``) read that cache.
 
 stdout is reserved for the JSON result; progress goes to stderr (the FastAPI
@@ -30,13 +30,26 @@ from utils.ib_preflight import ib_auth_state  # noqa: E402
 from clients.ib_client import DEFAULT_HOST  # noqa: E402
 
 CACHE_PATH = _SCRIPTS.parent / "data" / "market_calendar.json"
-# CLI client-id range (90-99) per scripts/CLAUDE.md — a daily one-shot, distinct
+# CLI client-id range (90-99) per scripts/CLAUDE.md — a weekly one-shot, distinct
 # from the pool (0-9), relay (10-19), and subprocess (20-49) ranges.
 _CLIENT_IDS = (95, 96, 97, 98)
+SERVICE = "market-calendar"
 
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr)
+
+
+def _record_health(state: str) -> None:
+    """Heartbeat every run (ok or error) so a missed week reads as stale."""
+    try:
+        from db import writer
+
+        writer.ensure_no_replica_for_writers()
+        finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        writer.record_service_health(SERVICE, state, finished_at=finished_at)
+    except Exception as exc:  # noqa: BLE001 — the cache write already decided the outcome
+        _log(f"[{SERVICE}] health heartbeat non-fatal: {exc}")
 
 
 def merge_days(existing_days: dict, new_days: dict) -> dict:
@@ -102,6 +115,7 @@ def main() -> None:
         if not new_days:
             print(json.dumps({"ok": False, "error": "empty/unparseable liquidHours",
                               "raw": liquid_hours[:200]}))
+            _record_health("error")
             sys.exit(1)
 
         merged = merge_days(_read_existing_days(), new_days)
@@ -123,8 +137,10 @@ def main() -> None:
             "today_status": new_days.get(et_today, merged.get(et_today)),
             "generated_at": out["generated_at"],
         }))
+        _record_health("ok")
     except Exception as exc:  # noqa: BLE001 — surface a clean JSON error for the bridge
         print(json.dumps({"ok": False, "error": str(exc)}))
+        _record_health("error")
         sys.exit(1)
 
 

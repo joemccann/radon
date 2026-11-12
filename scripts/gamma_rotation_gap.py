@@ -86,17 +86,8 @@ def _slope(values: List[float], length: int = 3) -> Optional[float]:
 
 
 def is_market_open() -> bool:
-    import zoneinfo
-
-    try:
-        et = zoneinfo.ZoneInfo("America/New_York")
-        now = datetime.now(et)
-    except Exception:
-        now = datetime.now()
-    if now.weekday() >= 5:
-        return False
-    minutes = now.hour * 60 + now.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+    from utils.market_calendar import is_market_open_et
+    return is_market_open_et()
 
 
 def _asset_state(net_gamma: float) -> str:

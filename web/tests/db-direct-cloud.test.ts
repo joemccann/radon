@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("getDb direct-cloud default", () => {
-  it("does not open an embedded replica unless explicitly opted in", async () => {
+  it("opens a direct-to-cloud client with a clean env", async () => {
     const db = await freshDbModule();
 
     db.getDb();
@@ -40,20 +40,21 @@ describe("getDb direct-cloud default", () => {
     });
   });
 
-  it("allows replica mode only when explicitly enabled and not disabled", async () => {
+  it("stays direct-to-cloud when the removed RADON_DB_USE_REPLICA opt-in is set", async () => {
     const db = await freshDbModule();
     process.env.NODE_ENV = "development";
     process.env.RADON_DB_USE_REPLICA = "1";
 
     db.getDb();
 
-    expect(createClientMock).toHaveBeenCalledWith(expect.objectContaining({
-      syncUrl: "https://example.turso.io",
+    expect(createClientMock).toHaveBeenCalledWith({
+      url: "https://example.turso.io",
       authToken: "token",
-    }));
+      fetch: expect.any(Function),
+    });
   });
 
-  it("lets RADON_DB_NO_REPLICA override the opt-in flag", async () => {
+  it("stays direct-to-cloud with both legacy knobs set", async () => {
     const db = await freshDbModule();
     process.env.RADON_DB_USE_REPLICA = "1";
     process.env.RADON_DB_NO_REPLICA = "1";

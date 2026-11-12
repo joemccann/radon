@@ -1,6 +1,6 @@
 # Scripts & CLI Reference
 
-The CLI surface area lives behind shell aliases registered in `.pi/`. Run `commands` from the repo root to see the live registry.
+This page is the human index of the CLI surface area. Each command maps to a script under `scripts/`.
 
 ## Scanning
 

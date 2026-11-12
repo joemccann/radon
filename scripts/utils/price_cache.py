@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from utils.atomic_io import atomic_save, verified_load
+from utils.market_calendar import is_market_open_et
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "price_history_cache"
 STOCKS_DIR = CACHE_DIR / "stocks"
@@ -45,16 +46,7 @@ def _filename(key: str) -> str:
 
 
 def is_market_hours() -> bool:
-    """Check if within 9:30-16:00 ET Mon-Fri."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
-    now = datetime.now(ZoneInfo("America/New_York"))
-    if now.weekday() >= 5:  # Sat/Sun
-        return False
-    t = now.hour * 60 + now.minute
-    return 570 <= t < 960  # 9:30 (570) to 16:00 (960)
+    return is_market_open_et()
 
 
 def _cache_path(subdir: Path, key: str) -> Path:

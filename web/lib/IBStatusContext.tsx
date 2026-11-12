@@ -31,11 +31,11 @@ export type IBAuthState =
   | "remote";
 
 /** Authoritative IB service state from FastAPI /health.ib_gateway.service_state.
- *  Literal backend vocabulary (scripts/api/ib_gateway.py):
- *    docker  `_check_docker`: healthy | unhealthy | starting | restarting | stopped | unknown
- *    cloud   `_check_cloud`:  reachable | unhealthy | unreachable
- *  launchd reports the raw IBC status string; anything unrecognised is
- *  treated as no verdict and the relay broker report decides. */
+ *  The backend emits `_check_cloud`'s vocabulary (scripts/api/ib_gateway.py):
+ *    reachable | unhealthy | unreachable
+ *  The other literals came from the retired docker Gateway mode and are still
+ *  read safely; anything unrecognised is treated as no verdict and the relay
+ *  broker report decides. */
 export type IBServiceState =
   | "healthy"
   | "reachable"

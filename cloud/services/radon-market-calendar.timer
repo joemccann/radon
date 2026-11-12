@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon market calendar refresh - weekly, Sunday evening UTC
+
+[Timer]
+# 22:00 UTC Sunday is 17:00 EST / 18:00 EDT, before the Monday session.
+# IBKR's liquidHours window covers about six days ahead, so one Sunday pull
+# writes the coming Mon-Fri schedule (holidays and early closes) before any
+# reader needs it. Persistent=true catches a host that was down at the slot.
+OnCalendar=Sun *-*-* 22:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

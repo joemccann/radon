@@ -603,7 +603,7 @@ class TestOrderOperations:
 # ===========================================================================
 
 class TestMarketData:
-    """Test get_quote, get_option_chain, qualify_contract."""
+    """Test get_quote, qualify_contract."""
 
     @patch("clients.ib_client.IB")
     def test_get_quote(self, MockIB):
@@ -641,39 +641,6 @@ class TestMarketData:
         call_args = mock_ib.reqMktData.call_args
         # Snapshot is a positional or keyword arg
         assert quote is not None
-
-    @patch("clients.ib_client.IB")
-    def test_get_option_chain(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-
-        chain_data = MagicMock()
-        chain_data.expirations = frozenset(["20260320", "20260417"])
-        chain_data.strikes = frozenset([145.0, 150.0, 155.0])
-        chain_data.exchange = "SMART"
-        chain_data.underlyingConId = 265598
-        chain_data.tradingClass = "AAPL"
-        chain_data.multiplier = "100"
-        mock_ib.reqSecDefOptParams.return_value = [chain_data]
-
-        client = IBClient()
-        client.connect(client_id=1)
-        chains = client.get_option_chain("AAPL")
-
-        mock_ib.reqSecDefOptParams.assert_called_once()
-        assert len(chains) >= 1
-
-    @patch("clients.ib_client.IB")
-    def test_get_option_chain_empty(self, MockIB):
-        mock_ib = MockIB.return_value
-        mock_ib.isConnected.return_value = True
-        mock_ib.reqSecDefOptParams.return_value = []
-
-        client = IBClient()
-        client.connect(client_id=1)
-        chains = client.get_option_chain("ZZZZZ")
-
-        assert chains == []
 
     @patch("clients.ib_client.IB")
     def test_qualify_contract(self, MockIB):

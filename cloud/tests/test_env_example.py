@@ -131,22 +131,6 @@ class TestCTAVisionModelLadder:
         assert source_owned <= env_vars.keys()
 
 
-class TestDropboxResearchVariables:
-    REQUIRED = [
-        "DROPBOX_APP_KEY",
-        "DROPBOX_REFRESH_TOKEN",
-        "DROPBOX_ACCOUNT_ID",
-        "DROPBOX_ROOT_NAMESPACE_ID",
-        "DROPBOX_FOLDER_ID",
-        "DROPBOX_FOLDER_PATH",
-    ]
-
-    def test_contains_private_research_variables(self, root):
-        env_vars = parse_env_vars(read_env_example(root))
-        for var in self.REQUIRED:
-            assert var in env_vars, f"Missing Dropbox research variable: {var}"
-
-
 class TestMarketDeskResearchVariables:
     """radon-marketdesk.service reads these with a default; the job degrades
     (no session seed, no Dropbox upload) instead of failing preflight."""

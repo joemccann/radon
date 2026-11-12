@@ -1,4 +1,4 @@
-"""The shared-folder research watcher is retired; deploys disable it."""
+"""The shared-folder research watcher is retired; deploys disable it and remove any installed copy."""
 from pathlib import Path
 import os
 import re
@@ -6,66 +6,115 @@ import subprocess
 import pytest
 
 HELPER=Path(__file__).resolve().parents[1]/'scripts/deploy-root-helper.sh'
+RETIRE_FUNCTIONS = ('retire_research_watcher', 'stop_retired_research_watcher', 'remove_retired_research_unit')
+REMOVAL = ['daemon-reload', 'reset-failed radon-research.service']
 
-def _retire_calls(tmp_path, enabled, active, *, fail_disable=False):
-    text = HELPER.read_text()
-    body = re.search(r'^retire_research_watcher\(\) \{\n(.*?)^\}', text, re.M | re.S).group(0)
-    log = tmp_path / 'calls'
-    script = '''set -euo pipefail
+STUBS = r'''set -euo pipefail
+SYSTEMD_UNIT_DIR="$UNITS"
+RM=rm
 systemctl_bounded() {
 if [[ "$1" == "is-enabled" ]]; then echo "$ENABLED"; [[ "$ENABLED" == enabled* ]]; return; fi
-printf '%s\\n' "$*" >> "$CALLS"
+printf '%s\n' "$*" >> "$CALLS"
 if [[ "$*" == *disable* && "$FAIL_DISABLE" == 1 ]]; then return 1; fi
 }
 active_state() { echo "$ACTIVE"; }
-wait_for_unit_state() { printf 'wait %s\\n' "$*" >> "$CALLS"; }
-''' + body + '\nretire_research_watcher\necho survived\n'
+wait_for_unit_state() { printf 'wait %s\n' "$*" >> "$CALLS"; [[ "$FAIL_WAIT" == 0 ]]; }
+'''
+
+
+def _retire_calls(tmp_path, enabled, active, *, fail_disable=False, fail_wait=False, installed=True):
+    """Run the real retire functions against a stubbed systemd and a temporary unit directory."""
+    text = HELPER.read_text()
+    bodies = [re.search(rf'^{name}\(\) \{{\n(.*?)^\}}', text, re.M | re.S).group(0) for name in RETIRE_FUNCTIONS]
+    units = tmp_path / 'system'
+    units.mkdir()
+    if installed:
+        (units / 'radon-research.service').write_text('[Service]\n')
+        (units / 'radon-research.service.d').mkdir()
+        (units / 'radon-research.service.d' / 'runtime-container.conf').write_text('[Service]\n')
+    (units / 'radon-api.service').write_text('[Service]\n')
+    log = tmp_path / 'calls'
+    script = STUBS + '\n'.join(bodies) + '\nretire_research_watcher\necho survived\n'
     result = subprocess.run(
         ['bash', '-c', script],
-        env={**os.environ, 'ENABLED': enabled, 'ACTIVE': active, 'CALLS': str(log),
-             'FAIL_DISABLE': '1' if fail_disable else '0'},
+        env={**os.environ, 'ENABLED': enabled, 'ACTIVE': active, 'CALLS': str(log), 'UNITS': str(units),
+             'FAIL_DISABLE': '1' if fail_disable else '0', 'FAIL_WAIT': '1' if fail_wait else '0'},
         capture_output=True, text=True,
     )
     calls = log.read_text().splitlines() if log.exists() else []
-    return result, calls
+    return result, calls, units
+
+
+def _removed(units):
+    assert not (units / 'radon-research.service').exists()
+    assert not (units / 'radon-research.service.d').exists()
+    assert (units / 'radon-api.service').is_file(), 'only the retired unit is removed'
+
+
+def _kept(units):
+    assert (units / 'radon-research.service').is_file()
+    assert (units / 'radon-research.service.d' / 'runtime-container.conf').is_file()
 
 
 @pytest.mark.parametrize('enabled', ['enabled', 'enabled-runtime'])
 @pytest.mark.parametrize('active', ['active', 'inactive'])
-def test_retire_disables_an_enabled_watcher(tmp_path, enabled, active):
-    """MarketDesk replaced the shared-folder watcher: a deploy turns it off."""
-    result, calls = _retire_calls(tmp_path, enabled, active)
+def test_retire_disables_an_enabled_watcher_then_removes_its_unit(tmp_path, enabled, active):
+    """MarketDesk replaced the shared-folder watcher: a deploy turns it off and uninstalls it."""
+    result, calls, units = _retire_calls(tmp_path, enabled, active)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'survived'
     assert calls == [
         '--no-block disable --now radon-research.service',
         'wait radon-research.service inactive',
+        *REMOVAL,
     ]
+    _removed(units)
 
 
 @pytest.mark.parametrize('active', ['active', 'activating'])
-def test_retire_stops_a_manually_started_watcher(tmp_path, active):
-    result, calls = _retire_calls(tmp_path, 'disabled', active)
+def test_retire_stops_a_manually_started_watcher_then_removes_its_unit(tmp_path, active):
+    result, calls, units = _retire_calls(tmp_path, 'disabled', active)
     assert result.returncode == 0, result.stderr
     assert calls == [
         '--no-block stop radon-research.service',
         'wait radon-research.service inactive',
+        *REMOVAL,
     ]
+    _removed(units)
 
 
 @pytest.mark.parametrize('enabled', ['disabled', 'not-found', 'masked', 'static'])
 @pytest.mark.parametrize('active', ['inactive', 'failed', ''])
-def test_retire_is_a_noop_once_the_watcher_is_off(tmp_path, enabled, active):
-    result, calls = _retire_calls(tmp_path, enabled, active)
+def test_retire_removes_an_installed_inactive_watcher(tmp_path, enabled, active):
+    """The repository no longer ships the unit, so an installed copy would be an untracked unit."""
+    result, calls, units = _retire_calls(tmp_path, enabled, active)
+    assert result.returncode == 0, result.stderr
+    assert calls == REMOVAL
+    _removed(units)
+
+
+def test_retire_is_a_noop_once_the_unit_is_gone(tmp_path):
+    result, calls, units = _retire_calls(tmp_path, 'not-found', '', installed=False)
     assert result.returncode == 0, result.stderr
     assert calls == []
+    assert (units / 'radon-api.service').is_file()
+
+
+def test_retire_keeps_the_unit_while_the_watcher_is_still_stopping(tmp_path):
+    result, calls, units = _retire_calls(tmp_path, 'disabled', 'active', fail_wait=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'survived'
+    assert 'still stopping' in result.stderr
+    assert 'daemon-reload' not in calls
+    _kept(units)
 
 
 def test_retire_is_never_fatal(tmp_path):
-    result, calls = _retire_calls(tmp_path, 'enabled', 'active', fail_disable=True)
+    result, calls, units = _retire_calls(tmp_path, 'enabled', 'active', fail_disable=True)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'survived'
     assert 'radon-research.service' in result.stderr
+    _kept(units)
 
 
 def test_deploy_never_starts_the_retired_watcher():
@@ -81,17 +130,16 @@ def test_deploy_never_starts_the_retired_watcher():
         assert lines.index('retire_research_watcher') > lines.index('resume_active_snapshot'), verb
 
 
-def test_fresh_setup_installs_research_but_does_not_enable_it(tmp_path):
+def test_retired_watcher_is_no_longer_shipped():
+    cloud = HELPER.parents[1]
+    assert not (cloud / 'services/radon-research.service').exists()
+    assert not (cloud / 'services/radon-research.service.d').exists()
     setup = (HELPER.parent / 'setup-vps.sh').read_text()
     inventory = re.search(r'readonly SERVICE_FILES=\(.*?\n\)', setup, re.S).group(0)
-    assert 'radon-research.service' in inventory
-    body = re.search(r'^enable_services\(\) \{\n(.*?)^\}', setup, re.M | re.S).group(0)
-    log = tmp_path / 'calls'
-    script = 'SERVICE_FILES=(radon-api.service radon-research.service)\nlog_info() { :; }\nlog_success() { :; }\nsystemctl() { printf \'%s\\n\' "$*" >> "$CALLS"; }\n' + body + '\nenable_services\n'
-    result = subprocess.run(['bash', '-c', script], env={**os.environ, 'CLOUD_DIR': str(tmp_path), 'CALLS': str(log)}, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert 'radon-api.service' in log.read_text()
-    assert 'radon-research.service' not in log.read_text()
+    assert 'radon-research.service' not in inventory
+    for name in ('deploy-root-helper.sh', 'bootstrap-control-plane.sh'):
+        assert 'services/radon-research.service' not in (HELPER.parent / name).read_text(), name
+    assert 'radon-research.service' not in (cloud / 'config/installed-units.sha256').read_text()
 
 
 def _state_wait_result(unit, desired, ready_at, *, test_mode=False, failed=False):
@@ -150,9 +198,9 @@ def test_research_failed_is_stopped_without_waiting():
 
 
 def test_research_stop_budget_fits_service_and_supervisor_deadlines():
+    """A leftover installed watcher still carries TimeoutStopSec=120, its last shipped body."""
     helper = HELPER.read_text()
-    unit = (HELPER.parents[1] / 'services/radon-research.service').read_text()
-    stop_timeout = int(re.search(r'^TimeoutStopSec=(\d+)$', unit, re.M).group(1))
+    stop_timeout = 120
     wait = int(re.search(r'^  readonly RESEARCH_STOP_WAIT_SECONDS=(\d+)$', helper, re.M).group(1))
     supervisor = int(re.search(r'^  readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)$', helper, re.M).group(1))
     assert wait >= stop_timeout + 30, 'systemd shutdown must leave time for ExecStopPost cleanup'

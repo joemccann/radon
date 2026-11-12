@@ -565,6 +565,43 @@ class TestFetchIbAuthGate:
         assert calls == []
 
 
+class TestLoggedSourceOrderMatchesTheCascade:
+    """The stderr copy must name the order fetch_closes really runs."""
+
+    _LABELS = {"ib": "IB", "rh": "Robinhood", "uw": "UW", "yahoo": "Yahoo"}
+
+    def _cascade_order(self) -> list[str]:
+        calls: list[str] = []
+
+        def rung(name):
+            return lambda tickers: calls.append(name) or {}
+
+        fetch_closes(
+            fetch_ib=rung("ib"), fetch_rh=rung("rh"),
+            fetch_uw=rung("uw"), fetch_yahoo=rung("yahoo"),
+        )
+        return [self._LABELS[name] for name in calls]
+
+    def test_run_banner_names_the_real_order(self, monkeypatch, capsys):
+        import fetch_credit_spread as fcs
+
+        def stop(**_kwargs):
+            raise RuntimeError("stop after banner")
+
+        monkeypatch.setattr(fcs, "fetch_closes", stop)
+        monkeypatch.setattr(fcs, "_record_error_health", lambda *_a, **_k: None)
+        with pytest.raises(RuntimeError):
+            fcs.run()
+        expected = " → ".join(self._cascade_order())
+        assert f"({expected})" in capsys.readouterr().err
+
+    def test_ib_skip_names_the_real_fallback_order(self, monkeypatch, capsys):
+        monkeypatch.setattr("fetch_credit_spread._ib_auth_state", lambda: "awaiting_2fa")
+        fetch_ib_closes([HYG_SYMBOL, SPX_SYMBOL])
+        fallback = " → ".join(self._cascade_order()[1:])
+        assert f"(falling back to {fallback})" in capsys.readouterr().err
+
+
 class TestCreditIbClientIds:
     def test_history_ids_are_scanner_range_and_unused_elsewhere(self):
         assert CREDIT_IB_HISTORY_CLIENT_IDS == (56, 69)

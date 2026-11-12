@@ -41,6 +41,19 @@ def test_stop_owned_tolerates_eperm_from_an_exited_group(gate, monkeypatch):
     gate._stop_owned(process)
 
 
+def test_stop_owned_tolerates_eperm_while_the_child_is_still_exiting(gate, monkeypatch):
+    # macOS can refuse killpg() with EPERM while the leader is mid-exit, before
+    # waitid() can see it. A child that finishes moments later is not an error.
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"], start_new_session=True)
+
+    def killpg(pid, sig):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(gate.os, "killpg", killpg)
+    gate._stop_owned(process)
+    assert process.returncode == 0
+
+
 def test_stop_owned_still_raises_eperm_for_a_live_group(gate, monkeypatch):
     process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
     try:

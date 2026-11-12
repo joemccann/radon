@@ -11,7 +11,7 @@ Radon is a single-operator project authored AI-first. The operator directs codin
 | Tool | Role | Canonical config |
 |---|---|---|
 | Claude Code | Primary coding agent | `CLAUDE.md` (root) + 8 subsystem `CLAUDE.md` files that auto-load by cwd |
-| Codex | Second agent, used for parallel or rescue work | `AGENTS.md` mirrors beside each `CLAUDE.md`, plus `.pi/` |
+| Codex | Second agent, used for parallel or rescue work | `AGENTS.md` mirrors beside each `CLAUDE.md`; the root `AGENTS.md` links to `.pi/AGENTS.md` |
 
 The `AGENTS.md` files intentionally mirror the `CLAUDE.md` hierarchy rather than sharing one file: each agent has its own discovery convention, and mirroring keeps either agent fully functional without the other. When a runbook changes, both copies change in the same commit.
 

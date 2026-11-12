@@ -38,7 +38,6 @@ APP_UNITS = (
     "radon-relay.service",
     "radon-nextjs.service",
     "radon-newsfeed.service",
-    "radon-research.service",
 )
 
 
@@ -140,10 +139,8 @@ def test_no_app_unit_binds_the_whole_state_directory(tmp_path_factory) -> None:
         log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
         destinations = _bind_destinations(_docker_run_argv(log))
         allowed = set(ALLOWED_UNDER_STATE_DIR)
-        if unit in ("radon-api.service", "radon-research.service"):
+        if unit == "radon-api.service":
             allowed.add(STATE_DIR / "research")
-        if unit == "radon-research.service":
-            allowed = {STATE_DIR / "research"}
         assert _state_dir_exposures(destinations, allowed) == [], (unit, destinations)
         bound = {PurePosixPath(destination) for destination in destinations}
         assert allowed <= bound, (unit, destinations)

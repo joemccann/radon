@@ -2,14 +2,12 @@
 import json
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_model_ladder import _StreamingResponse, _openai_obj_ok
 from model_gateway import engine as ml
-from research.model import Reviewer, ModelError
 
 @pytest.fixture
 def codex_env(tmp_path):
@@ -34,26 +32,26 @@ BAD_TERMINALS = [
 
 
 @pytest.mark.parametrize('terminal', BAD_TERMINALS)
-@pytest.mark.parametrize('public_path', ['chat', 'reviewer'])
+@pytest.mark.parametrize('public_path', ['chat', 'multimodal'])
 def test_bad_terminal_never_accepts_partial_json(terminal, public_path, codex_env):
     responses = []
     def post(*args, **kwargs):
         response = _StreamingResponse({}, chunks=[(DELTA + terminal).encode()])
         responses.append(response)
         return response
-    with pytest.raises((ml.ModelLadderExhausted, ModelError)) as error:
+    with pytest.raises((ml.ModelLadderExhausted, ml.ModelResponseError)) as error:
         if public_path == 'chat':
             ml.complete_text_json('review', env=codex_env, post=post)
         else:
-            Reviewer(env=codex_env, session=SimpleNamespace(post=post)).ask('review')
+            ml.complete_multimodal_json('review', env=codex_env, post=post, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
     assert 'FAKE-sensitive' not in str(error.value)
     assert responses and all(response.closed for response in responses)
 
 
 def test_completed_review_is_accepted_and_closed(codex_env):
     response = _StreamingResponse({}, chunks=[(DELTA + COMPLETED).encode()])
-    result = Reviewer(env=codex_env, session=SimpleNamespace(post=lambda *a, **k: response)).ask('review')
-    assert result == {'ok': True}
+    result = ml.complete_multimodal_json('review', env=codex_env, post=lambda *a, **k: response, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
+    assert result.data == {'ok': True}
     assert response.closed
 
 

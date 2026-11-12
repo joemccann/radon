@@ -84,34 +84,12 @@ def probe_pair():
     return threading.Event(), threading.Event()
 
 
-def test_local_health_check_leaves_the_loop_free(monkeypatch, probe_pair):
-    started, released = probe_pair
-
-    async def fake_check_docker():
-        return {"port_listening": True, "gateway_mode": "docker"}
-
-    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: False)
-    monkeypatch.setattr(ib_gateway, "is_docker_mode", lambda: True)
-    monkeypatch.setattr(ib_gateway, "_check_docker", fake_check_docker)
-    monkeypatch.setattr(
-        ib_gateway, "restart_backoff_state", _parked_backoff_state(started, released)
-    )
-
-    result, ticks = asyncio.run(
-        _drive_with_a_concurrent_task(started, released, pool_status=None)
-    )
-
-    assert ticks["n"] == 1, "the concurrent task never got the loop"
-    assert result["restart_backoff"]["probed"] is True
-
-
 def test_cloud_health_check_leaves_the_loop_free(monkeypatch, probe_pair):
     started, released = probe_pair
 
     async def fake_check_cloud():
         return {"port_listening": True, "gateway_mode": "cloud"}
 
-    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: True)
     monkeypatch.setattr(ib_gateway, "_check_cloud", fake_check_cloud)
     monkeypatch.setattr(
         ib_gateway, "restart_backoff_state", _parked_backoff_state(started, released)

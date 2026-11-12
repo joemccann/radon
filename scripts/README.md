@@ -5,7 +5,7 @@ Python and Node daemons for Radon. **Do not move these files into
 systemd / launchd / docs-owner update in the same commit.** Fifty units
 `ExecStart=` these paths.
 
-CLI aliases live in `.pi/commands.json`. Human index:
+CLI command index:
 [`docs/scripts-reference.md`](../docs/scripts-reference.md).
 
 ## Launchers
@@ -61,5 +61,4 @@ Do not invent a second copy of the scan logic here.
 
 New scripts stay at this top level unless a shim plan is explicit.
 Go-forward grouping (`scripts/fetch/`, `scripts/scan/`, `scripts/ib/`)
-is Phase 3 of [`docs/monorepo-legibility-plan.md`](../docs/monorepo-legibility-plan.md)
-and is not in force.
+is not in force.
