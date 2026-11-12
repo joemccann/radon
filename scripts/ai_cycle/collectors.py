@@ -239,7 +239,9 @@ class Transport:
         attempts = 2 if body is None else 1
         for attempt in range(attempts):
             if attempt and time.monotonic() >= self.deadline:
-                raise SourceError("Publisher transport failed")
+                # 2026-11-12 backfill: a retry that starts after the run
+                # deadline is the budget stop, not a publisher outage.
+                raise SourceError("Per-run time budget exhausted")
             if self.requests >= self.max_requests:
                 raise SourceError("Per-run request budget exhausted")
             if urlsplit(url).hostname == "openrouter.ai":
@@ -277,7 +279,12 @@ class Transport:
                     chunks.append(chunk)
                 return b"".join(chunks), dict(getattr(response, "headers", {}) or {})
             except requests.RequestException:
-                if attempt + 1 >= attempts or time.monotonic() >= self.deadline:
+                # A timeout that lands on the run deadline used to be labeled
+                # Publisher transport failed (2026-11-12 05:38Z backfill).
+                # That status exits 1. The budget stop exits 0.
+                if time.monotonic() >= self.deadline:
+                    raise SourceError("Per-run time budget exhausted") from None
+                if attempt + 1 >= attempts:
                     raise SourceError("Publisher transport failed") from None
             finally:
                 if response is not None:
