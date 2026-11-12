@@ -65,16 +65,6 @@ class AttemptState:
 
 
 _ATTEMPT_STATE: ContextVar[AttemptState | None] = ContextVar("gateway_attempt", default=None)
-_SLM_TAXONOMY: ContextVar[tuple[str, ...] | None] = ContextVar("gateway_slm_taxonomy", default=None)
-
-
-@contextmanager
-def slm_taxonomy(tags):
-    token = _SLM_TAXONOMY.set(tuple(tags) if tags is not None else None)
-    try:
-        yield
-    finally:
-        _SLM_TAXONOMY.reset(token)
 
 
 @contextmanager
@@ -234,10 +224,6 @@ _OPTIONAL_LADDER_ENV = (
     "ANTIGRAVITY_CLI",
     "ANTIGRAVITY_MODEL",
     "RADON_ANTIGRAVITY_ISOLATED",
-    "RADON_SLM_TAGGER_URL",
-    "RADON_SLM_TAGGER_MODE",
-    "RADON_SLM_TAGGER_TIMEOUT_S",
-    "RADON_SLM_TAGGER_THREADS",
 )
 
 _CREDIT_MARKERS = (
@@ -277,7 +263,6 @@ _DEFAULT_TEXT_MODELS = {
     "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
     "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
-    "slm-tagger": "radon-slm-tagger",
 }
 
 # qwen-3.8-27b defaults reasoning to high; disable so JSON/vision extraction
@@ -598,11 +583,6 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
         if token:
             return AuthMaterial(token, "api_key", "CEREBRAS_API_KEY")
         return None
-    if name == "slm-tagger":
-        url = _env_get(env, "RADON_SLM_TAGGER_URL")
-        if url:
-            return AuthMaterial("", "local", "RADON_SLM_TAGGER_URL")
-        return None
     return None
 
 
@@ -650,8 +630,6 @@ def _model_for(
         return _first_env_model(
             env, "CEREBRAS_VISION_MODEL", "CEREBRAS_MODEL", default=defaults["cerebras"]
         )
-    if name == "slm-tagger":
-        return defaults.get("slm-tagger", "radon-slm-tagger")
     return name
 
 
@@ -1319,115 +1297,6 @@ def _call_vision_provider(
     raise RuntimeError(f"{name}:unwired")
 
 
-def _slm_health_ok(url: str) -> bool:
-    """GET {url}/health with a 1s budget. Monkeypatch in tests so 503 hits POST."""
-    import urllib.error
-    import urllib.request
-
-    try:
-        req = urllib.request.Request(f"{url.rstrip('/')}/health", method="GET")
-        with urllib.request.urlopen(req, timeout=1) as resp:
-            return 200 <= int(getattr(resp, "status", 200)) < 300
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
-
-
-def _load_slm_taxonomy(env: Mapping[str, str]) -> list[str]:
-    scoped = _SLM_TAXONOMY.get()
-    if scoped is not None:
-        return list(scoped)
-    raw = (env.get("RADON_SLM_TAXONOMY_JSON") or "").strip()
-    if raw:
-        parsed = json.loads(raw)
-        return [str(t) for t in parsed] if isinstance(parsed, list) else []
-    path = Path(env.get("RADON_SLM_TAXONOMY_PATH") or "data/tag_taxonomy.json")
-    if path.is_file():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        tags = payload.get("tags") if isinstance(payload, dict) else payload
-        if isinstance(tags, list):
-            return [str(t) for t in tags if isinstance(t, str)]
-    try:
-        from db.hrana_http import hrana_query
-
-        rows = hrana_query("SELECT tag FROM tag_taxonomy", ())
-        out: list[str] = []
-        for row in rows:
-            if isinstance(row, dict):
-                tag = row.get("tag") or row.get("name")
-            else:
-                tag = row[0] if row else None
-            if tag:
-                out.append(str(tag))
-        return out
-    except Exception:
-        return []
-
-
-def accept_slm_tags_payload(obj: Any, taxonomy: Sequence[str] | None = None) -> bool:
-    """Closed-vocabulary SLM contract (HR-3). Distinct from accept_tags_payload."""
-    from newsfeed.slm.contract import classify_slm_tags
-
-    src = taxonomy if taxonomy is not None else _load_slm_taxonomy(os.environ)
-    code, _tags = classify_slm_tags(obj, src)
-    return code == "ok"
-
-
-def _call_slm_tagger(
-    post: Callable[..., Any],
-    system: str,
-    instruction: str,
-    *,
-    env: Mapping[str, str],
-    read_timeout: float,
-) -> tuple[int, str, Any]:
-    """The adapter was trained on the caller's live tagger prompt, so the
-    system message is forwarded verbatim like every other rung."""
-    from newsfeed.slm.contract import (
-        SLM_CHAT_COMPLETIONS_PATH,
-        SLM_DEFAULT_TIMEOUT_S,
-        SLM_DEFAULT_URL,
-        SLM_MAX_TOKENS,
-        SLM_RESPONSE_FORMAT,
-        SLM_TAGGER_NAME,
-        SLM_TEMPERATURE,
-        classify_slm_tags,
-    )
-
-    url = (_env_get(env, "RADON_SLM_TAGGER_URL") or SLM_DEFAULT_URL).rstrip("/")
-    timeout_raw = _env_get(env, "RADON_SLM_TAGGER_TIMEOUT_S")
-    timeout = float(timeout_raw) if timeout_raw else min(float(read_timeout), float(SLM_DEFAULT_TIMEOUT_S))
-    if not _slm_health_ok(url):
-        raise RuntimeError("unavailable")
-    body = {
-        "model": SLM_TAGGER_NAME,
-        "temperature": SLM_TEMPERATURE,
-        "max_tokens": SLM_MAX_TOKENS,
-        "response_format": SLM_RESPONSE_FORMAT,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": instruction},
-        ],
-    }
-    status, raw, payload = _request(
-        post,
-        f"{url}{SLM_CHAT_COMPLETIONS_PATH}",
-        {"content-type": "application/json"},
-        body,
-        timeout=timeout,
-        stream=False,
-    )
-    if status == 200 and isinstance(payload, dict):
-        text = _extract_text("slm-tagger", payload)
-        obj = parse_json_object(text)
-        code, _tags = classify_slm_tags(obj, _load_slm_taxonomy(env))
-        if code != "ok":
-            raise RuntimeError(code)
-    return status, raw, payload
-
-
 def _call_text_provider(
     name: str,
     auth: AuthMaterial,
@@ -1522,14 +1391,6 @@ def _call_text_provider(
             timeout=read_timeout,
             stream=True,
             max_bytes=max_response_bytes,
-        )
-    if name == "slm-tagger":
-        return _call_slm_tagger(
-            post,
-            system,
-            instruction,
-            env=env if env is not None else os.environ,
-            read_timeout=read_timeout,
         )
     raise RuntimeError(f"{name}:unwired")
 
@@ -2144,7 +2005,6 @@ __all__ = [
     "ModelLadderExhausted",
     "VisionResult",
     "accept_distill_payload",
-    "accept_slm_tags_payload",
     "accept_tags_payload",
     "anthropic_request_headers",
     "anthropic_request_system",
