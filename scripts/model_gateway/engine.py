@@ -487,6 +487,23 @@ def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     return None  # an api_key in auth.json is a prepaid key: never read
 
 
+def _expired_grant(name: str, env: Mapping[str, str]) -> bool:
+    """A renewable grant is on disk but its access token has expired.
+
+    Only grok's reader drops an expired entry; the others surface as a 401,
+    which already triggers renewal.
+    """
+    if name != "grok" or _auth_files_disabled(env):
+        return False
+    data = _json_load_object(_home_dir(env) / ".grok" / "auth.json") or {}
+    return any(
+        isinstance(entry, Mapping)
+        and isinstance(entry.get("key"), str) and entry["key"].strip()
+        and isinstance(entry.get("expires_at"), str) and _rfc3339_expired(entry["expires_at"])
+        for entry in data.values()
+    )
+
+
 def _antigravity_keychain_home(env: Mapping[str, str]) -> Path | None:
     raw = (env.get(_ANTIGRAVITY_KEYCHAIN_HOME_ENV) or "").strip()
     return Path(raw) if raw and Path(raw).is_absolute() else None
@@ -1713,6 +1730,15 @@ def _run_ladder(
             logger.info("%s skip provider=cursor reason=unwired", log_prefix)
             continue
         auth = _auth_for(name, env)
+        if auth is None and _expired_grant(name, env):
+            # Without this a host with no renewal timer (the Mac gateway)
+            # never renews: an expired grant is never sent, so never 401s.
+            refresh_token(name)
+            auth = _auth_for(name, env)
+            if auth is None:
+                attempted.append(f"{name}:token_refresh_pending")
+                logger.warning("%s provider=%s grant expired; renewal requested", log_prefix, name)
+                continue
         if auth is None:
             skipped.append(f"{name}:no_key")
             continue
