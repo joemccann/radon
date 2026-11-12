@@ -4113,3 +4113,12 @@ Review:
 
 - Three true red regressions and three controls; 207 focused tests passed in 21.85s. Independent review found no blocking issues. Documentation contract: 195 passed. Full infrastructure: 3,792 passed, 16 skipped. Web: 11,592 passed, 21 skipped; TypeScript passed.
 - Full Python: 19,740 passed, 12 skipped, 63 subtests, with the unchanged credential-cancellation timing failure also observed before this repair (0.352s versus 0.2s). Its complete module passed separately: 11 passed. The assertion and credential code were not changed. Exact-head CI and production verification remain pending.
+
+## Emil motion cleanup (2026-11-12)
+
+- [x] EM1 depends_on: [] Reconfirm audit findings on current main and inspect scoped web instructions.
+- [x] EM2 depends_on: [EM1] Remove recurring watchlist entrance and streaming prose pulse while preserving reduced-motion behavior.
+- [x] EM3 depends_on: [EM2] Run focused UI verification and review the diff.
+- [ ] EM4 depends_on: [EM3] Create a template-compliant PR, watch exact-head CI to green, and send the required notification.
+
+Review: Removed the watchlist 480 ms entry and 80 ms delay; kept reduced-motion handling for row hover. Removed the 1.5 s text pulse; the separate chat cursor still indicates streaming and stops for reduced motion. Full web Vitest: 11,153 passed, 10 skipped. Watchlist and chat Playwright: 7 passed. `git diff --check` clean.
