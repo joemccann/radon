@@ -841,6 +841,5 @@ class TestCreateDaemonHandlerRegistration:
         expected = {
             "preset_rebalance",
             "flex_token_check",
-            "replica-watchdog",
         }
         assert expected.issubset(handler_names)

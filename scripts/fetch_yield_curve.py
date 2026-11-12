@@ -223,7 +223,6 @@ def persist_result(
         return
 
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if rows_changed_rows:
         writer.upsert_yield_curve_rows(rows_changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot("yield-curve", scan_time, payload)

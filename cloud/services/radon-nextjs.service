@@ -16,16 +16,6 @@ Type=simple
 User=radon
 WorkingDirectory=/home/radon/radon/web
 EnvironmentFile=/etc/radon/env
-# 2026-05-20: take Next.js off the embedded replica too. Even with
-# api/relay/newsfeed/monitor on RADON_DB_NO_REPLICA=1, their direct-to-
-# cloud writes still raced Next.js's locally-buffered replica frames
-# and produced `WAL frame insert conflict` errors every minute. With
-# no replica anywhere we trade ~50ms of read latency on every /portfolio
-# / /orders / etc. for zero WAL contention. The libsql embedded-replica
-# model only works when ONE host has exactly ONE process writing, and
-# that one process can serve everything — Radon's split between Node
-# and Python writers can't satisfy that constraint.
-Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python3.13
 ExecStart=/usr/bin/npm run start
 Restart=always

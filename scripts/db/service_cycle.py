@@ -104,9 +104,6 @@ def _record(service: str, state: str, *, started_at: str,
         writer = _resolve_writer()
         if writer is None:
             return
-        ensure = getattr(writer, "ensure_no_replica_for_writers", None)
-        if ensure is not None:
-            ensure()
         writer.record_service_health(
             service, state,
             started_at=started_at, finished_at=finished_at, error=error,

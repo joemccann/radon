@@ -100,11 +100,10 @@ P1 every run for a condition that clears itself (2026-08-14).
 
 Persistence order every cycle:
 
-1. `writer.ensure_no_replica_for_writers()`
-2. `writer.upsert_skew2d_rows(series, recorded_at=scan_time)` when changed
-3. `writer.upsert_scan_snapshot("skew2d", scan_time, payload)` every cycle
-4. `writer.record_service_health("skew2d", "ok", finished_at=scan_time)` every cycle
-5. Atomic JSON fallback `data/skew2d.json`
+1. `writer.upsert_skew2d_rows(series, recorded_at=scan_time)` when changed
+2. `writer.upsert_scan_snapshot("skew2d", scan_time, payload)` every cycle
+3. `writer.record_service_health("skew2d", "ok", finished_at=scan_time)` every cycle
+4. Atomic JSON fallback `data/skew2d.json`
 
 CLI: `--json` → payload on stdout; progress on stderr.
 
@@ -217,8 +216,7 @@ Panel:
 ## Scheduling
 
 `cloud/services/radon-skew2d.{service,timer}`: oneshot venv-python direct,
-`EnvironmentFile=/etc/radon/env`, `RADON_DB_NO_REPLICA=1`,
-`TimeoutStartSec=120`;
+`EnvironmentFile=/etc/radon/env`, `TimeoutStartSec=120`;
 `OnCalendar=*-*-* 21:50:00 UTC` (five minutes after parent SKEW finalize),
 `Persistent=true`, `RandomizedDelaySec=30`. Register in `setup-vps.sh`
 `SERVICE_FILES` + `cloud/tests/test_systemd_services.py`.

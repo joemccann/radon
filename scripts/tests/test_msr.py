@@ -758,7 +758,7 @@ class TestRun:
         def _rec(name):
             return lambda *args, **kwargs: self.calls.append((name, args, kwargs))
 
-        for name in ("ensure_no_replica_for_writers", "upsert_msr_rows",
+        for name in ("upsert_msr_rows",
                      "upsert_scan_snapshot", "record_service_health",
                      "upsert_price_history_rows"):
             monkeypatch.setattr(writer, name, _rec(name))

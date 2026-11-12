@@ -20,10 +20,6 @@ def health_rows(monkeypatch):
 
     class FakeWriter:
         @staticmethod
-        def ensure_no_replica_for_writers():
-            return None
-
-        @staticmethod
         def upsert_iv_spread_rows(*a, **k):
             return None
 

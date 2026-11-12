@@ -57,9 +57,6 @@ separately as a plain file pair, not folded into every unit.
 
 Also checked:
   * live radon-* units absent from services/ -> drift.
-  * Environment invariant: every installed radon-*.service must carry
-    RADON_DB_NO_REPLICA=1 (supplied fleet-wide by the prefix drop-in),
-    asserted via `systemctl show -p Environment`.
   * Runtime artifacts are compared directly to their canonical cloud source.
     General Git worktree cleanliness is deliberately outside this audit: the
     production checkout can contain application/data hotfixes unrelated to
@@ -825,29 +822,6 @@ def _check_sudoers(drifts: list[dict], known_untracked: list[str]) -> None:
         drifts.append({"id": f"untracked-sudoers:{live.name}", "detail": str(live)})
 
 
-def _check_env_invariants(drifts: list[dict]) -> None:
-    """RADON_DB_NO_REPLICA=1 must be present on every installed
-    radon-*.service (the fleet prefix drop-in supplies it)."""
-    for unit_path in sorted(SYSTEMD_DIR.glob("radon-*.service")):
-        if not unit_path.is_file():
-            continue
-        unit = unit_path.name
-        try:
-            proc = _run(["systemctl", "show", unit, "-p", "Environment", "--value"])
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            drifts.append(
-                {"id": f"env-invariant:{unit}", "detail": str(exc)[:DETAIL_CAP]}
-            )
-            continue
-        if "RADON_DB_NO_REPLICA=1" not in proc.stdout:
-            drifts.append(
-                {
-                    "id": f"env-invariant:{unit}",
-                    "detail": "RADON_DB_NO_REPLICA=1 missing from Environment",
-                }
-            )
-
-
 def _check_repo_dirty(drifts: list[dict]) -> None:
     """Tracked-file modifications in the working copy = hand-edits that
     never made it into git. Untracked files (e.g. .env*) are ignored."""
@@ -893,7 +867,6 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
         _check_compose(raw_drifts)
     _check_units(raw_drifts, known_untracked)
     _check_sudoers(raw_drifts, known_untracked)
-    _check_env_invariants(raw_drifts)
     # Do not conflate application checkout hygiene with deployed configuration
     # drift. Managed runtime artifacts above are compared byte-for-byte or by
     # normalized unit directives, which is both narrower and actionable.

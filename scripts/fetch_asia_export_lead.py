@@ -214,7 +214,6 @@ def _check_source_coverage(country, rows, previous_rows=None):
 
 def _write_db_cache(payload, scan_time, *, rows_changed):
     from db import writer
-    writer.ensure_no_replica_for_writers()
     if rows_changed:
         writer.upsert_asia_export_lead_rows(payload["series"], recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

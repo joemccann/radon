@@ -324,8 +324,6 @@ def persist_calls(tmp_path, monkeypatch, turso_catalog):
     monkeypatch.setattr(mod, "LLM_MODELS_JSON", tmp_path / "llm_models.json")
     monkeypatch.setattr(writer, "get_llm_model_catalog_rows",
                         lambda: [dict(row) for row in turso_catalog], raising=False)
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers",
-                        lambda: calls.append(("guard",)))
     monkeypatch.setattr(writer, "upsert_llm_model_catalog_rows",
                         lambda rows, refreshed_at=None: calls.append(("rows", len(rows))))
     monkeypatch.setattr(writer, "upsert_scan_snapshot",
@@ -351,7 +349,6 @@ class TestPersistResult:
         persist_result(payload, rows)
 
         assert persist_calls == [
-            ("guard",),
             ("rows", 1),
             ("snapshot", "model-catalog"),
             ("health", "model-catalog", "ok", None),

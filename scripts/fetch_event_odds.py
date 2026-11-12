@@ -259,7 +259,6 @@ def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         db = get_db()
         db.execute(_EVENT_ODDS_TABLE_DDL)
         db.execute(

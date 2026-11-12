@@ -19,7 +19,6 @@ Environment=GROK_PAGE_NO_DOTENV=1
 Environment=HOME=/var/lib/radon-responder
 Environment=PATH=/opt/radon-model-clients/current/bin:/usr/local/bin:/usr/bin:/bin
 Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/python3.13 -I -S /opt/radon-model-clients/current/lib/model_gateway/cli.py status
 TimeoutStartSec=60
 StandardOutput=journal

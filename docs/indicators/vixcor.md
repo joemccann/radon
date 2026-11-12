@@ -619,13 +619,12 @@ def upsert_vixcor_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 ```
 
-Reused unchanged: `ensure_no_replica_for_writers()`, `upsert_scan_snapshot()`,
+Reused unchanged: `upsert_scan_snapshot()`,
 `record_service_health()`, `upsert_price_history_rows()`.
 
 Write order every cycle:
 
 ```python
-writer.ensure_no_replica_for_writers()
 if rows_changed:
     writer.upsert_price_history_rows("VIX", vix_tail)   # bounded tail, or full under --backfill
     writer.upsert_vixcor_rows(payload["series"], recorded_at=scan_time)
@@ -660,7 +659,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_vixcor.py
 StandardOutput=journal
 StandardError=journal

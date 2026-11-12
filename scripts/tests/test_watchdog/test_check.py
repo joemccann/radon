@@ -247,36 +247,28 @@ class TestSeverityMapping:
         )
         assert outcome.severity == "P1"
 
-    def test_continuous_stale_is_p3(self, db_conn, tmp_path, monkeypatch):
-        from watchdog import check, services
+    def test_continuous_stale_is_p3(self, db_conn):
+        from watchdog import check
 
-        # replica-watchdog uses a 24h window because it's event-driven —
-        # it only writes service_health when it heals. Seed 25h old so
-        # the stale path trips for the severity test.
-        replica_path = tmp_path / "replica.db"
-        replica_path.touch()
-        monkeypatch.setattr(services, "REPLICA_PATH", replica_path, raising=False)
+        # Seed 25h old so the stale path trips for the severity test.
         now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
-        _seed_service_health(db_conn, "replica-watchdog", "ok", now - timedelta(hours=25))
-        check.check_service(service="replica-watchdog", kind="stale", now=now, market_state="closed")
+        _seed_service_health(db_conn, "newsfeed-scraper", "ok", now - timedelta(hours=25))
+        check.check_service(service="newsfeed-scraper", kind="stale", now=now, market_state="closed")
         outcome = check.check_service(
-            service="replica-watchdog",
+            service="newsfeed-scraper",
             kind="stale",
             now=now + timedelta(minutes=5),
             market_state="closed",
         )
         assert outcome.severity == "P3"
 
-    def test_absent_replica_disables_historical_stale_and_error_rows(
-        self, db_conn, tmp_path, monkeypatch
+    def test_retired_replica_watchdog_disables_historical_stale_and_error_rows(
+        self, db_conn, monkeypatch
     ):
-        from watchdog import check, services
-
-        replica_path = tmp_path / "missing-replica.db"
-        monkeypatch.setattr(services, "REPLICA_PATH", replica_path, raising=False)
+        from watchdog import check
 
         def fail_if_health_is_read(_service):
-            raise AssertionError("disabled replica health must not be read")
+            raise AssertionError("retired replica-watchdog health must not be read")
 
         monkeypatch.setattr(check, "_read_service_health", fail_if_health_is_read)
         now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
@@ -297,6 +289,7 @@ class TestSeverityMapping:
                     market_state="closed",
                 )
                 assert outcome.status == "disabled"
+                assert outcome.message == "retired"
                 assert outcome.fired is False
                 assert outcome.severity is None
 

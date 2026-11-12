@@ -316,7 +316,6 @@ def _write_db_cache(
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_margin_debt_rows(payload["series"], recorded_at=scan_time)
         writer.upsert_scan_snapshot("margin-debt", scan_time, payload)

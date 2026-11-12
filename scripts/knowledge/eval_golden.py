@@ -543,7 +543,6 @@ def _resolve_results_path(path: Path | None) -> Path | None:
 
 
 def _production_db():
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     from dotenv import load_dotenv
 
     project_root = Path(__file__).resolve().parents[2]

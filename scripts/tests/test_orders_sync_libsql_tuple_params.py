@@ -77,7 +77,6 @@ def libsql_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
     )
     conn.commit()
 
-    monkeypatch.setenv("RADON_DB_NO_REPLICA", "1")
 
     import db.client as client_mod
     import db.writer as writer_mod

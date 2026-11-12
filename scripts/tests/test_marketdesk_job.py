@@ -285,7 +285,6 @@ def world(tmp_path, monkeypatch, db):
     w = World(tmp=tmp_path)
     monkeypatch.setattr(db_writer, "record_service_health",
                         lambda service, state, **kw: w.health.append((service, state, kw.get("error"))))
-    monkeypatch.setattr(db_writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
     return w
 
 

@@ -47,8 +47,8 @@ def _unit_files() -> dict[str, pathlib.Path]:
 
     T-236: this used to glob the TOP LEVEL only, which left
     services/radon-.service.d/common.conf -- the systemd prefix drop-in that
-    applies RADON_DB_NO_REPLICA=1 to EVERY radon-* unit (the DUR-07
-    belt-and-braces; setup-vps.sh:install_fleet_dropin installs it, and
+    applies fleet-wide environment to EVERY radon-* unit
+    (setup-vps.sh:install_fleet_dropin installs it, and
     drift_audit.py tracks it as `fleet-dropin`) -- with no sha256 pin at all.
     Editing it silently was exactly the "repo and host diverge with nothing at
     commit time saying so" hole this module exists to close, on the one file

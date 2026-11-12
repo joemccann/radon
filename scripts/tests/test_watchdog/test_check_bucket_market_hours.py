@@ -132,4 +132,4 @@ class TestContinuousBucketAlwaysRuns:
         assert report.ran is True
         services = {r.service for r in report.outcomes}
         assert "newsfeed-scraper" in services
-        assert "replica-watchdog" in services
+        assert "replica-watchdog" not in services

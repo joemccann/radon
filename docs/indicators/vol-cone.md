@@ -163,11 +163,10 @@ cache empty.
 
 Persistence order per cycle:
 
-1. `writer.ensure_no_replica_for_writers()`
-2. `writer.upsert_vol_cone_rows(rows, recorded_at=scan_time)` only when changed
-3. `writer.upsert_scan_snapshot("vol-cone", scan_time, payload)` every cycle
-4. `writer.record_service_health("vol-cone", "ok", finished_at=scan_time)` every cycle
-5. Atomic JSON fallback `data/vol_cone.json`
+1. `writer.upsert_vol_cone_rows(rows, recorded_at=scan_time)` only when changed
+2. `writer.upsert_scan_snapshot("vol-cone", scan_time, payload)` every cycle
+3. `writer.record_service_health("vol-cone", "ok", finished_at=scan_time)` every cycle
+4. Atomic JSON fallback `data/vol_cone.json`
 
 CLI: `--json` → payload to stdout; summary to stderr.
 
@@ -313,7 +312,6 @@ Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
 
 - Oneshot, User=radon, WorkingDirectory=/home/radon/radon,
   EnvironmentFile=/etc/radon/env,
-  `RADON_DB_NO_REPLICA=1`,
   ExecStart venv python `scripts/fetch_vol_cone.py`,
   TimeoutStartSec=900 (backfill headroom).
 - Timer: `OnCalendar=Mon..Fri *-*-* 20:45:00 UTC` (16:45 ET after the

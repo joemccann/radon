@@ -89,7 +89,6 @@ def mirror_scan_snapshot(
     except ImportError:  # pragma: no cover — DB layer optional in stripped envs
         return
     try:
-        writer.ensure_no_replica_for_writers()
         # Performance snapshots need the TWR tables to exist for downstream
         # /performance readers (plan §4.2: tables via dbExecute on first build).
         if service == "performance":

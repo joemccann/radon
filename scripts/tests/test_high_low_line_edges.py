@@ -2,7 +2,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
-import os
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +22,7 @@ def fake_writer(monkeypatch, *, fail=None):
                 raise RuntimeError("write failed")
         return run
     monkeypatch.setattr(scan, "writer", SimpleNamespace(**{name: record(name) for name in (
-        "ensure_no_replica_for_writers", "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")}))
+        "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")}))
     return calls
 
 
@@ -150,22 +149,20 @@ def test_persist_writes_both_intervals_then_snapshot_health_and_atomic_file(monk
     monkeypatch.setattr(scan, "CACHE_PATH", tmp_path / "cache.json")
     data = sample()
     scan.persist_result(data)
-    assert [c[0] for c in calls] == ["ensure_no_replica_for_writers", "upsert_high_low_line_rows", "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health"]
-    assert [c[2]["interval"] for c in calls[1:3]] == ["daily", "weekly"]
-    assert calls[3][2] == {"bounded": True}
+    assert [c[0] for c in calls] == ["upsert_high_low_line_rows", "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health"]
+    assert [c[2]["interval"] for c in calls[0:2]] == ["daily", "weekly"]
+    assert calls[2][2] == {"bounded": True}
     assert calls[-1][1] == ("high-low-line", "ok")
     assert scan.verified_load(str(scan.CACHE_PATH))["source_hash"] == data["source_hash"]
 
 
 @pytest.mark.parametrize("fail", ["upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health"])
-def test_failed_persist_retains_disk_and_restores_environment(monkeypatch, tmp_path, fail):
+def test_failed_persist_retains_disk(monkeypatch, tmp_path, fail):
     fake_writer(monkeypatch, fail=fail)
     monkeypatch.setattr(scan, "CACHE_PATH", tmp_path / "cache.json")
     scan.CACHE_PATH.write_text("last good")
-    monkeypatch.delenv("RADON_DB_NO_REPLICA", raising=False)
     with pytest.raises(RuntimeError): scan.persist_result(sample())
     assert scan.CACHE_PATH.read_text() == "last good"
-    assert "RADON_DB_NO_REPLICA" not in os.environ
 
 
 @pytest.mark.parametrize("key,value", [("count", 0), ("source_hash", "bad"), ("missing", True), ("series", []), ("weekly_series", [])])

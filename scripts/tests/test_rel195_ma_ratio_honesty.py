@@ -74,7 +74,6 @@ class TestFinishedAtIsWriteTime:
         up to the 1500s sweep budget."""
         from db import writer
 
-        monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(writer, "upsert_ma_ratio_rows", lambda *a, **k: None)
         monkeypatch.setattr(writer, "upsert_scan_snapshot", lambda *a, **k: None)
         monkeypatch.setattr(ma_ratio_scan, "_write_json_cache", lambda payload: None)

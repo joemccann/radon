@@ -10,7 +10,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # Same script POST /market-calendar/refresh runs. It merges IBKR's ~6-day
 # liquidHours window into data/market_calendar.json, the cache the relay
 # and market_state() read. Heartbeat `market-calendar` (8-day window) on

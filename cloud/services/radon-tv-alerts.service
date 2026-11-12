@@ -13,7 +13,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # The drain ships with the MAIN repo (scripts/tv_alerts_drain.py) and lands
 # on the next deploy. Until then this condition skips the run CLEANLY (unit
 # ends inactive, not failed) so the watchdog unit alarm does not page.

@@ -262,7 +262,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(mrs, "MA_RATIO_JSON", tmp_path / "ma_ratio.json")
-    monkeypatch.setattr(mrs.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(
         mrs.writer,
         "upsert_ma_ratio_rows",
@@ -288,7 +287,6 @@ class TestPersistResult:
         payload = _build_payload()
         persist_result(payload, payload["series"])
         assert persist_calls == [
-            ("guard",),
             ("rows", 53),
             ("snapshot", "ma-ratio"),
             ("health", "ma-ratio", "ok"),
@@ -321,7 +319,6 @@ class TestHeartbeatTimeout:
             "fetch_spx_overlay_closes",
             lambda yahoo, **kwargs: (dict(yahoo), "yahoo"),
         )
-        monkeypatch.setattr(mrs.writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(
             mrs.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: None
         )

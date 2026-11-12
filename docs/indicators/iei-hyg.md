@@ -107,7 +107,7 @@ Public functions the tests import (composed-method style, pure where possible):
 - `build_output(series, scan_time=None, source="ib") -> payload`
 - `merge_series(cached, fresh)`, `diff_new_rows(cached, series)` (compare `(date, iei_close, hyg_close, dxy_close)`)
 - `persist_result(payload, changed_rows, *, health_error=None)` — refuses an empty
-  series; then in order `writer.ensure_no_replica_for_writers()`, `upsert_iei_hyg_rows`
+  series; then in order `upsert_iei_hyg_rows`
   (only if changed), `upsert_scan_snapshot("iei-hyg", scan_time, payload)`,
   `record_service_health("iei-hyg", "ok" | "error", finished_at=scan_time, error=...)`,
   atomic JSON cache.

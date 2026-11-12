@@ -77,8 +77,7 @@ Composed-method style, stdlib-only computation. Pure functions:
   `missing: true` payload and persists nothing.
 - A session row exists only when `eligible >= 0.8 * member_count`.
 - `install_sigterm_unwind()` (shared with bpi).
-- Writes, in order, every cycle: `ensure_no_replica_for_writers()` →
-  `upsert_rsi_oversold_rows(rows, recorded_at=scan_time)` →
+- Writes, in order, every cycle: `upsert_rsi_oversold_rows(rows, recorded_at=scan_time)` →
   `upsert_scan_snapshot("rsi-oversold", scan_time, payload)` →
   `record_service_health("rsi-oversold", "ok", finished_at=scan_time)` →
   atomic JSON fallback `data/rsi_oversold.json`.
