@@ -142,10 +142,17 @@ export const COR_REFRESH: RefreshSchedule = [daily(2, 20)];
 export const VIXCOR_REFRESH: RefreshSchedule = [daily(2, 35)];
 
 /** cloud/services/radon-vixts.timer */
-export const VIXTS_REFRESH: RefreshSchedule = [daily(2, 45)];
+export const VIXTS_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+];
 
 /** cloud/services/radon-panic-index.timer */
-export const PANIC_INDEX_REFRESH: RefreshSchedule = [daily(2, 50), daily(13, 15)];
+export const PANIC_INDEX_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+  daily(13, 15),
+];
 
 /** cloud/services/radon-dispersion.timer — 22:20 sweep, 23:20 if a deploy killed it */
 export const DISPERSION_REFRESH: RefreshSchedule = [daily(22, 20), daily(23, 20)];
