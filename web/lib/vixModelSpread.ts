@@ -1,4 +1,6 @@
 /** Personal-use Cboe model spread. Statistics are computed by the daily writer. */
+import { appendProvisionalRow, type LiveSnapshot, type ProvisionalMeta } from "./provisionalRow";
+
 export type SpreadWindow = 20 | 252;
 export type SpreadBandState = "ABOVE BAND" | "WITHIN BAND" | "BELOW BAND" | "WARMUP" | "NO VARIATION";
 
@@ -41,39 +43,14 @@ export interface VixModelSpreadData {
   provisional?: VixModelSpreadProvisional | null;
 }
 
-export interface VixModelSpreadProvisional {
-  source: "ib" | "cboe_delayed";
-  quote_time: string | null;
-  scan_time: string;
-}
+export type VixModelSpreadProvisional = ProvisionalMeta;
 
 /** The writer's `vix-model-spread:live` side snapshot. */
-export interface VixModelSpreadLive {
-  scan_time: string;
-  row: VixModelSpreadEntry | null;
-  source: VixModelSpreadProvisional["source"] | null;
-  quote_time: string | null;
-}
+export type VixModelSpreadLive = LiveSnapshot<VixModelSpreadEntry>;
 
-/**
- * Append the provisional current-session row when it is newer than the last
- * official close. The official snapshot is never rewritten for a live tick.
- */
+/** Append the provisional current-session row when it is newer than the last official close. */
 export function withLiveRow<T extends VixModelSpreadData>(payload: T, live: VixModelSpreadLive | null): T {
-  const row = live?.row;
-  if (!live || !row || !live.source || !payload.data_date || row.date <= payload.data_date) return payload;
-  const series = [...payload.series, row];
-  const expected = payload.expected_session;
-  return {
-    ...payload,
-    series,
-    count: series.length,
-    current: row,
-    data_date: row.date,
-    as_of: row.date,
-    status: expected && row.date >= expected ? "ok" : payload.status,
-    provisional: { source: live.source, quote_time: live.quote_time, scan_time: live.scan_time },
-  };
+  return appendProvisionalRow(payload, live) as T;
 }
 
 function finite(value: number | null | undefined): number | null {

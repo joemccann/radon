@@ -4,7 +4,8 @@ import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
-import { withLiveRow, type VixModelSpreadData, type VixModelSpreadLive } from "@/lib/vixModelSpread";
+import { readLiveSnapshot } from "@/lib/provisionalRow";
+import { withLiveRow, type VixModelSpreadData, type VixModelSpreadEntry, type VixModelSpreadLive } from "@/lib/vixModelSpread";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -58,22 +59,8 @@ async function readFromDb(): Promise<TimestampedRead<Payload> | null> {
 }
 
 /** Provisional current-session row from the writer's side snapshot; advisory. */
-async function readLive(): Promise<VixModelSpreadLive | null> {
-  try {
-    const result = await dbExecute({
-      sql: `SELECT payload FROM scan_snapshots WHERE service = 'vix-model-spread:live'
-            ORDER BY scan_time DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const live = JSON.parse(String((result.rows[0] as unknown as { payload: string }).payload)) as Payload;
-    if (live.row !== null && !isEntry(live.row)) return null;
-    if (typeof live.scan_time !== "string") return null;
-    if (live.source !== null && live.source !== "ib" && live.source !== "cboe_delayed") return null;
-    return live as unknown as VixModelSpreadLive;
-  } catch {
-    return null;
-  }
+function readLive(): Promise<VixModelSpreadLive | null> {
+  return readLiveSnapshot(dbExecute, "vix-model-spread", (value): value is VixModelSpreadEntry => isEntry(value));
 }
 
 export async function GET(request: Request): Promise<Response> {

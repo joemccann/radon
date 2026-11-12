@@ -327,17 +327,38 @@ describe("PanicIndexPanel — copy discipline", () => {
 });
 
 describe("PanicIndexPanel — freshness rail", () => {
-  it("renders as-of and a countdown to the 02:50 UTC slot", () => {
+  it("renders as-of and a countdown to the 16:01 ET slot", () => {
+    // 14:00 ET on a Saturday: the next fire is 16:01 ET, ahead of 13:15 UTC Sunday.
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-27T00:30:00Z"));
-    renderPanel(hookState({ data: buildData({ data_date: "2026-08-26" }) }));
+    vi.setSystemTime(new Date("2026-08-29T18:00:00Z"));
+    renderPanel(hookState({ data: buildData({ data_date: "2026-08-28" }) }));
     act(() => {
       vi.advanceTimersByTime(0);
     });
     const rail = screen.getByTestId("panic-index-freshness-rail");
     expect(rail).toBeTruthy();
-    expect(screen.getByTestId("panic-index-strip-asof").textContent).toContain("2026-08-26");
-    expect(screen.getByTestId("panic-index-freshness-rail-countdown").textContent).toBe("2h 20m");
+    expect(screen.getByTestId("panic-index-strip-asof").textContent).toContain("2026-08-28");
+    expect(screen.getByTestId("panic-index-freshness-rail-countdown").textContent).toBe("2h 01m");
     expect(rail.textContent).toContain("Next sample");
+  });
+
+  it("samples every 5 minutes during the ET session", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T14:02:00Z"));
+    renderPanel(hookState({ data: buildData({ data_date: "2026-08-26" }) }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("panic-index-freshness-rail-countdown").textContent).toBe("3m 00s");
+  });
+
+  it("labels a provisional current session and omits the label on an official close", () => {
+    const provisional = { source: "cboe_delayed" as const, quote_time: "2026-08-27T15:44:32", scan_time: "2026-08-27T20:00:00Z" };
+    renderPanel(hookState({ data: { ...buildData({ data_date: "2026-08-27" }), provisional } }));
+    expect(screen.getByTestId("panic-index-provisional").textContent).toBe(
+      "Current session is provisional: Cboe 15-minute delayed quotes as of 15:44 ET, until the official close posts.");
+    cleanup();
+    renderPanel(hookState({ data: buildData({ data_date: "2026-08-26" }) }));
+    expect(screen.queryByTestId("panic-index-provisional")).toBeNull();
   });
 });
