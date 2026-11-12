@@ -194,6 +194,9 @@ directory, and without it the shell prints `getcwd: Permission denied`.
    other grants stay out of agy's reach. Sign in there: it prints a URL, open it,
    then paste the code back within 60 seconds. If macOS shows "Keychain Not
    Found", choose Cancel (never Reset To Defaults) and rerun `install.sh`.
+   Grant renewal (Codex, Grok) seals copies in the gateway account's own
+   `/Library/Radon/model-gateway-local/home/.radon/secrets.db`, created on first
+   renewal with its key beside it (0600).
    The gateway daemon runs with launchd `SessionCreate`; without it agy finds
    no grant under launchd ("You are not logged into Antigravity") even though
    the same sign-in works through `sudo -u`.
