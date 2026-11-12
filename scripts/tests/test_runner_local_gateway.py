@@ -72,7 +72,7 @@ def test_gateway_daemon_runs_the_root_installed_copy_as_its_own_account():
     assert env["RADON_SUBSCRIPTION_STATE_DIR"] == HOME + "/state"
     assert env["RADON_MODEL_CLIENT_UIDS"] == "502"
     assert env["RADON_MODEL_TUNNEL_GID"] == "401"
-    assert env["RADON_MODEL_PROVIDER_CONCURRENCY"] == "6"
+    assert env["RADON_MODEL_PROVIDER_CONCURRENCY"] == "16"
     assert env["PATH"].split(":")[0] == "/Library/Radon/model-clients/current/bin"
     assert env["ANTIGRAVITY_CLI"] == "/usr/local/radon-runner/gateway/bin/agy"
     assert env["RADON_ANTIGRAVITY_KEYCHAIN_HOME"] == "/Library/Radon/model-gateway-local/agy-home"

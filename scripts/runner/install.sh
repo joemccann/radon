@@ -44,7 +44,7 @@ GW_AGY_KEYCHAIN="$GW_AGY_HOME/Library/Keychains/radon-agy.keychain-db"
 GW_SOCKET="$GW_ROOT/run/gateway.sock"
 GW_CONTROL="$GW_ROOT/control/control.sock"
 # Concurrent calls per provider. Two security loops share one Claude login.
-GW_CONCURRENCY=6
+GW_CONCURRENCY=16
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of

@@ -131,7 +131,9 @@ Developer ID team and arm64 checked before install). The `json` and `chat`
 ladder runs here in the VPS order. Embeddings, OCR and forecasting stay on the VPS.
 `_radonbot` reaches it only through the group socket
 `/Library/Radon/model-gateway-local/run/gateway.sock` and never reads a grant.
-It runs 6 concurrent calls per provider, so the two security loops do not
+It runs 16 concurrent calls per provider (the gate's maximum; 6 refused 1818
+Opus calls with `provider_busy` during one DeepSec audit fan-out on 2026-11-12),
+so the two security loops do not
 queue behind each other or behind production traffic. An expired Codex or Grok
 grant is renewed on demand, non-interactively, for that provider only (Grok's
 reader drops an expired token, so the ladder requests renewal when it finds one
