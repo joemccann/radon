@@ -890,15 +890,15 @@ heartbeat. Installed by the deploy's `install-units` verb from
 
 ### VIX TS (`radon-vixts.timer`)
 
-Daily `02:45 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vixts.py`,
+Every 5 minutes 09:00-16:55 ET Mon-Fri plus daily `16:01 ET` (13:01 PT),
+no randomized delay, oneshot `scripts/fetch_vixts.py`,
 `TimeoutStartSec=300`. VIX / VIX3M term-structure ratio: below 1.00 the curve
 is in contango, above it is in backwardation. Three Cboe CDN files
 (`VIX_History.csv`, `VIX3M_History.csv`, `SPX_History.csv`) pulled through the
 shared `CboeClient` with per-file `If-Modified-Since`; when all three return
 304 the run reuses the cached payload and refreshes only the snapshot and
-heartbeat. 02:45 clears both the EDT and EST publication windows and sits
-after straddle 02:15, cor 02:20 and vixcor 02:35 so the CDN hits stay
-staggered. Runs every calendar day; weekend and holiday runs are 304
+heartbeat. The official session row lands on the first fire after Cboe
+stamps it (VIX ~01:50 UTC, VIX3M ~22:00 UTC). Every run also builds a provisional current-session row from one live source for all inputs (IB pool daily bars when `/health` is not non-authenticated, else Cboe 15-minute delayed quotes, `scripts/utils/index_live.py`) and writes it only to the small `vixts:live` snapshot, which the API appends with a `provisional` marker when it is newer than the official `data_date`. An unchanged-source live tick heartbeats without rewriting the official snapshot unless it is over 12h old. Runs every calendar day; weekend and holiday runs are 304
 heartbeats that keep `vixts` inside its 26h window. Single-source, so a
 plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
@@ -906,15 +906,15 @@ implausible series. Installed by the deploy's `install-units` verb from
 
 ### Panic Proxy (`radon-panic-index.timer`)
 
-Twice daily `02:50` and `13:15 UTC` (`RandomizedDelaySec=120`), oneshot
+Every 5 minutes 09:00-16:55 ET Mon-Fri, plus `16:01 ET` (13:01 PT) and
+`13:15 UTC` daily, no randomized delay, oneshot
 `scripts/fetch_panic_index.py`, `TimeoutStartSec=300`. Equal-weight mean of
 252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M and SKEW. This is Radon's
 reconstruction of the four inputs Goldman names for its Panic Index; it is
 not the Goldman index and is not scaled to match it. Four Cboe CDN files
 pulled through the shared `CboeClient` with per-file `If-Modified-Since`;
 when all four return 304 the run restates the cached payload and refreshes
-only the snapshot and heartbeat. UW 25d skew is an overlay only. 02:50 sits
-after vixts 02:45; 13:15 is kept pending a three-session VVIX/SKEW append
+only the snapshot and heartbeat. UW 25d skew is an overlay only. Every run also builds a provisional current-session row from one live source for all inputs (IB pool daily bars when `/health` is not non-authenticated, else Cboe 15-minute delayed quotes, `scripts/utils/index_live.py`) and writes it only to the small `panic-index:live` snapshot, which the API appends with a `provisional` marker when it is newer than the official `data_date`. An unchanged-source live tick heartbeats without rewriting the official snapshot unless it is over 12h old. The live row never alerts and carries no 25d overlay. 13:15 is kept pending a three-session VVIX/SKEW append
 measurement (only 2026-09-18 was observable at spec time: VIX/VIX3M 01:51,
 VVIX 12:01, SKEW 21:01, last row still 09/17). Runs every calendar day;
 weekend and holiday runs are 304 heartbeats that keep `panic-index` inside

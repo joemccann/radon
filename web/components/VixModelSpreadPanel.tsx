@@ -15,20 +15,12 @@ import SpectralLoader from "./SpectralLoader";
 import VixModelSpreadChart from "./VixModelSpreadChart";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import { VIX_MODEL_SPREAD_REFRESH } from "@/lib/refreshSchedule";
-import { formatVolPoints, formatSpreadZ, spreadBandState, spreadWindowStats, type SpreadWindow, type VixModelSpreadProvisional } from "@/lib/vixModelSpread";
+import { formatVolPoints, formatSpreadZ, spreadBandState, spreadWindowStats, type SpreadWindow } from "@/lib/vixModelSpread";
+import { provisionalNote } from "@/lib/provisionalRow";
 import { useVixModelSpread } from "@/lib/useVixModelSpread";
 import { useViewport } from "@/lib/useViewport";
 
 const EXPLANATION = "Model VIX = √(COR1M / 100) × VIXEQ. The spread is VIX minus model VIX in volatility points. A positive historical basis is normal. Bands use the selected trailing session window and population standard deviation, including the current observation. Above or below a band describes the spread, not a forecast of VIX declines.";
-
-const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-
-/** Names the live source and its quote time; quote_time is already ET wall clock. */
-function provisionalNote(provisional: VixModelSpreadProvisional): string {
-  const source = provisional.source === "ib" ? "IB index bars" : "Cboe 15-minute delayed quotes";
-  const time = provisional.quote_time ? provisional.quote_time.slice(11, 16) : ET_TIME.format(new Date(provisional.scan_time));
-  return `Current session is provisional: ${source} as of ${time} ET, until the official close posts.`;
-}
 
 export default function VixModelSpreadPanel() {
   const { data, loading, syncing, error, syncNow } = useVixModelSpread();

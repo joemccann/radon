@@ -227,3 +227,34 @@ describe("GET /api/panic-index freshness budget", () => {
     expect((json.current as Payload).level).toBe(-0.6256);
   });
 });
+
+describe("GET /api/panic-index provisional current session", () => {
+  const TODAY = daysAgo(0);
+  const liveRow = { ...seriesPoint(TODAY, 0.0332, -0.4959), skew25d: null, z_skew25d: null };
+  const card = { date: TODAY, level: 0.0332, delta_1d: -0.4959, delta_z: -1.2, delta_std_10y: 0.4,
+    rank_decline_10y: 120, rank_surge_10y: 2300, rank_n: 2520, legs: {} };
+  const live = (overrides: Payload = {}): Payload => ({
+    scan_time: new Date().toISOString(), row: liveRow, current: card,
+    source: "cboe_delayed", quote_time: `${TODAY}T17:00:19`, ...overrides,
+  });
+
+  it("appends the panic-index:live row and its card as provisional current", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertSnapshot(live(), "panic-index:live");
+    const { GET } = await import("../app/api/panic-index/route");
+    const json = await jsonOf(await GET());
+    expect(json.data_date).toBe(TODAY);
+    expect(json.current).toEqual(card);
+    expect((json.series as Payload[]).at(-1)).toEqual(liveRow);
+    expect(json.provisional).toEqual({ source: "cboe_delayed", quote_time: `${TODAY}T17:00:19`, scan_time: expect.any(String) });
+  });
+
+  it("ignores a live row that is not newer than the official close", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertSnapshot(live({ row: { ...liveRow, date: DATA_DATE } }), "panic-index:live");
+    const { GET } = await import("../app/api/panic-index/route");
+    expect(await jsonOf(await GET())).toEqual(official);
+  });
+});

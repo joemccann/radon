@@ -25,6 +25,7 @@ import {
   vixTsRegimeLabel,
 } from "@/lib/vixts";
 import { useVixTs } from "@/lib/useVixTs";
+import { provisionalNote } from "@/lib/provisionalRow";
 import { useViewport } from "@/lib/useViewport";
 
 /**
@@ -275,6 +276,11 @@ export default function VixTsPanel() {
             ariaLabel="VIX term structure history range brush"
           />
         )}
+        {data.provisional ? (
+          <div className="section-footnote" data-testid="vixts-provisional">
+            {provisionalNote(data.provisional)}
+          </div>
+        ) : null}
         <div className="section-footnote">
           {SOURCE_FOOTNOTE}
         </div>

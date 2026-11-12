@@ -13,6 +13,8 @@
  * Spec: docs/indicators/vixts.md.
  */
 
+import type { ProvisionalMeta } from "./provisionalRow";
+
 /* ─── Constants (display copy only) ──────────────────── */
 
 /** Ratio at or above this: the front month is bid over the 3-month. */
@@ -71,6 +73,19 @@ export interface VixTsData {
   stats: VixTsStats | null;
   series: VixTsPoint[];
   missing?: boolean;
+  /** Set when `current` is the in-progress session, not an official Cboe close. */
+  provisional?: ProvisionalMeta | null;
+}
+
+const finiteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Shape guard for a provisional `vixts:live` row before the route appends it. */
+export function isVixTsPoint(value: unknown): value is VixTsPoint {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+    && finiteNumber(row.vix) && finiteNumber(row.vix3m) && finiteNumber(row.ratio)
+    && (row.spx === null || finiteNumber(row.spx));
 }
 
 /** Contract: absent VIX TS data is HTTP 200 with missing:true, never a 4xx. */
