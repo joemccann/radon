@@ -159,7 +159,7 @@ def complete(request, *, catalog):
     if provider is not None:
         order = [provider] + [name for name in order if name != provider]
     if images:
-        order = [name for name in order if name not in {"antigravity", "cursor", "slm-tagger"}]
+        order = [name for name in order if name not in {"antigravity", "cursor"}]
     if tool_request:
         # These existing native tool adapters are verified. Text-only rungs
         # cannot silently discard tool schemas or earlier tool results.
