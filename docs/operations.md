@@ -591,7 +591,7 @@ production is untouched.
 
 **IBKR operator hold.** The Gateway shares the operator's IBKR username, so it kicks any operator login. On the broker as root, `radon ib release` (installed by `setup-vps.sh install_ib_hold` as `/usr/local/sbin/radon-ib-hold`, with the hold CLI it runs staged root-owned at `/usr/local/lib/radon/ib_operator_hold.py`) holds the Gateway logged out until `radon ib resume`. Every start path refuses while it is held. Runbook: `docs/ib-gateway-recovery.md`.
 
-**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. Set `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`. Secrets are loaded from `/etc/radon/env` (`0640` root:radon); the IB Gateway container alone reads the root-only `/etc/radon/ib-gateway/gateway.env` (built by `radon-ib-gateway-credential migrate`). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`). <!-- pragma: allowlist secret -->
+**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed monorepo helper at `/usr/local/bin/radon-ib-gateway-control` (sourced from `/home/radon/radon/cloud`). FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly. The compose body the helper runs is the control-plane artifact `/etc/radon/ib-gateway-compose.yml`. Secrets are loaded from `/etc/radon/env` (`0640` root:radon); the IB Gateway container alone reads the root-only `/etc/radon/ib-gateway/gateway.env` (built by `radon-ib-gateway-credential migrate`). `/home/radon/radon-cloud/.env` is retired, including any `.env.bak-*` files in that directory. Root demotion of the helper must run from a radon-readable cwd (never leave cwd as `/root`). <!-- pragma: allowlist secret -->
 
 Caddy is not in group `radon` (that gid reads the env file). `media.radon.run` serves protected snapshots from `/var/lib/radon-public/media` via group `caddy`. Legacy `radon-media` staging read ACLs remain during rollout and rollback; publication never changes source ownership or permissions. For permission errors, inspect the publisher unit and the affected leaf rather than recursively changing staging ownership.
 
@@ -710,7 +710,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-ai-cycle-backfill.timer` | Daily 05:30 UTC, up to 5 min jitter | Resumes bounded publisher-floor history ingestion from its durable checkpoint; `ai-cycle-backfill` heartbeat has a 26h freshness budget. [Coverage limits](ai-infrastructure-operations.md#history-and-request-bounds). |
 | `radon-ai-cycle.timer` | Daily 07:15 UTC, up to 5 min jitter | Versioned AI infrastructure observations. Partial provider access is explicit; `ai-cycle` heartbeat has a 26h freshness budget. [Collection and source configuration](ai-infrastructure-operations.md). |
 | `radon-liquidcompute.timer` | Daily 07:30 UTC, up to 5 min jitter | Liquid Compute homepage GPU index ticker. Host-tagged `liquidcompute` rows, C5 on `/regime/llm`. Third venue versus the rental book; methodology opaque until licensed. Heartbeat `liquidcompute` (26h). Enable: `systemctl enable --now radon-liquidcompute.timer`. |
-| `radon-slm-tagger-monitor.timer` | Daily 07:10 UTC, up to 5 min jitter | Newsfeed SLM tagger drift / invalid / label-shift monitor. No-op when `RADON_SLM_TAGGER_MODE` is `off` or `shadow`. Heartbeat `slm-tagger-monitor` (26h). Operator action on breach: `RADON_SLM_TAGGER_MODE=off`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md). |
+| `radon-slm-tagger-monitor.timer` | Daily 07:10 UTC, up to 5 min jitter | Unwired. The newsfeed SLM tagger rung failed every gate; `RADON_SLM_TAGGER_MODE` is ignored and tagging uses the model ladder. Units remain until a follow-up deletion. Do not enable the sidecar or treat a monitor page as a live tagging incident. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md). |
 | `radon-record-high-breadth.timer` | Daily 18:15 America/New_York, up to 60s jitter | TradingView provider-coherent SPX breadth comparison; `record-high-breadth` heartbeat 26h. [Source parity and gaps](indicators/record-high-breadth-source-parity.md). Requires explicit-consent owned 0600 OAuth store configured via `TRADINGVIEW_MCP_TOKEN_FILE`; missing credentials fail clearly and retain the previous snapshot. |
 | `radon-imbalance.timer` | Daily 18:25 America/New_York, up to 60s jitter | TradingView USI ASK minus BID **trade counts** (not share volume) with EMA(10) and SPX comparison; `imbalance` heartbeat 26h. Spec: [`indicators/imbalance.md`](indicators/imbalance.md). Same explicit-consent 0600 OAuth store as record-high-breadth (`TRADINGVIEW_MCP_TOKEN_FILE`). BATD is a parity check only. Missing ASK or BID stays null, never zero. Offset 10 minutes after record-high-breadth so the two jobs do not share one TV OAuth refresh. |
 | `radon-quant-targets.timer` | Mon..Fri 16:25 America/New_York | Systematic sleeve target weights into `quant_targets` for every key in `RADON_QUANT_STRATEGIES`. Heartbeat `quant-targets` (74h). Spec: [`quant-strategies.md`](quant-strategies.md). |
@@ -1357,25 +1357,11 @@ outcome is non-fatal. Once the watcher is inactive the same step deletes the
 installed unit file and drop-in and runs `daemon-reload`, so the drift audit
 never reports an untracked unit. The unit, its code and the Dropbox reader keys
 were deleted from the repository on 2026-11-11; the 150s research stop wait and
-the read-only API research bind stay. The text below is the historical
-activation contract for the retired unit; it cannot be re-enabled. Current app
+the read-only API research bind stay. The unit cannot be re-enabled. Current app
 containers do not receive those grant directories. Only `radon-model-gateway` does.
-
-The research worker executes the Python image's pinned `claude`, `codex`,
-`grok`, and `agy` binaries. It does not bind host `~/.local/bin`. Credential
-directories, `HOME=/home/radon`, and Antigravity refresh/state mounts retain
-their existing paths and modes. The image build verifies each installed CLI's
-version and ownership as the runtime user without calling provider APIs.
-
-Rollout uses the normal verified-image deployment: install the runtime wrapper
-from the same release and restart the managed research unit. No account,
-credential migration, or host CLI installation is required. If image CLI
-compatibility fails, roll back the complete release and its runtime wrapper
-together; do not add an unreviewed host executable mount.
-
-`radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
-
-The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials, the model provider key, and the optional Cloudflare Workers AI keys (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) remain in `/etc/radon/env`. Clairic report dates stay off until `CLAIRIC_DATES_ENABLED=1`. Provisioning and rotation: [Environment handling](../cloud/CLAUDE.md#environment-handling). Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
+Do not `systemctl start` or enable `radon-research.service`. Live research
+ingest is [MarketDesk research](marketdesk-research.md). Remaining shared
+contracts for publish, assets, Clairic and the archives: [Dropbox research](dropbox-research.md).
 
 ### MarketDesk research ingest
 

@@ -188,7 +188,7 @@ evidence; the next successful deploy performs bounded cleanup.
 | Secrets file | `/etc/radon/env` mode `0640` `root:radon` |
 | `IB_GATEWAY_MODE` | `cloud` |
 | `RADON_MODE` | `hetzner` |
-| `IB_GATEWAY_COMPOSE_DIR` | `/home/radon/radon/cloud` |
+| Gateway compose body | `/etc/radon/ib-gateway-compose.yml` |
 | Readiness marker | `/var/lib/radon/control-plane-ready` |
 | Green deploy marker | `/home/radon/.radon-last-green-deploy` |
 

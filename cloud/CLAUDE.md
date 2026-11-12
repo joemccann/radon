@@ -769,7 +769,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Setup validates the stable env before dependency installation or builds.
 - Host needs Bun 1.4.4 on radon PATH for staged Next builds (`deploy.sh` and `setup-vps.sh` `BUN_VERSION`).
 
-**IB Flex / Gateway env (Hetzner `/etc/radon/env` mode `0640`, owner `root:radon`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections — NAV in Base, Cash Transactions and Transfers — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`.
+**IB Flex / Gateway env (Hetzner `/etc/radon/env` mode `0640`, owner `root:radon`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections: NAV in Base, Cash Transactions and Transfers; don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose; deploy preflight only), `RADON_MODE=hetzner`. The helper runs `/etc/radon/ib-gateway-compose.yml`, not a checkout compose path.
 
 **Verify Flex query ids against the real env before trusting one written down anywhere** — a stale id documented here once pointed the runbook at a query that does not exist for this account. `IB_FLEX_FLOWS_QUERY_ID` is deliberately unset: `_flows_query_id()` falls back to the NAV id and `resolve_flows` reuses the one fetched document, so a run makes ONE Flex request. Setting it to a second id doubles the request rate against a token that has already taken a 24h-to-168h throttle embargo.
 
@@ -845,8 +845,9 @@ Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 
 `setup-vps.sh` also inventories `radon-slm-tagger.service` plus
 `radon-slm-tagger-monitor.{service,timer}` so a fresh host has the unit files.
-`enable_services` skips all three until Joe enables them after bakeoff `C WINS`.
-`RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
+`enable_services` skips all three. The rung is unwired and
+`RADON_SLM_TAGGER_MODE` is ignored; do not enable the units. Spec:
+[`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
 `setup-vps.sh` also inventories `radon-knowledge-eval.{service,timer}` so a
 fresh host has the unit files. `enable_services` skips both on every setup.

@@ -43,7 +43,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
-| Newsfeed text-tagger SLM v1 build spec (plan; local LoRA rung `slm-tagger` ahead of paid ladder rungs, text tags only) | [`docs/ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md) |
+| Newsfeed text-tagger SLM v1 (unwired; historical build spec) | [`docs/ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md) |
 | AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
 | AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity. Compute C5 Liquid Compute is a third-venue public GPU index, never the rental book |
 | MarketDesk research ingest (5-minute scraper, voice copy, Dropbox outbox; replaces the shared-folder watcher) | [`docs/marketdesk-research.md`](marketdesk-research.md) · retired watcher: [`docs/dropbox-research.md`](dropbox-research.md) |
