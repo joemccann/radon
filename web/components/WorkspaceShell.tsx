@@ -15,8 +15,8 @@ import { MARKET_HOURS_ACCOUNT_POLL_MS, OFF_HOURS_ACCOUNT_POLL_MS } from "@/lib/a
 import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
 import {
+  ORDERS_SNAPSHOT_STALE_THRESHOLD_MS,
   PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS,
-  SNAPSHOT_STALE_THRESHOLD_MS,
   useSnapshotStaleness,
 } from "@/lib/useSnapshotStaleness";
 import { useToast } from "@/lib/useToast";
@@ -540,7 +540,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     tick: stalenessTick,
   } = useSnapshotStaleness(
     lastSync,
-    isOrdersPage ? SNAPSHOT_STALE_THRESHOLD_MS : PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS,
+    isOrdersPage ? ORDERS_SNAPSHOT_STALE_THRESHOLD_MS : PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS,
   );
 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
