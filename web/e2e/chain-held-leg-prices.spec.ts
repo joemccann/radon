@@ -270,7 +270,7 @@ test.describe("Chain held-leg pricing", () => {
     await installMockWebSocket(page);
     stubApis(page);
 
-    await page.goto("http://127.0.0.1:3000/CRM?tab=chain");
+    await page.goto("/CRM?tab=chain");
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });

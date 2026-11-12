@@ -6,8 +6,11 @@
  * - VVIX strip cell shows a LIVE badge element
  * - VIX strip cell shows a timestamp sub-element (.regime-strip-ts)
  * - VVIX strip cell shows a timestamp sub-element (.regime-strip-ts)
- * - Without live WS data the timestamp shows "---"
- * - With live WS price injected the badge reads "LIVE" and timestamp shows HH:MM:SS
+ * - Without live data the timestamp is omitted (no "---" placeholder since #1041)
+ * - With a live quote the badge reads "LIVE" and the timestamp shows HH:MM:SS
+ *
+ * /api/index-quote is always mocked: unmocked, the route asks Yahoo for a live
+ * VIX and the result depends on the network and the hour.
  */
 
 import { test, expect } from "@playwright/test";
@@ -55,8 +58,19 @@ const ORDERS_EMPTY = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function setupMocks(page: import("@playwright/test").Page) {
+function indexQuote(symbol: string, last: number) {
+  return { symbol, last, lastIsCalculated: true, bid: null, ask: null, bidSize: null, askSize: null, volume: null, high: null, low: null, open: null, close: null, week52High: null, week52Low: null };
+}
+
+async function setupMocks(page: import("@playwright/test").Page, liveIndexes: Record<string, number> = {}) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  await page.route("**/api/index-quote**", (route) => {
+    const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "";
+    const last = liveIndexes[symbol];
+    const body = last == null ? { price: null, source: "none" } : { price: indexQuote(symbol, last), source: "yahoo" };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
 
   await page.route("**/api/regime", (route) =>
     route.fulfill({
@@ -131,43 +145,47 @@ test.describe("Regime /regime — VIX and VVIX live badge + timestamp", () => {
     await expect(cell.locator(".regime-badge")).toBeVisible();
   });
 
-  test("VIX strip cell has a .regime-strip-ts timestamp element", async ({ page }) => {
+  test("VIX strip cell shows a LIVE badge and HH:MM:SS timestamp with a live quote", async ({ page }) => {
+    await setupMocks(page, { VIX: 18.9 });
+    await page.goto("/regime");
+
+    const cell = stripCell(page, "vix");
+    await cell.waitFor({ timeout: 10_000 });
+
+    await expect(cell.locator(".regime-badge")).toHaveText("LIVE");
+    await expect(cell.locator(".regime-strip-ts")).toHaveText(/^\d{1,2}:\d{2}:\d{2}/);
+  });
+
+  test("VVIX strip cell shows a LIVE badge and HH:MM:SS timestamp with a live quote", async ({ page }) => {
+    await setupMocks(page, { VVIX: 96.4 });
+    await page.goto("/regime");
+
+    const cell = stripCell(page, "vvix");
+    await cell.waitFor({ timeout: 10_000 });
+
+    await expect(cell.locator(".regime-badge")).toHaveText("LIVE");
+    await expect(cell.locator(".regime-strip-ts")).toHaveText(/^\d{1,2}:\d{2}:\d{2}/);
+  });
+
+  test("VIX omits the timestamp and reads DAILY when no live data", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime");
 
     const cell = stripCell(page, "vix");
     await cell.waitFor({ timeout: 10_000 });
 
-    await expect(cell.locator(".regime-strip-ts")).toBeVisible();
+    await expect(cell.locator(".regime-badge")).toHaveText("DAILY");
+    await expect(cell.locator(".regime-strip-ts")).toHaveCount(0);
   });
 
-  test("VVIX strip cell has a .regime-strip-ts timestamp element", async ({ page }) => {
+  test("VVIX omits the timestamp and reads DAILY when no live data", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime");
 
     const cell = stripCell(page, "vvix");
     await cell.waitFor({ timeout: 10_000 });
 
-    await expect(cell.locator(".regime-strip-ts")).toBeVisible();
-  });
-
-  test("VIX timestamp shows '---' when no live WS data", async ({ page }) => {
-    await setupMocks(page);
-    await page.goto("/regime");
-
-    const cell = stripCell(page, "vix");
-    await cell.waitFor({ timeout: 10_000 });
-
-    await expect(cell.locator(".regime-strip-ts")).toHaveText("---");
-  });
-
-  test("VVIX timestamp shows '---' when no live WS data", async ({ page }) => {
-    await setupMocks(page);
-    await page.goto("/regime");
-
-    const cell = stripCell(page, "vvix");
-    await cell.waitFor({ timeout: 10_000 });
-
-    await expect(cell.locator(".regime-strip-ts")).toHaveText("---");
+    await expect(cell.locator(".regime-badge")).toHaveText("DAILY");
+    await expect(cell.locator(".regime-strip-ts")).toHaveCount(0);
   });
 });

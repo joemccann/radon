@@ -1,9 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-const SHOT_DIR = process.env.FX_SHOT_DIR ?? "/opt/cursor/artifacts";
-
 test.describe("libraries.dev pack C — terminal kit", () => {
-  test("shows evaluating gate beam and thinking wait in dark theme", async ({ page }) => {
+  test("shows evaluating gate beam and thinking wait in dark theme", async ({ page }, testInfo) => {
     await page.addInitScript(() => {
       localStorage.setItem("theme", "dark");
     });
@@ -14,7 +12,7 @@ test.describe("libraries.dev pack C — terminal kit", () => {
     await expect(page.getByTestId("gate-chip-01")).toHaveAttribute("data-gate-state", "evaluating");
     await expect(page.getByTestId("thinking-wait")).toHaveAttribute("data-kind", "evaluate");
     await page.locator("[data-testid='libraries-fx-demo']").screenshot({
-      path: `${SHOT_DIR}/app_kit_gates_orbs_dark.png`,
+      path: testInfo.outputPath("app_kit_gates_orbs_dark.png"),
     });
   });
 });

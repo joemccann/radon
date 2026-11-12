@@ -6,8 +6,11 @@
  *  2. VIX value matches CRI data (not live WS)
  *  3. VVIX value matches CRI data (not live WS)
  *  4. COR1M value matches CRI data (not a sector ETF proxy)
- *  4. VIX timestamp shows "---" (no live update)
- *  5. VVIX timestamp shows "---" (no live update)
+ *  4. VIX has no live timestamp (no live update; blank since #1041)
+ *  5. VVIX has no live timestamp (no live update; blank since #1041)
+ *
+ * /api/index-quote serves stale post-close prints (VIX 31.5, VVIX 140) so the
+ * gate is exercised hermetically; unmocked it would ask Yahoo for a live quote.
  *  6. MARKET CLOSED banner is visible
  */
 
@@ -54,6 +57,8 @@ const ORDERS_EMPTY = {
   executed_count: 0,
 };
 
+const STALE_INDEX_PRINTS: Record<string, number> = { VIX: 31.5, VVIX: 140 };
+
 async function setupMocks(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
@@ -81,6 +86,12 @@ async function setupMocks(page: import("@playwright/test").Page) {
   // Abort WS prices — simulates post-close where prices feed may still deliver
   // stale last-values; we must NOT use them when market_open=false
   await page.route("**/api/prices", (route) => route.abort());
+  await page.route("**/api/index-quote**", (route) => {
+    const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "";
+    const last = STALE_INDEX_PRINTS[symbol];
+    const price = last == null ? null : { symbol, last, lastIsCalculated: true, bid: null, ask: null, bidSize: null, askSize: null, volume: null, high: null, low: null, open: null, close: null, week52High: null, week52Low: null };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ price, source: price ? "yahoo" : "none" }) });
+  });
   await page.route("**/api/ib-status", (route) =>
     route.fulfill({
       status: 200,
@@ -171,23 +182,25 @@ test.describe("Regime /regime — market closed EOD values", () => {
     await expect(vvixCell.locator(".regime-strip-value")).toHaveText("130.18");
   });
 
-  test("VIX timestamp shows '---' when market closed (no live updates)", async ({ page }) => {
+  test("VIX omits the live timestamp when market closed (no live updates)", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime");
 
     const vixCell = page.locator('[data-testid="strip-vix"]');
     await vixCell.waitFor({ timeout: 10_000 });
 
-    await expect(vixCell.locator(".regime-strip-ts")).toHaveText("---");
+    await expect(vixCell.locator(".regime-badge")).toHaveText("DAILY");
+    await expect(vixCell.locator(".regime-strip-ts")).toHaveCount(0);
   });
 
-  test("VVIX timestamp shows '---' when market closed (no live updates)", async ({ page }) => {
+  test("VVIX omits the live timestamp when market closed (no live updates)", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime");
 
     const vvixCell = page.locator('[data-testid="strip-vvix"]');
     await vvixCell.waitFor({ timeout: 10_000 });
 
-    await expect(vvixCell.locator(".regime-strip-ts")).toHaveText("---");
+    await expect(vvixCell.locator(".regime-badge")).toHaveText("DAILY");
+    await expect(vvixCell.locator(".regime-strip-ts")).toHaveCount(0);
   });
 });
