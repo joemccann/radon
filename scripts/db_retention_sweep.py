@@ -106,9 +106,6 @@ def main() -> int:
     started_at = _now_iso()
     t0 = time.monotonic()
 
-    # Ensure writers never open a retired replica even if env is wrong.
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
     try:
         from scripts.db.retention import run_retention_sweep_http
     except ImportError:

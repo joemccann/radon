@@ -16,7 +16,6 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=PYTHONPATH=/home/radon/radon/scripts
 Environment=RADON_RESEARCH_DIR=/var/lib/radon/research
-Environment=RADON_DB_NO_REPLICA=1
 # The private research root is readable only inside the research container,
 # so the runtime-container.conf drop-in replaces this ExecStart with
 # radon-app-runtime (rw bind of /var/lib/radon-private/research). Off-box

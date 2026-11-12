@@ -120,10 +120,6 @@ class TestFailedRowUpsertIsNotSuccess:
 
         class _Writer:
             @staticmethod
-            def ensure_no_replica_for_writers():
-                return None
-
-            @staticmethod
             def upsert_ivrank_rows(*_a, **_k):
                 raise RuntimeError("hrana 502: stream not found")
 

@@ -25,7 +25,6 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
     ib_orders.py invokes. Returns the captured-calls dict so tests can
     assert against it."""
     calls: dict[str, list[Any]] = {
-        "ensure_no_replica_for_writers": [],
         "record_service_health": [],
         "replace_open_orders_for_session": [],
         "upsert_executed_order": [],
@@ -33,7 +32,6 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
     }
 
     fake = types.ModuleType("db.writer")
-    fake.ensure_no_replica_for_writers = lambda: calls["ensure_no_replica_for_writers"].append(True)  # type: ignore[attr-defined]
     fake.record_service_health = lambda *a, **kw: calls["record_service_health"].append((a, kw))  # type: ignore[attr-defined]
     fake.replace_open_orders_for_session = lambda rows, **kw: calls["replace_open_orders_for_session"].append(rows) or True  # type: ignore[attr-defined]
     def upsert_executed_orders_for_session(rows):

@@ -10,7 +10,6 @@ from .preset_rebalance_handler import PresetRebalanceHandler
 from .journal_sync import JournalSyncHandler
 from .journal_reconcile import JournalReconcileHandler
 from .journal_gap_sli import JournalGapSliHandler
-from .replica_watchdog import ReplicaWatchdogHandler
 
 __all__ = [
     'BaseHandler',
@@ -19,5 +18,4 @@ __all__ = [
     'JournalSyncHandler',
     'JournalReconcileHandler',
     'JournalGapSliHandler',
-    'ReplicaWatchdogHandler',
 ]

@@ -271,7 +271,6 @@ UW had `0.127` that day (VIX was ~15). After the merge and before ranking:
 ### D.3 Write order (every cycle)
 
 ```python
-writer.ensure_no_replica_for_writers()
 if rows_changed:
     writer.upsert_ivrank_rows(payload["series"], recorded_at=scan_time)
 writer.upsert_scan_snapshot("ivrank", scan_time, payload)          # EVERY cycle
@@ -308,7 +307,7 @@ the window.
 `cloud/services/radon-ivrank.service` — copy `radon-vixcor.service` verbatim
 (oneshot, `User=radon`, `WorkingDirectory=/home/radon/radon`,
 `EnvironmentFile=/etc/radon/env`,
-`Environment=RADON_DB_NO_REPLICA=1`, venv python **directly** — never a
+venv python **directly** — never a
 `run_*.sh` wrapper — journald, `TimeoutStartSec=300`).
 `cloud/services/radon-ivrank.timer` — `Persistent=true`,
 `RandomizedDelaySec=120`, comment naming the 22:10 UTC reasoning above.

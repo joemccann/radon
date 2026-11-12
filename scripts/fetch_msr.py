@@ -417,14 +417,6 @@ def _write_db_cache(
         print(f"[msr] db cache non-fatal: {exc}", file=sys.stderr)
 
 
-def _ensure_writer_guard() -> None:
-    try:
-        from db import writer
-    except ImportError:
-        return
-    writer.ensure_no_replica_for_writers()
-
-
 def _record_failure(exc: Exception) -> None:
     """Error heartbeat before the oneshot dies, so the failure is visible
     as an error row rather than a silently aging ok row."""
@@ -519,7 +511,6 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
         from clients.cboe_client import CboeClient
         client = CboeClient()
 
-    _ensure_writer_guard()
     cached = _read_json_cache()
     texts, stamps = _fetch_cboe_files(client, (cached or {}).get("source_last_modified") or {})
     index_closes = _load_index_closes()

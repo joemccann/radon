@@ -106,7 +106,7 @@ point-in-time; no backtest or historical availability claim is made.
   levels so a conditional GET can reuse every previously fetched observation.
 - `build_output(taiwan_rows, korea_rows, *, scan_time=None, source_metadata=None)`.
 - `_write_db_cache(payload, scan_time, *, rows_changed)` writes Turso in this order:
-  `ensure_no_replica_for_writers`, changed history rows, `upsert_scan_snapshot`,
+  changed history rows, `upsert_scan_snapshot`,
   `record_service_health`. DB failure must not be reported as successful persistence.
 - `persist_result(payload, *, previous=None, path=None)` refuses empty/invalid
   output, compares normalized series for changed history, then writes DB and an

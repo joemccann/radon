@@ -253,7 +253,7 @@ Sanity check while you have the payload: `1 + total_return` should equal the pro
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon
-RADON_DB_NO_REPLICA=1 /Users/joemccann/dev/apps/finance/radon/.venv/bin/python - <<'PY'
+/Users/joemccann/dev/apps/finance/radon/.venv/bin/python - <<'PY'
 import json
 from dotenv import load_dotenv
 load_dotenv('.env')
@@ -306,7 +306,7 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon
-RADON_DB_NO_REPLICA=1 /Users/joemccann/dev/apps/finance/radon/.venv/bin/python -c "
+/Users/joemccann/dev/apps/finance/radon/.venv/bin/python -c "
 from dotenv import load_dotenv; load_dotenv('.env')
 from scripts.db.client import get_db
 for r in get_db().execute(\"SELECT service, state, last_error, updated_at FROM service_health WHERE service='cash-flow-sync'\").fetchall():

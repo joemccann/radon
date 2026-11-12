@@ -239,7 +239,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(fd, "DIVYIELD_JSON", tmp_path / "divyield.json")
-    monkeypatch.setattr(fd.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(
         fd.writer,
         "upsert_divyield_rows",
@@ -264,7 +263,6 @@ class TestPersistResult:
 
         persist_result(_build_payload(), [_current_row()])
         assert persist_calls == [
-            ("guard",),
             ("rows", 1),
             ("snapshot", "div-yield"),
             ("health", "div-yield", "ok"),
@@ -278,7 +276,6 @@ class TestPersistResult:
         persist_result(_build_payload(), [])
         kinds = [call[0] for call in persist_calls]
         assert "rows" not in kinds
-        assert persist_calls[0] == ("guard",)
         assert ("snapshot", "div-yield") in persist_calls
         assert ("health", "div-yield", "ok") in persist_calls
 

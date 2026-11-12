@@ -14,7 +14,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # The sampler ships with the MAIN repo (scripts/host_metrics_sampler.py)
 # and lands on the next deploy. Until then this condition skips the run
 # CLEANLY (unit ends inactive, not failed) so the watchdog unit alarm

@@ -32,7 +32,6 @@ EXPECTED_COLUMNS = (
 
 @pytest.fixture
 def split_statements(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("RADON_DB_NO_REPLICA", "1")
     scripts_dir = _REPO_ROOT / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))

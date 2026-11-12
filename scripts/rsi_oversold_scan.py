@@ -253,7 +253,6 @@ def _record_ok_heartbeat(finished_at: str) -> None:
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback."""
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if rows:
         writer.upsert_rsi_oversold_rows(rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

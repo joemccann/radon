@@ -90,7 +90,7 @@ Same-date corrections change derived series and must upsert history. A stable se
 spread REAL NOT NULL, all ten rolling fields nullable REAL, recorded_at TEXT
 NOT NULL; descending date index; schema_migrations version98. Writer
 `upsert_vix_model_spread_rows(series,recorded_at=...)` is idempotent. Execute
-ensure_no_replica_for_writers, history on change, snapshot publication
+history on change, snapshot publication
 (`vix-model-spread`), record_service_health every successful run, then atomic
 data/vix-model-spread.json fallback. --json stdout JSON only. Errors exit
 nonzero. Reuse actual production migration runner, never auto-create schema

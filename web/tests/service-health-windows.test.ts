@@ -23,7 +23,6 @@ describe("SERVICE_FRESHNESS_WINDOWS", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["newsfeed-scraper"]).toBeDefined();
     expect(SERVICE_FRESHNESS_WINDOWS["fill-monitor"]).toBeDefined();
     expect(SERVICE_FRESHNESS_WINDOWS["cash-flow-sync"]).toBeDefined();
-    expect(SERVICE_FRESHNESS_WINDOWS["replica-watchdog"]).toBeDefined();
     for (const name of ["marketdesk-research", "marketdesk-dropbox"]) {
       expect(SERVICE_FRESHNESS_WINDOWS[name]).toMatchObject({
         open: 15 * 60_000,
@@ -317,7 +316,6 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["flex-token-check", "scheduled"],
     ["cri-scan", "scheduled"],
     ["vcg-scan", "scheduled"],
-    ["replica-watchdog", "scheduled"],
     ["orders-sync", "scheduled"],
     ["portfolio-sync", "scheduled"],
     ["scanner", "scheduled"],
@@ -988,7 +986,6 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["execution-sweep", true],
     ["orders-read-compare", true],
     ["newsfeed-scraper", false],
-    ["replica-watchdog", false],
     ["cash-flow-sync", false],
     ["flex-token-check", false],
     ["cta-sync", false],

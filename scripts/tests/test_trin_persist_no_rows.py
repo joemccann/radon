@@ -26,9 +26,6 @@ class _Writer:
         self.samples: list = []
         self.daily: list = []
 
-    def ensure_no_replica_for_writers(self):
-        return None
-
     def upsert_trin_samples(self, rows, recorded_at=None):
         self.samples.append((rows, recorded_at))
 

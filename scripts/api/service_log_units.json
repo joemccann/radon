@@ -48,7 +48,6 @@
   "performance": null,
   "position-reconcile": "radon-monitor.service",
   "preset-rebalance": "radon-monitor.service",
-  "replica-watchdog": "radon-monitor.service",
   "scanner": "radon-flow-refresh.service",
   "strength-confirmation": "radon-signals-refresh.service",
   "theta-harvester": "radon-signals-refresh.service",

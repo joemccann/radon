@@ -360,20 +360,19 @@ prints the payload to stdout; every progress line goes to **stderr**.
 
 ### E.2 Flow, every run
 
-1. `writer.ensure_no_replica_for_writers()`.
-2. **Rehydrate raw rows from Turso** `dispersion_history`, paged on the date cursor
+1. **Rehydrate raw rows from Turso** `dispersion_history`, paged on the date cursor
    (`WHERE date > ? ORDER BY date LIMIT 500`). Turso is the source of truth; the
    JSON fallback is read only when the Turso read raises (the skew lesson: a fresh
    host once clobbered a 731-row snapshot with a 10-row JSON payload).
-3. `last_complete = utils.market_calendar.last_completed_session_date()`.
+2. `last_complete = utils.market_calendar.last_completed_session_date()`.
    **If not `--backfill` and the stored max date `>= last_complete`:** no new
    session. Log `"[dispersion] no new session since <date>; refreshing snapshot only"`,
    rebuild the payload from stored rows, write snapshot + `ok` heartbeat + JSON,
    return. **No IB or Yahoo traffic** (this is what weekend and holiday runs do).
-4. Resolve the universe: `resolve_constituents("SPX")` tickers + `SECTOR_ETFS` +
+3. Resolve the universe: `resolve_constituents("SPX")` tickers + `SECTOR_ETFS` +
    `VIX_SYMBOL`. Members use `Stock(ticker.replace("-", " "), "SMART", "USD")`;
    VIX uses `Index("VIX", "CBOE", "USD")`.
-5. Fetch closes (`fetch_closes(symbols, backfill) -> dict[symbol, dict[date, close]]`):
+4. Fetch closes (`fetch_closes(symbols, backfill) -> dict[symbol, dict[date, close]]`):
    IB rung for all symbols inside `IB_SWEEP_BUDGET_S`, then the Yahoo rung for
    whatever IB left empty with its own `YAHOO_SWEEP_BUDGET_S` (never the IB rung's
    spent deadline, R-446). Duration `BACKFILL_DURATION` or `INCREMENTAL_DURATION`.
@@ -381,23 +380,23 @@ prints the payload to stdout; every progress line goes to **stderr**.
    `error.class == "ib_rung_dead"`, and the panel renders `source.prices` in the
    strip with a YAHOO FALLBACK badge: Yahoo is the last rung, never a silent
    primary (R-434).
-6. If **VIX** came back empty from both rungs, or the resulting cross-section on
+5. If **VIX** came back empty from both rungs, or the resulting cross-section on
    `last_complete` is below `MIN_STOCKS`: `_serve_cached(...)` re-serves the stored
    payload as `status: "stale_source"` with an **`error` heartbeat** and exits
    non-zero (ivrank pattern; never latch `ok` over unconfirmed data).
-7. Compute raw rows for every session in the fetched window (C.2-C.3); keep the
+6. Compute raw rows for every session in the fetched window (C.2-C.3); keep the
    new ones (`date > stored max`, plus any stored-window session whose refetched
    `n_stocks` exceeds the stored value, or all when `--backfill`) and stamp each
    with `source` = the sweep's `source.prices` (R-447). Guard with
    `ensure_plausible_rows(rows)` (C.1 bands, **every** row). Merge into the stored
    rows by date (new wins). A 0 close is dropped by both parsers and by the
    return math, so a halted name costs one symbol, not the cycle (R-449).
-8. Writes, in order: `writer.upsert_dispersion_rows(new_rows, recorded_at=scan_time)`
+7. Writes, in order: `writer.upsert_dispersion_rows(new_rows, recorded_at=scan_time)`
    **chunked** (model `upsert_hhlev_rows`; a backfill passes ~2,500 rows) — only
    when there are new rows; `writer.upsert_scan_snapshot("dispersion", scan_time, payload)`;
    `writer.record_service_health("dispersion", "ok"|"error", finished_at=scan_time, error=...)`;
    atomic write of `data/dispersion.json`.
-9. `_write_db` reproduces `fetch_vixcor.py`'s R-192 isolation: a failed row upsert
+8. `_write_db` reproduces `fetch_vixcor.py`'s R-192 isolation: a failed row upsert
    must not take the snapshot and heartbeat down with it, and surfaces as an
    `error` heartbeat rather than a silent exit 0.
 
@@ -539,7 +538,7 @@ No em dashes.
 `TimeoutStartSec=900`: a 515-symbol IB sweep plus a Yahoo top-up plus a chunked
 Turso write; the incremental run is 1-3 minutes, the budget is 600 s + writes).
 `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_dispersion.py`,
-`EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`, `User=radon`.
+`EnvironmentFile=/etc/radon/env`, `User=radon`.
 
 **`cloud/services/radon-dispersion.timer`**
 

@@ -201,7 +201,6 @@ def _write_db(
     if writer is None:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_skew2d_rows(series, recorded_at=scan_time)
         writer.upsert_scan_snapshot("skew2d", scan_time, payload)
@@ -253,7 +252,6 @@ def _hold_for_parent_embargo(
     )
     if writer is not None:
         try:
-            writer.ensure_no_replica_for_writers()
             writer.upsert_scan_snapshot("skew2d", scan_time, payload)
             writer.record_service_health(
                 "skew2d",

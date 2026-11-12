@@ -84,8 +84,7 @@ def test_run_scan_timeout_heartbeats_cri_scan_error(tmp_path, monkeypatch):
     (tmp_path / "cri_scan.py").write_text("# stub\n")
 
     with patch.object(dr.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["x"], timeout=180)), \
-         patch("db.writer.record_service_health", fake_health), \
-         patch("db.writer.ensure_no_replica_for_writers", lambda: None):
+         patch("db.writer.record_service_health", fake_health):
         ok = dr._run_scan("cri_scan.py", ["--json"], out, timeout=dr.CRI_SCAN_TIMEOUT_SECS)
 
     assert ok is False

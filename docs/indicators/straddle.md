@@ -87,8 +87,7 @@ functions:
   cached per-file stamps; **both** 304 → reuse cached payload with fresh
   `scan_time`, `_write_db_cache(..., rows_changed=False)`; otherwise rebuild
   and `rows_changed=True`. Empty parse → raise (never cache empty).
-- Persistence order per cycle: `ensure_no_replica_for_writers()` →
-  `upsert_straddle_rows(series, recorded_at=scan_time)` (only when changed) →
+- Persistence order per cycle: `upsert_straddle_rows(series, recorded_at=scan_time)` (only when changed) →
   `upsert_scan_snapshot("straddle", scan_time, payload)` →
   `record_service_health("straddle", "ok", finished_at=scan_time)` → atomic
   JSON fallback `data/straddle.json`.
@@ -203,7 +202,7 @@ Panel:
 - `scripts/watchdog/services.py` — same window + daily-bucket list.
 - `cloud/services/radon-straddle.{service,timer}` — oneshot venv-python direct
   (`ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_straddle.py`),
-  `EnvironmentFile=/etc/radon/env`, `RADON_DB_NO_REPLICA=1`;
+  `EnvironmentFile=/etc/radon/env`;
   timer `OnCalendar=*-*-* 02:15:00 UTC` (Cboe appends the session row ~20:00 ET
   ≈ 00:00-01:00 UTC; 02:15 UTC clears both DST regimes), `RandomizedDelaySec=300`,
   `Persistent=true`. Runs daily including weekends: weekend runs are 304

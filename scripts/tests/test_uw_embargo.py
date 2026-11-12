@@ -119,9 +119,6 @@ class TestErrorHeartbeat:
         calls = []
 
         class FakeWriter:
-            def ensure_no_replica_for_writers(self):
-                return None
-
             def record_service_health(self, service, state, finished_at=None, error=None):
                 calls.append((service, state, error))
 
